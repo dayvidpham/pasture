@@ -50,7 +50,7 @@ func TestLifecycleContractRejectsInvalidUnresolvedIdentityMetadata(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			_, err := newLifecycleContract(
-				ClaudeCode2_1_210(),
+				ClaudeCode2_1_261(),
 				[]ClaudeLifecycleEvent{ClaudeEventSessionStart},
 				map[ClaudeLifecycleEvent]LifecycleEventMapping{
 					ClaudeEventSessionStart: test.mapping(),
@@ -85,7 +85,7 @@ func TestLifecycleContractRejectsOptionalRequestForHumanResponse(t *testing.T) {
 		nativeIdentity(IdentityRequest, "request_id", false),
 	}
 	_, err := newLifecycleContract(
-		ClaudeCode2_1_210(),
+		ClaudeCode2_1_261(),
 		[]ClaudeLifecycleEvent{ClaudeEventElicitationResult},
 		map[ClaudeLifecycleEvent]LifecycleEventMapping{
 			ClaudeEventElicitationResult: mapping,
@@ -212,7 +212,7 @@ func TestLifecycleContractBindsBlockingExitCodesToEvidence(t *testing.T) {
 			}
 
 			_, err := newLifecycleContract(
-				ClaudeCode2_1_210(),
+				ClaudeCode2_1_261(),
 				[]ClaudeLifecycleEvent{ClaudeEventSessionStart},
 				map[ClaudeLifecycleEvent]LifecycleEventMapping{
 					ClaudeEventSessionStart: mapping,

@@ -128,27 +128,24 @@ func TestCaptureProvenanceClearanceIsACommittedPath(t *testing.T) {
 	})
 }
 
-// legacyClaudeCorpusRoot is the committed Claude ingress corpus root, relative
-// to this package's directory.
-const legacyClaudeCorpusRoot = ingressTestdataRoot + "/claude/testdata"
+// claudeCorpusRoot is the committed Claude ingress corpus root, relative to
+// this package's directory.
+const claudeCorpusRoot = ingressTestdataRoot + "/claude/testdata"
 
-// TestCaptureProvenanceExemptionIsEnumeratedNotVersioned asserts the exemption
-// boundary directly. A listed legacy capture, at its committed path with its
-// committed bytes, validates without an event, a redaction record or a
-// clearance path. Everything else needs all three: the same bytes at an
-// unlisted path, new bytes at a frozen host pin, and new bytes at an older
-// pin alike. The exemption is keyed on what and where the capture IS, never
-// on how old its host was.
-func TestCaptureProvenanceExemptionIsEnumeratedNotVersioned(t *testing.T) {
+// TestEveryCaptureNeedsEventRedactionAndClearance asserts that no committed
+// path and no bytes earn an exemption from the three provenance fields: the
+// committed SessionStart validates only WITH its sidecar's event, redaction
+// and clearance, and the same bytes at the same committed path with those
+// fields blank are refused naming the first missing one. New bytes at that
+// path, and any bytes at any other path, are refused the same way.
+func TestEveryCaptureNeedsEventRedactionAndClearance(t *testing.T) {
 	t.Parallel()
-	const legacyFixture = "fixtures/session_start_2_1_222.json"
-	legacyAbs, err := filepath.Abs(filepath.Join(legacyClaudeCorpusRoot, legacyFixture))
+	const fixture = "fixtures/session_start_2_1_261.json"
+	abs, err := filepath.Abs(filepath.Join(claudeCorpusRoot, fixture))
 	require.NoError(t, err)
-	legacy, err := os.ReadFile(legacyAbs)
+	committedBytes, err := os.ReadFile(abs)
 	require.NoError(t, err)
-	require.True(t, acceptance.IsLegacyExemptCapture(legacyAbs, digest.FromBytes(legacy)), "the committed 2.1.222 session start must be on the legacy list for this test to mean anything")
-	fresh := []byte(`{"hook_event_name":"SessionStart","cwd":"/home/user/project","session_id":"fresh-bytes-not-on-the-legacy-list"}`)
-	require.False(t, acceptance.IsLegacyExemptCapture(legacyAbs, digest.FromBytes(fresh)), "new bytes at a listed path are not exempt")
+	fresh := []byte(`{"hook_event_name":"SessionStart","cwd":"/home/user/project","session_id":"fresh-bytes"}`)
 
 	bare := func(body []byte, version string) acceptance.CaptureProvenance {
 		p := validCaptureProvenance(body)
@@ -157,135 +154,97 @@ func TestCaptureProvenanceExemptionIsEnumeratedNotVersioned(t *testing.T) {
 		return p
 	}
 
-	t.Run("listed-legacy-capture-at-its-committed-path-needs-no-clearance", func(t *testing.T) {
+	t.Run("the-committed-capture-validates-with-its-sidecar", func(t *testing.T) {
 		t.Parallel()
 		var committed acceptance.CaptureProvenance
-		raw, err := os.ReadFile(strings.TrimSuffix(legacyAbs, ".json") + ".provenance.json")
+		raw, err := os.ReadFile(strings.TrimSuffix(abs, ".json") + ".provenance.json")
 		require.NoError(t, err)
 		require.NoError(t, json.Unmarshal(raw, &committed))
-		require.Empty(t, committed.Clearance, "the committed legacy sidecar carries no clearance; that is what the exemption exists for")
-		require.NoError(t, committed.ValidateFixture(legacyClaudeCorpusRoot, legacyFixture))
-		require.NoError(t, bare(legacy, "2.1.222").ValidateCommittedFixtureBytes(legacyAbs, legacy))
+		require.NotEmpty(t, committed.Event)
+		require.NotEmpty(t, committed.Redaction)
+		require.NotEmpty(t, committed.Clearance, "every committed sidecar carries its clearance path")
+		require.NoError(t, committed.ValidateFixture(claudeCorpusRoot, fixture))
 	})
-	t.Run("listed-bytes-at-an-unlisted-path-need-clearance", func(t *testing.T) {
+	t.Run("the-committed-bytes-at-their-committed-path-are-not-exempt", func(t *testing.T) {
 		t.Parallel()
-		root := t.TempDir()
-		copied := filepath.Join(root, "fixtures", "session_start_copy.json")
-		require.NoError(t, os.MkdirAll(filepath.Dir(copied), 0o700))
-		require.NoError(t, os.WriteFile(copied, legacy, 0o600))
-		p := bare(legacy, "2.1.222")
-		p.Event, p.Redaction = "SessionStart", "home-path-v1"
-		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(copied, legacy), "clearance is empty")
-		require.ErrorContains(t, p.ValidateFixture(root, "fixtures/session_start_copy.json"), "clearance is empty")
-	})
-	t.Run("bytes-alone-never-earn-the-exemption", func(t *testing.T) {
-		t.Parallel()
-		require.ErrorContains(t, bare(legacy, "2.1.222").ValidateFixtureBytes(legacy), "event is empty")
-	})
-	t.Run("unlisted-bytes-at-a-frozen-pin-need-clearance", func(t *testing.T) {
-		t.Parallel()
-		p := bare(fresh, "2.1.251")
-		p.Event, p.Redaction = "SessionStart", "none"
-		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(legacyAbs, fresh), "clearance is empty")
-	})
-	t.Run("unlisted-bytes-at-an-old-pin-need-clearance", func(t *testing.T) {
-		t.Parallel()
-		p := bare(fresh, "2.1.210")
-		p.Event, p.Redaction = "SessionStart", "none"
-		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(legacyAbs, fresh), "clearance is empty")
-	})
-	t.Run("unlisted-bytes-need-event-and-redaction", func(t *testing.T) {
-		t.Parallel()
-		p := bare(fresh, "2.1.251")
-		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(legacyAbs, fresh), "event is empty")
+		p := bare(committedBytes, "2.1.261")
+		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(abs, committedBytes), "event is empty")
 		p.Event = "SessionStart"
-		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(legacyAbs, fresh), "redaction is empty")
-		p.Redaction = "none"
-		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(legacyAbs, fresh), "clearance is empty")
+		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(abs, committedBytes), "redaction is empty")
+		p.Redaction = "home-path-v1"
+		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(abs, committedBytes), "clearance is empty")
+		require.ErrorContains(t, p.ValidateFixture(claudeCorpusRoot, fixture), "clearance is empty")
 		p.Clearance = acceptedClearancePath
-		require.NoError(t, p.ValidateCommittedFixtureBytes(legacyAbs, fresh))
+		require.NoError(t, p.ValidateCommittedFixtureBytes(abs, committedBytes))
 	})
-	t.Run("legacy-bytes-still-fail-the-digest-check", func(t *testing.T) {
+	t.Run("bytes-alone-need-all-three", func(t *testing.T) {
 		t.Parallel()
-		p := bare(legacy, "2.1.222")
-		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(legacyAbs, append([]byte(nil), append(legacy, '\n')...)), "digest is")
+		require.ErrorContains(t, bare(committedBytes, "2.1.261").ValidateFixtureBytes(committedBytes), "event is empty")
+	})
+	t.Run("new-bytes-at-any-pin-need-all-three", func(t *testing.T) {
+		t.Parallel()
+		for _, version := range []string{"2.1.251", "2.1.261", "2.1.210"} {
+			p := bare(fresh, version)
+			p.Event, p.Redaction = "SessionStart", "none"
+			require.ErrorContains(t, p.ValidateCommittedFixtureBytes(abs, fresh), "clearance is empty", "host version %s", version)
+		}
+	})
+	t.Run("a-digest-mismatch-is-refused-before-the-field-checks", func(t *testing.T) {
+		t.Parallel()
+		p := bare(committedBytes, "2.1.261")
+		require.ErrorContains(t, p.ValidateCommittedFixtureBytes(abs, append([]byte(nil), append(committedBytes, '\n')...)), "digest is")
 	})
 }
 
-// TestLegacyExemptionListEqualsCommittedSidecarsWithoutClearance holds the
-// enumerated exemption equal, in both directions, to the population it exists
-// for: every committed authentic sidecar in the ingress corpora whose declared
-// rawFileDigest matches its fixture bytes and that carries NO clearance key,
-// keyed on the committed path and the digest. The control is that the list is
-// non-empty and every entry resolves to such a sidecar: an entry with no
-// committed sidecar behind it, a wrong digest, or a wrong path is an error.
-// The next pin bump deletes the legacy fixtures and this list together and
-// replaces this control with the assertion that an exempt fixture no longer
-// exists.
-//
-// WHAT IT READS: every *.provenance.json under internal/lifecycle/ingress/*/
-// testdata/fixtures, decoded as a JSON object. WHAT IT DOES NOT READ: a
-// sidecar without a rawFileDigest key (the provider-shaped Codex and OpenCode
-// sidecars of the earlier captures, which no code path decodes as a
-// CaptureProvenance); a sidecar whose declared digest does not match its
-// fixture bytes (the validator refuses it before the exemption is consulted);
-// a sidecar whose origin is not authentic-capture.
-func TestLegacyExemptionListEqualsCommittedSidecarsWithoutClearance(t *testing.T) {
+// TestEveryCommittedAuthenticSidecarCarriesAClearance walks EVERY committed
+// provenance sidecar of every harness and holds each authentic one to the
+// full provenance: an event, a redaction record that parses, a clearance path,
+// and a digest that is the digest of its sibling fixture's committed bytes,
+// so ValidateFixture accepts it. The population is derived from the corpora,
+// so a fixture added later is covered the day it is committed. Controls: the
+// walk read at least one sidecar per harness; and the two Claude controls
+// that deliberately break the digest or the origin are named and expected.
+func TestEveryCommittedAuthenticSidecarCarriesAClearance(t *testing.T) {
 	t.Parallel()
 	sidecars, err := filepath.Glob(filepath.Join(ingressTestdataRoot, "*", "testdata", "fixtures", "*.provenance.json"))
 	require.NoError(t, err)
 	require.NotEmpty(t, sidecars, "the walk read no sidecar at all under %s; the ingress corpora must still exist for this guard to assert anything", ingressTestdataRoot)
 
-	population := map[string]digest.Digest{}
-	claudeShaped, distinct := 0, map[digest.Digest]struct{}{}
+	perHarness := map[string]int{}
+	expectedRefusals := map[string]string{
+		"session_start_2_1_261_digest_mismatch.provenance.json": "digest is",
+	}
 	for _, sidecar := range sidecars {
 		raw, err := os.ReadFile(sidecar)
 		require.NoError(t, err)
-		var fields map[string]json.RawMessage
-		require.NoError(t, json.Unmarshal(raw, &fields), "sidecar %s is not a JSON object", sidecar)
-		var origin string
-		require.NoError(t, json.Unmarshal(fields["origin"], &origin), "sidecar %s has no readable origin", sidecar)
-		declaredRaw, hasDigest := fields["rawFileDigest"]
-		_, hasClearance := fields["clearance"]
-		if !hasDigest {
-			continue
-		}
-		claudeShaped++
-		if origin != string(acceptance.OriginAuthenticCapture) || hasClearance {
-			continue
-		}
-		var declared string
-		require.NoError(t, json.Unmarshal(declaredRaw, &declared))
+		var p acceptance.CaptureProvenance
+		require.NoError(t, json.Unmarshal(raw, &p), "sidecar %s is not a CaptureProvenance", sidecar)
+		harnessDir := filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(sidecar))))
+		perHarness[harnessDir]++
 		fixture := strings.TrimSuffix(sidecar, ".provenance.json") + ".json"
-		body, err := os.ReadFile(fixture)
+		_, err = os.Stat(fixture)
 		require.NoError(t, err, "sidecar %s has no sibling fixture", sidecar)
-		actual := digest.FromBytes(body)
-		if actual.String() != declared {
+		if p.Origin != acceptance.OriginAuthenticCapture {
+			require.Equal(t, "session_start_2_1_261_origin_authored.provenance.json", filepath.Base(sidecar), "the only non-authentic sidecar is the origin control")
 			continue
 		}
-		rel, err := filepath.Rel(filepath.Join(ingressTestdataRoot, "..", ".."), fixture)
+		require.NotEmpty(t, p.Event, "sidecar %s carries no event", sidecar)
+		_, err = acceptance.ParseRedaction(p.Redaction)
+		require.NoError(t, err, "sidecar %s", sidecar)
+		require.NotEmpty(t, p.Clearance, "sidecar %s carries no clearance path; no committed capture is exempt", sidecar)
+		require.NoError(t, acceptance.ValidateClearancePath(p.Clearance), "sidecar %s", sidecar)
+		root := filepath.Dir(filepath.Dir(sidecar))
+		rel, err := filepath.Rel(root, fixture)
 		require.NoError(t, err)
-		population[filepath.ToSlash(filepath.Join("internal", rel))] = actual
-		distinct[actual] = struct{}{}
+		err = p.ValidateFixture(root, rel)
+		if want, control := expectedRefusals[filepath.Base(sidecar)]; control {
+			require.ErrorContains(t, err, want, "the digest-mismatch control must be refused by the digest check")
+			continue
+		}
+		require.NoError(t, err, "sidecar %s does not validate its committed fixture", sidecar)
 	}
-	t.Logf("populations: %d CaptureProvenance-shaped sidecars; %d reach the exemption; %d distinct payloads among them", claudeShaped, len(population), len(distinct))
-
-	listed := acceptance.LegacyExemptCaptures()
-	require.NotEmpty(t, listed, "the legacy exemption list is empty while committed sidecars without a clearance still exist: %v", population)
-	listedByPath := map[string]digest.Digest{}
-	for _, entry := range listed {
-		_, duplicate := listedByPath[entry.Path]
-		require.False(t, duplicate, "legacy exemption list names %s twice", entry.Path)
-		listedByPath[entry.Path] = entry.Digest
-		got, present := population[entry.Path]
-		require.True(t, present, "legacy exemption list names %s, but no committed authentic sidecar without a clearance sits at that path with bytes matching its declared digest; remove the entry", entry.Path)
-		require.Equal(t, got, entry.Digest, "legacy exemption list records the wrong digest for %s", entry.Path)
-		abs, err := filepath.Abs(filepath.Join(ingressTestdataRoot, "..", "..", strings.TrimPrefix(entry.Path, "internal/")))
-		require.NoError(t, err)
-		require.True(t, acceptance.IsLegacyExemptCapture(abs, entry.Digest), "entry %s does not resolve through IsLegacyExemptCapture at its own absolute path", entry.Path)
-	}
-	for path, d := range population {
-		require.Contains(t, listedByPath, path, "committed sidecar for %s has no clearance and is not on the legacy exemption list; either add a clearance path to the sidecar or, if it predates the clearance field, add its path and digest %s to the list", path, d)
+	for _, harness := range []string{"claude", "codex", "opencode"} {
+		require.Positive(t, perHarness[harness], "the %s corpus contributed no sidecar; the corpus walk is broken or the directory moved", harness)
 	}
 }
 
@@ -378,7 +337,7 @@ func validCaptureProvenance(body []byte) acceptance.CaptureProvenance {
 	return acceptance.CaptureProvenance{
 		Origin:         acceptance.OriginAuthenticCapture,
 		Harness:        acceptance.HarnessClaudeCode,
-		HarnessVersion: "2.1.210",
+		HarnessVersion: "2.1.261",
 		CaptureSource:  "reviewed-test-evidence",
 		RawFileDigest:  digest.FromBytes(body).String(),
 		CapturedAt:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),

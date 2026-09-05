@@ -43,7 +43,7 @@ func TestOpenCodeNativeToolNames_MatchPinnedContract(t *testing.T) {
 
 	// Cross-check every name really is native in the pinned contract, proving the
 	// allow-list is the contract's own declared surface, not a hand-copied list.
-	contract := runtime.OpenCode1_18_10()
+	contract := runtime.OpenCode1_18_29()
 	native := map[string]bool{}
 	for _, kind := range ir.AllOperationKinds() {
 		desc, ok := runtime.CoreOperationDescriptorFor(kind)
@@ -281,15 +281,15 @@ func TestOpenCodeGeneratedLifecycleCallbacks_RunBuiltCLIWithAuthenticFixtures(t 
 import { sessionCreated, toolExecuteBefore } from %q;
 const sessionCapture = await Bun.file(%q).json();
 const toolCapture = await Bun.file(%q).json();
-await sessionCreated(sessionCapture.value);
-const output = toolCapture.value.output;
+await sessionCreated(sessionCapture);
+const output = toolCapture.output;
 const before = JSON.stringify(output.args);
-await toolExecuteBefore(toolCapture.value.input, output);
+await toolExecuteBefore(toolCapture.input, output);
 if (JSON.stringify(output.args) !== before) throw new Error("generated tool.execute.before callback changed output.args");
 console.log(JSON.stringify({ argsUnchanged: true }));
 `, moduleURL,
-		filepath.Join(fixtureDir, "session_created_1_18_10.capture.json"),
-		filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+		filepath.Join(fixtureDir, "session_created_1_18_29.json"),
+		filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
 	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
 		t.Fatalf("write Bun production-proof runner: %v", err)
 	}
@@ -315,7 +315,7 @@ console.log(JSON.stringify({ argsUnchanged: true }));
 	}
 	for _, required := range []string{
 		fmt.Sprintf(`"registrationContract":"opencode/%s"`, openCodeHostVersion()),
-		fmt.Sprintf(`"contract":%q`, runtime.OpenCode1_18_10().ID().String()),
+		fmt.Sprintf(`"contract":%q`, runtime.OpenCode1_18_29().ID().String()),
 		`"semantic":1`,
 		`"semantic":2`,
 	} {
@@ -536,7 +536,7 @@ func TestOpenCodeTargetDescriptor_RuntimeContractIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("descriptor: %v", err)
 	}
-	want := runtime.OpenCode1_18_10().ID()
+	want := runtime.OpenCode1_18_29().ID()
 	if desc.RuntimeContract() != want {
 		t.Errorf("descriptor RuntimeContract = %v, want %v", desc.RuntimeContract(), want)
 	}
@@ -689,14 +689,14 @@ func TestOpenCodeGeneratedGateSurvivesARealPastureFault(t *testing.T) {
 import { toolExecuteBefore } from %q;
 const toolCapture = await Bun.file(%q).json();
 
-const output = toolCapture.value.output;
+const output = toolCapture.output;
 const before = JSON.stringify(output.args);
-await toolExecuteBefore(toolCapture.value.input, output);
+await toolExecuteBefore(toolCapture.input, output);
 if (JSON.stringify(output.args) !== before) {
   throw new Error("a pasture fault changed output.args");
 }
 console.log(JSON.stringify({ toolCallProceeded: true }));
-`, moduleURL, filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+`, moduleURL, filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
 	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
 		t.Fatalf("write Bun fail-open proof runner: %v", err)
 	}

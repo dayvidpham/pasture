@@ -89,7 +89,7 @@ var CodexTarget = TargetHarness{
 // CodexRuntimeContract returns the Codex runtime contract the
 // target lowers against. It is the single source of the target's native
 // vocabulary and RuntimeContractID.
-func CodexRuntimeContract() runtime.RuntimeContract { return runtime.Codex0_146_0() }
+func CodexRuntimeContract() runtime.RuntimeContract { return runtime.Codex0_153_0() }
 
 // CodexRuntimeContractID returns the pinned Codex contract identity the target
 // publishes in its descriptor, manifest, and agent profiles.

@@ -124,7 +124,7 @@ func commitOccurrenceNaming(t *testing.T, tracker protocol.TaskTracker, ref dige
 	require.True(t, ok)
 	identity, err := resolver.ResolveLifecycleIdentity(ctx)
 	require.NoError(t, err)
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	require.NoError(t, err)
 	payload, err := json.Marshal(struct {
 		Contract string                      `json:"contract"`

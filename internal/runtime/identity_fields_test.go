@@ -16,7 +16,7 @@ import (
 func TestLifecycleEventMappingDeclaredField(t *testing.T) {
 	t.Parallel()
 
-	mapping, err := runtime.ClaudeCode2_1_210Lifecycle().Mapping(runtime.ClaudeEventPreToolUse)
+	mapping, err := runtime.ClaudeCode2_1_261Lifecycle().Mapping(runtime.ClaudeEventPreToolUse)
 	require.NoError(t, err)
 
 	t.Run("declared field is found and returned by exact name", func(t *testing.T) {

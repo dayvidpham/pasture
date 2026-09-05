@@ -12,8 +12,8 @@ import (
 func TestBelowFloorStepsDownOneRelease(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ in, want string }{
-		{"2.1.261", "2.1.260"},
-		{"0.146.0", "0.145.0"},
+		{"3.3.3", "3.3.2"},
+		{"7.7.7", "7.7.6"},
 		{"1.0.0", "0.0.0"},
 	} {
 		v, err := runtime.ParseHostVersion(tc.in)

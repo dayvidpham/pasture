@@ -14,7 +14,7 @@ import (
 
 func TestClaudeManifestIsCompleteAndDefensivelyCopied(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
 	// One registration row per runtime profile event: the count and the last
 	// name are read from the profile, never restated.
 	profile := runtime.ClaudeLifecycleEvents()

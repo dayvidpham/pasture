@@ -641,7 +641,7 @@ func (c LifecycleContract[E]) Mapping(event E) (LifecycleEventMapping, error) {
 			"lifecycle lookup used a zero contract",
 			"a lookup needs one of the static version-bounded lifecycle profiles",
 			"LifecycleContract.Mapping", "no native event mapping can be generated",
-			"use ClaudeCode2_1_210Lifecycle, Codex0_146_0Lifecycle, or OpenCode1_18_10Lifecycle", nil,
+			"use ClaudeCode2_1_261Lifecycle, Codex0_153_0Lifecycle, or OpenCode1_18_29Lifecycle", nil,
 		)
 	}
 	mapping, found := c.mappings[event]

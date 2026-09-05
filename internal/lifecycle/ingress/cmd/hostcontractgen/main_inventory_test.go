@@ -38,9 +38,9 @@ func TestInventoryLifecycleRowsAgreeWithPinnedContracts(t *testing.T) {
 		contract hostcontract.Contract
 	}
 	pinned := []harnessContract{
-		{ir.HarnessClaudeCode, hostcontract.ClaudeCode2_1_210()},
-		{ir.HarnessOpenCode, hostcontract.OpenCode1_18_10()},
-		{ir.HarnessCodex, hostcontract.Codex0_146_0()},
+		{ir.HarnessClaudeCode, hostcontract.ClaudeCode2_1_261()},
+		{ir.HarnessOpenCode, hostcontract.OpenCode1_18_29()},
+		{ir.HarnessCodex, hostcontract.Codex0_153_0()},
 	}
 	var derived []string
 	for _, hc := range pinned {
@@ -123,9 +123,9 @@ func diffLifecycleRowSets(want, got []string) (missing, extra []string) {
 // that reads that label would block a session on a plugin that only throws.
 func TestGeneratedManifestsCarryRuntimeFailureModesVerbatim(t *testing.T) {
 	openCode := string(renderProviderManifest(
-		hostcontract.OpenCode1_18_10(), "OpenCode1_18_10", "ir.HarnessOpenCode"))
+		hostcontract.OpenCode1_18_29(), "OpenCode1_18_29", "ir.HarnessOpenCode"))
 	codex := string(renderProviderManifest(
-		hostcontract.Codex0_146_0(), "Codex0_146_0", "ir.HarnessCodex"))
+		hostcontract.Codex0_153_0(), "Codex0_153_0", "ir.HarnessCodex"))
 
 	for _, rendered := range []string{openCode, codex} {
 		if !strings.Contains(rendered, `pastureruntime "github.com/dayvidpham/pasture/internal/runtime"`) {
@@ -185,9 +185,9 @@ func TestGeneratedNamesFollowTheContractVersion(t *testing.T) {
 		payload      string
 		function     string
 	}{
-		{hostcontract.ClaudeCode2_1_210(), "internal/lifecycle/registration/claude_TOKEN.gen.go", "internal/lifecycle/ingress/claude/payload_TOKEN.gen.go", "func ClaudeCodeTOKEN() Manifest"},
-		{hostcontract.OpenCode1_18_10(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCodeTOKEN() Manifest"},
-		{hostcontract.Codex0_146_0(), "internal/lifecycle/registration/codex_TOKEN.gen.go", "internal/lifecycle/ingress/codex/payload_TOKEN.gen.go", "func CodexTOKEN() Manifest"},
+		{hostcontract.ClaudeCode2_1_261(), "internal/lifecycle/registration/claude_TOKEN.gen.go", "internal/lifecycle/ingress/claude/payload_TOKEN.gen.go", "func ClaudeCodeTOKEN() Manifest"},
+		{hostcontract.OpenCode1_18_29(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCodeTOKEN() Manifest"},
+		{hostcontract.Codex0_153_0(), "internal/lifecycle/registration/codex_TOKEN.gen.go", "internal/lifecycle/ingress/codex/payload_TOKEN.gen.go", "func CodexTOKEN() Manifest"},
 	} {
 		token := versionToken(tc.contract)
 		if token == "" || token != strings.ReplaceAll(tc.contract.Version, ".", "_") {

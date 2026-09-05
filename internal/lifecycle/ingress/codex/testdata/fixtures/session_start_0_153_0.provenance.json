@@ -1,0 +1,11 @@
+{
+  "origin": "authentic-capture",
+  "harness": "codex-cli",
+  "harnessVersion": "0.153.0",
+  "captureSource": "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
+  "rawFileDigest": "sha256:cd5256a1d139adad49f0755096914b64bb7662384d3166240223703b0f732601",
+  "capturedAt": "2026-09-05T12:30:24Z",
+  "event": "SessionStart",
+  "redaction": "home-path-v1",
+  "clearance": "internal/lifecycle/ingress/codex/testdata/fixtures/CLEARANCE.md"
+}

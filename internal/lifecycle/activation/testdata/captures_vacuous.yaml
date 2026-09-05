@@ -1,7 +1,7 @@
 cases:
   - name: only-enabled-control
     input:
-      fixture: fixtures/session_start_2_1_210.json
+      fixture: fixtures/session_start_2_1_261.json
     expected:
       decision: enabled
       reason: ""

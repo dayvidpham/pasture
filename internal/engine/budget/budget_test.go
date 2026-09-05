@@ -189,11 +189,11 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	// as already content-addressed so the injected contention targets only the
 	// second transaction.
 	service.Blobs = existingBlob{}
-	raw, err := os.ReadFile(filepath.Join("..", "..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	_, err = service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
 		close(release)
@@ -263,11 +263,11 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	held, release, lockErr := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	probeErr := make(chan error, 1)
 	service.Blobs = lockAfterBlob{store: realStore, dbPath: dbPath, profile: profile, held: held, release: release, lockErr: lockErr, probeErr: probeErr}
-	raw, err := os.ReadFile(filepath.Join("..", "..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
 	_, receiveErr := service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
@@ -374,11 +374,11 @@ func TestBudgetWorkerProcess(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	raw, err := os.ReadFile(filepath.Join("..", "..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	warrant := deliveryWarrant(t, delivery)
 	for i := 0; i < count; i++ {
 		if _, err := service.Receive(context.Background(), warrant, delivery); err != nil {

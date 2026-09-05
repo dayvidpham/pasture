@@ -200,9 +200,9 @@ func claudeLifecycleMappings() map[ClaudeLifecycleEvent]LifecycleEventMapping {
 	return mappings
 }
 
-// ClaudeCode2_1_210Lifecycle returns the immutable Claude Code lifecycle table
+// ClaudeCode2_1_261Lifecycle returns the immutable Claude Code lifecycle table
 // bound to the same exact host version and RuntimeContractID as
-// ClaudeCode2_1_210.
-func ClaudeCode2_1_210Lifecycle() LifecycleContract[ClaudeLifecycleEvent] {
-	return mustLifecycleContract(ClaudeCode2_1_210(), ClaudeLifecycleEvents(), claudeLifecycleMappings())
+// ClaudeCode2_1_261.
+func ClaudeCode2_1_261Lifecycle() LifecycleContract[ClaudeLifecycleEvent] {
+	return mustLifecycleContract(ClaudeCode2_1_261(), ClaudeLifecycleEvents(), claudeLifecycleMappings())
 }

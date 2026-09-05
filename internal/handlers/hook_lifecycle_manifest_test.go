@@ -63,10 +63,10 @@ func TestHookLifecycleMetamodelReadSurface(t *testing.T) {
 	require.Nil(t, beforeView.DefinitionJournalID)
 
 	// Deliver a valid Claude SessionStart, which lazily activates the metamodel.
-	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	require.NoError(t, err)
 	_, err = handlers.HookLifecycleResponse(ctx, handlers.HookLifecycleInput{
-		DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: "SessionStart", HostVersion: "2.1.210",
+		DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: "SessionStart", HostVersion: "2.1.261",
 		Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.metamodel.delivery"},
 	})
 	require.NoError(t, err)

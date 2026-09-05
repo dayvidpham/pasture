@@ -175,7 +175,7 @@ func commitPreM5V1Record(ctx context.Context, t *testing.T, tracker protocol.Tas
 		t.Fatalf("resolve lifecycle identity: %v", err)
 	}
 
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	if err != nil {
 		t.Fatalf("construct runtime contract: %v", err)
 	}

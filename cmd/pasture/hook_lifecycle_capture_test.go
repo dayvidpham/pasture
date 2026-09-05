@@ -23,7 +23,7 @@ import (
 // captureFileName is the file the capture sink writes for one Claude Code
 // Notification payload at the recorded host version:
 // <harness>_<snake_event>_<version with dots as underscores>.<n>.json.
-var captureFileName = "claude-code_notification_" + strings.ReplaceAll(registration.ClaudeCode2_1_210().Version, ".", "_") + ".1.json"
+var captureFileName = "claude-code_notification_" + strings.ReplaceAll(registration.ClaudeCode2_1_261().Version, ".", "_") + ".1.json"
 
 // captureNoticePrefix is the load-bearing phrase of the one notice the hook
 // prints when it records a session. It is pinned here on the binary as it is
@@ -48,9 +48,9 @@ func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	run := func(captureDir string) lifecycleRun {
 		dbPath := filepath.Join(t.TempDir(), "pasture.db")
 		if captureDir == "" {
-			return runLifecycleHookOn(t, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_210().Version, payload)
+			return runLifecycleHookOn(t, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload)
 		}
-		return runLifecycleHookOn(t, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_210().Version, payload, "PASTURE_CAPTURE_DIR="+captureDir)
+		return runLifecycleHookOn(t, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload, "PASTURE_CAPTURE_DIR="+captureDir)
 	}
 	base := run("")
 	require.Equal(t, 0, base.ExitCode, base.Stderr)
@@ -98,12 +98,12 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 		t.Skip("root ignores directory permissions, so an unwritable directory cannot be arranged")
 	}
 	binary := lifecycleBinary(t)
-	payload := claudeFixture(t, "session_start_2_1_222.json")
+	payload := claudeFixture(t, "session_start_2_1_261.json")
 	run := func(env ...string) lifecycleRun {
 		dir := t.TempDir()
 		dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 		initializeLifecycleTestDatabase(t, dbPath)
-		return runLifecycleHookOn(t, binary, dbPath, "claude-code", "SessionStart", "2.1.222", payload, env...)
+		return runLifecycleHookOn(t, binary, dbPath, "claude-code", "SessionStart", "2.1.261", payload, env...)
 	}
 	base := run()
 	require.Equal(t, 0, base.ExitCode, base.Stderr)
@@ -129,7 +129,7 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 	// standard output, so the durable state is what tells them apart: the
 	// event must be RECORDED, which a fault would not do.
 	listed := runLifecycleList(t, binary, failed.FaultDir+"/"+tasks.DefaultDBFilename.String(), "json")
-	assert.Contains(t, listed, `"registrationContract":"`+registration.ClaudeCode2_1_210().Contract.String()+`"`, "the event was recorded although the capture failed")
+	assert.Contains(t, listed, `"registrationContract":"`+registration.ClaudeCode2_1_261().Contract.String()+`"`, "the event was recorded although the capture failed")
 	assert.Contains(t, listed, `"event":1`, "the recorded occurrence is the SessionStart kind")
 }
 
@@ -320,7 +320,7 @@ func TestAStalledStdinUnderCaptureIsBoundedByTheInvocationDeadline(t *testing.T)
 	command := exec.Command(binary,
 		databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle",
-		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+		"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261")
 	command.Stdin = stdinRead
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout

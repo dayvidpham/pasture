@@ -32,7 +32,7 @@ func TestNativeParseClosuresPreservePreOriginPayloadShape(t *testing.T) {
 			dispatch, err := dispatchLifecycle(harness)
 			require.NoError(t, err, "registry row must resolve for a supported harness")
 			event := dispatch.manifest.Events[0]
-			capture := dispatch.parse([]byte(`{}`), event, "2.1.210")
+			capture := dispatch.parse([]byte(`{}`), event, "2.1.261")
 			require.Zero(t, capture.delivery.Origin,
 				"%s parse closure must leave the delivery origin at the zero value (native sentinel default)", dispatch.name)
 			require.Zero(t, capture.delivery.Envelope.Origin,

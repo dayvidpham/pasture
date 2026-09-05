@@ -1,11 +1,11 @@
 {
   "harness": "claude-code",
-  "contract": "claude-code/2.1.210",
+  "contract": "claude-code/2.1.261",
   "events": [
     {
       "event": "SessionStart",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_222.json (Claude Code 2.1.222 authentic capture)",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_261.json (Claude Code 2.1.261 authentic capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionStart",
       "responseCapability": "unset",
       "failureEvidence": ""
@@ -20,7 +20,7 @@
     {
       "event": "SessionEnd",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_222.json (Claude Code 2.1.222 authentic capture)",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_261.json (Claude Code 2.1.261 authentic capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionEnd",
       "responseCapability": "unset",
       "failureEvidence": ""
@@ -56,7 +56,7 @@
     {
       "event": "PreToolUse",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_261.json (Claude Code 2.1.261 authentic capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreToolUse",
       "responseCapability": "unset",
       "failureEvidence": "https://docs.claude.com/en/docs/claude-code/hooks"
@@ -78,7 +78,7 @@
     {
       "event": "PostToolUse",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_261.json (Claude Code 2.1.261 authentic capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUse",
       "responseCapability": "unset",
       "failureEvidence": ""
@@ -86,7 +86,7 @@
     {
       "event": "PostToolUseFailure",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_222.json (Claude Code 2.1.222 authentic capture)",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_261.json (Claude Code 2.1.261 authentic capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUseFailure",
       "responseCapability": "unset",
       "failureEvidence": ""
@@ -94,7 +94,7 @@
     {
       "event": "PostToolBatch",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_222.json (Claude Code 2.1.222 authentic capture)",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_261.json (Claude Code 2.1.261 authentic capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolBatch",
       "responseCapability": "unset",
       "failureEvidence": "unset"
@@ -179,7 +179,7 @@
     {
       "event": "PreCompact",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreCompact",
       "responseCapability": "unset",
       "failureEvidence": "unset"
@@ -187,7 +187,7 @@
     {
       "event": "PostCompact",
       "state": "enabled",
-      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostCompact",
       "responseCapability": "unset",
       "failureEvidence": ""

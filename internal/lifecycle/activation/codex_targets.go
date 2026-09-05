@@ -16,8 +16,8 @@ import (
 // codexCaptureProofs declares every Codex capture proof. The arm becomes the
 // constant CaptureProof<arm>.
 var codexCaptureProofs = [...]captureProofDeclaration{
-	{ordinal: 100, arm: "CodexSessionStart", event: registration.EventCodexSessionStart, fixture: "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_146_0.json (Codex 0.146.0 authentic command-hook capture)"},
-	{ordinal: 101, arm: "CodexPreToolUse", event: registration.EventCodexPreToolUse, fixture: "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_146_0.json (Codex 0.146.0 authentic command-hook capture)"},
+	{ordinal: 100, arm: "CodexSessionStart", event: registration.EventCodexSessionStart, fixture: "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_153_0.json (Codex 0.153.0 authentic command-hook capture)"},
+	{ordinal: 101, arm: "CodexPreToolUse", event: registration.EventCodexPreToolUse, fixture: "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_153_0.json (Codex 0.153.0 authentic command-hook capture)"},
 }
 
 // codexProductionProofs declares every Codex production proof. The arm becomes
@@ -37,17 +37,17 @@ var codexTargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventCodexPreToolUse, captureProof: CaptureProofCodexPreToolUse, productionProof: ProductionProofCodexPreToolUse},
 }
 
-// Codex0_146_0TargetEvents returns a defensive copy of the proved target set.
-func Codex0_146_0TargetEvents() []model.ContractEventKind {
+// Codex0_153_0TargetEvents returns a defensive copy of the proved target set.
+func Codex0_153_0TargetEvents() []model.ContractEventKind {
 	return targetEvents(codexTargetEventDeclarations[:])
 }
 
-// Codex0_146_0 derives a fresh exhaustive activation manifest from the generated
+// Codex0_153_0 derives a fresh exhaustive activation manifest from the generated
 // Codex host manifest and the proved static target declaration. Exactly the two
 // proven events are Enabled; every other generated Codex event is Withheld with
 // the outside-target-set reason. The manifest performs no filesystem access and
 // derives only from the generated registration manifest, so Codex evidence can
 // never enable an OpenCode or Claude entry.
-func Codex0_146_0() ([]Entry, error) {
-	return deriveManifest("activation.Codex0_146_0", registration.Codex0_146_0().Entries(), codexTargetEventDeclarations[:])
+func Codex0_153_0() ([]Entry, error) {
+	return deriveManifest("activation.Codex0_153_0", registration.Codex0_153_0().Entries(), codexTargetEventDeclarations[:])
 }

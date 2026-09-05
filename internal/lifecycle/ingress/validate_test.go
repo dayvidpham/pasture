@@ -32,15 +32,15 @@ type harnessParser struct {
 
 func harnessParsers() []harnessParser {
 	return []harnessParser{
-		{registration.ClaudeCode2_1_210(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.ClaudeCode2_1_261(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := claude.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},
-		{registration.Codex0_146_0(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.Codex0_153_0(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := codex.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},
-		{registration.OpenCode1_18_10(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.OpenCode1_18_29(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := opencode.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},
@@ -220,9 +220,9 @@ func TestAnIdentityPolicyNoneEventLandsWithoutIdentitiesOrUnresolvedReason(t *te
 	t.Parallel()
 	var rows []noIdentityRow
 	declared := 0
-	collectNoIdentityRows(t, runtime.ClaudeCode2_1_210Lifecycle(), &rows, &declared)
-	collectNoIdentityRows(t, runtime.Codex0_146_0Lifecycle(), &rows, &declared)
-	collectNoIdentityRows(t, runtime.OpenCode1_18_10Lifecycle(), &rows, &declared)
+	collectNoIdentityRows(t, runtime.ClaudeCode2_1_261Lifecycle(), &rows, &declared)
+	collectNoIdentityRows(t, runtime.Codex0_153_0Lifecycle(), &rows, &declared)
+	collectNoIdentityRows(t, runtime.OpenCode1_18_29Lifecycle(), &rows, &declared)
 	require.NotEmpty(t, rows, "no pinned profile row declares zero identities, so this test would check nothing")
 	require.Positive(t, declared, "no pinned profile row declares an identity, so the label has one value only")
 

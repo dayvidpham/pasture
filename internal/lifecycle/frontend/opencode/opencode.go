@@ -70,7 +70,7 @@ var eventMappings = map[model.ContractEventKind]runtime.OpenCodeLifecycleEvent{
 // host is the pinned OpenCode data consumed by the generic frontend engine.
 var host = frontend.Host[runtime.OpenCodeLifecycleEvent]{
 	Label:    "OpenCode",
-	Contract: runtime.OpenCode1_18_10Lifecycle,
+	Contract: runtime.OpenCode1_18_29Lifecycle,
 	Events:   eventMappings,
 }
 

@@ -16,9 +16,9 @@ import (
 // drifted from the pinned contract.
 func registrationManifests() []registration.Manifest {
 	return []registration.Manifest{
-		registration.ClaudeCode2_1_210(),
-		registration.OpenCode1_18_10(),
-		registration.Codex0_146_0(),
+		registration.ClaudeCode2_1_261(),
+		registration.OpenCode1_18_29(),
+		registration.Codex0_153_0(),
 	}
 }
 

@@ -215,7 +215,7 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 		assertLifecycleContract(
 			t,
 			lifecycleFixtureFor(t, fixture, "claude-code"),
-			runtime.ClaudeCode2_1_210Lifecycle(),
+			runtime.ClaudeCode2_1_261Lifecycle(),
 			runtime.ClaudeLifecycleEvents(),
 			func(event runtime.ClaudeLifecycleEvent) string { return event.NativeName() },
 		)
@@ -226,7 +226,7 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 		assertLifecycleContract(
 			t,
 			lifecycleFixtureFor(t, fixture, "codex"),
-			runtime.Codex0_146_0Lifecycle(),
+			runtime.Codex0_153_0Lifecycle(),
 			runtime.CodexLifecycleEvents(),
 			func(event runtime.CodexLifecycleEvent) string { return event.NativeName() },
 		)
@@ -237,7 +237,7 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 		assertLifecycleContract(
 			t,
 			lifecycleFixtureFor(t, fixture, "opencode"),
-			runtime.OpenCode1_18_10Lifecycle(),
+			runtime.OpenCode1_18_29Lifecycle(),
 			runtime.OpenCodeLifecycleEvents(),
 			func(event runtime.OpenCodeLifecycleEvent) string { return event.NativeName() },
 		)
@@ -246,7 +246,7 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 
 func TestClaudeLifecyclePreservesBatchRequestAndStopSemantics(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210Lifecycle()
+	contract := runtime.ClaudeCode2_1_261Lifecycle()
 
 	batch, err := contract.Mapping(runtime.ClaudeEventPostToolBatch)
 	require.NoError(t, err)
@@ -285,7 +285,7 @@ func TestClaudeLifecyclePreservesBatchRequestAndStopSemantics(t *testing.T) {
 
 func TestCodexLifecyclePreservesStrictMutationAndConcurrencyWithoutMerge(t *testing.T) {
 	t.Parallel()
-	contract := runtime.Codex0_146_0Lifecycle()
+	contract := runtime.Codex0_153_0Lifecycle()
 
 	pre, err := contract.Mapping(runtime.CodexEventPreToolUse)
 	require.NoError(t, err)
@@ -314,7 +314,7 @@ func TestCodexLifecyclePreservesStrictMutationAndConcurrencyWithoutMerge(t *test
 
 func TestOpenCodeLifecycleSeparatesNamedHandlersFromCatchAllAndSSE(t *testing.T) {
 	t.Parallel()
-	contract := runtime.OpenCode1_18_10Lifecycle()
+	contract := runtime.OpenCode1_18_29Lifecycle()
 
 	named, err := contract.Mapping(runtime.OpenCodeEventToolExecuteBefore)
 	require.NoError(t, err)
@@ -483,9 +483,9 @@ func TestEveryRegisteredRowIsDeclaredAndAnUnknownCoordinateIsNot(t *testing.T) {
 	t.Parallel()
 
 	rows := 0
-	rows += assertEveryRowDeclared(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_210Lifecycle(), runtime.ClaudeLifecycleEvents())
-	rows += assertEveryRowDeclared(t, ir.HarnessCodex, runtime.Codex0_146_0Lifecycle(), runtime.CodexLifecycleEvents())
-	rows += assertEveryRowDeclared(t, ir.HarnessOpenCode, runtime.OpenCode1_18_10Lifecycle(), runtime.OpenCodeLifecycleEvents())
+	rows += assertEveryRowDeclared(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_261Lifecycle(), runtime.ClaudeLifecycleEvents())
+	rows += assertEveryRowDeclared(t, ir.HarnessCodex, runtime.Codex0_153_0Lifecycle(), runtime.CodexLifecycleEvents())
+	rows += assertEveryRowDeclared(t, ir.HarnessOpenCode, runtime.OpenCode1_18_29Lifecycle(), runtime.OpenCodeLifecycleEvents())
 	require.NotZero(t, rows, "no contract yielded a row, so nothing above was asserted")
 
 	for _, coordinate := range []struct {

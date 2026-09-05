@@ -18,9 +18,9 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	contract := hostcontract.ClaudeCode2_1_210()
-	opencode := hostcontract.OpenCode1_18_10()
-	codex := hostcontract.Codex0_146_0()
+	contract := hostcontract.ClaudeCode2_1_261()
+	opencode := hostcontract.OpenCode1_18_29()
+	codex := hostcontract.Codex0_153_0()
 	// The lifecycle-event inventory rows are emitted in THIS same walk that
 	// renders the registration manifests, from the identical pinned contracts,
 	// so the inventory table and registration can never drift from each other
@@ -56,7 +56,7 @@ func main() {
 }
 
 // versionToken spells a host version the way Go identifiers and file names
-// carry it: dots become underscores (2.1.210 -> 2_1_210). Every versioned
+// carry it: dots become underscores (2.1.261 -> 2_1_261). Every versioned
 // output file name and generated function name is built from it, so when the
 // recorded host version moves, the generated surface is renamed by generation
 // and never by hand; a test pins that the names follow the contract version.

@@ -29,7 +29,7 @@ func Contract(descriptor target.TargetDescriptor) (activation.ActivationContract
 	if !descriptor.IsValid() || descriptor.Harness() != ir.HarnessClaudeCode {
 		return activation.ActivationContract{}, fault("Claude activation contract construction", "valid Claude target descriptor", "the target descriptor is zero, invalid, or belongs to another harness", "Contract", "binding immutable Claude components", "the installer cannot prove which artifacts it would activate", "pass claudecode.Descriptor() from the target package", nil)
 	}
-	runtimeContract := runtime.ClaudeCode2_1_210()
+	runtimeContract := runtime.ClaudeCode2_1_261()
 	if descriptor.RuntimeContractID() != runtimeContract.ID() {
 		return activation.ActivationContract{}, fault("Claude activation contract construction", "matching reviewed runtime identity", fmt.Sprintf("target runtime %s differs from reviewed runtime %s", descriptor.RuntimeContractID(), runtimeContract.ID()), "Contract", "binding host compatibility", "manager behavior could be applied outside the artifact's reviewed contract", "rebuild the target and activation contract from the same release", nil)
 	}

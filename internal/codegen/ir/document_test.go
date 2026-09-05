@@ -245,7 +245,7 @@ func TestCompileFailureMatrixReturnsZeroTreeAndShortCircuits(t *testing.T) {
 
 	t.Run("target-literal contract mismatch", func(t *testing.T) {
 		t.Parallel()
-		olderContract := mustContract(t, ir.HarnessClaudeCode, "2.1.209")
+		olderContract := mustContract(t, ir.HarnessClaudeCode, "2.1.260")
 		claude, err := ir.LiteralForHarness(ir.HarnessClaudeCode, olderContract, []byte("old literal"), "reviewed for an older contract")
 		require.NoError(t, err)
 		openCode, err := ir.LiteralUnsupported(ir.HarnessOpenCode, "unsupported")

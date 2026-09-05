@@ -1,7 +1,7 @@
 // Package codegen — Codex standalone agent TOML generation.
 //
 // The Codex harness, at the recorded Codex version, has no per-file "subagent" or "skill
-// invocation" runtime: its pinned runtime contract (runtime.Codex0_146_0)
+// invocation" runtime: its pinned runtime contract (runtime.Codex0_153_0)
 // lowers InvokeSkill as a semantic instruction and every delegation/collection/
 // stop operation as parent-mediated, so the only NATIVE Codex function a
 // generated agent may reference is `request-input`.

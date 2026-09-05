@@ -1,0 +1,34 @@
+# Hand-authored from the Claude Code 2.1.x compatibility contract and live
+# captures through Claude Code 2.1.261.
+# This file is deliberately outside hostcontractgen and must never be generated.
+events:
+  - {name: SessionStart, fields: [source, model, session_title], behavior: observation}
+  - {name: Setup, fields: [trigger], behavior: observation}
+  - {name: SessionEnd, fields: [reason], behavior: observation}
+  - {name: UserPromptSubmit, fields: [prompt], behavior: gate}
+  - {name: UserPromptExpansion, fields: [prompt, command_name], behavior: gate}
+  - {name: Stop, fields: [stop_hook_active], behavior: stop-gate}
+  - {name: StopFailure, fields: [error, error_type], behavior: observation}
+  - {name: PreToolUse, fields: [tool_name, tool_input, tool_use_id], behavior: gate}
+  - {name: PermissionRequest, fields: [tool_name, tool_input, request_id], behavior: gate}
+  - {name: PermissionDenied, fields: [tool_name, tool_input], behavior: observation}
+  - {name: PostToolUse, fields: [tool_name, tool_input, tool_output, tool_response, duration_ms, tool_use_id], behavior: observation}
+  - {name: PostToolUseFailure, fields: [tool_name, tool_input, error, is_interrupt, duration_ms, tool_use_id], behavior: observation}
+  - {name: PostToolBatch, fields: [batch_results, tool_calls], behavior: gate}
+  - {name: FileChanged, fields: [file_path], behavior: observation}
+  - {name: CwdChanged, fields: [], behavior: observation}
+  - {name: ConfigChange, fields: [config_source], behavior: conditional-gate}
+  - {name: InstructionsLoaded, fields: [file_path, memory_type, load_reason, globs, trigger_file_path, parent_file_path], behavior: observation}
+  - {name: WorktreeCreate, fields: [], behavior: gate}
+  - {name: WorktreeRemove, fields: [], behavior: observation}
+  - {name: SubagentStart, fields: [agent_id], behavior: observation}
+  - {name: SubagentStop, fields: [agent_id, agent_transcript_path, stop_hook_active], behavior: stop-gate}
+  - {name: TeammateIdle, fields: [teammate_name], behavior: gate}
+  - {name: TaskCreated, fields: [task_id], behavior: gate}
+  - {name: TaskCompleted, fields: [task_id], behavior: gate}
+  - {name: PreCompact, fields: [trigger, custom_instructions], behavior: gate}
+  - {name: PostCompact, fields: [trigger, compact_summary], behavior: observation}
+  - {name: Notification, fields: [message, notification_type, title], behavior: observation}
+  - {name: MessageDisplay, fields: [message, content], behavior: observation}
+  - {name: Elicitation, fields: [request_id, fields, mcp_server_name, message, mode, requested_schema], behavior: gate}
+  - {name: ElicitationResult, fields: [request_id, response, mcp_server_name, mode, action, content], behavior: human-response}

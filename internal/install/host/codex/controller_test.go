@@ -106,7 +106,7 @@ func TestContractMatchesReviewedGlobalLayout(t *testing.T) {
 	}
 	// The ids and the admission are read from the Codex runtime contract, the
 	// one root, never restated in the fixture.
-	root := runtime.Codex0_146_0()
+	root := runtime.Codex0_153_0()
 	if contract.ID().String() != hostcodex.ActivationContractID() || contract.ID().String() != "codex/global@"+root.Versions().Min().String() {
 		t.Fatalf("contract id %s is not derived from the Codex runtime contract version %s", contract.ID(), root.Versions().Min())
 	}
@@ -624,7 +624,7 @@ func TestGlobalHookCommandReachesInstalledRunnerFromUnrelatedDirectory(t *testin
 	if err != nil {
 		t.Fatalf("installed runner did not reach the injected Pasture binary: %v", err)
 	}
-	if !strings.Contains(string(args), "hook lifecycle --harness codex --event SessionStart --host-version "+runtime.Codex0_146_0().Versions().Min().String()) {
+	if !strings.Contains(string(args), "hook lifecycle --harness codex --event SessionStart --host-version "+runtime.Codex0_153_0().Versions().Min().String()) {
 		t.Fatalf("installed global runner forwarded wrong argv: %q", args)
 	}
 }
@@ -804,9 +804,9 @@ func stubDirectFileContract(t *testing.T, harness ir.HarnessID, root string) (ac
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, _ := activation.NewActivationContractID(string(harness) + "/test@0.146.0")
+	id, _ := activation.NewActivationContractID(string(harness) + "/test@0.153.0")
 	probe, _ := activation.NewCommandSchema("true", "--version")
-	version, _ := runtime.ParseHostVersion("0.146.0")
+	version, _ := runtime.ParseHostVersion("0.153.0")
 	versions, _ := runtime.NewVersionConstraint(version, version, false)
 	contract, err := activation.NewActivationContract(id, harness, versions, probe, exhaustive)
 	if err != nil {

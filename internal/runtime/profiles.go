@@ -192,13 +192,13 @@ func mustFloorContract(harness ir.HarnessID, core CoreRuntimeBindings) RuntimeCo
 	return contract
 }
 
-// ClaudeCode2_1_210 is the runtime contract for Claude Code at the recorded
+// ClaudeCode2_1_261 is the runtime contract for Claude Code at the recorded
 // host version, the one its id carries (artifact.ProductionRuntimeContract).
 // Admission is a floor: that version and every later release. Its native
 // bindings name only Agent/SendMessage/TaskStop-era tools; it never names a
 // removed team-lifecycle call (TeamCreate/TeamDelete). Any schema or semantic
 // change to this profile requires a new RuntimeContractID.
-func ClaudeCode2_1_210() RuntimeContract {
+func ClaudeCode2_1_261() RuntimeContract {
 	version := productionHostVersion(ir.HarnessClaudeCode).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
@@ -233,14 +233,14 @@ func ClaudeCode2_1_210() RuntimeContract {
 	return mustFloorContract(ir.HarnessClaudeCode, buildCoreBindings(table))
 }
 
-// OpenCode1_18_10 is the runtime contract for OpenCode at the recorded host
+// OpenCode1_18_29 is the runtime contract for OpenCode at the recorded host
 // version, the one its id carries (artifact.ProductionRuntimeContract).
 // Admission is a floor: that version and every later release. It uses only
 // OpenCode's documented skill/task/question surfaces. It never invents a
 // persistent-message, follow-up, wait, or close tool: operations with no
 // documented native surface are lowered as semantic instructions, and stopping
 // an assignment is explicitly unsupported rather than a fabricated close call.
-func OpenCode1_18_10() RuntimeContract {
+func OpenCode1_18_29() RuntimeContract {
 	version := productionHostVersion(ir.HarnessOpenCode).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
@@ -275,13 +275,13 @@ func OpenCode1_18_10() RuntimeContract {
 	return mustFloorContract(ir.HarnessOpenCode, buildCoreBindings(table))
 }
 
-// Codex0_146_0 is the runtime contract for Codex at the recorded host version,
+// Codex0_153_0 is the runtime contract for Codex at the recorded host version,
 // the one its id carries (artifact.ProductionRuntimeContract). Admission is a
 // floor: that version and every later release. It lowers only the exposed
 // collaboration/request-input functions; operations with no exposed Codex
 // function are parent-mediated or lowered as semantic instructions rather than
 // invented.
-func Codex0_146_0() RuntimeContract {
+func Codex0_153_0() RuntimeContract {
 	version := productionHostVersion(ir.HarnessCodex).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
@@ -319,5 +319,5 @@ func Codex0_146_0() RuntimeContract {
 // PinnedContracts returns the three runtime contracts, one per enabled harness,
 // each admitting its recorded host version and every later release.
 func PinnedContracts() []RuntimeContract {
-	return []RuntimeContract{ClaudeCode2_1_210(), OpenCode1_18_10(), Codex0_146_0()}
+	return []RuntimeContract{ClaudeCode2_1_261(), OpenCode1_18_29(), Codex0_153_0()}
 }

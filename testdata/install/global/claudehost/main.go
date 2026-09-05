@@ -15,7 +15,7 @@
 // State file (PASTURE_FAKE_CLAUDE_STATE, required):
 //
 //	{
-//	  "host_version": "2.1.210 (Claude Code)",   // printed by --version
+//	  "host_version": "2.1.261 (Claude Code)",   // printed by --version
 //	  "marketplaces": [ ... ],                   // marketplace list --json body
 //	  "installed":    [ ... ],                   // plugin list --available --json body
 //	  "versions":     {"pasture-skills": "0.0.4"},

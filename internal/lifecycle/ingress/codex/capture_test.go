@@ -1,12 +1,16 @@
 package codex_test
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/internal/hostcontract"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -14,14 +18,32 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// Authentic Codex identity facts from the two cleared command-hook payloads.
-// These are provider-specific and MUST survive ingress unflattened.
-const (
-	preToolSessionID = "019fc756-217c-7233-81f7-b5e979279345"
-	preToolTurnID    = "019fc756-21b7-7f63-b8e2-4f4cd1ce0184"
-	preToolUseID     = "exec-fe2dea40-82a3-410f-891e-a7f9e6295c6b"
-	sessionStartID   = "019fc756-217c-7233-81f7-b5e979279345"
+const codexFixtureDir = "testdata/fixtures"
+
+// The Codex identity values are read from the committed fixtures, so the
+// proofs follow the capture instead of restating its ids.
+var (
+	preToolSessionID = codexFixtureMember("pre_tool_use_0_153_0.json", "session_id")
+	preToolTurnID    = codexFixtureMember("pre_tool_use_0_153_0.json", "turn_id")
+	preToolUseID     = codexFixtureMember("pre_tool_use_0_153_0.json", "tool_use_id")
+	sessionStartID   = codexFixtureMember("session_start_0_153_0.json", "session_id")
 )
+
+func codexFixtureMember(file, member string) string {
+	raw, err := os.ReadFile(filepath.Join(codexFixtureDir, file))
+	if err != nil {
+		panic(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		panic(err)
+	}
+	value, ok := payload[member].(string)
+	if !ok || value == "" {
+		panic("fixture " + file + " carries no string member " + member)
+	}
+	return value
+}
 
 // TestProductionIngressPreservesExactBytesAndCodexIdentities drives both cleared
 // fixtures through the PRODUCTION codex.Parse and asserts the durable delivery
@@ -29,29 +51,24 @@ const (
 // native correlation identities. FAILS until the L3 implementation lands.
 func TestProductionIngressPreservesExactBytesAndCodexIdentities(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_146_0()
+	manifest := registration.Codex0_153_0()
 	tests := []struct {
-		name, file, sha256 string
-		size               int
-		event              model.ContractEventKind
-		bindings           []model.NativeBinding
+		name, file string
+		event      model.ContractEventKind
+		bindings   []model.NativeBinding
 	}{
 		{
-			name:   "SessionStart",
-			file:   "session_start_0_146_0.json",
-			sha256: "69f56b0b3f98e7739828d64f1af6749931b750895eec433fa037600a623c7a04",
-			size:   291,
-			event:  registration.EventCodexSessionStart,
+			name:  "SessionStart",
+			file:  "session_start_0_153_0.json",
+			event: registration.EventCodexSessionStart,
 			bindings: []model.NativeBinding{
 				{Kind: model.BindingSession, NativeName: "session_id", Value: sessionStartID},
 			},
 		},
 		{
-			name:   "PreToolUse",
-			file:   "pre_tool_use_0_146_0.json",
-			sha256: "77ea0aa2a208418a2883db0cdb003e6fcf2c62856af515027dbe46270b7812e1",
-			size:   507,
-			event:  registration.EventCodexPreToolUse,
+			name:  "PreToolUse",
+			file:  "pre_tool_use_0_153_0.json",
+			event: registration.EventCodexPreToolUse,
 			bindings: []model.NativeBinding{
 				{Kind: model.BindingSession, NativeName: "session_id", Value: preToolSessionID},
 				{Kind: model.BindingTurn, NativeName: "turn_id", Value: preToolTurnID},
@@ -63,9 +80,11 @@ func TestProductionIngressPreservesExactBytesAndCodexIdentities(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			raw, err := os.ReadFile("testdata/fixtures/" + tc.file)
+			raw, err := os.ReadFile(filepath.Join(codexFixtureDir, tc.file))
 			require.NoError(t, err)
-			require.Len(t, raw, tc.size)
+			sidecar := codexSidecar(t, tc.file)
+			require.NoError(t, sidecar.ValidateFixture("testdata", "fixtures/"+tc.file), "the committed bytes are the cleared bytes the sidecar records")
+			require.Equal(t, eventByKind(t, manifest, tc.event).NativeName, sidecar.Event)
 
 			event := eventByKind(t, manifest, tc.event)
 			capture := codex.Parse(raw, event, manifest.Version, model.OccurrenceEnvelopeRef{})
@@ -92,11 +111,11 @@ func TestProductionIngressPreservesExactBytesAndCodexIdentities(t *testing.T) {
 // imply authentic runtime proof. Passes on the L1 generated surface.
 func TestCodexCatalogIsSourceDerivedAndOnlySelectedEventsAreProven(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_146_0()
+	manifest := registration.Codex0_153_0()
 	// Two roots record the host version: the runtime contract id and the host
 	// contract the manifest is generated from. They are one version.
-	require.Equal(t, runtime.Codex0_146_0().Versions().Min().String(), manifest.Version, "the registration manifest and the runtime contract record one host version")
-	source := hostcontract.Codex0_146_0().Events
+	require.Equal(t, runtime.Codex0_153_0().Versions().Min().String(), manifest.Version, "the registration manifest and the runtime contract record one host version")
+	source := hostcontract.Codex0_153_0().Events
 	require.NotEmpty(t, source, "the Codex host contract declares at least one event")
 	require.Len(t, manifest.Events, len(source), "the generated manifest is the host contract's whole catalogue")
 	proved := map[string]bool{"SessionStart": true, "PreToolUse": true}
@@ -121,4 +140,17 @@ func eventByKind(t *testing.T, manifest registration.Manifest, kind model.Contra
 	}
 	t.Fatalf("generated Codex manifest does not contain event kind %d", kind)
 	return registration.Event{}
+}
+
+// codexSidecar reads a fixture's provenance sidecar in the shape every
+// committed capture carries.
+func codexSidecar(t *testing.T, file string) acceptance.CaptureProvenance {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(codexFixtureDir, strings.TrimSuffix(file, ".json")+".provenance.json"))
+	require.NoError(t, err)
+	var sidecar acceptance.CaptureProvenance
+	require.NoError(t, json.Unmarshal(raw, &sidecar))
+	require.Equal(t, registration.Codex0_153_0().Version, sidecar.HarnessVersion, "captured at the recorded host version")
+	require.Equal(t, "internal/lifecycle/ingress/codex/testdata/fixtures/CLEARANCE.md", sidecar.Clearance)
+	return sidecar
 }

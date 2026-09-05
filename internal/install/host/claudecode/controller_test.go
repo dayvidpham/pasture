@@ -38,7 +38,7 @@ func TestContractBindsImmutableComponentsAndReviewedRange(t *testing.T) {
 
 	assert.Equal(t, ir.HarnessClaudeCode, contract.Harness())
 	// The admission is the runtime contract's floor, read from the one root.
-	min := runtime.ClaudeCode2_1_210().Versions().Min()
+	min := runtime.ClaudeCode2_1_261().Versions().Min()
 	assert.Equal(t, min.String(), contract.HostVersions().Min().String())
 	assert.False(t, contract.HostVersions().HasUpperBound(), "admission is a floor with no upper bound")
 	assert.True(t, contract.HostVersions().Allows(min))
@@ -282,7 +282,7 @@ func TestOptionalAllFalseUnavailableProbePreservesWithoutMutation(t *testing.T) 
 func TestRequiredOutOfRangeHostFailsBeforeMutation(t *testing.T) {
 	t.Parallel()
 	host := newHost(false)
-	admitted := runtime.ClaudeCode2_1_210().Versions()
+	admitted := runtime.ClaudeCode2_1_261().Versions()
 	host.version = testutil.BelowFloor(t, admitted.Min()).String()
 	controller := mustController(t, host)
 	_, err := controller.PlanSelection(context.Background(), groupRequest(t, 1, nil))
@@ -433,7 +433,7 @@ type fixtureHost struct {
 func newHost(marketplace bool, rows ...pluginRow) *fixtureHost {
 	// The fake host reports the recorded Claude Code version, read from the
 	// runtime contract, so the probe admits it whatever the root records.
-	host := &fixtureHost{version: runtime.ClaudeCode2_1_210().Versions().Min().String(), marketplace: marketplace, plugins: map[string]pluginRow{}}
+	host := &fixtureHost{version: runtime.ClaudeCode2_1_261().Versions().Min().String(), marketplace: marketplace, plugins: map[string]pluginRow{}}
 	for _, row := range rows {
 		key := row.ID
 		if _, duplicate := host.plugins[key]; duplicate {

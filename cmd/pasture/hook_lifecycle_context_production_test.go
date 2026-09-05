@@ -80,10 +80,10 @@ func TestContextDisclosureCommitsOneOpBeforePrint(t *testing.T) {
 	initializeLifecycleTestDatabase(t, dbPath)
 
 	for _, tc := range []struct{ event, fixture string }{
-		{"PreToolUse", "pre_tool_use_2_1_222.json"},
-		{"PostToolUse", "post_tool_use_2_1_222.json"},
-		{"PostToolUseFailure", "post_tool_use_failure_2_1_222.json"},
-		{"PostToolBatch", "post_tool_batch_2_1_222.json"},
+		{"PreToolUse", "pre_tool_use_2_1_261.json"},
+		{"PostToolUse", "post_tool_use_2_1_261.json"},
+		{"PostToolUseFailure", "post_tool_use_failure_2_1_261.json"},
+		{"PostToolBatch", "post_tool_batch_2_1_261.json"},
 	} {
 		deliverClaudeBuilt(t, binary, dbPath, tc.event, readProductionClaudeFixture(t, tc.fixture, tc.event))
 	}
@@ -137,7 +137,7 @@ func TestContextDisclosureHostResponseByteIdenticalProceed(t *testing.T) {
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	preToolUse := readProductionClaudeFixture(t, "pre_tool_use_2_1_222.json", "PreToolUse")
+	preToolUse := readProductionClaudeFixture(t, "pre_tool_use_2_1_261.json", "PreToolUse")
 	bytesBefore := deliverClaudeBuilt(t, binary, dbPath, "PreToolUse", preToolUse)
 	require.JSONEq(t, `{"decision":"proceed"}`, bytesBefore)
 	require.Empty(t, disclosureRows(t, dbPath, disclosurePlanEvidenceKind), "a delivery must never commit a disclosure fact")
@@ -168,17 +168,17 @@ func TestContextDisclosurePostCommitStdoutFailureReportsStderrWithTrailIntact(t 
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	raw := readProductionClaudeFixture(t, "session_start_2_1_222.json", "SessionStart")
+	raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
 	for i := 0; i < 3; i++ {
 		require.NoError(t, handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{
-			DBPath: dbPath, Harness: "claude-code", Event: "SessionStart", HostVersion: "2.1.222",
+			DBPath: dbPath, Harness: "claude-code", Event: "SessionStart", HostVersion: "2.1.261",
 			Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		}))
 	}
 
 	code, err := handlers.HookLifecycleContext(context.Background(), failingWriter{}, handlers.HookLifecycleContextInput{
 		DBPath:     dbPath,
-		Binding:    "session:session_id=3696b790-3973-49f2-b156-9d82146bf7ec",
+		Binding:    "session:session_id=c02859c0-10ab-49c3-9b93-29280bd45fbb",
 		Clock:      lifecycleCLIClock{},
 		Operations: lifecycleCLIOperations{},
 	}, "json")

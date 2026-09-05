@@ -57,7 +57,7 @@ func TestPinnedContractsClassifyEveryCoreOperation(t *testing.T) {
 
 func TestClaudeContractNamesNoRemovedTeamLifecycleCalls(t *testing.T) {
 	t.Parallel()
-	claude := runtime.ClaudeCode2_1_210()
+	claude := runtime.ClaudeCode2_1_261()
 	for _, kind := range ir.AllOperationKinds() {
 		_, callName := classify(t, claude, kind)
 		lowered := strings.ToLower(callName)
@@ -68,7 +68,7 @@ func TestClaudeContractNamesNoRemovedTeamLifecycleCalls(t *testing.T) {
 
 func TestOpenCodeContractInventsNoTools(t *testing.T) {
 	t.Parallel()
-	opencode := runtime.OpenCode1_18_10()
+	opencode := runtime.OpenCode1_18_29()
 
 	// No invented persistent-message / follow-up / wait native tools.
 	forbidden := []string{"task_agent_message", "follow_up", "followup", "wait", "task_close"}
@@ -131,9 +131,9 @@ func TestPinnedContractVersionBoundaries(t *testing.T) {
 
 func TestPinnedContractHarnessBinding(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_210().Harness())
-	assert.Equal(t, ir.HarnessOpenCode, runtime.OpenCode1_18_10().Harness())
-	assert.Equal(t, ir.HarnessCodex, runtime.Codex0_146_0().Harness())
+	assert.Equal(t, ir.HarnessClaudeCode, runtime.ClaudeCode2_1_261().Harness())
+	assert.Equal(t, ir.HarnessOpenCode, runtime.OpenCode1_18_29().Harness())
+	assert.Equal(t, ir.HarnessCodex, runtime.Codex0_153_0().Harness())
 }
 
 // lifecycleProfileRow is one pinned lifecycle row rendered as strings, so the
@@ -318,9 +318,9 @@ func TestPinnedLifecycleProfileRowsMatchTheCommittedTable(t *testing.T) {
 
 	observed := make(map[string]lifecycleProfileRow, len(pinnedLifecycleProfileRows))
 	perHarness := map[string]int{
-		string(ir.HarnessClaudeCode): collectLifecycleProfileRows(t, runtime.ClaudeCode2_1_210Lifecycle(), observed),
-		string(ir.HarnessCodex):      collectLifecycleProfileRows(t, runtime.Codex0_146_0Lifecycle(), observed),
-		string(ir.HarnessOpenCode):   collectLifecycleProfileRows(t, runtime.OpenCode1_18_10Lifecycle(), observed),
+		string(ir.HarnessClaudeCode): collectLifecycleProfileRows(t, runtime.ClaudeCode2_1_261Lifecycle(), observed),
+		string(ir.HarnessCodex):      collectLifecycleProfileRows(t, runtime.Codex0_153_0Lifecycle(), observed),
+		string(ir.HarnessOpenCode):   collectLifecycleProfileRows(t, runtime.OpenCode1_18_29Lifecycle(), observed),
 	}
 	total := 0
 	for harness, count := range perHarness {

@@ -94,7 +94,7 @@ func edge(f lineage.LinkFact) [4]any {
 // (o1->o2, o2->o3), From always the immediately preceding occurrence.
 func TestDeriveLinksPredecessorChain(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	records := []model.LifecycleRecord{
 		occurrence(t, 10, claude, id(runtime.IdentitySession, "S1")),
 		occurrence(t, 20, claude, id(runtime.IdentitySession, "S1")),
@@ -125,7 +125,7 @@ func TestDeriveLinksPredecessorChain(t *testing.T) {
 // read-side materialize-then-no-op property, content-addressed with no cursor.
 func TestDeriveLinksIdempotentReRunYieldsNothing(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	records := []model.LifecycleRecord{
 		occurrence(t, 10, claude, id(runtime.IdentitySession, "S1")),
 		occurrence(t, 20, claude, id(runtime.IdentitySession, "S1")),
@@ -157,7 +157,7 @@ func TestDeriveLinksIdempotentReRunYieldsNothing(t *testing.T) {
 // committed, a later occurrence extends the chain by exactly the new edge.
 func TestDeriveLinksIncrementalCommitsOnlyNewEdges(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	base := []model.LifecycleRecord{
 		occurrence(t, 10, claude, id(runtime.IdentitySession, "S1")),
 		occurrence(t, 20, claude, id(runtime.IdentitySession, "S1")),
@@ -177,8 +177,8 @@ func TestDeriveLinksIncrementalCommitsOnlyNewEdges(t *testing.T) {
 // two independent chains; no edge crosses harnesses.
 func TestDeriveLinksPerHostChains(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
-	opencode := mustContract(t, ir.HarnessOpenCode, registration.OpenCode1_18_10().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
+	opencode := mustContract(t, ir.HarnessOpenCode, registration.OpenCode1_18_29().Contract.String())
 	records := []model.LifecycleRecord{
 		occurrence(t, 10, claude, id(runtime.IdentitySession, "shared")),
 		occurrence(t, 20, opencode, id(runtime.IdentitySession, "shared")),
@@ -209,7 +209,7 @@ func TestDeriveLinksPerHostChains(t *testing.T) {
 // kinds threads two independent chains at once.
 func TestDeriveLinksParallelIdentityKinds(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	records := []model.LifecycleRecord{
 		occurrence(t, 10, claude, id(runtime.IdentitySession, "S1"), id(runtime.IdentityToolCall, "T1")),
 		occurrence(t, 20, claude, id(runtime.IdentitySession, "S1"), id(runtime.IdentityToolCall, "T1")),
@@ -235,7 +235,7 @@ func TestDeriveLinksParallelIdentityKinds(t *testing.T) {
 // (harness, kind, value, from, to).
 func TestDeriveLinksContentAddressedDedup(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	records := []model.LifecycleRecord{
 		occurrence(t, 10, claude, id(runtime.IdentitySession, "S1")),
 		occurrence(t, 20, claude, id(runtime.IdentitySession, "S1")),
@@ -263,7 +263,7 @@ func TestDeriveLinksContentAddressedDedup(t *testing.T) {
 // identical edge set (records are sorted by occurrence journal order).
 func TestDeriveLinksDeterministicRegardlessOfInputOrder(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	ordered := []model.LifecycleRecord{
 		occurrence(t, 10, claude, id(runtime.IdentitySession, "S1")),
 		occurrence(t, 20, claude, id(runtime.IdentitySession, "S1")),
@@ -289,7 +289,7 @@ func TestDeriveLinksDeterministicRegardlessOfInputOrder(t *testing.T) {
 // predecessor, so no edge is produced.
 func TestDeriveLinksSingletonChainHasNoEdge(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	records := []model.LifecycleRecord{
 		occurrence(t, 10, claude, id(runtime.IdentitySession, "only")),
 	}

@@ -582,7 +582,7 @@ func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
 	host, err := runtime.ParseHostVersion(versionText)
 	// The admitted versions are spelled by the runtime contract's own renderer,
 	// so this text follows the contract when the contract moves.
-	admitted := runtime.ClaudeCode2_1_210().Versions()
+	admitted := runtime.ClaudeCode2_1_261().Versions()
 	if err != nil || !admitted.Allows(host) {
 		return nativeSnapshot{}, &probeUnavailableError{cause: fault("Claude host probe", fmt.Sprintf("a Claude Code host version %s", admitted.Describe()), fmt.Sprintf("reported host version %q is not admitted by the reviewed floor", strings.TrimSpace(string(versionResult.Stdout))), "Controller.probe", "checking compatibility before native mutation", "no marketplace or plugin action was attempted", fmt.Sprintf("install a Claude Code version %s or update the reviewed activation contract", admitted.Describe()), err)}
 	}

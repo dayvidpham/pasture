@@ -15,7 +15,7 @@ import (
 
 func validContract(t *testing.T) ir.RuntimeContractID {
 	t.Helper()
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Version)
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Version)
 	if err != nil {
 		t.Fatalf("build runtime contract: %v", err)
 	}

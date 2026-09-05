@@ -19,7 +19,7 @@ type TargetDescriptor struct {
 
 func NewTargetDescriptor(contract ir.RuntimeContractID, skills, agents, hooks Component) (TargetDescriptor, error) {
 	if !contract.IsValid() || contract.Harness() != ir.HarnessOpenCode {
-		return TargetDescriptor{}, fmt.Errorf("opencode.NewTargetDescriptor: runtime contract %q is not a valid OpenCode contract — use runtime.OpenCode1_18_10().ID()", contract)
+		return TargetDescriptor{}, fmt.Errorf("opencode.NewTargetDescriptor: runtime contract %q is not a valid OpenCode contract — use runtime.OpenCode1_18_29().ID()", contract)
 	}
 	for _, input := range []struct {
 		name      string
@@ -52,7 +52,7 @@ func Descriptor() (TargetDescriptor, error) {
 	if err != nil {
 		return TargetDescriptor{}, fmt.Errorf("opencode.Descriptor: build hooks component: %w", err)
 	}
-	return NewTargetDescriptor(runtime.OpenCode1_18_10().ID(), skills, agents, hooks)
+	return NewTargetDescriptor(runtime.OpenCode1_18_29().ID(), skills, agents, hooks)
 }
 
 func (d TargetDescriptor) RuntimeContractID() ir.RuntimeContractID { return d.contract }

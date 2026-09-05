@@ -37,7 +37,7 @@ func TestUnselectedCodexEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 		t.Run(event, func(t *testing.T) {
 			dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 
-			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "codex", "--event", event, "--host-version", "0.146.0")
+			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "codex", "--event", event, "--host-version", "0.153.0")
 			command.Stdin = bytes.NewReader([]byte(`{"hook_event_name":"` + event + `"}`))
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
@@ -83,11 +83,11 @@ func (w *erroringWriter) Write(p []byte) (int, error) {
 func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
-	raw := readProductionClaudeFixture(t, "pre_tool_use_2_1_222.json", "PreToolUse")
+	raw := readProductionClaudeFixture(t, "pre_tool_use_2_1_261.json", "PreToolUse")
 
 	failing := &erroringWriter{}
 	var stderr bytes.Buffer
-	rootCmd.SetArgs([]string{databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.222"})
+	rootCmd.SetArgs([]string{databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.261"})
 	rootCmd.SetIn(bytes.NewReader(raw))
 	rootCmd.SetOut(failing)
 	rootCmd.SetErr(&stderr)

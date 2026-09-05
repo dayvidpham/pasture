@@ -51,7 +51,7 @@ var claudeEventMappings = map[model.ContractEventKind]runtime.ClaudeLifecycleEve
 // host is the pinned Claude data consumed by the generic frontend engine.
 var host = frontend.Host[runtime.ClaudeLifecycleEvent]{
 	Label:    "Claude",
-	Contract: runtime.ClaudeCode2_1_210Lifecycle,
+	Contract: runtime.ClaudeCode2_1_261Lifecycle,
 	Events:   claudeEventMappings,
 }
 

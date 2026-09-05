@@ -192,7 +192,7 @@ type installerEnv struct {
 
 // defaultHostVersion is what the fake host prints for --version: the recorded
 // Claude Code version, read from the runtime contract, in the host's spelling.
-var defaultHostVersion = pastureruntime.ClaudeCode2_1_210().Versions().Min().String() + " (Claude Code)"
+var defaultHostVersion = pastureruntime.ClaudeCode2_1_261().Versions().Min().String() + " (Claude Code)"
 
 // newEnv creates one isolated installer environment: an empty HOME, an empty
 // state home, a PATH containing only the isolated Claude host, and a seeded

@@ -45,7 +45,7 @@ func TestActivationIndexAndPublicLookupUseTypedExtensions(t *testing.T) {
 	}
 	compileTimeActivationIndexType(exhaustive)
 
-	host, err := runtime.ParseHostVersion("2.1.210")
+	host, err := runtime.ParseHostVersion("2.1.261")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestActivationIndexAndPublicLookupUseTypedExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := NewActivationContractID("claude-code/activation@2.1.210")
+	id, err := NewActivationContractID("claude-code/activation@2.1.261")
 	if err != nil {
 		t.Fatal(err)
 	}

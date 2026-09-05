@@ -113,7 +113,7 @@ func scopedInput() lifecyclecontext.ContextInput {
 // content, so different inputs produce a different digest.
 func TestProjectDeterministicAndCanonical(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	coordinate := manifest(0x11)
 	records := []model.LifecycleRecord{
 		recordV2(t, 30, claude, coordinate, id(runtime.IdentitySession, "S1")),
@@ -182,7 +182,7 @@ func TestProjectDeterministicAndCanonical(t *testing.T) {
 // (empty) metamodel.
 func TestProjectSummarizesChainsMetamodelsAndUnresolved(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	coordinate := manifest(0x33)
 	records := []model.LifecycleRecord{
 		recordV2(t, 10, claude, coordinate, id(runtime.IdentitySession, "S1")),
@@ -253,7 +253,7 @@ func TestProjectSummarizesChainsMetamodelsAndUnresolved(t *testing.T) {
 // an unbounded projection.
 func TestProjectBoundsAndMarksTruncation(t *testing.T) {
 	t.Parallel()
-	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
+	claude := mustContract(t, ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
 	coordinate := manifest(0x44)
 	records := make([]model.LifecycleRecord, lifecyclecontext.MaxProjectionRecords+5)
 	for i := range records {

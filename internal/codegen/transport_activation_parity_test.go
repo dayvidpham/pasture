@@ -197,11 +197,11 @@ func registeredBlockingModes(t *testing.T, harness ir.HarnessID) map[string]regi
 	var manifest registration.Manifest
 	switch harness {
 	case ir.HarnessClaudeCode:
-		manifest = registration.ClaudeCode2_1_210()
+		manifest = registration.ClaudeCode2_1_261()
 	case ir.HarnessCodex:
-		manifest = registration.Codex0_146_0()
+		manifest = registration.Codex0_153_0()
 	case ir.HarnessOpenCode:
-		manifest = registration.OpenCode1_18_10()
+		manifest = registration.OpenCode1_18_29()
 	default:
 		t.Fatalf("harness %q has no registration manifest in this test", harness)
 	}

@@ -96,6 +96,7 @@ const (
 
 const (
 	FieldSessionID model.NativeFieldID = iota + 1
+	FieldScratchpadDir
 	FieldTranscriptPath
 	FieldCWD
 	FieldPermissionMode

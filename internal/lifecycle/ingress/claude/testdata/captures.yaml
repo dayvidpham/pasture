@@ -1,7 +1,7 @@
 cases:
   - name: authentic-session-start
     input:
-      fixture: fixtures/session_start_2_1_222.json
+      fixture: fixtures/session_start_2_1_261.json
     expected:
       decision: enabled
       reason: ""
@@ -13,7 +13,7 @@ cases:
       description: The reviewed authentic fixture remains unchanged.
   - name: authentic-session-end
     input:
-      fixture: fixtures/session_end_2_1_222.json
+      fixture: fixtures/session_end_2_1_261.json
     expected:
       decision: enabled
       reason: ""
@@ -25,7 +25,7 @@ cases:
       description: The reviewed authentic fixture remains unchanged.
   - name: authentic-pre-tool-use
     input:
-      fixture: fixtures/pre_tool_use_2_1_222.json
+      fixture: fixtures/pre_tool_use_2_1_261.json
     expected:
       decision: enabled
       reason: ""
@@ -37,7 +37,7 @@ cases:
       description: The reviewed authentic fixture remains unchanged.
   - name: authentic-post-tool-use
     input:
-      fixture: fixtures/post_tool_use_2_1_222.json
+      fixture: fixtures/post_tool_use_2_1_261.json
     expected:
       decision: enabled
       reason: ""
@@ -49,7 +49,7 @@ cases:
       description: The reviewed authentic fixture remains unchanged.
   - name: authentic-post-tool-use-failure
     input:
-      fixture: fixtures/post_tool_use_failure_2_1_222.json
+      fixture: fixtures/post_tool_use_failure_2_1_261.json
     expected:
       decision: enabled
       reason: ""
@@ -61,7 +61,7 @@ cases:
       description: The reviewed authentic fixture remains unchanged.
   - name: authentic-post-tool-batch
     input:
-      fixture: fixtures/post_tool_batch_2_1_222.json
+      fixture: fixtures/post_tool_batch_2_1_261.json
     expected:
       decision: enabled
       reason: ""
@@ -73,7 +73,7 @@ cases:
       description: The reviewed authentic fixture remains unchanged.
   - name: authentic-pre-compact
     input:
-      fixture: fixtures/pre_compact_2_1_222.json
+      fixture: fixtures/pre_compact_2_1_261.json
     expected:
       decision: enabled
       reason: ""
@@ -85,7 +85,7 @@ cases:
       description: The reviewed authentic fixture remains unchanged.
   - name: authentic-post-compact
     input:
-      fixture: fixtures/post_compact_2_1_222.json
+      fixture: fixtures/post_compact_2_1_261.json
     expected:
       decision: enabled
       reason: ""
@@ -97,7 +97,7 @@ cases:
       description: The reviewed authentic fixture remains unchanged.
   - name: authored-origin-control
     input:
-      fixture: fixtures/session_start_2_1_210_origin_authored.json
+      fixture: fixtures/session_start_2_1_261_origin_authored.json
     expected:
       decision: withheld
       reason: non-authentic-origin
@@ -109,7 +109,7 @@ cases:
       description: The sibling provenance origin is relabelled from authentic capture to authored.
   - name: digest-mismatch-control
     input:
-      fixture: fixtures/session_start_2_1_210_digest_mismatch.json
+      fixture: fixtures/session_start_2_1_261_digest_mismatch.json
     expected:
       decision: withheld
       reason: digest-mismatch
@@ -121,7 +121,7 @@ cases:
       description: The sibling provenance carries a digest that does not match the unchanged bytes.
   - name: version-out-of-range-control
     input:
-      fixture: fixtures/session_start_2_1_210_version_out_of_range.json
+      fixture: fixtures/session_start_2_1_261_version_out_of_range.json
     expected:
       decision: withheld
       reason: version-out-of-range
@@ -133,7 +133,7 @@ cases:
       description: The sibling provenance advertises the host version one patch release below the admitted floor, so the floor is proven exclusive there.
   - name: path-escape-control
     input:
-      fixture: ../fixtures/session_start_2_1_210.json
+      fixture: ../fixtures/session_start_2_1_261.json
     expected:
       decision: withheld
       reason: path-escape

@@ -230,8 +230,8 @@ func openCodeLifecycleMappings() map[OpenCodeLifecycleEvent]LifecycleEventMappin
 	}
 }
 
-// OpenCode1_18_10Lifecycle returns the immutable OpenCode lifecycle table bound
-// to the same exact host version and RuntimeContractID as OpenCode1_18_10.
-func OpenCode1_18_10Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
-	return mustLifecycleContract(OpenCode1_18_10(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings())
+// OpenCode1_18_29Lifecycle returns the immutable OpenCode lifecycle table bound
+// to the same exact host version and RuntimeContractID as OpenCode1_18_29.
+func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
+	return mustLifecycleContract(OpenCode1_18_29(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings())
 }

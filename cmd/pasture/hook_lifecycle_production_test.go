@@ -58,15 +58,15 @@ import plugin from %q;
 const sessionCapture = await Bun.file(%q).json();
 const toolCapture = await Bun.file(%q).json();
 const hooks = await plugin.server({ client: {} }, {});
-await hooks.event(sessionCapture.value);
-const output = toolCapture.value.output;
+await hooks.event(sessionCapture);
+const output = toolCapture.output;
 const before = JSON.stringify(output.args);
-await hooks["tool.execute.before"](toolCapture.value.input, output);
+await hooks["tool.execute.before"](toolCapture.input, output);
 if (JSON.stringify(output.args) !== before) throw new Error("enabled generated handler changed output.args");
 console.log(JSON.stringify({argsUnchanged: true}));
 `, moduleURL,
-		filepath.Join(fixtureDir, "session_created_1_18_10.capture.json"),
-		filepath.Join(fixtureDir, "tool_execute_before_1_18_10.capture.json"))
+		filepath.Join(fixtureDir, "session_created_1_18_29.json"),
+		filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
 	require.NoError(t, os.WriteFile(runner, []byte(script), 0o600))
 	command := exec.Command(bun, runner)
 	command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath)
@@ -89,11 +89,11 @@ console.log(JSON.stringify({argsUnchanged: true}));
 	semantics := make(map[model.ContractEventKind]runtime.EventSemantic, 2)
 	identities := make(map[model.ContractEventKind]map[runtime.NativeIdentityKind]string, 2)
 	for _, record := range page.Records() {
-		require.Equal(t, registration.OpenCode1_18_10().Contract, record.Occurrence.RuntimeContract)
-		require.Equal(t, registration.OpenCode1_18_10().Version, record.Occurrence.Envelope.HostVersion)
+		require.Equal(t, registration.OpenCode1_18_29().Contract, record.Occurrence.RuntimeContract)
+		require.Equal(t, registration.OpenCode1_18_29().Version, record.Occurrence.Envelope.HostVersion)
 		require.Len(t, record.Interpreted(), 1)
 		interpreted := record.Interpreted()[0]
-		require.Equal(t, runtime.OpenCode1_18_10().ID(), interpreted.Contract())
+		require.Equal(t, runtime.OpenCode1_18_29().ID(), interpreted.Contract())
 		semantics[record.Occurrence.Kind] = interpreted.Semantic()
 		identities[record.Occurrence.Kind] = make(map[runtime.NativeIdentityKind]string)
 		for _, identity := range interpreted.Identities() {
@@ -104,12 +104,12 @@ console.log(JSON.stringify({argsUnchanged: true}));
 	require.Equal(t, runtime.SemanticGateConsultation, semantics[registration.EventOpenCodeToolExecuteBefore])
 	t.Run("session.created", func(t *testing.T) {
 		require.Equal(t, runtime.SemanticObservation, semantics[registration.EventOpenCodeSessionCreated])
-		require.Equal(t, "ses_038a9e08dffewOKvezW94jg2BO", identities[registration.EventOpenCodeSessionCreated][runtime.IdentitySession])
+		require.Equal(t, "ses_f8e723e13ffeUWnfE2vlRBO1xN", identities[registration.EventOpenCodeSessionCreated][runtime.IdentitySession])
 	})
 	t.Run("tool.execute.before", func(t *testing.T) {
 		require.Equal(t, runtime.SemanticGateConsultation, semantics[registration.EventOpenCodeToolExecuteBefore])
-		require.Equal(t, "ses_038a9e08dffewOKvezW94jg2BO", identities[registration.EventOpenCodeToolExecuteBefore][runtime.IdentitySession])
-		require.Equal(t, "call_t7cziiGDQdypG92fXwcgWBUf", identities[registration.EventOpenCodeToolExecuteBefore][runtime.IdentityToolCall])
+		require.Equal(t, "ses_f8e723e13ffeUWnfE2vlRBO1xN", identities[registration.EventOpenCodeToolExecuteBefore][runtime.IdentitySession])
+		require.Equal(t, "call_4zMdLgUBV12aE7yHvuYQolSx", identities[registration.EventOpenCodeToolExecuteBefore][runtime.IdentityToolCall])
 	})
 
 	interpretedRows := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
@@ -130,29 +130,29 @@ console.log(JSON.stringify({argsUnchanged: true}));
 
 	// Claude is deliberately non-live regression evidence here. Compare only the
 	// shared gate semantic, blocking mode, and canonical Proceed decision.
-	openCodeGate, err := runtime.OpenCode1_18_10Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteBefore)
+	openCodeGate, err := runtime.OpenCode1_18_29Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteBefore)
 	require.NoError(t, err)
-	claudeGate, err := runtime.ClaudeCode2_1_210Lifecycle().Mapping(runtime.ClaudeEventPreToolUse)
+	claudeGate, err := runtime.ClaudeCode2_1_261Lifecycle().Mapping(runtime.ClaudeEventPreToolUse)
 	require.NoError(t, err)
 	require.Equal(t, claudeGate.Semantic(), openCodeGate.Semantic())
 	require.Equal(t, claudeGate.Blocking(), openCodeGate.Blocking())
-	require.NotEqual(t, runtime.ClaudeCode2_1_210().ID(), runtime.OpenCode1_18_10().ID())
+	require.NotEqual(t, runtime.ClaudeCode2_1_261().ID(), runtime.OpenCode1_18_29().ID())
 }
 
 // The two contract ids every durable record must carry, read from the
 // registration manifest and the runtime contract so a moved host version
 // moves every expectation in this file with it.
 var (
-	occurrenceLifecycleContract  = registration.ClaudeCode2_1_210().Contract.String()
-	interpretedLifecycleContract = runtime.ClaudeCode2_1_210().ID().String()
+	occurrenceLifecycleContract  = registration.ClaudeCode2_1_261().Contract.String()
+	interpretedLifecycleContract = runtime.ClaudeCode2_1_261().ID().String()
 )
 
 const (
 	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
 	consultationEvidenceKind      = provenance.EvidenceKind("pasture.lifecycle.consultation.v1")
-	expectedSessionIdentity       = "3696b790-3973-49f2-b156-9d82146bf7ec"
-	expectedInterpretedIdentities = `[{"kind":1,"value":"3696b790-3973-49f2-b156-9d82146bf7ec"}]`
+	expectedSessionIdentity       = "c02859c0-10ab-49c3-9b93-29280bd45fbb"
+	expectedInterpretedIdentities = `[{"kind":1,"value":"c02859c0-10ab-49c3-9b93-29280bd45fbb"}]`
 )
 
 var expectedEnabledClaudeEvents = []model.ContractEventKind{
@@ -179,81 +179,81 @@ type claudeProductionFixture struct {
 
 var claudeProductionFixtures = []claudeProductionFixture{
 	{
-		name: "SessionStart", fixture: "session_start_2_1_222.json", event: registration.EventSessionStart,
-		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "3696b790-3973-49f2-b156-9d82146bf7ec"}},
+		name: "SessionStart", fixture: "session_start_2_1_261.json", event: registration.EventSessionStart,
+		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticObservation,
-		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "3696b790-3973-49f2-b156-9d82146bf7ec"}},
+		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 	},
 	{
-		name: "SessionEnd", fixture: "session_end_2_1_222.json", event: registration.EventSessionEnd,
-		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "dc64d2f6-0d5e-4e2a-b880-49c980a6c750"}},
+		name: "SessionEnd", fixture: "session_end_2_1_261.json", event: registration.EventSessionEnd,
+		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticObservation,
-		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "dc64d2f6-0d5e-4e2a-b880-49c980a6c750"}},
+		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 	},
 	{
-		name: "PreToolUse", fixture: "pre_tool_use_2_1_222.json", event: registration.EventPreToolUse,
+		name: "PreToolUse", fixture: "pre_tool_use_2_1_261.json", event: registration.EventPreToolUse,
 		bindings: []lifecycleBindingPayload{
-			{Kind: model.BindingSession, NativeName: "session_id", Value: "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"},
-			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01BZyDFUsmM5YK5u8ZRkrvcE"},
+			{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
+			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01DECpiEtdNZxsYNXCTg5tb1"},
 		},
 		semantic: runtime.SemanticGateConsultation,
 		identities: []interpretedIdentityPayload{
-			{Kind: uint8(runtime.IdentitySession), Value: "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"},
-			{Kind: uint8(runtime.IdentityToolCall), Value: "toolu_01BZyDFUsmM5YK5u8ZRkrvcE"},
+			{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
+			{Kind: uint8(runtime.IdentityToolCall), Value: "toolu_01DECpiEtdNZxsYNXCTg5tb1"},
 		},
 		blocking: true,
 	},
 	{
-		name: "PostToolUse", fixture: "post_tool_use_2_1_222.json", event: registration.EventPostToolUse,
+		name: "PostToolUse", fixture: "post_tool_use_2_1_261.json", event: registration.EventPostToolUse,
 		bindings: []lifecycleBindingPayload{
-			{Kind: model.BindingSession, NativeName: "session_id", Value: "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"},
-			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01G65GiPDVnmxtRrYWq9aZaP"},
+			{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
+			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01DECpiEtdNZxsYNXCTg5tb1"},
 		},
 		semantic: runtime.SemanticObservation,
 		identities: []interpretedIdentityPayload{
-			{Kind: uint8(runtime.IdentitySession), Value: "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"},
-			{Kind: uint8(runtime.IdentityToolCall), Value: "toolu_01G65GiPDVnmxtRrYWq9aZaP"},
+			{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
+			{Kind: uint8(runtime.IdentityToolCall), Value: "toolu_01DECpiEtdNZxsYNXCTg5tb1"},
 		},
 	},
 	{
-		name: "PostToolUseFailure", fixture: "post_tool_use_failure_2_1_222.json", event: registration.EventPostToolUseFailure,
+		name: "PostToolUseFailure", fixture: "post_tool_use_failure_2_1_261.json", event: registration.EventPostToolUseFailure,
 		bindings: []lifecycleBindingPayload{
-			{Kind: model.BindingSession, NativeName: "session_id", Value: "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"},
-			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01BZyDFUsmM5YK5u8ZRkrvcE"},
+			{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
+			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01JnozEijp6Ly4oYGZ478HGD"},
 		},
 		semantic: runtime.SemanticObservation,
 		identities: []interpretedIdentityPayload{
-			{Kind: uint8(runtime.IdentitySession), Value: "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"},
-			{Kind: uint8(runtime.IdentityToolCall), Value: "toolu_01BZyDFUsmM5YK5u8ZRkrvcE"},
+			{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
+			{Kind: uint8(runtime.IdentityToolCall), Value: "toolu_01JnozEijp6Ly4oYGZ478HGD"},
 		},
 	},
 	{
-		name: "PostToolBatch", fixture: "post_tool_batch_2_1_222.json", event: registration.EventPostToolBatch,
-		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"}},
+		name: "PostToolBatch", fixture: "post_tool_batch_2_1_261.json", event: registration.EventPostToolBatch,
+		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticGateConsultation,
-		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "5f8d1e67-8c33-4d23-a7fe-ffd9eb711e68"}},
+		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		unresolved: []interpretedUnresolvedPayload{{Reason: uint8(waist.UnresolvedToolCall)}},
 		blocking:   true,
 	},
 	{
-		name: "PreCompact", fixture: "pre_compact_2_1_222.json", event: registration.EventPreCompact,
-		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "2c9a0e31-7f70-4a54-b44a-264444df74a1"}},
+		name: "PreCompact", fixture: "pre_compact_2_1_261.json", event: registration.EventPreCompact,
+		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticGateConsultation,
-		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "2c9a0e31-7f70-4a54-b44a-264444df74a1"}},
+		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		blocking:   true,
 	},
 	{
-		name: "PostCompact", fixture: "post_compact_2_1_222.json", event: registration.EventPostCompact,
-		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "2c9a0e31-7f70-4a54-b44a-264444df74a1"}},
+		name: "PostCompact", fixture: "post_compact_2_1_261.json", event: registration.EventPostCompact,
+		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticObservation,
-		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "2c9a0e31-7f70-4a54-b44a-264444df74a1"}},
+		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 	},
 }
 
 func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	t.Parallel()
 
-	manifest, err := activation.ClaudeCode2_1_210()
+	manifest, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
 	enabled := make([]model.ContractEventKind, 0, len(expectedEnabledClaudeEvents))
 	for _, entry := range manifest {
@@ -269,9 +269,9 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	require.NoError(t, err)
-	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261")
 	command.Stdin = bytes.NewReader(raw)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -294,7 +294,7 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	assertSharedOperation(t, occurrence, interpreted[0])
 
 	require.Equal(t, registration.EventSessionStart, occurrencePayload.Event)
-	require.Equal(t, "2.1.222", occurrencePayload.Envelope.HostVersion)
+	require.Equal(t, "2.1.261", occurrencePayload.Envelope.HostVersion)
 	// The occurrence-side binding is retained independently from the waist
 	// identity assertion above; it is not a substitute for interpreted evidence.
 	require.Len(t, occurrencePayload.Bindings, 1)
@@ -317,7 +317,7 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	require.NotContains(t, stdout.String(), dbPath)
 
 	ingestAgain := func(payload []byte) {
-		cmd := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+		cmd := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261")
 		cmd.Stdin = bytes.NewReader(payload)
 		require.NoError(t, cmd.Run())
 	}
@@ -396,7 +396,7 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 			initializeLifecycleTestDatabase(t, dbPath)
 			raw := readProductionClaudeFixture(t, testCase.fixture, testCase.name)
 
-			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", testCase.name, "--host-version", "2.1.222")
+			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", testCase.name, "--host-version", "2.1.261")
 			command.Stdin = bytes.NewReader(raw)
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
@@ -426,7 +426,7 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 			require.Equal(t, occurrenceLifecycleContract, occurrencePayload.Contract)
 			require.Equal(t, testCase.event, occurrencePayload.Event)
 			require.Equal(t, occurrenceLifecycleContract, occurrencePayload.Envelope.Runtime.Contract.String())
-			require.Equal(t, "2.1.222", occurrencePayload.Envelope.HostVersion)
+			require.Equal(t, "2.1.261", occurrencePayload.Envelope.HostVersion)
 			require.Equal(t, model.CaptureValid, occurrencePayload.Capture)
 			require.Equal(t, digest.FromBytes(raw).String(), occurrencePayload.Body)
 			require.Equal(t, testCase.bindings, occurrencePayload.Bindings)
@@ -493,11 +493,11 @@ func TestClaudePayloadEventCannotOverrideRegisteredCLIEvent(t *testing.T) {
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
-	authentic := readProductionClaudeFixture(t, "session_start_2_1_222.json", "SessionStart")
+	authentic := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
 	raw := bytes.Replace(authentic, []byte(`"hook_event_name":"SessionStart"`), []byte(`"hook_event_name":"SessionEnd"`), 1)
 	require.NotEqual(t, authentic, raw, "the negative control must change only the payload's event claim")
 
-	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261")
 	command.Stdin = bytes.NewReader(raw)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -547,16 +547,21 @@ func TestWithheldClaudeElicitationIsNotAdmittedByBuiltCLI(t *testing.T) {
 	t.Parallel()
 
 	binary := lifecycleBinary(t)
-	cases := []struct{ event, fixture string }{
-		{event: "Elicitation", fixture: "elicitation_2_1_222.json"},
-		{event: "ElicitationResult", fixture: "elicitation_result_2_1_222.json"},
+	// No Elicitation or ElicitationResult payload was captured at this host
+	// version (the pair needs an MCP elicitation the capture session did not
+	// drive), so the bytes below are a stand-in shaped like the host's payload.
+	// The refusal under test happens before standard input is read, so the
+	// payload's content cannot reach any assertion here.
+	cases := []struct{ event string }{
+		{event: "Elicitation"},
+		{event: "ElicitationResult"},
 	}
 	for _, testCase := range cases {
 		testCase := testCase
 		t.Run(testCase.event, func(t *testing.T) {
 			dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
-			raw := readProductionClaudeFixture(t, testCase.fixture, testCase.event)
-			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", testCase.event, "--host-version", "2.1.222")
+			raw := []byte(`{"session_id":"stand-in","hook_event_name":"` + testCase.event + `","mcp_server_name":"stand-in","mode":"form"}`)
+			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", testCase.event, "--host-version", "2.1.261")
 			command.Stdin = bytes.NewReader(raw)
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
@@ -587,7 +592,7 @@ func TestMalformedClaudeEventToOccurrenceOnly(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 			initializeLifecycleTestDatabase(t, dbPath)
-			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", testCase.name, "--host-version", "2.1.222")
+			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", testCase.name, "--host-version", "2.1.261")
 			command.Stdin = bytes.NewReader(raw)
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
@@ -637,7 +642,7 @@ func TestLifecycleLeafFaultsExitZeroAndReport(t *testing.T) {
 
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
-	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	require.NoError(t, err)
 	base := []string{databaseFlagName.Argument(), filepath.Join(dir, tasks.DefaultDBFilename.String()), "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.220"}
 	databaseDirectory := filepath.Join(dir, "database-directory")
@@ -689,7 +694,7 @@ func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "opencode", "--event", "session.updated", "--host-version", registration.OpenCode1_18_10().Version)
+	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "opencode", "--event", "session.updated", "--host-version", registration.OpenCode1_18_29().Version)
 	command.Stdin = bytes.NewBufferString(`{"event":{"type":"session.updated"}}`)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -794,7 +799,7 @@ func TestLifecycleProjectionRebuildOccurrenceAndBindingsAreAtomic(t *testing.T) 
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_210.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	require.NoError(t, err)
 	ingest := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.220")
 	ingest.Stdin = bytes.NewReader(raw)
@@ -1048,18 +1053,16 @@ func readProductionClaudeFixture(t *testing.T, fixture, expectedEvent string) []
 	require.NoError(t, err)
 	var members map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(provenanceBytes, &members))
-	require.ElementsMatch(t, []string{"origin", "harness", "harnessVersion", "captureSource", "rawFileDigest", "capturedAt", "redaction", "event"}, mapKeys(members))
-	var sidecar struct {
-		acceptance.CaptureProvenance
-		Redaction string `json:"redaction"`
-		Event     string `json:"event"`
-	}
+	require.ElementsMatch(t, []string{"origin", "harness", "harnessVersion", "captureSource", "rawFileDigest", "capturedAt", "redaction", "event", "clearance"}, mapKeys(members))
+	var sidecar acceptance.CaptureProvenance
 	require.NoError(t, json.Unmarshal(provenanceBytes, &sidecar))
 	require.Equal(t, acceptance.OriginAuthenticCapture, sidecar.Origin)
 	require.Equal(t, acceptance.HarnessClaudeCode, sidecar.Harness)
-	require.Equal(t, "2.1.222", sidecar.HarnessVersion)
-	require.Equal(t, "tools/capture-claude-hook.sh", sidecar.CaptureSource)
-	require.Equal(t, "home-path-v1", sidecar.Redaction)
+	require.Equal(t, registration.ClaudeCode2_1_261().Version, sidecar.HarnessVersion, "the Claude fixture was captured at the recorded host version")
+	require.Equal(t, "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)", sidecar.CaptureSource, "every fixture of this corpus came through the in-binary capture sink")
+	rules, err := acceptance.ParseRedaction(sidecar.Redaction)
+	require.NoError(t, err)
+	require.Equal(t, acceptance.RedactionHomePath, rules[0], "every Claude fixture carries the home path, so home-path-v1 is applied first")
 	require.Equal(t, expectedEvent, sidecar.Event)
 	require.Equal(t, digest.FromBytes(raw).String(), sidecar.RawFileDigest)
 	require.NoError(t, sidecar.ValidateFixture(root, relativeFixture))
@@ -1144,7 +1147,7 @@ func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture mode
 	require.Equal(t, event, payload.Event)
 	require.Equal(t, occurrenceLifecycleContract, payload.Envelope.Runtime.Contract.String())
 	require.Equal(t, capture, payload.Capture)
-	require.Equal(t, "2.1.222", payload.Envelope.HostVersion)
+	require.Equal(t, "2.1.261", payload.Envelope.HostVersion)
 	sum := sha256.Sum256(body)
 	require.Equal(t, "sha256:"+hex.EncodeToString(sum[:]), payload.Body)
 	return payload
@@ -1165,7 +1168,7 @@ func assertOccurrenceEnvelope(t *testing.T, raw json.RawMessage) {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
 	require.ElementsMatch(t, []string{"Runtime", "HostVersion", "Schema", "Implementation", "Retention"}, mapKeys(members))
-	require.JSONEq(t, `"2.1.222"`, string(members["HostVersion"]))
+	require.JSONEq(t, `"2.1.261"`, string(members["HostVersion"]))
 
 	runtime := decodeJSONObject(t, members["Runtime"])
 	require.ElementsMatch(t, []string{"Definition", "Contract"}, mapKeys(runtime))
@@ -1241,7 +1244,7 @@ func assertSharedOperation(t *testing.T, occurrence, interpreted provenance.Evid
 // review ("activation last"): the two selected events
 // became enabled in the committed default only after acceptance review. The
 // proofs below exercise the enabled path NOW, on the real production handler
-// path, by injecting the committed activation catalog activation.Codex0_146_0()
+// path, by injecting the committed activation catalog activation.Codex0_153_0()
 // through the sanctioned HookLifecycleInput.Activations pre-activation seam
 // (documented in internal/handlers/hook_lifecycle.go as "not a separate
 // test-only code path"). Native continuation bytes are produced by the exact
@@ -1265,23 +1268,23 @@ type codexProductionFixture struct {
 
 var codexProductionFixtures = []codexProductionFixture{
 	{
-		name: "SessionStart", fixture: "session_start_0_146_0.json", event: "SessionStart",
+		name: "SessionStart", fixture: "session_start_0_153_0.json", event: "SessionStart",
 		kind: registration.EventCodexSessionStart, semantic: runtime.SemanticObservation,
 		wantResponse: false, wantNative: []byte(`{}`),
 		wantEvidence:    []provenance.EvidenceKind{occurrenceEvidenceKind, interpretedEvidenceKind},
-		identities:      map[runtime.NativeIdentityKind]string{runtime.IdentitySession: "019fc756-217c-7233-81f7-b5e979279345"},
+		identities:      map[runtime.NativeIdentityKind]string{runtime.IdentitySession: "01a07188-cfc9-7bc2-b51b-4f53cf18f9f5"},
 		captureProof:    activation.CaptureProofCodexSessionStart,
 		productionProof: activation.ProductionProofCodexSessionStart,
 	},
 	{
-		name: "PreToolUse", fixture: "pre_tool_use_0_146_0.json", event: "PreToolUse",
+		name: "PreToolUse", fixture: "pre_tool_use_0_153_0.json", event: "PreToolUse",
 		kind: registration.EventCodexPreToolUse, semantic: runtime.SemanticGateConsultation,
 		wantResponse: true, wantNative: []byte(`{"continue":true}`),
 		wantEvidence: []provenance.EvidenceKind{occurrenceEvidenceKind, interpretedEvidenceKind, consultationEvidenceKind},
 		identities: map[runtime.NativeIdentityKind]string{
-			runtime.IdentitySession:  "019fc756-217c-7233-81f7-b5e979279345",
-			runtime.IdentityTurn:     "019fc756-21b7-7f63-b8e2-4f4cd1ce0184",
-			runtime.IdentityToolCall: "exec-fe2dea40-82a3-410f-891e-a7f9e6295c6b",
+			runtime.IdentitySession:  "01a07188-cfc9-7bc2-b51b-4f53cf18f9f5",
+			runtime.IdentityTurn:     "01a0718c-6f88-73c2-8d82-013e647cc02f",
+			runtime.IdentityToolCall: "exec-8d2f7dd7-3b46-40af-af0a-252dad7bbbec",
 		},
 		captureProof:    activation.CaptureProofCodexPreToolUse,
 		productionProof: activation.ProductionProofCodexPreToolUse,
@@ -1290,7 +1293,7 @@ var codexProductionFixtures = []codexProductionFixture{
 
 // TestEnabledCodexHandlersToDurableReadBack is the SessionStart-ingress and
 // PreToolUse-gate integrated production proof. For each
-// authentic Codex 0.146.0 fixture it drives the real durable handler path with
+// authentic Codex 0.153.0 fixture it drives the real durable handler path with
 // the committed activation catalog injected, proves the durable receipt commits
 // before the native continuation bytes are available, and proves the persisted
 // evidence is provider-correct on bounded public read-back. It mirrors
@@ -1298,7 +1301,7 @@ var codexProductionFixtures = []codexProductionFixture{
 func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 	t.Parallel()
 
-	activations, err := activation.Codex0_146_0()
+	activations, err := activation.Codex0_153_0()
 	require.NoError(t, err)
 	for _, tc := range codexProductionFixtures {
 		tc := tc
@@ -1315,7 +1318,7 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 			raw := readCodexProductionFixture(t, tc.fixture, tc.event, tc.captureProof)
 
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_146_0().Version,
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_153_0().Version,
 				Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 				Activations: activations,
 			})
@@ -1348,7 +1351,7 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 			require.NoError(t, tracker.Close())
 
 			// Bounded provider-correct public read-back.
-			identities, semantic := readBackGate(t, dbPath, registration.Codex0_146_0().Contract, runtime.Codex0_146_0().ID(), tc.kind)
+			identities, semantic := readBackGate(t, dbPath, registration.Codex0_153_0().Contract, runtime.Codex0_153_0().ID(), tc.kind)
 			require.Equal(t, tc.semantic, semantic)
 			require.Equal(t, tc.identities, identities, "read-back identities must be the provider-correct Codex correlation set")
 		})
@@ -1365,18 +1368,18 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	t.Parallel()
 
 	// --- Codex PreToolUse gate: live production path, injected committed catalog.
-	codexActivations, err := activation.Codex0_146_0()
+	codexActivations, err := activation.Codex0_153_0()
 	require.NoError(t, err)
-	codexRaw := readCodexProductionFixture(t, "pre_tool_use_0_146_0.json", "PreToolUse", activation.CaptureProofCodexPreToolUse)
+	codexRaw := readCodexProductionFixture(t, "pre_tool_use_0_153_0.json", "PreToolUse", activation.CaptureProofCodexPreToolUse)
 	codexDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, codexDB)
 	codexResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: registration.Codex0_146_0().Version,
+		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: registration.Codex0_153_0().Version,
 		Input: bytes.NewReader(codexRaw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		Activations: codexActivations,
 	})
 	require.NoError(t, err)
-	codexIdentities, codexSemantic := readBackGate(t, codexDB, registration.Codex0_146_0().Contract, runtime.Codex0_146_0().ID(), registration.EventCodexPreToolUse)
+	codexIdentities, codexSemantic := readBackGate(t, codexDB, registration.Codex0_153_0().Contract, runtime.Codex0_153_0().ID(), registration.EventCodexPreToolUse)
 	codexNative, err := nativeresponse.CodexContinuation(codexResponse)
 	require.NoError(t, err)
 
@@ -1385,11 +1388,11 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	openCodeDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, openCodeDB)
 	openCodeResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_10().Version,
+		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_29().Version,
 		Input: bytes.NewReader(openCodeWire), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 	})
 	require.NoError(t, err)
-	openCodeIdentities, openCodeSemantic := readBackGate(t, openCodeDB, registration.OpenCode1_18_10().Contract, runtime.OpenCode1_18_10().ID(), registration.EventOpenCodeToolExecuteBefore)
+	openCodeIdentities, openCodeSemantic := readBackGate(t, openCodeDB, registration.OpenCode1_18_29().Contract, runtime.OpenCode1_18_29().ID(), registration.EventOpenCodeToolExecuteBefore)
 	openCodeNative, err := nativeresponse.CanonicalProceed(openCodeResponse)
 	require.NoError(t, err)
 
@@ -1398,16 +1401,16 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	require.True(t, openCodeResponse.IsValid(), "the OpenCode gate must produce a valid Proceed response")
 	require.Equal(t, runtime.SemanticGateConsultation, codexSemantic)
 	require.Equal(t, codexSemantic, openCodeSemantic, "both live providers derive the same gate-consultation semantic")
-	codexGate, err := runtime.Codex0_146_0Lifecycle().Mapping(runtime.CodexEventPreToolUse)
+	codexGate, err := runtime.Codex0_153_0Lifecycle().Mapping(runtime.CodexEventPreToolUse)
 	require.NoError(t, err)
-	openCodeGate, err := runtime.OpenCode1_18_10Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteBefore)
+	openCodeGate, err := runtime.OpenCode1_18_29Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteBefore)
 	require.NoError(t, err)
 	require.Equal(t, codexGate.Semantic(), openCodeGate.Semantic(), "the shared gate semantic is provider-neutral")
 	require.Equal(t, codexGate.Blocking(), openCodeGate.Blocking(), "both gate mappings share the same blocking mode")
 
 	// DISTINCT: provider-specific facts stay separate; no whole-payload identity.
-	require.NotEqual(t, runtime.Codex0_146_0().ID(), runtime.OpenCode1_18_10().ID(), "interpreted runtime contracts remain provider-correct")
-	require.NotEqual(t, registration.Codex0_146_0().Contract, registration.OpenCode1_18_10().Contract, "registration contracts remain provider-correct")
+	require.NotEqual(t, runtime.Codex0_153_0().ID(), runtime.OpenCode1_18_29().ID(), "interpreted runtime contracts remain provider-correct")
+	require.NotEqual(t, registration.Codex0_153_0().Contract, registration.OpenCode1_18_29().Contract, "registration contracts remain provider-correct")
 	require.Equal(t, []byte(`{"continue":true}`), codexNative)
 	require.Equal(t, []byte(`{"decision":"proceed"}`), openCodeNative)
 	require.NotEqual(t, codexNative, openCodeNative, "provider-specific native continuation shapes remain distinct")
@@ -1450,14 +1453,14 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	require.NotContains(t, string(openCodeManifest), "codex", "the OpenCode manifest carries no Codex activation entry")
 
 	// Codex now emits its own committed activation audit report, unconditionally,
-	// derived from registration.Codex0_146_0() + activation.Codex0_146_0().
+	// derived from registration.Codex0_153_0() + activation.Codex0_153_0().
 	codexReportPath := filepath.Join(root, ".codex", "pasture-codex-activation.json")
 	codexReport, err := os.ReadFile(codexReportPath)
 	require.NoError(t, err, "the Codex activation audit report must be a committed artifact at %s", codexReportPath)
 
 	// Content equality against a freshly derived report — no golden literals for
-	// content, so catalog drift in registration.Codex0_146_0() or
-	// activation.Codex0_146_0() is caught here rather than silently accepted.
+	// content, so catalog drift in registration.Codex0_153_0() or
+	// activation.Codex0_153_0() is caught here rather than silently accepted.
 	wantReport := deriveCodexActivationReport(t)
 	require.Equal(t, string(wantReport), string(codexReport), "the committed Codex activation report must equal the report freshly derived from the pinned Codex registration + activation catalogs")
 
@@ -1472,7 +1475,7 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(codexReport, &parsed))
 	require.Equal(t, "codex", parsed.Harness, "the Codex audit report is the Codex-only artifact")
-	require.Len(t, parsed.Events, len(registration.Codex0_146_0().Entries()), "the Codex activation report is exhaustive over every generated Codex event")
+	require.Len(t, parsed.Events, len(registration.Codex0_153_0().Entries()), "the Codex activation report is exhaustive over every generated Codex event")
 	enabled := make([]string, 0, 2)
 	for _, entry := range parsed.Events {
 		if entry.State == "enabled" {
@@ -1545,15 +1548,13 @@ func gateIdentityNativeNames(mapping runtime.LifecycleEventMapping) []string {
 func openCodeToolExecuteBeforeWire(t *testing.T) []byte {
 	t.Helper()
 	root := filepath.Join("..", "..", "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
-	raw, err := os.ReadFile(filepath.Join(root, "tool_execute_before_1_18_10.capture.json"))
+	raw, err := os.ReadFile(filepath.Join(root, "tool_execute_before_1_18_29.json"))
 	require.NoError(t, err)
 	var capture struct {
-		Value struct {
-			Input  json.RawMessage `json:"input"`
-			Output struct {
-				Args json.RawMessage `json:"args"`
-			} `json:"output"`
-		} `json:"value"`
+		Input  json.RawMessage `json:"input"`
+		Output struct {
+			Args json.RawMessage `json:"args"`
+		} `json:"output"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &capture))
 	type outputArgs struct {
@@ -1562,7 +1563,7 @@ func openCodeToolExecuteBeforeWire(t *testing.T) []byte {
 	wire, err := json.Marshal(struct {
 		Input  json.RawMessage `json:"input"`
 		Output outputArgs      `json:"output"`
-	}{Input: capture.Value.Input, Output: outputArgs{Args: capture.Value.Output.Args}})
+	}{Input: capture.Input, Output: outputArgs{Args: capture.Output.Args}})
 	require.NoError(t, err)
 	return wire
 }
@@ -1578,22 +1579,15 @@ func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string, cap
 
 	provenanceBytes, err := os.ReadFile(filepath.Join(root, strings.TrimSuffix(fixture, ".json")+".provenance.json"))
 	require.NoError(t, err)
-	var sidecar struct {
-		Provider               string `json:"provider"`
-		ObservedRuntimeVersion string `json:"observedRuntimeVersion"`
-		Origin                 string `json:"origin"`
-		Redaction              string `json:"redaction"`
-		RawBytes               int    `json:"rawBytes"`
-		RawSHA256              string `json:"rawSHA256"`
-	}
+	var sidecar acceptance.CaptureProvenance
 	require.NoError(t, json.Unmarshal(provenanceBytes, &sidecar))
-	require.Equal(t, "codex", sidecar.Provider)
-	require.Equal(t, "0.146.0", sidecar.ObservedRuntimeVersion)
-	require.Equal(t, "authentic-capture", sidecar.Origin)
-	require.Equal(t, "none", sidecar.Redaction)
-	require.Equal(t, len(raw), sidecar.RawBytes, "authentic Codex fixture byte count must match its provenance sidecar")
+	require.Equal(t, acceptance.HarnessCodexCLI, sidecar.Harness)
+	require.Equal(t, registration.Codex0_153_0().Version, sidecar.HarnessVersion, "the Codex fixture was captured at the recorded host version")
+	require.Equal(t, acceptance.OriginAuthenticCapture, sidecar.Origin)
+	require.Equal(t, expectedEvent, sidecar.Event)
+	require.NoError(t, sidecar.ValidateFixture(root, fixture), "the committed Codex fixture bytes must match the cleared digest its sidecar records")
 	sum := sha256.Sum256(raw)
-	require.Equal(t, hex.EncodeToString(sum[:]), sidecar.RawSHA256, "authentic Codex fixture digest must match the cleared digest exactly")
+	require.Equal(t, "sha256:"+hex.EncodeToString(sum[:]), sidecar.RawFileDigest, "authentic Codex fixture digest must match the cleared digest exactly")
 
 	// Capture-proof linkage (constant -> fixture, path -> bytes -> digest): the
 	// activation catalog's CaptureProof referent must cite the EXACT fixture this
@@ -1609,7 +1603,7 @@ func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string, cap
 	require.NoError(t, err, "the fixture path cited by CaptureProof.Name() must resolve to a real file")
 	require.Equal(t, raw, citedBytes, "the fixture cited by CaptureProof.Name() must be exactly the bytes this proof reads")
 	citedSum := sha256.Sum256(citedBytes)
-	require.Equal(t, sidecar.RawSHA256, hex.EncodeToString(citedSum[:]),
+	require.Equal(t, sidecar.RawFileDigest, "sha256:"+hex.EncodeToString(citedSum[:]),
 		"the fixture cited by CaptureProof.Name() must digest-match the cleared SHA-256 the proof enforces")
 	return raw
 }

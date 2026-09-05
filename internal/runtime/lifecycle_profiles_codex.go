@@ -155,8 +155,8 @@ func codexUnprovenObservationMapping(event CodexLifecycleEvent, evidence Failure
 	}
 }
 
-// Codex0_146_0Lifecycle returns the immutable Codex CLI lifecycle table bound
-// to the same exact host version and RuntimeContractID as Codex0_146_0.
-func Codex0_146_0Lifecycle() LifecycleContract[CodexLifecycleEvent] {
-	return mustLifecycleContract(Codex0_146_0(), CodexLifecycleEvents(), codexLifecycleMappings())
+// Codex0_153_0Lifecycle returns the immutable Codex CLI lifecycle table bound
+// to the same exact host version and RuntimeContractID as Codex0_153_0.
+func Codex0_153_0Lifecycle() LifecycleContract[CodexLifecycleEvent] {
+	return mustLifecycleContract(Codex0_153_0(), CodexLifecycleEvents(), codexLifecycleMappings())
 }

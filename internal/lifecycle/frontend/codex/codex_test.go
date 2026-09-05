@@ -1,7 +1,9 @@
 package codex_test
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,12 +19,32 @@ import (
 )
 
 // Authentic Codex identity facts from the two cleared command-hook payloads.
-const (
-	preToolSessionID = "019fc756-217c-7233-81f7-b5e979279345"
-	preToolTurnID    = "019fc756-21b7-7f63-b8e2-4f4cd1ce0184"
-	preToolUseID     = "exec-fe2dea40-82a3-410f-891e-a7f9e6295c6b"
-	sessionStartID   = "019fc756-217c-7233-81f7-b5e979279345"
+const codexFixtureDir = "../../ingress/codex/testdata/fixtures"
+
+// The Codex identity values are read from the committed fixtures, so the
+// proofs follow the capture instead of restating its ids.
+var (
+	preToolSessionID = codexFixtureMember("pre_tool_use_0_153_0.json", "session_id")
+	preToolTurnID    = codexFixtureMember("pre_tool_use_0_153_0.json", "turn_id")
+	preToolUseID     = codexFixtureMember("pre_tool_use_0_153_0.json", "tool_use_id")
+	sessionStartID   = codexFixtureMember("session_start_0_153_0.json", "session_id")
 )
+
+func codexFixtureMember(file, member string) string {
+	raw, err := os.ReadFile(filepath.Join(codexFixtureDir, file))
+	if err != nil {
+		panic(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		panic(err)
+	}
+	value, ok := payload[member].(string)
+	if !ok || value == "" {
+		panic("fixture " + file + " carries no string member " + member)
+	}
+	return value
+}
 
 // TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2 drives both cleared
 // fixtures through the PRODUCTION ingress and frontend to verified waist L2. It
@@ -35,7 +57,7 @@ const (
 // FAILS until the L3 frontend implementation lands.
 func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_146_0()
+	manifest := registration.Codex0_153_0()
 	tests := []struct {
 		name, file, nativeName string
 		kind                   model.ContractEventKind
@@ -45,7 +67,7 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 	}{
 		{
 			name:       "SessionStart observation smoke",
-			file:       "session_start_0_146_0.json",
+			file:       "session_start_0_153_0.json",
 			nativeName: "SessionStart",
 			kind:       registration.EventCodexSessionStart,
 			semantic:   runtime.SemanticObservation,
@@ -56,7 +78,7 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 		},
 		{
 			name:       "PreToolUse gate",
-			file:       "pre_tool_use_0_146_0.json",
+			file:       "pre_tool_use_0_153_0.json",
 			nativeName: "PreToolUse",
 			kind:       registration.EventCodexPreToolUse,
 			semantic:   runtime.SemanticGateConsultation,
@@ -73,11 +95,11 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			raw, err := os.ReadFile("../../ingress/codex/testdata/fixtures/" + tc.file)
+			raw, err := os.ReadFile(filepath.Join(codexFixtureDir, tc.file))
 			require.NoError(t, err)
 
 			event := eventByKind(t, manifest, tc.kind)
-			capture := codexingress.Parse(raw, event, "0.146.0", model.OccurrenceEnvelopeRef{})
+			capture := codexingress.Parse(raw, event, manifest.Version, model.OccurrenceEnvelopeRef{})
 			require.Equal(t, model.CaptureValid, capture.Disposition)
 
 			l1, identities, err := codex.Bind(capture.Delivery.Event, capture.Delivery.Bindings)
@@ -95,8 +117,8 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 			require.Equal(t, ir.HarnessCodex, l2.Origin().Harness())
 			require.Equal(t, waist.NativeEventName(tc.nativeName), l2.Origin().NativeEventName())
 			// IP-1 (resolved at M3-WAVE-1 consolidation): origin must carry the
-			// pinned codex@0.146.0 contract owned by M3-SLICE-1.
-			require.Equal(t, runtime.Codex0_146_0Lifecycle().ID(), l2.Origin().Contract())
+			// pinned codex@0.153.0 contract owned by M3-SLICE-1.
+			require.Equal(t, runtime.Codex0_153_0Lifecycle().ID(), l2.Origin().Contract())
 		})
 	}
 }
@@ -108,7 +130,7 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 // built-binary proofs hold that a withheld event is refused there.
 func TestEventMappingsCoverEveryRegisteredCodexEvent(t *testing.T) {
 	t.Parallel()
-	testutil.AssertEventMappingsCoverRegistration(t, registration.Codex0_146_0(), runtime.Codex0_146_0Lifecycle(), codex.Bind)
+	testutil.AssertEventMappingsCoverRegistration(t, registration.Codex0_153_0(), runtime.Codex0_153_0Lifecycle(), codex.Bind)
 }
 
 func eventByKind(t *testing.T, manifest registration.Manifest, kind model.ContractEventKind) registration.Event {

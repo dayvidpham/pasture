@@ -29,7 +29,7 @@ import (
 // missing-origin render contract is documented in the L2 leaf comment).
 func TestHookLifecycleFormatterDisclosesRawOriginInText(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210Lifecycle().ID()
+	contract := runtime.ClaudeCode2_1_261Lifecycle().ID()
 	record, err := model.NewLifecycleRecord(newOriginOccurrence(1, contract, origin.OriginRaw), nil)
 	require.NoError(t, err)
 	page := model.LifecyclePage{Items: []model.LifecycleRecord{record}}
@@ -51,7 +51,7 @@ func TestHookLifecycleFormatterDisclosesRawOriginInText(t *testing.T) {
 // failure — see the L2 leaf comment).
 func TestHookLifecycleFormatterDisclosesRawOriginInJSON(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210Lifecycle().ID()
+	contract := runtime.ClaudeCode2_1_261Lifecycle().ID()
 	identities := []waist.SemanticIdentity{{Kind: runtime.IdentitySession, Value: "s"}}
 	interpreted, err := model.NewInterpretedRecord(model.InterpretationID(10), model.OccurrenceID(1), runtime.SemanticObservation, identities, nil, contract)
 	require.NoError(t, err)
@@ -82,7 +82,7 @@ func TestHookLifecycleFormatterDisclosesRawOriginInJSON(t *testing.T) {
 // the SLICE-3 baseline); any change to the native rendering is caught here.
 func TestHookLifecycleFormatterNativeOriginGoldenBytes(t *testing.T) {
 	t.Parallel()
-	contract := runtime.ClaudeCode2_1_210Lifecycle().ID()
+	contract := runtime.ClaudeCode2_1_261Lifecycle().ID()
 	identities := []waist.SemanticIdentity{{Kind: runtime.IdentitySession, Value: "s"}}
 	interpreted, err := model.NewInterpretedRecord(model.InterpretationID(10), model.OccurrenceID(1), runtime.SemanticObservation, identities, nil, contract)
 	require.NoError(t, err)

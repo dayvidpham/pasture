@@ -25,7 +25,17 @@ import (
 	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
-const canonicalAuthenticFixtureDigest = "sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003"
+// canonicalAuthenticFixtureDigest is the cleared digest the committed
+// SessionStart sidecar records; the fixture bytes must reproduce it exactly.
+func canonicalAuthenticFixtureDigest(t *testing.T) string {
+	t.Helper()
+	sidecarBytes, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.provenance.json")
+	require.NoError(t, err)
+	var sidecar acceptance.CaptureProvenance
+	require.NoError(t, json.Unmarshal(sidecarBytes, &sidecar))
+	require.NotEmpty(t, sidecar.RawFileDigest)
+	return sidecar.RawFileDigest
+}
 
 // expectedCase is one corpus row as the product defines it: a name, a
 // classification, and the decision and reason the evaluator must return.
@@ -66,14 +76,14 @@ func expectedCorpusCases(t *testing.T) []expectedCase {
 // activation entry is Enabled, in declaration order, and refuses an empty set.
 func enabledClaudeTargets(t *testing.T) []model.ContractEventKind {
 	t.Helper()
-	entries, err := activation.ClaudeCode2_1_210()
+	entries, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
 	state := make(map[model.ContractEventKind]activation.State, len(entries))
 	for _, entry := range entries {
 		state[entry.Event] = entry.State
 	}
 	var enabled []model.ContractEventKind
-	for _, target := range activation.ClaudeCode2_1_210TargetEvents() {
+	for _, target := range activation.ClaudeCode2_1_261TargetEvents() {
 		if state[target] == activation.Enabled {
 			enabled = append(enabled, target)
 		}
@@ -86,7 +96,7 @@ func enabledClaudeTargets(t *testing.T) []model.ContractEventKind {
 // generated Claude manifest.
 func nativeNameOf(t *testing.T, kind model.ContractEventKind) string {
 	t.Helper()
-	for _, entry := range registration.ClaudeCode2_1_210().Entries() {
+	for _, entry := range registration.ClaudeCode2_1_261().Entries() {
 		if entry.Kind == kind {
 			return entry.NativeName
 		}
@@ -117,7 +127,7 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 	cases := corpus.Cases()
 	require.Len(t, cases, len(wantCases), "one must-pass case per declared target plus the required controls")
 
-	entries, err := activation.ClaudeCode2_1_210()
+	entries, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
 	entryByEvent := make(map[model.ContractEventKind]activation.Entry, len(entries))
 	enabledEvents := make(map[model.ContractEventKind]struct{})
@@ -195,7 +205,7 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 	}, admittedEvents)
 	require.Equal(t, enabledEvents, admittedEvents, "every enabled event needs independent real-corpus admission")
 
-	for _, event := range activation.ClaudeCode2_1_210TargetEvents() {
+	for _, event := range activation.ClaudeCode2_1_261TargetEvents() {
 		entry, exists := entryByEvent[event]
 		require.True(t, exists, "target event %d", event)
 		if _, enabled := admittedEvents[event]; enabled {
@@ -247,11 +257,11 @@ func TestNonAuthenticTargetBreadthThroughProductionWaist(t *testing.T) {
 			require.Equal(t, row.nativeName, registered.NativeName)
 
 			input := append([]byte(nil), row.payload...)
-			capture := Parse(input, registered, registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{})
+			capture := Parse(input, registered, registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{})
 			input[0] = ' '
 			require.Equal(t, model.CaptureValid, capture.Disposition)
 			require.Equal(t, model.CaptureValid, capture.Delivery.Capture)
-			require.Equal(t, registration.ClaudeCode2_1_210().Contract, capture.Delivery.Contract)
+			require.Equal(t, registration.ClaudeCode2_1_261().Contract, capture.Delivery.Contract)
 			require.Equal(t, row.event, capture.Delivery.Event)
 			require.Equal(t, row.payload, capture.Delivery.Body, "delivery retains defensive exact bytes")
 			require.Equal(t, row.bindings, capture.Delivery.Bindings, "native binding order/name/kind/value")
@@ -283,7 +293,7 @@ func TestNonAuthenticTargetBreadthThroughProductionWaist(t *testing.T) {
 
 func requireRegistrationEvent(t *testing.T, kind model.ContractEventKind) registration.Event {
 	t.Helper()
-	for _, event := range registration.ClaudeCode2_1_210().Entries() {
+	for _, event := range registration.ClaudeCode2_1_261().Entries() {
 		if event.Kind == kind {
 			return event
 		}
@@ -302,10 +312,10 @@ func TestIndependentCatalogueCoversGeneratedManifest(t *testing.T) {
 	var catalogue struct {
 		Events []row `yaml:"events"`
 	}
-	raw, err := os.ReadFile("testdata/corpora/claude_2_1_210_catalogue.yaml")
+	raw, err := os.ReadFile("testdata/corpora/claude_2_1_261_catalogue.yaml")
 	require.NoError(t, err)
 	require.NoError(t, yaml.Unmarshal(raw, &catalogue))
-	manifest := registration.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
 	require.Len(t, catalogue.Events, len(manifest.Events))
 	for i, expected := range catalogue.Events {
 		require.Equal(t, expected.Name, manifest.Events[i].NativeName, "independent catalogue order %d", i)
@@ -331,8 +341,8 @@ func TestIndependentCatalogueCoversGeneratedManifest(t *testing.T) {
 func TestClaudeCatalogueMatchesRuntimeMappingForAllOrdinals(t *testing.T) {
 	t.Parallel()
 
-	manifest := registration.ClaudeCode2_1_210()
-	runtimeContract := runtime.ClaudeCode2_1_210Lifecycle()
+	manifest := registration.ClaudeCode2_1_261()
+	runtimeContract := runtime.ClaudeCode2_1_261Lifecycle()
 	// Two roots record the host version: the runtime contract id and the host
 	// contract the manifest is generated from. They are one version or nothing
 	// downstream agrees on which host it describes.
@@ -499,17 +509,17 @@ func TestCaptureCorpusShapeFollowsTheTargetTable(t *testing.T) {
 func TestAuthenticProvenanceValidatesUnchangedFixture(t *testing.T) {
 	t.Parallel()
 
-	provenanceBytes, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.provenance.json")
+	provenanceBytes, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.provenance.json")
 	require.NoError(t, err)
-	raw, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.json")
+	raw, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.json")
 	require.NoError(t, err)
-	require.Equal(t, canonicalAuthenticFixtureDigest, digest.FromBytes(raw).String())
+	require.Equal(t, canonicalAuthenticFixtureDigest(t), digest.FromBytes(raw).String())
 	var provenanceRecord acceptance.CaptureProvenance
 	// Decode through encoding/json without DisallowUnknownFields: redaction and
 	// event are intentional provenance metadata outside CaptureProvenance.
 	require.NoError(t, json.Unmarshal(provenanceBytes, &provenanceRecord))
-	require.Equal(t, canonicalAuthenticFixtureDigest, provenanceRecord.RawFileDigest)
-	require.NoError(t, provenanceRecord.ValidateFixture("testdata", "fixtures/session_start_2_1_210.json"))
+	require.Equal(t, canonicalAuthenticFixtureDigest(t), provenanceRecord.RawFileDigest)
+	require.NoError(t, provenanceRecord.ValidateFixture("testdata", "fixtures/session_start_2_1_261.json"))
 }
 
 func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
@@ -533,8 +543,8 @@ func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
 		require.NoError(t, err, "sibling provenance for %s", testCase.Input.Fixture)
 		var fields map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(provenanceBytes, &fields))
-		require.Len(t, fields, 8, "provenance for %s", testCase.Input.Fixture)
-		for _, field := range []string{"origin", "harness", "harnessVersion", "captureSource", "rawFileDigest", "capturedAt", "redaction", "event"} {
+		require.Len(t, fields, 9, "provenance for %s", testCase.Input.Fixture)
+		for _, field := range []string{"origin", "harness", "harnessVersion", "captureSource", "rawFileDigest", "capturedAt", "redaction", "event", "clearance"} {
 			_, present := fields[field]
 			require.True(t, present, "provenance %s has %s", provenancePath, field)
 		}
@@ -547,7 +557,7 @@ func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
 		case "non-authentic-origin":
 			require.Equal(t, acceptance.OriginAuthored, provenanceRecord.Origin)
 		case "digest-mismatch":
-			require.NotEqual(t, canonicalAuthenticFixtureDigest, provenanceRecord.RawFileDigest)
+			require.NotEqual(t, canonicalAuthenticFixtureDigest(t), provenanceRecord.RawFileDigest)
 		case "version-out-of-range":
 			// The control sits exactly one patch release below the floor the
 			// evaluator admits, so it proves the floor is exclusive there and it
@@ -566,12 +576,12 @@ func TestCaptureCorpusMetadataControlsHaveSiblingProvenance(t *testing.T) {
 func TestDerivedCorpusFixturesAreByteIdenticalMetadataControls(t *testing.T) {
 	t.Parallel()
 
-	base, err := os.ReadFile("testdata/fixtures/session_start_2_1_210.json")
+	base, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.json")
 	require.NoError(t, err)
 	for _, name := range []string{
-		"session_start_2_1_210_origin_authored.json",
-		"session_start_2_1_210_digest_mismatch.json",
-		"session_start_2_1_210_version_out_of_range.json",
+		"session_start_2_1_261_origin_authored.json",
+		"session_start_2_1_261_digest_mismatch.json",
+		"session_start_2_1_261_version_out_of_range.json",
 	} {
 		derived, err := os.ReadFile(filepath.Join("testdata/fixtures", name))
 		require.NoError(t, err)
@@ -614,7 +624,7 @@ func TestCaptureScriptEmitsMatchingDeterministicSiblings(t *testing.T) {
 }
 
 func isCommonField(name string) bool {
-	for _, common := range []string{"session_id", "transcript_path", "cwd", "permission_mode", "hook_event_name", "effort", "agent_id", "agent_type", "prompt_id"} {
+	for _, common := range []string{"session_id", "transcript_path", "cwd", "permission_mode", "hook_event_name", "effort", "agent_id", "agent_type", "prompt_id", "scratchpad_dir"} {
 		if name == common {
 			return true
 		}

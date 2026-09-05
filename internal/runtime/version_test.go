@@ -23,22 +23,22 @@ func TestParseHostVersion(t *testing.T) {
 		input   string
 		wantErr bool
 	}{
-		{name: "exact triple", input: "2.1.210"},
-		{name: "leading v", input: "v2.1.210"},
-		{name: "prerelease", input: "2.1.210-rc.1"},
-		{name: "build metadata", input: "2.1.210+build.7"},
-		{name: "prerelease and build", input: "2.1.210-rc.1+build.7"},
+		{name: "exact triple", input: "2.1.261"},
+		{name: "leading v", input: "v2.1.261"},
+		{name: "prerelease", input: "2.1.261-rc.1"},
+		{name: "build metadata", input: "2.1.261+build.7"},
+		{name: "prerelease and build", input: "2.1.261-rc.1+build.7"},
 		{name: "empty", input: "", wantErr: true},
-		{name: "padded", input: " 2.1.210", wantErr: true},
+		{name: "padded", input: " 2.1.261", wantErr: true},
 		{name: "two components", input: "2.1", wantErr: true},
-		{name: "four components", input: "2.1.210.5", wantErr: true},
+		{name: "four components", input: "2.1.261.5", wantErr: true},
 		{name: "non numeric", input: "2.x.0", wantErr: true},
 		{name: "leading zero", input: "2.01.0", wantErr: true},
 		{name: "leading zero numeric prerelease identifier", input: "1.2.3-01", wantErr: true},
 		{name: "leading zero alphanumeric prerelease identifier allowed", input: "1.2.3-0a.1"},
 		{name: "leading zero build identifier allowed", input: "1.2.3+001"},
-		{name: "empty prerelease", input: "2.1.210-", wantErr: true},
-		{name: "empty build", input: "2.1.210+", wantErr: true},
+		{name: "empty prerelease", input: "2.1.261-", wantErr: true},
+		{name: "empty build", input: "2.1.261+", wantErr: true},
 		{name: "garbage", input: "not-a-version", wantErr: true},
 	}
 	for _, tc := range cases {
@@ -60,45 +60,47 @@ func TestParseHostVersion(t *testing.T) {
 func TestComparePrecedence(t *testing.T) {
 	t.Parallel()
 	// Build metadata never changes precedence.
-	assert.Equal(t, 0, runtime.ComparePrecedence(mustParse(t, "2.1.210+a"), mustParse(t, "2.1.210+b")))
+	assert.Equal(t, 0, runtime.ComparePrecedence(mustParse(t, "2.1.261+a"), mustParse(t, "2.1.261+b")))
 	// Release ordering.
-	assert.Equal(t, -1, runtime.ComparePrecedence(mustParse(t, "2.1.209"), mustParse(t, "2.1.210")))
+	assert.Equal(t, -1, runtime.ComparePrecedence(mustParse(t, "2.1.260"), mustParse(t, "2.1.261")))
 	assert.Equal(t, 1, runtime.ComparePrecedence(mustParse(t, "2.2.0"), mustParse(t, "2.1.999")))
 	// A prerelease has lower precedence than its release.
-	assert.Equal(t, -1, runtime.ComparePrecedence(mustParse(t, "2.1.210-rc.1"), mustParse(t, "2.1.210")))
+	assert.Equal(t, -1, runtime.ComparePrecedence(mustParse(t, "2.1.261-rc.1"), mustParse(t, "2.1.261")))
 	// Prerelease identifier ordering.
-	assert.Equal(t, -1, runtime.ComparePrecedence(mustParse(t, "2.1.210-rc.1"), mustParse(t, "2.1.210-rc.2")))
-	assert.Equal(t, -1, runtime.ComparePrecedence(mustParse(t, "2.1.210-1"), mustParse(t, "2.1.210-alpha")))
+	assert.Equal(t, -1, runtime.ComparePrecedence(mustParse(t, "2.1.261-rc.1"), mustParse(t, "2.1.261-rc.2")))
+	assert.Equal(t, -1, runtime.ComparePrecedence(mustParse(t, "2.1.261-1"), mustParse(t, "2.1.261-alpha")))
 }
 
 func TestVersionConstraintExactBoundary(t *testing.T) {
 	t.Parallel()
-	constraint, err := runtime.NewExactVersion(mustParse(t, "2.1.210"))
+	constraint, err := runtime.NewExactVersion(mustParse(t, "2.1.261"))
 	require.NoError(t, err)
 
-	assert.True(t, constraint.Allows(mustParse(t, "2.1.210")), "exact accepted boundary")
-	assert.True(t, constraint.Allows(mustParse(t, "2.1.210+build.9")), "build metadata does not change acceptance")
-	assert.False(t, constraint.Allows(mustParse(t, "2.1.209")), "immediately lower rejected")
+	assert.True(t, constraint.Allows(mustParse(t, "2.1.261")), "exact accepted boundary")
+	assert.True(t, constraint.Allows(mustParse(t, "2.1.261+build.9")), "build metadata does not change acceptance")
+	assert.False(t, constraint.Allows(mustParse(t, "2.1.260")), "immediately lower rejected")
 	assert.False(t, constraint.Allows(mustParse(t, "2.1.211")), "immediately higher rejected")
-	assert.False(t, constraint.Allows(mustParse(t, "2.1.210-rc.1")), "prerelease requires explicit inclusion")
+	assert.False(t, constraint.Allows(mustParse(t, "2.1.261-rc.1")), "prerelease requires explicit inclusion")
 	assert.False(t, constraint.Allows(runtime.HostVersion{}), "zero version rejected")
 }
 
 func TestVersionConstraintPrereleaseInclusion(t *testing.T) {
 	t.Parallel()
-	lo := mustParse(t, "2.1.210-rc.1")
-	hi := mustParse(t, "2.1.210")
+	lo := mustParse(t, "2.1.261-rc.1")
+	hi := mustParse(t, "2.1.261")
 	constraint, err := runtime.NewVersionConstraint(lo, hi, true)
 	require.NoError(t, err)
 
-	assert.True(t, constraint.Allows(mustParse(t, "2.1.210-rc.1")), "explicitly included prerelease boundary")
-	assert.True(t, constraint.Allows(mustParse(t, "2.1.210")))
-	assert.False(t, constraint.Allows(mustParse(t, "2.1.210-beta.1")), "prerelease below the included boundary rejected")
+	assert.True(t, constraint.Allows(mustParse(t, "2.1.261-rc.1")), "explicitly included prerelease boundary")
+	assert.True(t, constraint.Allows(mustParse(t, "2.1.261")))
+	assert.False(t, constraint.Allows(mustParse(t, "2.1.261-beta.1")), "prerelease below the included boundary rejected")
 }
 
 func TestNewVersionConstraintRejectsInvertedBounds(t *testing.T) {
 	t.Parallel()
-	_, err := runtime.NewVersionConstraint(mustParse(t, "2.1.211"), mustParse(t, "2.1.210"), false)
+	// Sample versions unrelated to any recorded host version: the bounds are
+	// inverted by construction (min above max), and no version sweep moves them.
+	_, err := runtime.NewVersionConstraint(mustParse(t, "9.9.9"), mustParse(t, "9.9.8"), false)
 	require.Error(t, err)
 }
 
@@ -140,15 +142,15 @@ func TestNewVersionFloorRejectsUnparsedBound(t *testing.T) {
 // up, stay, or move down.
 func TestVersionConstraintDescribeNamesEachShape(t *testing.T) {
 	t.Parallel()
-	exact, err := runtime.NewExactVersion(mustParse(t, "0.146.0"))
+	exact, err := runtime.NewExactVersion(mustParse(t, "0.153.0"))
 	require.NoError(t, err)
-	closed, err := runtime.NewVersionConstraint(mustParse(t, "2.1.210"), mustParse(t, "2.2.0-0"), false)
+	closed, err := runtime.NewVersionConstraint(mustParse(t, "2.1.261"), mustParse(t, "2.2.0-0"), false)
 	require.NoError(t, err)
 	floor, err := runtime.NewVersionFloor(mustParse(t, "1.18.29"))
 	require.NoError(t, err)
 
-	assert.Equal(t, "exactly 0.146.0", exact.Describe())
-	assert.Equal(t, "from 2.1.210 through 2.2.0-0", closed.Describe())
+	assert.Equal(t, "exactly 0.153.0", exact.Describe())
+	assert.Equal(t, "from 2.1.261 through 2.2.0-0", closed.Describe())
 	assert.Equal(t, "at or above 1.18.29", floor.Describe())
 	assert.True(t, exact.HasUpperBound())
 	assert.True(t, closed.HasUpperBound())

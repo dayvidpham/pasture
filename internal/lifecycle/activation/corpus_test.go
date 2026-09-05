@@ -277,7 +277,7 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		root, corpus := copiedReviewedEvidenceCorpus(t)
 		outside := filepath.Join(t.TempDir(), "outside.provenance.json")
 		require.NoError(t, os.WriteFile(outside, []byte("{}"), 0o600))
-		path := filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json")
+		path := filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json")
 		require.NoError(t, os.Remove(path))
 		if err := os.Symlink(outside, path); err != nil {
 			t.Skipf("symlinks unsupported: %v", err)
@@ -313,7 +313,7 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			root, corpus := copiedReviewedEvidenceCorpus(t)
-			rewriteProvenance(t, filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json"), tc.mutate)
+			rewriteProvenance(t, filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json"), tc.mutate)
 			got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 			if tc.wantError != "" {
 				require.ErrorContains(t, err, tc.wantError)
@@ -332,25 +332,25 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		want   string
 	}{
 		"missing-fixture": {func(root string) {
-			require.NoError(t, os.Remove(filepath.Join(root, "fixtures", "session_start_2_1_210.json")))
+			require.NoError(t, os.Remove(filepath.Join(root, "fixtures", "session_start_2_1_261.json")))
 		}, "resolve fixture"},
 		"missing-provenance": {func(root string) {
-			require.NoError(t, os.Remove(filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json")))
+			require.NoError(t, os.Remove(filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json")))
 		}, "resolve provenance"},
 		"malformed-json": {func(root string) {
-			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json"), []byte("{"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json"), []byte("{"), 0o600))
 		}, "decode provenance"},
 		"trailing-json": {func(root string) {
-			p := filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json")
+			p := filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json")
 			body, err := os.ReadFile(p)
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(p, append(body, []byte("{}")...), 0o600))
 		}, "exactly one JSON object"},
 		"oversized-json": {func(root string) {
-			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json"), []byte(strings.Repeat(" ", activation.MaxProvenanceBytes+1)), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_261.provenance.json"), []byte(strings.Repeat(" ", activation.MaxProvenanceBytes+1)), 0o600))
 		}, "exceeds"},
 		"oversized-fixture": {func(root string) {
-			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_210.json"), []byte(strings.Repeat("x", activation.MaxFixtureBytes+1)), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", "session_start_2_1_261.json"), []byte(strings.Repeat("x", activation.MaxFixtureBytes+1)), 0o600))
 		}, "native payload bound"},
 	} {
 		name, tc := name, tc
@@ -369,9 +369,9 @@ func TestEvaluateIgnoresCorpusOracleAndReviewMetadata(t *testing.T) {
 	t.Parallel()
 	root, _ := copiedReviewedEvidenceCorpus(t)
 	variants := []string{
-		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_210.json"), "source: requirement, ref: ref", "source: bug, ref: contradictory-review", 1),
-		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_210.json"), "description: pass", "description: contradictory mutation prose", 1),
-		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_210_origin_authored.json"), "decision: enabled, reason: \"\"", "decision: enabled, reason: \"\"", 1),
+		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_261.json"), "source: requirement, ref: ref", "source: bug, ref: contradictory-review", 1),
+		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_261.json"), "description: pass", "description: contradictory mutation prose", 1),
+		strings.Replace(validCorpusYAML("fixtures/session_start_2_1_261_origin_authored.json"), "decision: enabled, reason: \"\"", "decision: enabled, reason: \"\"", 1),
 	}
 	for i, body := range variants {
 		corpus, err := loadCorpusTextAt(t, root, body)
@@ -396,7 +396,7 @@ func copiedReviewedEvidenceCorpus(t *testing.T) (string, activation.Corpus) {
 	fixtureDir := filepath.Join(root, "fixtures")
 	require.NoError(t, os.Mkdir(fixtureDir, 0o700))
 	source := filepath.Join("..", "ingress", "claude", "testdata", "fixtures")
-	names := []string{"session_start_2_1_210", "session_start_2_1_210_origin_authored", "session_start_2_1_210_digest_mismatch", "session_start_2_1_210_version_out_of_range"}
+	names := []string{"session_start_2_1_261", "session_start_2_1_261_origin_authored", "session_start_2_1_261_digest_mismatch", "session_start_2_1_261_version_out_of_range"}
 	for _, name := range names {
 		for _, ext := range []string{".json", ".provenance.json"} {
 			body, err := os.ReadFile(filepath.Join(source, name+ext))
@@ -411,25 +411,25 @@ func copiedReviewedEvidenceCorpus(t *testing.T) (string, activation.Corpus) {
 	}
 	corpusYAML := `cases:
 - name: pass
-  input: {fixture: fixtures/session_start_2_1_210.json}
+  input: {fixture: fixtures/session_start_2_1_261.json}
   expected: {decision: enabled, reason: ""}
   classification: must-pass
   provenance: {source: requirement, ref: reviewed-capture}
   mutation: {description: copied reviewed capture bytes}
 - name: origin
-  input: {fixture: fixtures/session_start_2_1_210_origin_authored.json}
+  input: {fixture: fixtures/session_start_2_1_261_origin_authored.json}
   expected: {decision: withheld, reason: non-authentic-origin}
   classification: must-fail
   provenance: {source: bug, ref: control}
   mutation: {description: non-authentic origin control}
 - name: digest
-  input: {fixture: fixtures/session_start_2_1_210_digest_mismatch.json}
+  input: {fixture: fixtures/session_start_2_1_261_digest_mismatch.json}
   expected: {decision: withheld, reason: digest-mismatch}
   classification: must-fail
   provenance: {source: bug, ref: control}
   mutation: {description: digest control}
 - name: version
-  input: {fixture: fixtures/session_start_2_1_210_version_out_of_range.json}
+  input: {fixture: fixtures/session_start_2_1_261_version_out_of_range.json}
   expected: {decision: withheld, reason: version-out-of-range}
   classification: must-fail
   provenance: {source: enum, ref: control}
@@ -547,7 +547,7 @@ func TestClaudeEvaluatorDecidesTheCommittedClaudeCorpusAsBefore(t *testing.T) {
 	}
 	require.Equal(t, 8, enabled, "the eight enabled Claude targets evaluate as enabled")
 	require.Equal(t, acceptance.HarnessClaudeCode, selected.Harness())
-	require.Equal(t, activation.ClaudeCode2_1_210TargetEvents(), selected.TargetEvents())
+	require.Equal(t, activation.ClaudeCode2_1_261TargetEvents(), selected.TargetEvents())
 }
 
 // harnessSample is one harness's real committed capture bytes, re-homed in a
@@ -567,9 +567,9 @@ type harnessSample struct {
 
 func harnessSamples() []harnessSample {
 	return []harnessSample{
-		sample(acceptance.HarnessClaudeCode, "SessionStart", filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"), "session_start.json", registration.EventSessionStart, activation.ClaudeCodeEvaluator()),
-		sample(acceptance.HarnessCodexCLI, "SessionStart", filepath.Join("..", "ingress", "codex", "testdata", "fixtures", "session_start_0_146_0.json"), "session_start.json", registration.EventCodexSessionStart, activation.CodexEvaluator()),
-		sample(acceptance.HarnessOpenCode, "session.created", filepath.Join("..", "ingress", "opencode", "testdata", "fixtures", "session_created_1_18_10.capture.json"), "session_created.capture.json", registration.EventOpenCodeSessionCreated, activation.OpenCodeEvaluator()),
+		sample(acceptance.HarnessClaudeCode, "SessionStart", filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"), "session_start.json", registration.EventSessionStart, activation.ClaudeCodeEvaluator()),
+		sample(acceptance.HarnessCodexCLI, "SessionStart", filepath.Join("..", "ingress", "codex", "testdata", "fixtures", "session_start_0_153_0.json"), "session_start.json", registration.EventCodexSessionStart, activation.CodexEvaluator()),
+		sample(acceptance.HarnessOpenCode, "session.created", filepath.Join("..", "ingress", "opencode", "testdata", "fixtures", "session_created_1_18_29.json"), "session_created.capture.json", registration.EventOpenCodeSessionCreated, activation.OpenCodeEvaluator()),
 	}
 }
 
@@ -734,8 +734,8 @@ func TestEvaluatorRefusalsFireForEveryHarness(t *testing.T) {
 
 func TestProvenancePathSitsBesideTheFixtureUnderThePlainName(t *testing.T) {
 	t.Parallel()
-	require.Equal(t, "fixtures/session_created_1_18_10.provenance.json", activation.ProvenancePath("fixtures/session_created_1_18_10.capture.json"))
-	require.Equal(t, "fixtures/session_start_2_1_222.provenance.json", activation.ProvenancePath("fixtures/session_start_2_1_222.json"))
+	require.Equal(t, "fixtures/session_created_1_18_29.provenance.json", activation.ProvenancePath("fixtures/session_created_1_18_29.json"))
+	require.Equal(t, "fixtures/session_start_2_1_261.provenance.json", activation.ProvenancePath("fixtures/session_start_2_1_261.json"))
 }
 
 func TestEvaluatorForIsClosedAndTheZeroEvaluatorRefuses(t *testing.T) {

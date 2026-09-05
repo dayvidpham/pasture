@@ -10,7 +10,7 @@
 // Bind in production.
 //
 // MEASURED: the self-contained ingress catalogue
-// (internal/lifecycle/ingress/internal/hostcontract/codex_0_146_0.go, read by the
+// (internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, read by the
 // handler's admission) and the runtime Codex profile (read by Bind) disagree on
 // every registered event on at least one axis: the failure mode on all ten
 // (the catalogue declares report-and-continue or exit-2-blocks where the profile
@@ -34,7 +34,7 @@ import (
 // codexLifecycle returns the Codex runtime lifecycle contract used to bind
 // native events into the waist: the sole runtime seam in this package.
 func codexLifecycle() runtime.LifecycleContract[runtime.CodexLifecycleEvent] {
-	return runtime.Codex0_146_0Lifecycle()
+	return runtime.Codex0_153_0Lifecycle()
 }
 
 // eventMappings pairs every generated Codex registration ordinal with its

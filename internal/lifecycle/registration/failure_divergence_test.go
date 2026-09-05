@@ -107,9 +107,9 @@ var overClaimsBlocking = map[ir.HarnessID][]string{
 
 func manifests() map[ir.HarnessID]registration.Manifest {
 	return map[ir.HarnessID]registration.Manifest{
-		ir.HarnessClaudeCode: registration.ClaudeCode2_1_210(),
-		ir.HarnessCodex:      registration.Codex0_146_0(),
-		ir.HarnessOpenCode:   registration.OpenCode1_18_10(),
+		ir.HarnessClaudeCode: registration.ClaudeCode2_1_261(),
+		ir.HarnessCodex:      registration.Codex0_153_0(),
+		ir.HarnessOpenCode:   registration.OpenCode1_18_29(),
 	}
 }
 

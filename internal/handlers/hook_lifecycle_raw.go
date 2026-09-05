@@ -32,22 +32,22 @@ const hookLifecycleRawWhere = "Ingesting a raw lifecycle event (internal/handler
 type RawSchemaVersion string
 
 const (
-	// RawSchemaClaudeCode2_1_210 is the wire identity of the Claude Code
-	// 2.1.210 payload schema pinned in this build.
-	RawSchemaClaudeCode2_1_210 RawSchemaVersion = "claude-code/2.1.210"
-	// RawSchemaOpenCode1_18_10 is the wire identity of the OpenCode 1.18.10
+	// RawSchemaClaudeCode2_1_261 is the wire identity of the Claude Code
+	// 2.1.261 payload schema pinned in this build.
+	RawSchemaClaudeCode2_1_261 RawSchemaVersion = "claude-code/2.1.261"
+	// RawSchemaOpenCode1_18_29 is the wire identity of the OpenCode 1.18.29
 	// payload schema pinned in this build.
-	RawSchemaOpenCode1_18_10 RawSchemaVersion = "opencode/1.18.10"
-	// RawSchemaCodex0_146_0 is the wire identity of the Codex 0.146.0 payload
+	RawSchemaOpenCode1_18_29 RawSchemaVersion = "opencode/1.18.29"
+	// RawSchemaCodex0_153_0 is the wire identity of the Codex 0.153.0 payload
 	// schema pinned in this build.
-	RawSchemaCodex0_146_0 RawSchemaVersion = "codex/0.146.0"
+	RawSchemaCodex0_153_0 RawSchemaVersion = "codex/0.153.0"
 )
 
 // IsValid reports whether the schema identity names a version pinned in this
 // build.
 func (v RawSchemaVersion) IsValid() bool {
 	switch v {
-	case RawSchemaClaudeCode2_1_210, RawSchemaOpenCode1_18_10, RawSchemaCodex0_146_0:
+	case RawSchemaClaudeCode2_1_261, RawSchemaOpenCode1_18_29, RawSchemaCodex0_153_0:
 		return true
 	default:
 		return false
@@ -65,7 +65,7 @@ func ParseRawSchemaVersion(value string) (RawSchemaVersion, error) {
 	candidate := RawSchemaVersion(strings.TrimSpace(value))
 	if !candidate.IsValid() {
 		return "", fmt.Errorf("wire schema %q is not known to this build of pasture; supply one of %q, %q, or %q",
-			value, RawSchemaClaudeCode2_1_210, RawSchemaOpenCode1_18_10, RawSchemaCodex0_146_0)
+			value, RawSchemaClaudeCode2_1_261, RawSchemaOpenCode1_18_29, RawSchemaCodex0_153_0)
 	}
 	return candidate, nil
 }
@@ -104,11 +104,11 @@ func rawSchemaVersionFor(harness ir.HarnessID) RawSchemaVersion {
 	var version string
 	switch harness {
 	case ir.HarnessClaudeCode:
-		version = registration.ClaudeCode2_1_210().Version
+		version = registration.ClaudeCode2_1_261().Version
 	case ir.HarnessOpenCode:
-		version = registration.OpenCode1_18_10().Version
+		version = registration.OpenCode1_18_29().Version
 	case ir.HarnessCodex:
-		version = registration.Codex0_146_0().Version
+		version = registration.Codex0_153_0().Version
 	default:
 		return ""
 	}

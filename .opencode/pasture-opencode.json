@@ -1,8 +1,8 @@
 {
   "$schema": "https://pasture.dev/opencode-target.json",
   "target": "opencode",
-  "runtime_contract": "opencode/opencode@1.18.10",
-  "host_version": "1.18.10",
+  "runtime_contract": "opencode/opencode@1.18.29",
+  "host_version": "1.18.29",
   "native_tools": [
     "question",
     "skill",
@@ -99,7 +99,7 @@
     {
       "event": "session.created",
       "state": "enabled",
-      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)",
       "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/session.created"
     },
     {
@@ -210,7 +210,7 @@
     {
       "event": "tool.execute.before",
       "state": "enabled",
-      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_10.capture.json (OpenCode 1.18.10 authentic callback-object capture)",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)",
       "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/tool.execute.before"
     },
     {

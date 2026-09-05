@@ -63,7 +63,7 @@ func GenerateLifecycleMetamodel() ([]byte, error) {
 }
 
 func claudeSection() (metamodelHarness, error) {
-	contract := runtime.ClaudeCode2_1_210Lifecycle()
+	contract := runtime.ClaudeCode2_1_261Lifecycle()
 	events := make([]metamodelEvent, 0, len(contract.Events()))
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
@@ -76,7 +76,7 @@ func claudeSection() (metamodelHarness, error) {
 }
 
 func codexSection() (metamodelHarness, error) {
-	contract := runtime.Codex0_146_0Lifecycle()
+	contract := runtime.Codex0_153_0Lifecycle()
 	events := make([]metamodelEvent, 0, len(contract.Events()))
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)
@@ -89,7 +89,7 @@ func codexSection() (metamodelHarness, error) {
 }
 
 func openCodeSection() (metamodelHarness, error) {
-	contract := runtime.OpenCode1_18_10Lifecycle()
+	contract := runtime.OpenCode1_18_29Lifecycle()
 	events := make([]metamodelEvent, 0, len(contract.Events()))
 	for _, event := range contract.Events() {
 		mapping, err := contract.Mapping(event)

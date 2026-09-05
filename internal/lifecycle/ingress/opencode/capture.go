@@ -25,7 +25,7 @@ type Capture struct {
 // event determines the provider-specific identity paths.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
 	validation := ingress.Validate(raw)
-	manifest := registration.OpenCode1_18_10()
+	manifest := registration.OpenCode1_18_29()
 	envelope.Runtime.Contract = manifest.Contract
 	envelope.HostVersion = observedVersion
 	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}

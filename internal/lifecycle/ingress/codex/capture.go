@@ -33,7 +33,7 @@ type Capture struct {
 // unflattened in the body.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
 	validation := ingress.Validate(raw)
-	manifest := registration.Codex0_146_0()
+	manifest := registration.Codex0_153_0()
 	envelope.Runtime.Contract = manifest.Contract
 	envelope.HostVersion = observedVersion
 	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}

@@ -12,7 +12,7 @@ import (
 
 func TestOpenCodeActivationRequiresBothExactProofs(t *testing.T) {
 	t.Parallel()
-	entries, err := activation.OpenCode1_18_10()
+	entries, err := activation.OpenCode1_18_29()
 	require.NoError(t, err)
 	require.Len(t, entries, 47)
 
@@ -37,7 +37,7 @@ func TestOpenCodeActivationRequiresBothExactProofs(t *testing.T) {
 
 func TestOpenCodeCatalogMembershipDoesNotActivateAnotherEvent(t *testing.T) {
 	t.Parallel()
-	entries, err := activation.OpenCode1_18_10()
+	entries, err := activation.OpenCode1_18_29()
 	require.NoError(t, err)
 	for _, entry := range entries {
 		if entry.Event == registration.EventOpenCodeSessionUpdated {
@@ -50,8 +50,8 @@ func TestOpenCodeCatalogMembershipDoesNotActivateAnotherEvent(t *testing.T) {
 
 func TestOpenCodeActivationTargetEventsAreDefensive(t *testing.T) {
 	t.Parallel()
-	targets := activation.OpenCode1_18_10TargetEvents()
+	targets := activation.OpenCode1_18_29TargetEvents()
 	require.Len(t, targets, 2)
 	targets[0] = 0
-	require.Equal(t, registration.EventOpenCodeSessionCreated, activation.OpenCode1_18_10TargetEvents()[0])
+	require.Equal(t, registration.EventOpenCodeSessionCreated, activation.OpenCode1_18_29TargetEvents()[0])
 }

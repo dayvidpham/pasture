@@ -324,12 +324,12 @@ func TestDecodeInterpretedStrictCanonicalEvidence(t *testing.T) {
 
 func mustClaudeLifecycleContract(t *testing.T) ir.RuntimeContractID {
 	t.Helper()
-	return runtime.ClaudeCode2_1_210Lifecycle().ID()
+	return runtime.ClaudeCode2_1_261Lifecycle().ID()
 }
 
 func mustSessionStartL2(t *testing.T, value string) waist.L2 {
 	t.Helper()
-	contract := runtime.ClaudeCode2_1_210Lifecycle()
+	contract := runtime.ClaudeCode2_1_261Lifecycle()
 	binding, err := waist.BindEvent(contract, runtime.ClaudeEventSessionStart)
 	if err != nil {
 		t.Fatalf("BindEvent(SessionStart) error = %v", err)
@@ -347,7 +347,7 @@ func mustSessionStartL2(t *testing.T, value string) waist.L2 {
 
 func mustPostToolBatchL2(t *testing.T, value string) waist.L2 {
 	t.Helper()
-	contract := runtime.ClaudeCode2_1_210Lifecycle()
+	contract := runtime.ClaudeCode2_1_261Lifecycle()
 	binding, err := waist.BindEvent(contract, runtime.ClaudeEventPostToolBatch)
 	if err != nil {
 		t.Fatalf("BindEvent(PostToolBatch) error = %v", err)

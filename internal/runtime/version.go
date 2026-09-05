@@ -40,7 +40,7 @@ type HostVersion struct {
 }
 
 // ParseHostVersion parses one harness host version. It accepts a leading "v"
-// (so `v2.1.210` and `2.1.210` are the same version), a MAJOR.MINOR.PATCH
+// (so `v2.1.261` and `2.1.261` are the same version), a MAJOR.MINOR.PATCH
 // triple, an optional `-prerelease` series, and optional `+build` metadata. It
 // rejects empty, padded, or otherwise unparsable output actionably rather than
 // letting a garbage string silently compare as some default version.
@@ -84,7 +84,7 @@ func ParseHostVersion(value string) (HostVersion, error) {
 			fmt.Sprintf("host version %q is not a MAJOR.MINOR.PATCH triple", value),
 			"contract matching compares three numeric release components in order",
 			where, "the host cannot be matched against any runtime contract",
-			"supply exactly three dot-separated numeric components, e.g. 2.1.210", nil,
+			"supply exactly three dot-separated numeric components, e.g. 2.1.261", nil,
 		)
 	}
 	numbers := make([]uint64, 3)

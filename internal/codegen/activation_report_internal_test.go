@@ -76,7 +76,7 @@ func TestFailureEvidenceColumnFollowsTheDeclaredBlockingModeAndTheCitation(t *te
 // refusals for an entry that does not belong to its event.
 func TestActivationSupportEntryForIsTheOneRowBuilder(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
 	var sessionStart, setup, preToolUse registration.Event
 	for _, event := range manifest.Events {
 		switch event.NativeName {

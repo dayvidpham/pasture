@@ -18,13 +18,13 @@ import (
 // read from the Codex runtime contract, the one root, so the id follows the
 // recorded host version instead of restating it.
 func ActivationContractID() string {
-	return "codex/global@" + runtime.Codex0_146_0().Versions().Min().String()
+	return "codex/global@" + runtime.Codex0_153_0().Versions().Min().String()
 }
 
 // installerVersions is the Codex runtime contract's own admission: a floor at
 // the recorded host version. The generated runner evidence was captured at that
 // version; a host at or above it is admitted and a host below it is refused.
-var installerVersions = runtime.Codex0_146_0().Versions()
+var installerVersions = runtime.Codex0_153_0().Versions()
 
 // NewActivationContract binds all three independent Codex packages beneath one
 // absolute home root. Their immutable bundle paths retain the public native
@@ -33,8 +33,8 @@ func NewActivationContract(target targetcodex.TargetDescriptor, home string) (ac
 	if !target.IsValid() || target.Harness() != ir.HarnessCodex {
 		return activation.ActivationContract{}, fmt.Errorf("Codex activation contract rejected an invalid target descriptor before host validation: the descriptor is zero, malformed, or belongs to another harness; rebuild it with target/codex.Descriptor and retry")
 	}
-	if target.RuntimeContractID() != runtime.Codex0_146_0().ID() {
-		return activation.ActivationContract{}, fmt.Errorf("Codex activation contract rejected target runtime %q before host validation: generated artifacts must remain exactly compiled for %s; regenerate target/codex and review the runtime contract change instead of widening installer compatibility", target.RuntimeContractID(), runtime.Codex0_146_0().ID())
+	if target.RuntimeContractID() != runtime.Codex0_153_0().ID() {
+		return activation.ActivationContract{}, fmt.Errorf("Codex activation contract rejected target runtime %q before host validation: generated artifacts must remain exactly compiled for %s; regenerate target/codex and review the runtime contract change instead of widening installer compatibility", target.RuntimeContractID(), runtime.Codex0_153_0().ID())
 	}
 	if home == "" || !filepath.IsAbs(home) || filepath.Clean(home) != home {
 		return activation.ActivationContract{}, fmt.Errorf("Codex activation contract construction failed: home root %q is empty, relative, or unclean; pass one canonical absolute user home directory", home)

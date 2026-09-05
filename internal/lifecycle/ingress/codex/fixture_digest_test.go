@@ -5,84 +5,69 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dayvidpham/pasture/internal/acceptance"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
-// provenance mirrors the landed OpenCode provenance sidecar shape, adapted to
-// Codex command-hook stdin (the raw bytes ARE the payload; there is no parent
-// JSONL or nested callback value).
-type provenance struct {
-	Provider                string `json:"provider"`
-	ObservedRuntimeVersion  string `json:"observedRuntimeVersion"`
-	InspectedSourceRevision string `json:"inspectedSourceRevision"`
-	CapturedAt              string `json:"capturedAt"`
-	CaptureMethod           string `json:"captureMethod"`
-	SourceSelector          string `json:"sourceSelector"`
-	RawBytes                int    `json:"rawBytes"`
-	RawSHA256               string `json:"rawSHA256"`
-	Origin                  string `json:"origin"`
-	Redaction               string `json:"redaction"`
-}
-
-// TestClearedFixtureBytesMatchPinnedDigests pins the two irreplaceable
-// user-cleared Codex candidates to their exact sizes and SHA-256 digests, and
-// verifies each provenance sidecar records the complete D4 chain of custody.
-// Codex usage is exhausted; these two payloads are the entire authentic Codex
-// evidence base, so this gate is authoritative for any later re-import.
-func TestClearedFixtureBytesMatchPinnedDigests(t *testing.T) {
+// TestClearedFixtureBytesMatchTheirSidecars holds every committed Codex
+// fixture to the provenance sidecar beside it: the sidecar is the
+// CaptureProvenance shape every cleared capture carries, its digest is the
+// digest of the committed bytes, it names the native event, the recorded host
+// version and the clearance record, and the redaction it lists parses. The
+// corpus is the two events the capture session drove; a third fixture here
+// means the table below must grow deliberately.
+func TestClearedFixtureBytesMatchTheirSidecars(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name, payload, provenanceFile, sourceSelector, capturedAt string
-		size                                                      int
-		sha256                                                    string
-	}{
-		{
-			name:           "SessionStart",
-			payload:        "session_start_0_146_0.json",
-			provenanceFile: "session_start_0_146_0.provenance.json",
-			sourceSelector: "1785755740434994199-2327240-SessionStart.json",
-			capturedAt:     "2026-08-03T11:15:40.435Z",
-			size:           291,
-			sha256:         "69f56b0b3f98e7739828d64f1af6749931b750895eec433fa037600a623c7a04",
-		},
-		{
-			name:           "PreToolUse",
-			payload:        "pre_tool_use_0_146_0.json",
-			provenanceFile: "pre_tool_use_0_146_0.provenance.json",
-			sourceSelector: "1785755744328519447-2328094-PreToolUse.json",
-			capturedAt:     "2026-08-03T11:15:44.328Z",
-			size:           507,
-			sha256:         "77ea0aa2a208418a2883db0cdb003e6fcf2c62856af515027dbe46270b7812e1",
-		},
+	expected := map[string]string{
+		"session_start_0_153_0.json": "SessionStart",
+		"pre_tool_use_0_153_0.json":  "PreToolUse",
 	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+	fixtures, err := filepath.Glob(filepath.Join(codexFixtureDir, "*.json"))
+	require.NoError(t, err)
+	var payloads []string
+	for _, fixture := range fixtures {
+		if filepath.Ext(fixture) == ".json" && !isSidecar(fixture) {
+			payloads = append(payloads, filepath.Base(fixture))
+		}
+	}
+	require.Len(t, payloads, len(expected), "the Codex corpus is exactly the captured events; %v", payloads)
+	for _, file := range payloads {
+		file := file
+		t.Run(file, func(t *testing.T) {
 			t.Parallel()
-			raw, err := os.ReadFile("testdata/fixtures/" + tc.payload)
+			event, known := expected[file]
+			require.True(t, known, "unexpected Codex fixture %s", file)
+			raw, err := os.ReadFile(filepath.Join(codexFixtureDir, file))
 			require.NoError(t, err)
-			require.Len(t, raw, tc.size, "cleared fixture byte size must be exact")
-			require.Equal(t, tc.sha256, sum(raw), "cleared fixture digest must match the pinned authoritative value")
-
-			provRaw, err := os.ReadFile("testdata/fixtures/" + tc.provenanceFile)
+			require.True(t, json.Valid(raw))
+			sidecarBytes, err := os.ReadFile(filepath.Join(codexFixtureDir, file[:len(file)-len(".json")]+".provenance.json"))
 			require.NoError(t, err)
-			var prov provenance
-			require.NoError(t, json.Unmarshal(provRaw, &prov))
-			require.Equal(t, "codex", prov.Provider)
-			require.Equal(t, registration.Codex0_146_0().Version, prov.ObservedRuntimeVersion)
-			require.Equal(t, "d6407d735942c7cfc996aa2bc7d0f97fc8f0e4bf", prov.InspectedSourceRevision)
-			require.Equal(t, tc.capturedAt, prov.CapturedAt)
-			require.Equal(t, "command hook exact stdin bytes", prov.CaptureMethod)
-			require.Equal(t, tc.sourceSelector, prov.SourceSelector)
-			require.Equal(t, tc.size, prov.RawBytes)
-			require.Equal(t, tc.sha256, prov.RawSHA256, "provenance digest must equal the payload digest")
-			require.Equal(t, "authentic-capture", prov.Origin)
-			require.Equal(t, "none", prov.Redaction)
+			var members map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(sidecarBytes, &members))
+			require.Len(t, members, 9, "the sidecar carries exactly the CaptureProvenance members")
+			var sidecar acceptance.CaptureProvenance
+			require.NoError(t, json.Unmarshal(sidecarBytes, &sidecar))
+			require.Equal(t, acceptance.OriginAuthenticCapture, sidecar.Origin)
+			require.Equal(t, acceptance.HarnessCodexCLI, sidecar.Harness)
+			require.Equal(t, registration.Codex0_153_0().Version, sidecar.HarnessVersion)
+			require.Equal(t, event, sidecar.Event)
+			require.Equal(t, "sha256:"+sum(raw), sidecar.RawFileDigest, "the sidecar digest is the digest of the committed bytes")
+			rules, err := acceptance.ParseRedaction(sidecar.Redaction)
+			require.NoError(t, err)
+			require.NotEmpty(t, rules)
+			require.NoError(t, sidecar.ValidateFixture("testdata", "fixtures/"+file))
 		})
 	}
+}
+
+func isSidecar(path string) bool {
+	const suffix = ".provenance.json"
+	return len(path) >= len(suffix) && path[len(path)-len(suffix):] == suffix
 }
 
 func sum(b []byte) string {

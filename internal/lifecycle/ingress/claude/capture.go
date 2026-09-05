@@ -27,7 +27,7 @@ type Capture struct {
 // registration allows, and the declared identities are bound by exact name.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
 	validation := ingress.Validate(raw)
-	manifest := registration.ClaudeCode2_1_210()
+	manifest := registration.ClaudeCode2_1_261()
 	envelope.Runtime.Contract = manifest.Contract
 	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}
 	result.Delivery = receipt.Delivery{Contract: manifest.Contract, Event: event.Kind, Envelope: envelope, Body: validation.Body}

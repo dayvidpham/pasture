@@ -18,9 +18,9 @@ import (
 // M3-P4 derivation obligation for the Codex catalog.
 func TestCodexActivationEnablesExactlyTheTwoProvenEvents(t *testing.T) {
 	t.Parallel()
-	entries, err := activation.Codex0_146_0()
+	entries, err := activation.Codex0_153_0()
 	require.NoError(t, err)
-	require.Len(t, entries, len(registration.Codex0_146_0().Entries()), "the manifest must be exhaustive over the generated Codex catalog")
+	require.Len(t, entries, len(registration.Codex0_153_0().Entries()), "the manifest must be exhaustive over the generated Codex catalog")
 
 	enabled := make([]model.ContractEventKind, 0, 2)
 	for _, entry := range entries {
@@ -54,7 +54,7 @@ func TestCodexActivationEnablesExactlyTheTwoProvenEvents(t *testing.T) {
 // catalog change silently activating an unproven event.
 func TestCodexActivationWithholdsEveryNonTargetGeneratedEvent(t *testing.T) {
 	t.Parallel()
-	entries, err := activation.Codex0_146_0()
+	entries, err := activation.Codex0_153_0()
 	require.NoError(t, err)
 	stateByEvent := make(map[model.ContractEventKind]activation.State, len(entries))
 	for _, entry := range entries {
@@ -79,13 +79,13 @@ func TestCodexActivationWithholdsEveryNonTargetGeneratedEvent(t *testing.T) {
 // accessor returns an independent copy that cannot mutate the static table.
 func TestCodexActivationTargetEventsAreDefensive(t *testing.T) {
 	t.Parallel()
-	targets := activation.Codex0_146_0TargetEvents()
+	targets := activation.Codex0_153_0TargetEvents()
 	require.Equal(t, []model.ContractEventKind{
 		registration.EventCodexSessionStart,
 		registration.EventCodexPreToolUse,
 	}, targets)
 	targets[0] = 0
-	require.Equal(t, registration.EventCodexSessionStart, activation.Codex0_146_0TargetEvents()[0], "the target table must be immune to caller mutation")
+	require.Equal(t, registration.EventCodexSessionStart, activation.Codex0_153_0TargetEvents()[0], "the target table must be immune to caller mutation")
 }
 
 // TestCodexEvidenceLeavesOpenCodeAndClaudeActivationUnchanged is the M3-P4
@@ -96,14 +96,14 @@ func TestCodexActivationTargetEventsAreDefensive(t *testing.T) {
 func TestCodexEvidenceLeavesOpenCodeAndClaudeActivationUnchanged(t *testing.T) {
 	t.Parallel()
 
-	openCode, err := activation.OpenCode1_18_10()
+	openCode, err := activation.OpenCode1_18_29()
 	require.NoError(t, err)
 	require.Equal(t, []model.ContractEventKind{
 		registration.EventOpenCodeSessionCreated,
 		registration.EventOpenCodeToolExecuteBefore,
 	}, enabledEvents(openCode), "the accepted OpenCode enabled set must be unchanged")
 
-	claude, err := activation.ClaudeCode2_1_210()
+	claude, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
 	require.Equal(t, []model.ContractEventKind{
 		registration.EventSessionStart,
@@ -116,7 +116,7 @@ func TestCodexEvidenceLeavesOpenCodeAndClaudeActivationUnchanged(t *testing.T) {
 		registration.EventPostCompact,
 	}, enabledEvents(claude), "the accepted Claude enabled set must be unchanged")
 
-	codex, err := activation.Codex0_146_0()
+	codex, err := activation.Codex0_153_0()
 	require.NoError(t, err)
 	codexEvents := make(map[model.ContractEventKind]struct{}, len(codex))
 	for _, entry := range codex {

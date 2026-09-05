@@ -27,7 +27,7 @@ const OpenCodeHooksModulePath = ".opencode/plugins/pasture-lifecycle.ts"
 // never reference an invented OpenCode tool: the allow-list is the contract's
 // own declared surface, computed here rather than hand-copied.
 func deriveOpenCodeNativeToolNames() ([]string, error) {
-	contract := runtime.OpenCode1_18_10()
+	contract := runtime.OpenCode1_18_29()
 	seen := make(map[string]struct{})
 	var names []string
 	for _, kind := range ir.AllOperationKinds() {
@@ -73,7 +73,7 @@ func GenerateOpenCodeHooksModule() (string, error) {
 		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: activation: %w", err)
 	}
 	enabled := make(map[model.ContractEventKind]bool, 2)
-	manifest := registration.OpenCode1_18_10().Entries()
+	manifest := registration.OpenCode1_18_29().Entries()
 	for index, entry := range activationEntries {
 		enabled[manifest[index].Kind] = entry.State == activation.Enabled
 	}
@@ -93,7 +93,7 @@ func GenerateOpenCodeHooksModule() (string, error) {
 		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: derive native tool allow-list: %w", err)
 	}
 	metadata, err := lifecycleMetadata(
-		runtime.OpenCode1_18_10Lifecycle(),
+		runtime.OpenCode1_18_29Lifecycle(),
 		openCodeHostVersion(),
 		func(string) []string { return nil },
 	)
@@ -233,20 +233,20 @@ export default { id: "pasture-lifecycle", server: PastureLifecycle };
 }
 
 func openCodeEventByKind(kind model.ContractEventKind) (registration.Event, error) {
-	for _, event := range registration.OpenCode1_18_10().Entries() {
+	for _, event := range registration.OpenCode1_18_29().Entries() {
 		if event.Kind == kind {
 			return event, nil
 		}
 	}
-	return registration.Event{}, fmt.Errorf("codegen.openCodeEventByKind: generated OpenCode %s manifest lacks event kind %d; regenerate the host contract before activation", registration.OpenCode1_18_10().Version, kind)
+	return registration.Event{}, fmt.Errorf("codegen.openCodeEventByKind: generated OpenCode %s manifest lacks event kind %d; regenerate the host contract before activation", registration.OpenCode1_18_29().Version, kind)
 }
 
 func openCodeActivationEntries() ([]activation.Entry, error) {
-	entries, err := activation.OpenCode1_18_10()
+	entries, err := activation.OpenCode1_18_29()
 	if err != nil {
 		return nil, err
 	}
-	manifest := registration.OpenCode1_18_10().Entries()
+	manifest := registration.OpenCode1_18_29().Entries()
 	if len(entries) != len(manifest) {
 		return nil, fmt.Errorf("activation has %d entries but generated OpenCode manifest has %d; activation must exhaustively classify every generated event", len(entries), len(manifest))
 	}
@@ -263,5 +263,5 @@ func openCodeActivationEntries() ([]activation.Entry, error) {
 // passes it to every hook invocation and the target manifest records it, so
 // neither restates a number that could drift from the contract.
 func openCodeHostVersion() string {
-	return runtime.OpenCode1_18_10().Versions().Min().String()
+	return runtime.OpenCode1_18_29().Versions().Min().String()
 }

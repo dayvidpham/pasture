@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,7 +48,7 @@ func codexFixture(t *testing.T, name string) []byte {
 // enforcement pattern. After M3 UAT the two accepted events (SessionStart,
 // PreToolUse) are enabled, so this refusal proof uses non-selected catalog
 // events (Stop, PostToolUse) and no activation is injected: the statically
-// dispatched production manifest activation.Codex0_146_0() governs admission.
+// dispatched production manifest activation.Codex0_153_0() governs admission.
 func TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage(t *testing.T) {
 	t.Parallel()
 	for _, event := range []string{"Stop", "PostToolUse"} {
@@ -57,7 +58,7 @@ func TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage(t *testi
 			dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 			input := &readTrackingLifecycleInput{}
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessCodex, Event: event, HostVersion: "0.146.0",
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: event, HostVersion: registration.Codex0_153_0().Version,
 				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.codex"},
 			})
 			require.ErrorContains(t, err, `Codex event "`+event+`" is withheld (reason outside-target-set)`)
@@ -92,7 +93,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 	}{
 		{
 			name:         "SessionStart observation",
-			fixture:      "session_start_0_146_0.json",
+			fixture:      "session_start_0_153_0.json",
 			event:        "SessionStart",
 			kind:         registration.EventCodexSessionStart,
 			semantic:     runtime.SemanticObservation,
@@ -100,12 +101,12 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			wantNative:   []byte(`{}`),
 			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2"},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
-				runtime.IdentitySession: "019fc756-217c-7233-81f7-b5e979279345",
+				runtime.IdentitySession: "session_id",
 			},
 		},
 		{
 			name:         "PreToolUse gate",
-			fixture:      "pre_tool_use_0_146_0.json",
+			fixture:      "pre_tool_use_0_153_0.json",
 			event:        "PreToolUse",
 			kind:         registration.EventCodexPreToolUse,
 			semantic:     runtime.SemanticGateConsultation,
@@ -113,9 +114,9 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			wantNative:   []byte(`{"continue":true}`),
 			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.consultation.v1"},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
-				runtime.IdentitySession:  "019fc756-217c-7233-81f7-b5e979279345",
-				runtime.IdentityTurn:     "019fc756-21b7-7f63-b8e2-4f4cd1ce0184",
-				runtime.IdentityToolCall: "exec-fe2dea40-82a3-410f-891e-a7f9e6295c6b",
+				runtime.IdentitySession:  "session_id",
+				runtime.IdentityTurn:     "turn_id",
+				runtime.IdentityToolCall: "tool_use_id",
 			},
 		},
 	}
@@ -132,7 +133,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			require.NoError(t, bootstrap.Close())
 
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: "0.146.0",
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_153_0().Version,
 				Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.codex." + tc.name},
 				Activations: enabledCodexActivation(),
 			})
@@ -177,18 +178,29 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			require.NoError(t, err)
 			require.Len(t, records.Records(), 1, "the bounded read-back must return exactly the one committed occurrence")
 			record := records.Records()[0]
-			require.Equal(t, registration.Codex0_146_0().Contract, record.Occurrence.RuntimeContract, "read-back must preserve the Codex provider contract")
-			require.Equal(t, "0.146.0", record.Occurrence.Envelope.HostVersion)
+			require.Equal(t, registration.Codex0_153_0().Contract, record.Occurrence.RuntimeContract, "read-back must preserve the Codex provider contract")
+			require.Equal(t, registration.Codex0_153_0().Version, record.Occurrence.Envelope.HostVersion)
 			require.Equal(t, tc.kind, record.Occurrence.Kind)
 			require.Len(t, record.Interpreted(), 1)
 			interpreted := record.Interpreted()[0]
-			require.Equal(t, runtime.Codex0_146_0().ID(), interpreted.Contract(), "interpreted read-back must carry the Codex runtime contract, never OpenCode or Claude")
+			require.Equal(t, runtime.Codex0_153_0().ID(), interpreted.Contract(), "interpreted read-back must carry the Codex runtime contract, never OpenCode or Claude")
 			require.Equal(t, tc.semantic, interpreted.Semantic())
 			identities := make(map[runtime.NativeIdentityKind]string, len(interpreted.Identities()))
 			for _, identity := range interpreted.Identities() {
 				identities[identity.Kind] = identity.Value
 			}
-			require.Equal(t, tc.wantIdentities, identities, "read-back identities must be the provider-correct Codex correlation set")
+			// wantIdentities names the payload member each identity kind is bound
+			// from; the expected value is read from the committed fixture, so the
+			// test follows the capture instead of restating its ids.
+			var payload map[string]any
+			require.NoError(t, json.Unmarshal(raw, &payload))
+			want := make(map[runtime.NativeIdentityKind]string, len(tc.wantIdentities))
+			for kind, member := range tc.wantIdentities {
+				value, ok := payload[member].(string)
+				require.True(t, ok, "fixture %s carries no string member %q for identity %v", tc.fixture, member, kind)
+				want[kind] = value
+			}
+			require.Equal(t, want, identities, "read-back identities must be the provider-correct Codex correlation set")
 		})
 	}
 }

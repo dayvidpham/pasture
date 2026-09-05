@@ -34,14 +34,14 @@ func NewTargetDescriptor(contract ir.RuntimeContractID, skills, agents, hooks Co
 		return TargetDescriptor{}, fmt.Errorf(
 			"claudecode.NewTargetDescriptor: the runtime contract identity is zero or invalid — " +
 				"a target must publish the exact version-bounded contract it was compiled under; " +
-				"construct the identity with ir.NewRuntimeContractID or take it from runtime.ClaudeCode2_1_210().ID()",
+				"construct the identity with ir.NewRuntimeContractID or take it from runtime.ClaudeCode2_1_261().ID()",
 		)
 	}
 	if contract.Harness() != ir.HarnessClaudeCode {
 		return TargetDescriptor{}, fmt.Errorf(
 			"claudecode.NewTargetDescriptor: runtime contract %q is bound to harness %q, not %q — "+
 				"the Claude Code target may publish only a Claude Code runtime contract; "+
-				"supply a claude-code contract such as runtime.ClaudeCode2_1_210().ID()",
+				"supply a claude-code contract such as runtime.ClaudeCode2_1_261().ID()",
 			contract, contract.Harness(), ir.HarnessClaudeCode,
 		)
 	}
@@ -89,14 +89,14 @@ func requireComponent(slot string, component Component, want artifact.Extension)
 }
 
 // Descriptor builds the pinned Claude Code target descriptor from the embedded
-// generated plugin trees and the runtime.ClaudeCode2_1_210 contract. It is the
+// generated plugin trees and the runtime.ClaudeCode2_1_261 contract. It is the
 // single production entry point: it constructs one immutable content-addressed
 // bundle per component and publishes the exact contract identity the artifacts
 // were reviewed against. Skills and agents are published default-off alongside
 // hooks so no component activates without an explicit selection; hooks are
 // additionally side-effecting and must be opted into.
 func Descriptor() (TargetDescriptor, error) {
-	contract := runtime.ClaudeCode2_1_210()
+	contract := runtime.ClaudeCode2_1_261()
 
 	skillsBundle, err := bundleForPluginRoot(skillsPluginRoot)
 	if err != nil {

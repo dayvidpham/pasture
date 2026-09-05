@@ -24,7 +24,7 @@ import (
 // per-host encoders (CodexContinuation, CanonicalProceed) emit for every
 // (harness, response-validity) pair — the encoders the frontendRegistry encode
 // members reference. The Codex shapes are
-// derived from the pinned Codex 0.146.0 command-hook output contract:
+// derived from the pinned Codex 0.153.0 command-hook output contract:
 //
 //   - {"continue":true} — hooks/src/schema.rs HookUniversalOutputWire.continue
 //     is the sole universal directive a blocking PreToolUse gate needs to
@@ -89,9 +89,9 @@ func TestEncodeGoldenNativeContinuationBytes(t *testing.T) {
 // production value rather than a hand-built response.
 func proceedResponse(t *testing.T) backend.HostResponse {
 	t.Helper()
-	raw, err := os.ReadFile("../ingress/codex/testdata/fixtures/pre_tool_use_0_146_0.json")
+	raw, err := os.ReadFile("../ingress/codex/testdata/fixtures/pre_tool_use_0_153_0.json")
 	require.NoError(t, err)
-	manifest := registration.Codex0_146_0()
+	manifest := registration.Codex0_153_0()
 	var event registration.Event
 	for _, candidate := range manifest.Events {
 		if candidate.Kind == registration.EventCodexPreToolUse {
@@ -100,7 +100,7 @@ func proceedResponse(t *testing.T) backend.HostResponse {
 		}
 	}
 	require.NotZero(t, event.Kind)
-	capture := codexingress.Parse(raw, event, registration.Codex0_146_0().Version, model.OccurrenceEnvelopeRef{})
+	capture := codexingress.Parse(raw, event, registration.Codex0_153_0().Version, model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, capture.Disposition)
 	l1, identities, err := codexfrontend.Bind(capture.Delivery.Event, capture.Delivery.Bindings)
 	require.NoError(t, err)

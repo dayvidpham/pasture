@@ -23,7 +23,7 @@ import (
 //
 //  1. Against the BUILT production CLI (TestCodexGeneratedRunnerDrivesBuiltCLI):
 //     after M3 Implementation UAT the committed Codex dispatch enables the two
-//     accepted events via activation.Codex0_146_0(), so the generated runner +
+//     accepted events via activation.Codex0_153_0(), so the generated runner +
 //     built CLI + real temporary storage is the strongest end-to-end M3-P1/P2
 //     proof: PreToolUse emits the exact native continuation {"continue":true}
 //     and SessionStart emits {} on stdout, both exit 0 with durable evidence
@@ -85,14 +85,14 @@ func TestCodexGeneratedRunnerDrivesBuiltCLI(t *testing.T) {
 	binary := filepath.Join(buildDir, "pasture")
 	buildCodexProofCLI(t, root, binary)
 
-	registrationContract := registration.Codex0_146_0().Contract.String()
-	interpretedContract := runtime.Codex0_146_0().ID().String()
+	registrationContract := registration.Codex0_153_0().Contract.String()
+	interpretedContract := runtime.Codex0_153_0().ID().String()
 
 	enabled := []struct {
 		event, fixture, wantStdout, wantSemantic string
 	}{
-		{event: "PreToolUse", fixture: "pre_tool_use_0_146_0.json", wantStdout: `{"continue":true}`, wantSemantic: `"semantic":2`},
-		{event: "SessionStart", fixture: "session_start_0_146_0.json", wantStdout: `{}`, wantSemantic: `"semantic":1`},
+		{event: "PreToolUse", fixture: "pre_tool_use_0_153_0.json", wantStdout: `{"continue":true}`, wantSemantic: `"semantic":2`},
+		{event: "SessionStart", fixture: "session_start_0_153_0.json", wantStdout: `{}`, wantSemantic: `"semantic":1`},
 	}
 	for _, tc := range enabled {
 		tc := tc
@@ -190,7 +190,7 @@ func TestCodexGeneratedRunnerIsTransparentConduit(t *testing.T) {
 	}
 
 	runner := filepath.Join(root, ".codex", "hooks", "events", "PreToolUse.sh")
-	raw := codexIngressFixture(t, root, "pre_tool_use_0_146_0.json")
+	raw := codexIngressFixture(t, root, "pre_tool_use_0_153_0.json")
 
 	cmd := exec.Command("sh", runner)
 	cmd.Stdin = bytes.NewReader(raw)

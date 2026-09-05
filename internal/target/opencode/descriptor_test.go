@@ -16,7 +16,7 @@ func TestDescriptorPublishesIndependentGeneratedBundles(t *testing.T) {
 	t.Parallel()
 	descriptor, err := opencode.Descriptor()
 	require.NoError(t, err)
-	require.Equal(t, runtime.OpenCode1_18_10().ID(), descriptor.RuntimeContractID())
+	require.Equal(t, runtime.OpenCode1_18_29().ID(), descriptor.RuntimeContractID())
 	require.True(t, descriptor.Skills().DefaultEnabled())
 	require.True(t, descriptor.Agents().DefaultEnabled())
 	require.False(t, descriptor.Hooks().DefaultEnabled())

@@ -31,7 +31,7 @@ type corpusFixture struct {
 }
 
 // committedFixtures derives the corpus from the fixture directories beneath
-// this package: every <stem>.json and <stem>.capture.json with its
+// this package: every <stem>.json with its
 // <stem>.provenance.json sidecar. The population is read from disk, so a
 // fixture added by a later capture campaign is covered the day it lands.
 func committedFixtures(t *testing.T) []corpusFixture {
@@ -45,15 +45,10 @@ func committedFixtures(t *testing.T) []corpusFixture {
 		}
 		raw, err := os.ReadFile(path)
 		require.NoError(t, err)
-		stem := strings.TrimSuffix(strings.TrimSuffix(path, ".json"), ".capture")
+		// Every committed fixture is the raw payload the host sent, as the capture
+		// sink wrote it; there is no record wrapper to unwrap.
+		stem := strings.TrimSuffix(path, ".json")
 		payload := raw
-		if strings.HasSuffix(path, ".capture.json") {
-			var record struct {
-				Value json.RawMessage `json:"value"`
-			}
-			require.NoError(t, json.Unmarshal(raw, &record), "%s is not a capture record", path)
-			payload = record.Value
-		}
 		sidecarBytes, err := os.ReadFile(stem + ".provenance.json")
 		require.NoError(t, err, "%s has no provenance sidecar", path)
 		var sidecar map[string]json.RawMessage
@@ -306,46 +301,12 @@ func TestFixtureInventoryReport(t *testing.T) {
 	fmt.Printf("%d payloads inventoried in %s\n", reported, dir)
 }
 
-// freeTextExemptDigests COUNTS the committed fixtures that CARRY FREE TEXT and
-// PREDATE THE REDACTION RULE free-text-v1, keyed by the SHA-256 of their
-// payload bytes. That is the whole population it names, and it is not the
-// clearance exemption: the clearance procedure keeps its own enumerated list
-// of the fixtures that predate that procedure, over a different population
-// and for a different question, and the two lists are kept apart on purpose.
-// A digest key means no other fixture, and no altered copy of these, can
-// claim this exemption.
-//
-// HOW IT IS COUNTED: one entry per committed fixture whose payload the
-// inventory classifies as carrying at least one free-text field and whose
-// sidecar does not declare free-text-v1. The count is the number of entries in
-// this map, len(freeTextExemptDigests), and the corpus walk below is its
-// authority: a fixture that carries free text without the rule and is not
-// listed here fails that walk, so the map can never be smaller than the
-// population; and the loop after the walk fails on any entry that no longer
-// resolves, so the map can never be larger. SIX entries at the time of
-// writing: four Claude fixtures (elicitation, post_tool_batch, post_tool_use,
-// post_tool_use_failure), one Codex fixture (pre_tool_use) and one OpenCode
-// fixture (session_created). The number falls by one each time one of them is
-// re-captured under the rule, and reaches zero when the last goes; at that
-// point this map and its non-vacuity control are deleted together. The
-// non-vacuity control is the loop after the corpus walk: the list is
-// non-empty, every entry must still resolve to a committed fixture that
-// carries free text, and a stale entry is an error.
-var freeTextExemptDigests = map[string]string{
-	"b3a426a5a273ff4a52c5834dc1846295617c706f2427d38a7e40f6b0f0e98112": "claude elicitation_2_1_222.json",
-	"2dd6c5e05902d1a07ca86258ef91adfd7b957118cac5c17d5d888f8b533b5e6e": "claude post_tool_batch_2_1_222.json",
-	"b7de90f8fa0afb1a62f947b311cde85799417e794e5a58305e920d0006bf3da9": "claude post_tool_use_2_1_222.json",
-	"a0ec3e466598b80607b244524e01b859dfb953c5fba3e50ba2546222f73b58b7": "claude post_tool_use_failure_2_1_222.json",
-	"77ea0aa2a208418a2883db0cdb003e6fcf2c62856af515027dbe46270b7812e1": "codex pre_tool_use_0_146_0.json",
-	"07b16ca0c5f9c8ea3948ac31e1509dd6d1d26cb93f5aa0c4456f04ce255f0cc1": "opencode session_created_1_18_10.capture.json",
-}
-
 func TestEveryCommittedFixtureWithFreeTextListsTheFreeTextRule(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{ingress.HomePathRule, ingress.FreeTextRule} {
 		require.True(t, acceptance.RedactionRule(name).IsValid(), "this package names the substitution %q, which the capture provenance does not accept as a redaction rule; the two names must agree, or no sidecar can declare the substitution", name)
 	}
-	seen := map[string]bool{}
+	checked := 0
 	for _, fixture := range committedFixtures(t) {
 		fields, err := ingress.Inventory(fixture.payload)
 		require.NoError(t, err, fixture.name)
@@ -359,10 +320,7 @@ func TestEveryCommittedFixtureWithFreeTextListsTheFreeTextRule(t *testing.T) {
 			continue
 		}
 		rules := redactionRules(t, fixture)
-		if _, exempt := freeTextExemptDigests[fixture.digest]; exempt {
-			seen[fixture.digest] = true
-			continue
-		}
+		checked++
 		hasRule := false
 		for _, rule := range rules {
 			if rule == ingress.FreeTextRule {
@@ -385,10 +343,11 @@ func TestEveryCommittedFixtureWithFreeTextListsTheFreeTextRule(t *testing.T) {
 			assert.Less(t, home, free, "fixture %s lists the rules out of order; %s is applied before %s", fixture.name, ingress.HomePathRule, ingress.FreeTextRule)
 		}
 	}
-	require.NotEmpty(t, freeTextExemptDigests, "the free-text exemption list is empty while this test still exists; delete the list and this control together when the last legacy fixture goes")
-	for digest, name := range freeTextExemptDigests {
-		assert.True(t, seen[digest], "the exemption for %s (%s) names a fixture that no longer exists or no longer carries free text; delete the entry", name, digest)
-	}
+	// Non-vacuity: the corpus carries free text (prompts, tool commands, a
+	// compact summary), so the rule check above ran at least once. No fixture is
+	// exempt; the last legacy fixture left with the corpus captured at these
+	// host versions.
+	require.Positive(t, checked, "no committed fixture carries free text, so the free-text rule was never checked; the corpus walk or the inventory classifier is broken")
 }
 
 func TestNoCommittedFixtureCarriesARefusedClass(t *testing.T) {
