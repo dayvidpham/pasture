@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/engine/budget"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -126,7 +127,8 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 	journal := &blockedJournal{Journal: service.Appender.Journal, reached: make(chan struct{})}
 	abandoned.Appender.Journal = journal
 
-	ctx, cancel := context.WithCancel(context.Background())
+	cancellable, cancel := context.WithCancel(context.Background())
+	ctx := clocklessDeadline{Context: cancellable, at: time.Now().Add(profile.WorkflowResult())}
 	failed := make(chan error, 1)
 	go func() {
 		_, receiveErr := abandoned.Receive(ctx, deliveryWarrant(t, delivery), delivery)
@@ -182,7 +184,7 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 	// The blob is content-addressed, so the orphan of the abandoned run is
 	// adopted by the occurrence rather than duplicated: a retry after an
 	// abandonment reclaims its own orphan.
-	if _, err := service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery); err != nil {
+	if _, err := service.Receive(boundedContext(t, profile), deliveryWarrant(t, delivery), delivery); err != nil {
 		t.Fatalf("the same delivery must commit once the store is free: %v", err)
 	}
 	assertNoOccurrenceNamesAnAbsentBlob(t, tracker, blobs)

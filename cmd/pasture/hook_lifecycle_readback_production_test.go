@@ -108,7 +108,8 @@ func TestNativeListReadBackGoldenBytesUnchanged(t *testing.T) {
 
 func seedRawOriginOccurrence(t *testing.T, dbPath string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.TestProfile().WorkflowResult())
+	defer cancel()
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
 	defer tracker.Close()

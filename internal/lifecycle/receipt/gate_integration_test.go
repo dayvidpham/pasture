@@ -45,7 +45,8 @@ func (o *gateTestOperations) NewOperationID() (string, error) {
 // read-back is non-empty) until L3.
 func TestReceiveGateRefusalLeavesStoreEmpty(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pasture.db")
 

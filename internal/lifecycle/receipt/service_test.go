@@ -4,6 +4,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,8 +114,8 @@ func TestReceiveWritesBlobBeforeOccurrence(t *testing.T) {
 	inputs := []provenance.OperationInput{}
 	clock := testClock{now: time.Unix(10, 0)}
 	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 41}}}}
-	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-order"}}
-	r, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery())
+	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-order"}}
+	r, err := s.Receive(boundedContext(t), mustDeliveryWarrant(), validDelivery())
 	if err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
@@ -145,14 +146,14 @@ func TestReceiveAppendsOccurrenceAndOneExtraInOneOperation(t *testing.T) {
 		applyCount: &applyCount,
 		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 43}}},
 	}
-	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-one-extra"}}
+	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-one-extra"}}
 	interpreted, err := NewInterpreted(mustSessionStartL2(t, "session-1"), mustClaudeLifecycleContract(t), metamodel.Active())
 	if err != nil {
 		t.Fatal(err)
 	}
 	extra := interpreted.Effect()
 
-	receipt, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), extra)
+	receipt, err := s.Receive(boundedContext(t), mustDeliveryWarrant(), validDelivery(), extra)
 	if err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
@@ -181,9 +182,9 @@ func TestReceiveRejectsForgedLifecycleExtraBeforeAppend(t *testing.T) {
 	inputs := []provenance.OperationInput{}
 	clock := testClock{now: time.Unix(10, 0)}
 	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{}}
-	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-forged-extra"}}
+	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-forged-extra"}}
 	forged := provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: interpretedSlot, EvidenceKind: interpretedKind, ContentDigest: []byte{1}, Payload: []byte(`{"semantic":1}`)}
-	if _, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), forged); err == nil {
+	if _, err := s.Receive(boundedContext(t), mustDeliveryWarrant(), validDelivery(), forged); err == nil {
 		t.Fatal("Receive accepted a forged interpreted effect; want validation before Append")
 	}
 	if len(inputs) != 0 {
@@ -201,10 +202,10 @@ func TestReceiveRejectsUnnormalizedBindingsBeforeWrites(t *testing.T) {
 			calls := []string{}
 			inputs := []provenance.OperationInput{}
 			clock := testClock{now: time.Unix(10, 0)}
-			service := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "invalid-binding"}}
+			service := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "invalid-binding"}}
 			delivery := validDelivery()
 			delivery.Bindings = []model.NativeBinding{binding}
-			if _, err := service.Receive(context.Background(), mustDeliveryWarrant(), delivery); err == nil {
+			if _, err := service.Receive(boundedContext(t), mustDeliveryWarrant(), delivery); err == nil {
 				t.Fatal("accepted invalid binding")
 			}
 			if len(calls) != 0 || len(inputs) != 0 {
@@ -226,7 +227,7 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 		applyCount: &applyCount,
 		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 42}}},
 	}
-	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-extras"}}
+	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-extras"}}
 	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), mustClaudeLifecycleContract(t), metamodel.Active())
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +239,7 @@ func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
 	}
 	extraTwo := consultation.Effect()
 
-	receipt, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), extraOne, extraTwo)
+	receipt, err := s.Receive(boundedContext(t), mustDeliveryWarrant(), validDelivery(), extraOne, extraTwo)
 	if err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
@@ -267,8 +268,8 @@ func TestReceiveCrashAfterBlobLeavesNoOccurrence(t *testing.T) {
 	t.Parallel()
 	calls := []string{}
 	clock := testClock{now: time.Unix(10, 0)}
-	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls}, Clock: clock, Deadline: time.Second}, Identity: failingIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-crash"}}
-	if _, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery()); err == nil {
+	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls}, Clock: clock, Deadline: time.Second}, Identity: failingIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-crash"}}
+	if _, err := s.Receive(boundedContext(t), mustDeliveryWarrant(), validDelivery()); err == nil {
 		t.Fatal("Receive succeeded, want simulated crash")
 	}
 	if len(calls) != 1 || calls[0] != "blob" {
@@ -432,4 +433,86 @@ func mustDeliveryWarrant() gate.Warrant {
 		panic(refusal)
 	}
 	return warrant
+}
+
+// boundedContext is the context every accepted delivery in these tests
+// carries: a deadline inside the writer window, released with the test.
+func boundedContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+func refusalService(calls *[]string) Service {
+	clock := testClock{now: time.Unix(10, 0)}
+	j := contextJournal{calls: calls, inputs: &[]provenance.OperationInput{}, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 41}}}}
+	return Service{Window: time.Second, Blobs: orderedBlobs{calls: calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "writer-window"}}
+}
+
+func requireWindowRefusal(t *testing.T, err error, calls []string, phrases ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("Receive must refuse")
+	}
+	for _, phrase := range phrases {
+		if !strings.Contains(err.Error(), phrase) {
+			t.Fatalf("refusal %q must contain %q", err.Error(), phrase)
+		}
+	}
+	if len(calls) != 0 {
+		t.Fatalf("the refusal must come before any I/O; calls = %v", calls)
+	}
+	var structuredErr *pasterrors.StructuredError
+	if !stderrors.As(err, &structuredErr) || structuredErr.Category != pasterrors.CategoryValidation {
+		t.Fatalf("the refusal must be a validation error, got %v", err)
+	}
+}
+
+// TestReceiveRefusesADeliveryWhoseContextCarriesNoDeadline: the writer window
+// is the bound the orphan reclaim ages blobs against, so a writer that could
+// hold the store for ever is refused before any I/O, and the refusal names
+// the tier the window comes from.
+func TestReceiveRefusesADeliveryWhoseContextCarriesNoDeadline(t *testing.T) {
+	t.Parallel()
+	calls := []string{}
+	_, err := refusalService(&calls).Receive(context.Background(), mustDeliveryWarrant(), validDelivery())
+	requireWindowRefusal(t, err, calls, "carries no deadline", "1s writer window", "WorkflowResult tier")
+}
+
+// TestReceiveRefusesADeadlineBeyondTheWriterWindow: a deadline is not enough;
+// it must lie inside the window, or the writer may still outlive the bound.
+func TestReceiveRefusesADeadlineBeyondTheWriterWindow(t *testing.T) {
+	t.Parallel()
+	calls := []string{}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := refusalService(&calls).Receive(ctx, mustDeliveryWarrant(), validDelivery())
+	requireWindowRefusal(t, err, calls, "beyond the 1s writer window", "WorkflowResult tier")
+}
+
+// TestReceiveRefusesAServiceWithoutAWriterWindow: a zero window is a service
+// built outside the production constructor; it refuses rather than defaulting,
+// because a silent zero would disable the bound.
+func TestReceiveRefusesAServiceWithoutAWriterWindow(t *testing.T) {
+	t.Parallel()
+	calls := []string{}
+	s := refusalService(&calls)
+	s.Window = 0
+	_, err := s.Receive(boundedContext(t), mustDeliveryWarrant(), validDelivery())
+	requireWindowRefusal(t, err, calls, "has no writer window", "WorkflowResult tier")
+}
+
+// TestReceiveAcceptsADeadlineInsideTheWindow is the control for the three
+// refusals: a deadline inside the window commits blob then occurrence.
+func TestReceiveAcceptsADeadlineInsideTheWindow(t *testing.T) {
+	t.Parallel()
+	calls := []string{}
+	r, err := refusalService(&calls).Receive(boundedContext(t), mustDeliveryWarrant(), validDelivery())
+	if err != nil {
+		t.Fatalf("a deadline inside the window must be accepted: %v", err)
+	}
+	if r.JournalID() != 41 || len(calls) != 2 {
+		t.Fatalf("accepted delivery must commit blob then occurrence; id=%d calls=%v", r.JournalID(), calls)
+	}
 }

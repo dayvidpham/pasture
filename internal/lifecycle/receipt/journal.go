@@ -76,6 +76,12 @@ func NewSQLiteBlobStore(db *sql.DB, options ...BlobStoreOption) SQLiteBlobStore 
 // snapshot instant taken from the same wall clock in production; a store
 // built without a clock must therefore stamp real time, never zero, or every
 // fresh blob would read as a legacy row older than any bound.
+//
+// This is one of the two INJECTED clocks the age bound reads (the other is the
+// rebuild's snapshot clock). The writer-window refusal in Service.Receive reads
+// the WALL clock instead, because it judges a context deadline; see
+// Service.boundedWriter for the boundary between the two, and script both
+// injected clocks in any test that scripts one.
 func (s SQLiteBlobStore) writeInstant() time.Time {
 	if s.clock == nil {
 		return time.Now()

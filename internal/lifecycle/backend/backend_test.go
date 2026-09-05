@@ -109,6 +109,7 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 	inputs := []provenance.OperationInput{}
 	clock := fixedClock{now: time.Unix(10, 0)}
 	service := receipt.Service{
+		Window:     time.Second,
 		Blobs:      blobFake{calls: &calls},
 		Appender:   receipt.JournalAppender{Journal: journalFake{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second},
 		Identity:   identityFake{},
@@ -130,7 +131,7 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 	if refusal != nil {
 		t.Fatalf("legalize delivery intent: %v", refusal)
 	}
-	if _, err := service.Receive(context.Background(), warrant, delivery, interpreted.Effect(), consultation.Effect()); err != nil {
+	if _, err := service.Receive(boundedContext(t), warrant, delivery, interpreted.Effect(), consultation.Effect()); err != nil {
 		t.Fatalf("Receive() rejected production effects: %v", err)
 	}
 	if len(calls) != 2 || calls[0] != "blob" || calls[1] != "append" {
@@ -239,4 +240,11 @@ func (journalFake) ReplayProjections() (provenance.ReplayResult, error) {
 }
 func (journalFake) MigrateLegacyBaseline(provenance.MigrationInput) (provenance.MigrationResult, error) {
 	return provenance.MigrationResult{}, nil
+}
+
+func boundedContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	t.Cleanup(cancel)
+	return ctx
 }

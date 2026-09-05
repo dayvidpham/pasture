@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/acceptance/origin"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
@@ -41,6 +42,14 @@ type Service struct {
 	Identity   IdentityResolver
 	Clock      Clock
 	Operations OperationIDSource
+	// Window is the longest time any writer may hold between the payload blob
+	// write and the journal append: the WorkflowResult tier of the injected
+	// timeout profile. Receive refuses a context with no deadline, or with a
+	// deadline further away than this, because the orphan reclaim ages
+	// unnamed blobs against exactly this bound and a writer outside it would
+	// be one the reclaim cannot see. Zero refuses every delivery: the value
+	// comes from a validated profile, never from a default.
+	Window time.Duration
 }
 
 type occurrencePayload struct {
@@ -76,6 +85,9 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 	}
 	if s.Blobs == nil || s.Identity == nil || s.Clock == nil || s.Operations == nil {
 		return Receipt{}, structured(pasterrors.CategoryValidation, "The lifecycle receipt service is incompletely wired.", "Blob storage, identity resolution, clock, and operation identity are all required to produce an attributable durable receipt.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "Nothing was recorded.", "Construct the service through the unified production opener with every dependency supplied.", nil)
+	}
+	if err := s.boundedWriter(ctx); err != nil {
+		return Receipt{}, err
 	}
 	body := append([]byte(nil), delivery.Body...)
 	ref := digest.FromBytes(body)
@@ -124,6 +136,36 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 		return Receipt{}, err
 	}
 	return Receipt{OccurrenceID: id}, nil
+}
+
+// boundedWriter refuses a delivery whose caller could hold the store between
+// the blob write and the journal append for longer than the writer window.
+//
+// TWO CLOCKS MEET HERE, AND THE SOURCE SAYS WHICH DECISION READS WHICH. This
+// refusal compares ctx.Deadline() against the WALL clock (time.Until), because
+// a context deadline is a wall-clock instant set by context.WithTimeout,
+// whatever clock the service was given; compared against the injected clock it
+// would refuse every scripted test and bound nothing in production. The AGE of
+// a payload blob, written_at against the rebuild's snapshot instant, reads the
+// INJECTED clocks: the blob store's at the write (SQLiteBlobStore.writeInstant)
+// and the rebuild's at the snapshot. In production all of these are the wall
+// clock, so the window this refusal enforces is the window the reclaim ages
+// against. A test that scripts one injected clock must script the other, and
+// must give its context a real deadline inside the window, because this
+// refusal will not read the scripted clock.
+func (s Service) boundedWriter(ctx context.Context) error {
+	const where = "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive)."
+	if s.Window <= 0 {
+		return structured(pasterrors.CategoryValidation, "The lifecycle receipt service has no writer window (the WorkflowResult tier).", "The window is the WorkflowResult tier of the injected timeout profile; a zero window would leave the time between the payload write and the journal append unbounded, and the orphan reclaim ages blobs against that bound.", where, "Nothing was recorded.", "Construct the service through tasks.NewLifecycleReceiptService, which sets the window from the validated profile.", nil)
+	}
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline {
+		return structured(pasterrors.CategoryValidation, fmt.Sprintf("The lifecycle delivery carries no deadline; every writer must expire within the %s writer window (the WorkflowResult tier).", s.Window), "The window is the longest time a writer may hold between the payload write and the journal append, so that a payload blob older than the window that no occurrence names is known to be abandoned rather than in flight.", where, "Nothing was recorded.", "Call Receive with a context whose deadline lies within the writer window; the native hook derives one from the hook-invocation tier and the raw import from the WorkflowResult tier.", nil)
+	}
+	if remaining := time.Until(deadline); remaining > s.Window {
+		return structured(pasterrors.CategoryValidation, fmt.Sprintf("The lifecycle delivery deadline is %s away, beyond the %s writer window (the WorkflowResult tier).", remaining.Round(time.Millisecond), s.Window), "A writer that may hold the store longer than the WorkflowResult tier is one the orphan reclaim cannot distinguish from an abandoned one.", where, "Nothing was recorded.", "Derive the delivery context from the WorkflowResult tier or a shorter tier of the same profile.", nil)
+	}
+	return nil
 }
 
 // CanonicalizeLifecycleEffects returns the exact evidence effects the journal

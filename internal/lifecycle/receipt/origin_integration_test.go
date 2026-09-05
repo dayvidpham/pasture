@@ -32,7 +32,8 @@ import (
 // must survive the tolerant projection decode.
 func TestRawOriginOccurrenceReadsBackThroughProductionStore(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), timeouts.TestProfile().WorkflowResult())
+	defer cancel()
 	dbPath, cleanup := newBootstrappedTracker(t)
 	defer cleanup()
 
