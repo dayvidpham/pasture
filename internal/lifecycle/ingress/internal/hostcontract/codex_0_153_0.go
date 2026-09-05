@@ -26,17 +26,29 @@ var codexFields = []Field{
 // codexReaderRefusalCost is the blast radius both arms of codexFailureReader
 // report, and it is measured from the import graph rather than assumed.
 //
-// WHAT MAY BE CLAIMED HERE. This package has exactly one caller outside its own
-// tests: the generator internal/lifecycle/ingress/cmd/hostcontractgen. No
-// pasture binary links it (it is in the dependency set of none of the five
-// commands under cmd/). The Codex hook path admits with the COMMITTED
-// internal/lifecycle/registration/codex_0_153_0.gen.go, which is plain Go data
-// and calls nothing here. So a refusal here stops REGENERATION and never
-// admission, and the message must say the smaller, true thing: a maintainer who
-// is told the product is down looks for an outage that is not there.
+// THE MEASUREMENT THAT SUPPORTS THE COST. "go list -deps ./cmd/..." names this
+// package ZERO times, with and without the recovery build tag, so no pasture
+// binary links it. The Codex hook path admits with the COMMITTED
+// internal/lifecycle/registration/codex_0_153_0.gen.go, which
+// internal/handlers/hook_lifecycle.go reads as plain Go data and which calls
+// nothing here. The generator builds all three harness catalogs before it
+// writes any file, so a refusal here leaves every generated file with the bytes
+// it has. So a refusal here stops REGENERATION and never admission, and the
+// message must say the smaller, true thing: a maintainer who is told the
+// product is down looks for an outage that is not there.
+//
+// THE MESSAGE DOES NOT NAME AN EXCLUSIVE CALLER, and that is deliberate. An
+// earlier wording called the generator the only caller of this catalog outside
+// this package's own tests. "go list -f '{{.TestImports}} {{.XTestImports}}'
+// ./..." names FOUR packages whose tests build this catalog, so a driven
+// refusal reddens several packages in one run, and a reader of one of the
+// others was told by this message that it was not a caller. A caller set moves
+// whenever somebody writes a test; the cost does not. State the cost, and say
+// that more than one package goes red, rather than count the callers.
 const codexReaderRefusalCost = "WHAT IT COSTS: code generation stops here and admission does not. " +
-	"The generator internal/lifecycle/ingress/cmd/hostcontractgen is the only caller of this catalog outside this package's own tests, " +
-	"and it renders every harness in one pass, so make generate writes no file for any harness and the committed generated files keep the bytes they have. " +
+	"The generator internal/lifecycle/ingress/cmd/hostcontractgen builds this catalog and renders every harness in one pass, " +
+	"so make generate writes no file for any harness and the committed generated files keep the bytes they have. " +
+	"Anything else that builds this catalog stops with this same message, so expect more than one red package in one run rather than a second, separate defect. " +
 	"A running pasture is unaffected: no pasture binary links this package, and a Codex hook is still admitted from the committed internal/lifecycle/registration/codex_0_153_0.gen.go. " +
 	"HOW TO REPAIR: "
 

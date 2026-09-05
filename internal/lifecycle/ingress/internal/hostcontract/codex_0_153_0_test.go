@@ -108,12 +108,20 @@ func TestEveryCodexCatalogRowCarriesTheRuntimeFailureMode(t *testing.T) {
 // must name the event and both files, because the repair is in one of them.
 //
 // It also pins the COST the message states, and the cost is measured from the
-// import graph. This package has one caller outside its own tests, the generator
-// internal/lifecycle/ingress/cmd/hostcontractgen, and no pasture binary links
-// it, so a refusal here stops code generation and NEVER admission: a Codex hook
-// is still admitted from the committed generated manifest. A message that told
-// the reader the product was down for Codex would send that person to look for
-// an outage that is not there, so the phrase is held here.
+// import graph: "go list -deps ./cmd/..." names this package zero times, with
+// and without the recovery build tag, so no pasture binary links it and a
+// refusal here stops code generation and NEVER admission. A Codex hook is still
+// admitted from the committed generated manifest. A message that told the
+// reader the product was down for Codex would send that person to look for an
+// outage that is not there, so the phrase is held here.
+//
+// It ALSO pins that the message names no exclusive caller. FOUR packages build
+// this catalog in their tests, so a driven refusal reddens several packages in
+// one run. While the message called the generator the only caller outside this
+// package's own tests, a reader of one of the other red packages was told by
+// the message itself that it was not a caller, and had to decide whether that
+// red was a second, separate defect. The retired exclusivity phrasings are
+// refused below, so the class cannot come back in a new wording.
 func TestTheCodexFailureReaderRefusesAnEventTheProfileDoesNotDeclare(t *testing.T) {
 	t.Parallel()
 
@@ -139,10 +147,21 @@ func TestTheCodexFailureReaderRefusesAnEventTheProfileDoesNotDeclare(t *testing.
 		"internal/runtime/lifecycle_profiles_codex.go",
 		"code generation stops here and admission does not",
 		"a Codex hook is still admitted from the committed internal/lifecycle/registration/codex_0_153_0.gen.go",
+		"Anything else that builds this catalog stops with this same message, so expect more than one red package in one run",
 		"then run make generate",
 	} {
 		require.Containsf(t, message, phrase,
 			"the refusal must carry %q, so the reader learns which event failed, where it failed, what it costs and where the repair goes", phrase)
+	}
+	for _, retired := range []string{
+		"the only caller of this catalog",
+		"exactly one caller",
+		"one caller outside its own tests",
+	} {
+		require.NotContainsf(t, message, retired,
+			"the refusal must not name an exclusive caller, and it carries the retired phrase %q. FOUR packages build this catalog in their tests, "+
+				"so a driven refusal reddens several packages in one run; a reader of one of the others is then told by this message that it is not a caller, "+
+				"and goes hunting a cause that is not there. State the cost and say that several packages go red, and count no callers", retired)
 	}
 	require.NotContains(t, message, "no Codex hook can be admitted",
 		"the refusal must not claim admission stops: no pasture binary links this package, and the Codex hook path admits with the committed generated manifest, "+
