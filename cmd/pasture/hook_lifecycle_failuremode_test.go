@@ -5709,6 +5709,7 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_failuremode_test.go",
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
+	"hook_lifecycle_raw_test.go",
 }
 
 // guardSweepForeign are the package's other test files, which this slice did
@@ -5719,7 +5720,6 @@ var guardSweepForeign = map[string]string{
 	"hook_lifecycle_context_production_test.go":  "not changed by this slice",
 	"hook_lifecycle_gate_test.go":                "not changed by this slice",
 	"hook_lifecycle_lineage_production_test.go":  "not changed by this slice",
-	"hook_lifecycle_raw_test.go":                 "not changed by this slice",
 	"hook_lifecycle_readback_production_test.go": "not changed by this slice",
 	"hook_test.go":                               "not changed by this slice",
 	"install_frontend_test.go":                   "not changed by this slice",

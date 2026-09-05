@@ -2,13 +2,22 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/stretchr/testify/assert"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -96,6 +105,13 @@ func TestRawLifecycleGateFlowMirrorsNative(t *testing.T) {
 // shape the native hook would not have emitted for the same payload (review
 // IMPORTANT-1: the former hardcoded rawAcknowledge printed a Proceed object
 // for every event including observations).
+//
+// WHAT IT VISITS: four hand-listed rows, the two enabled Claude events and
+// the two enabled Codex events, one observation and one gate each, driven
+// through the built binary on both surfaces.
+// WHAT IT DOES NOT READ: the OpenCode surface, for which this table holds no
+// row; and any event outside the four, so a continuation class that only a
+// later-enabled event exercises is not covered here.
 func TestRawContinuationParityWithNativePerEvent(t *testing.T) {
 	t.Parallel()
 
@@ -628,4 +644,136 @@ func TestRawDryRunRefusesIdentically(t *testing.T) {
 			require.Contains(t, previewStderr, tc.want)
 		})
 	}
+}
+
+// TestTheRawPathRunsUnderTheWorkflowResultTier is the source pin for the raw
+// import deadline. It reads every non-test source of this command and
+// requires exactly one call to handlers.HookLifecycleRaw, whose context is
+// the `ctx` derived immediately before it by
+// context.WithTimeout(cmd.Context(), timeouts.ProductionProfile().WorkflowResult()).
+//
+// The deadline is what makes the age bound on orphan payload blobs a true
+// claim: every writer's window between its blob write and its journal append
+// is then bounded by the WorkflowResult tier. The mutation that turns this RED
+// is passing cmd.Context() to the handler again, or deriving the deadline from
+// another tier.
+//
+// WHAT IT VISITS: every non-test Go source of this command, by glob.
+// WHAT IT DOES NOT READ: the handler, whose own use of the context is proved
+// by TestARawImportWhoseDeadlineHasPassedCommitsNothing below.
+func TestTheRawPathRunsUnderTheWorkflowResultTier(t *testing.T) {
+	t.Parallel()
+	sources, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	calls := 0
+	for _, name := range sources {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		require.NoError(t, parseErr)
+		for _, declaration := range file.Decls {
+			ast.Inspect(declaration, func(node ast.Node) bool {
+				call, isCall := node.(*ast.CallExpr)
+				if !isCall || sourceOf(call.Fun) != "handlers.HookLifecycleRaw" {
+					return true
+				}
+				calls++
+				require.Len(t, call.Args, 2)
+				assert.Equal(t, "ctx", sourceOf(call.Args[0]), "%s must pass the bounded context, never cmd.Context() itself", name)
+				// The derivation stands immediately before the call, in the
+				// same block, so nothing can run under the raw context unbounded.
+				block := enclosingBlockOf(declaration, call)
+				require.NotNil(t, block, "the raw handler call must sit in a block this pin can read")
+				derived := false
+				for index, statement := range block.List {
+					if !containsNode(statement, call) {
+						continue
+					}
+					require.Greater(t, index, 1, "the context derivation and its cancel must precede the call")
+					assert.Equal(t, "ctx, cancel := context.WithTimeout(cmd.Context(), timeouts.ProductionProfile().WorkflowResult())", sourceOfNode(block.List[index-2]),
+						"%s must derive the raw context from the WorkflowResult tier of the production profile, the longest writer window", name)
+					assert.Equal(t, "defer cancel()", sourceOfNode(block.List[index-1]))
+					derived = true
+				}
+				assert.True(t, derived, "the derivation was not found before the handler call")
+				return true
+			})
+		}
+	}
+	assert.Equal(t, 1, calls, "exactly one production entry into the raw handler exists")
+}
+
+// enclosingBlockOf returns the innermost block statement that contains target.
+func enclosingBlockOf(root ast.Node, target ast.Node) *ast.BlockStmt {
+	var found *ast.BlockStmt
+	ast.Inspect(root, func(node ast.Node) bool {
+		block, isBlock := node.(*ast.BlockStmt)
+		if isBlock && containsNode(block, target) {
+			found = block
+		}
+		return true
+	})
+	return found
+}
+
+// containsNode reports whether target appears inside root.
+func containsNode(root ast.Node, target ast.Node) bool {
+	found := false
+	ast.Inspect(root, func(node ast.Node) bool {
+		if node == target {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// TestARawImportWhoseDeadlineHasPassedCommitsNothing drives the raw handler in
+// process with a context whose deadline has already passed and a valid,
+// enabled payload: the store refuses the write window, no occurrence is
+// committed, and the diagnostic names the deadline. Run through the
+// production handler and the production store; the context is the only thing
+// the test supplies.
+//
+// It is serial: it opens a real store through the command's store path.
+func TestARawImportWhoseDeadlineHasPassedCommitsNothing(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancel()
+
+	_, err := handlers.HookLifecycleRaw(ctx, handlers.HookLifecycleRawInput{
+		DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: "SessionStart", HostVersion: "2.1.222",
+		SchemaVersion: handlers.RawSchemaVersion("claude-code/2.1.210"),
+		Input:         bytes.NewReader(claudeFixture(t, "session_start_2_1_222.json")),
+		Clock:         lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+	})
+	require.Error(t, err, "an expired deadline must stop the import")
+	assert.Contains(t, err.Error(), "context deadline exceeded", "the refusal must carry the deadline as its cause")
+
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	size, err := model.NewPageSize(1)
+	require.NoError(t, err)
+	page, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: size}})
+	require.NoError(t, err)
+	assert.Empty(t, page.Records(), "no occurrence may be committed past the deadline")
+}
+
+// TestTheRawDeadlineDiagnosticNamesTheTierAndTheStoreState pins the load-bearing
+// phrases of the sentence a raw import reads at its deadline: the tier, that
+// no occurrence was committed, and that the blob is a reclaimable orphan.
+func TestTheRawDeadlineDiagnosticNamesTheTierAndTheStoreState(t *testing.T) {
+	t.Parallel()
+	text := rawDeadlineDiagnostic(timeouts.ProductionProfile().WorkflowResult(), "SessionStart", "claude-code")
+	assert.Contains(t, text, "stopped at its 30s import deadline")
+	assert.Contains(t, text, "no occurrence was committed for this payload")
+	assert.Contains(t, text, "the payload blob it may have written is a reclaimable orphan")
+	assert.Contains(t, text, `event "SessionStart" of harness "claude-code"`)
 }
