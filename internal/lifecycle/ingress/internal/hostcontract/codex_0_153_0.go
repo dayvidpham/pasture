@@ -153,19 +153,23 @@ func Codex0_153_0() Contract {
 		{Field: fCodexToolUseID, Binding: model.BindingToolCall, Required: true},
 	}
 
-	// SessionEnd is emitted by the host at 0.153.0 (codex-rs/core/src/hook_runtime.rs:378-392,
-	// root session only) and still at 0.153.0 (:464-478). It was absent from this catalogue
-	// although the host emitted it all along, so the catalogue was 10 of 11. The emitter
-	// declares session_id, transcript_path, cwd, hook_event_name and reason
-	// (codex-rs/hooks/src/events/session_end.rs:64-68): that is the cited payload SHAPE, not a
-	// declared identity. Like every other unproven Codex row, this row declares no identity and
-	// no payload field until an authentic capture proves what the host writes on the wire.
+	// SessionEnd was emitted by the host before this catalogue held it, and BOTH
+	// pinned versions emit it from the SAME function, run_session_end_hooks:
+	// codex-rs/core/src/hook_runtime.rs:369 at rust-v0.146.0 (root session only at
+	// :378-382) and :455 at rust-v0.153.0 (root session only at :464-468). The
+	// emitter serializes session_id, transcript_path, cwd, hook_event_name and
+	// reason (codex-rs/hooks/src/events/session_end.rs:64-68 at rust-v0.153.0):
+	// that is the cited payload SHAPE, not a declared identity. Like every other
+	// unproven Codex row, this row declares no identity and no payload field until
+	// an authentic capture proves what the host writes on the wire.
 	sessionEnd := observe(11, "EventCodexSessionEnd", "SessionEnd")
-	// Interrupt is emitted from 0.153.0 (the HookEventName arm and
-	// codex-rs/hooks/src/events/interrupt.rs arrived between 0.146.0 and 0.153.0).
-	// The emitter declares session_id, turn_id, transcript_path, cwd and
-	// hook_event_name: the cited shape, not declared identities, for the same
-	// reason as SessionEnd above.
+	// Interrupt arrived BETWEEN the two pinned versions. At rust-v0.146.0 there is
+	// no codex-rs/hooks/src/events/interrupt.rs and no interrupt emitter in
+	// codex-rs/core/src/hook_runtime.rs; at rust-v0.153.0 both exist, and the
+	// emitter is run_turn_interrupt_hooks at :486. It serializes session_id,
+	// turn_id, transcript_path, cwd, hook_event_name, model and permission_mode
+	// (codex-rs/hooks/src/events/interrupt.rs:76-82 at rust-v0.153.0): the cited
+	// shape, not declared identities, for the same reason as SessionEnd above.
 	interrupt := observe(12, "EventCodexInterrupt", "Interrupt")
 
 	// WHERE EACH ROW WAS READ IN THE HOST, at tag rust-v0.153.0 of
