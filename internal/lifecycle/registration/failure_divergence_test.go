@@ -178,6 +178,19 @@ func TestTheOverClaimingRowsAreNamedSeparately(t *testing.T) {
 	}
 }
 
+// staleManifestFirst is the state to rule out FIRST whenever a Codex
+// measurement in this file disagrees with a committed sentence or a recorded
+// set. Every measured value here reads the COMMITTED generated manifest, so a
+// change to the runtime profile or to the source catalogue moves one side of a
+// comparison at once and the other side only after generation. A reader who is
+// not told this edits a sentence, or widens a recorded set, to match a number
+// the next generation takes back.
+//
+// It is one string and not four, because four copies of one sentence drift.
+const staleManifestFirst = " The measured side reads the COMMITTED generated manifest internal/lifecycle/registration/codex_0_153_0.gen.go. " +
+	"So if internal/runtime/lifecycle_profiles_codex.go or the source catalogue has moved and make generate has not run since, RUN IT FIRST: " +
+	"until it runs this measurement is taken against a stale manifest, and a repair made by hand is undone by the next generation."
+
 // codexDivergenceCounts is every number and every name the two committed Codex
 // doc comments state about the two artefacts, derived from the tree at head.
 type codexDivergenceCounts struct {
@@ -299,8 +312,9 @@ func deriveCodexDivergenceCounts(t *testing.T) codexDivergenceCounts {
 		case len(event.Identities) == 0 && len(mapping.Identities()) > 0:
 			counts.identityAbsent = append(counts.identityAbsent, event.NativeName)
 		case len(event.Identities) != len(mapping.Identities()):
-			t.Errorf("the Codex catalogue declares %d identities on row %q and the runtime profile declares %d; "+
-				"the doc comments describe the identity difference as rows where the catalogue declares NONE, and this row is a third case they do not cover",
+			t.Errorf("the committed Codex manifest declares %d identities on row %q and the runtime profile declares %d; "+
+				"the doc comments describe the identity difference as rows where the manifest declares NONE, and this row is a third case they do not cover."+
+				staleManifestFirst,
 				len(event.Identities), event.NativeName, len(mapping.Identities()))
 		}
 	}
@@ -434,10 +448,8 @@ func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
 	for _, pin := range pins {
 		if !strings.Contains(pin.text, pin.sentence) {
 			t.Errorf("the committed file %s does not state the count the tree derives; it must carry the sentence %q. "+
-				"A count in a doc comment is a claim about the tree: sweep it in the commit that moves it. "+
-				"EVERY count above is derived from the COMMITTED generated manifest internal/lifecycle/registration/codex_0_153_0.gen.go. "+
-				"So if you have changed internal/runtime/lifecycle_profiles_codex.go or the source catalogue and have not yet run make generate, RUN IT FIRST: "+
-				"the number this message asks for is then measured against a stale manifest, and sweeping the sentence by hand would write a count the next generation undoes",
+				"A count in a doc comment is a claim about the tree: sweep it in the commit that moves it."+
+				staleManifestFirst,
 				pin.path, pin.sentence)
 		}
 	}
@@ -624,13 +636,15 @@ func TestTheCodexArtefactsDisagreeOnExactlyTheseOtherAxes(t *testing.T) {
 		},
 	} {
 		if len(axis.got) != len(axis.want) {
-			t.Errorf("the two Codex artefacts disagree on %s for %d rows %v, want exactly %d %v; %s",
+			t.Errorf("the two Codex artefacts disagree on %s for %d rows %v, want exactly %d %v; %s."+
+				staleManifestFirst,
 				axis.name, len(axis.got), axis.got, len(axis.want), axis.want, axis.why)
 			continue
 		}
 		for index := range axis.want {
 			if axis.got[index] != axis.want[index] {
-				t.Errorf("the two Codex artefacts disagree on %s for rows %v, want %v; %s",
+				t.Errorf("the two Codex artefacts disagree on %s for rows %v, want %v; %s."+
+					staleManifestFirst,
 					axis.name, axis.got, axis.want, axis.why)
 				break
 			}
