@@ -79,6 +79,19 @@ const (
 	// decision: a row that carries it names the CLEARANCE.md where the
 	// decision is recorded.
 	WithheldEmittedOutsideTransport
+	// WithheldTriggerNotExercised records that the host CAN fire the event,
+	// and WE chose not to produce the condition that fires it. Its two limbs
+	// are (a) a setting we will not impose on the capturing user's host
+	// configuration, and (b) a condition we will not induce (for example a
+	// real API failure). It is a user decision: a row that carries it names
+	// the CLEARANCE.md where the decision, and which limb applies, is
+	// recorded.
+	//
+	// It does NOT cover a row nobody knows how to fire: that case is
+	// WithheldNoReachableTrigger, unchanged by this reason. It does NOT cover
+	// a row that was captured under a disclosed non-default configuration:
+	// that row is enabled, with the configuration stated beside its fixture.
+	WithheldTriggerNotExercised
 	// numWithheldReasons is the sentinel that closes the enum. A new arm goes
 	// above it, and IsValid and AllWithheldReasons widen with it; String must
 	// then name the arm or the enum-sync test turns red naming it.
@@ -94,7 +107,8 @@ func (r WithheldReason) IsValid() bool {
 func (r WithheldReason) RequiresClearance() bool {
 	switch r {
 	case WithheldNoReachableTrigger, WithheldUnclearablePayload,
-		WithheldProviderHook, WithheldNotEmittedByHost, WithheldEmittedOutsideTransport:
+		WithheldProviderHook, WithheldNotEmittedByHost, WithheldEmittedOutsideTransport,
+		WithheldTriggerNotExercised:
 		return true
 	default:
 		return false
@@ -134,6 +148,8 @@ func (r WithheldReason) String() string {
 		return "not-emitted-by-host"
 	case WithheldEmittedOutsideTransport:
 		return "emitted-outside-transport"
+	case WithheldTriggerNotExercised:
+		return "trigger-not-exercised"
 	default:
 		return ""
 	}
@@ -432,9 +448,9 @@ func NewWithheld(event model.ContractEventKind, reason WithheldReason) (Entry, e
 
 // NewWithheldByDecision builds a withheld entry for a reason that records a
 // user decision (no reachable trigger, unclearable payload, provider hook,
-// not emitted by host, emitted outside transport). The clearance is the
-// committed CLEARANCE.md path that holds the decision; it is validated by the
-// same rule a capture sidecar's clearance is. For WithheldNotEmittedByHost
+// not emitted by host, emitted outside transport, trigger not exercised). The
+// clearance is the committed CLEARANCE.md path that holds the decision; it is
+// validated by the same rule a capture sidecar's clearance is. For WithheldNotEmittedByHost
 // specifically, the acceptance rule is stricter than an empty-path check: the
 // recorded decision at that path must cite the search that found no emission
 // site (the file and symbol searched, at the recorded host version), never
