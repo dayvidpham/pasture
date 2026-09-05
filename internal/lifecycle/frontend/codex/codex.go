@@ -12,15 +12,19 @@
 // MEASURED: the self-contained ingress catalogue
 // (internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, read by the
 // handler's admission) and the runtime Codex profile (read by Bind) disagree on
-// every registered event on at least one axis: the failure mode on all ten
+// every registered event on at least one axis: the failure mode on 11 of the 12
 // (the catalogue declares report-and-continue or exit-2-blocks where the profile
 // declares strict-hook-failure or a demoted exit-2-blocks), the mutation mode on
 // PreToolUse and PostToolUse, the blocking mode on PostCompact, and the declared
-// identities on the eight events without an authentic capture. The frontend
+// identities on the 10 events without an authentic capture. The frontend
 // binds with the profile's row; the handler admits with the catalogue's row.
 // Re-deriving the catalogue from the profile is the OpenCode-style remedy and is
-// separate work; until it lands, this package states the divergence and does not
-// call it inert.
+// separate work; until it lands, this package states the divergence.
+//
+// The counts above are read back from the tree by
+// internal/lifecycle/registration/failure_divergence_test.go, so a new
+// registration or a new capture turns that test RED instead of leaving a stale
+// number here.
 package codex
 
 import (

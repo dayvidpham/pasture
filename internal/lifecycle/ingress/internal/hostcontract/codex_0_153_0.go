@@ -33,18 +33,27 @@ var codexFields = []Field{
 // configured-hook ingress smoke observation and is never treated as
 // semantically identical to the OpenCode session.created aggregate.
 //
-// Known divergence, and why it is inert. This catalog and the runtime Codex
-// profile (internal/runtime/lifecycle_profiles.go) both describe the Codex
-// event set, and they disagree on the 9 events that have no authentic capture,
-// which are every Codex gate plus the SessionEnd and SubagentStart observations. This source declares no identities for them,
-// and it declares a BLOCKING failure mode for all 7 of its gate rows while the
-// runtime profile now declares none: a blocking exit code needs a citation, and
-// the Codex rows carry none yet. So this source OVER-CLAIMS blocking relative
-// to the runtime profile; it does not merely simplify it. The Codex frontend
-// (internal/lifecycle/frontend/codex) binds ONLY the 2 authenticity-proven
-// events and rejects the other 9, so the diverging metadata never reaches
-// ingest. The runtime profile is the authority for non-ingress event semantics,
+// Known divergence. This catalog and the runtime Codex profile
+// (internal/runtime/lifecycle_profiles.go) both describe the Codex event set,
+// and they disagree. Of the 12 registered Codex events, 10 have no authentic
+// capture, and this source declares no identities for any of those 10. On the
+// failure mode the two artefacts disagree on 11 rows, and on 7 of those this
+// source declares a BLOCKING failure mode while the runtime profile declares
+// none: a blocking exit code needs a citation, and the Codex rows carry none
+// yet. So this source OVER-CLAIMS blocking relative to the runtime profile; it
+// does not merely simplify it.
+//
+// The diverging metadata never reaches ingest, and the mechanism that stops it
+// is the ACTIVATION TABLE, which withholds every event without a capture proof
+// before Bind is reached. It is not the frontend: the Codex frontend mapping
+// (internal/lifecycle/frontend/codex) is complete over all 12 registered
+// events. The runtime profile is the authority for non-ingress event semantics,
 // and it is the one to believe when the two disagree.
+//
+// The counts above are read back from the tree by
+// internal/lifecycle/registration/failure_divergence_test.go, so a new
+// registration or a new capture turns that test RED instead of leaving a stale
+// number here.
 //
 // Re-derive this catalog from the runtime profile once every Codex event has an
 // authentic capture and a production proof. Until then, keep the two

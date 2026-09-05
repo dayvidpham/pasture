@@ -1,10 +1,14 @@
 package registration_test
 
 import (
+	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
@@ -42,7 +46,7 @@ import (
 // governs behaviour. It is 22 rows, and it is NOT the same set as the rows the
 // evidence rule demoted, which is a distinction worth keeping straight:
 //
-//   - 18 rows OVER-CLAIM BLOCKING: 11 Claude rows and 7 of the 8 Codex gates.
+//   - 18 rows OVER-CLAIM BLOCKING: 11 Claude rows and all 7 Codex gates.
 //     The manifest says the host refuses on the pasture exit code; the runtime
 //     says report-and-continue, because the row cites no host evidence for that
 //     claim. Believing the manifest is the dangerous mistake here.
@@ -57,7 +61,7 @@ import (
 //     agree about what the event IS.
 //
 // The count differs from the count of rows the evidence rule demoted (11 Claude
-// plus all 8 Codex gates). The two sets overlap and are not the same question:
+// plus all 7 Codex gates). The two sets overlap and are not the same question:
 // one asks what the runtime profile changed, the other asks where the two
 // committed artefacts disagree today.
 var divergentRows = map[ir.HarnessID][]string{
@@ -192,6 +196,134 @@ func TestTheOverClaimingRowsAreNamedSeparately(t *testing.T) {
 		overClaiming += len(names)
 	}
 	if overClaiming != 18 {
-		t.Fatalf("%d rows over-claim blocking, want 18 of the 20 divergent rows", overClaiming)
+		t.Fatalf("%d rows over-claim blocking, want 18 of the 22 divergent rows", overClaiming)
+	}
+}
+
+// codexDivergenceCounts is every number the two committed Codex doc comments
+// state about the divergence, derived from the tree at head.
+type codexDivergenceCounts struct {
+	registered      int
+	withoutCapture  int
+	failureDiverged int
+	overClaiming    int
+	catalogueGates  int
+}
+
+// deriveCodexDivergenceCounts measures the counts from the product's own
+// sources: the generated Codex registration manifest, the Codex activation
+// manifest (which refuses an entry with no event-bound capture proof) and the
+// runtime Codex profile. Nothing here is typed by hand, so a new registration
+// or a new capture moves every number at once.
+func deriveCodexDivergenceCounts(t *testing.T) codexDivergenceCounts {
+	t.Helper()
+
+	manifest := registration.Codex0_153_0()
+	counts := codexDivergenceCounts{registered: len(manifest.Entries())}
+	for _, event := range manifest.Entries() {
+		runtimeRow, declared := pastureruntime.LookupLifecycleFailure(ir.HarnessCodex, event.NativeName)
+		if !declared {
+			t.Fatalf("manifest event %q of harness %q is not declared by the runtime profile", event.NativeName, ir.HarnessCodex)
+		}
+		if event.Failure != runtimeRow.Mode {
+			counts.failureDiverged++
+		}
+		if event.Failure.BlocksByExitCode() {
+			counts.catalogueGates++
+			if !runtimeRow.Mode.BlocksByExitCode() {
+				counts.overClaiming++
+			}
+		}
+	}
+
+	entries, err := activation.Codex0_153_0()
+	if err != nil {
+		t.Fatalf("the Codex activation manifest does not derive: %v", err)
+	}
+	if len(entries) != counts.registered {
+		t.Fatalf("the Codex activation manifest holds %d entries for %d registered events; the two must be exhaustive over each other",
+			len(entries), counts.registered)
+	}
+	for _, entry := range entries {
+		if !entry.CaptureProof.IsValid() {
+			counts.withoutCapture++
+		}
+	}
+	return counts
+}
+
+// codexDocComments are the two committed files that state the divergence in
+// prose. Both are read by a maintainer to learn what diverges and what stops
+// it, so both are held to the tree they describe.
+var codexDocComments = []string{
+	"../ingress/internal/hostcontract/codex_0_153_0.go",
+	"../frontend/codex/codex.go",
+}
+
+// readCodexDocComment reads one source file and flattens its comment text, so a
+// sentence that wraps over several comment lines is one string to search.
+func readCodexDocComment(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the committed file %q cannot be read, so its counts cannot be held: %v", path, err)
+	}
+	return strings.Join(strings.Fields(strings.ReplaceAll(string(raw), "//", " ")), " ")
+}
+
+// TestTheCodexDocCommentsStateTheDerivedCounts holds every count the two Codex
+// doc comments state against the count derived from the tree. A count in prose
+// is a claim about the tree, and this repository has already watched one of
+// them rot: the "events without an authentic capture" number was swept when a
+// row was added and not swept when the next row was added.
+//
+// The pin is a READ, not a second hand-maintained number: each expected
+// sentence is built from the derived count, so a new registration or a new
+// capture turns this test RED naming the file and the sentence it must carry.
+func TestTheCodexDocCommentsStateTheDerivedCounts(t *testing.T) {
+	t.Parallel()
+
+	counts := deriveCodexDivergenceCounts(t)
+	catalogue := readCodexDocComment(t, codexDocComments[0])
+	frontend := readCodexDocComment(t, codexDocComments[1])
+
+	pins := []struct {
+		path     string
+		text     string
+		sentence string
+	}{
+		{codexDocComments[0], catalogue, fmt.Sprintf("Of the %d registered Codex events, %d have no authentic capture", counts.registered, counts.withoutCapture)},
+		{codexDocComments[0], catalogue, fmt.Sprintf("the two artefacts disagree on %d rows, and on %d of those this source declares a BLOCKING failure mode", counts.failureDiverged, counts.overClaiming)},
+		{codexDocComments[1], frontend, fmt.Sprintf("the failure mode on %d of the %d", counts.failureDiverged, counts.registered)},
+		{codexDocComments[1], frontend, fmt.Sprintf("identities on the %d events without an authentic capture", counts.withoutCapture)},
+	}
+	for _, pin := range pins {
+		if !strings.Contains(pin.text, pin.sentence) {
+			t.Errorf("the committed file %s does not state the count the tree derives; it must carry the sentence %q. "+
+				"A count in a doc comment is a claim about the tree: sweep it in the commit that moves it",
+				pin.path, pin.sentence)
+		}
+	}
+
+	// The mechanism sentence, and the claim it replaced. The frontend mapping is
+	// complete over every registered event, so the frontend rejects nothing; the
+	// activation table is what withholds an event without a capture proof.
+	if !strings.Contains(catalogue, "the mechanism that stops it is the ACTIVATION TABLE") {
+		t.Errorf("the committed file %s must name the activation table as the mechanism that withholds an event without a capture proof",
+			codexDocComments[0])
+	}
+	for _, retired := range []string{"and why it is inert", "rejects the other"} {
+		if strings.Contains(catalogue, retired) {
+			t.Errorf("the committed file %s still carries the retired claim %q", codexDocComments[0], retired)
+		}
+	}
+
+	// Non-vacuity: a derivation that measures nothing would pass every pin above.
+	if counts.registered == 0 || counts.withoutCapture == 0 || counts.failureDiverged == 0 || counts.overClaiming == 0 {
+		t.Fatalf("the derived Codex counts are %+v; a zero means the derivation reads nothing and the pins above prove nothing", counts)
+	}
+	if counts.catalogueGates != len(overClaimsBlocking[ir.HarnessCodex]) {
+		t.Errorf("the Codex catalogue declares %d gate rows and %d of them over-claim blocking; while the runtime profile cites no Codex evidence the two counts are equal, and the notes that say so must be swept together",
+			counts.catalogueGates, len(overClaimsBlocking[ir.HarnessCodex]))
 	}
 }
