@@ -1,10 +1,5 @@
 contracts:
   - harness: claude-code
-    id: claude-code/claude-code@2.1.210
-    version: 2.1.210
-    max_version: 2.2.0-0
-    lower: 2.1.209
-    higher: 2.2.0
     event_order:
       - SessionStart
       - Setup
@@ -343,10 +338,6 @@ contracts:
 
   - harness: codex
     unresolved_by_event: {}
-    id: codex/codex@0.146.0
-    version: 0.146.0
-    lower: 0.145.0
-    higher: 0.146.1
     event_order:
       - SessionStart
       - UserPromptSubmit
@@ -497,10 +488,6 @@ contracts:
 
   - harness: opencode
     unresolved_by_event: {}
-    id: opencode/opencode@1.18.10
-    version: 1.18.10
-    lower: 1.18.9
-    higher: 1.18.11
     event_order:
       - command.executed
       - file.edited

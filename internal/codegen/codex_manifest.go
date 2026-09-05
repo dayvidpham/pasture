@@ -11,7 +11,7 @@
 // boundary. When selected, Codex loads the generated per-event command runners;
 // none of these files installs a Git hook or changes core.hooksPath.
 //
-// Transport shape (Codex 0.146.0, Python-free per #65 and Phase 8 decision 2):
+// Transport shape (Codex at the recorded version, Python-free per #65 and Phase 8 decision 2):
 // each `.codex/hooks.json` entry is a PLAIN command string — `sh
 // .codex/hooks/events/<Event>.sh` — with no host-side ${VAR} expansion, because
 // authentic capture only proves plain-command-string invocation. Each runner is
@@ -142,7 +142,7 @@ type codexHooksConfig struct {
 }
 
 // codexRunnerRelPath is the plain (variable-free) command path each hooks.json
-// entry uses to invoke an event runner. Codex 0.146.0 authentic capture proves
+// entry uses to invoke an event runner. The committed authentic Codex capture proves
 // only plain-command-string invocation; host-side ${VAR} expansion inside
 // hooks.json command strings is unproven and must not be relied on, so the path
 // is spelled literally relative to the project root.
@@ -151,12 +151,12 @@ func codexRunnerRelPath(event string) string {
 }
 
 // codexAuthenticMatchers pins the two authentically-proven, activation-bound
-// Codex 0.146.0 events to the EXACT matcher values recorded by the irreplaceable
+// Codex events to the EXACT matcher values recorded by the irreplaceable
 // authentic capture configuration. Matcher input-selection semantics carry no
 // in-tree contract backing (the host contract documents identities/semantics and
 // nativeresponse documents only OUTPUT continuation), and Codex usage is
 // exhausted, so these proven values can never be re-verified or regained. If a
-// non-proven value ("") were shipped for these two events and 0.146.0 selects
+// non-proven value ("") were shipped for these two events and the recorded Codex version selects
 // differently at runtime, S5/Wave-3 activation would silently fail to fire with
 // no evidence left to diagnose. These are exactly the two events M3 activates,
 // so they must carry the proven matcher, not the inherited empty convention.

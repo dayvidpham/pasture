@@ -580,8 +580,11 @@ func (c *Controller) probe(ctx context.Context) (nativeSnapshot, error) {
 	}
 	versionText := strings.TrimSuffix(strings.TrimSpace(string(versionResult.Stdout)), " (Claude Code)")
 	host, err := runtime.ParseHostVersion(versionText)
-	if err != nil || !runtime.ClaudeCode2_1_210().Supports(host) {
-		return nativeSnapshot{}, &probeUnavailableError{cause: fault("Claude host probe", ">=2.1.210 and <2.2.0", fmt.Sprintf("reported host version %q is outside the reviewed range", strings.TrimSpace(string(versionResult.Stdout))), "Controller.probe", "checking compatibility before native mutation", "no marketplace or plugin action was attempted", "install a reviewed Claude Code 2.1.x version or update the reviewed activation contract", err)}
+	// The admitted versions are spelled by the runtime contract's own renderer,
+	// so this text follows the contract when the contract moves.
+	admitted := runtime.ClaudeCode2_1_210().Versions()
+	if err != nil || !admitted.Allows(host) {
+		return nativeSnapshot{}, &probeUnavailableError{cause: fault("Claude host probe", fmt.Sprintf("a Claude Code host version %s", admitted.Describe()), fmt.Sprintf("reported host version %q is not admitted by the reviewed floor", strings.TrimSpace(string(versionResult.Stdout))), "Controller.probe", "checking compatibility before native mutation", "no marketplace or plugin action was attempted", fmt.Sprintf("install a Claude Code version %s or update the reviewed activation contract", admitted.Describe()), err)}
 	}
 	marketResult, err := c.run(ctx, command("claude", "plugin", "marketplace", "list", "--json"))
 	if err != nil {

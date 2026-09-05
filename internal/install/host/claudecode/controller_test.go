@@ -26,6 +26,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/install/service"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	target "github.com/dayvidpham/pasture/internal/target/claudecode"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 func TestContractBindsImmutableComponentsAndReviewedRange(t *testing.T) {
@@ -36,12 +37,14 @@ func TestContractBindsImmutableComponentsAndReviewedRange(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, ir.HarnessClaudeCode, contract.Harness())
-	assert.Equal(t, "2.1.210", contract.HostVersions().Min().String())
-	assert.Equal(t, "2.2.0-0", contract.HostVersions().Max().String())
-	assert.True(t, contract.HostVersions().Allows(mustHost(t, "2.1.210")))
-	assert.True(t, contract.HostVersions().Allows(mustHost(t, "2.1.233")))
-	assert.False(t, contract.HostVersions().Allows(mustHost(t, "2.1.209")))
-	assert.False(t, contract.HostVersions().Allows(mustHost(t, "2.2.0")))
+	// The admission is the runtime contract's floor, read from the one root.
+	min := runtime.ClaudeCode2_1_210().Versions().Min()
+	assert.Equal(t, min.String(), contract.HostVersions().Min().String())
+	assert.False(t, contract.HostVersions().HasUpperBound(), "admission is a floor with no upper bound")
+	assert.True(t, contract.HostVersions().Allows(min))
+	assert.True(t, contract.HostVersions().Allows(testutil.Bump(t, min, 0, 0, 23)))
+	assert.True(t, contract.HostVersions().Allows(testutil.Bump(t, min, 0, 1, 0)))
+	assert.False(t, contract.HostVersions().Allows(testutil.BelowFloor(t, min)))
 	assert.Equal(t, "claude --version", contract.VersionProbe().String())
 
 	wantPackages := []string{"pasture-skills", "pasture-agents", "pasture-hooks"}
@@ -279,11 +282,16 @@ func TestOptionalAllFalseUnavailableProbePreservesWithoutMutation(t *testing.T) 
 func TestRequiredOutOfRangeHostFailsBeforeMutation(t *testing.T) {
 	t.Parallel()
 	host := newHost(false)
-	host.version = "2.2.0"
+	admitted := runtime.ClaudeCode2_1_210().Versions()
+	host.version = testutil.BelowFloor(t, admitted.Min()).String()
 	controller := mustController(t, host)
 	_, err := controller.PlanSelection(context.Background(), groupRequest(t, 1, nil))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "reviewed range")
+	// The refusal names the reviewed floor and spells the admitted versions
+	// through the contract's own renderer; both phrases are load-bearing.
+	assert.Contains(t, err.Error(), "is not admitted by the reviewed floor")
+	assert.Contains(t, err.Error(), "a Claude Code host version "+admitted.Describe())
+	assert.Contains(t, err.Error(), "install a Claude Code version "+admitted.Describe())
 	assert.Empty(t, host.mutations)
 }
 

@@ -1,5 +1,5 @@
 // Package codex captures exact command-hook stdin bytes from the pinned Codex
-// 0.146.0 CLI lifecycle contract. Unlike the OpenCode ingress, the captured
+// CLI lifecycle contract at the recorded version. Unlike the OpenCode ingress, the captured
 // bytes ARE the native command-hook stdin payload; there is no in-process
 // callback object and no nested record envelope to unwrap.
 package codex

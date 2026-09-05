@@ -117,7 +117,7 @@ type OpenCodeTargetDescriptor struct {
 }
 
 // NewOpenCodeTargetDescriptor builds the descriptor from the delivered pinned
-// OpenCode 1.18.10 runtime contract. It derives the native tool allow-list and
+// OpenCode runtime contract. It derives the native tool allow-list and
 // generates the embedded hook module up front so the descriptor is a complete,
 // immutable value.
 func NewOpenCodeTargetDescriptor() (OpenCodeTargetDescriptor, error) {
@@ -201,7 +201,7 @@ func (d OpenCodeTargetDescriptor) Manifest() (string, error) {
 		Schema:          "https://pasture.dev/opencode-target.json",
 		Target:          string(ir.HarnessOpenCode),
 		RuntimeContract: d.contract.String(),
-		HostVersion:     openCodeHostVersion,
+		HostVersion:     openCodeHostVersion(),
 		NativeTools:     d.NativeToolNames(),
 		Components:      d.Components(),
 		Activation:      activationManifest,

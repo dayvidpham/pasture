@@ -102,7 +102,7 @@ func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
 	// therefore runs as report-and-continue until the Codex coverage work fills
 	// the citation in.
 	//
-	// The evidence itself is NOT missing. The pinned Codex 0.146.0 command-hook
+	// The evidence itself is NOT missing. The Codex command-hook
 	// output contract IS committed in this repository, with its inspected source
 	// revision, in internal/lifecycle/nativeresponse/nativeresponse.go: it
 	// records that a blocking hook is rejected unless continue == true. That

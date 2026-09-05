@@ -175,9 +175,10 @@ pipeline as native events and commit the same occurrence evidence kind.
 
 Exact provider payloads are not interchangeable fixtures. Lifecycle activation
 is proof-gated per host contract: Claude has 8 enabled events, OpenCode has two
-user-reviewed OpenCode 1.18.10 callback records (`session.created` and
-`tool.execute.before`), and Codex has two Codex 0.146.0 command-hook records
-(`SessionStart` and `PreToolUse`). The remaining generated events are explicitly
+user-reviewed callback records (`session.created` and `tool.execute.before`),
+and Codex has two command-hook records (`SessionStart` and `PreToolUse`), each
+captured at the host version its fixture's provenance records. The remaining
+generated events are explicitly
 withheld until authentic capture and production-path proofs exist. See
 [docs/privacy.md](docs/privacy.md) for the complete clearance boundary.
 

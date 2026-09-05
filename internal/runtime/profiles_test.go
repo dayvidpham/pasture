@@ -12,6 +12,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/effects"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -95,34 +96,35 @@ func TestOpenCodeContractInventsNoTools(t *testing.T) {
 	assert.Equal(t, "question", questionCall)
 }
 
+// Every runtime contract admits a FLOOR at its recorded host version: that
+// version and every later release are admitted; the release below it, a
+// prerelease of it and an unparsed host are refused. The population is the
+// contracts themselves, so a contract added later is covered without an edit.
 func TestPinnedContractVersionBoundaries(t *testing.T) {
 	t.Parallel()
-	claude := runtime.ClaudeCode2_1_210()
-	assert.False(t, claude.Supports(mustParse(t, "2.1.209")))
-	assert.True(t, claude.Supports(mustParse(t, "2.1.210")))
-	assert.True(t, claude.Supports(mustParse(t, "2.1.220")))
-	assert.True(t, claude.Supports(mustParse(t, "2.1.999")))
-	assert.False(t, claude.Supports(mustParse(t, "2.2.0")))
-
-	cases := []struct {
-		contract runtime.RuntimeContract
-		exact    string
-		lower    string
-		higher   string
-	}{
-		{contract: runtime.OpenCode1_18_10(), exact: "1.18.10", lower: "1.18.9", higher: "1.18.11"},
-		{contract: runtime.Codex0_146_0(), exact: "0.146.0", lower: "0.145.0", higher: "0.146.1"},
+	contracts := runtime.PinnedContracts()
+	require.Len(t, contracts, 3, "one runtime contract per enabled harness")
+	harnesses := make(map[ir.HarnessID]int, len(contracts))
+	for _, contract := range contracts {
+		harnesses[contract.Harness()]++
 	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.contract.ID().String(), func(t *testing.T) {
+	for harness, count := range harnesses {
+		require.Equal(t, 1, count, "harness %s has one runtime contract", harness)
+	}
+	for _, contract := range contracts {
+		contract := contract
+		t.Run(contract.ID().String(), func(t *testing.T) {
 			t.Parallel()
-			assert.True(t, tc.contract.Supports(mustParse(t, tc.exact)), "exact accepted boundary")
-			assert.True(t, tc.contract.Supports(mustParse(t, tc.exact+"+build.5")), "build metadata does not change precedence")
-			assert.False(t, tc.contract.Supports(mustParse(t, tc.lower)), "immediately lower rejected")
-			assert.False(t, tc.contract.Supports(mustParse(t, tc.higher)), "immediately higher rejected")
-			assert.False(t, tc.contract.Supports(mustParse(t, tc.exact+"-rc.1")), "prerelease requires explicit inclusion")
-			assert.False(t, tc.contract.Supports(runtime.HostVersion{}), "unparsed host rejected")
+			min := contract.Versions().Min()
+			assert.False(t, contract.Versions().HasUpperBound(), "admission is a floor with no upper bound")
+			assert.True(t, contract.Supports(min), "the recorded version is admitted")
+			assert.True(t, contract.Supports(mustParse(t, min.String()+"+build.5")), "build metadata does not change precedence")
+			assert.True(t, contract.Supports(testutil.Bump(t, min, 0, 0, 1)), "the next patch release is admitted")
+			assert.True(t, contract.Supports(testutil.Bump(t, min, 0, 1, 0)), "a later minor release is admitted")
+			assert.True(t, contract.Supports(testutil.Bump(t, min, 1, 0, 0)), "a later major release is admitted")
+			assert.False(t, contract.Supports(testutil.BelowFloor(t, min)), "the release below the recorded version is refused")
+			assert.False(t, contract.Supports(mustParse(t, min.String()+"-rc.1")), "a prerelease of the recorded version is refused")
+			assert.False(t, contract.Supports(runtime.HostVersion{}), "unparsed host rejected")
 		})
 	}
 }

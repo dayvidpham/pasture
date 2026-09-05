@@ -14,27 +14,17 @@ import (
 	targetcodex "github.com/dayvidpham/pasture/internal/target/codex"
 )
 
-const ActivationContractID = "codex/global@0.146.0"
-
-var installerVersions = mustInstallerVersions()
-
-func mustInstallerVersions() runtime.VersionConstraint {
-	// Generated runner evidence is hard-coded for 0.146.0, so activation remains
-	// an exact point contract until detected host-version propagation is proved.
-	min, err := runtime.ParseHostVersion("0.146.0")
-	if err != nil {
-		panic(err)
-	}
-	max, err := runtime.ParseHostVersion("0.146.0")
-	if err != nil {
-		panic(err)
-	}
-	versions, err := runtime.NewVersionConstraint(min, max, false)
-	if err != nil {
-		panic(err)
-	}
-	return versions
+// ActivationContractID names the Codex activation contract. Its version is
+// read from the Codex runtime contract, the one root, so the id follows the
+// recorded host version instead of restating it.
+func ActivationContractID() string {
+	return "codex/global@" + runtime.Codex0_146_0().Versions().Min().String()
 }
+
+// installerVersions is the Codex runtime contract's own admission: a floor at
+// the recorded host version. The generated runner evidence was captured at that
+// version; a host at or above it is admitted and a host below it is refused.
+var installerVersions = runtime.Codex0_146_0().Versions()
 
 // NewActivationContract binds all three independent Codex packages beneath one
 // absolute home root. Their immutable bundle paths retain the public native
@@ -72,7 +62,7 @@ func NewActivationContract(target targetcodex.TargetDescriptor, home string) (ac
 	if err != nil {
 		return activation.ActivationContract{}, fmt.Errorf("assemble exhaustive Codex activations: %w", err)
 	}
-	id, err := activation.NewActivationContractID(ActivationContractID)
+	id, err := activation.NewActivationContractID(ActivationContractID())
 	if err != nil {
 		return activation.ActivationContract{}, err
 	}

@@ -130,7 +130,7 @@ cases:
       source: enum
       ref: internal/runtime/lifecycle.go
     mutation:
-      description: The sibling provenance advertises a host version outside the pinned admission range.
+      description: The sibling provenance advertises the host version one patch release below the admitted floor, so the floor is proven exclusive there.
   - name: path-escape-control
     input:
       fixture: ../fixtures/session_start_2_1_210.json

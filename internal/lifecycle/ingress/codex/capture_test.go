@@ -8,8 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/internal/hostcontract"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // Authentic Codex identity facts from the two cleared command-hook payloads.
@@ -66,13 +68,13 @@ func TestProductionIngressPreservesExactBytesAndCodexIdentities(t *testing.T) {
 			require.Len(t, raw, tc.size)
 
 			event := eventByKind(t, manifest, tc.event)
-			capture := codex.Parse(raw, event, "0.146.0", model.OccurrenceEnvelopeRef{})
+			capture := codex.Parse(raw, event, manifest.Version, model.OccurrenceEnvelopeRef{})
 
 			require.Equal(t, model.CaptureValid, capture.Disposition, "cleared authentic payload must parse as valid")
 			require.Equal(t, digest.FromBytes(raw), capture.Digest, "digest must be taken over the exact stdin bytes")
 			require.Equal(t, manifest.Contract, capture.Delivery.Contract)
 			require.Equal(t, tc.event, capture.Delivery.Event)
-			require.Equal(t, "0.146.0", capture.Delivery.Envelope.HostVersion)
+			require.Equal(t, manifest.Version, capture.Delivery.Envelope.HostVersion)
 			require.Equal(t, model.CaptureValid, capture.Delivery.Capture)
 			// The command-hook stdin bytes ARE the payload; nothing is unwrapped
 			// or reformatted, so the durable body is byte-identical to the raw
@@ -91,8 +93,12 @@ func TestProductionIngressPreservesExactBytesAndCodexIdentities(t *testing.T) {
 func TestCodexCatalogIsSourceDerivedAndOnlySelectedEventsAreProven(t *testing.T) {
 	t.Parallel()
 	manifest := registration.Codex0_146_0()
-	require.Equal(t, "0.146.0", manifest.Version)
-	require.Len(t, manifest.Events, 10)
+	// Two roots record the host version: the runtime contract id and the host
+	// contract the manifest is generated from. They are one version.
+	require.Equal(t, runtime.Codex0_146_0().Versions().Min().String(), manifest.Version, "the registration manifest and the runtime contract record one host version")
+	source := hostcontract.Codex0_146_0().Events
+	require.NotEmpty(t, source, "the Codex host contract declares at least one event")
+	require.Len(t, manifest.Events, len(source), "the generated manifest is the host contract's whole catalogue")
 	proved := map[string]bool{"SessionStart": true, "PreToolUse": true}
 	proofCount := 0
 	for _, event := range manifest.Events {

@@ -169,6 +169,13 @@ func isAllDigits(s string) bool {
 
 func (v HostVersion) IsValid() bool { return v.parsed }
 
+// Release returns the MAJOR, MINOR and PATCH release components. A caller
+// that derives a coarser identity from a version (a "MAJOR.MINOR" family, for
+// example) reads them here instead of re-parsing String().
+func (v HostVersion) Release() (major, minor, patch uint64) {
+	return v.major, v.minor, v.patch
+}
+
 // HasPrerelease reports whether the version carries a prerelease series, which
 // a constraint must explicitly include before it matches.
 func (v HostVersion) HasPrerelease() bool { return len(v.prerelease) > 0 }

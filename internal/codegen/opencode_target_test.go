@@ -21,7 +21,7 @@ import (
 )
 
 // expectedOpenCodeNativeTools is the exact native tool allow-list OpenCode
-// 1.18.10 declares: invoke-skill -> skill, delegate-assignment -> task,
+// the recorded version declares: invoke-skill -> skill, delegate-assignment -> task,
 // request-user-decision -> question. Every other core operation is
 // semantic-instruction or unsupported and contributes no native tool.
 var expectedOpenCodeNativeTools = []string{"question", "skill", "task"}
@@ -217,8 +217,8 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	for _, required := range []string{
-		`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.10"]`,
-		`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.10"]`,
+		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", %q]`, openCodeHostVersion()),
+		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", %q]`, openCodeHostVersion()),
 		`{ input, output: { args } }`, `response.decision !== "proceed"`, `output.args = args`,
 	} {
 		if !strings.Contains(module, required) {
@@ -314,8 +314,8 @@ console.log(JSON.stringify({ argsUnchanged: true }));
 		t.Fatalf("read back generated callback receipts through production CLI: %v\n%s", err, readbackOutput)
 	}
 	for _, required := range []string{
-		`"registrationContract":"opencode/1.18.10"`,
-		`"contract":"opencode/opencode@1.18.10"`,
+		fmt.Sprintf(`"registrationContract":"opencode/%s"`, openCodeHostVersion()),
+		fmt.Sprintf(`"contract":%q`, runtime.OpenCode1_18_10().ID().String()),
 		`"semantic":1`,
 		`"semantic":2`,
 	} {

@@ -9,9 +9,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/internal/hostcontract"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/opencode"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
 type capturedRecord struct {
@@ -43,10 +45,10 @@ func TestAuthenticCallbackRecordsPreserveBytesProvenanceAndIdentities(t *testing
 			require.Len(t, record.Value, test.valueBytes)
 			require.Equal(t, test.valueDigest, sum(record.Value))
 			event := eventByKind(t, manifest, test.event)
-			capture := opencode.Parse(record.Value, event, "1.18.10", model.OccurrenceEnvelopeRef{})
+			capture := opencode.Parse(record.Value, event, manifest.Version, model.OccurrenceEnvelopeRef{})
 			require.Equal(t, model.CaptureValid, capture.Disposition)
 			require.Equal(t, manifest.Contract, capture.Delivery.Contract)
-			require.Equal(t, "1.18.10", capture.Delivery.Envelope.HostVersion)
+			require.Equal(t, manifest.Version, capture.Delivery.Envelope.HostVersion)
 			require.Len(t, capture.Delivery.Bindings, test.identityCount)
 			require.Equal(t, record.Value, json.RawMessage(capture.Delivery.Body))
 		})
@@ -56,7 +58,12 @@ func TestAuthenticCallbackRecordsPreserveBytesProvenanceAndIdentities(t *testing
 func TestCatalogIsSourceDerivedAndAuthenticProofIsSelected(t *testing.T) {
 	t.Parallel()
 	manifest := registration.OpenCode1_18_10()
-	require.Len(t, manifest.Events, 47)
+	// Two roots record the host version: the runtime contract id and the host
+	// contract the manifest is generated from. They are one version.
+	require.Equal(t, runtime.OpenCode1_18_10().Versions().Min().String(), manifest.Version, "the registration manifest and the runtime contract record one host version")
+	source := hostcontract.OpenCode1_18_10().Events
+	require.NotEmpty(t, source, "the OpenCode host contract declares at least one event")
+	require.Len(t, manifest.Events, len(source), "the generated manifest is the host contract's whole catalogue")
 	proved := map[string]bool{"session.created": true, "tool.execute.before": true}
 	proofCount := 0
 	for _, event := range manifest.Events {

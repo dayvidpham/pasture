@@ -274,7 +274,7 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 
 func TestClaudeLifecycleTransportAllowsAuthentic2_1_222FieldShapes(t *testing.T) {
 	t.Parallel()
-	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_210Lifecycle(), "2.1.210", claudeNativeFields)
+	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_210Lifecycle(), runtime.ClaudeCode2_1_210Lifecycle().Versions().Min().String(), claudeNativeFields)
 	if err != nil {
 		t.Fatalf("build Claude lifecycle transport metadata: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/stretchr/testify/require"
 )
 
@@ -71,7 +72,7 @@ func TestClearedFixtureBytesMatchPinnedDigests(t *testing.T) {
 			var prov provenance
 			require.NoError(t, json.Unmarshal(provRaw, &prov))
 			require.Equal(t, "codex", prov.Provider)
-			require.Equal(t, "0.146.0", prov.ObservedRuntimeVersion)
+			require.Equal(t, registration.Codex0_146_0().Version, prov.ObservedRuntimeVersion)
 			require.Equal(t, "d6407d735942c7cfc996aa2bc7d0f97fc8f0e4bf", prov.InspectedSourceRevision)
 			require.Equal(t, tc.capturedAt, prov.CapturedAt)
 			require.Equal(t, "command hook exact stdin bytes", prov.CaptureMethod)

@@ -11,7 +11,7 @@ import (
 )
 
 // TestCodexActivationEnablesExactlyTheTwoProvenEvents proves the derived Codex
-// 0.146.0 activation manifest is exhaustive over the generated catalog and
+// activation manifest is exhaustive over the generated catalog and
 // enables exactly the two authentically-proven events (SessionStart,
 // PreToolUse), each with both event-bound proofs, while every other generated
 // Codex event is Withheld (outside-target-set) with zero proofs. This is the
@@ -20,7 +20,7 @@ func TestCodexActivationEnablesExactlyTheTwoProvenEvents(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.Codex0_146_0()
 	require.NoError(t, err)
-	require.Len(t, entries, 10, "the manifest must be exhaustive over the generated Codex 0.146.0 catalog")
+	require.Len(t, entries, len(registration.Codex0_146_0().Entries()), "the manifest must be exhaustive over the generated Codex catalog")
 
 	enabled := make([]model.ContractEventKind, 0, 2)
 	for _, entry := range entries {

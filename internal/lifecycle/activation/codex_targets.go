@@ -28,7 +28,7 @@ var codexProductionProofs = [...]productionProofDeclaration{
 }
 
 // codexTargetEventDeclarations is the static typed target declaration for
-// Codex 0.146.0. Exactly the two authentically-proven events, SessionStart and
+// Codex at the recorded version. Exactly the two authentically-proven events, SessionStart and
 // PreToolUse, bind their event-bound capture and production proofs; generated
 // catalog membership alone carries no proof, so every other Codex event
 // derives to Withheld (outside-target-set).

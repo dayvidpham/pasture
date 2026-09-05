@@ -84,9 +84,12 @@ func nativeEvent(kind model.ContractEventKind, symbol, name string, fields []mod
 	return Event{Kind: kind, Symbol: symbol, Name: name, Fields: all, Identities: ids, Blocking: blocking, Mutation: mutation, Failure: failure, StopLoop: stop}
 }
 
-// ClaudeCode2_1_210 is the pinned compatibility contract for the supported
-// Claude Code 2.1.x range. Optional non-identity fields include names observed
-// through 2.1.222; required identity fields remain the authority boundary.
+// ClaudeCode2_1_210 is the Claude Code host contract at the recorded version
+// (Contract.Version, one of the two version roots; a test binds it to the
+// runtime contract id). Optional non-identity fields include names observed in
+// the authentic captures committed under
+// internal/lifecycle/ingress/claude/testdata; required identity fields remain
+// the authority boundary.
 func ClaudeCode2_1_210() Contract {
 	o := func(k model.ContractEventKind, s, n string, f ...model.NativeFieldID) Event {
 		return nativeEvent(k, s, n, f, nil, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable)

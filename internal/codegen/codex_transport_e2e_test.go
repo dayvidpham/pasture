@@ -14,7 +14,7 @@ import (
 
 // This file is the IP-3 end-to-end production proof for the generated Codex
 // lifecycle transport. It executes the ACTUAL committed runner
-// (.codex/hooks/events/<Event>.sh) exactly as Codex 0.146.0 would — a plain
+// (.codex/hooks/events/<Event>.sh) exactly as Codex would — a plain
 // command string invoking `sh <runner>` with the authentic native event JSON on
 // stdin and PASTURE_BIN pointing at a real pasture binary — and proves the
 // transport wiring end-to-end against real temporary storage.
@@ -35,7 +35,7 @@ import (
 //     with PASTURE_BIN pointing at a controlled CLI stand-in, the exec-only
 //     runner is proven to (a) deliver the exact authentic fixture bytes to the
 //     CLI's stdin unmodified, (b) invoke the exact CLI contract
-//     `hook lifecycle --harness codex --event <Event> --host-version 0.146.0`
+//     `hook lifecycle --harness codex --event <Event> --host-version <recorded version>`
 //     that S3 built (no invented flags), and (c) pass the CLI's native
 //     continuation bytes ({"continue":true}) straight back to the host by exec
 //     stdout inheritance.
@@ -68,7 +68,7 @@ func codexIngressFixture(t *testing.T, root, name string) []byte {
 
 // TestCodexGeneratedRunnerDrivesBuiltCLI is the built-CLI half of the IP-3
 // proof and, after the M3-UAT activation flip, the strongest end-to-end M3-P1/P2
-// proof. It runs the committed generated runner exactly as Codex 0.146.0 would
+// proof. It runs the committed generated runner exactly as Codex would
 // (`sh <runner>` with the authentic native event JSON on stdin and PASTURE_BIN
 // pointing at the real built binary) against real temporary storage, and proves:
 //
@@ -223,7 +223,7 @@ func TestCodexGeneratedRunnerIsTransparentConduit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read captured argv: %v", err)
 	}
-	wantArgv := "hook lifecycle --harness codex --event PreToolUse --host-version 0.146.0"
+	wantArgv := "hook lifecycle --harness codex --event PreToolUse --host-version " + codexHostVersionLabel()
 	if string(gotArgv) != wantArgv {
 		t.Errorf("runner invoked the CLI with argv %q, want the exact contract %q", gotArgv, wantArgv)
 	}

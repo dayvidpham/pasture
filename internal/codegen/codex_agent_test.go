@@ -52,7 +52,7 @@ func TestCodexAgentEmitsStandaloneProfilePerToolRole(t *testing.T) {
 
 // TestCodexAgentFunctionsAreContractDerived proves every emitted agent profile
 // declares exactly the native Codex functions the pinned contract classifies —
-// for Codex 0.146.0 the sole native call `request-input` — and never a
+// for the recorded Codex version the sole native call `request-input` — and never a
 // fabricated skill/spawn function.
 func TestCodexAgentFunctionsAreContractDerived(t *testing.T) {
 	t.Parallel()
@@ -61,7 +61,7 @@ func TestCodexAgentFunctionsAreContractDerived(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatal("codexNativeFunctions() returned no native calls; the pinned Codex contract must classify at least request-input")
 	}
-	// The only native Codex 0.146.0 operation is RequestUserDecision -> request-input.
+	// The only native Codex operation is RequestUserDecision -> request-input.
 	if len(want) != 1 || want[0] != "request-input" {
 		t.Fatalf("pinned Codex native functions = %v, want exactly [request-input]", want)
 	}

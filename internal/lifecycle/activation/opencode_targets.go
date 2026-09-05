@@ -28,7 +28,7 @@ var openCodeProductionProofs = [...]productionProofDeclaration{
 }
 
 // openCodeTargetEventDeclarations is the static typed target declaration for
-// OpenCode 1.18.10. Generated catalog membership alone carries no proof.
+// OpenCode at the recorded version. Generated catalog membership alone carries no proof.
 var openCodeTargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventOpenCodeSessionCreated, captureProof: CaptureProofOpenCodeSessionCreated, productionProof: ProductionProofOpenCodeSessionCreated},
 	{event: registration.EventOpenCodeToolExecuteBefore, captureProof: CaptureProofOpenCodeToolExecuteBefore, productionProof: ProductionProofOpenCodeToolExecuteBefore},

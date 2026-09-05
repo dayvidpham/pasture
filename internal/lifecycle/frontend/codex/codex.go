@@ -1,4 +1,4 @@
-// Package codex supplies the pinned Codex 0.146.0 command-hook vocabulary as
+// Package codex supplies the Codex command-hook vocabulary, at the recorded Codex version, as
 // host data for the generic lifecycle frontend. All control flow lives in
 // internal/lifecycle/frontend; this package is data plus a monomorphic wrapper.
 //
@@ -24,7 +24,7 @@ import (
 //
 // IP-1 (resolved at M3-WAVE-1 consolidation): the sole runtime seam in this
 // package. M3-SLICE-1 owns the exact profile; this frontend binds against the
-// pinned codex@0.146.0 contract and its two authentically proven events
+// Codex runtime contract and its two authentically proven events
 // (SessionStart observation, PreToolUse gate).
 func codexLifecycle() runtime.LifecycleContract[runtime.CodexLifecycleEvent] {
 	return runtime.Codex0_146_0Lifecycle()

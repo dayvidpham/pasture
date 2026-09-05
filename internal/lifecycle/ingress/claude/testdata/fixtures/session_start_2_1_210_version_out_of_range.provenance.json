@@ -1,7 +1,7 @@
 {
   "origin": "authentic-capture",
   "harness": "claude-code",
-  "harnessVersion": "2.2.0",
+  "harnessVersion": "2.1.209",
   "captureSource": "45a8cc4",
   "rawFileDigest": "sha256:30d524e5d2cb22d486faad05adbaa1a4b7e0d72cd6301f38fe18ca5e3f167003",
   "capturedAt": "2026-07-30T03:59:28Z",

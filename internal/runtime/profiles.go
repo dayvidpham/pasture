@@ -151,7 +151,12 @@ func (l operationLowering) toOperationBinding(descriptor CoreOperationDescriptor
 	}
 }
 
-func mustExactContract(harness ir.HarnessID, core CoreRuntimeBindings) RuntimeContract {
+// productionHostVersion returns the host version the harness's production
+// runtime contract id records (artifact.ProductionRuntimeContract), the ONE
+// root every version a profile states or admits is read from. A profile never
+// writes a version by hand: prose formats this value, and admission is a floor
+// at it.
+func productionHostVersion(harness ir.HarnessID) HostVersion {
 	id, err := artifact.ProductionRuntimeContract(harness)
 	if err != nil {
 		panic(err)
@@ -164,35 +169,19 @@ func mustExactContract(harness ir.HarnessID, core CoreRuntimeBindings) RuntimeCo
 	if err != nil {
 		panic(err)
 	}
-	constraint, err := NewExactVersion(host)
-	if err != nil {
-		panic(err)
-	}
-	contract, err := NewRuntimeContract(id, harness, constraint, core)
-	if err != nil {
-		panic(err)
-	}
-	return contract
+	return host
 }
 
-func mustRangeContract(harness ir.HarnessID, maxVersion string, core CoreRuntimeBindings) RuntimeContract {
+// mustFloorContract builds a harness's runtime contract with admission "at or
+// above the recorded version": the recorded version is the one root, the host
+// may move to any later release, and a host below the recorded version is
+// refused (NewVersionFloor). Every harness uses this one shape.
+func mustFloorContract(harness ir.HarnessID, core CoreRuntimeBindings) RuntimeContract {
 	id, err := artifact.ProductionRuntimeContract(harness)
 	if err != nil {
 		panic(err)
 	}
-	_, minVersion, ok := strings.Cut(id.String(), "@")
-	if !ok {
-		panic("production runtime contract has no version")
-	}
-	min, err := ParseHostVersion(minVersion)
-	if err != nil {
-		panic(err)
-	}
-	max, err := ParseHostVersion(maxVersion)
-	if err != nil {
-		panic(err)
-	}
-	constraint, err := NewVersionConstraint(min, max, false)
+	constraint, err := NewVersionFloor(productionHostVersion(harness))
 	if err != nil {
 		panic(err)
 	}
@@ -203,11 +192,14 @@ func mustRangeContract(harness ir.HarnessID, maxVersion string, core CoreRuntime
 	return contract
 }
 
-// ClaudeCode2_1_210 is the pinned runtime contract for Claude Code 2.1.210. Its
-// native bindings name only Agent/SendMessage/TaskStop-era tools; it never
-// names a removed team-lifecycle call (TeamCreate/TeamDelete). Any schema or
-// semantic change to this profile requires a new RuntimeContractID.
+// ClaudeCode2_1_210 is the runtime contract for Claude Code at the recorded
+// host version, the one its id carries (artifact.ProductionRuntimeContract).
+// Admission is a floor: that version and every later release. Its native
+// bindings name only Agent/SendMessage/TaskStop-era tools; it never names a
+// removed team-lifecycle call (TeamCreate/TeamDelete). Any schema or semantic
+// change to this profile requires a new RuntimeContractID.
 func ClaudeCode2_1_210() RuntimeContract {
+	version := productionHostVersion(ir.HarnessClaudeCode).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:  effects.RuntimeClassNative,
@@ -227,7 +219,7 @@ func ClaudeCode2_1_210() RuntimeContract {
 		},
 		ir.OperationCollectAssignmentResults: {
 			class:    effects.RuntimeClassParentMediated,
-			mediated: mustMediated("parent orchestrator", "the parent gathers each delegated Agent result as it completes; Claude Code 2.1.210 exposes no native batch-wait tool"),
+			mediated: mustMediated("parent orchestrator", fmt.Sprintf("the parent gathers each delegated Agent result as it completes; Claude Code %s exposes no native batch-wait tool", version)),
 		},
 		ir.OperationStopAssignment: {
 			class:  effects.RuntimeClassNative,
@@ -238,15 +230,18 @@ func ClaudeCode2_1_210() RuntimeContract {
 			native: mustNativeCall("AskUserQuestion", []string{"questions"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustRangeContract(ir.HarnessClaudeCode, "2.2.0-0", buildCoreBindings(table))
+	return mustFloorContract(ir.HarnessClaudeCode, buildCoreBindings(table))
 }
 
-// OpenCode1_18_10 is the pinned runtime contract for OpenCode 1.18.10. It uses
-// only OpenCode's documented skill/task/question surfaces. It never invents a
+// OpenCode1_18_10 is the runtime contract for OpenCode at the recorded host
+// version, the one its id carries (artifact.ProductionRuntimeContract).
+// Admission is a floor: that version and every later release. It uses only
+// OpenCode's documented skill/task/question surfaces. It never invents a
 // persistent-message, follow-up, wait, or close tool: operations with no
 // documented native surface are lowered as semantic instructions, and stopping
 // an assignment is explicitly unsupported rather than a fabricated close call.
 func OpenCode1_18_10() RuntimeContract {
+	version := productionHostVersion(ir.HarnessOpenCode).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:  effects.RuntimeClassNative,
@@ -258,41 +253,44 @@ func OpenCode1_18_10() RuntimeContract {
 		},
 		ir.OperationContinueAssignment: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("OpenCode 1.18.10 exposes no follow-up tool: reconstruct the assignment as a fresh task with its complete retained role, evidence, decisions, and outstanding work"),
+			semantic: mustSemantic(fmt.Sprintf("OpenCode %s exposes no follow-up tool: reconstruct the assignment as a fresh task with its complete retained role, evidence, decisions, and outstanding work", version)),
 		},
 		ir.OperationSendAssignmentMessage: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("OpenCode 1.18.10 exposes no persistent-message tool: carry the message content into the next task prompt for the target assignment"),
+			semantic: mustSemantic(fmt.Sprintf("OpenCode %s exposes no persistent-message tool: carry the message content into the next task prompt for the target assignment", version)),
 		},
 		ir.OperationCollectAssignmentResults: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("OpenCode 1.18.10 exposes no wait tool: collect each task result inline as tasks return"),
+			semantic: mustSemantic(fmt.Sprintf("OpenCode %s exposes no wait tool: collect each task result inline as tasks return", version)),
 		},
 		ir.OperationStopAssignment: {
 			class:  effects.RuntimeClassUnsupported,
-			reason: "OpenCode 1.18.10 exposes no close/stop tool; stopping a running task has no modeled native semantics and must not be lowered to a fabricated close call",
+			reason: fmt.Sprintf("OpenCode %s exposes no close/stop tool; stopping a running task has no modeled native semantics and must not be lowered to a fabricated close call", version),
 		},
 		ir.OperationRequestUserDecision: {
 			class:  effects.RuntimeClassNative,
 			native: mustNativeCall("question", []string{"prompt", "options"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustExactContract(ir.HarnessOpenCode, buildCoreBindings(table))
+	return mustFloorContract(ir.HarnessOpenCode, buildCoreBindings(table))
 }
 
-// Codex0_146_0 is the pinned runtime contract for Codex 0.146.0. It lowers only
-// the exact exposed collaboration/request-input functions; operations with no
-// exposed Codex function are parent-mediated or lowered as semantic
-// instructions rather than invented.
+// Codex0_146_0 is the runtime contract for Codex at the recorded host version,
+// the one its id carries (artifact.ProductionRuntimeContract). Admission is a
+// floor: that version and every later release. It lowers only the exposed
+// collaboration/request-input functions; operations with no exposed Codex
+// function are parent-mediated or lowered as semantic instructions rather than
+// invented.
 func Codex0_146_0() RuntimeContract {
+	version := productionHostVersion(ir.HarnessCodex).String()
 	table := map[ir.OperationKind]operationLowering{
 		ir.OperationInvokeSkill: {
 			class:    effects.RuntimeClassSemanticInstruction,
-			semantic: mustSemantic("Codex 0.146.0 exposes no skill function: perform the skill's steps directly following its reviewed protocol instructions"),
+			semantic: mustSemantic(fmt.Sprintf("Codex %s exposes no skill function: perform the skill's steps directly following its reviewed protocol instructions", version)),
 		},
 		ir.OperationDelegateAssignment: {
 			class:    effects.RuntimeClassParentMediated,
-			mediated: mustMediated("parent orchestrator", "the parent drives Codex delegation over the collaboration surface; Codex 0.146.0 exposes no self-service spawn function"),
+			mediated: mustMediated("parent orchestrator", fmt.Sprintf("the parent drives Codex delegation over the collaboration surface; Codex %s exposes no self-service spawn function", version)),
 		},
 		ir.OperationContinueAssignment: {
 			class:    effects.RuntimeClassParentMediated,
@@ -308,18 +306,18 @@ func Codex0_146_0() RuntimeContract {
 		},
 		ir.OperationStopAssignment: {
 			class:    effects.RuntimeClassParentMediated,
-			mediated: mustMediated("parent orchestrator", "the parent stops the Codex assignment; Codex 0.146.0 exposes no self-service stop function"),
+			mediated: mustMediated("parent orchestrator", fmt.Sprintf("the parent stops the Codex assignment; Codex %s exposes no self-service stop function", version)),
 		},
 		ir.OperationRequestUserDecision: {
 			class:  effects.RuntimeClassNative,
 			native: mustNativeCall("request-input", []string{"prompt", "options"}, "the user's requested input bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustExactContract(ir.HarnessCodex, buildCoreBindings(table))
+	return mustFloorContract(ir.HarnessCodex, buildCoreBindings(table))
 }
 
-// PinnedContracts returns the three initial pinned point contracts, one per
-// enabled harness.
+// PinnedContracts returns the three runtime contracts, one per enabled harness,
+// each admitting its recorded host version and every later release.
 func PinnedContracts() []RuntimeContract {
 	return []RuntimeContract{ClaudeCode2_1_210(), OpenCode1_18_10(), Codex0_146_0()}
 }

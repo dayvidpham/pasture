@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/codegen/scan"
 	"github.com/dayvidpham/pasture/internal/runtime"
@@ -27,11 +28,6 @@ type lifecycleFixture struct {
 
 type lifecycleContractFixture struct {
 	Harness    string                   `yaml:"harness"`
-	ID         string                   `yaml:"id"`
-	Version    string                   `yaml:"version"`
-	MaxVersion string                   `yaml:"max_version"`
-	Lower      string                   `yaml:"lower"`
-	Higher     string                   `yaml:"higher"`
 	EventOrder []string                 `yaml:"event_order"`
 	Axes       lifecycleAxesFixture     `yaml:"axes"`
 	Identities lifecycleIdentityFixture `yaml:"identities"`
@@ -119,17 +115,18 @@ func assertLifecycleContract[E comparable](
 ) {
 	t.Helper()
 	require.True(t, contract.IsValid())
-	assert.Equal(t, want.ID, contract.ID().String())
 	assert.Equal(t, want.Harness, string(contract.Harness()))
-	assert.Equal(t, want.Version, contract.Versions().Min().String())
-	maxVersion := want.MaxVersion
-	if maxVersion == "" {
-		maxVersion = want.Version
-	}
-	assert.Equal(t, maxVersion, contract.Versions().Max().String())
-	assert.True(t, contract.Supports(mustParse(t, want.Version)))
-	assert.False(t, contract.Supports(mustParse(t, want.Lower)))
-	assert.False(t, contract.Supports(mustParse(t, want.Higher)))
+	// The lifecycle contract's id and admission are read from the one root,
+	// never restated in the fixture: the id is the harness's production runtime
+	// contract id, and admission is a floor at the version that id records.
+	wantID, rootErr := artifact.ProductionRuntimeContract(contract.Harness())
+	require.NoError(t, rootErr)
+	assert.Equal(t, wantID.String(), contract.ID().String(), "the lifecycle contract id is the production runtime contract id")
+	min := contract.Versions().Min()
+	assert.False(t, contract.Versions().HasUpperBound(), "admission is a floor")
+	assert.True(t, contract.Supports(min), "the recorded version is admitted")
+	assert.True(t, contract.Supports(testutil.Bump(t, min, 0, 0, 1)), "the next patch release is admitted")
+	assert.False(t, contract.Supports(testutil.BelowFloor(t, min)), "the release below the recorded version is refused")
 
 	actualEvents := contract.Events()
 	require.Equal(t, events, actualEvents, "the contract and exported typed enumeration must share one order")

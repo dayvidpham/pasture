@@ -164,7 +164,7 @@ func TestCodexHooksConfigCoversActivatedEvents(t *testing.T) {
 
 // TestCodexHooksMatchersMatchAuthenticCapture pins the generated hooks.json
 // matcher values for the two authentically-proven, activation-bound Codex
-// 0.146.0 events to the EXACT values recorded by the irreplaceable authentic
+// Codex events to the EXACT values recorded by the irreplaceable authentic
 // capture configuration. These values can never be re-verified (Codex usage is
 // exhausted), so this golden freezes them against silent drift.
 //
