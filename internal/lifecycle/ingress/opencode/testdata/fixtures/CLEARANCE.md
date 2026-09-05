@@ -47,6 +47,20 @@ node_modules); the plugin file was unchanged. One line per event:
 - session.created: `opencode_session_created_1_18_29.1.json` — trigger: the first prompt, "Say hello in one word." (fired 1 s after Enter) — 2026-09-05T12:31:50Z — raw sha256:1c77be2e9dab5cee9b410d117d5bced8c287285960efac671dcdf6e841468bac (660 bytes) — committed sha256:71c8de3aadd8019b7e4123076625a0be6e3faaadd56a23c2a79c28a58f7ab591 (654 bytes)
 - tool.execute.before: `opencode_tool_execute_before_1_18_29.1.json` — trigger: the second prompt, "Run ls -la in the shell and describe the output." (fired 3 s after Enter; no permission prompt) — 2026-09-05T12:32:28Z — raw sha256:a454a9af11e0d38cf9ce2bf9279398364743c4c87ca5054f1e10b675942cc98c (150 bytes) — committed sha256:4ac8bef2356d19aa2972e61d1f6e50fe1bf3a3ebf187382f6591a5630d548053 (150 bytes)
 
+Record addendum, written on 2026-09-05 after the acceptance below, and
+correcting nothing that was accepted: the plugin the kit carried and the plugin
+this repository ships are NOT byte-identical. The committed
+`.opencode/plugins/pasture-lifecycle.ts` is sha256
+`900e45e7d91bd390ea2474eebb8b82c9de755f7eb393e88bfc01791791b5ebb6`. It differs
+from the kit's `bfd1f25bfcef8d8f3f5b6b784816a15f1a238cc42ac3d7edd2f00a7d3ea0a879`
+by exactly one line: the METADATA event table spells
+`installation.update-available` where the kit spelled
+`installation.update_available`. That correction landed after the kit was built,
+because the host's own schema spells the type with a hyphen. Neither captured
+event is that row: the captures are session.created and tool.execute.before, so
+the one differing line took no part in them and the captures stand. A reader who
+hashes the shipped plugin gets the first digest above.
+
 Both files carry one sessionID. No other file was produced; none was
 discarded. Observed and recorded elsewhere, not a clearance matter: the hook's
 standard error was drawn inside the host's terminal screen; the capture was
