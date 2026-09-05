@@ -1713,7 +1713,7 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 // SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
 // so it must not use t.Parallel.
 func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"}
+	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: pastureruntime.OpenCode1_18_29().Versions().Min().String()}
 
 	dir := t.TempDir()
 	previous := flagDBPath
@@ -1862,7 +1862,7 @@ func TestTheFaultRecordSaysSoWhenTheStorePathNamesNoDirectory(t *testing.T) {
 // SERIAL: this test drives the shared hookLifecycleCmd and writes flagDBPath,
 // so it must not use t.Parallel.
 func TestTheUnusableInputListHasAVisibleEnd(t *testing.T) {
-	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.19"}
+	coords := lifecycleCoordinates{Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: pastureruntime.OpenCode1_18_29().Versions().Min().String()}
 
 	dir := t.TempDir()
 	previous := flagDBPath
