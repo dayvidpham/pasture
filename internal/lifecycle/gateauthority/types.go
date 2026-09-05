@@ -41,6 +41,16 @@ const (
 	ActionTaskLifecycle
 	ActionPermission
 	ActionPostHoc
+	// ActionObservation is a pure observation: the host is telling pasture that
+	// something happened, not asking whether it may happen.
+	//
+	// An observation that REPORTS A COMPLETED ACTION of a named class takes this
+	// arm too, not the class of the action it reports. The reason is the
+	// decision order: an observation exits on its semantic before its class is
+	// ever read, so giving it the named class would put a value into the tables
+	// that nothing can reach, and would read as a rule when it is not one. A
+	// post-hoc GATE, which the host does ask, keeps ActionPostHoc.
+	ActionObservation
 	// actionClassCeiling is the exclusive upper sentinel. It is the ONLY place
 	// the arm count lives: a new arm above goes in before it, and every
 	// derivation over this enum reads it instead of a hand-written list.
@@ -71,6 +81,7 @@ var actionClassTokens = map[ActionClass]string{
 	ActionTaskLifecycle: "task-lifecycle",
 	ActionPermission:    "permission",
 	ActionPostHoc:       "post-hoc",
+	ActionObservation:   "observation",
 }
 
 // String renders the class as its canonical token, or as a named invalid value.
