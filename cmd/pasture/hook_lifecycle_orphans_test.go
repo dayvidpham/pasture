@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -178,15 +179,34 @@ func TestOrphanCountAgreesWithTheEnumerationTheInvariantTestUses(t *testing.T) {
 // quietly turns "expected and reclaimable" into something that reads as a fault
 // turns this test RED.
 //
-// WHAT IT VISITS: the THREE claims listed below, in the wording this command
-// ships today.
-// WHAT IT DOES NOT READ: any fourth claim added to that output, and any
+// WHAT IT VISITS: the FOUR claims listed below, in the wording this command
+// ships today, and every sentence boundary of the note.
+// WHAT IT DOES NOT READ: a fifth claim added to that output, and any
 // rewording that keeps the pinned phrases while changing what surrounds them.
-// It reads phrases, not the whole sentence.
+// It reads phrases and the joins between sentences, not the whole sentence.
+//
+// The note is built by concatenating string literals, and a literal that ends
+// a sentence must also end with a space or the next literal's first word is
+// glued to the full stop; the built binary once printed "the pasture
+// store.Every read command". So the join between the contention sentence and
+// the reclaim sentence is pinned as one phrase across the boundary, and no
+// full stop anywhere in the note may be followed directly by a letter.
+// MUTATION: remove the space after "the pasture store." and this is RED at
+// the join pin and again at the boundary sweep.
 func TestOrphanCountWordingSaysWhatItIsThatItIsExpectedAndWhatALargeNumberMeans(t *testing.T) {
 	t.Parallel()
 
 	note := handlers.OrphanPayloadNote
+
+	// 0. THE SENTENCES ARE JOINED AS SENTENCES. The join is read as ONE phrase
+	// that spans the boundary, because a pin on either sentence alone stays
+	// green when the space between them is lost.
+	assert.Contains(t, note, "such as another writer holding the pasture store. Every read command reclaims orphans",
+		"the contention sentence and the reclaim sentence must be joined by a full stop and a space; the built binary prints this note verbatim in text and in JSON")
+	glued := regexp.MustCompile(`\.[A-Za-z]`)
+	assert.Nil(t, glued.FindStringIndex(note),
+		"a full stop followed directly by a letter is two sentences glued together at a literal boundary: %q", glued.FindString(note))
+	assert.True(t, strings.HasSuffix(note, "."), "the note ends with a full stop")
 
 	// 1. WHAT AN ORPHAN IS.
 	assert.Contains(t, note, "a payload blob that no recorded occurrence names",

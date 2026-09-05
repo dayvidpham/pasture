@@ -29,7 +29,7 @@ import (
 const OrphanPayloadNote = "An orphan is a payload blob that no recorded occurrence names. " +
 	"One is left behind by a hook invocation that was abandoned between its two durable writes, and at most one arises per abandoned invocation. " +
 	"This is expected and reclaimable, not damage: the blob is written before the journal row deliberately, because a spare blob can be reclaimed later while a journal row naming an absent blob could not be repaired at all. " +
-	"A large number therefore does not mean the store is corrupt. It means invocations were abandoned repeatedly, so the thing to investigate is the store contention that caused the abandonment, such as another writer holding the pasture store." +
+	"A large number therefore does not mean the store is corrupt. It means invocations were abandoned repeatedly, so the thing to investigate is the store contention that caused the abandonment, such as another writer holding the pasture store. " +
 	"Every read command reclaims orphans that are older than the writer window, at most 1024 per run, so the number remaining can be smaller than the number that was there before the command ran; the reclaimed count says by how much."
 
 // HookLifecycleOrphansInput selects the store to inspect.
