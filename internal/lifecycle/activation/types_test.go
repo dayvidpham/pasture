@@ -1,6 +1,8 @@
 package activation_test
 
 import (
+	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,6 +12,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation/internal/proofgen"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/testutil"
 )
 
 func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
@@ -202,4 +205,104 @@ func TestADecisionReasonRequiresACommittedClearancePath(t *testing.T) {
 	require.NoError(t, err)
 	enabled.Clearance = clearance
 	require.False(t, enabled.IsValid(), "an enabled entry that names a clearance is invalid")
+}
+
+// TestWithheldReasonStringMirrorsEveryArm applies the shared enum-sync helper:
+// every arm the sentinel-bounded population yields must have a non-empty,
+// distinct String(). An arm added above the sentinel without a String() case
+// turns this RED naming the arm.
+func TestWithheldReasonStringMirrorsEveryArm(t *testing.T) {
+	t.Parallel()
+	testutil.RequireEnumMirrorComplete(t, testutil.EnumMirror[activation.WithheldReason]{
+		Subject: "activation.WithheldReason -> String()",
+		Arms:    activation.AllWithheldReasons(),
+		Mirror: func(arm activation.WithheldReason) (string, bool) {
+			text := arm.String()
+			return text, text != ""
+		},
+		Describe: func(arm activation.WithheldReason) string { return fmt.Sprintf("WithheldReason(%d)", arm) },
+	})
+}
+
+// TestGeneratedProofConstantsMirrorTheDeclarationTablesBothWays applies the
+// shared enum-sync helper to the proof enums against the three target files:
+// every declared arm has a generated constant of the same ordinal, and every
+// generated constant has a declared arm. A declaration row added without
+// regeneration, or a generated constant edited by hand, turns this RED
+// naming the arm.
+func TestGeneratedProofConstantsMirrorTheDeclarationTablesBothWays(t *testing.T) {
+	t.Parallel()
+	generatedCapture := activation.GeneratedCaptureProofs()
+	declaredCapture := activation.CaptureProofArms()
+	testutil.RequireEnumMirrorComplete(t, testutil.EnumMirror[activation.CaptureProofArm]{
+		Subject: "declared capture proof arms (the three target files) -> generated CaptureProof constants",
+		Arms:    declaredCapture,
+		Mirror: func(arm activation.CaptureProofArm) (string, bool) {
+			generated, ok := generatedCapture[arm.Arm]
+			if !ok || generated != arm.Proof {
+				return "", false
+			}
+			return fmt.Sprintf("CaptureProof%s=%d", arm.Arm, generated), true
+		},
+		Describe: func(arm activation.CaptureProofArm) string {
+			return fmt.Sprintf("%s capture arm %q ordinal %d (run make generate)", arm.Harness, arm.Arm, arm.Proof)
+		},
+	})
+	declaredCaptureByArm := map[string]activation.CaptureProof{}
+	for _, arm := range declaredCapture {
+		declaredCaptureByArm[arm.Arm] = arm.Proof
+	}
+	generatedCaptureNames := make([]string, 0, len(generatedCapture))
+	for name := range generatedCapture {
+		generatedCaptureNames = append(generatedCaptureNames, name)
+	}
+	sort.Strings(generatedCaptureNames)
+	testutil.RequireEnumMirrorComplete(t, testutil.EnumMirror[string]{
+		Subject: "generated CaptureProof constants -> declared capture proof arms",
+		Arms:    generatedCaptureNames,
+		Mirror: func(name string) (string, bool) {
+			declared, ok := declaredCaptureByArm[name]
+			if !ok || declared != generatedCapture[name] {
+				return "", false
+			}
+			return fmt.Sprintf("%s=%d", name, declared), true
+		},
+	})
+
+	generatedProduction := activation.GeneratedProductionProofs()
+	declaredProduction := activation.ProductionProofArms()
+	testutil.RequireEnumMirrorComplete(t, testutil.EnumMirror[activation.ProductionProofArm]{
+		Subject: "declared production proof arms (the three target files) -> generated ProductionProof constants",
+		Arms:    declaredProduction,
+		Mirror: func(arm activation.ProductionProofArm) (string, bool) {
+			generated, ok := generatedProduction[arm.Arm]
+			if !ok || generated != arm.Proof {
+				return "", false
+			}
+			return fmt.Sprintf("ProductionProof%s=%d", arm.Arm, generated), true
+		},
+		Describe: func(arm activation.ProductionProofArm) string {
+			return fmt.Sprintf("%s production arm %q ordinal %d (run make generate)", arm.Harness, arm.Arm, arm.Proof)
+		},
+	})
+	declaredProductionByArm := map[string]activation.ProductionProof{}
+	for _, arm := range declaredProduction {
+		declaredProductionByArm[arm.Arm] = arm.Proof
+	}
+	generatedProductionNames := make([]string, 0, len(generatedProduction))
+	for name := range generatedProduction {
+		generatedProductionNames = append(generatedProductionNames, name)
+	}
+	sort.Strings(generatedProductionNames)
+	testutil.RequireEnumMirrorComplete(t, testutil.EnumMirror[string]{
+		Subject: "generated ProductionProof constants -> declared production proof arms",
+		Arms:    generatedProductionNames,
+		Mirror: func(name string) (string, bool) {
+			declared, ok := declaredProductionByArm[name]
+			if !ok || declared != generatedProduction[name] {
+				return "", false
+			}
+			return fmt.Sprintf("%s=%d", name, declared), true
+		},
+	})
 }
