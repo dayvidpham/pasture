@@ -9,6 +9,7 @@ import (
 
 	digest "github.com/opencontainers/go-digest"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -23,24 +24,28 @@ type Capture struct {
 }
 
 // Parse captures the exact command-hook stdin bytes for a selected Codex event
-// and extracts the provider-specific native correlation identities. The raw
-// bytes are retained byte-exact as the durable evidence body: Codex delivers the
-// event JSON on stdin, so no field is lifted out or reformatted, and provider
-// facts beyond correlation (tool name/input, permission mode, cwd) survive
+// and extracts the provider-specific native correlation identities. The shared
+// refusals run first, through ingress.Validate, so a malformed payload is
+// refused with the same disposition on every harness. The raw bytes are
+// retained byte-exact as the durable evidence body: Codex delivers the event
+// JSON on stdin, so no field is lifted out or reformatted, and provider facts
+// beyond correlation (tool name/input, permission mode, cwd) survive
 // unflattened in the body.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
-	body := append([]byte(nil), raw...)
+	validation := ingress.Validate(raw)
 	manifest := registration.Codex0_146_0()
 	envelope.Runtime.Contract = manifest.Contract
 	envelope.HostVersion = observedVersion
-	result := Capture{Digest: digest.FromBytes(body), Disposition: model.CaptureValid}
-	result.Delivery = receipt.Delivery{Contract: manifest.Contract, Event: event.Kind, Envelope: envelope, Body: body}
+	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}
+	result.Delivery = receipt.Delivery{Contract: manifest.Contract, Event: event.Kind, Envelope: envelope, Body: validation.Body}
 
-	var value payload
-	if err := json.Unmarshal(body, &value); err != nil {
-		result.Disposition = model.CaptureMalformed
-	} else {
-		result.Disposition, result.Delivery.Bindings = bindingsFor(event.NativeName, value)
+	if validation.Disposition == model.CaptureValid {
+		var value payload
+		if err := json.Unmarshal(validation.Body, &value); err != nil {
+			result.Disposition = model.CaptureMalformed
+		} else {
+			result.Disposition, result.Delivery.Bindings = bindingsFor(event.NativeName, value)
+		}
 	}
 	result.Delivery.Capture = result.Disposition
 	return result

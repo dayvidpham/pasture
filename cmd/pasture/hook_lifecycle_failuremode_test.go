@@ -5703,11 +5703,14 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 // down as foreign, and a new file cannot arrive without being classified at all.
 var guardSweepOwned = []string{
 	"hook_environment_test.go",
+	"hook_lifecycle_capture_test.go",
 	"hook_lifecycle_codex_test.go",
 	"hook_lifecycle_docs_test.go",
 	"hook_lifecycle_failuremode_test.go",
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
+	"hook_lifecycle_raw_test.go",
+	"hook_lifecycle_writers_test.go",
 }
 
 // guardSweepForeign are the package's other test files, which this slice did
@@ -5718,7 +5721,6 @@ var guardSweepForeign = map[string]string{
 	"hook_lifecycle_context_production_test.go":  "not changed by this slice",
 	"hook_lifecycle_gate_test.go":                "not changed by this slice",
 	"hook_lifecycle_lineage_production_test.go":  "not changed by this slice",
-	"hook_lifecycle_raw_test.go":                 "not changed by this slice",
 	"hook_lifecycle_readback_production_test.go": "not changed by this slice",
 	"hook_test.go":                               "not changed by this slice",
 	"install_frontend_test.go":                   "not changed by this slice",

@@ -310,13 +310,39 @@ invocation abandoned at its deadline can leave a committed payload blob with no
 occurrence — one orphan per abandoned invocation, holding that invocation's raw
 host payload, bounded by the 1 MiB ingress payload cap. The write order is
 deliberate: an orphan blob is reclaimable, while a journal row naming an absent
-blob is corruption. `receipt.SQLiteBlobStore.Reclaimable` identifies them and
-nothing deletes them yet.
+blob is corruption. `receipt.SQLiteBlobStore.Reclaimable` identifies them, and
+every read command reclaims them, as the next paragraphs say.
 
-They can now be COUNTED. `pasture hook lifecycle orphans` reports how many
-payload blobs no occurrence names, in text or JSON, and it deletes nothing.
-`receipt.SQLiteBlobStore.ReclaimableCount` answers it from the same predicate
-`Reclaimable` enumerates, so the operator surface and the abandonment invariant
+They are COUNTED and RECLAIMED. `pasture hook lifecycle orphans` reports, in
+text or JSON, how many payload blobs this run reclaimed and how many remain.
+Every read command that rebuilds the projection (`list`, `context`, `lineage`,
+`orphans`) reclaims inside that rebuild: after the projection rows are
+re-inserted from the journal, in the same write transaction and under a
+savepoint, the rebuild deletes at most `projection.ReclaimCap` (1024) orphan
+blobs, oldest first, whose `written_at` stamp is older than the snapshot
+instant (taken before the journal was read) minus the WorkflowResult tier, the
+longest window any writer may hold between its payload write and its journal
+append. A blob that a journal row names is never selected, because the
+projection it reads was rebuilt in the same transaction; a blob younger than
+the window is never selected, because its writer may still be between its two
+writes. Two rules cover the rows that predate the stamp. First, the migration
+that adds `written_at` stamps every pre-existing blob with the MIGRATION
+INSTANT, so legacy orphans become eligible one writer window after the
+upgrade, not at once, and a writer of an older build that was between its two
+writes at the upgrade instant gets the same grace as any other writer. Second,
+a `written_at` of 0 means UNKNOWN and is never eligible: after the upgrade a 0
+can only come from an older build inserting into the upgraded store, and an
+unknown age never satisfies an age bound; that row is a small, bounded, rare
+leak accepted over a manufactured corruption, until a later delivery of the
+same body by a stamping build refreshes the stamp. The legacy orphans still
+drain at the cap per read command, one window later. A reclaim that fails
+rolls back alone, the rebuild still commits, and the store prints ONE line on
+the diagnostic sink it was constructed with (the process stderr in
+production); on success it prints nothing. The orphans command prints BOTH numbers because it mutates what it
+measures by running; a single count that shrank because the command ran would
+be a defect unless the output said so.
+The remaining count comes from `receipt.SQLiteBlobStore.ReclaimableCount`, the
+same predicate `Reclaimable` enumerates, so the operator surface and the abandonment invariant
 can never describe different sets. The count rebuilds the disposable occurrence
 projection from the journal first, exactly as `pasture hook lifecycle list`
 does: taken against a projection that was never rebuilt, every blob would look
@@ -343,6 +369,84 @@ contends. It would therefore be slowest under exactly the condition that
 produces orphans, and a slow enough count would push the invocation into its
 deadline and leave one more orphan behind — making the counter a cause of the
 thing it counts. A test asserts that no hook-path source calls it.
+
+### Capturing host payloads and clearing them into fixtures
+
+Every fixture under `internal/lifecycle/ingress/<harness>/testdata/fixtures/`
+is an authentic capture: bytes a real host sent to a real hook, in a LIVE
+session. A payload generated from the host contract cannot falsify that
+contract, so no fixture is authored, and no fixture is taken from another
+tool's data directory. `~/.local/share/peasant` is read-only for every agent
+and is not a fixture source.
+
+**Capture.** Set `PASTURE_CAPTURE_DIR` and run the session. The hook records
+each payload it receives, byte for byte, to
+`<harness>_<snake_event>_<version>.<n>.json` in that directory, numbered, and
+it never overwrites a file. The directory must be an ABSOLUTE path, it must sit
+OUTSIDE the repository, and it must already EXIST: a relative path would
+resolve against whatever directory the host started the hook in; a capture
+inside the repository can reach a commit before it is cleared; and pasture
+never creates the directory, because a directory pasture creates is one the
+user did not choose. A directory that fails any of these rules produces one
+warning on standard error, nothing is captured, and the host outcome is
+unchanged, because a capture setting must never fail a session. On the first
+payload it records, the hook prints one notice: `capture mode is recording
+this session to <dir>`. The shell script `tools/capture-claude-hook.sh`
+predates the in-binary capture and writes a provenance sidecar of its own.
+
+**Clearance.** A capture reaches the repository only through this procedure,
+in this order, and the mechanical steps are enforced by tests over the
+committed corpus:
+
+1. Capture into a directory outside the repository, as above.
+2. Inventory. `go test ./internal/lifecycle/ingress/ -run TestFixtureInventoryReport`
+   with `PASTURE_INVENTORY_DIR=<dir>` prints, per payload, every field path
+   with its value class (`identifier`, `path`, `free-text`, `number`, `bool`,
+   `null`), flags every free-text field, and names every refused class and
+   every reason a payload is unclearable.
+3. Substitute values, never structure. Two rules exist, applied in this
+   order and listed in the fixture's provenance: `home-path-v1` rewrites the
+   capturing user's home directory, and `free-text-v1` replaces each
+   free-text string by placeholder text of the same raw length. Keys,
+   nesting, types and nulls are unchanged; a fixture that lost a field, a
+   key, a type or a null would no longer falsify the contract. A committed
+   fixture that carries free text must list `free-text-v1`, or the corpus test
+   is RED naming the fixture and the field. A value that substitution cannot
+   clear makes the payload UNCLEARABLE; its event stays withheld and the user
+   decides.
+4. Scan. The secret scan runs over every file beneath every `testdata`
+   directory in the normal test flow, against the committed shapes in
+   `internal/lifecycle/ingress/inventory.go` (private key blocks; AWS, GCP,
+   GitHub and Anthropic token shapes; JSON web tokens). Any hit is RED naming
+   the file and the shape.
+5. Write `CLEARANCE.md` in the harness fixture directory from the template
+   there: the inventory, the rules applied in order, the scan result, the
+   fixture list, and later the user's verbatim acceptance with its date. The
+   harness acceptance test runs against the LOCAL worktree; nothing captured
+   reaches any remote before the user's acceptance for that harness.
+6. After the acceptance, the worker writes the verbatim acceptance into
+   `CLEARANCE.md`, commits locally and reports. The integrator pushes, opens
+   the pull request, and appends its URL to `CLEARANCE.md` in the landing
+   commit. A worker has no push path, so the private-first rule does not rest
+   on discipline alone.
+7. Refused payload classes are never committed whatever the substitution: a
+   tool response above 4096 bytes (raw file contents), an environment dump,
+   and any free-text field on a prompt or message event that was not
+   substituted by rule 3. The corpus test refuses the first two by shape.
+
+**Gate policy.** A lifecycle hook that cannot evaluate its event FAILS OPEN by
+default: the host receives that harness's continue bytes, exit 0, one
+diagnostic on standard error and a best-effort line in the fault record, and
+the user's action proceeds. `PASTURE_HOOK_FAIL_CLOSED=1` opts a fault into
+blocking on the hosts that read an exit code as a refusal. A policy DENIAL is
+the opposite case and FAILS CLOSED: it reaches the host as that harness's
+refusal, never as a fault, and never as a fault dressed as a refusal. Today
+every gate consultation answers proceed; the denial arms arrive with the gate
+decision work. A row may block by exit code only where its `FailureEvidence`
+cites the host documentation or the committed capture that shows the host
+honours the exit code; an uncited blocking row runs as report-and-continue. A
+Claude Code proceed is exit 0 with EMPTY standard output, because on that host
+any byte on standard output is read as a decision.
 
 ### Schema migration (`pasture migrate`)
 

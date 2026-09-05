@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -74,10 +76,42 @@ type openTaskTrackerOptions struct {
 	maxOpenConns       int
 	afterGenesisCommit func(provenance.JournalID) error
 	timeouts           timeouts.Profile
+	clock              receipt.Clock
+	diagnostics        io.Writer
 }
 
 func WithTimeoutProfile(profile timeouts.Profile) OpenTaskTrackerOption {
 	return func(o *openTaskTrackerOptions) { o.timeouts = profile }
+}
+
+// WithStoreClock replaces the clock the store holds for its own housekeeping
+// (the snapshot instant the orphan reclaim ages payload blobs against). It is
+// a TEST-ONLY option: production opens with the wall clock, and a test that
+// scripts this clock must script the payload store's clock as well, because
+// the age bound reads both.
+func WithStoreClock(clock receipt.Clock) OpenTaskTrackerOption {
+	return func(o *openTaskTrackerOptions) { o.clock = clock }
+}
+
+// WithDiagnosticSink replaces the stream the store writes its one housekeeping
+// diagnostic to (a failed orphan reclaim). It is a TEST-ONLY option: production
+// opens with the process stderr. A nil sink is refused at open, not defaulted.
+func WithDiagnosticSink(sink io.Writer) OpenTaskTrackerOption {
+	return func(o *openTaskTrackerOptions) { o.diagnostics = sink }
+}
+
+// wallClock is the clock production stores hold.
+type wallClock struct{}
+
+func (wallClock) Now() time.Time { return time.Now() }
+
+// productionOpenDefaults are the construction inputs every production opener
+// passes: the wall clock and the process stderr. They are set HERE and in no
+// library default below, so the two public openers are the enumeration of
+// production construction sites and the refusal in openTaskTrackerWithOptions
+// is what makes that enumeration complete.
+func productionOpenDefaults() openTaskTrackerOptions {
+	return openTaskTrackerOptions{clock: wallClock{}, diagnostics: os.Stderr}
 }
 
 // OpenTaskTrackerOption configures OpenTaskTrackerWithOptions.
@@ -105,7 +139,7 @@ func WithMaxOpenConns(n int) OpenTaskTrackerOption {
 // OpenTaskTrackerWithOptions opens the unified tracker with explicit opt-in
 // behavior for tests that copy a current golden database.
 func OpenTaskTrackerWithOptions(dbPath string, opts ...OpenTaskTrackerOption) (protocol.TaskTracker, error) {
-	cfg := openTaskTrackerOptions{}
+	cfg := productionOpenDefaults()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -116,7 +150,7 @@ func OpenTaskTrackerWithOptions(dbPath string, opts ...OpenTaskTrackerOption) (p
 // register it without recursive resolution of the public OpenTaskTracker
 // symbol via the protocol package.
 func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
-	return openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{})
+	return openTaskTrackerWithOptions(dbPath, productionOpenDefaults())
 }
 
 func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (protocol.TaskTracker, error) {
@@ -125,6 +159,12 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	}
 	if err := cfg.timeouts.Validate(); err != nil {
 		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The unified store timeout profile is invalid.", Why: err.Error(), Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.openTaskTrackerWithOptions).", Impact: "No database handles were opened.", Fix: "Use a constructor-validated production or test profile."}
+	}
+	if cfg.diagnostics == nil {
+		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The unified store has no diagnostics sink.", Why: "The store writes one line when its orphan payload reclaim fails, and a nil sink would lose that line; the sink is a required construction input, never a default, so a construction site nobody enumerated fails here instead of working quietly.", Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.openTaskTrackerWithOptions).", Impact: "No database handles were opened.", Fix: "Open through tasks.OpenTaskTracker or tasks.OpenTaskTrackerWithOptions, which pass the process stderr; a test passes a buffer or io.Discard through tasks.WithDiagnosticSink."}
+	}
+	if cfg.clock == nil {
+		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The unified store has no clock.", Why: "The store's orphan payload reclaim ages blobs against the instant it read the journal, and that instant must come from a clock the store holds; a nil clock is refused rather than defaulted.", Where: "Opening the pasture database (internal/tasks/open_unified.go in tasks.openTaskTrackerWithOptions).", Impact: "No database handles were opened.", Fix: "Open through tasks.OpenTaskTracker or tasks.OpenTaskTrackerWithOptions, which pass the wall clock; a test passes a scripted clock through tasks.WithStoreClock."}
 	}
 	if dbPath == "" {
 		dbPath = DefaultDBPath()
@@ -236,6 +276,9 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	}
 
 	tracker := newTrackerImpl(prov, trail, auditDB)
+	tracker.timeoutProfile = cfg.timeouts
+	tracker.storeClock = cfg.clock
+	tracker.diagnostics = cfg.diagnostics
 	tracker.afterGenesisCommit = cfg.afterGenesisCommit
 	return tracker, nil
 }

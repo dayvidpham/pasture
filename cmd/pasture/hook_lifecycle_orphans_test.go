@@ -3,15 +3,21 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
+	"go/ast"
 	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/assert"
@@ -84,8 +90,10 @@ func TestOrphanCountIsZeroOnACleanStoreAndTrueAfterAbandonedInvocations(t *testi
 	initializeLifecycleTestDatabase(t, dbPath)
 
 	cleanText := runLifecycleOrphans(t, binary, dbPath, "text")
-	assert.Contains(t, cleanText, "orphan payload blobs: 0\n",
+	assert.Contains(t, cleanText, "orphan payload blobs remaining: 0\n",
 		"a clean store has no unnamed payload blob, and the report must say so rather than stay silent")
+	assert.Contains(t, cleanText, "orphan payload blobs reclaimed by this run: 0\n",
+		"a clean store gives the reclaim nothing to do, and the report says so rather than omitting the number")
 	assert.Contains(t, cleanText, handlers.OrphanPayloadNote,
 		"the note must reach the TEXT renderer, which is the DEFAULT format and the only one an "+
 			"operator reads at a terminal. Pinning the constant and the JSON protects the COPIES "+
@@ -101,26 +109,26 @@ func TestOrphanCountIsZeroOnACleanStoreAndTrueAfterAbandonedInvocations(t *testi
 	ingest.Stdin = bytes.NewReader(raw)
 	require.NoError(t, ingest.Run())
 
-	assert.Contains(t, runLifecycleOrphans(t, binary, dbPath, "text"), "orphan payload blobs: 0\n",
+	assert.Contains(t, runLifecycleOrphans(t, binary, dbPath, "text"), "orphan payload blobs remaining: 0\n",
 		"a COMMITTED invocation names its own blob, so successful work must never be counted as an orphan")
 
 	const abandoned = 3
 	leaveOrphanBlobs(t, dbPath, abandoned)
 
 	abandonedText := runLifecycleOrphans(t, binary, dbPath, "text")
-	assert.Contains(t, abandonedText, "orphan payload blobs: 3\n",
+	assert.Contains(t, abandonedText, "orphan payload blobs remaining: 3\n",
 		"one orphan arises per abandoned invocation, so three abandonments must read as three")
+	assert.Contains(t, abandonedText, "orphan payload blobs reclaimed by this run: 0\n",
+		"a blob the production store wrote moments ago is inside the writer window, so this run must reclaim none of the three: its writer may still be between its two writes")
 	assert.Contains(t, abandonedText, handlers.OrphanPayloadNote,
 		"a NON-ZERO reading is where the misreading is expensive, so the text renderer must carry "+
 			"the note there too: an operator who reads a count alone concludes the store is damaged "+
 			"and hunts for a corrupt state these proofs show cannot exist")
 
-	var view struct {
-		Count int64  `json:"orphanPayloadBlobs"`
-		Note  string `json:"note"`
-	}
+	var view orphanReportView
 	require.NoError(t, json.Unmarshal([]byte(runLifecycleOrphans(t, binary, dbPath, "json")), &view))
-	assert.Equal(t, int64(abandoned), view.Count, "both renderers must report one number")
+	assert.Equal(t, int64(abandoned), view.Remaining, "both renderers must report the same remaining number")
+	assert.Equal(t, int64(0), view.ReclaimedThisRun, "both renderers must report the same reclaimed number")
 	assert.Equal(t, handlers.OrphanPayloadNote, view.Note,
 		"the meaning travels with the number in JSON too: a dashboard that renders the count alone "+
 			"reproduces the misreading the sentence exists to prevent")
@@ -171,15 +179,34 @@ func TestOrphanCountAgreesWithTheEnumerationTheInvariantTestUses(t *testing.T) {
 // quietly turns "expected and reclaimable" into something that reads as a fault
 // turns this test RED.
 //
-// WHAT IT VISITS: the THREE claims listed below, in the wording this command
-// ships today.
-// WHAT IT DOES NOT READ: any fourth claim added to that output, and any
+// WHAT IT VISITS: the FOUR claims listed below, in the wording this command
+// ships today, and every sentence boundary of the note.
+// WHAT IT DOES NOT READ: a fifth claim added to that output, and any
 // rewording that keeps the pinned phrases while changing what surrounds them.
-// It reads phrases, not the whole sentence.
+// It reads phrases and the joins between sentences, not the whole sentence.
+//
+// The note is built by concatenating string literals, and a literal that ends
+// a sentence must also end with a space or the next literal's first word is
+// glued to the full stop; the built binary once printed "the pasture
+// store.Every read command". So the join between the contention sentence and
+// the reclaim sentence is pinned as one phrase across the boundary, and no
+// full stop anywhere in the note may be followed directly by a letter.
+// MUTATION: remove the space after "the pasture store." and this is RED at
+// the join pin and again at the boundary sweep.
 func TestOrphanCountWordingSaysWhatItIsThatItIsExpectedAndWhatALargeNumberMeans(t *testing.T) {
 	t.Parallel()
 
 	note := handlers.OrphanPayloadNote
+
+	// 0. THE SENTENCES ARE JOINED AS SENTENCES. The join is read as ONE phrase
+	// that spans the boundary, because a pin on either sentence alone stays
+	// green when the space between them is lost.
+	assert.Contains(t, note, "such as another writer holding the pasture store. Every read command reclaims orphans",
+		"the contention sentence and the reclaim sentence must be joined by a full stop and a space; the built binary prints this note verbatim in text and in JSON")
+	glued := regexp.MustCompile(`\.[A-Za-z]`)
+	assert.Nil(t, glued.FindStringIndex(note),
+		"a full stop followed directly by a letter is two sentences glued together at a literal boundary: %q", glued.FindString(note))
+	assert.True(t, strings.HasSuffix(note, "."), "the note ends with a full stop")
 
 	// 1. WHAT AN ORPHAN IS.
 	assert.Contains(t, note, "a payload blob that no recorded occurrence names",
@@ -200,6 +227,12 @@ func TestOrphanCountWordingSaysWhatItIsThatItIsExpectedAndWhatALargeNumberMeans(
 		"the misreading must be refused by name, not merely left unstated")
 	assert.Contains(t, note, "the thing to investigate is the store contention that caused the abandonment",
 		"the reader must leave with the action to take, which is the whole value of the number")
+
+	// 4. THAT THE COMMAND CHANGES WHAT IT MEASURES, AND BY HOW MUCH.
+	assert.Contains(t, note, "at most 1024 per run",
+		"the reader must be told the reclaim is bounded, or a shrinking number reads as data loss")
+	assert.Contains(t, note, "the reclaimed count says by how much",
+		"the reader must be told which number explains the change")
 
 	// The words that would make it a fault report must not appear.
 	for _, forbidden := range []string{"corruption detected", "damaged", "data loss", "inconsistent"} {
@@ -396,4 +429,269 @@ func TestTheOrphanCountLivesOnlyOnTheOrphansReadSurface(t *testing.T) {
 				"silently stops matching, and the guard would then look stricter than it is while "+
 				"a real home of the count goes unnamed", path)
 	}
+}
+
+// orphanReportView is the JSON shape the orphans command prints: what this
+// run reclaimed, what remains, and the note.
+type orphanReportView struct {
+	ReclaimedThisRun int64  `json:"orphanPayloadBlobsReclaimedThisRun"`
+	Remaining        int64  `json:"orphanPayloadBlobsRemaining"`
+	Note             string `json:"note"`
+}
+
+// lifecycleStoreHandle opens the unified database handle the production
+// reader uses, for seeding and inspecting payload blob rows directly.
+func lifecycleStoreHandle(t *testing.T, dbPath string) (*sql.DB, func()) {
+	t.Helper()
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	concrete, ok := reader.(projection.Reader)
+	require.True(t, ok, "the production reader %T must expose the unified handle", reader)
+	return concrete.DB, func() { _ = tracker.Close() }
+}
+
+// legacyOrphanAge is how far in the past seedLegacyOrphans stamps its rows:
+// one hour, far beyond any writer window, so the built binary, which ages
+// against the wall clock, sees them as reclaimable on the run that follows.
+const legacyOrphanAge = time.Hour
+
+// seedLegacyOrphans writes payload blobs stamped one hour in the past, the
+// state a pre-existing orphan is in one window after the migration stamped it
+// with the migration instant. They are older than the window and no
+// occurrence names them, so a read command reclaims them, up to the cap. The
+// stamp is a KNOWN instant on purpose: a row at 0 has an unknown age and is
+// never reclaimed, and that case is proven separately below.
+func seedLegacyOrphans(t *testing.T, dbPath string, count int) {
+	t.Helper()
+	db, closeStore := lifecycleStoreHandle(t, dbPath)
+	defer closeStore()
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	stamp := time.Now().Add(-legacyOrphanAge).UnixNano()
+	for i := 0; i < count; i++ {
+		body := []byte(fmt.Sprintf(`{"legacy-orphan":%d}`, i))
+		_, err := tx.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count, written_at) VALUES(?,?,?,?)`, digest.FromBytes(body).String(), body, len(body), stamp)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tx.Commit())
+}
+
+// downgradePayloadBlobsToV7 gives the store the shape a build without the
+// written_at column left behind: the column and the version 8 row are removed,
+// so the schema is the version 7 schema and the next open runs the version 7
+// to 8 migration. The given bodies are inserted the way a version 7 Put wrote
+// them, with no stamp. It returns their digests.
+func downgradePayloadBlobsToV7(t *testing.T, dbPath string, bodies ...[]byte) []string {
+	t.Helper()
+	db, closeStore := lifecycleStoreHandle(t, dbPath)
+	defer closeStore()
+	_, err := db.Exec(`ALTER TABLE lifecycle_payload_blobs DROP COLUMN written_at`)
+	require.NoError(t, err)
+	_, err = db.Exec(`DELETE FROM audit_schema_meta WHERE version = 8`)
+	require.NoError(t, err)
+	digests := make([]string, 0, len(bodies))
+	for _, body := range bodies {
+		ref := digest.FromBytes(body).String()
+		_, err = db.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, ref, body, len(body))
+		require.NoError(t, err)
+		digests = append(digests, ref)
+	}
+	return digests
+}
+
+// TestTheFirstReadCommandAfterTheUpgradeReclaimsNothingWrittenBeforeIt is the
+// upgrade case through the BUILT BINARY: a store at version 7 holds a blob a
+// build without the written_at column wrote moments ago (its writer may still
+// be between its blob write and its journal append), and the first read
+// command of this build upgrades the store and runs its reclaim in the same
+// process. The command must reclaim NOTHING: the migration stamps the blob
+// with the migration instant, which is inside the window. The stamp is read
+// back and must equal the applied_at of version 8. A second unstamped row is
+// then inserted AFTER the upgrade, standing for the older build still writing
+// to the upgraded store; a further run reclaims nothing again, because an
+// unknown age never satisfies the bound, and it still counts that row as an
+// orphan.
+// WHAT IT VISITS: the migration, the reclaim and the report, all through the
+// binary a user runs. WHAT IT DOES NOT RUN: the older build itself; the
+// version 7 shape is reconstructed from a store this build made.
+// MUTATION: make the migration leave pre-existing rows at 0 again and the
+// first run reclaims one, RED at the "reclaimed by this run: 0" reading.
+func TestTheFirstReadCommandAfterTheUpgradeReclaimsNothingWrittenBeforeIt(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	digests := downgradePayloadBlobsToV7(t, dbPath, []byte(`{"written":"moments before the upgrade, by the older build"}`))
+
+	text := runLifecycleOrphans(t, binary, dbPath, "text")
+	assert.Contains(t, text, "orphan payload blobs reclaimed by this run: 0\n",
+		"the first read command after the upgrade must reclaim nothing: the pre-existing blob is stamped with the migration instant, inside the window, and its writer may still be between its two writes")
+	assert.Contains(t, text, "orphan payload blobs remaining: 1\n",
+		"the pre-existing orphan is still there and still counted")
+
+	db, closeStore := lifecycleStoreHandle(t, dbPath)
+	var stamp, appliedAt int64
+	require.NoError(t, db.QueryRow(`SELECT written_at FROM lifecycle_payload_blobs WHERE digest = ?`, digests[0]).Scan(&stamp))
+	require.NoError(t, db.QueryRow(`SELECT applied_at FROM audit_schema_meta WHERE version = 8`).Scan(&appliedAt))
+	assert.NotZero(t, stamp, "the pre-existing blob must not carry 0 after the upgrade")
+	assert.Equal(t, appliedAt, stamp, "the pre-existing blob carries exactly the migration instant the upgrade recorded")
+	late := []byte(`{"written":"after the upgrade, by the older build, with no stamp"}`)
+	_, err := db.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, digest.FromBytes(late).String(), late, len(late))
+	require.NoError(t, err)
+	closeStore()
+
+	var view orphanReportView
+	require.NoError(t, json.Unmarshal([]byte(runLifecycleOrphans(t, binary, dbPath, "json")), &view))
+	assert.Equal(t, int64(0), view.ReclaimedThisRun, "a row inserted after the upgrade with no stamp has an unknown age and is never reclaimed; the migration-instant row is still inside the window")
+	assert.Equal(t, int64(2), view.Remaining, "both rows remain and both are counted as orphans")
+}
+
+func payloadBlobRows(t *testing.T, dbPath string) (int, []string) {
+	t.Helper()
+	db, closeStore := lifecycleStoreHandle(t, dbPath)
+	defer closeStore()
+	rows, err := db.Query(`SELECT digest FROM lifecycle_payload_blobs ORDER BY digest`)
+	require.NoError(t, err)
+	defer rows.Close()
+	digests := []string{}
+	for rows.Next() {
+		var d string
+		require.NoError(t, rows.Scan(&d))
+		digests = append(digests, d)
+	}
+	require.NoError(t, rows.Err())
+	return len(digests), digests
+}
+
+// TestTheOrphansReportSaysWhatThisRunReclaimedAndWhatRemains: the orphans
+// command reclaims inside its own rebuild, so it MUTATES what it measures by
+// running. Both numbers are printed and each is true of the run that printed
+// it. MUTATION: drop the reclaimed line from the text renderer and this is RED
+// at the first reading; drop the JSON field and it is RED at the second.
+func TestTheOrphansReportSaysWhatThisRunReclaimedAndWhatRemains(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	const legacy = 5
+	seedLegacyOrphans(t, dbPath, legacy)
+
+	text := runLifecycleOrphans(t, binary, dbPath, "text")
+	assert.Contains(t, text, "orphan payload blobs reclaimed by this run: 5\n",
+		"five orphans stamped an hour ago are older than the window, so this run reclaims all five and says so")
+	assert.Contains(t, text, "orphan payload blobs remaining: 0\n",
+		"after the reclaim nothing remains, and the remaining number is true of the store this run left behind")
+
+	seedLegacyOrphans(t, dbPath, legacy)
+	var view orphanReportView
+	require.NoError(t, json.Unmarshal([]byte(runLifecycleOrphans(t, binary, dbPath, "json")), &view))
+	assert.Equal(t, int64(legacy), view.ReclaimedThisRun, "the JSON reader gets the reclaimed number")
+	assert.Equal(t, int64(0), view.Remaining, "the JSON reader gets the remaining number")
+	assert.Equal(t, handlers.OrphanPayloadNote, view.Note)
+}
+
+// TestEveryReadCommandReachesTheReclaim is the REAL-BINARY reachability proof
+// for the reclaim, over EVERY read command, derived and not listed.
+//
+// POPULATION: each registered leaf under `hook lifecycle` whose RunE closure
+// over cmd/pasture calls an exported handler whose own closure over
+// internal/handlers calls the tasks rebuild (the one path to the reclaim).
+// NON-VACUITY: at least four are derived (list, context, lineage, orphans
+// today); a derived command with no entry in the argument table is RED, so a
+// new read command cannot arrive unproven.
+// PER COMMAND, through the built binary: a store holding ONE referenced blob
+// (a real ingested occurrence) and cap+3 orphans stamped an hour ago; the
+// command exits 0 with EMPTY standard error; afterwards exactly the cap was
+// reclaimed, the three youngest-by-digest-order survivors remain, and the
+// referenced blob SURVIVES.
+// WHAT IT VISITS: the live command tree; the non-test sources of cmd/pasture
+// and internal/handlers; the payload blob table before and after each run.
+// WHAT IT DOES NOT READ: the command's standard output beyond exit status.
+// MUTATION: remove the reclaim call from the projection rebuild and every
+// derived command is RED naming the surviving count.
+func TestEveryReadCommandReachesTheReclaim(t *testing.T) {
+	// Serial on purpose: it reads the live command tree, which the whole
+	// process shares.
+	root := writerGuardModuleRoot(t)
+	handlersGraph := writerGuardParse(t, filepath.Join(root, "internal", "handlers"))
+	rebuilders := handlersGraph.functionsReaching(func(call *ast.CallExpr) bool {
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		return ok && strings.HasPrefix(selector.Sel.Name, "RebuildLifecycleOccurrences")
+	})
+	require.NotEmpty(t, rebuilders, "no handler reaches the tasks rebuild; the derivation is broken, not the tree")
+	cmdGraph := writerGuardParse(t, filepath.Join(root, "cmd", "pasture"))
+
+	arguments := map[string][]string{
+		"list":    {},
+		"context": {"--binding", "session:session_id=3696b790-3973-49f2-b156-9d82146bf7ec"},
+		"lineage": {"--binding", "session:session_id=3696b790-3973-49f2-b156-9d82146bf7ec"},
+		"orphans": {},
+	}
+	binary := lifecycleBinary(t)
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"))
+	require.NoError(t, err)
+
+	derived := []string{}
+	for _, command := range hookLifecycleCmd.Commands() {
+		if command.RunE == nil {
+			continue
+		}
+		closure := cmdGraph.closure(cmdGraph.bodyOfFunc(t, command.RunE))
+		if !callsHandlersWriter(closure, rebuilders) {
+			continue
+		}
+		derived = append(derived, command.Name())
+		args, known := arguments[command.Name()]
+		require.True(t, known, "%s rebuilds the projection and so reclaims, but this proof has no arguments to run it with; add them so the new read command is proven", command.CommandPath())
+
+		dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+		initializeLifecycleTestDatabase(t, dbPath)
+		ingest := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle",
+			"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.222")
+		ingest.Stdin = bytes.NewReader(raw)
+		require.NoError(t, ingest.Run(), "%s: the referenced occurrence must ingest", command.Name())
+		before, referenced := payloadBlobRows(t, dbPath)
+		require.Equal(t, 1, before, "%s: one referenced blob before seeding", command.Name())
+		const survivors = 3
+		seedLegacyOrphans(t, dbPath, projection.ReclaimCap+survivors)
+
+		run := exec.Command(binary, append([]string{databaseFlagName.Argument(), dbPath, "hook", "lifecycle", command.Name()}, args...)...)
+		var stdout, stderr bytes.Buffer
+		run.Stdout = &stdout
+		run.Stderr = &stderr
+		require.NoError(t, run.Run(), "%s: %s%s", command.Name(), stdout.String(), stderr.String())
+		assert.Empty(t, stderr.String(), "%s: a read command whose reclaim succeeds prints nothing on standard error", command.Name())
+
+		after, digests := payloadBlobRows(t, dbPath)
+		assert.Equal(t, 1+survivors, after, "%s: exactly the cap (%d) of %d legacy orphans is reclaimed by one run; %d rows survive", command.Name(), projection.ReclaimCap, projection.ReclaimCap+survivors, after)
+		assert.Contains(t, digests, referenced[0], "%s: the blob a recorded occurrence names must survive the reclaim", command.Name())
+	}
+	sort.Strings(derived)
+	require.GreaterOrEqual(t, len(derived), 4, "non-vacuity: at least list, context, lineage and orphans rebuild the projection; derived %v", derived)
+}
+
+// TestTheOrphansHelpSaysTheCommandReclaims pins the help text, because it is
+// the most consequential sentence on this command's operator surface: whether
+// the command deletes the user's data. The command reclaims orphan blobs
+// inside its rebuild, so the help must say so and must not say the opposite.
+// Read through the built binary, which is what a user runs.
+// MUTATION: restore "The command deletes nothing" to the Long text, or drop
+// the reclaim sentence, and this is RED.
+func TestTheOrphansHelpSaysTheCommandReclaims(t *testing.T) {
+	t.Parallel()
+	command := exec.Command(lifecycleBinary(t), "hook", "lifecycle", "orphans", "--help")
+	var stdout bytes.Buffer
+	command.Stdout = &stdout
+	require.NoError(t, command.Run())
+	help := stdout.String()
+	assert.Contains(t, help, "Reclaim and count the payload blobs that no recorded occurrence names",
+		"the first line must say the command reclaims, not only counts")
+	assert.Contains(t, help, "reclaims orphan\nblobs older than the writer window, at most 1024 per run",
+		"the help must say what is deleted, under what bound, and how much at most")
+	assert.Contains(t, help, "how many blobs this run\nreclaimed, and how many remain",
+		"the help must name the two numbers the output prints, so a reader can tell them apart")
+	assert.NotContains(t, help, "deletes nothing",
+		"a command that deletes must never carry help text that says it deletes nothing")
 }

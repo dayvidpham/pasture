@@ -3,14 +3,11 @@
 package claude
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
-	"io"
-	"unicode/utf8"
 
 	digest "github.com/opencontainers/go-digest"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -23,63 +20,23 @@ type Capture struct {
 }
 
 // Parse classifies raw bytes against a trusted generated registration. The
-// digest and defensive body copy are made before any decode attempt.
+// shared refusals run first, through ingress.Validate, so the digest and the
+// defensive body copy exist before any decode attempt and a malformed payload
+// is refused with the same disposition on every harness. What follows is
+// Claude-specific: the member set is validated against the fields the
+// registration allows, and the declared identities are bound by exact name.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
-	body := append([]byte(nil), raw...)
+	validation := ingress.Validate(raw)
 	manifest := registration.ClaudeCode2_1_210()
 	envelope.Runtime.Contract = manifest.Contract
-	result := Capture{Digest: digest.FromBytes(body), Disposition: model.CaptureValid}
-	result.Delivery = receipt.Delivery{Contract: manifest.Contract, Event: event.Kind, Envelope: envelope, Body: body}
+	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}
+	result.Delivery = receipt.Delivery{Contract: manifest.Contract, Event: event.Kind, Envelope: envelope, Body: validation.Body}
 	result.Delivery.Envelope.HostVersion = observedVersion
-	if !utf8.Valid(body) {
-		result.Disposition = model.CaptureInvalidUTF8
-		result.Delivery.Capture = result.Disposition
-		return result
-	}
-	members, duplicate, err := strictMembers(body)
-	if duplicate {
-		result.Disposition = model.CaptureDuplicateField
-	} else if err != nil {
-		result.Disposition = model.CaptureMalformed
-	} else {
-		result.Disposition, result.Delivery.Bindings = validateMembers(members, event)
+	if validation.Disposition == model.CaptureValid {
+		result.Disposition, result.Delivery.Bindings = validateMembers(validation.Members, event)
 	}
 	result.Delivery.Capture = result.Disposition
 	return result
-}
-
-func strictMembers(raw []byte) (map[string]json.RawMessage, bool, error) {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	token, err := decoder.Token()
-	if err != nil || token != json.Delim('{') {
-		return nil, false, fmt.Errorf("payload is not a JSON object: %w", err)
-	}
-	members := make(map[string]json.RawMessage)
-	for decoder.More() {
-		keyToken, err := decoder.Token()
-		if err != nil {
-			return nil, false, err
-		}
-		key, ok := keyToken.(string)
-		if !ok {
-			return nil, false, fmt.Errorf("object member name is not a string")
-		}
-		if _, exists := members[key]; exists {
-			return nil, true, nil
-		}
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return nil, false, err
-		}
-		members[key] = append(json.RawMessage(nil), value...)
-	}
-	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
-		return nil, false, fmt.Errorf("payload object is not terminated: %w", err)
-	}
-	if token, err = decoder.Token(); err != io.EOF {
-		return nil, false, fmt.Errorf("payload has trailing JSON value or bytes")
-	}
-	return members, false, nil
 }
 
 func validateMembers(members map[string]json.RawMessage, event registration.Event) (model.CaptureDisposition, []model.NativeBinding) {

@@ -109,6 +109,7 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 	inputs := []provenance.OperationInput{}
 	clock := fixedClock{now: time.Unix(10, 0)}
 	service := receipt.Service{
+		Window:     time.Second,
 		Blobs:      blobFake{calls: &calls},
 		Appender:   receipt.JournalAppender{Journal: journalFake{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second},
 		Identity:   identityFake{},

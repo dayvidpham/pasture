@@ -64,6 +64,10 @@ func (openCodeManifestEmitter) Emit(root string, opts GenerateOptions) ([]Genera
 	if err != nil {
 		return nil, fmt.Errorf("codegen.openCodeManifestEmitter.Emit: render target manifest: %w", err)
 	}
+	activationReport, err := renderOpenCodeActivationReport()
+	if err != nil {
+		return nil, fmt.Errorf("codegen.openCodeManifestEmitter.Emit: render activation report: %w", err)
+	}
 	outputs := []struct {
 		path    string
 		content string
@@ -71,6 +75,7 @@ func (openCodeManifestEmitter) Emit(root string, opts GenerateOptions) ([]Genera
 		{path: filepath.Join(root, "opencode.json"), content: content},
 		{path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath)), content: descriptor.HooksModule()},
 		{path: filepath.Join(root, filepath.FromSlash(OpenCodeTargetManifestPath)), content: targetManifest},
+		{path: filepath.Join(root, filepath.FromSlash(OpenCodeActivationReportPath)), content: activationReport},
 	}
 	files := make([]GeneratedFile, 0, len(outputs))
 	for _, output := range outputs {

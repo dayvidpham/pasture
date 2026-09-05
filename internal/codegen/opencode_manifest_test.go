@@ -32,8 +32,8 @@ func TestOpenCodeManifestEmittedContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openCodeManifestEmitter.Emit: %v", err)
 	}
-	if len(files) != 3 {
-		t.Fatalf("openCodeManifestEmitter.Emit returned %d files, want opencode.json, lifecycle plugin, and target manifest", len(files))
+	if len(files) != 4 {
+		t.Fatalf("openCodeManifestEmitter.Emit returned %d files, want opencode.json, lifecycle plugin, target manifest, and activation report", len(files))
 	}
 
 	var f GeneratedFile

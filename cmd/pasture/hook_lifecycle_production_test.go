@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/acceptance"
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
@@ -758,7 +759,12 @@ func TestLifecycleListStandardExitCategories(t *testing.T) {
 		initializeLifecycleTestDatabase(t, storagePath)
 		db, err := sql.Open("sqlite", storagePath)
 		require.NoError(t, err)
-		_, err = db.Exec(`DELETE FROM audit_schema_meta; INSERT INTO audit_schema_meta(version,applied_at) VALUES(8,1)`)
+		// A schema version newer than this build knows, derived from the
+		// constant. The audit schema ceiling moves with every migration, so a
+		// literal that encodes "newer than known" stops being newer once the
+		// ceiling passes it, and the case would then prove nothing; the
+		// derivation keeps it one above the ceiling without an edit.
+		_, err = db.Exec(fmt.Sprintf(`DELETE FROM audit_schema_meta; INSERT INTO audit_schema_meta(version,applied_at) VALUES(%d,1)`, audit.MaxKnownSchemaVersion+1))
 		require.NoError(t, err)
 		require.NoError(t, db.Close())
 	}, 5}}
@@ -1475,46 +1481,18 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	require.ErrorIs(t, statErr, os.ErrNotExist, "the legacy Codex activation filename must not be emitted at %s", legacy)
 }
 
-// deriveCodexActivationReport recomputes the exact bytes the Codex activation
-// audit report must contain, straight from the pinned registration manifest and
-// activation catalog — mirroring codexManifestEmitter.Emit (which mirrors
-// emitClaudeHooks). It carries no golden literals: every event name, state,
-// reason, and proof is read from the live catalogs, so a catalog change forces
-// the committed artifact to change in lockstep or this test fails.
+// deriveCodexActivationReport renders the exact bytes the Codex activation
+// audit report must contain through the product's own emitter, which reads the
+// pinned registration manifest and activation catalog live. It carries no
+// golden literals: a catalog change forces the committed artifact to change in
+// lockstep or this test fails. The report's row shape has one builder in
+// internal/codegen and this test does not copy it, so the shape cannot drift
+// between the emitter and the test.
 func deriveCodexActivationReport(t *testing.T) []byte {
 	t.Helper()
-	manifest := registration.Codex0_146_0()
-	states, err := activation.Codex0_146_0()
+	report, err := codegen.RenderCodexActivationReport()
 	require.NoError(t, err)
-	byKind := make(map[model.ContractEventKind]activation.Entry, len(states))
-	for _, state := range states {
-		byKind[state.Event] = state
-	}
-	type reportEntry struct {
-		Event           string `json:"event"`
-		State           string `json:"state"`
-		Reason          string `json:"reason,omitempty"`
-		CaptureProof    string `json:"captureProof,omitempty"`
-		ProductionProof string `json:"productionProof,omitempty"`
-	}
-	report := struct {
-		Harness  string        `json:"harness"`
-		Contract string        `json:"contract"`
-		Events   []reportEntry `json:"events"`
-	}{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
-	for _, event := range manifest.Events {
-		state, ok := byKind[event.Kind]
-		require.True(t, ok, "activation catalog must cover generated Codex event %q", event.NativeName)
-		entry := reportEntry{Event: event.NativeName, State: state.State.String(), Reason: state.Reason.String()}
-		if state.State == activation.Enabled {
-			entry.CaptureProof = state.CaptureProof.Name()
-			entry.ProductionProof = state.ProductionProof.Name()
-		}
-		report.Events = append(report.Events, entry)
-	}
-	wire, err := json.MarshalIndent(report, "", "  ")
-	require.NoError(t, err)
-	return append(wire, '\n')
+	return []byte(report)
 }
 
 // readBackGate rebuilds and reads back the single committed occurrence for a
@@ -1600,14 +1578,12 @@ func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string, cap
 		Redaction              string `json:"redaction"`
 		RawBytes               int    `json:"rawBytes"`
 		RawSHA256              string `json:"rawSHA256"`
-		ClearanceAuthority     string `json:"clearanceAuthority"`
 	}
 	require.NoError(t, json.Unmarshal(provenanceBytes, &sidecar))
 	require.Equal(t, "codex", sidecar.Provider)
 	require.Equal(t, "0.146.0", sidecar.ObservedRuntimeVersion)
 	require.Equal(t, "authentic-capture", sidecar.Origin)
 	require.Equal(t, "none", sidecar.Redaction)
-	require.Equal(t, "aura-plugins-a6h3d", sidecar.ClearanceAuthority)
 	require.Equal(t, len(raw), sidecar.RawBytes, "authentic Codex fixture byte count must match its provenance sidecar")
 	sum := sha256.Sum256(raw)
 	require.Equal(t, hex.EncodeToString(sum[:]), sidecar.RawSHA256, "authentic Codex fixture digest must match the cleared digest exactly")

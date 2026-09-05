@@ -18,8 +18,8 @@ var hookLifecycleOrphansFormat string
 // slowest precisely when orphans are being produced.
 var hookLifecycleOrphansCmd = &cobra.Command{
 	Use:   "orphans",
-	Short: "Count the payload blobs that no recorded occurrence names",
-	Long: `Count the payload blobs that no recorded occurrence names.
+	Short: "Reclaim and count the payload blobs that no recorded occurrence names",
+	Long: `Reclaim and count the payload blobs that no recorded occurrence names.
 
 An orphan is a payload blob that no recorded occurrence names. One is left
 behind by a hook invocation that was abandoned between its two durable writes,
@@ -32,10 +32,13 @@ A large number does not mean the store is corrupt. It means invocations were
 abandoned repeatedly, so the thing to investigate is the store contention that
 caused the abandonment.
 
-The command deletes nothing and changes no journal truth. It rebuilds the
-disposable occurrence projection from the journal before counting, because a
-count taken against a projection that was never rebuilt would report every blob
-as an orphan.`,
+The command changes no journal truth, but it is not a pure read. Like every
+read command it rebuilds the disposable occurrence projection from the journal
+first, because a count taken against a projection that was never rebuilt would
+report every blob as an orphan; and inside that rebuild it reclaims orphan
+blobs older than the writer window, at most 1024 per run. So it prints TWO
+numbers, each true of the run that printed it: how many blobs this run
+reclaimed, and how many remain.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		hookLifecycleOrphansInput.DBPath = flagDBPath

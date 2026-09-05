@@ -34,7 +34,7 @@ func receiveOnce(t *testing.T, delivery Delivery) []byte {
 	inputs := []provenance.OperationInput{}
 	clock := testClock{now: time.Unix(10, 0)}
 	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 41}}}}
-	s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "origin-carrier"}}
+	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "origin-carrier"}}
 	if _, err := s.Receive(context.Background(), mustDeliveryWarrant(), delivery); err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestReceiveOriginPayloadDeterministic(t *testing.T) {
 			inputs := []provenance.OperationInput{}
 			clock := testClock{now: time.Unix(10, 0)}
 			j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 41}}}}
-			s := Service{Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "origin-race"}}
+			s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "origin-race"}}
 			_, errs[i] = s.Receive(context.Background(), mustDeliveryWarrant(), delivery)
 			if len(inputs) == 1 && len(inputs[0].Effects) == 1 {
 				payloads[i] = append([]byte(nil), inputs[0].Effects[0].Payload...)

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -309,9 +312,24 @@ func lifecycleOutcome(
 					errLifecycleWorkPanicked, lifecyclePanicCause(coords, recovered))}
 			}
 		}()
+		// CAPTURE HAPPENS HERE, INSIDE THE WORK AND INSIDE ITS DEADLINE, and
+		// ONLY when the operator asked for it. Three facts hold this shape:
+		//   - the handler refuses a WITHHELD event before it reads a byte, and
+		//     a withheld event is exactly what a capture campaign records, so
+		//     the bytes are read BEFORE the handler and handed to it unchanged;
+		//   - the read is inside this goroutine, so a stdin that never closes
+		//     is bounded by the select below like every other stall;
+		//   - with PASTURE_CAPTURE_DIR unset nothing here runs, the handler
+		//     reads stdin itself as it always did, and the ordering and the
+		//     bytes on the host path are exactly those of a build without
+		//     capture. That case is pinned in source and on the binary.
+		input := cmd.InOrStdin()
+		if env.CaptureDir != "" {
+			input = captureHostPayload(cmd, coords, env.CaptureDir, input)
+		}
 		native, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
 			DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
-			HostVersion: coords.HostVersion, Input: cmd.InOrStdin(),
+			HostVersion: coords.HostVersion, Input: input,
 			Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 			Barrier: barrier,
 		})
@@ -344,6 +362,56 @@ func lifecycleOutcome(
 
 	return hostexit.ForDecision(native, hostexit.ExitContinue, "")
 }
+
+// captureHostPayload records the host payload to the capture directory and
+// returns a reader that hands the handler the same bytes. It reads at most
+// one byte above the ingress bound, exactly as the handler does, so the
+// handler's over-limit refusal is unchanged; a read error is handed on after
+// the bytes read, so the handler's read refusal is unchanged too. It runs
+// inside the work goroutine, so it shares the hook-invocation deadline.
+//
+// A capture failure NEVER changes the host outcome: every refusal and every
+// failed write is one warning from the sink on standard error, the payload
+// still reaches the handler, and the host receives the outcome it would have
+// received without capture. The sink prints its notice once, on the first
+// payload it records, so the operator learns that capture was requested and
+// whether it happened.
+//
+// The repository the sink must stay outside of is the one enclosing the
+// working directory the host started the hook in: a capture there could reach
+// a commit before it is cleared. If the working directory cannot be read,
+// that check cannot run, and capture is refused rather than guessed.
+func captureHostPayload(cmd *cobra.Command, coords lifecycleCoordinates, dir string, input io.Reader) io.Reader {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"pasture: the working directory could not be read (%v), so pasture cannot tell whether %s is inside a repository and nothing is captured; "+
+				"this happened in captureHostPayload (cmd/pasture/hook_lifecycle.go) while the hook was starting; the event is still evaluated and the host is not affected; "+
+				"start the host from a directory that exists\n", err, hookCaptureDirEnv)
+		return input
+	}
+	repoRoot, _ := handlers.EnclosingRepositoryRoot(cwd)
+	sink, err := handlers.NewDirectoryCaptureSink(dir, repoRoot, cmd.ErrOrStderr())
+	if err != nil {
+		// The sink has told the operator why. Capture is off for this run.
+		return input
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(input, model.MaxNativePayloadBytes+1))
+	if readErr != nil {
+		return io.MultiReader(bytes.NewReader(raw), failingReader{err: readErr})
+	}
+	// Record reports its own failure on standard error, and the outcome never
+	// depends on whether the capture was written, so its result is not
+	// consulted here; the sink's tests consult it.
+	_, _ = sink.Record(coords.Harness, coords.Event, coords.HostVersion, raw)
+	return bytes.NewReader(raw)
+}
+
+// failingReader returns one read error, so a stdin failure met while
+// capturing reaches the handler as the same failure.
+type failingReader struct{ err error }
+
+func (r failingReader) Read([]byte) (int, error) { return 0, r.err }
 
 // lifecycleContinuation resolves the bytes THIS host reads as "you may
 // continue" for THIS event class. A fail-open fault emits them, because on two

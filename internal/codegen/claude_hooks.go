@@ -164,20 +164,19 @@ func emitClaudeHooks(root string, opts GenerateOptions, manifest registration.Ma
 		Description: "Pasture lifecycle adapters and shared-worktree git discipline for the pinned Claude Code contract.",
 		Hooks:       make(map[string][]claudeHookGroup, len(manifest.Events)),
 	}
-	support := activationSupportReport{Harness: string(manifest.Harness), Contract: manifest.Contract.String()}
+	support, err := buildActivationSupportReport("codegen.emitClaudeHooks", manifest, states)
+	if err != nil {
+		return nil, err
+	}
 	for _, event := range manifest.Events {
 		state, present := stateByKind[event.Kind]
 		if !present {
 			return nil, fmt.Errorf("codegen.emitClaudeHooks: generated event %q has no activation entry; add one exhaustive typed decision", event.NativeName)
 		}
-		entry := activationSupportEntry{Event: event.NativeName, State: state.State.String(), Reason: state.Reason.String()}
 		if state.State == activation.Enabled {
-			entry.CaptureProof = state.CaptureProof.Name()
-			entry.ProductionProof = state.ProductionProof.Name()
 			command := claudeHookCommand{Type: "command", Command: fmt.Sprintf(`${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event %s --host-version "${CLAUDE_CODE_VERSION:-unknown}"`, event.NativeName), Timeout: 10}
 			config.Hooks[event.NativeName] = []claudeHookGroup{{Matcher: "", Hooks: []claudeHookCommand{command}}}
 		}
-		support.Events = append(support.Events, entry)
 	}
 	if len(stateByKind) != len(manifest.Events) {
 		return nil, fmt.Errorf("codegen.emitClaudeHooks: activation has %d entries for %d generated events; remove non-manifest entries and provide one exact decision per event", len(stateByKind), len(manifest.Events))

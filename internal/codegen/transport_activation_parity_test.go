@@ -11,6 +11,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/dayvidpham/pasture/internal/codegen"
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/inventory"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
 // TestTransportWiresOnlyActivatedEvents asserts, for every harness Pasture
@@ -49,18 +55,218 @@ func TestTransportWiresOnlyActivatedEvents(t *testing.T) {
 
 	t.Run("opencode", func(t *testing.T) {
 		t.Parallel()
-		enabled := enabledEventsFromOpenCodeManifest(t, filepath.Join(root, ".opencode", "pasture-opencode.json"))
+		enabled := enabledEventsFromActivationReport(t, filepath.Join(root, ".opencode", "pasture-opencode-activation.json"))
 		wired := openCodeWiredLifecycleEvents(t, filepath.Join(root, ".opencode", "plugins", "pasture-lifecycle.ts"))
 		requireSameEvents(t, ".opencode/plugins/pasture-lifecycle.ts", enabled, wired)
 	})
+}
+
+// activationReportPaths maps every harness that has lifecycle registration
+// rows to its committed activation audit report. The harness population is
+// DERIVED from the registration inventory below, so a harness that gains
+// registration rows without a report here fails by name.
+var activationReportPaths = map[ir.HarnessID]string{
+	ir.HarnessClaudeCode: filepath.Join("hooks", "pasture-activation.json"),
+	ir.HarnessCodex:      filepath.Join(".codex", "pasture-codex-activation.json"),
+	ir.HarnessOpenCode:   filepath.Join(".opencode", "pasture-opencode-activation.json"),
+}
+
+// registeredLifecycleHarnesses derives the set of harnesses with lifecycle
+// registration rows from the registration inventory, the product's own
+// source of that fact.
+func registeredLifecycleHarnesses(t *testing.T) []ir.HarnessID {
+	t.Helper()
+	table, err := inventory.Table()
+	require.NoError(t, err)
+	seen := map[ir.HarnessID]struct{}{}
+	for _, row := range table {
+		if row.Key.Kind == inventory.KindLifecycleEvent {
+			seen[row.Key.Harness] = struct{}{}
+		}
+	}
+	require.NotEmpty(t, seen, "the registration inventory names no lifecycle harness at all, so nothing below is asserted")
+	harnesses := make([]ir.HarnessID, 0, len(seen))
+	for harness := range seen {
+		harnesses = append(harnesses, harness)
+	}
+	sort.Slice(harnesses, func(i, j int) bool { return harnesses[i] < harnesses[j] })
+	return harnesses
+}
+
+// TestEveryLifecycleHarnessHasOneActivationReportInTheSharedShape proves
+// three things over every harness with lifecycle registration rows: a
+// separate report file exists for it; the report names that harness; and
+// every row carries the responseCapability and failureEvidence KEYS, each
+// holding the unset token, the empty string (a genuinely absent source) or a
+// non-empty citation, and never anything else.
+func TestEveryLifecycleHarnessHasOneActivationReportInTheSharedShape(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	harnesses := registeredLifecycleHarnesses(t)
+	seenReports := map[string]struct{}{}
+	rows := 0
+	for _, harness := range harnesses {
+		relative, ok := activationReportPaths[harness]
+		require.True(t, ok, "harness %q has lifecycle registration rows but no activation report path in this test; add its report and its path", harness)
+		_, duplicate := seenReports[relative]
+		require.False(t, duplicate, "two harnesses share the report %s; every harness has its own separate report", relative)
+		seenReports[relative] = struct{}{}
+
+		raw, err := os.ReadFile(filepath.Join(root, relative))
+		require.NoError(t, err, "activation report %s must exist for harness %q; run make generate", relative, harness)
+		var report struct {
+			Harness string                       `json:"harness"`
+			Events  []map[string]json.RawMessage `json:"events"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &report), "activation report %s is not JSON", relative)
+		require.Equal(t, string(harness), report.Harness, "activation report %s names another harness", relative)
+		require.NotEmpty(t, report.Events, "activation report %s has no rows", relative)
+		for _, row := range report.Events {
+			rows++
+			var event string
+			require.NoError(t, json.Unmarshal(row["event"], &event))
+			for _, column := range []string{"responseCapability", "failureEvidence"} {
+				value, present := row[column]
+				require.True(t, present, "%s row %q lacks the %s key; the column is never omitted because its empty string is a value", relative, event, column)
+				var text string
+				require.NoError(t, json.Unmarshal(value, &text), "%s row %q: %s is not a string", relative, event, column)
+				switch {
+				case text == codegen.ActivationColumnUnset, text == "":
+				case strings.HasPrefix(text, "https://"), strings.HasPrefix(text, "http://"), strings.Contains(text, "/"):
+				default:
+					require.Failf(t, "unexpected column value", "%s row %q: %s is %q, which is neither the unset token, the empty string nor a citation", relative, event, column, text)
+				}
+			}
+		}
+	}
+	require.Len(t, seenReports, len(harnesses), "one report per harness")
+	require.NotZero(t, rows, "no report row was read, so the column assertions above asserted nothing")
+}
+
+// TestNotYetDerivedColumnsRenderTheUnsetTokenNotTheEmptyString reads the
+// committed reports and pins that a not-yet-derived column is the literal
+// token and never the empty string: every row's responseCapability is unset in
+// this build, and a blocking row without a citation renders unset for its
+// evidence while a non-blocking row renders the empty string.
+func TestNotYetDerivedColumnsRenderTheUnsetTokenNotTheEmptyString(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	unsetEvidence, absentEvidence, citedEvidence := 0, 0, 0
+	for harness, relative := range activationReportPaths {
+		raw, err := os.ReadFile(filepath.Join(root, relative))
+		require.NoError(t, err)
+		var report struct {
+			Events []struct {
+				Event              string `json:"event"`
+				ResponseCapability string `json:"responseCapability"`
+				FailureEvidence    string `json:"failureEvidence"`
+			} `json:"events"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &report))
+		blockingByEvent := registeredBlockingModes(t, harness)
+		for _, row := range report.Events {
+			require.Equal(t, codegen.ActivationColumnUnset, row.ResponseCapability, "%s row %q: no build derives a response capability yet, so the column must carry the unset token and not the empty string", relative, row.Event)
+			policy, ok := pastureruntime.LookupLifecycleFailure(harness, row.Event)
+			require.True(t, ok, "%s row %q has no pinned profile row", relative, row.Event)
+			blocking, registered := blockingByEvent[row.Event]
+			require.True(t, registered, "%s row %q is not a registered event", relative, row.Event)
+			switch {
+			case row.FailureEvidence == codegen.ActivationColumnUnset:
+				unsetEvidence++
+				require.False(t, policy.Evidence.IsPresent(), "%s row %q renders unset but the profile cites %q", relative, row.Event, policy.Evidence.Source)
+				require.NotEqual(t, registration.NonBlocking, blocking, "%s row %q is declared non-blocking, so its evidence source is genuinely absent and must render the empty string, not the unset token", relative, row.Event)
+			case row.FailureEvidence == "":
+				absentEvidence++
+				require.Equal(t, registration.NonBlocking, blocking, "%s row %q is declared blocking, so an empty evidence column claims a source that is genuinely absent when it is only not yet supplied; render the unset token", relative, row.Event)
+			default:
+				citedEvidence++
+				require.Equal(t, policy.Evidence.Source, row.FailureEvidence, "%s row %q cites something the profile does not", relative, row.Event)
+				require.NotEqual(t, registration.NonBlocking, blocking, "%s row %q is declared non-blocking and must not carry a citation", relative, row.Event)
+			}
+		}
+	}
+	require.NotZero(t, unsetEvidence, "no blocking row without a citation exists, so the unset case was never read")
+	require.NotZero(t, absentEvidence, "no non-blocking row exists, so the absent case was never read")
+	require.NotZero(t, citedEvidence, "no cited row exists, so the citation case was never read")
+}
+
+// registeredBlockingModes reads the declared blocking mode of every generated
+// event of one harness from its registration manifest.
+func registeredBlockingModes(t *testing.T, harness ir.HarnessID) map[string]registration.BlockingMode {
+	t.Helper()
+	var manifest registration.Manifest
+	switch harness {
+	case ir.HarnessClaudeCode:
+		manifest = registration.ClaudeCode2_1_210()
+	case ir.HarnessCodex:
+		manifest = registration.Codex0_146_0()
+	case ir.HarnessOpenCode:
+		manifest = registration.OpenCode1_18_10()
+	default:
+		t.Fatalf("harness %q has no registration manifest in this test", harness)
+	}
+	out := map[string]registration.BlockingMode{}
+	for _, event := range manifest.Entries() {
+		out[event.NativeName] = event.Blocking
+	}
+	return out
+}
+
+// TestOpenCodeReportAgreesWithTheTargetManifestActivationArray holds the new
+// OpenCode report and the activation array the target manifest keeps as
+// target data to the same events, states and reasons, in the same order.
+func TestOpenCodeReportAgreesWithTheTargetManifestActivationArray(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	var report activationReportFile
+	readGeneratedJSON(t, filepath.Join(root, ".opencode", "pasture-opencode-activation.json"), &report)
+	var manifest openCodeTargetManifestFile
+	readGeneratedJSON(t, filepath.Join(root, ".opencode", "pasture-opencode.json"), &manifest)
+	require.Len(t, manifest.Activation, len(report.Events), "the report and the manifest activation array must list the same events")
+	require.NotEmpty(t, report.Events)
+	for index := range report.Events {
+		require.Equal(t, manifest.Activation[index].Event, report.Events[index].Event, "row %d", index)
+		require.Equal(t, manifest.Activation[index].State, report.Events[index].State, "row %d (%s)", index, report.Events[index].Event)
+		require.Equal(t, manifest.Activation[index].Reason, report.Events[index].Reason, "row %d (%s)", index, report.Events[index].Event)
+	}
+}
+
+// TestAWithheldEventIsNeverWired is the negative half of parity, stated on
+// its own: every withheld row of every report is absent from that harness's
+// transport.
+func TestAWithheldEventIsNeverWired(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	wiredByHarness := map[ir.HarnessID]map[string]struct{}{
+		ir.HarnessClaudeCode: claudeWiredLifecycleEvents(t, filepath.Join(root, "hooks", "hooks.json")),
+		ir.HarnessCodex:      codexWiredLifecycleEvents(t, filepath.Join(root, ".codex", "hooks.json")),
+		ir.HarnessOpenCode:   openCodeWiredLifecycleEvents(t, filepath.Join(root, ".opencode", "plugins", "pasture-lifecycle.ts")),
+	}
+	withheld := 0
+	for _, harness := range registeredLifecycleHarnesses(t) {
+		var report activationReportFile
+		readGeneratedJSON(t, filepath.Join(root, activationReportPaths[harness]), &report)
+		wired, ok := wiredByHarness[harness]
+		require.True(t, ok, "harness %q has no transport reader in this test", harness)
+		for _, entry := range report.Events {
+			if entry.State != "withheld" {
+				continue
+			}
+			withheld++
+			_, isWired := wired[entry.Event]
+			require.False(t, isWired, "%s withholds %q but the transport wires it", activationReportPaths[harness], entry.Event)
+		}
+	}
+	require.NotZero(t, withheld, "no withheld row exists, so nothing above was asserted")
 }
 
 // activationReportFile mirrors the committed Claude and Codex activation audit
 // reports. Only the fields this parity check reads are declared.
 type activationReportFile struct {
 	Events []struct {
-		Event string `json:"event"`
-		State string `json:"state"`
+		Event  string `json:"event"`
+		State  string `json:"state"`
+		Reason string `json:"reason"`
 	} `json:"events"`
 }
 
@@ -69,8 +275,9 @@ type activationReportFile struct {
 // files, nested one level down.
 type openCodeTargetManifestFile struct {
 	Activation []struct {
-		Event string `json:"event"`
-		State string `json:"state"`
+		Event  string `json:"event"`
+		State  string `json:"state"`
+		Reason string `json:"reason"`
 	} `json:"activation"`
 }
 
@@ -86,21 +293,6 @@ func enabledEventsFromActivationReport(t *testing.T, path string) map[string]str
 	}
 	require.NotEmpty(t, enabled,
 		"activation report %q enables no event; a harness with an empty enabled set cannot be checked for transport parity — regenerate the report or remove the harness from this test", path)
-	return enabled
-}
-
-func enabledEventsFromOpenCodeManifest(t *testing.T, path string) map[string]struct{} {
-	t.Helper()
-	var manifest openCodeTargetManifestFile
-	readGeneratedJSON(t, path, &manifest)
-	enabled := make(map[string]struct{})
-	for _, entry := range manifest.Activation {
-		if entry.State == "enabled" {
-			enabled[entry.Event] = struct{}{}
-		}
-	}
-	require.NotEmpty(t, enabled,
-		"OpenCode target manifest %q enables no event; regenerate the manifest before running the transport parity check", path)
 	return enabled
 }
 

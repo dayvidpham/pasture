@@ -32,11 +32,63 @@ type IdentityResolver interface {
 	ResolveLifecycleIdentity(context.Context) (Identity, error)
 }
 
+// BlobStore is the NARROW WRITE door on the payload blob table: one method,
+// which stores a content-addressed body and stamps the instant it was written.
+// The receipt service is its only caller and depends on nothing else about the
+// store, so a fake that records the call satisfies it. The delete door is a
+// separate type, PayloadReclaimer, which nothing on a write path constructs.
 type BlobStore interface {
 	Put(context.Context, digest.Digest, []byte) error
 }
 
-type SQLiteBlobStore struct{ DB *sql.DB }
+// SQLiteBlobStore writes and inspects payload blobs on the unified store. It
+// holds its own clock for the written-at stamp: the wall clock unless a
+// scripted clock is injected through NewSQLiteBlobStore, so a store built as
+// a bare literal stamps real time and a test can choose the instant.
+type SQLiteBlobStore struct {
+	DB    *sql.DB
+	clock Clock
+}
+
+// BlobStoreOption configures a SQLiteBlobStore at construction.
+type BlobStoreOption func(*SQLiteBlobStore)
+
+// WithPayloadClock makes the store stamp written_at from the given clock
+// instead of the wall clock. It exists for tests that must place a blob at a
+// chosen instant relative to the reclaim window; production wires no clock
+// and stamps real time.
+func WithPayloadClock(clock Clock) BlobStoreOption {
+	return func(s *SQLiteBlobStore) { s.clock = clock }
+}
+
+// NewSQLiteBlobStore builds a store on the unified handle with the options
+// applied. Without options it is identical to the literal SQLiteBlobStore{DB: db}.
+func NewSQLiteBlobStore(db *sql.DB, options ...BlobStoreOption) SQLiteBlobStore {
+	store := SQLiteBlobStore{DB: db}
+	for _, option := range options {
+		option(&store)
+	}
+	return store
+}
+
+// writeInstant is the instant a Put stamps. The wall clock is the default
+// because the stamp's only reader, the orphan reclaim, ages a blob against a
+// snapshot instant taken from the same wall clock in production; a store
+// built without a clock must therefore stamp real time, never zero: a zero
+// stamp means an UNKNOWN age, which the reclaim never treats as old, so an
+// unstamped orphan would never be reclaimed.
+//
+// This is one of the two INJECTED clocks the age bound reads (the other is the
+// rebuild's snapshot clock). The writer-window refusal in Service.Receive reads
+// the WALL clock instead, because it judges a context deadline; see
+// Service.boundedWriter for the boundary between the two, and script both
+// injected clocks in any test that scripts one.
+func (s SQLiteBlobStore) writeInstant() time.Time {
+	if s.clock == nil {
+		return time.Now()
+	}
+	return s.clock.Now()
+}
 
 const MaxReclaimablePayloads = 256
 
@@ -54,7 +106,13 @@ func (s SQLiteBlobStore) Put(ctx context.Context, ref digest.Digest, body []byte
 			_ = tx.Rollback()
 		}
 	}()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO lifecycle_payload_blobs (digest, body, byte_count) VALUES (?, ?, ?) ON CONFLICT(digest) DO NOTHING`, ref.String(), body, len(body)); err != nil {
+	// The stamp is REFRESHED on a repeated Put and never moved back. A writer
+	// re-delivering a body whose digest an old orphan already carries is in
+	// flight between this write and its journal append exactly like a first
+	// writer, so the age the reclaim reads must be this writer's instant, not
+	// the orphan's; a stamp left at the old instant would let a read command
+	// delete the blob under an append that then names an absent blob.
+	if _, err = tx.ExecContext(ctx, `INSERT INTO lifecycle_payload_blobs (digest, body, byte_count, written_at) VALUES (?, ?, ?, ?) ON CONFLICT(digest) DO UPDATE SET written_at = max(lifecycle_payload_blobs.written_at, excluded.written_at)`, ref.String(), body, len(body), s.writeInstant().UnixNano()); err != nil {
 		return structured(pasterrors.CategoryStorage, "The lifecycle payload blob could not be stored.", "SQLite rejected the content-addressed blob write before the occurrence transaction began.", "Writing the content-addressed payload blob (internal/lifecycle/receipt/journal.go in receipt.SQLiteBlobStore.Put).", "No occurrence was committed; a previous identical blob, if any, is unchanged.", "Run `pasture migrate`, confirm the database is writable, and retry the delivery.", err)
 	}
 	if err = tx.Commit(); err != nil {
@@ -201,4 +259,63 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 
 func structured(category pasterrors.Category, what, why, where, impact, fix string, cause error) error {
 	return &pasterrors.StructuredError{Category: category, What: what, Why: why, Where: where, Impact: impact, Fix: fix, Cause: cause}
+}
+
+// PayloadReclaimer is the NARROW DELETE door on the payload blob table, and
+// the only one. It is a separate type from SQLiteBlobStore on purpose: that
+// type's doc says read-only inspection plus the receipt write, and a delete
+// arriving on it would make the doc false and the value unsafe to hand around.
+//
+// It runs inside a transaction it is handed, never on a bare handle, because
+// the one caller that constructs it is the projection rebuild's reclaim, which
+// may delete only against a projection it has just rebuilt in that same
+// transaction. Against a stale projection a blob that a journal row names
+// looks named by nothing, and deleting it would leave a journal row naming an
+// absent blob, the one state the blob-before-journal write order exists to
+// prevent.
+type PayloadReclaimer struct{ Tx *sql.Tx }
+
+// ReclaimOrphansWrittenBefore deletes, oldest first and at most limit, the
+// payload blobs that no lifecycle_occurrences row names, whose written_at is
+// KNOWN, and whose written_at is before the given instant, in unix
+// nanoseconds. It returns the digests it deleted.
+//
+// A written_at of 0 means UNKNOWN, never "older than any bound", and a row at
+// 0 is NEVER eligible. The migration that added the column stamps every row
+// that existed before it with the migration instant, so after the upgrade a
+// row can read 0 only when a build that predates the column inserted it after
+// the upgrade; its age is unknown, and an unknown age must never satisfy an
+// age bound. The trade is stated here beside the predicate: such a row is a
+// small, bounded and rare leak (one orphan per abandoned invocation of an
+// older build on an upgraded store, until a later delivery of the same body
+// by a stamping build refreshes the stamp through the Put's max() update and
+// makes it eligible in due course), and that leak is accepted over the
+// alternative, which deletes a blob whose writer may still be between its
+// blob write and its journal append and so manufactures a journal row naming
+// an absent blob.
+func (r PayloadReclaimer) ReclaimOrphansWrittenBefore(ctx context.Context, before int64, limit int) ([]digest.Digest, error) {
+	if r.Tx == nil || limit <= 0 {
+		return nil, structured(pasterrors.CategoryValidation, "The orphan payload reclaim is invalid.", "A transaction and a positive limit are required; the reclaim never runs on a bare handle, because it must delete only against a projection rebuilt in the same transaction.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted.", "Construct the reclaimer from the projection rebuild's own transaction with a limit of at least 1.", nil)
+	}
+	rows, err := r.Tx.QueryContext(ctx, `DELETE FROM lifecycle_payload_blobs WHERE digest IN (SELECT b.digest FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL AND b.written_at > 0 AND b.written_at < ? ORDER BY b.written_at ASC, b.digest ASC LIMIT ?) RETURNING digest`, before, limit)
+	if err != nil {
+		return nil, structured(pasterrors.CategoryStorage, "Orphan lifecycle payloads could not be reclaimed.", "SQLite rejected the bounded orphan delete.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted; the enclosing savepoint is rolled back by the caller.", "Run `pasture migrate` so the payload blob table carries its written-at stamp, confirm database health, and run a read command again.", err)
+	}
+	defer rows.Close()
+	deleted := make([]digest.Digest, 0, limit)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		ref, err := digest.Parse(raw)
+		if err != nil {
+			return nil, fmt.Errorf("reclaimed lifecycle payload digest %q is invalid: %w", raw, err)
+		}
+		deleted = append(deleted, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return deleted, nil
 }

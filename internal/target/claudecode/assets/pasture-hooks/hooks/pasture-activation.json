@@ -6,159 +6,219 @@
       "event": "SessionStart",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_222.json (Claude Code 2.1.222 authentic capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionStart"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionStart",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "Setup",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "SessionEnd",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_222.json (Claude Code 2.1.222 authentic capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionEnd"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionEnd",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "UserPromptSubmit",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "https://docs.claude.com/en/docs/claude-code/hooks"
     },
     {
       "event": "UserPromptExpansion",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "Stop",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "https://docs.claude.com/en/docs/claude-code/hooks"
     },
     {
       "event": "StopFailure",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "PreToolUse",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreToolUse"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreToolUse",
+      "responseCapability": "unset",
+      "failureEvidence": "https://docs.claude.com/en/docs/claude-code/hooks"
     },
     {
       "event": "PermissionRequest",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "PermissionDenied",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "PostToolUse",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_2_1_222.json (Claude Code 2.1.222 authentic capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUse"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUse",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "PostToolUseFailure",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_use_failure_2_1_222.json (Claude Code 2.1.222 authentic capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUseFailure"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolUseFailure",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "PostToolBatch",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_222.json (Claude Code 2.1.222 authentic capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolBatch"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolBatch",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "FileChanged",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "CwdChanged",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "ConfigChange",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "InstructionsLoaded",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "WorktreeCreate",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "WorktreeRemove",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "SubagentStart",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "SubagentStop",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "https://docs.claude.com/en/docs/claude-code/hooks"
     },
     {
       "event": "TeammateIdle",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "TaskCreated",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "TaskCompleted",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "PreCompact",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreCompact"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreCompact",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "PostCompact",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_222.json (Claude Code 2.1.222 authentic capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostCompact"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostCompact",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "Notification",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "MessageDisplay",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "Elicitation",
       "state": "withheld",
-      "reason": "missing-request-correlation"
+      "reason": "missing-request-correlation",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "ElicitationResult",
       "state": "withheld",
-      "reason": "missing-request-correlation"
+      "reason": "missing-request-correlation",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     }
   ]
 }

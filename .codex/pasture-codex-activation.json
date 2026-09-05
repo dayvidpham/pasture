@@ -6,53 +6,73 @@
       "event": "SessionStart",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_146_0.json (Codex 0.146.0 authentic command-hook capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/SessionStart"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/SessionStart",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "UserPromptSubmit",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "PreToolUse",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_146_0.json (Codex 0.146.0 authentic command-hook capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/PreToolUse"
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/PreToolUse",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "PermissionRequest",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "PostToolUse",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "PreCompact",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "PostCompact",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "SubagentStart",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": ""
     },
     {
       "event": "SubagentStop",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     },
     {
       "event": "Stop",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "outside-target-set",
+      "responseCapability": "unset",
+      "failureEvidence": "unset"
     }
   ]
 }

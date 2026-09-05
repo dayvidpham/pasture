@@ -12,11 +12,20 @@ package tasks_test
 // WAL / busy_timeout / fsync).
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -587,4 +596,231 @@ func TestForwarding_AuditRecordAndQuery(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("QueryEvents returned %d events, want 1", len(got))
 	}
+}
+
+// TestTheStoreRefusesANilDiagnosticSinkAndANilClock: the sink and the clock are
+// REQUIRED construction inputs of the store, not library defaults. A nil is
+// refused with a validation error naming the field, so a construction site
+// nobody enumerated fails loudly at the place the enumeration was incomplete
+// instead of working quietly with a default nobody chose.
+func TestTheStoreRefusesANilDiagnosticSinkAndANilClock(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	_, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithDiagnosticSink(nil))
+	require.Error(t, err, "a nil diagnostics sink must be refused at open")
+	assert.Contains(t, err.Error(), "has no diagnostics sink", "the refusal names the field")
+	assert.Contains(t, err.Error(), "validation error", "a nil sink is a construction fault, not a storage fault")
+	_, err = tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithStoreClock(nil))
+	require.Error(t, err, "a nil clock must be refused at open")
+	assert.Contains(t, err.Error(), "has no clock", "the refusal names the field")
+	_, statErr := os.Stat(dbPath)
+	assert.True(t, os.IsNotExist(statErr), "a refused open creates no database file")
+}
+
+// TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock is the
+// ENUMERATION of production construction sites, derived from source rather
+// than listed: every exported function of the tasks package that returns a
+// protocol.TaskTracker is a production opener. For each one it checks two
+// things, and the test name is true only because both are checked:
+//
+//  1. THE OPTIONS VALUE THE OPENER PASSES IS ROOTED IN productionOpenDefaults().
+//     The closure of the opener over the package's non-test functions must
+//     contain at least one call to openTaskTrackerWithOptions, and the
+//     options argument of EVERY such call must be either the call
+//     productionOpenDefaults() itself or a local variable whose declaration
+//     in the enclosing function is assigned from that call. Reaching
+//     productionOpenDefaults somewhere in the closure is NOT enough: an opener
+//     that builds a fresh options literal and copies one field out of the
+//     defaults reaches the function and passes neither the sink nor the
+//     clock, and only the argument check catches it.
+//  2. productionOpenDefaults() ITSELF NAMES os.Stderr AND wallClock{} in its
+//     body, so a value rooted there carries the process stderr and the wall
+//     clock.
+//
+// WHAT IT VISITS: every non-test .go file of internal/tasks; the bodies of
+// the exported openers and of every same-package function they call by name;
+// the arguments of each openTaskTrackerWithOptions call in those bodies; the
+// declarations of the local variables those arguments name; and the body of
+// productionOpenDefaults.
+// WHAT IT DOES NOT READ: test files, method calls, any other package, or what
+// an OpenTaskTrackerOption does to the value AFTER it was rooted in the
+// defaults. An option that sets the sink or the clock to nil is not seen
+// here; it is caught at runtime by the refusal in openTaskTrackerWithOptions,
+// which TestTheStoreRefusesANilDiagnosticSinkAndANilClock pins.
+// NON-VACUITY: at least two openers are derived (the plain opener and the
+// options opener today); fewer is RED.
+// MUTATIONS, each RED naming the opener: make OpenTaskTrackerWithOptions
+// start from an empty options value instead of the production defaults; add
+// an exported opener that passes openTaskTrackerOptions{timeouts:
+// productionOpenDefaults().timeouts}, which reaches the defaults and passes
+// neither the sink nor the clock; remove os.Stderr or wallClock{} from
+// productionOpenDefaults.
+func TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock(t *testing.T) {
+	t.Parallel()
+	dir := "."
+	fset := token.NewFileSet()
+	funcs := map[string]*ast.FuncDecl{}
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+		require.NoError(t, parseErr)
+		for _, declaration := range file.Decls {
+			if function, ok := declaration.(*ast.FuncDecl); ok && function.Recv == nil && function.Body != nil {
+				funcs[function.Name.Name] = function
+			}
+		}
+	}
+
+	// 2. The defaults value names the process stderr and the wall clock.
+	defaults, known := funcs["productionOpenDefaults"]
+	require.True(t, known, "productionOpenDefaults must be declared in a non-test file of internal/tasks: it is the one place the production sink and clock are named")
+	stderr, wall := false, false
+	ast.Inspect(defaults.Body, func(node ast.Node) bool {
+		switch typed := node.(type) {
+		case *ast.SelectorExpr:
+			if pkg, ok := typed.X.(*ast.Ident); ok && pkg.Name == "os" && typed.Sel.Name == "Stderr" {
+				stderr = true
+			}
+		case *ast.CompositeLit:
+			if ident, ok := typed.Type.(*ast.Ident); ok && ident.Name == "wallClock" {
+				wall = true
+			}
+		}
+		return true
+	})
+	require.True(t, stderr, "productionOpenDefaults never names os.Stderr: the diagnostics sink is a required input and the production defaults must carry the process stderr")
+	require.True(t, wall, "productionOpenDefaults never names wallClock{}: the store clock is a required input and the production defaults must carry the wall clock")
+
+	// 1. Every opener passes a value rooted in the defaults, at every call.
+	openers := []string{}
+	for name, function := range funcs {
+		if !function.Name.IsExported() || function.Type.Results == nil {
+			continue
+		}
+		returnsTracker := false
+		for _, result := range function.Type.Results.List {
+			if selector, ok := result.Type.(*ast.SelectorExpr); ok {
+				if pkg, isIdent := selector.X.(*ast.Ident); isIdent && pkg.Name == "protocol" && selector.Sel.Name == "TaskTracker" {
+					returnsTracker = true
+				}
+			}
+		}
+		if !returnsTracker {
+			continue
+		}
+		openers = append(openers, name)
+		seen := map[string]bool{name: true}
+		closure := []*ast.FuncDecl{function}
+		constructorCalls := 0
+		for index := 0; index < len(closure); index++ {
+			enclosing := closure[index]
+			ast.Inspect(enclosing.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				ident, ok := call.Fun.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				if ident.Name == "openTaskTrackerWithOptions" {
+					constructorCalls++
+					require.Len(t, call.Args, 2, "production opener %s: openTaskTrackerWithOptions takes the path and the options value", name)
+					assert.True(t, optionsRootedInProductionDefaults(call.Args[1], enclosing.Body),
+						"production opener %s passes openTaskTrackerWithOptions an options value that is not rooted in productionOpenDefaults() (in %s): it must pass the call itself or a local assigned from it, or the opener carries neither the process stderr nor the wall clock", name, enclosing.Name.Name)
+					return true
+				}
+				if callee, known := funcs[ident.Name]; known && !seen[ident.Name] {
+					seen[ident.Name] = true
+					closure = append(closure, callee)
+				}
+				return true
+			})
+		}
+		assert.Positive(t, constructorCalls, "production opener %s never reaches openTaskTrackerWithOptions through same-package calls, so nothing here can say what it passes", name)
+	}
+	sort.Strings(openers)
+	require.GreaterOrEqual(t, len(openers), 2, "non-vacuity: at least two production openers must be derived; found %v", openers)
+}
+
+// optionsRootedInProductionDefaults reports whether an options argument is the
+// call productionOpenDefaults() itself, or an identifier whose declaration in
+// the enclosing body is assigned from that call (cfg := productionOpenDefaults()
+// or var cfg = productionOpenDefaults()). Anything else, a composite literal
+// in particular, is not rooted, whatever it reaches.
+func optionsRootedInProductionDefaults(argument ast.Expr, enclosing *ast.BlockStmt) bool {
+	switch typed := argument.(type) {
+	case *ast.CallExpr:
+		return isProductionDefaultsCall(typed)
+	case *ast.Ident:
+		rooted := false
+		ast.Inspect(enclosing, func(node ast.Node) bool {
+			switch statement := node.(type) {
+			case *ast.AssignStmt:
+				if statement.Tok != token.DEFINE || len(statement.Lhs) != 1 || len(statement.Rhs) != 1 {
+					return true
+				}
+				if lhs, ok := statement.Lhs[0].(*ast.Ident); ok && lhs.Name == typed.Name {
+					if call, isCall := statement.Rhs[0].(*ast.CallExpr); isCall && isProductionDefaultsCall(call) {
+						rooted = true
+					}
+				}
+			case *ast.ValueSpec:
+				if len(statement.Names) != 1 || len(statement.Values) != 1 || statement.Names[0].Name != typed.Name {
+					return true
+				}
+				if call, isCall := statement.Values[0].(*ast.CallExpr); isCall && isProductionDefaultsCall(call) {
+					rooted = true
+				}
+			}
+			return true
+		})
+		return rooted
+	default:
+		return false
+	}
+}
+
+func isProductionDefaultsCall(call *ast.CallExpr) bool {
+	ident, ok := call.Fun.(*ast.Ident)
+	return ok && ident.Name == "productionOpenDefaults" && len(call.Args) == 0
+}
+
+// TestAFailedReclaimIsOneLineOnTheStoreSinkAndSuccessIsSilent: the store owns
+// the sink, so the ONE line a failed orphan reclaim earns is written by the
+// store's rebuild wrapper, nothing threads a writer down, and a rebuild whose
+// reclaim succeeds writes nothing at all.
+func TestAFailedReclaimIsOneLineOnTheStoreSinkAndSuccessIsSilent(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	bootstrap, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	_, err = bootstrap.Create("file://tracker-sink-test", "bootstrap", "initialize the persisted ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	require.NoError(t, bootstrap.Close())
+
+	var sink bytes.Buffer
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithDiagnosticSink(&sink))
+	require.NoError(t, err)
+	defer tracker.Close()
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+	assert.Empty(t, sink.String(), "a rebuild whose reclaim succeeds prints nothing")
+
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	concrete, ok := reader.(projection.Reader)
+	require.True(t, ok)
+	_, err = concrete.DB.Exec(`ALTER TABLE lifecycle_payload_blobs RENAME COLUMN written_at TO written_at_gone`)
+	require.NoError(t, err)
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker), "a failed reclaim never fails the rebuild")
+	lines := strings.Split(strings.TrimRight(sink.String(), "\n"), "\n")
+	require.Len(t, lines, 1, "exactly one line on the store's sink, got %q", sink.String())
+	assert.True(t, strings.HasPrefix(lines[0], "pasture: the orphan payload reclaim inside the projection rebuild failed: "), "the line names what failed: %q", lines[0])
+	assert.Contains(t, lines[0], "the rebuild still completed and nothing was deleted", "the line says the rebuild completed and nothing was deleted")
+	assert.Contains(t, lines[0], "the next read command retries the reclaim", "the line says what happens next")
 }

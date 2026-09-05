@@ -43,8 +43,8 @@ func TestMigrateV6ToV7RebuildsAndBackfillsBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	version, err := readVersion(db)
-	if err != nil || version != 7 {
-		t.Fatalf("version=%d err=%v", version, err)
+	if err != nil || version != MaxKnownSchemaVersion {
+		t.Fatalf("version=%d want=%d err=%v", version, MaxKnownSchemaVersion, err)
 	}
 	var oldColumn int
 	if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info('lifecycle_occurrences') WHERE name='bindings_json'`).Scan(&oldColumn); err != nil || oldColumn != 0 {
@@ -146,7 +146,7 @@ func TestMigrateV6ToV7AcceptsEmptyBindings(t *testing.T) {
 	}
 }
 
-func TestMigrateV5RunsOrderedChainToV7(t *testing.T) {
+func TestMigrateV5RunsOrderedChainToTheCurrentVersion(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "pasture.db")+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
@@ -159,8 +159,8 @@ func TestMigrateV5RunsOrderedChainToV7(t *testing.T) {
 		t.Fatal(err)
 	}
 	version, _ := readVersion(db)
-	if version != 7 {
-		t.Fatalf("version=%d", version)
+	if version != MaxKnownSchemaVersion {
+		t.Fatalf("version=%d want=%d", version, MaxKnownSchemaVersion)
 	}
 	for _, table := range []string{"lifecycle_payload_blobs", "lifecycle_occurrences", "lifecycle_occurrence_bindings"} {
 		var count int
@@ -178,7 +178,7 @@ func TestMigrateV5RunsOrderedChainToV7(t *testing.T) {
 	}
 }
 
-func TestCurrentV7DatabaseIsIdempotentAndCascades(t *testing.T) {
+func TestV7DatabaseIsPromotedAndStillCascades(t *testing.T) {
 	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "pasture.db")+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
