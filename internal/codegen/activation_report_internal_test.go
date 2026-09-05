@@ -120,3 +120,38 @@ func TestActivationSupportEntryForIsTheOneRowBuilder(t *testing.T) {
 	_, err = activationSupportEntryFor(ir.HarnessCodex, setup, withheldSetup)
 	require.ErrorContains(t, err, `has no pinned lifecycle profile row for harness "codex"`, "Codex has no Setup event, so the Claude row cannot be reported under the Codex profile")
 }
+
+// TestActivationSupportEntryForRendersEachNewWithholdingArm pins that the one
+// shared row builder carries every new withholding arm through to its report
+// sentence, with no per-harness hand list: activationSupportEntryFor is the
+// single builder that emitClaudeHooks, the Codex manifest emitter and the
+// OpenCode manifest emitter all call, so a reason that renders here renders
+// in all three committed activation reports. Removing one arm's String()
+// case turns this red, quoting the arm's rendered reason text.
+func TestActivationSupportEntryForRendersEachNewWithholdingArm(t *testing.T) {
+	t.Parallel()
+	manifest := registration.ClaudeCode2_1_261()
+	var setup registration.Event
+	for _, event := range manifest.Events {
+		if event.NativeName == "Setup" {
+			setup = event
+		}
+	}
+	require.NotZero(t, setup.Kind)
+
+	const clearance = "internal/lifecycle/ingress/claude/testdata/CLEARANCE.md"
+	for _, tc := range []struct {
+		reason activation.WithheldReason
+		want   string
+	}{
+		{activation.WithheldProviderHook, "provider-hook"},
+		{activation.WithheldNotEmittedByHost, "not-emitted-by-host"},
+		{activation.WithheldEmittedOutsideTransport, "emitted-outside-transport"},
+	} {
+		decision, err := activation.NewWithheldByDecision(setup.Kind, tc.reason, clearance)
+		require.NoError(t, err)
+		row, err := activationSupportEntryFor(ir.HarnessClaudeCode, setup, decision)
+		require.NoError(t, err)
+		require.Equal(t, activationSupportEntry{Event: "Setup", State: "withheld", Reason: tc.want, Clearance: clearance, ResponseCapability: "unset", FailureEvidence: ""}, row, "reason %q must render as %q in the shared row builder", tc.reason, tc.want)
+	}
+}

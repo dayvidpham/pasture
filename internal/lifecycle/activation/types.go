@@ -52,6 +52,27 @@ const (
 	// made safe to commit by the substitution rules. It is a user decision: a
 	// row that carries it names the CLEARANCE.md where the decision is recorded.
 	WithheldUnclearablePayload
+	// WithheldProviderHook records that the host reads the hook's own output
+	// or exit code as an answer only the hook can give, so an observer row
+	// would change host behaviour rather than only report on it (a Claude
+	// worktree-create hook: standard output must carry the created worktree
+	// path; a worktree-remove hook: exit 0 asserts the removal happened). It
+	// is a user decision: a row that carries it names the CLEARANCE.md where
+	// the decision is recorded.
+	WithheldProviderHook
+	// WithheldNotEmittedByHost records that the host declares the event name
+	// or the hook key at the recorded version and never emits the event or
+	// calls the key. This covers two kinds of declared-but-silent name: an
+	// event name present only in generated SDK types with no publisher, or a
+	// declared hook key nothing calls. It is a user decision: a row that
+	// carries it names the CLEARANCE.md where the decision is recorded.
+	WithheldNotEmittedByHost
+	// WithheldEmittedOutsideTransport records that the host does emit the
+	// event, but on a channel the harness transport does not observe, so no
+	// capture can reach the hook however long a session runs. It is a user
+	// decision: a row that carries it names the CLEARANCE.md where the
+	// decision is recorded.
+	WithheldEmittedOutsideTransport
 	// numWithheldReasons is the sentinel that closes the enum. A new arm goes
 	// above it, and IsValid and AllWithheldReasons widen with it; String must
 	// then name the arm or the enum-sync test turns red naming it.
@@ -65,7 +86,13 @@ func (r WithheldReason) IsValid() bool {
 // RequiresClearance reports whether the reason is a user decision that must
 // be recorded in a CLEARANCE.md before a row may carry it.
 func (r WithheldReason) RequiresClearance() bool {
-	return r == WithheldNoReachableTrigger || r == WithheldUnclearablePayload
+	switch r {
+	case WithheldNoReachableTrigger, WithheldUnclearablePayload,
+		WithheldProviderHook, WithheldNotEmittedByHost, WithheldEmittedOutsideTransport:
+		return true
+	default:
+		return false
+	}
 }
 
 // AllWithheldReasons returns every valid arm in ordinal order. The population
@@ -95,6 +122,12 @@ func (r WithheldReason) String() string {
 		return "no-reachable-trigger"
 	case WithheldUnclearablePayload:
 		return "unclearable-payload"
+	case WithheldProviderHook:
+		return "provider-hook"
+	case WithheldNotEmittedByHost:
+		return "not-emitted-by-host"
+	case WithheldEmittedOutsideTransport:
+		return "emitted-outside-transport"
 	default:
 		return ""
 	}
