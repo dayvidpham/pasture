@@ -212,7 +212,11 @@ export const PastureLifecycle = async ({ client }) => ({
   },
 });
 
-export default PastureLifecycle;
+// OpenCode reads the default export first. When it is an object whose server()
+// is the plugin function, the loader uses it and reads nothing else. A bare
+// function default falls back to a scan of every export, which throws on the
+// first export that is not a function (PASTURE_NATIVE_TOOLS above).
+export default { id: "pasture-lifecycle", server: PastureLifecycle };
 `
 
 	return fmt.Sprintf(

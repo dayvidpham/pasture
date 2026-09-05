@@ -53,14 +53,14 @@ func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
 	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
 	runner := filepath.Join(dir, "enabled-handlers.ts")
 	script := fmt.Sprintf(`
-import PastureLifecycle from %q;
+import plugin from %q;
 const sessionCapture = await Bun.file(%q).json();
 const toolCapture = await Bun.file(%q).json();
-const plugin = await PastureLifecycle({ client: {} });
-await plugin.event(sessionCapture.value);
+const hooks = await plugin.server({ client: {} }, {});
+await hooks.event(sessionCapture.value);
 const output = toolCapture.value.output;
 const before = JSON.stringify(output.args);
-await plugin["tool.execute.before"](toolCapture.value.input, output);
+await hooks["tool.execute.before"](toolCapture.value.input, output);
 if (JSON.stringify(output.args) !== before) throw new Error("enabled generated handler changed output.args");
 console.log(JSON.stringify({argsUnchanged: true}));
 `, moduleURL,
