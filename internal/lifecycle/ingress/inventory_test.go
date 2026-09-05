@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 )
 
@@ -77,38 +78,20 @@ func committedFixtures(t *testing.T) []corpusFixture {
 	return fixtures
 }
 
-// redactionRuleSet is the closed set of rule names a sidecar may list. It
-// mirrors the closed set the capture provenance declares; the two are held
-// equal at the fold of the two sides.
-var redactionRuleSet = map[string]struct{}{"none": {}, ingress.HomePathRule: {}, ingress.FreeTextRule: {}}
-
-// redactionRules reads the rules a sidecar declares, in the ONE shape the
-// capture provenance publishes: the JSON member "redaction" is a STRING that
-// encodes an ordered list, either "none" alone or every applied rule in the
-// order applied joined by ",", for example "home-path-v1,free-text-v1". Any
-// other JSON shape, an unknown rule name, a duplicate, or "none" beside a
-// rule is refused here, so a sidecar cannot satisfy the corpus assertion by
-// carrying a shape the provenance reader would not accept.
-func redactionRules(t *testing.T, fixture corpusFixture) []string {
+// redactionRules reads the rules a sidecar declares through
+// acceptance.ParseRedaction, the reader that owns the redaction grammar, so
+// the corpus assertion accepts and refuses exactly the values the capture
+// provenance accepts and refuses. Only the JSON shape is checked here: the
+// member "redaction" is a STRING, as the provenance sidecar declares it, and
+// any other JSON shape is refused before the value reaches the parser.
+func redactionRules(t *testing.T, fixture corpusFixture) []acceptance.RedactionRule {
 	t.Helper()
 	raw, present := fixture.sidecar["redaction"]
 	require.True(t, present, "%s declares no redaction member; every provenance sidecar states the rules applied, or none", fixture.name)
 	var encoded string
 	require.NoError(t, json.Unmarshal(raw, &encoded), "%s declares a redaction that is not a JSON string; the provenance shape is one string encoding an ordered, comma-joined rule list", fixture.name)
-	require.NotEmpty(t, encoded, "%s declares an empty redaction; the provenance shape is \"none\" or a comma-joined rule list", fixture.name)
-	if encoded == "none" {
-		return nil
-	}
-	rules := strings.Split(encoded, ",")
-	seen := map[string]struct{}{}
-	for _, rule := range rules {
-		_, known := redactionRuleSet[rule]
-		require.True(t, known, "%s declares the redaction rule %q, which is not in the closed rule set", fixture.name, rule)
-		require.NotEqual(t, "none", rule, "%s lists \"none\" beside a rule; \"none\" stands alone", fixture.name)
-		_, duplicate := seen[rule]
-		require.False(t, duplicate, "%s lists the redaction rule %q twice", fixture.name, rule)
-		seen[rule] = struct{}{}
-	}
+	rules, err := acceptance.ParseRedaction(encoded)
+	require.NoError(t, err, "%s declares a redaction the capture provenance refuses", fixture.name)
 	return rules
 }
 
@@ -346,6 +329,9 @@ var freeTextExemptDigests = map[string]string{
 
 func TestEveryCommittedFixtureWithFreeTextListsTheFreeTextRule(t *testing.T) {
 	t.Parallel()
+	for _, name := range []string{ingress.HomePathRule, ingress.FreeTextRule} {
+		require.True(t, acceptance.RedactionRule(name).IsValid(), "this package names the substitution %q, which the capture provenance does not accept as a redaction rule; the two names must agree, or no sidecar can declare the substitution", name)
+	}
 	seen := map[string]bool{}
 	for _, fixture := range committedFixtures(t) {
 		fields, err := ingress.Inventory(fixture.payload)
