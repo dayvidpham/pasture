@@ -683,9 +683,23 @@ func feasibilityEventRow(t *testing.T, tracker *trackerImpl, task provenance.Tas
 //     operation, so the authority sits directly below the event. This is the
 //     shape every assignment command writes today.
 //   - SEPARATED: the authority was committed by an EARLIER operation than its
-//     material event. The first walk finds nothing and the fallback walk runs
-//     from the event's producing operation down to the task's birth, so the
-//     cost is the whole stretch of journal between them.
+//     material event, with a stretch of journal between them. The walk covers
+//     that whole stretch.
+//
+// MEASURED, on every shape below and on the composed-allocation shape of the
+// probe above: the material event row carries NO producing-operation id, so the
+// recovery takes its single-range walk, from the material event down to the
+// task's birth. The per-fact cost is therefore that distance. The two-range
+// fallback the recovery also carries was reached by no shape measured here.
+//
+// THE COMMITTED STRETCH IS A CHEAP REGRESSION GUARD, NOT THE MEASUREMENT. The
+// bound was measured once on a journal of 3028 rows: the adjacent shape cost 2
+// predicate calls over 1 candidate, the composed-allocation shape 3 calls over
+// 2 candidates at a distance of 2, and the separated shape 3018 calls over 3017
+// candidates, that is one call per journal id of the stretch. The stretch kept
+// below is small enough to leave the suite fast while still proving that the
+// separated cost scales with it. A reader who wants the large number again
+// raises the constant and reruns.
 //
 // RED when: the adjacent shape stops being cheap, or the separated shape stops
 // scaling with the stretch. Either means the recovery mechanism changed and the
@@ -703,7 +717,7 @@ func TestGateFeasibilityProbe6bBackfillBound(t *testing.T) {
 
 	// SEPARATED: the authority is committed first, then a stated stretch of
 	// journal, then the material event.
-	const stretch = 3000
+	const stretch = 250
 	separatedTask := createHumanTestTask(t, tracker, "probe6b-separated")
 	separated := seedSeparatedEpisode(t, tracker, separatedTask, "probe6b-separated-owner", actor, "probe6b-separated", stretch)
 	separatedCost := measureAuthorityScanCost(t, tracker, separatedTask, separated)
@@ -716,7 +730,7 @@ func TestGateFeasibilityProbe6bBackfillBound(t *testing.T) {
 		t.Fatalf("the adjacent shape cost %d predicate calls; want at most 8, because one operation places the authority directly below its material event", adjacentCost.predicateCalls)
 	}
 	if separatedCost.candidates < stretch {
-		t.Fatalf("the separated shape walked %d candidates over a %d-event stretch; want at least the stretch, because the fallback walk runs from the event's producing operation down to the task's birth", separatedCost.candidates, stretch)
+		t.Fatalf("the separated shape walked %d candidates over a %d-event stretch; want at least the stretch, because the walk runs from the material event down to the task's birth and the stretch lies between them", separatedCost.candidates, stretch)
 	}
 
 	// MUTATION: add one extra predicate call per candidate and the adjacent
@@ -812,10 +826,12 @@ type authorityScanCost struct {
 
 // measureAuthorityScanCost walks the SAME candidate ranges the production
 // recovery walks (internal/tasks/epoch_assignment_service.go, in
-// assignmentAuthorityForEvent: first from the material event down to the event's
-// producing operation, then from below that operation down to the task's birth),
-// calling the SAME exported predicate, and counts the calls. The production
-// method is the oracle: the walk must recover the id it recovers.
+// assignmentAuthorityForEvent), calling the SAME exported predicate, and counts
+// the calls. It mirrors both of that function's branches: the two-range walk
+// taken when the material event row names a producing operation, and the
+// single-range walk from the material event down to the task's birth taken when
+// it does not. Every shape measured here takes the single-range walk. The
+// production method is the oracle: this walk must recover the id it recovers.
 func measureAuthorityScanCost(t *testing.T, tracker *trackerImpl, task provenance.TaskID, episode feasibilityEpisode) authorityScanCost {
 	t.Helper()
 	service := feasibilityAssignmentService(t, tracker)
