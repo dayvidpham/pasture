@@ -37,12 +37,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/dayvidpham/provenance"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -99,7 +102,26 @@ type trackerImpl struct {
 	// are transactional and no DDL is applied while a tracker is open.
 	hasRoleColumn    bool // true when audit_events still has the legacy `role` column (pre-v3 schema)
 	hasEpochIDColumn bool // true when audit_events still has `epoch_id` (pre-v4 schema)
+
+	// timeoutProfile, storeClock and diagnostics are what the store itself
+	// holds so that housekeeping it runs on behalf of a read command needs
+	// nothing threaded down from the command: the profile supplies the
+	// writer window (its WorkflowResult tier), the clock supplies the
+	// snapshot instant the orphan reclaim ages blobs against, and the
+	// diagnostics sink receives the ONE line a failed reclaim earns. The sink
+	// and the clock are REQUIRED construction inputs: the unified openers
+	// pass the process stderr and the wall clock, tests pass a buffer or
+	// io.Discard and a scripted clock through the test-only options, and a
+	// nil is refused at construction rather than defaulted, so a construction
+	// site nobody enumerated fails loudly instead of quietly working.
+	timeoutProfile timeouts.Profile
+	storeClock     receipt.Clock
+	diagnostics    io.Writer
 }
+
+func (t *trackerImpl) lifecycleTimeoutProfile() timeouts.Profile { return t.timeoutProfile }
+func (t *trackerImpl) lifecycleStoreClock() receipt.Clock        { return t.storeClock }
+func (t *trackerImpl) lifecycleDiagnosticSink() io.Writer        { return t.diagnostics }
 
 // newTrackerImpl wires up a trackerImpl. The caller (OpenTaskTracker) is
 // responsible for opening prov, trail, and auditDB against the same dbPath

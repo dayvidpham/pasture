@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"time"
 
 	digest "github.com/opencontainers/go-digest"
@@ -22,17 +21,18 @@ import (
 // write order creates deliberately, not a retention policy.
 const ReclaimCap = 1024
 
-// RebuildOptions carries what a reclaiming rebuild needs beyond the store: the
-// clock that supplies the snapshot instant, the longest window any writer may
-// hold between its blob write and its journal append (the WorkflowResult tier
-// of the injected profile), and the stream one diagnostic line goes to when
-// the reclaim fails. All three are required. There is no silent default for a
-// bound or for a stream: a zero window would reclaim in-flight blobs, and a
-// missing stream would make a failed reclaim invisible.
+// RebuildOptions carries what the rebuild's reclaim needs beyond the store:
+// the clock that supplies the snapshot instant, and the longest window any
+// writer may hold between its blob write and its journal append (the
+// WorkflowResult tier of the injected profile). Both are required and both
+// come from the store that owns the rebuild, never from a caller above it.
+// There is no silent default for a bound: a zero window would reclaim
+// in-flight blobs. The rebuild takes NO output stream; it RETURNS what the
+// reclaim did, and the layer that owns a diagnostic stream prints the one
+// failure line from that outcome.
 type RebuildOptions struct {
-	Clock       receipt.Clock
-	Window      time.Duration
-	Diagnostics io.Writer
+	Clock  receipt.Clock
+	Window time.Duration
 }
 
 func (o RebuildOptions) validate() error {
@@ -41,19 +41,21 @@ func (o RebuildOptions) validate() error {
 		return projectionError("The reclaiming projection rebuild has no clock.", "The reclaim ages orphan payload blobs against the instant the journal was read, and that instant must come from the injected clock.", "No projection rows were changed and nothing was reclaimed.", "Pass the process clock in RebuildOptions.Clock.", nil)
 	case o.Window <= 0:
 		return projectionError("The reclaiming projection rebuild has no writer window.", "An orphan payload blob is reclaimed only when it is older than the longest window a writer may hold between its blob write and its journal append; a zero window would reclaim a blob whose append is still in flight.", "No projection rows were changed and nothing was reclaimed.", "Pass the WorkflowResult tier of the injected timeout profile in RebuildOptions.Window.", nil)
-	case o.Diagnostics == nil:
-		return projectionError("The reclaiming projection rebuild has no diagnostic stream.", "A reclaim that fails must say so on a stream an operator reads; silence would hide housekeeping that stopped.", "No projection rows were changed and nothing was reclaimed.", "Pass the read command's standard error in RebuildOptions.Diagnostics.", nil)
 	}
 	return nil
 }
 
-// ReclaimReport is what the reclaim inside one rebuild did: the digests it
+// ReclaimOutcome is what the reclaim inside one rebuild did: the digests it
 // deleted, and the failure it reported if it could not run. A failure never
-// fails the rebuild.
-type ReclaimReport struct {
+// fails the rebuild; the rebuild returns it here and the caller that owns a
+// diagnostic stream prints ReclaimFailureLine once.
+type ReclaimOutcome struct {
 	Reclaimed []digest.Digest
 	Failure   error
 }
+
+// Count is how many payload blobs this rebuild reclaimed.
+func (o ReclaimOutcome) Count() int { return len(o.Reclaimed) }
 
 // reclaimFailurePrefix and reclaimFailureSuffix frame the ONE line a failed
 // reclaim writes. The suffix is operator text: it says where it happened, that
@@ -64,8 +66,10 @@ const (
 		"the rebuild still completed and nothing was deleted; the orphan payload blobs stay where they were, and the next read command retries the reclaim"
 )
 
-// ReclaimFailureLine renders the diagnostic a failed reclaim writes, so a test
-// can pin its load-bearing phrases against the text the rebuild emits.
+// ReclaimFailureLine renders the ONE diagnostic line a failed reclaim earns.
+// The rebuild does not write it; the store that ran the rebuild does, on the
+// diagnostic sink it was constructed with, so a test can pin the phrases
+// against the text the operator reads.
 func ReclaimFailureLine(failure error) string {
 	return reclaimFailurePrefix + failure.Error() + reclaimFailureSuffix
 }

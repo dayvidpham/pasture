@@ -1,7 +1,6 @@
 package projection_test
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -156,12 +155,11 @@ func commitOccurrenceNaming(t *testing.T, tracker protocol.TaskTracker, ref dige
 	require.NoError(t, err)
 }
 
-func reclaimingRebuild(t *testing.T, tracker protocol.TaskTracker, db *sql.DB, clock receipt.Clock) (projection.ReclaimReport, string) {
+func reclaimingRebuild(t *testing.T, tracker protocol.TaskTracker, db *sql.DB, clock receipt.Clock) projection.ReclaimOutcome {
 	t.Helper()
-	var diagnostics bytes.Buffer
-	report, err := projection.RebuildOccurrencesReclaiming(context.Background(), tracker.Journal(), db, projection.RebuildOptions{Clock: clock, Window: reclaimWindow, Diagnostics: &diagnostics})
-	require.NoError(t, err, "the reclaiming rebuild must complete")
-	return report, diagnostics.String()
+	outcome, err := projection.RebuildOccurrences(context.Background(), tracker.Journal(), db, projection.RebuildOptions{Clock: clock, Window: reclaimWindow})
+	require.NoError(t, err, "the rebuild must complete")
+	return outcome
 }
 
 func TestReclaimingRebuildReclaimsOnlyUnnamedBlobsOlderThanTheWindow(t *testing.T) {
@@ -175,9 +173,8 @@ func TestReclaimingRebuildReclaimsOnlyUnnamedBlobsOlderThanTheWindow(t *testing.
 	commitOccurrenceNaming(t, tracker, legacyNamed, "reclaim.named.legacy")
 	legacyOrphan := seedBlob(t, db, []byte("legacy orphan"), time.Time{})
 
-	report, diagnostics := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
-	require.NoError(t, report.Failure)
-	assert.Empty(t, diagnostics, "a reclaim that succeeds says nothing")
+	report := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	require.NoError(t, report.Failure, "a reclaim that succeeds reports no failure, so the store prints nothing")
 	assert.Equal(t, []digest.Digest{legacyOrphan, oldOrphan}, report.Reclaimed, "oldest first: the legacy blob at 0, then the orphan older than the window")
 
 	assert.False(t, blobExists(t, db, oldOrphan), "an unnamed blob older than the window is reclaimed")
@@ -188,16 +185,6 @@ func TestReclaimingRebuildReclaimsOnlyUnnamedBlobsOlderThanTheWindow(t *testing.
 	var projected int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM lifecycle_occurrences`).Scan(&projected))
 	assert.Equal(t, 2, projected, "the rebuild still projected every journal occurrence")
-}
-
-// TestThePlainRebuildReclaimsNothing pins that the entry every read command
-// runs today is unchanged: it projects and deletes no blob, however old.
-func TestThePlainRebuildReclaimsNothing(t *testing.T) {
-	t.Parallel()
-	tracker, db := openReclaimStore(t)
-	orphan := seedBlob(t, db, []byte("plain orphan"), time.Time{})
-	require.NoError(t, projection.RebuildOccurrences(context.Background(), tracker.Journal(), db))
-	assert.True(t, blobExists(t, db, orphan), "RebuildOccurrences must not reclaim; only the reclaiming entry does")
 }
 
 // TestReclaimAgesAgainstTheSnapshotInstantNotTheDeleteInstant: the clock
@@ -211,8 +198,7 @@ func TestReclaimAgesAgainstTheSnapshotInstantNotTheDeleteInstant(t *testing.T) {
 	tracker, db := openReclaimStore(t)
 	inFlight := seedBlob(t, db, []byte("written just before the snapshot"), snapshotEpoch.Add(-time.Second))
 	clock := &sequenceClock{instants: []time.Time{snapshotEpoch, snapshotEpoch.Add(reclaimWindow + 2*time.Second)}}
-	var diagnostics bytes.Buffer
-	report, err := projection.RebuildOccurrencesReclaiming(context.Background(), slowReadJournal{Journal: tracker.Journal(), clock: clock}, db, projection.RebuildOptions{Clock: clock, Window: reclaimWindow, Diagnostics: &diagnostics})
+	report, err := projection.RebuildOccurrences(context.Background(), slowReadJournal{Journal: tracker.Journal(), clock: clock}, db, projection.RebuildOptions{Clock: clock, Window: reclaimWindow})
 	require.NoError(t, err)
 	require.NoError(t, report.Failure)
 	require.Equal(t, 1, clock.index, "the journal read advanced the clock, so a snapshot taken after the read would see the later instant")
@@ -242,13 +228,13 @@ func TestReclaimCapIsOldestFirstAndExactlyTheCap(t *testing.T) {
 			youngest = append(youngest, ref)
 		}
 	}
-	first, _ := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	first := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
 	require.NoError(t, first.Failure)
 	assert.Len(t, first.Reclaimed, cap, "exactly the cap is reclaimed in one rebuild")
 	for _, ref := range youngest {
 		assert.True(t, blobExists(t, db, ref), "the youngest orphans wait for the next rebuild")
 	}
-	second, _ := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	second := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
 	require.NoError(t, second.Failure)
 	assert.Len(t, second.Reclaimed, extra, "the next rebuild reclaims the rest")
 	var remaining int
@@ -271,7 +257,7 @@ func TestStaleProjectionNeverLosesAJournalNamedBlob(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM lifecycle_occurrences`).Scan(&projected))
 	require.Equal(t, 0, projected, "the projection is stale by construction: never rebuilt")
 
-	report, _ := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	report := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
 	require.NoError(t, report.Failure)
 	assert.Empty(t, report.Reclaimed)
 	assert.True(t, blobExists(t, db, named), "the journal-named blob %s was deleted although a journal row names it", named)
@@ -293,7 +279,9 @@ func TestAReclaimFailureLeavesTheRebuildCompleteAndSaysSo(t *testing.T) {
 		_, _ = db.Exec(`ALTER TABLE lifecycle_payload_blobs RENAME COLUMN written_at_gone TO written_at`)
 	})
 
-	report, diagnostics := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	report := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	require.Error(t, report.Failure, "the failed reclaim is reported in the outcome for the store to print")
+	diagnostics := projection.ReclaimFailureLine(report.Failure) + "\n"
 	require.Error(t, report.Failure, "the reclaim must report that it could not run")
 	assert.Empty(t, report.Reclaimed)
 	assert.True(t, blobExists(t, db, orphan), "a failed reclaim deletes nothing")
@@ -317,12 +305,11 @@ func TestRebuildOptionsRefuseMissingInputs(t *testing.T) {
 		options projection.RebuildOptions
 		refusal string
 	}{
-		{"no clock", projection.RebuildOptions{Window: reclaimWindow, Diagnostics: &bytes.Buffer{}}, "has no clock"},
-		{"no window", projection.RebuildOptions{Clock: clock, Diagnostics: &bytes.Buffer{}}, "has no writer window"},
-		{"no diagnostics", projection.RebuildOptions{Clock: clock, Window: reclaimWindow}, "has no diagnostic stream"},
+		{"no clock", projection.RebuildOptions{Window: reclaimWindow}, "has no clock"},
+		{"no window", projection.RebuildOptions{Clock: clock}, "has no writer window"},
 	}
 	for _, tc := range cases {
-		_, err := projection.RebuildOccurrencesReclaiming(context.Background(), tracker.Journal(), db, tc.options)
+		_, err := projection.RebuildOccurrences(context.Background(), tracker.Journal(), db, tc.options)
 		require.Error(t, err, tc.name)
 		assert.Contains(t, err.Error(), tc.refusal, tc.name)
 	}
@@ -401,7 +388,7 @@ func TestTheReclaimIsReachedOnlyFromTheRebuild(t *testing.T) {
 					switch renderExpr(typed.Fun) {
 					case "reclaimOrphanPayloads":
 						reclaimCalls[relative+": "+function.Name.Name]++
-					case "RebuildOccurrencesReclaiming", "projection.RebuildOccurrencesReclaiming":
+					case "RebuildOccurrences", "projection.RebuildOccurrences":
 						reclaimingCallers = append(reclaimingCallers, relative+": "+function.Name.Name)
 					}
 				case *ast.CompositeLit:
@@ -419,11 +406,12 @@ func TestTheReclaimIsReachedOnlyFromTheRebuild(t *testing.T) {
 		"the reclaim is called exactly once, from the rebuild, inside its transaction after the re-insert; any other caller reads a projection that may be stale")
 	assert.Equal(t, []string{filepath.Join("internal", "lifecycle", "projection", "reclaim.go") + ": reclaimOrphanPayloads"}, deleters,
 		"the narrow delete type is constructed only by the reclaim; a construction anywhere else is a second delete door")
-	// The reclaiming entry has NO production caller yet: the read commands
-	// still run the plain rebuild until their diagnostic stream is threaded to
-	// it. This number is stated so that the day a caller appears it is a
-	// deliberate change to this line, and a caller on a hook path is refused.
-	assert.Empty(t, reclaimingCallers, "production callers of the reclaiming rebuild: %v; a new caller must be a read command with a diagnostic stream, never a hook path", reclaimingCallers)
+	// The rebuild has EXACTLY ONE production caller, the tasks wrapper that
+	// every read command reaches; the reclaim is reached through it and
+	// through nothing else. A second caller is a new path that must state
+	// where its failure line goes; a caller on a hook path is refused.
+	assert.Equal(t, []string{filepath.Join("internal", "tasks", "lifecycle_identity.go") + ": RebuildLifecycleOccurrencesReporting"}, reclaimingCallers,
+		"production callers of the rebuild: %v; the one caller is the tasks wrapper the read commands share, never a hook path", reclaimingCallers)
 }
 
 func TestReclaimFailureLineNamesTheOutcome(t *testing.T) {
@@ -451,7 +439,7 @@ func TestAFreshlyPutBlobIsNeverReclaimedWhileItsWriterMayStillAppend(t *testing.
 	staleRef := digest.FromBytes(stale)
 	require.NoError(t, receipt.NewSQLiteBlobStore(db, receipt.WithPayloadClock(&sequenceClock{instants: []time.Time{snapshotEpoch.Add(-reclaimWindow - time.Nanosecond)}})).Put(ctx, staleRef, stale))
 
-	report, _ := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	report := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
 	require.NoError(t, report.Failure)
 	assert.True(t, blobExists(t, db, freshRef), "a blob the production store wrote inside the window is never reclaimed: its writer may still be between the blob write and the journal append")
 	assert.False(t, blobExists(t, db, staleRef), "control: a blob the production store wrote before the window is reclaimed")
@@ -471,7 +459,7 @@ func TestARedeliveredOrphanBodyIsProtectedByItsNewWriter(t *testing.T) {
 	untouchedRef := seedBlob(t, db, []byte(`{"hook_event_name":"SessionStart","body":"never seen again"}`), time.Time{})
 	require.NoError(t, receipt.NewSQLiteBlobStore(db, receipt.WithPayloadClock(&sequenceClock{instants: []time.Time{snapshotEpoch}})).Put(context.Background(), redeliveredRef, redelivered))
 
-	report, _ := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
+	report := reclaimingRebuild(t, tracker, db, &sequenceClock{instants: []time.Time{snapshotEpoch}})
 	require.NoError(t, report.Failure)
 	assert.True(t, blobExists(t, db, redeliveredRef), "a legacy orphan whose body a new writer re-delivered inside the window is protected by that writer's refreshed stamp")
 	assert.False(t, blobExists(t, db, untouchedRef), "control: the legacy orphan nobody re-delivered is reclaimed")

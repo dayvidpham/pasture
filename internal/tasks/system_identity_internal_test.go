@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -60,6 +61,7 @@ func TestSystemIdentityCrashAfterGenesisCommitConvergesOnReopen(t *testing.T) {
 	var committedAuthority provenance.JournalID
 
 	first, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{
+		clock: wallClock{}, diagnostics: io.Discard,
 		afterGenesisCommit: func(authority provenance.JournalID) error {
 			committedAuthority = authority
 			return injected
@@ -85,7 +87,7 @@ func TestSystemIdentityCrashAfterGenesisCommitConvergesOnReopen(t *testing.T) {
 		t.Fatalf("close crash-gap assertion database: %v", err)
 	}
 
-	reopened, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{})
+	reopened, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{clock: wallClock{}, diagnostics: io.Discard})
 	if err != nil {
 		t.Fatalf("reopen after crash gap: %v", err)
 	}
@@ -186,11 +188,11 @@ func runCoordinatedFirstOpenChild(t *testing.T, dbPath string) {
 		}
 	}
 
-	first, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{afterGenesisCommit: afterGenesis("first")})
+	first, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{afterGenesisCommit: afterGenesis("first"), clock: wallClock{}, diagnostics: io.Discard})
 	if err != nil {
 		t.Fatalf("open first coordinated tracker: %v", err)
 	}
-	second, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{afterGenesisCommit: afterGenesis("second")})
+	second, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{afterGenesisCommit: afterGenesis("second"), clock: wallClock{}, diagnostics: io.Discard})
 	if err != nil {
 		_ = first.Close()
 		t.Fatalf("open second coordinated tracker: %v", err)
@@ -309,7 +311,7 @@ func TestSystemIdentityConcurrentFirstOpenTimeoutKillsAndReaps(t *testing.T) {
 func TestSystemIdentityPersistedNoncanonicalGenesisFailsClosed(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	opened, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{})
+	opened, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{clock: wallClock{}, diagnostics: io.Discard})
 	if err != nil {
 		t.Fatalf("open fixture tracker: %v", err)
 	}
@@ -362,7 +364,7 @@ func TestSystemIdentityPersistedNoncanonicalGenesisFailsClosed(t *testing.T) {
 func TestSystemIdentityPersistedMissingGenesisFailsClosed(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	opened, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{})
+	opened, err := openTaskTrackerWithOptions(dbPath, openTaskTrackerOptions{clock: wallClock{}, diagnostics: io.Discard})
 	if err != nil {
 		t.Fatalf("open fixture tracker: %v", err)
 	}

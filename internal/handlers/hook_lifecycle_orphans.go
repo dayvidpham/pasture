@@ -29,7 +29,8 @@ import (
 const OrphanPayloadNote = "An orphan is a payload blob that no recorded occurrence names. " +
 	"One is left behind by a hook invocation that was abandoned between its two durable writes, and at most one arises per abandoned invocation. " +
 	"This is expected and reclaimable, not damage: the blob is written before the journal row deliberately, because a spare blob can be reclaimed later while a journal row naming an absent blob could not be repaired at all. " +
-	"A large number therefore does not mean the store is corrupt. It means invocations were abandoned repeatedly, so the thing to investigate is the store contention that caused the abandonment, such as another writer holding the pasture store."
+	"A large number therefore does not mean the store is corrupt. It means invocations were abandoned repeatedly, so the thing to investigate is the store contention that caused the abandonment, such as another writer holding the pasture store." +
+	"Every read command reclaims orphans that are older than the writer window, at most 1024 per run, so the number remaining can be smaller than the number that was there before the command ran; the reclaimed count says by how much."
 
 // HookLifecycleOrphansInput selects the store to inspect.
 type HookLifecycleOrphansInput struct {
@@ -37,7 +38,14 @@ type HookLifecycleOrphansInput struct {
 }
 
 // HookLifecycleOrphans reports how many committed payload blobs no occurrence
-// names. It deletes nothing and it changes no journal truth.
+// names. It changes no journal truth, but IT IS NOT A PURE READ: like every
+// read command it rebuilds the disposable occurrence projection first, and
+// the rebuild reclaims orphan blobs older than the writer window, up to the
+// projection package's cap. A command that MEASURES orphans therefore
+// MUTATES the thing it measures by running, so it prints TWO numbers, and
+// each is true of the run that printed it: how many blobs this run
+// reclaimed, and how many remain. A single number that shrank because the
+// command ran would be a defect unless the output said so.
 //
 // It REBUILDS THE DISPOSABLE OCCURRENCE PROJECTION from the journal first, for
 // the same reason `pasture hook lifecycle list` does. The count is a LEFT JOIN
@@ -80,7 +88,8 @@ func HookLifecycleOrphans(ctx context.Context, out io.Writer, in HookLifecycleOr
 		return listResult(err)
 	}
 	defer tracker.Close()
-	if err := tasks.RebuildLifecycleOccurrences(ctx, tracker); err != nil {
+	reclaim, err := tasks.RebuildLifecycleOccurrencesReporting(ctx, tracker)
+	if err != nil {
 		return listResult(err)
 	}
 	blobs, err := tasks.NewLifecycleBlobStore(tracker)
@@ -93,21 +102,23 @@ func HookLifecycleOrphans(ctx context.Context, out io.Writer, in HookLifecycleOr
 	}
 
 	if format == "json" {
-		if err := json.NewEncoder(out).Encode(orphanPayloadView{Count: count, Note: OrphanPayloadNote}); err != nil {
+		if err := json.NewEncoder(out).Encode(orphanPayloadView{ReclaimedThisRun: int64(reclaim.Count()), Remaining: count, Note: OrphanPayloadNote}); err != nil {
 			return listResult(err)
 		}
 		return 0, nil
 	}
-	if _, err := fmt.Fprintf(out, "orphan payload blobs: %d\nwhat this number means: %s\n", count, OrphanPayloadNote); err != nil {
+	if _, err := fmt.Fprintf(out, "orphan payload blobs reclaimed by this run: %d\norphan payload blobs remaining: %d\nwhat these numbers mean: %s\n", reclaim.Count(), count, OrphanPayloadNote); err != nil {
 		return listResult(err)
 	}
 	return 0, nil
 }
 
-// orphanPayloadView carries the same two facts to a machine reader. The note
-// travels with the count in JSON as well, because a dashboard that renders the
-// number alone reproduces the misreading this text exists to prevent.
+// orphanPayloadView carries the same facts to a machine reader: what this run
+// reclaimed, what remains, and the note. The note travels with the numbers in
+// JSON as well, because a dashboard that renders a count alone reproduces the
+// misreading this text exists to prevent.
 type orphanPayloadView struct {
-	Count int64  `json:"orphanPayloadBlobs"`
-	Note  string `json:"note"`
+	ReclaimedThisRun int64  `json:"orphanPayloadBlobsReclaimedThisRun"`
+	Remaining        int64  `json:"orphanPayloadBlobsRemaining"`
+	Note             string `json:"note"`
 }

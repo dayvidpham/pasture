@@ -12,11 +12,20 @@ package tasks_test
 // WAL / busy_timeout / fsync).
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -587,4 +596,140 @@ func TestForwarding_AuditRecordAndQuery(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("QueryEvents returned %d events, want 1", len(got))
 	}
+}
+
+// TestTheStoreRefusesANilDiagnosticSinkAndANilClock: the sink and the clock are
+// REQUIRED construction inputs of the store, not library defaults. A nil is
+// refused with a validation error naming the field, so a construction site
+// nobody enumerated fails loudly at the place the enumeration was incomplete
+// instead of working quietly with a default nobody chose.
+func TestTheStoreRefusesANilDiagnosticSinkAndANilClock(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	_, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithDiagnosticSink(nil))
+	require.Error(t, err, "a nil diagnostics sink must be refused at open")
+	assert.Contains(t, err.Error(), "has no diagnostics sink", "the refusal names the field")
+	assert.Contains(t, err.Error(), "validation error", "a nil sink is a construction fault, not a storage fault")
+	_, err = tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithStoreClock(nil))
+	require.Error(t, err, "a nil clock must be refused at open")
+	assert.Contains(t, err.Error(), "has no clock", "the refusal names the field")
+	_, statErr := os.Stat(dbPath)
+	assert.True(t, os.IsNotExist(statErr), "a refused open creates no database file")
+}
+
+// TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock is the
+// ENUMERATION of production construction sites, derived from source rather
+// than listed: every exported function of the tasks package that returns a
+// protocol.TaskTracker is a production opener, and the closure of each over
+// the package's non-test functions must reach the process stderr and the wall
+// clock. The nil refusal above is what makes this enumeration complete: an
+// opener that reached neither would open nothing.
+// WHAT IT VISITS: every non-test .go file of internal/tasks; the bodies of the
+// exported openers and of every same-package function they call by name.
+// WHAT IT DOES NOT READ: test files, method calls, or any other package.
+// NON-VACUITY: at least two openers are derived (the plain opener and the
+// options opener today); fewer is RED.
+// MUTATION: make OpenTaskTrackerWithOptions start from an empty options value
+// instead of the production defaults and this test is RED naming it.
+func TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock(t *testing.T) {
+	t.Parallel()
+	dir := "."
+	fset := token.NewFileSet()
+	funcs := map[string]*ast.FuncDecl{}
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(fset, filepath.Join(dir, name), nil, 0)
+		require.NoError(t, parseErr)
+		for _, declaration := range file.Decls {
+			if function, ok := declaration.(*ast.FuncDecl); ok && function.Recv == nil && function.Body != nil {
+				funcs[function.Name.Name] = function
+			}
+		}
+	}
+	openers := []string{}
+	for name, function := range funcs {
+		if !function.Name.IsExported() || function.Type.Results == nil {
+			continue
+		}
+		returnsTracker := false
+		for _, result := range function.Type.Results.List {
+			if selector, ok := result.Type.(*ast.SelectorExpr); ok {
+				if pkg, isIdent := selector.X.(*ast.Ident); isIdent && pkg.Name == "protocol" && selector.Sel.Name == "TaskTracker" {
+					returnsTracker = true
+				}
+			}
+		}
+		if !returnsTracker {
+			continue
+		}
+		openers = append(openers, name)
+		seen := map[string]bool{}
+		bodies := []*ast.BlockStmt{function.Body}
+		stderr, wall := false, false
+		for index := 0; index < len(bodies); index++ {
+			ast.Inspect(bodies[index], func(node ast.Node) bool {
+				switch typed := node.(type) {
+				case *ast.CallExpr:
+					if ident, ok := typed.Fun.(*ast.Ident); ok && !seen[ident.Name] {
+						if callee, known := funcs[ident.Name]; known {
+							seen[ident.Name] = true
+							bodies = append(bodies, callee.Body)
+						}
+					}
+				case *ast.SelectorExpr:
+					if pkg, ok := typed.X.(*ast.Ident); ok && pkg.Name == "os" && typed.Sel.Name == "Stderr" {
+						stderr = true
+					}
+				case *ast.CompositeLit:
+					if ident, ok := typed.Type.(*ast.Ident); ok && ident.Name == "wallClock" {
+						wall = true
+					}
+				}
+				return true
+			})
+		}
+		assert.True(t, stderr, "production opener %s never reaches os.Stderr: the diagnostics sink is a required input and the opener must pass the process stderr", name)
+		assert.True(t, wall, "production opener %s never reaches the wall clock: the store clock is a required input and the opener must pass it", name)
+	}
+	sort.Strings(openers)
+	require.GreaterOrEqual(t, len(openers), 2, "non-vacuity: at least two production openers must be derived; found %v", openers)
+}
+
+// TestAFailedReclaimIsOneLineOnTheStoreSinkAndSuccessIsSilent: the store owns
+// the sink, so the ONE line a failed orphan reclaim earns is written by the
+// store's rebuild wrapper, nothing threads a writer down, and a rebuild whose
+// reclaim succeeds writes nothing at all.
+func TestAFailedReclaimIsOneLineOnTheStoreSinkAndSuccessIsSilent(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	bootstrap, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	_, err = bootstrap.Create("file://tracker-sink-test", "bootstrap", "initialize the persisted ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	require.NoError(t, bootstrap.Close())
+
+	var sink bytes.Buffer
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithDiagnosticSink(&sink))
+	require.NoError(t, err)
+	defer tracker.Close()
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+	assert.Empty(t, sink.String(), "a rebuild whose reclaim succeeds prints nothing")
+
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	concrete, ok := reader.(projection.Reader)
+	require.True(t, ok)
+	_, err = concrete.DB.Exec(`ALTER TABLE lifecycle_payload_blobs RENAME COLUMN written_at TO written_at_gone`)
+	require.NoError(t, err)
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker), "a failed reclaim never fails the rebuild")
+	lines := strings.Split(strings.TrimRight(sink.String(), "\n"), "\n")
+	require.Len(t, lines, 1, "exactly one line on the store's sink, got %q", sink.String())
+	assert.True(t, strings.HasPrefix(lines[0], "pasture: the orphan payload reclaim inside the projection rebuild failed: "), "the line names what failed: %q", lines[0])
+	assert.Contains(t, lines[0], "the rebuild still completed and nothing was deleted", "the line says the rebuild completed and nothing was deleted")
+	assert.Contains(t, lines[0], "the next read command retries the reclaim", "the line says what happens next")
 }

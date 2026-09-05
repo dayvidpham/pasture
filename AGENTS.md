@@ -310,13 +310,30 @@ invocation abandoned at its deadline can leave a committed payload blob with no
 occurrence — one orphan per abandoned invocation, holding that invocation's raw
 host payload, bounded by the 1 MiB ingress payload cap. The write order is
 deliberate: an orphan blob is reclaimable, while a journal row naming an absent
-blob is corruption. `receipt.SQLiteBlobStore.Reclaimable` identifies them and
-nothing deletes them yet.
+blob is corruption. `receipt.SQLiteBlobStore.Reclaimable` identifies them, and
+every read command reclaims them, as the next paragraphs say.
 
-They can now be COUNTED. `pasture hook lifecycle orphans` reports how many
-payload blobs no occurrence names, in text or JSON, and it deletes nothing.
-`receipt.SQLiteBlobStore.ReclaimableCount` answers it from the same predicate
-`Reclaimable` enumerates, so the operator surface and the abandonment invariant
+They are COUNTED and RECLAIMED. `pasture hook lifecycle orphans` reports, in
+text or JSON, how many payload blobs this run reclaimed and how many remain.
+Every read command that rebuilds the projection (`list`, `context`, `lineage`,
+`orphans`) reclaims inside that rebuild: after the projection rows are
+re-inserted from the journal, in the same write transaction and under a
+savepoint, the rebuild deletes at most `projection.ReclaimCap` (1024) orphan
+blobs, oldest first, whose `written_at` stamp is older than the snapshot
+instant (taken before the journal was read) minus the WorkflowResult tier, the
+longest window any writer may hold between its payload write and its journal
+append. A blob that a journal row names is never selected, because the
+projection it reads was rebuilt in the same transaction; a blob younger than
+the window is never selected, because its writer may still be between its two
+writes. Legacy blobs stamped 0 by the migration are older than any bound and
+drain at the cap per read command. A reclaim that fails rolls back alone, the
+rebuild still commits, and the store prints ONE line on the diagnostic sink it
+was constructed with (the process stderr in production); on success it prints
+nothing. The orphans command prints BOTH numbers because it mutates what it
+measures by running; a single count that shrank because the command ran would
+be a defect unless the output said so.
+The remaining count comes from `receipt.SQLiteBlobStore.ReclaimableCount`, the
+same predicate `Reclaimable` enumerates, so the operator surface and the abandonment invariant
 can never describe different sets. The count rebuilds the disposable occurrence
 projection from the journal first, exactly as `pasture hook lifecycle list`
 does: taken against a projection that was never rebuilt, every blob would look

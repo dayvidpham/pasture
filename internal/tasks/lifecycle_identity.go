@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -84,19 +85,47 @@ func NewLifecycleBlobStore(tracker protocol.TaskTracker) (receipt.SQLiteBlobStor
 }
 
 // RebuildLifecycleOccurrences derives the disposable occurrence projection
-// exclusively from journal truth.
+// exclusively from journal truth and, inside the same transaction, reclaims
+// orphan payload blobs older than the writer window, up to the projection
+// package's cap. Every read command that rebuilds the projection reaches the
+// reclaim through here; there is no rebuild without it. A reclaim failure
+// never fails the rebuild: this wrapper prints the ONE failure line on the
+// store's own diagnostic sink and returns nil, and it prints nothing on
+// success. Callers that report the numbers use RebuildLifecycleOccurrencesReporting.
 func RebuildLifecycleOccurrences(ctx context.Context, tracker protocol.TaskTracker) error {
+	_, err := RebuildLifecycleOccurrencesReporting(ctx, tracker)
+	return err
+}
+
+// RebuildLifecycleOccurrencesReporting is RebuildLifecycleOccurrences with the
+// reclaim's outcome returned, so a command that reports orphans can print
+// what this run reclaimed from data rather than from a side effect. The
+// options the rebuild needs come from what the store already holds: its
+// timeout profile for the window, its clock for the snapshot instant. The
+// failure line, if any, has already been written to the store's sink when
+// this returns.
+func RebuildLifecycleOccurrencesReporting(ctx context.Context, tracker protocol.TaskTracker) (projection.ReclaimOutcome, error) {
 	store, ok := tracker.(lifecycleReceiptStore)
 	if !ok || store.auditDBHandle() == nil {
-		return &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot rebuild lifecycle occurrences.", Why: "Projection replay needs the unified journal and database handle.", Where: "Wiring lifecycle replay (internal/tasks/lifecycle_identity.go in tasks.RebuildLifecycleOccurrences).", Impact: "No projection rows were changed.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
+		return projection.ReclaimOutcome{}, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot rebuild lifecycle occurrences.", Why: "Projection replay needs the unified journal and database handle.", Where: "Wiring lifecycle replay (internal/tasks/lifecycle_identity.go in tasks.RebuildLifecycleOccurrences).", Impact: "No projection rows were changed.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
 	}
-	return projection.RebuildOccurrences(ctx, store.Journal(), store.auditDBHandle())
+	outcome, err := projection.RebuildOccurrences(ctx, store.Journal(), store.auditDBHandle(), projection.RebuildOptions{Clock: store.lifecycleStoreClock(), Window: store.lifecycleTimeoutProfile().WorkflowResult()})
+	if err != nil {
+		return projection.ReclaimOutcome{}, err
+	}
+	if outcome.Failure != nil {
+		fmt.Fprintln(store.lifecycleDiagnosticSink(), projection.ReclaimFailureLine(outcome.Failure))
+	}
+	return outcome, nil
 }
 
 type lifecycleReceiptStore interface {
 	protocol.TaskTracker
 	receipt.IdentityResolver
 	auditDBHandle() *sql.DB
+	lifecycleTimeoutProfile() timeouts.Profile
+	lifecycleStoreClock() receipt.Clock
+	lifecycleDiagnosticSink() io.Writer
 }
 
 // NewLifecycleReceiptService wires the production receipt path to the unified
