@@ -16,6 +16,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -174,7 +175,7 @@ func commitPreM5V1Record(ctx context.Context, t *testing.T, tracker protocol.Tas
 		t.Fatalf("resolve lifecycle identity: %v", err)
 	}
 
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code/2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
 	if err != nil {
 		t.Fatalf("construct runtime contract: %v", err)
 	}

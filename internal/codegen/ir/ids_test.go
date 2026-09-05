@@ -101,7 +101,7 @@ func TestRuntimeContractIDJSONRoundTripAndForgedValues(t *testing.T) {
 	require.NoError(t, err)
 	encoded, err := json.Marshal(contract)
 	require.NoError(t, err)
-	assert.JSONEq(t, `"codex/0.146.0"`, string(encoded))
+	assert.JSONEq(t, `"codex/`+productionVersion(t, ir.HarnessCodex)+`"`, string(encoded))
 
 	var decoded ir.RuntimeContractID
 	require.NoError(t, json.Unmarshal(encoded, &decoded))

@@ -25,6 +25,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
@@ -123,7 +124,7 @@ func commitOccurrenceNaming(t *testing.T, tracker protocol.TaskTracker, ref dige
 	require.True(t, ok)
 	identity, err := resolver.ResolveLifecycleIdentity(ctx)
 	require.NoError(t, err)
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code/2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
 	require.NoError(t, err)
 	payload, err := json.Marshal(struct {
 		Contract string                      `json:"contract"`

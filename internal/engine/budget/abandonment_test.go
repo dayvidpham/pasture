@@ -118,7 +118,7 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 		t.Fatal(err)
 	}
 	delivery := claudeingress.Parse(
-		raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
+		raw, registration.ClaudeCode2_1_210().Events[0], registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
 
 	// STATE 3: abandoned between the blob commit and the journal append.

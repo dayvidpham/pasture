@@ -50,7 +50,7 @@ func TestRawOriginOccurrenceReadsBackThroughProductionStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read native fixture: %v", err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	delivery.Origin = acceptance.OriginRaw
 	delivery.Envelope.Origin = acceptance.OriginRaw
 

@@ -193,7 +193,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	_, err = service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
 		close(release)
@@ -267,7 +267,7 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
 	_, receiveErr := service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
@@ -378,7 +378,7 @@ func TestBudgetWorkerProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], "2.1.210", model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_210().Events[0], registration.ClaudeCode2_1_210().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	warrant := deliveryWarrant(t, delivery)
 	for i := 0; i < count; i++ {
 		if _, err := service.Receive(context.Background(), warrant, delivery); err != nil {

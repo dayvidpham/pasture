@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -89,7 +90,7 @@ console.log(JSON.stringify({argsUnchanged: true}));
 	identities := make(map[model.ContractEventKind]map[runtime.NativeIdentityKind]string, 2)
 	for _, record := range page.Records() {
 		require.Equal(t, registration.OpenCode1_18_10().Contract, record.Occurrence.RuntimeContract)
-		require.Equal(t, "1.18.10", record.Occurrence.Envelope.HostVersion)
+		require.Equal(t, registration.OpenCode1_18_10().Version, record.Occurrence.Envelope.HostVersion)
 		require.Len(t, record.Interpreted(), 1)
 		interpreted := record.Interpreted()[0]
 		require.Equal(t, runtime.OpenCode1_18_10().ID(), interpreted.Contract())
@@ -138,9 +139,15 @@ console.log(JSON.stringify({argsUnchanged: true}));
 	require.NotEqual(t, runtime.ClaudeCode2_1_210().ID(), runtime.OpenCode1_18_10().ID())
 }
 
+// The two contract ids every durable record must carry, read from the
+// registration manifest and the runtime contract so a moved host version
+// moves every expectation in this file with it.
+var (
+	occurrenceLifecycleContract  = registration.ClaudeCode2_1_210().Contract.String()
+	interpretedLifecycleContract = runtime.ClaudeCode2_1_210().ID().String()
+)
+
 const (
-	occurrenceLifecycleContract   = "claude-code/2.1.210"
-	interpretedLifecycleContract  = "claude-code/claude-code@2.1.210"
 	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
 	consultationEvidenceKind      = provenance.EvidenceKind("pasture.lifecycle.consultation.v1")
@@ -682,7 +689,7 @@ func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "opencode", "--event", "session.updated", "--host-version", "1.18.10")
+	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "opencode", "--event", "session.updated", "--host-version", registration.OpenCode1_18_10().Version)
 	command.Stdin = bytes.NewBufferString(`{"event":{"type":"session.updated"}}`)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -1115,7 +1122,7 @@ func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture mode
 	t.Helper()
 	members := decodeJSONObject(t, raw)
 	require.ElementsMatch(t, []string{"contract", "event", "envelope", "bindings", "capture", "body_digest"}, mapKeys(members))
-	require.JSONEq(t, `"claude-code/2.1.210"`, string(members["contract"]))
+	require.JSONEq(t, strconv.Quote(occurrenceLifecycleContract), string(members["contract"]))
 	require.JSONEq(t, fmt.Sprintf("%d", event), string(members["event"]))
 	if capture == model.CaptureMalformed {
 		require.JSONEq(t, `2`, string(members["capture"]))
@@ -1162,7 +1169,7 @@ func assertOccurrenceEnvelope(t *testing.T, raw json.RawMessage) {
 
 	runtime := decodeJSONObject(t, members["Runtime"])
 	require.ElementsMatch(t, []string{"Definition", "Contract"}, mapKeys(runtime))
-	require.JSONEq(t, `"claude-code/2.1.210"`, string(runtime["Contract"]))
+	require.JSONEq(t, strconv.Quote(occurrenceLifecycleContract), string(runtime["Contract"]))
 	assertZeroDefinitionRef(t, runtime["Definition"])
 
 	for _, wrapper := range []string{"Schema", "Implementation", "Retention"} {
@@ -1191,7 +1198,7 @@ func assertInterpretedEvidence(t *testing.T, raw []byte) {
 	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "manifest"}, mapKeys(members))
 	require.Equal(t, json.RawMessage(`1`), members["semantic"])
 	require.Equal(t, json.RawMessage(expectedInterpretedIdentities), members["identities"])
-	require.Equal(t, json.RawMessage(`"claude-code/claude-code@2.1.210"`), members["contract"])
+	require.Equal(t, json.RawMessage(strconv.Quote(interpretedLifecycleContract)), members["contract"])
 
 	decoder = json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -1308,7 +1315,7 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 			raw := readCodexProductionFixture(t, tc.fixture, tc.event, tc.captureProof)
 
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: "0.146.0",
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_146_0().Version,
 				Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 				Activations: activations,
 			})
@@ -1364,7 +1371,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	codexDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, codexDB)
 	codexResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: "0.146.0",
+		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: registration.Codex0_146_0().Version,
 		Input: bytes.NewReader(codexRaw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		Activations: codexActivations,
 	})
@@ -1378,7 +1385,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	openCodeDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, openCodeDB)
 	openCodeResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: "1.18.10",
+		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_10().Version,
 		Input: bytes.NewReader(openCodeWire), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 	})
 	require.NoError(t, err)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/provenance"
 )
@@ -151,7 +152,7 @@ func evidenceRow(jid int64, op string, kind provenance.EvidenceKind, payload str
 
 func occurrence(t *testing.T, jid int64) model.OccurrenceRecord {
 	t.Helper()
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, "claude-code/2.1.210")
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_210().Contract.String())
 	if err != nil {
 		t.Fatalf("construct runtime contract: %v", err)
 	}
