@@ -104,7 +104,7 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 		require.Equal(t, want.decision, testCase.ExpectedDecision(), want.name)
 		require.Equal(t, want.reason, testCase.ExpectedReason(), want.name)
 
-		evaluation, err := activation.Evaluate("testdata", testCase)
+		evaluation, err := activation.ClaudeCodeEvaluator().Evaluate("testdata", testCase)
 		require.NoError(t, err, want.name)
 		require.True(t, evaluation.IsValid(), want.name)
 		require.Equal(t, testCase.Name(), evaluation.CaseName(), want.name)

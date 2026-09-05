@@ -2,21 +2,14 @@ package activation
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
-	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
-	"github.com/dayvidpham/pasture/internal/runtime"
-	digest "github.com/opencontainers/go-digest"
 	"gopkg.in/yaml.v3"
 )
 
@@ -257,6 +250,7 @@ type Evaluation struct {
 	event        model.ContractEventKind
 	decision     Decision
 	reason       CorpusReason
+	detail       string
 	eventPresent bool
 	constructed  bool
 }
@@ -274,6 +268,12 @@ func (e Evaluation) IsValid() bool {
 func (e Evaluation) CaseName() string     { return e.caseName }
 func (e Evaluation) Decision() Decision   { return e.decision }
 func (e Evaluation) Reason() CorpusReason { return e.reason }
+
+// Detail is the sentence that explains a withheld reason to a reader, when
+// the reason has one; a version-out-of-range evaluation names the observed
+// host version and the admitted versions. It is empty for an enabled
+// evaluation.
+func (e Evaluation) Detail() string { return e.detail }
 func (e Evaluation) Event() (model.ContractEventKind, bool) {
 	if !e.eventPresent {
 		return 0, false
@@ -477,148 +477,6 @@ func LoadCorpus(path string) (Corpus, error) {
 		return Corpus{}, &CoverageError{MissingCoverage: missing}
 	}
 	return Corpus{cases: cases, constructed: true}, nil
-}
-
-// Evaluate evaluates one immutable case against contained fixture evidence.
-func Evaluate(root string, c Case) (Evaluation, error) {
-	if !c.IsValid() {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: case is not constructed by LoadCorpus; load and select a valid corpus case")
-	}
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: resolve root %q: %w", root, err)
-	}
-	fixture, escaped, err := containedPath(rootAbs, c.fixture)
-	if err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: resolve fixture for case %q: %w", c.name, err)
-	}
-	if escaped {
-		return withheldEvaluation(c.name, CorpusReasonPathEscape), nil
-	}
-	provenance := strings.TrimSuffix(fixture, filepath.Ext(fixture)) + ".provenance.json"
-	provenance, escaped, err = containedPath(rootAbs, provenance)
-	if err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: resolve provenance for case %q: %w", c.name, err)
-	}
-	if escaped {
-		return withheldEvaluation(c.name, CorpusReasonPathEscape), nil
-	}
-	fixtureFile, err := os.Open(fixture)
-	if err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: open contained fixture %q for case %q: %w", fixture, c.name, err)
-	}
-	body, readErr := io.ReadAll(io.LimitReader(fixtureFile, MaxFixtureBytes+1))
-	closeErr := fixtureFile.Close()
-	if readErr != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: read bounded fixture %q for case %q: %w", fixture, c.name, readErr)
-	}
-	if closeErr != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: close fixture %q for case %q after bounded read: %w", fixture, c.name, closeErr)
-	}
-	if len(body) > MaxFixtureBytes {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: fixture %q for case %q exceeds the %d-byte native payload bound; reduce or reject the capture", fixture, c.name, MaxFixtureBytes)
-	}
-	provenanceFile, err := os.Open(provenance)
-	if err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: open contained provenance %q for case %q: %w", provenance, c.name, err)
-	}
-	praw, readErr := io.ReadAll(io.LimitReader(provenanceFile, MaxProvenanceBytes+1))
-	closeErr = provenanceFile.Close()
-	if readErr != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: read bounded provenance %q for case %q: %w", provenance, c.name, readErr)
-	}
-	if closeErr != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: close provenance %q for case %q after bounded read: %w", provenance, c.name, closeErr)
-	}
-	if len(praw) > MaxProvenanceBytes {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance %q exceeds %d bytes; reduce it", provenance, MaxProvenanceBytes)
-	}
-	var p acceptance.CaptureProvenance
-	jd := json.NewDecoder(bytes.NewReader(praw))
-	if err := jd.Decode(&p); err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: decode provenance %q: %w", provenance, err)
-	}
-	var extra any
-	if err := jd.Decode(&extra); !errors.Is(err, io.EOF) {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance %q must contain exactly one JSON object", provenance)
-	}
-	if p.Origin != acceptance.OriginAuthenticCapture {
-		return withheldEvaluation(c.name, CorpusReasonNonAuthenticOrigin), nil
-	}
-	want, err := digest.Parse(p.RawFileDigest)
-	if err != nil || want.Algorithm() != digest.SHA256 {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance %q has malformed SHA-256 digest %q; record sha256:<hex>", provenance, p.RawFileDigest)
-	}
-	sum := sha256.Sum256(body)
-	if want.Encoded() != hex.EncodeToString(sum[:]) {
-		return withheldEvaluation(c.name, CorpusReasonDigestMismatch), nil
-	}
-	version, err := runtime.ParseHostVersion(p.HarnessVersion)
-	if err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance %q has malformed host version %q: %w", provenance, p.HarnessVersion, err)
-	}
-	if !runtime.ClaudeCode2_1_210Lifecycle().Supports(version) {
-		return withheldEvaluation(c.name, CorpusReasonVersionOutOfRange), nil
-	}
-	if p.Harness != acceptance.HarnessClaudeCode {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance %q names harness %q, not claude-code; capture with the pinned Claude harness", provenance, p.Harness)
-	}
-	var event model.ContractEventKind
-	found := false
-	for _, entry := range registration.ClaudeCode2_1_210().Entries() {
-		if entry.NativeName == p.Event {
-			event = entry.Kind
-			found = true
-			break
-		}
-	}
-	if !found {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance %q names empty or unknown event %q; use an exact generated Claude native event", provenance, p.Event)
-	}
-	target := false
-	for _, candidate := range ClaudeCode2_1_210TargetEvents() {
-		if candidate == event {
-			target = true
-			break
-		}
-	}
-	if !target {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: provenance event %q is generated but outside the activation target set; capture one of the ten declared targets", p.Event)
-	}
-	if err := p.ValidateCommittedFixtureBytes(fixture, body); err != nil {
-		return Evaluation{}, fmt.Errorf("activation.Evaluate: final fixture validation failed for case %q: %w", c.name, err)
-	}
-	return Evaluation{caseName: c.name, event: event, decision: DecisionEnabled, reason: CorpusReasonNone, eventPresent: true, constructed: true}, nil
-}
-
-func withheldEvaluation(name string, reason CorpusReason) Evaluation {
-	return Evaluation{caseName: name, decision: DecisionWithheld, reason: reason, constructed: true}
-}
-
-func containedPath(root, candidate string) (string, bool, error) {
-	if !filepath.IsAbs(candidate) {
-		candidate = filepath.Join(root, candidate)
-	}
-	abs, err := filepath.Abs(candidate)
-	if err != nil {
-		return "", false, err
-	}
-	rel, err := filepath.Rel(root, abs)
-	if err != nil {
-		return "", false, err
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return abs, true, nil
-	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return "", false, err
-	}
-	rel, err = filepath.Rel(root, resolved)
-	if err != nil {
-		return "", false, err
-	}
-	return resolved, rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)), nil
 }
 
 func rejectYAMLFeatures(n *yaml.Node) error {

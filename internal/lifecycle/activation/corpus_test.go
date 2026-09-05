@@ -8,9 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/dayvidpham/pasture/internal/acceptance"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -211,7 +215,7 @@ func TestEvaluateRealAuthenticCaptureAndOracleIndependence(t *testing.T) {
 	require.Len(t, cases, 5)
 	cases[0] = activation.Case{}
 	require.True(t, corpus.Cases()[0].IsValid())
-	got, err := activation.Evaluate(root, corpus.Cases()[0])
+	got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 	require.NoError(t, err)
 	require.True(t, got.IsValid())
 	require.Equal(t, "pass", got.CaseName())
@@ -225,14 +229,14 @@ func TestEvaluateControlsFollowBindingPrecedence(t *testing.T) {
 	t.Parallel()
 	root, corpus := copiedReviewedEvidenceCorpus(t)
 	for _, c := range corpus.Cases()[1:] {
-		got, err := activation.Evaluate(root, c)
+		got, err := activation.ClaudeCodeEvaluator().Evaluate(root, c)
 		require.NoError(t, err, c.Name())
 		require.True(t, got.IsValid())
 		require.Equal(t, c.ExpectedReason(), got.Reason())
 		_, ok := got.Event()
 		require.False(t, ok)
 	}
-	_, err := activation.Evaluate(root, activation.Case{})
+	_, err := activation.ClaudeCodeEvaluator().Evaluate(root, activation.Case{})
 	require.Error(t, err)
 	var coverage *activation.CoverageError
 	require.False(t, errors.As(err, &coverage))
@@ -246,7 +250,7 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 			root := t.TempDir()
 			corpus, err := loadCorpusTextAt(t, root, validCorpusYAML(fixture))
 			require.NoError(t, err)
-			got, err := activation.Evaluate(root, corpus.Cases()[0])
+			got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 			require.NoError(t, err)
 			require.Equal(t, activation.CorpusReasonPathEscape, got.Reason())
 		}
@@ -262,7 +266,7 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		}
 		corpus, err := loadCorpusTextAt(t, root, validCorpusYAML("fixtures/pass.json"))
 		require.NoError(t, err)
-		got, err := activation.Evaluate(root, corpus.Cases()[0])
+		got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 		require.NoError(t, err)
 		require.Equal(t, activation.CorpusReasonPathEscape, got.Reason())
 	})
@@ -276,7 +280,7 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 		if err := os.Symlink(outside, path); err != nil {
 			t.Skipf("symlinks unsupported: %v", err)
 		}
-		got, err := activation.Evaluate(root, corpus.Cases()[0])
+		got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 		require.NoError(t, err)
 		require.Equal(t, activation.CorpusReasonPathEscape, got.Reason())
 	})
@@ -291,21 +295,21 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 			p["rawFileDigest"] = "sha256:" + strings.Repeat("0", 64)
 			p["harnessVersion"] = "bad"
 		}, activation.CorpusReasonDigestMismatch, ""},
-		"version-before-wrong-harness": {func(p map[string]any) { p["harnessVersion"] = "2.2.0"; p["harness"] = "codex-cli" }, activation.CorpusReasonVersionOutOfRange, ""},
-		"malformed-digest":             {func(p map[string]any) { p["rawFileDigest"] = "bad" }, 0, "malformed SHA-256"},
-		"malformed-version":            {func(p map[string]any) { p["harnessVersion"] = "bad" }, 0, "malformed host version"},
-		"wrong-harness":                {func(p map[string]any) { p["harness"] = "codex-cli" }, 0, "not claude-code"},
-		"empty-event":                  {func(p map[string]any) { p["event"] = "" }, 0, "empty or unknown event"},
-		"unknown-event":                {func(p map[string]any) { p["event"] = "Unknown" }, 0, "empty or unknown event"},
-		"non-target-event":             {func(p map[string]any) { p["event"] = "Setup" }, 0, "outside the activation target"},
-		"final-timestamp-validation":   {func(p map[string]any) { p["capturedAt"] = "not-time" }, 0, "final fixture validation failed"},
+		"harness-before-bad-version": {func(p map[string]any) { p["harnessVersion"] = "2.2.0"; p["harness"] = "codex-cli" }, 0, `names harness "codex-cli", not "claude-code"`},
+		"malformed-digest":           {func(p map[string]any) { p["rawFileDigest"] = "bad" }, 0, "malformed SHA-256"},
+		"malformed-version":          {func(p map[string]any) { p["harnessVersion"] = "bad" }, 0, "malformed host version"},
+		"wrong-harness":              {func(p map[string]any) { p["harness"] = "codex-cli" }, 0, `not "claude-code"`},
+		"empty-event":                {func(p map[string]any) { p["event"] = "" }, 0, "empty or unknown event"},
+		"unknown-event":              {func(p map[string]any) { p["event"] = "Unknown" }, 0, "empty or unknown event"},
+		"non-target-event":           {func(p map[string]any) { p["event"] = "Setup" }, 0, "outside the claude-code activation target set"},
+		"final-timestamp-validation": {func(p map[string]any) { p["capturedAt"] = "not-time" }, 0, "final fixture validation failed"},
 	} {
 		name, tc := name, tc
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			root, corpus := copiedReviewedEvidenceCorpus(t)
 			rewriteProvenance(t, filepath.Join(root, "fixtures", "session_start_2_1_210.provenance.json"), tc.mutate)
-			got, err := activation.Evaluate(root, corpus.Cases()[0])
+			got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 			if tc.wantError != "" {
 				require.ErrorContains(t, err, tc.wantError)
 				require.False(t, got.IsValid())
@@ -349,7 +353,7 @@ func TestEvaluateContainmentPrecedenceAndEvidenceErrors(t *testing.T) {
 			t.Parallel()
 			root, corpus := copiedReviewedEvidenceCorpus(t)
 			tc.action(root)
-			got, err := activation.Evaluate(root, corpus.Cases()[0])
+			got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 			require.ErrorContains(t, err, tc.want)
 			require.False(t, got.IsValid())
 		})
@@ -367,7 +371,7 @@ func TestEvaluateIgnoresCorpusOracleAndReviewMetadata(t *testing.T) {
 	for i, body := range variants {
 		corpus, err := loadCorpusTextAt(t, root, body)
 		require.NoError(t, err, "variant %d", i)
-		got, err := activation.Evaluate(root, corpus.Cases()[0])
+		got, err := activation.ClaudeCodeEvaluator().Evaluate(root, corpus.Cases()[0])
 		require.NoError(t, err)
 		if i < 2 {
 			require.Equal(t, activation.DecisionEnabled, got.Decision())
@@ -504,4 +508,260 @@ func validCorpusYAML(passFixture string) string {
   provenance: {source: boundary, ref: ref}
   mutation: {description: escape}
 `, passFixture)
+}
+
+// TestClaudeEvaluatorDecidesTheCommittedClaudeCorpusAsBefore is the
+// equivalence proof for the harness-parameterised evaluator: every row of the
+// committed Claude corpus evaluates to the decision and reason the corpus
+// expected before the evaluator existed, through the explicit Claude
+// evaluator and through EvaluatorFor.
+func TestClaudeEvaluatorDecidesTheCommittedClaudeCorpusAsBefore(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join("..", "ingress", "claude", "testdata")
+	corpus, err := activation.LoadCorpus(filepath.Join(root, "captures.yaml"))
+	require.NoError(t, err)
+	cases := corpus.Cases()
+	require.Len(t, cases, 12, "the committed Claude corpus has twelve rows")
+	selected, err := activation.EvaluatorFor(acceptance.HarnessClaudeCode)
+	require.NoError(t, err)
+	enabled := 0
+	for _, c := range cases {
+		for name, evaluate := range map[string]func(string, activation.Case) (activation.Evaluation, error){
+			"explicit": activation.ClaudeCodeEvaluator().Evaluate,
+			"selected": selected.Evaluate,
+		} {
+			got, err := evaluate(root, c)
+			require.NoError(t, err, "%s: %s", name, c.Name())
+			require.True(t, got.IsValid(), "%s: %s", name, c.Name())
+			require.Equal(t, c.ExpectedDecision(), got.Decision(), "%s: %s", name, c.Name())
+			require.Equal(t, c.ExpectedReason(), got.Reason(), "%s: %s", name, c.Name())
+		}
+		if c.ExpectedDecision() == activation.DecisionEnabled {
+			enabled++
+		}
+	}
+	require.Equal(t, 8, enabled, "the eight enabled Claude targets evaluate as enabled")
+	require.Equal(t, acceptance.HarnessClaudeCode, selected.Harness())
+	require.Equal(t, activation.ClaudeCode2_1_210TargetEvents(), selected.TargetEvents())
+}
+
+// harnessSample is one harness's real committed capture bytes, re-homed in a
+// temp corpus under a canonical sidecar, so that the Codex and OpenCode
+// evaluators are exercised on authentic bytes although the committed sidecars
+// of those harnesses predate the canonical shape.
+type harnessSample struct {
+	harness    acceptance.HarnessKind
+	version    string
+	event      string
+	source     string
+	fixture    string
+	wantEvent  model.ContractEventKind
+	evaluator  activation.Evaluator
+	outOfRange string
+}
+
+func harnessSamples() []harnessSample {
+	return []harnessSample{
+		{acceptance.HarnessClaudeCode, "2.1.222", "SessionStart", filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_222.json"), "session_start.json", registration.EventSessionStart, activation.ClaudeCodeEvaluator(), "2.2.0"},
+		{acceptance.HarnessCodexCLI, "0.146.0", "SessionStart", filepath.Join("..", "ingress", "codex", "testdata", "fixtures", "session_start_0_146_0.json"), "session_start.json", registration.EventCodexSessionStart, activation.CodexEvaluator(), "0.146.1"},
+		{acceptance.HarnessOpenCode, "1.18.10", "session.created", filepath.Join("..", "ingress", "opencode", "testdata", "fixtures", "session_created_1_18_10.capture.json"), "session_created.capture.json", registration.EventOpenCodeSessionCreated, activation.OpenCodeEvaluator(), "1.18.11"},
+	}
+}
+
+// canonicalCorpus copies the sample's committed bytes into a temp corpus root
+// under fixtures/<fixture>, writes a canonical sidecar beside it, and loads a
+// corpus whose first case is that fixture.
+func canonicalCorpus(t *testing.T, sample harnessSample) (string, activation.Corpus) {
+	t.Helper()
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "fixtures"), 0o700))
+	body, err := os.ReadFile(sample.source)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", sample.fixture), body, 0o600))
+	sidecar := acceptance.CaptureProvenance{
+		Origin:         acceptance.OriginAuthenticCapture,
+		Harness:        sample.harness,
+		HarnessVersion: sample.version,
+		CaptureSource:  "reviewed-test-evidence",
+		RawFileDigest:  digest.FromBytes(body).String(),
+		CapturedAt:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		Event:          sample.event,
+		Redaction:      "none",
+		Clearance:      "internal/lifecycle/ingress/" + strings.TrimSuffix(string(sample.harness), "-cli") + "/testdata/CLEARANCE.md",
+	}
+	raw, err := json.Marshal(sidecar)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, "fixtures", activation.ProvenancePath(sample.fixture)), raw, 0o600))
+	corpus, err := loadCorpusTextAt(t, root, validCorpusYAML("fixtures/"+sample.fixture))
+	require.NoError(t, err)
+	return root, corpus
+}
+
+// TestEachHarnessEvaluatorResolvesAgainstItsOwnContract proves that the Codex
+// and OpenCode evaluators resolve a fixture through THEIR contract, manifest
+// and target set, and that a fixture offered to another harness's evaluator is
+// refused naming both harnesses rather than evaluated against the wrong
+// contract.
+func TestEachHarnessEvaluatorResolvesAgainstItsOwnContract(t *testing.T) {
+	t.Parallel()
+	samples := harnessSamples()
+	for _, sample := range samples {
+		sample := sample
+		t.Run(string(sample.harness), func(t *testing.T) {
+			t.Parallel()
+			root, corpus := canonicalCorpus(t, sample)
+			got, err := sample.evaluator.Evaluate(root, corpus.Cases()[0])
+			require.NoError(t, err)
+			require.Equal(t, activation.DecisionEnabled, got.Decision())
+			event, ok := got.Event()
+			require.True(t, ok)
+			require.Equal(t, sample.wantEvent, event, "the event resolves through this harness's own registration manifest")
+			require.Equal(t, sample.harness, sample.evaluator.Harness())
+			selected, err := activation.EvaluatorFor(sample.harness)
+			require.NoError(t, err)
+			require.Equal(t, sample.evaluator.Contract(), selected.Contract())
+		})
+	}
+	for i, sample := range samples {
+		foreign := samples[(i+1)%len(samples)]
+		sample, foreign := sample, foreign
+		t.Run(string(sample.harness)+"-fixture-offered-to-"+string(foreign.harness), func(t *testing.T) {
+			t.Parallel()
+			root, corpus := canonicalCorpus(t, sample)
+			got, err := foreign.evaluator.Evaluate(root, corpus.Cases()[0])
+			require.ErrorContains(t, err, fmt.Sprintf("names harness %q, not %q", sample.harness, foreign.harness))
+			require.ErrorContains(t, err, fmt.Sprintf("evaluate the fixture with the %q evaluator", sample.harness))
+			require.False(t, got.IsValid())
+		})
+	}
+}
+
+// TestEvaluatorRefusalsFireForEveryHarness runs the four withheld categories
+// and the two hard refusals against each harness's own evaluator, on that
+// harness's real bytes.
+func TestEvaluatorRefusalsFireForEveryHarness(t *testing.T) {
+	t.Parallel()
+	for _, sample := range harnessSamples() {
+		sample := sample
+		t.Run(string(sample.harness), func(t *testing.T) {
+			t.Parallel()
+			for name, tc := range map[string]struct {
+				mutate     func(map[string]any)
+				wantReason activation.CorpusReason
+				wantError  string
+			}{
+				"origin":        {func(p map[string]any) { p["origin"] = "authored" }, activation.CorpusReasonNonAuthenticOrigin, ""},
+				"digest":        {func(p map[string]any) { p["rawFileDigest"] = "sha256:" + strings.Repeat("0", 64) }, activation.CorpusReasonDigestMismatch, ""},
+				"version":       {func(p map[string]any) { p["harnessVersion"] = sample.outOfRange }, activation.CorpusReasonVersionOutOfRange, ""},
+				"unknown-event": {func(p map[string]any) { p["event"] = "NoSuchEvent" }, 0, "empty or unknown event"},
+			} {
+				name, tc := name, tc
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+					root, corpus := canonicalCorpus(t, sample)
+					rewriteProvenance(t, filepath.Join(root, "fixtures", activation.ProvenancePath(sample.fixture)), tc.mutate)
+					got, err := sample.evaluator.Evaluate(root, corpus.Cases()[0])
+					if tc.wantError != "" {
+						require.ErrorContains(t, err, tc.wantError)
+						require.False(t, got.IsValid())
+						return
+					}
+					require.NoError(t, err)
+					require.Equal(t, activation.DecisionWithheld, got.Decision())
+					require.Equal(t, tc.wantReason, got.Reason())
+				})
+			}
+			t.Run("path-escape", func(t *testing.T) {
+				t.Parallel()
+				root, corpus := canonicalCorpus(t, sample)
+				got, err := sample.evaluator.Evaluate(root, corpus.Cases()[4])
+				require.NoError(t, err)
+				require.Equal(t, activation.CorpusReasonPathEscape, got.Reason())
+			})
+			t.Run("no-clearance", func(t *testing.T) {
+				// The committed Claude bytes are on the legacy exemption list, so
+				// the clearance rule is exercised on bytes that are not: the
+				// same capture with one byte appended, digest recomputed.
+				t.Parallel()
+				root, corpus := canonicalCorpus(t, sample)
+				fixture := filepath.Join(root, "fixtures", sample.fixture)
+				body, err := os.ReadFile(fixture)
+				require.NoError(t, err)
+				body = append(body, '\n')
+				require.NoError(t, os.WriteFile(fixture, body, 0o600))
+				rewriteProvenance(t, filepath.Join(root, "fixtures", activation.ProvenancePath(sample.fixture)), func(p map[string]any) {
+					p["rawFileDigest"] = digest.FromBytes(body).String()
+					p["clearance"] = ""
+				})
+				got, err := sample.evaluator.Evaluate(root, corpus.Cases()[0])
+				require.ErrorContains(t, err, "final fixture validation failed")
+				require.ErrorContains(t, err, "clearance is empty")
+				require.False(t, got.IsValid())
+			})
+		})
+	}
+}
+
+func TestProvenancePathSitsBesideTheFixtureUnderThePlainName(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "fixtures/session_created_1_18_10.provenance.json", activation.ProvenancePath("fixtures/session_created_1_18_10.capture.json"))
+	require.Equal(t, "fixtures/session_start_2_1_222.provenance.json", activation.ProvenancePath("fixtures/session_start_2_1_222.json"))
+}
+
+func TestEvaluatorForIsClosedAndTheZeroEvaluatorRefuses(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []acceptance.HarnessKind{acceptance.HarnessAntigravity, acceptance.HarnessKind("gemini"), ""} {
+		_, err := activation.EvaluatorFor(harness)
+		require.ErrorContains(t, err, "has no activation evaluator")
+	}
+	require.False(t, (activation.Evaluator{}).IsValid())
+	root, corpus := copiedReviewedEvidenceCorpus(t)
+	_, err := (activation.Evaluator{}).Evaluate(root, corpus.Cases()[0])
+	require.ErrorContains(t, err, "evaluator is not constructed")
+}
+
+// TestVersionAdmissionFollowsEachHarnessContract states the admission shape
+// per harness and proves it on fixtures: Claude Code admits a RANGE, so a
+// patch release inside it (the frozen 2.1.251 pin among them) is admitted;
+// Codex and OpenCode admit EXACTLY their pinned version. A version outside
+// admission is withheld with a detail that names the observed and the
+// admitted versions, because a reader who cannot see both cannot act.
+func TestVersionAdmissionFollowsEachHarnessContract(t *testing.T) {
+	t.Parallel()
+	require.False(t, activation.ClaudeCodeEvaluator().AdmitsExactly(), "Claude Code admits a range")
+	require.True(t, activation.CodexEvaluator().AdmitsExactly(), "Codex admits exactly its pinned version")
+	require.True(t, activation.OpenCodeEvaluator().AdmitsExactly(), "OpenCode admits exactly its pinned version")
+
+	for _, tc := range []struct {
+		sample   harnessSample
+		version  string
+		admitted bool
+		detail   string
+	}{
+		{harnessSamples()[0], "2.1.222", true, ""},
+		{harnessSamples()[0], "2.1.223", true, ""},
+		{harnessSamples()[0], "2.1.251", true, ""},
+		{harnessSamples()[0], "2.2.0", false, `observed host version "2.2.0" is outside the admitted claude-code versions, from 2.1.210 through 2.2.0-0`},
+		{harnessSamples()[0], "2.1.209", false, `observed host version "2.1.209" is outside the admitted claude-code versions, from 2.1.210 through 2.2.0-0`},
+		{harnessSamples()[1], "0.146.0", true, ""},
+		{harnessSamples()[1], "0.146.1", false, `observed host version "0.146.1" is outside the admitted codex-cli versions, exactly 0.146.0`},
+		{harnessSamples()[2], "1.18.10", true, ""},
+		{harnessSamples()[2], "1.18.11", false, `observed host version "1.18.11" is outside the admitted opencode versions, exactly 1.18.10`},
+	} {
+		tc := tc
+		t.Run(string(tc.sample.harness)+"-"+tc.version, func(t *testing.T) {
+			t.Parallel()
+			root, corpus := canonicalCorpus(t, tc.sample)
+			rewriteProvenance(t, filepath.Join(root, "fixtures", activation.ProvenancePath(tc.sample.fixture)), func(p map[string]any) { p["harnessVersion"] = tc.version })
+			got, err := tc.sample.evaluator.Evaluate(root, corpus.Cases()[0])
+			require.NoError(t, err)
+			if tc.admitted {
+				require.Equal(t, activation.DecisionEnabled, got.Decision(), "version %s must be admitted", tc.version)
+				require.Empty(t, got.Detail())
+				return
+			}
+			require.Equal(t, activation.CorpusReasonVersionOutOfRange, got.Reason())
+			require.Equal(t, tc.detail, got.Detail())
+		})
+	}
 }
