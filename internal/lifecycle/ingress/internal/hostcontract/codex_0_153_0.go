@@ -193,7 +193,21 @@ func codexFailureReaderOver(rows []codexRuntimeRow) func(name string) pasturerun
 // The identities are the field still written twice. Give a row its identities
 // here once an authentic capture shows what the host writes on the wire for it.
 func Codex0_153_0() Contract {
-	failure := codexFailureReader()
+	return codex0_153_0Over(codexProfileRows())
+}
+
+// codex0_153_0Over builds the catalog over ONE set of runtime rows. Production
+// passes codexProfileRows(); a control passes rows it built, so that "every row
+// takes its arm from the read" can be proved rather than assumed.
+//
+// The rows are a parameter for a reason a comparison of the two artefacts
+// cannot cover. A row that carries a HAND-WRITTEN arm is invisible whenever the
+// value written by hand equals the value the read would answer, and in a
+// profile where every declared gate cites host evidence that is true of every
+// blocking row at once. Building the catalog twice over rows with different
+// arms is the only shape no literal can satisfy.
+func codex0_153_0Over(rows []codexRuntimeRow) Contract {
+	failure := codexFailureReaderOver(rows)
 	// observe builds a report-and-continue catalog event with no declared
 	// identities (source-derived metadata only). Its failure mode is read.
 	observe := func(kind model.ContractEventKind, symbol, name string) Event {

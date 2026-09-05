@@ -85,8 +85,13 @@ func TestEveryCodexCatalogRowCarriesTheRuntimeFailureMode(t *testing.T) {
 		}
 	}
 
-	// ARMS CONTROL. It is the one non-vacuity control the subject keeps, and its
-	// message is true in EVERY state it can fire in.
+	// ARMS CONTROL, and its role is narrower than an earlier wording claimed.
+	// MEASURED, in all three citation worlds: a read that returns one CONSTANT
+	// is caught by the row equality above, which fails first and stops the test,
+	// so this control never fires on that break. What it does catch is a
+	// DEGENERATE PROFILE: a profile that gives every Codex row the same arm. The
+	// row equality cannot tell a read from a constant there, because every
+	// answer is the same value, and this control is what says so.
 	//
 	// A control that demanded a DEMOTED gate stood here. It is gone, for two
 	// measured reasons. It would turn RED on the day every Codex row cites host
@@ -94,11 +99,12 @@ func TestEveryCodexCatalogRowCarriesTheRuntimeFailureMode(t *testing.T) {
 	// changed direction. And it could never fire on its own: a row is demoted or
 	// promoted only if it is BLOCKING, a non-blocking row always carries the
 	// strict-hook arm, so a tree with no moved row carries ONE arm and this
-	// control fails first. The other two checks cover what it claimed to: a read
-	// that returned the DECLARED field turns the row equality above RED naming
-	// the row, and a read that returned a constant turns this RED.
+	// control fails first. It becomes reachable again if a later change gives a
+	// NON-blocking row a demotable mode, and it should return then.
 	require.Greaterf(t, len(arms), 1,
-		"every Codex catalog row carries the same failure arm %v; a read that returned one constant would satisfy every check above, so this control fails first",
+		"every Codex catalog row carries the same failure arm %v, so the runtime Codex profile gives every row one arm. "+
+			"The row equality above cannot tell a read from a constant in that profile, because every answer is the same value. "+
+			"Widen the profile in internal/runtime/lifecycle_profiles_codex.go, or say here why one arm is now correct",
 		arms)
 }
 
@@ -153,6 +159,57 @@ func TestTheCodexFailureReadTakesTheEvidenceBoundArmAndNotTheDeclaredOne(t *test
 			"The row is built in this test and not read from the tree, so this holds whether or not any live Codex row cites host evidence. "+
 			"Repair the read in codexFailureReaderOver in internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go",
 		got, row.failure, row.declared)
+}
+
+// TestEveryCodexCatalogRowTakesItsFailureArmFromTheRead proves that the catalog
+// is a FUNCTION of the rows it reads, and it constructs the case rather than
+// waiting for the tree to hold it.
+//
+// WHY THE ROW-BY-ROW EQUALITY ABOVE IS NOT ENOUGH. That check compares the
+// catalog with the live profile. A row that carries a HAND-WRITTEN arm passes it
+// whenever the value written by hand equals the value the read would answer, and
+// in a profile where every declared gate cites host evidence that is true of
+// every blocking row at once. MEASURED: with every Codex row cited and every
+// gate row given a hand-written blocking arm, the row equality, the arms
+// control, the divergence subject and the two doc-comment subjects all report
+// ok. Nothing sees it.
+//
+// THE CONSTRUCTED CASE. The catalog is built TWICE over the same row names with
+// DIFFERENT arms, and every row must follow the arm it was built over. No
+// literal can satisfy both builds, whatever value somebody writes, and no
+// citation state changes that.
+func TestEveryCodexCatalogRowTakesItsFailureArmFromTheRead(t *testing.T) {
+	t.Parallel()
+
+	first := pastureruntime.FailureStrictHook
+	second := pastureruntime.FailureStrictExitTwoBlocks
+	require.NotEqualf(t, first, second,
+		"the two constructed builds must use DIFFERENT arms, or a hand-written literal satisfies both and this control proves nothing; both are %v", first)
+
+	names := make([]string, 0, len(pastureruntime.CodexLifecycleEvents()))
+	for _, row := range codexProfileRows() {
+		names = append(names, row.NativeName())
+	}
+	require.NotEmpty(t, names, "the runtime Codex profile names no row, so the catalog cannot be built over a constructed row set")
+
+	for _, arm := range []pastureruntime.FailureMode{first, second} {
+		rows := make([]codexRuntimeRow, 0, len(names))
+		for _, name := range names {
+			rows = append(rows, constructedCodexRow{name: name, failure: arm, declared: arm})
+		}
+		contract := codex0_153_0Over(rows)
+		require.Lenf(t, contract.Events, len(names),
+			"the catalog built over %d constructed rows declares %d events, so some row was not asked for its arm", len(names), len(contract.Events))
+		for _, event := range contract.Events {
+			require.Equalf(t, arm, event.Failure,
+				"the Codex catalog row %q carries the failure arm %v while the read answers %v for EVERY row of this build. "+
+					"That row does not take its arm from the read: it carries an arm written into internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go by hand. "+
+					"A hand-written arm is invisible to a comparison with the live profile whenever the value written happens to equal what the read would answer, "+
+					"which is true of every blocking row at once once every declared Codex gate cites host evidence. "+
+					"Give that row Failure: failure(name), as the observe and gate builders do",
+				event.Name, event.Failure, arm)
+		}
+	}
 }
 
 // TestTheCodexFailureReaderRefusesAnEventTheProfileDoesNotDeclare pins the
