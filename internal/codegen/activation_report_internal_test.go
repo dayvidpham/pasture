@@ -147,6 +147,7 @@ func TestActivationSupportEntryForRendersEachNewWithholdingArm(t *testing.T) {
 		{activation.WithheldProviderHook, "provider-hook"},
 		{activation.WithheldNotEmittedByHost, "not-emitted-by-host"},
 		{activation.WithheldEmittedOutsideTransport, "emitted-outside-transport"},
+		{activation.WithheldTriggerNotExercised, "trigger-not-exercised"},
 	} {
 		decision, err := activation.NewWithheldByDecision(setup.Kind, tc.reason, clearance)
 		require.NoError(t, err)

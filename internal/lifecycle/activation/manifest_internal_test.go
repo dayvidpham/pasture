@@ -21,6 +21,7 @@ func TestDeriveManifestRefusesADecisionRowWithoutAClearance(t *testing.T) {
 	for _, reason := range []WithheldReason{
 		WithheldNoReachableTrigger, WithheldUnclearablePayload,
 		WithheldProviderHook, WithheldNotEmittedByHost, WithheldEmittedOutsideTransport,
+		WithheldTriggerNotExercised,
 	} {
 		_, err := deriveManifest("test", events, []targetEventDeclaration{{event: registration.EventSetup, withheldReason: reason}})
 		require.ErrorContains(t, err, `target event "Setup" withheld as "`+reason.String()+`" records a user decision and must name the committed CLEARANCE.md`)
