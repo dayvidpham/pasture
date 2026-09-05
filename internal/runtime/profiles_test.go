@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -112,17 +113,27 @@ var hostCapabilityClaims = []string{
 	"offers no",
 }
 
-// processWords name this project's own workflow, not anything the reader of a
-// contract instruction can act on. A contract or an operation added later is
-// covered the day it exists because this list is checked against the same
-// derived population as hostCapabilityClaims. Matching is case-insensitive and
-// whole-word, so "reviewed" catches "reviewed" but not, say, "unreviewed".
+// processWords name this project's own workflow with no product meaning in a
+// contract instruction: nothing in the runtime ever names a "review", a
+// "reviewer" or a "proposal". Matching is case-insensitive and whole-word, so
+// "reviewed" catches "reviewed" but not, say, "unreviewed".
 var processWords = []string{
 	"reviewed",
 	"review",
-	"slice",
-	"phase",
+	"reviewer",
 	"proposal",
+}
+
+// protocolNumberedShapes are the NUMBERED or ROLE-TOKENED forms of "phase"
+// and "slice" that name a Pasture Protocol tracking artefact ("Phase 8",
+// "phase-8", "SLICE-1", "M3-SLICE-1"). A BARE "phase" or "slice" is allowed:
+// from the field-labelled actionable-error shape (what/why/where/when/phase/
+// impact/fix) onward, "phase" is also ordinary product vocabulary for a task
+// phase, and a bare word carries no tracking reference by itself. Only the
+// numbered form does.
+var protocolNumberedShapes = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bphase[ -]\d`),
+	regexp.MustCompile(`(?i)\bslice[ -][A-Za-z0-9]`),
 }
 
 // wordBoundaryPattern reports whether text contains word as a whole word,
@@ -154,40 +165,17 @@ func isWordChar(b byte) bool {
 		(b >= '0' && b <= '9')
 }
 
-// actionableErrorLabels are the actionable-error format's own field labels
-// (what/why/where/when/phase/impact/fix — see AGENTS.md "Actionable Errors").
-// A refusal reason is built from that shape, and "phase:" is the format's key
-// vocabulary, not operator prose about the Pasture Protocol's phases. The
-// process-word scan strips these labels from a refusal reason before matching
-// so the field label itself cannot trip the rule; it must not stop a real
-// process word that appears inside a label's VALUE.
-var actionableErrorLabels = []string{
-	"what:",
-	"why:",
-	"where:",
-	"when:",
-	"phase:",
-	"impact:",
-	"fix:",
-}
-
-// stripActionableErrorLabels removes every actionable-error field label from
-// text, leaving each label's value in place so a process word inside a value
-// is still caught by the scan that follows.
-func stripActionableErrorLabels(text string) string {
-	for _, label := range actionableErrorLabels {
-		text = strings.ReplaceAll(text, label, "")
-	}
-	return text
-}
-
 // TestNoContractInstructionClaimsWhatTheHostExposes holds every instruction,
 // mediation reason and refusal reason of every pinned contract to what a
 // contract can truthfully say. Three rules: no host-capability claim, no
 // pinned host version inside the prose (a number inside a sentence makes the
 // sentence a claim about that host and a bump re-asserts it unread), and no
-// process word (this project's own workflow vocabulary, which the reader
-// cannot act on and which the product cannot claim to have applied).
+// Pasture Protocol tracking reference — the process words that have no
+// product meaning in an instruction ("reviewed", "review", "reviewer",
+// "proposal"), and the numbered or role-tokened forms of "phase" and "slice"
+// ("Phase 8", "SLICE-1", "M3-SLICE-1"). A bare "phase" or "slice" is allowed:
+// the actionable-error shape carries a field labelled "phase" that names an
+// operation step, and that is product vocabulary, not a tracking reference.
 //
 // The population is derived, and the test refuses to pass on an empty or
 // implausibly small one, so deleting the rows cannot make it green.
@@ -221,48 +209,54 @@ func TestNoContractInstructionClaimsWhatTheHostExposes(t *testing.T) {
 				"the %s of operation %q on harness %q carries the pinned host version %q, which turns it into a claim about that host that a bump re-asserts unread: %s",
 				entry.kind, entry.operation, entry.harness, version, entry.text)
 		}
-		processWordScanText := entry.text
-		if entry.kind == "refusal" {
-			// A refusal reason is built in the actionable-error shape
-			// (what/why/where/when/phase/impact/fix); strip the labels so the
-			// format's own "phase:" key does not trip the scan, while a
-			// process word inside a label's value is still caught below.
-			processWordScanText = stripActionableErrorLabels(entry.text)
-		}
 		for _, word := range processWords {
-			assert.False(t, containsWholeWord(processWordScanText, word),
+			assert.False(t, containsWholeWord(entry.text, word),
 				"the %s of operation %q on harness %q carries the process word %q, which names this project's own workflow rather than anything the reader can act on: %s",
 				entry.kind, entry.operation, entry.harness, word, entry.text)
+		}
+		for _, shape := range protocolNumberedShapes {
+			match := shape.FindString(entry.text)
+			assert.Empty(t, match,
+				"the %s of operation %q on harness %q carries the Pasture Protocol tracking reference %q, which names an internal tracking artefact rather than anything the reader can act on: %s",
+				entry.kind, entry.operation, entry.harness, match, entry.text)
 		}
 	}
 }
 
-// TestActionableErrorLabelStrippingDoesNotHideAProcessWordInAValue is the
-// required control for stripActionableErrorLabels: stripping the format's own
-// labels must not also swallow a real process word that sits inside one
-// label's VALUE. A planted refusal text carries "phase" only inside the value
-// of its own "phase:" label ("phase: during the review phase"), so if the
-// exemption were built by dropping everything at "phase:" onward, or by
-// matching on the word rather than the labelled key, this would wrongly turn
-// green.
-func TestActionableErrorLabelStrippingDoesNotHideAProcessWordInAValue(t *testing.T) {
+// TestProtocolNumberedShapesDistinguishTrackingReferencesFromProductVocabulary
+// is the required control for protocolNumberedShapes: a NUMBERED or
+// ROLE-TOKENED form of "phase"/"slice" is a Pasture Protocol tracking
+// reference and must be refused, while a BARE "phase" or "slice" — including
+// the actionable-error shape's own "phase:" field label — is product
+// vocabulary and must pass.
+func TestProtocolNumberedShapesDistinguishTrackingReferencesFromProductVocabulary(t *testing.T) {
 	t.Parallel()
 
-	planted := "what: something failed; why: it is unsupported; where: LookupOperationBinding; when: contract lookup; phase: during the review phase; impact: nothing lowers; fix: use a supported operation"
-	stripped := stripActionableErrorLabels(planted)
+	refused := []string{
+		"per Phase 8 decision 2",
+		"owned by M3-SLICE-1",
+	}
+	for _, text := range refused {
+		matched := false
+		for _, shape := range protocolNumberedShapes {
+			if shape.MatchString(text) {
+				matched = true
+				break
+			}
+		}
+		assert.True(t, matched, "expected a tracking-reference match in %q", text)
+	}
 
-	require.NotContains(t, stripped, "phase:",
-		"the label token itself must be removed: %q", stripped)
-
-	found := false
-	for _, word := range processWords {
-		if containsWholeWord(stripped, word) {
-			found = true
-			break
+	allowed := []string{
+		"phase: runtime contract validation",
+		"the task phase is unset",
+	}
+	for _, text := range allowed {
+		for _, shape := range protocolNumberedShapes {
+			assert.False(t, shape.MatchString(text),
+				"a bare %q must not match the tracking-reference shape %s", text, shape)
 		}
 	}
-	assert.True(t, found,
-		"stripping the actionable-error labels must not hide a process word inside a label's value; stripped text: %q", stripped)
 }
 
 func TestClaudeContractNamesNoRemovedTeamLifecycleCalls(t *testing.T) {
