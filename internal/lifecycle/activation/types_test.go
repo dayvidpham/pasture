@@ -158,12 +158,21 @@ func TestWithheldReasonsForUserDecisionsAreValidDistinctAndClosed(t *testing.T) 
 	t.Parallel()
 	require.True(t, activation.WithheldNoReachableTrigger.IsValid())
 	require.True(t, activation.WithheldUnclearablePayload.IsValid())
+	require.True(t, activation.WithheldProviderHook.IsValid())
+	require.True(t, activation.WithheldNotEmittedByHost.IsValid())
+	require.True(t, activation.WithheldEmittedOutsideTransport.IsValid())
 	require.False(t, activation.WithheldReasonInvalid.IsValid(), "the zero value is invalid")
 	require.Equal(t, "no-reachable-trigger", activation.WithheldNoReachableTrigger.String())
 	require.Equal(t, "unclearable-payload", activation.WithheldUnclearablePayload.String())
+	require.Equal(t, "provider-hook", activation.WithheldProviderHook.String())
+	require.Equal(t, "not-emitted-by-host", activation.WithheldNotEmittedByHost.String())
+	require.Equal(t, "emitted-outside-transport", activation.WithheldEmittedOutsideTransport.String())
 	require.NotEqual(t, activation.WithheldNoReachableTrigger.String(), activation.WithheldUnclearablePayload.String())
 	require.True(t, activation.WithheldNoReachableTrigger.RequiresClearance())
 	require.True(t, activation.WithheldUnclearablePayload.RequiresClearance())
+	require.True(t, activation.WithheldProviderHook.RequiresClearance())
+	require.True(t, activation.WithheldNotEmittedByHost.RequiresClearance())
+	require.True(t, activation.WithheldEmittedOutsideTransport.RequiresClearance())
 	require.False(t, activation.WithheldOutsideTargetSet.RequiresClearance())
 
 	all := activation.AllWithheldReasons()
@@ -171,7 +180,8 @@ func TestWithheldReasonsForUserDecisionsAreValidDistinctAndClosed(t *testing.T) 
 		activation.WithheldMissingFixture, activation.WithheldOutsideTargetSet, activation.WithheldUnverifiedBuild,
 		activation.WithheldProductionProofMissing, activation.WithheldMissingRequestCorrelation,
 		activation.WithheldNoReachableTrigger, activation.WithheldUnclearablePayload,
-	}, all, "the derived population is exactly the seven arms")
+		activation.WithheldProviderHook, activation.WithheldNotEmittedByHost, activation.WithheldEmittedOutsideTransport,
+	}, all, "the derived population is exactly the ten arms")
 	require.False(t, activation.WithheldReason(len(all)+1).IsValid(), "the arm after the last one is invalid")
 }
 
@@ -181,7 +191,10 @@ func TestWithheldReasonsForUserDecisionsAreValidDistinctAndClosed(t *testing.T) 
 func TestADecisionReasonRequiresACommittedClearancePath(t *testing.T) {
 	t.Parallel()
 	const clearance = "internal/lifecycle/ingress/claude/testdata/CLEARANCE.md"
-	for _, reason := range []activation.WithheldReason{activation.WithheldNoReachableTrigger, activation.WithheldUnclearablePayload} {
+	for _, reason := range []activation.WithheldReason{
+		activation.WithheldNoReachableTrigger, activation.WithheldUnclearablePayload,
+		activation.WithheldProviderHook, activation.WithheldNotEmittedByHost, activation.WithheldEmittedOutsideTransport,
+	} {
 		_, err := activation.NewWithheld(registration.EventSetup, reason)
 		require.ErrorContains(t, err, "records a user decision and requires the committed CLEARANCE.md path")
 		_, err = activation.NewWithheldByDecision(registration.EventSetup, reason, "")

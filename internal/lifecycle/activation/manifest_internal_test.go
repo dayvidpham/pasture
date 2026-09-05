@@ -18,7 +18,10 @@ func TestDeriveManifestRefusesADecisionRowWithoutAClearance(t *testing.T) {
 	events := registration.ClaudeCode2_1_261().Entries()
 	const clearance = "internal/lifecycle/ingress/claude/testdata/CLEARANCE.md"
 
-	for _, reason := range []WithheldReason{WithheldNoReachableTrigger, WithheldUnclearablePayload} {
+	for _, reason := range []WithheldReason{
+		WithheldNoReachableTrigger, WithheldUnclearablePayload,
+		WithheldProviderHook, WithheldNotEmittedByHost, WithheldEmittedOutsideTransport,
+	} {
 		_, err := deriveManifest("test", events, []targetEventDeclaration{{event: registration.EventSetup, withheldReason: reason}})
 		require.ErrorContains(t, err, `target event "Setup" withheld as "`+reason.String()+`" records a user decision and must name the committed CLEARANCE.md`)
 		require.ErrorContains(t, err, "clearance is empty")
