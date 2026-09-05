@@ -19,6 +19,44 @@ func identities(base []NativeIdentityField, extra ...NativeIdentityField) []Nati
 	return result
 }
 
+// IdentityPolicy is a TABLE LABEL over a lifecycle row's declared identities.
+// It has NO waist effect: it decides nothing about how an event lands. An
+// IdentityPolicyNone row declares no identities, lands as an occurrence with
+// zero identities and no correlation key, is ordered by ingress sequence
+// only, and never produces an unresolved fact. The label is DERIVED from the
+// identities column rather than stored beside it, so it cannot disagree with
+// the column it describes.
+type IdentityPolicy uint8
+
+const (
+	IdentityPolicyInvalid IdentityPolicy = iota
+	// IdentityPolicyNone marks a row that declares no correlation identity.
+	IdentityPolicyNone
+	// IdentityPolicyDeclared marks a row that declares at least one.
+	IdentityPolicyDeclared
+)
+
+func (p IdentityPolicy) IsValid() bool { return p == IdentityPolicyNone || p == IdentityPolicyDeclared }
+
+func (p IdentityPolicy) String() string {
+	switch p {
+	case IdentityPolicyNone:
+		return "none"
+	case IdentityPolicyDeclared:
+		return "declared"
+	default:
+		return ""
+	}
+}
+
+// IdentityPolicy labels this row by its declared identities. See IdentityPolicy.
+func (m LifecycleEventMapping) IdentityPolicy() IdentityPolicy {
+	if len(m.identities) == 0 {
+		return IdentityPolicyNone
+	}
+	return IdentityPolicyDeclared
+}
+
 // Pi intentionally has no lifecycle contract constructor. Its extension and RPC
 // research informed the semantic split, but no Pi adapter is shipped.
 

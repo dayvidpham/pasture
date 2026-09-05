@@ -7,6 +7,7 @@ import (
 
 	digest "github.com/opencontainers/go-digest"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -19,20 +20,24 @@ type Capture struct {
 }
 
 // Parse captures the JSON serialization of the in-process callback object.
-// The selected event determines the provider-specific identity paths.
+// The shared refusals run first, through ingress.Validate, so a malformed
+// payload is refused with the same disposition on every harness. The selected
+// event determines the provider-specific identity paths.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
-	body := append([]byte(nil), raw...)
+	validation := ingress.Validate(raw)
 	manifest := registration.OpenCode1_18_10()
 	envelope.Runtime.Contract = manifest.Contract
 	envelope.HostVersion = observedVersion
-	result := Capture{Digest: digest.FromBytes(body), Disposition: model.CaptureValid}
-	result.Delivery = receipt.Delivery{Contract: manifest.Contract, Event: event.Kind, Envelope: envelope, Body: body}
+	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}
+	result.Delivery = receipt.Delivery{Contract: manifest.Contract, Event: event.Kind, Envelope: envelope, Body: validation.Body}
 
-	var value callbackValue
-	if err := json.Unmarshal(body, &value); err != nil {
-		result.Disposition = model.CaptureMalformed
-	} else {
-		result.Disposition, result.Delivery.Bindings = bindingsFor(event.NativeName, value)
+	if validation.Disposition == model.CaptureValid {
+		var value callbackValue
+		if err := json.Unmarshal(validation.Body, &value); err != nil {
+			result.Disposition = model.CaptureMalformed
+		} else {
+			result.Disposition, result.Delivery.Bindings = bindingsFor(event.NativeName, value)
+		}
 	}
 	result.Delivery.Capture = result.Disposition
 	return result
