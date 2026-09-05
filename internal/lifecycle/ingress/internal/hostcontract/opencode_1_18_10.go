@@ -68,6 +68,13 @@ func symbol(prefix, name string) string {
 			continue
 		}
 		c := name[i]
+		if c == '-' {
+			// A hyphen in a native name (installation.update-available) is
+			// carried as an underscore, so the Go identifier stays the one the
+			// tree has always used while the native name is spelled as the host
+			// emits it.
+			c = '_'
+		}
 		if upper && c >= 'a' && c <= 'z' {
 			c -= 'a' - 'A'
 		}

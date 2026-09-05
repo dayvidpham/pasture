@@ -258,7 +258,7 @@ var pinnedLifecycleProfileRows = []lifecycleProfileRow{
 	{"opencode", "file.edited", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "file.watcher.updated", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "installation.updated", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
-	{"opencode", "installation.update_available", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
+	{"opencode", "installation.update-available", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "lsp.client.diagnostics", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "lsp.updated", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},
 	{"opencode", "message.updated", "observation", "opencode-catch-all-sse", "nonblocking", "none", "observation-stream", "none", "observe-only", "observe-only", "", "not-applicable", "", ""},

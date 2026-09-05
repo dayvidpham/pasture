@@ -493,7 +493,7 @@ contracts:
       - file.edited
       - file.watcher.updated
       - installation.updated
-      - installation.update_available
+      - installation.update-available
       - lsp.client.diagnostics
       - lsp.updated
       - message.updated
@@ -543,7 +543,7 @@ contracts:
           - file.edited
           - file.watcher.updated
           - installation.updated
-          - installation.update_available
+          - installation.update-available
           - lsp.client.diagnostics
           - lsp.updated
           - message.updated
@@ -610,7 +610,7 @@ contracts:
           - file.edited
           - file.watcher.updated
           - installation.updated
-          - installation.update_available
+          - installation.update-available
           - lsp.client.diagnostics
           - lsp.updated
           - message.updated
@@ -644,7 +644,7 @@ contracts:
           - file.edited
           - file.watcher.updated
           - installation.updated
-          - installation.update_available
+          - installation.update-available
           - lsp.client.diagnostics
           - lsp.updated
           - message.updated
@@ -695,7 +695,7 @@ contracts:
           - file.edited
           - file.watcher.updated
           - installation.updated
-          - installation.update_available
+          - installation.update-available
           - lsp.client.diagnostics
           - lsp.updated
           - message.updated
@@ -763,7 +763,7 @@ contracts:
           - file.edited
           - file.watcher.updated
           - installation.updated
-          - installation.update_available
+          - installation.update-available
           - lsp.client.diagnostics
           - lsp.updated
           - message.updated
@@ -797,7 +797,7 @@ contracts:
           - file.edited
           - file.watcher.updated
           - installation.updated
-          - installation.update_available
+          - installation.update-available
           - lsp.client.diagnostics
           - lsp.updated
           - message.updated
@@ -869,7 +869,7 @@ contracts:
           - file.edited
           - file.watcher.updated
           - installation.updated
-          - installation.update_available
+          - installation.update-available
           - lsp.client.diagnostics
           - lsp.updated
           - message.updated
@@ -904,7 +904,7 @@ contracts:
           - file.edited
           - file.watcher.updated
           - installation.updated
-          - installation.update_available
+          - installation.update-available
           - lsp.client.diagnostics
           - lsp.updated
           - message.updated

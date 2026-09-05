@@ -68,7 +68,7 @@ var openCodeLifecycleEventNames = [...]string{
 	"file.edited",
 	"file.watcher.updated",
 	"installation.updated",
-	"installation.update_available",
+	"installation.update-available", // spelled as OpenCode emits it: packages/schema/src/installation-event.ts, identical at 1.18.10 and 1.18.29
 	"lsp.client.diagnostics",
 	"lsp.updated",
 	"message.updated",

@@ -22,7 +22,7 @@ var eventMappings = map[model.ContractEventKind]runtime.OpenCodeLifecycleEvent{
 	registration.EventOpenCodeFileEdited:                         runtime.OpenCodeEventFileEdited,                         // file.edited
 	registration.EventOpenCodeFileWatcherUpdated:                 runtime.OpenCodeEventFileWatcherUpdated,                 // file.watcher.updated
 	registration.EventOpenCodeInstallationUpdated:                runtime.OpenCodeEventInstallationUpdated,                // installation.updated
-	registration.EventOpenCodeInstallationUpdate_available:       runtime.OpenCodeEventInstallationUpdateAvailable,        // installation.update_available
+	registration.EventOpenCodeInstallationUpdate_available:       runtime.OpenCodeEventInstallationUpdateAvailable,        // installation.update-available
 	registration.EventOpenCodeLspClientDiagnostics:               runtime.OpenCodeEventLSPClientDiagnostics,               // lsp.client.diagnostics
 	registration.EventOpenCodeLspUpdated:                         runtime.OpenCodeEventLSPUpdated,                         // lsp.updated
 	registration.EventOpenCodeMessageUpdated:                     runtime.OpenCodeEventMessageUpdated,                     // message.updated

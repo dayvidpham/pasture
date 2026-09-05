@@ -31,7 +31,7 @@
       "failureEvidence": ""
     },
     {
-      "event": "installation.update_available",
+      "event": "installation.update-available",
       "state": "withheld",
       "reason": "outside-target-set",
       "responseCapability": "unset",
