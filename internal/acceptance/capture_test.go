@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/acceptance"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 )
@@ -183,7 +185,16 @@ func TestEveryCaptureNeedsEventRedactionAndClearance(t *testing.T) {
 	})
 	t.Run("new-bytes-at-any-pin-need-all-three", func(t *testing.T) {
 		t.Parallel()
-		for _, version := range []string{"2.1.251", "2.1.261", "2.1.210"} {
+		// The three samples are READ from the Claude contract: the recorded
+		// floor, one release above it and one below it. The subtest says
+		// nothing about any pin, so a literal here would only keep a retired
+		// number alive and read as if it still meant something.
+		floor := pastureruntime.ClaudeCode2_1_261().Versions().Min()
+		for _, version := range []string{
+			floor.String(),
+			testutil.Bump(t, floor, 0, 0, 1).String(),
+			testutil.BelowFloor(t, floor).String(),
+		} {
 			p := bare(fresh, version)
 			p.Event, p.Redaction = "SessionStart", "none"
 			require.ErrorContains(t, p.ValidateCommittedFixtureBytes(abs, fresh), "clearance is empty", "host version %s", version)
