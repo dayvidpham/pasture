@@ -354,10 +354,24 @@ func TestSchemaRegistryParity(t *testing.T) {
 	)
 }
 
-// TestGeneratedOutputInventory proves both sides of the generation contract:
-// canonical registries select the exact paths each harness emits, and those
-// paths are the exact files committed in the dedicated output trees. Root
-// outputs are recognized by content so a renamed stale copy is still orphaned.
+// TestGeneratedOutputInventory proves both sides of the generation contract.
+//
+// The EXPECTED file set of each harness is DERIVED from its emitters: the
+// production dry run (EmitHarness with Write false) names every file the
+// harness generates, so an output added to an emitter is covered here without
+// an edit to this file. Non-vacuity: every harness emits at least one file, and
+// its activation report path constant is in the set. Every emitted file must be
+// committed byte-identical (a missing or stale file is RED), every committed
+// file under a GENERATED TREE must be emitted (a stray file is RED, orphaned),
+// and every emitted path must fall under a generated tree or in a declared
+// MIXED directory, so a new output tree cannot escape the walk. What the guard
+// does NOT see: a stray file in a mixed directory (hooks/ carries hand-authored
+// payload files beside the two emitted ones; the repository root carries
+// everything), which is checked for the emitted files' presence and content
+// only. The registry-derived skill and agent expectations are a second
+// derivation of the same outputs, kept so a registry entry and an emitter
+// cannot disagree silently. Root outputs are recognized by content so a renamed
+// stale copy is still orphaned.
 func TestGeneratedOutputInventory(t *testing.T) {
 	root := testModuleRoot(t)
 
@@ -367,10 +381,6 @@ func TestGeneratedOutputInventory(t *testing.T) {
 	expectedClaudeAgents := make(map[string]string)
 	expectedOpenCodeAgents := make(map[string]string)
 	expectedCodexAgents := make(map[string]string)
-	expectedClaudeHarness := make(map[string]string)
-	expectedOpenCodeHarness := make(map[string]string)
-	expectedCodexHarness := make(map[string]string)
-	expectedCodexControl := make(map[string]string)
 	expectedRootOutputs := make(map[string]string, 2)
 
 	for _, commandID := range sortedCommandSpecIDs() {
@@ -380,21 +390,16 @@ func TestGeneratedOutputInventory(t *testing.T) {
 			continue // TestGeneratedSkillRegistryParity reports the actionable path error.
 		}
 		owner := "CommandSpecs[" + commandID + "]"
-		claudePath := filepath.ToSlash(spec.File)
-		openCodePath := filepath.ToSlash(filepath.Join(".opencode", "skill", dir, "SKILL.md"))
-		codexPath := filepath.ToSlash(filepath.Join(codexSkillRoot, dir, "SKILL.md"))
-		addExpectedOutput(t, expectedClaudeSkills, claudePath, owner)
-		addExpectedOutput(t, expectedOpenCodeSkills, openCodePath, owner)
-		addExpectedOutput(t, expectedCodexSkills, codexPath, owner)
-		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
-		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
-		addExpectedOutput(t, expectedCodexHarness, codexPath, owner)
+		addExpectedOutput(t, expectedClaudeSkills, filepath.ToSlash(spec.File), owner)
+		addExpectedOutput(t, expectedOpenCodeSkills, filepath.ToSlash(filepath.Join(".opencode", "skill", dir, "SKILL.md")), owner)
+		addExpectedOutput(t, expectedCodexSkills, filepath.ToSlash(filepath.Join(codexSkillRoot, dir, "SKILL.md")), owner)
 	}
 
 	for _, dir := range openCodeVerbatimDirs {
 		sourceRoot := filepath.Join(root, "skills", dir)
+		// The verbatim sources are hand-authored residents of the Claude skill
+		// root, not Claude outputs: the orphan walk admits them by directory.
 		for _, sourcePath := range sortedStringKeys(collectRelativeFiles(t, root, sourceRoot)) {
-			addExpectedOutput(t, expectedClaudeSkills, sourcePath, "openCodeVerbatimDirs["+dir+"] source")
 			relWithinSource, err := filepath.Rel(filepath.Join("skills", dir), filepath.FromSlash(sourcePath))
 			if err != nil {
 				t.Fatalf(
@@ -408,13 +413,8 @@ func TestGeneratedOutputInventory(t *testing.T) {
 					sourcePath, dir, err,
 				)
 			}
-			destination := filepath.ToSlash(filepath.Join(".opencode", "skill", dir, relWithinSource))
-			codexDestination := filepath.ToSlash(filepath.Join(codexSkillRoot, dir, relWithinSource))
-			owner := "openCodeVerbatimDirs[" + dir + "] destination"
-			addExpectedOutput(t, expectedOpenCodeSkills, destination, owner)
-			addExpectedOutput(t, expectedOpenCodeHarness, destination, owner)
-			addExpectedOutput(t, expectedCodexSkills, codexDestination, "codexVerbatimDirs["+dir+"] destination")
-			addExpectedOutput(t, expectedCodexHarness, codexDestination, "codexVerbatimDirs["+dir+"] destination")
+			addExpectedOutput(t, expectedOpenCodeSkills, filepath.ToSlash(filepath.Join(".opencode", "skill", dir, relWithinSource)), "openCodeVerbatimDirs["+dir+"] destination")
+			addExpectedOutput(t, expectedCodexSkills, filepath.ToSlash(filepath.Join(codexSkillRoot, dir, relWithinSource)), "codexVerbatimDirs["+dir+"] destination")
 		}
 	}
 
@@ -424,59 +424,137 @@ func TestGeneratedOutputInventory(t *testing.T) {
 			continue
 		}
 		owner := "RoleSpecs[" + string(roleID) + "].Tools"
-		claudePath := filepath.ToSlash(filepath.Join("agents", string(roleID)+".md"))
-		openCodePath := filepath.ToSlash(filepath.Join(".opencode", "agent", string(roleID)+".md"))
-		codexPath := filepath.ToSlash(filepath.Join(codexAgentsRoot, "pasture-"+string(roleID)+".toml"))
-		addExpectedOutput(t, expectedClaudeAgents, claudePath, owner)
-		addExpectedOutput(t, expectedOpenCodeAgents, openCodePath, owner)
-		addExpectedOutput(t, expectedCodexAgents, codexPath, owner)
-		addExpectedOutput(t, expectedClaudeHarness, claudePath, owner)
-		addExpectedOutput(t, expectedOpenCodeHarness, openCodePath, owner)
-		addExpectedOutput(t, expectedCodexHarness, codexPath, owner)
-		addExpectedOutput(t, expectedCodexControl, codexPath, owner)
-	}
-
-	addExpectedOutput(t, expectedClaudeHarness, "hooks/hooks.json", "ClaudeCodeTarget.Manifest lifecycle config")
-	addExpectedOutput(t, expectedClaudeHarness, "hooks/pasture-activation.json", "ClaudeCodeTarget.Manifest activation support report")
-	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeHooksModulePath), "OpenCodeTarget.Manifest lifecycle plugin")
-	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeTargetManifestPath), "OpenCodeTarget.Manifest target descriptor")
-	addExpectedOutput(t, expectedOpenCodeHarness, filepath.ToSlash(OpenCodeActivationReportPath), "OpenCodeTarget.Manifest activation audit report")
-	addExpectedOutput(t, expectedOpenCodeHarness, "opencode.json", "OpenCodeTarget.Manifest")
-	for _, path := range []string{codexTargetManifestPath, ".codex/hooks.json"} {
-		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget.Manifest")
-		addExpectedOutput(t, expectedCodexControl, path, "CodexTarget.Manifest")
-	}
-	addExpectedOutput(t, expectedCodexHarness, ".codex/pasture-codex-activation.json", "CodexTarget.Manifest activation audit report")
-	addExpectedOutput(t, expectedCodexControl, ".codex/pasture-codex-activation.json", "CodexTarget.Manifest activation audit report")
-	// One runner per ACTIVATED event only: the transport wires nothing the
-	// activation manifest withholds, so a withheld event owns no output path.
-	for _, event := range codexLifecycleEventNamesForTest() {
-		path := filepath.ToSlash(filepath.Join(codexHooksRoot, "events", event+".sh"))
-		addExpectedOutput(t, expectedCodexHarness, path, "CodexTarget lifecycle event "+event)
-		addExpectedOutput(t, expectedCodexControl, path, "CodexTarget lifecycle event "+event)
+		addExpectedOutput(t, expectedClaudeAgents, filepath.ToSlash(filepath.Join("agents", string(roleID)+".md")), owner)
+		addExpectedOutput(t, expectedOpenCodeAgents, filepath.ToSlash(filepath.Join(".opencode", "agent", string(roleID)+".md")), owner)
+		addExpectedOutput(t, expectedCodexAgents, filepath.ToSlash(filepath.Join(codexAgentsRoot, "pasture-"+string(roleID)+".toml")), owner)
 	}
 	addExpectedOutput(t, expectedRootOutputs, "schema.xml", "GenerateSchemaToFile")
 	addExpectedOutput(t, expectedRootOutputs, "opencode.json", "OpenCodeTarget.Manifest")
 
-	claudeFiles, claudePaths := collectHarnessOutputs(t, root, ClaudeCodeTarget)
-	openCodeFiles, openCodePaths := collectHarnessOutputs(t, root, OpenCodeTarget)
-	codexFiles, codexPaths := collectHarnessOutputs(t, root, CodexTarget)
-	assertOutputSetEqual(t, "Claude Code harness output paths", expectedClaudeHarness, claudePaths)
-	assertOutputSetEqual(t, "OpenCode harness output paths", expectedOpenCodeHarness, openCodePaths)
-	assertOutputSetEqual(t, "Codex harness output paths", expectedCodexHarness, codexPaths)
-	assertGeneratedFilesCommitted(t, root, claudeFiles)
-	assertGeneratedFilesCommitted(t, root, openCodeFiles)
-	assertGeneratedFilesCommitted(t, root, codexFiles)
+	for _, inventory := range generatedOutputInventories() {
+		files, emitted := collectHarnessOutputs(t, root, inventory.harness)
+		assertEmittedInventoryIsNonVacuous(t, inventory, emitted)
+		assertGeneratedFilesCommitted(t, root, files)
+		assertEmittedPathsStayInsideDeclaredOutputs(t, inventory, emitted)
+		assertGeneratedTreesCarryNoOrphans(t, root, inventory, emitted)
+	}
 
-	assertOutputSetEqual(t, "Claude Code skill tree", expectedClaudeSkills, collectRelativeFiles(t, root, filepath.Join(root, "skills")))
-	assertOutputSetEqual(t, "OpenCode skill tree", expectedOpenCodeSkills, collectRelativeFiles(t, root, filepath.Join(root, ".opencode", "skill")))
-	assertOutputSetEqual(t, "Codex skill tree", expectedCodexSkills, collectRelativeFiles(t, root, filepath.Join(root, filepath.FromSlash(codexSkillRoot))))
-	assertOutputSetEqual(t, "Claude Code agent tree", expectedClaudeAgents, collectRelativeFiles(t, root, filepath.Join(root, "agents")))
-	assertOutputSetEqual(t, "OpenCode agent tree", expectedOpenCodeAgents, collectRelativeFiles(t, root, filepath.Join(root, ".opencode", "agent")))
-	assertOutputSetEqual(t, "Codex control tree", expectedCodexControl, collectRelativeFiles(t, root, filepath.Join(root, ".codex")))
+	// Registry-derived expectations against the emitters: the two derivations
+	// of the skill and agent outputs must agree exactly.
+	_, claudeEmitted := collectHarnessOutputs(t, root, ClaudeCodeTarget)
+	_, openCodeEmitted := collectHarnessOutputs(t, root, OpenCodeTarget)
+	_, codexEmitted := collectHarnessOutputs(t, root, CodexTarget)
+	assertOutputSetEqual(t, "Claude Code skill outputs", expectedClaudeSkills, subsetUnder(claudeEmitted, ClaudeCodeTarget.SkillRoot))
+	assertOutputSetEqual(t, "OpenCode skill outputs", expectedOpenCodeSkills, subsetUnder(openCodeEmitted, OpenCodeTarget.SkillRoot))
+	assertOutputSetEqual(t, "Codex skill outputs", expectedCodexSkills, subsetUnder(codexEmitted, codexSkillRoot))
+	assertOutputSetEqual(t, "Claude Code agent outputs", expectedClaudeAgents, subsetUnder(claudeEmitted, "agents"))
+	assertOutputSetEqual(t, "OpenCode agent outputs", expectedOpenCodeAgents, subsetUnder(openCodeEmitted, filepath.ToSlash(filepath.Join(".opencode", "agent"))))
+	assertOutputSetEqual(t, "Codex agent outputs", expectedCodexAgents, subsetUnder(codexEmitted, codexAgentsRoot))
 	assertOutputSetEqual(t, "generated repository-root files", expectedRootOutputs, collectGeneratedRootFiles(t, root))
 
 	assertCommittedContent(t, filepath.Join(root, "schema.xml"), generateSchemaContent(), "GenerateSchemaToFile")
+}
+
+// generatedOutputInventory declares, per harness, WHERE the guard looks: the
+// trees whose every committed file must be emitted, the mixed directories whose
+// emitted files are checked for presence and content only, the hand-authored
+// source directories that live inside a generated tree, and the one path the
+// emitted set must always contain. The FILE population is never listed here; it
+// comes from the emitter.
+type generatedOutputInventory struct {
+	harness          TargetHarness
+	generatedTrees   []string
+	mixedDirectories []string
+	sourceResidents  []string
+	requiredOutput   string
+}
+
+func generatedOutputInventories() []generatedOutputInventory {
+	// The verbatim skill sources are hand-authored directories below the Claude
+	// skill root; every other harness copies them, Claude reads them in place.
+	sources := make([]string, 0, len(openCodeVerbatimDirs)+len(codexVerbatimDirs))
+	for _, dir := range append(append([]string(nil), openCodeVerbatimDirs...), codexVerbatimDirs...) {
+		sources = append(sources, filepath.ToSlash(filepath.Join(ClaudeCodeTarget.SkillRoot, dir)))
+	}
+	return []generatedOutputInventory{
+		{harness: ClaudeCodeTarget, generatedTrees: []string{ClaudeCodeTarget.SkillRoot, "agents"}, mixedDirectories: []string{"hooks"}, sourceResidents: sources, requiredOutput: ClaudeActivationReportPath},
+		{harness: OpenCodeTarget, generatedTrees: []string{".opencode"}, mixedDirectories: []string{"."}, requiredOutput: OpenCodeActivationReportPath},
+		{harness: CodexTarget, generatedTrees: []string{codexSkillRoot, ".codex"}, requiredOutput: codexActivationReportRelPath},
+	}
+}
+
+func assertEmittedInventoryIsNonVacuous(t *testing.T, inventory generatedOutputInventory, emitted map[string]string) {
+	t.Helper()
+	if len(emitted) == 0 {
+		t.Fatalf("the %s harness emits no file: the inventory guard has nothing to hold and would pass vacuously", inventory.harness.Name)
+	}
+	if _, ok := emitted[filepath.ToSlash(inventory.requiredOutput)]; !ok {
+		t.Fatalf("the %s harness emitted set lacks its activation report %q; the guard's population is not the harness's real output", inventory.harness.Name, inventory.requiredOutput)
+	}
+}
+
+func assertEmittedPathsStayInsideDeclaredOutputs(t *testing.T, inventory generatedOutputInventory, emitted map[string]string) {
+	t.Helper()
+	for _, path := range sortedStringKeys(emitted) {
+		if isUnderAny(path, inventory.generatedTrees) || isDirectlyInAny(path, inventory.mixedDirectories) {
+			continue
+		}
+		t.Errorf("the %s harness emits %q outside every declared generated tree %v and mixed directory %v; declare where it lives or the orphan walk never covers it", inventory.harness.Name, path, inventory.generatedTrees, inventory.mixedDirectories)
+	}
+}
+
+func assertGeneratedTreesCarryNoOrphans(t *testing.T, root string, inventory generatedOutputInventory, emitted map[string]string) {
+	t.Helper()
+	for _, tree := range inventory.generatedTrees {
+		committed := collectRelativeFiles(t, root, filepath.Join(root, filepath.FromSlash(tree)))
+		emittedInTree := 0
+		var orphaned []string
+		for _, path := range sortedStringKeys(committed) {
+			if _, ok := emitted[path]; ok {
+				emittedInTree++
+				continue
+			}
+			if isUnderAny(path, inventory.sourceResidents) {
+				continue
+			}
+			orphaned = append(orphaned, path)
+		}
+		if emittedInTree == 0 {
+			t.Errorf("the %s harness emits nothing under its declared generated tree %q; the tree is misdeclared or the emitter is empty", inventory.harness.Name, tree)
+		}
+		if len(orphaned) > 0 {
+			t.Errorf("generated tree %q of the %s harness holds committed files no emitter produces (orphaned: %v); in-place generation cannot remove a retired output, so delete each one after confirming its source was retired", tree, inventory.harness.Name, orphaned)
+		}
+	}
+}
+
+func subsetUnder(paths map[string]string, tree string) map[string]string {
+	out := make(map[string]string)
+	for path, owner := range paths {
+		if isUnderAny(path, []string{tree}) {
+			out[path] = owner
+		}
+	}
+	return out
+}
+
+func isUnderAny(path string, trees []string) bool {
+	for _, tree := range trees {
+		tree = filepath.ToSlash(tree)
+		if strings.HasPrefix(path, tree+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func isDirectlyInAny(path string, dirs []string) bool {
+	for _, dir := range dirs {
+		if filepath.ToSlash(filepath.Dir(path)) == filepath.ToSlash(dir) {
+			return true
+		}
+	}
+	return false
 }
 
 func skillDirFromCommandFile(file string) (string, bool) {
