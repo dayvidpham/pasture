@@ -6,8 +6,11 @@
 - The lifecycle contracts record Claude Code 2.1.261, Codex 0.153.0 and
   OpenCode 1.18.29. Admission is a floor at each recorded version: a host at
   or above it is admitted, a host below it is refused with the version it
-  needs. The twelve enabled events were recaptured at those versions in live
-  host sessions and cleared under the documented procedure; every committed
+  needs. The floor decides installation and fixture admission; on the live
+  hook path the observed host version is recorded as provenance and never
+  judged, because some routes pass no usable version at all. The twelve
+  enabled events were recaptured at those versions in live host sessions and
+  cleared under the documented procedure; every committed
   fixture carries a provenance sidecar that names its event, its substitution
   rules and the `CLEARANCE.md` holding the user's verbatim acceptance, and no
   committed capture is exempt from those three fields any more. Claude Code
