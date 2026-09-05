@@ -79,6 +79,38 @@ func TestCodexAgentFunctionsAreContractDerived(t *testing.T) {
 	}
 }
 
+// TestCodexAgentHeaderStatesTheMechanismAndClaimsNothingAboutTheHost pins the
+// comment block above `functions` in every emitted profile. The text a reader
+// meets must say WHERE the list comes from — the pinned runtime contract's
+// native operation bindings — and must NOT claim that the Codex host exposes no
+// skill or agent-spawn function. That claim was false of the host, and because
+// it carried the pinned version it was re-asserted, unchecked, at every bump.
+func TestCodexAgentHeaderStatesTheMechanismAndClaimsNothingAboutTheHost(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	files, err := codexAgentEmitter{}.Emit(root, "", GenerateOptions{Diff: false, Write: false})
+	if err != nil {
+		t.Fatalf("codexAgentEmitter.Emit: %v", err)
+	}
+	if len(files) == 0 {
+		t.Fatal("codexAgentEmitter emitted no profile; the header pin would hold nothing and would pass vacuously")
+	}
+	const mechanism = "`functions` is derived from the pinned runtime contract's native operation"
+	const parentMediated = "this profile does not use the host's skill or agent-spawn"
+	for _, f := range files {
+		if !strings.Contains(f.Content, mechanism) {
+			t.Fatalf("agent profile %q does not state where the function list comes from; it must carry %q:\n%s", f.Path, mechanism, f.Content)
+		}
+		if !strings.Contains(f.Content, parentMediated) {
+			t.Fatalf("agent profile %q does not state what this profile uses; it must carry %q:\n%s", f.Path, parentMediated, f.Content)
+		}
+		if strings.Contains(f.Content, "exposes no skill") || strings.Contains(f.Content, "exposes no self-service spawn") {
+			t.Fatalf("agent profile %q claims the Codex host exposes no skill or spawn function; the host ships both, so the header must describe pasture's profile only:\n%s", f.Path, f.Content)
+		}
+	}
+}
+
 // TestCodexAgentRenderIsDeterministic proves the agent renderer is a pure
 // function of its inputs: two renders of the same role are byte-identical.
 func TestCodexAgentRenderIsDeterministic(t *testing.T) {

@@ -1,10 +1,11 @@
 // Package codegen — Codex standalone agent TOML generation.
 //
-// The Codex harness, at the recorded Codex version, has no per-file "subagent" or "skill
-// invocation" runtime: its pinned runtime contract (runtime.Codex0_153_0)
-// lowers InvokeSkill as a semantic instruction and every delegation/collection/
-// stop operation as parent-mediated, so the only NATIVE Codex function a
-// generated agent may reference is `request-input`.
+// The profiles this file emits are derived from the pinned Codex runtime
+// contract (runtime.Codex0_153_0) and from nothing else. That contract lowers
+// InvokeSkill as a semantic instruction and every delegation/collection/stop
+// operation as parent-mediated, so the only NATIVE Codex function a generated
+// agent may reference is `request-input`. This says what PASTURE'S PROFILE
+// USES; it makes no claim about what the host does or does not expose.
 //
 // This file emits one standalone TOML profile per protocol role that carries
 // tools (the same role set the Claude Code and OpenCode agent emitters cover)
@@ -32,8 +33,19 @@ import (
 // Codex profile and reject an incompatible shape.
 const codexAgentSchema = "pasture.codex.agent.v1"
 
+// codexAgentFunctionsHeader is the comment block every emitted profile carries
+// above its `functions` list. It states the MECHANISM that produced the list
+// and nothing about the host's own surface: an earlier wording claimed the
+// pinned Codex version exposes no skill or agent-spawn function, which is not
+// true of the host, and a version bump silently re-asserted it at each new
+// version. What is true, and what a reader needs, is that this profile calls
+// only what the pinned contract binds as native.
+const codexAgentFunctionsHeader = "# `functions` is derived from the pinned runtime contract's native operation\n" +
+	"# bindings; this profile does not use the host's skill or agent-spawn\n" +
+	"# functions, and delegation is parent-mediated by design.\n"
+
 // codexRoleClass is the orchestration position a role occupies on the Codex
-// harness. Codex at the recorded version exposes no self-service spawn function, so a
+// harness. This profile does not use a host agent-spawn function, so a
 // "delegated" role is driven by the parent orchestrator (parent-mediated in the
 // pinned contract) rather than invoked natively by a sibling agent.
 type codexRoleClass string
@@ -46,7 +58,8 @@ const (
 // codexRoleClasses maps each protocol role to its Codex orchestration class.
 // Primary roles are user-driven top-level orchestration/planning roles;
 // delegated roles run under a primary's direction and, on Codex, are
-// parent-mediated because the harness has no native spawn function.
+// parent-mediated by design: the pinned contract binds delegation to the parent
+// orchestrator, so no agent-spawn function is used.
 var codexRoleClasses = map[protocol.RoleId]codexRoleClass{
 	protocol.RoleEpoch:      codexRoleClassPrimary,
 	protocol.RoleSupervisor: codexRoleClassPrimary,
@@ -144,9 +157,7 @@ func renderCodexAgent(roleID protocol.RoleId, functions []string) (string, error
 	fmt.Fprintf(&b, "# Standalone Codex agent profile for the %q protocol role.\n", string(roleID))
 	fmt.Fprintf(&b, "# Runtime contract: %s\n", CodexRuntimeContractID().String())
 	b.WriteString("#\n")
-	b.WriteString("# `functions` lists the native Codex functions this agent may call. Codex\n")
-	fmt.Fprintf(&b, "# %s exposes no skill or self-service spawn function, so it is derived\n", codexHostVersionLabel())
-	b.WriteString("# from the pinned runtime contract's native operation bindings.\n")
+	b.WriteString(codexAgentFunctionsHeader)
 	fmt.Fprintf(&b, "schema = %s\n", tomlString(codexAgentSchema))
 	fmt.Fprintf(&b, "name = %s\n", tomlString(string(roleID)))
 	fmt.Fprintf(&b, "description = %s\n", tomlString(roleSpec.Description))
