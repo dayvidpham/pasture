@@ -488,6 +488,16 @@ func ensurePastureTables(db *sql.DB) error {
 			)`,
 		},
 		{
+			name: "pasture_session_claim",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_session_claim (
+				harness TEXT NOT NULL,
+				session TEXT NOT NULL,
+				actor TEXT NOT NULL,
+				claimed_at INTEGER NOT NULL,
+				PRIMARY KEY (harness, session)
+			)`,
+		},
+		{
 			// pasture_system_identity persists the resolved committing actor and
 			// genesis bootstrap-authority JournalID that the journaled task backend
 			// binds every mutation to (Tracker.As → Session). It is a singleton
