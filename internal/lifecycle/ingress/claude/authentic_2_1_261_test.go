@@ -140,6 +140,11 @@ func TestAuthenticClaude2_1_261ElicitationRemainsUncorrelatedAndWithheld(t *test
 func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 	t.Parallel()
 
+	// The corpus holds two groups. The first eight are the events the
+	// activation table enables today. The fourteen below them are cleared
+	// authentic captures of events that are NOT enabled yet: the bytes are
+	// committed so the enabling work has real evidence to hold its rows
+	// against, and no row is enabled by their presence.
 	events := map[string]string{
 		"post_compact_2_1_261.json":          "PostCompact",
 		"post_tool_batch_2_1_261.json":       "PostToolBatch",
@@ -149,6 +154,21 @@ func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 		"pre_tool_use_2_1_261.json":          "PreToolUse",
 		"session_end_2_1_261.json":           "SessionEnd",
 		"session_start_2_1_261.json":         "SessionStart",
+
+		"config_change_2_1_261.json":         "ConfigChange",
+		"cwd_changed_2_1_261.json":           "CwdChanged",
+		"directory_added_2_1_261.json":       "DirectoryAdded",
+		"instructions_loaded_2_1_261.json":   "InstructionsLoaded",
+		"message_display_2_1_261.json":       "MessageDisplay",
+		"notification_2_1_261.json":          "Notification",
+		"permission_request_2_1_261.json":    "PermissionRequest",
+		"post_model_switch_2_1_261.json":     "PostModelSwitch",
+		"pre_model_switch_2_1_261.json":      "PreModelSwitch",
+		"stop_2_1_261.json":                  "Stop",
+		"subagent_start_2_1_261.json":        "SubagentStart",
+		"subagent_stop_2_1_261.json":         "SubagentStop",
+		"user_prompt_expansion_2_1_261.json": "UserPromptExpansion",
+		"user_prompt_submit_2_1_261.json":    "UserPromptSubmit",
 	}
 	// The three controls carry the SessionStart bytes with one sidecar member
 	// changed each; they are part of the closed inventory and are checked by

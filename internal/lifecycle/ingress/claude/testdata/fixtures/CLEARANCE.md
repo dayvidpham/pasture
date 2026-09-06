@@ -11,6 +11,12 @@ Claude Code 2.1.261, verified with `claude --version` immediately before the
 session on 2026-09-05: `2.1.261 (Claude Code)`. Admission is a floor: this
 version and every later release; the contract records 2.1.261.
 
+A second batch of fourteen captures was taken on 2026-09-05 from the same host
+release. `claude --version` printed `2.1.261 (Claude Code)` immediately before
+the sittings and again immediately after them, so the host did not move while
+the bytes were produced. The pinned version and the floor above are unchanged
+by this batch.
+
 ## Capture
 
 Captured in one live session on 2026-09-05, into
@@ -64,6 +70,107 @@ Captured and not used (not committed; listed so the record is complete):
 - `claude-code_pre_tool_use_2_1_261.2.json` — raw sha256:712f37935b38eeaf7fadd13c87920722079c71ecb603fca4098b56282fdeab1d (783 bytes)
 - `claude-code_pre_tool_use_2_1_261.3.json` — raw sha256:db3bd2daccab0d0de2209ac9a20c4c4e78fa2a616e4b86b54bd3528948be74c1 (763 bytes)
 - `claude-code_session_start_2_1_261.2.json` — raw sha256:e8d7f523729b366aa24691ddd83cf817a975aa8ae88a956d4fa0429a58939156 (547 bytes)
+
+### The second batch, fourteen events, 2026-09-05
+
+These fourteen captures cover events the product does NOT enable today. They
+are cleared and committed here as evidence; the events stay unactivated, and
+the work that enables a row is separate from this record.
+
+Captured in two live sittings on 2026-09-05, into
+`~/.local/share/pasture-captures/s4/probe`, with `PASTURE_CAPTURE_DIR` set. The
+fourteen chosen files were copied, never moved, into
+`~/.local/share/pasture-captures/s4/batch`; the originals stay outside the
+repository. Paths in this record are spelled with `~` for the capturing user's
+home directory; the fixture bytes themselves carry the `/home/user` placeholder
+that `home-path-v1` writes. The sessions were interactive terminal sessions of
+the real host binary on the user's machine, run at the user's direction by the
+team's operators; the user did not type the prompts. Nothing captured reached
+any remote before the user's acceptance recorded below.
+
+Build kit: one `pasture` binary, sha256
+`c2c2ad98940f312f94b8ee88052c84e07da9ab0c5c7d54bf339e31a835af46d6`, built with
+`CGO_ENABLED=0` from an archive copy of head
+`0b33f0760602fb7522a18afe73a5ae91011c090b` in
+`~/.local/share/pasture-captures/s4/kit/src`. The copy carries ONE deliberate
+edit, and it never reaches this repository: every registered Claude row was
+added to `internal/lifecycle/activation/claude_targets.go` with placeholder
+proof strings that name themselves as kit placeholders, and `make generate` was
+run there. The edit exists because the generator writes a transport row only
+for an enabled event, so a host cannot fire a hook for an event the shipped
+transport does not carry. The kit's generated `hooks/hooks.json` then holds 33
+event keys, sha256
+`f7ab20b86ad928c1cb7e3668eeed96304f4cee1d5d27d5810fb73c2cbb6d0a73`, and the
+kit's `hooks/pasture-activation.json` is sha256
+`b7911f6f59612558504d3de459389bb0c799411b0579710c59c5a009b86dc8bc`. Nothing was
+hand-shaped: the generator refused no row. All four kit digests were verified
+read-only again before the clearing work and they still match.
+
+Transport mechanism, measured and not assumed: a project-level
+`.claude/settings.json` in the throwaway project directory
+`~/.local/share/pasture-captures/s4/project`, sha256
+`ae58b608b44be3765fb641cd0d177d77702888b818d846eeaaae3970d83a927d`, holding the
+kit's hooks object with 33 event keys. Three rows of the kit file were dropped
+from it because they name a plugin-root variable that does not resolve outside
+a plugin. The installed plugin was NOT edited. Environment in the host's shell:
+`PASTURE_BIN` = the kit binary, `PASTURE_CAPTURE_DIR` = the capture directory
+above, `PASTURE_DB_PATH` = a scratch database file under
+`~/.local/share/pasture-captures/s4/scratch` (the live store was not touched),
+and `CLAUDE_CODE_VERSION` exported from `claude --version`, without which every
+captured file is named `unknown`.
+
+One line per chosen event: event, file, trigger, capture time, raw digest with
+its byte size, and committed digest with its byte size. The difference between
+the two digests is what the substitution changed, and the byte sizes show how
+much.
+- InstructionsLoaded: `instructions_loaded_2_1_261.json` — trigger: the launch of the session itself, with no prompt — 2026-09-05T21:10:22Z — raw sha256:02a8392af005a09afddf0d45df70b10b6492f89cc203468c3bbed897d035947d (541 bytes) — committed sha256:07eeb7ad0b1bcce0623ec64020d25d0e8a005f91d69bb4e6c95798abc9bb0eda (526 bytes)
+- UserPromptSubmit: `user_prompt_submit_2_1_261.json` — trigger: the prompt "Reply with the single word ok." — 2026-09-05T21:10:37Z — raw sha256:546f71ffbc64ec03ed7077f58e6a6c13152b1f1083f2033dfec3785b4596825c (560 bytes) — committed sha256:1f928b9073362ebaa2c0e2bc261cb6e02cde7d158f7101d597f65dc8976426e5 (548 bytes)
+- Stop: `stop_2_1_261.json` — trigger: the same turn ending — 2026-09-05T21:10:39Z — raw sha256:f06ecf93102314d7e025caf417d92619f59149f57881cb1d111853d579935f77 (628 bytes) — committed sha256:db86aac9557f32615ea1446eb5599fb3dea7df35a6e95aa9b2970749063b6d79 (616 bytes)
+- MessageDisplay: `message_display_2_1_261.json` — trigger: the same turn, the answer displayed — 2026-09-05T21:10:39Z — raw sha256:ae01383e52f525c6a1e6391e7ce9a03853a51337ae4cd1dd710d9863bccffee7 (628 bytes) — committed sha256:e41da860b97f9e4e5fa26e007d64964db2ef7dfc0d6a0f6c713c3ba45abf1c46 (616 bytes)
+- DirectoryAdded: `directory_added_2_1_261.json` — trigger: the command "/add-dir <a scratch directory>", answered "1. Yes, for this session" — 2026-09-05T21:11:05Z — raw sha256:336d883d15c0303d5f8473c376c16dca75f40d54d9c3557132c88a985be91e3e (585 bytes) — committed sha256:e864af13aed72eef6ad686e9cd8fa40a9c9bea8576ada65feceb273e9b08a874 (570 bytes)
+- PreModelSwitch: `pre_model_switch_2_1_261.json` — trigger: the command "/model", another model highlighted, then chosen and confirmed — 2026-09-05T21:11:30Z — raw sha256:a7187569d8031035df2d6f416e5b35871e777a84e754c1e46010b65dd8850a6c (726 bytes) — committed sha256:268f7bdf78221e312e69cbfaa8de869f85aa6c816898d95c7b87e9c26dcfbc19 (714 bytes)
+- PostModelSwitch: `post_model_switch_2_1_261.json` — trigger: the same model change completing — 2026-09-05T21:11:39Z — raw sha256:31d1d5d0b73c398e343f1461dc1a73067f9abebe82030bacabae8f898380b0ad (727 bytes) — committed sha256:c92a88e2d6fd90ac9a6ffcd5a96c62006b478c8ef5abed9134bb0aa5d2bd6523 (715 bytes)
+- PermissionRequest: `permission_request_2_1_261.json` — trigger: the prompt "Create a file named a.txt in this directory containing the single word ok.", with the host asking for permission — 2026-09-05T21:13:01Z — raw sha256:cddd1c4e64c2d56779aad96f3a33d601742a73d6289a6c5be8ad43429bf6aef4 (738 bytes) — committed sha256:daff36bd80b769b087f340d798497d7f074a5d49360cc53f227be3f8001c9904 (723 bytes)
+- Notification: `notification_2_1_261.json` — trigger: the same permission dialog — 2026-09-05T21:13:07Z — raw sha256:38aeb866fd607268f487279aa3cf6c5215867b8213a919328768357141f19e5a (570 bytes) — committed sha256:aab36db4e6ba2df02660c92ab744ac1e60159f077b8ed974c12ee9848ffd08ff (558 bytes)
+- UserPromptExpansion: `user_prompt_expansion_2_1_261.json` — trigger: the command "/probe", with a probe command file in the throwaway project directory — 2026-09-05T21:17:30Z — raw sha256:19b8804b288e5f6e31a79b37245e91c43d6e8a94bb286075b8739dc694207ef5 (651 bytes) — committed sha256:dbfccc625b2f833876b4fa02a0b7a31447b6c73d3d780439e271ef80a6825ce6 (639 bytes)
+- ConfigChange: `config_change_2_1_261.json` — trigger: a settings file written in the throwaway project directory from another shell while the session ran — 2026-09-05T21:17:44Z — raw sha256:c3dc244c88ecc8e5dc3623e713d43476760b992fc154a93487be2a9038a08a6d (612 bytes) — committed sha256:f28231875ec9f1485caed5f91e014d44ac740a1105b8fb9fed44b097c8e575cf (597 bytes)
+- CwdChanged: `cwd_changed_2_1_261.json` — trigger: the prompt "Run the shell command: cd <a scratch directory>", approved — 2026-09-05T21:19:00Z — raw sha256:7144a86f307f00b0eaa0ed7e6fe3e95ca53971514378865eec857ea35e065d3b (621 bytes) — committed sha256:0dd92eadb211df083321ab0b64a683876f8779343dac1de6a339fb938774ea00 (603 bytes)
+- SubagentStart: `subagent_start_2_1_261.json` — trigger: the prompt "Use the Agent tool to launch one general-purpose subagent whose whole task is to reply with the word ok." — 2026-09-05T21:19:17Z — raw sha256:38bbc416ff37ceaf683263515e79a8c481bc930cb94f8c81727b7b3a123dbba5 (552 bytes) — committed sha256:ba8a32004176dffc6c094b3d056b818887f0fc08e72caebc1569053367853372 (540 bytes)
+- SubagentStop: `subagent_stop_2_1_261.json` — trigger: the same subagent finishing — 2026-09-05T21:19:19Z — raw sha256:97beaa03d0559d3556822c5323002ec2a3e739f30501f5006ad8cd3fd611bb70 (1004 bytes) — committed sha256:d3f0e8dfbe6f7aa472f99107f950587b60f7299d66e1f3fd093847fa731bef37 (986 bytes)
+
+Two facts a reader will otherwise misread, both measured:
+
+1. In the capture directory the already-enabled events arrive in exact digest
+   PAIRS: two files per firing with an identical digest, while every
+   not-yet-enabled event appears once per firing. This is NOT a host
+   double-firing defect. The installed plugin registers exactly those same
+   events and runs the same command with the same binary, so each of those
+   firings is recorded twice, once by the project transport and once by the
+   plugin. None of those files is in this batch: the eight already-enabled
+   events keep the fixtures recorded above, because new bytes would need a new
+   acceptance for no gain.
+2. PreModelSwitch fires once per model the picker HIGHLIGHTS, not once per
+   model change, and an automatic model change fires no PreModelSwitch at all.
+   The committed pair is therefore the MATCHED picker pair: both files carry
+   source `picker`, the same `from_model` and `to_model`, and the same
+   `prompt_id` `b00aa439-bb17-4596-9f84-3ef106a968e4`, which is the host's own
+   identifier for one operation. A picker payload paired with an automatic one
+   would put a false story in this record.
+
+Captured and not used (not committed; listed so the record is complete): the
+capture directory holds 102 files over 20 event stems, and a later sitting,
+described below, wrote 47 more files into a directory of its own. Everything
+outside the fourteen files above is either an already-enabled event, a repeated
+firing of a chosen event with a longer payload, or probe traffic. Nothing was
+deleted or moved.
+
+That later sitting looked for three more events and none of them fired:
+TaskCreated, TaskCompleted and TeammateIdle. The sitting made two genuine
+attempts. It created a named teammate, gave it work, and saw it reply and go
+idle, both times. Ten other events fired normally in the same sitting, and the
+transport carried the subscription for all three throughout, so the cause is
+not ours. The three stay unenabled with that cause recorded, and they are not
+in this batch.
 
 ## Inventory
 
@@ -252,6 +359,179 @@ claude-code_session_start_2_1_261.2.json
 14 payloads inventoried in ~/.local/share/pasture-captures/claude
 ```
 
+### The second batch
+
+Output of the inventory report (`PASTURE_INVENTORY_DIR` over the batch
+directory, all 14 payloads, each of which is a fixture below). The report names
+every refused class and every unclearable reason it finds; it named none.
+
+```
+claude-code_config_change_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .hook_event_name                                             identifier
+  .source                                                      identifier
+  .file_path                                                   path
+claude-code_cwd_changed_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .hook_event_name                                             identifier
+  .old_cwd                                                     path
+  .new_cwd                                                     path
+claude-code_directory_added_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .hook_event_name                                             identifier
+  .directory                                                   path
+  .source                                                      identifier
+claude-code_instructions_loaded_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .hook_event_name                                             identifier
+  .file_path                                                   path
+  .memory_type                                                 identifier
+  .load_reason                                                 identifier
+claude-code_message_display_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .hook_event_name                                             identifier
+  .turn_id                                                     identifier
+  .message_id                                                  identifier
+  .index                                                       number
+  .final                                                       bool
+  .delta                                                       identifier
+claude-code_notification_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .hook_event_name                                             identifier
+  .message                                                     free-text    FREE TEXT: substitute with free-text-v1
+  .notification_type                                           identifier
+claude-code_permission_request_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .permission_mode                                             identifier
+  .hook_event_name                                             identifier
+  .tool_name                                                   identifier
+  .tool_input.file_path                                        path
+  .tool_input.content                                          identifier
+  .permission_suggestions[0].type                              identifier
+  .permission_suggestions[0].mode                              identifier
+  .permission_suggestions[0].destination                       identifier
+claude-code_post_model_switch_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .hook_event_name                                             identifier
+  .from_model                                                  identifier
+  .to_model                                                    identifier
+  .requested_model                                             identifier
+  .source                                                      identifier
+  .context_tokens                                              number
+  .prompt_cache_warm                                           bool
+  .cache_ttl                                                   identifier
+  .estimated_cache_write_usd                                   number
+  .pricing                                                     identifier
+claude-code_pre_model_switch_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .hook_event_name                                             identifier
+  .from_model                                                  identifier
+  .to_model                                                    identifier
+  .requested_model                                             identifier
+  .source                                                      identifier
+  .context_tokens                                              number
+  .prompt_cache_warm                                           bool
+  .cache_ttl                                                   identifier
+  .estimated_cache_write_usd                                   number
+  .pricing                                                     identifier
+claude-code_stop_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .permission_mode                                             identifier
+  .effort.level                                                identifier
+  .hook_event_name                                             identifier
+  .stop_hook_active                                            bool
+  .last_assistant_message                                      identifier
+claude-code_subagent_start_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .agent_id                                                    identifier
+  .agent_type                                                  identifier
+  .hook_event_name                                             identifier
+claude-code_subagent_stop_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .permission_mode                                             identifier
+  .agent_id                                                    identifier
+  .agent_type                                                  identifier
+  .hook_event_name                                             identifier
+  .stop_hook_active                                            bool
+  .agent_transcript_path                                       path
+  .last_assistant_message                                      identifier
+  .background_tasks[0].id                                      identifier
+  .background_tasks[0].type                                    identifier
+  .background_tasks[0].status                                  identifier
+  .background_tasks[0].description                             free-text    FREE TEXT: substitute with free-text-v1
+  .background_tasks[0].agent_type                              identifier
+claude-code_user_prompt_expansion_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .permission_mode                                             identifier
+  .hook_event_name                                             identifier
+  .expansion_type                                              identifier
+  .command_name                                                identifier
+  .command_args                                                identifier
+  .command_source                                              identifier
+  .prompt                                                      path
+claude-code_user_prompt_submit_2_1_261.1.json
+  .session_id                                                  identifier
+  .transcript_path                                             path
+  .cwd                                                         path
+  .scratchpad_dir                                              path
+  .prompt_id                                                   identifier
+  .permission_mode                                             identifier
+  .hook_event_name                                             identifier
+  .prompt                                                      free-text    FREE TEXT: substitute with free-text-v1
+14 payloads inventoried in ~/.local/share/pasture-captures/s4/batch
+```
+
 ## Rules applied, in order
 
 Per fixture, the value-only rules applied in the order applied, as listed in
@@ -278,6 +558,50 @@ user name (asserted by the clearing run). Rules applied per fixture, in order:
 - session_end_2_1_261.json: home-path-v1
 - the three controls below carry the session_start bytes and its rules.
 
+### The second batch
+
+`home-path-v1` first, in all three spellings, then `free-text-v1` over every
+field the inventory flagged. Structure, keys, types and nulls are unchanged:
+the committed bytes were compared field by field with the raw bytes and the two
+carry the same paths, the same value types, the same array lengths and the same
+nulls. Every digest above was recomputed over the committed bytes. Rules
+applied per fixture, in order:
+
+- config_change_2_1_261.json: home-path-v1
+- cwd_changed_2_1_261.json: home-path-v1
+- directory_added_2_1_261.json: home-path-v1
+- instructions_loaded_2_1_261.json: home-path-v1
+- message_display_2_1_261.json: home-path-v1
+- notification_2_1_261.json: home-path-v1, free-text-v1 (.message)
+- permission_request_2_1_261.json: home-path-v1
+- post_model_switch_2_1_261.json: home-path-v1
+- pre_model_switch_2_1_261.json: home-path-v1
+- stop_2_1_261.json: home-path-v1
+- subagent_start_2_1_261.json: home-path-v1
+- subagent_stop_2_1_261.json: home-path-v1, free-text-v1 (.background_tasks[0].description)
+- user_prompt_expansion_2_1_261.json: home-path-v1
+- user_prompt_submit_2_1_261.json: home-path-v1
+
+Two of the three spellings of the home directory occur in these payloads, and
+both were rewritten: the absolute path, and the directory slug a host derives
+from a path. Every payload carries both, in `transcript_path`, `cwd` and
+`scratchpad_dir`. The relative spelling occurs in none of the fourteen, checked
+by search, and the rule covers it wherever it does occur. After the two rules
+the committed bytes carry no occurrence of the capturing user's name in any
+spelling, which the corpus guard asserts over every file of this directory,
+this record included.
+
+Five committed values carry short host or assistant text that the classifier
+does not class as free text, so the second rule did not fire on them, and they
+are listed here rather than left for a reader to find: `.delta` on
+MessageDisplay and `.last_assistant_message` on Stop and on SubagentStop are
+each the two letters `ok`, the whole answer the trigger asked for; `.prompt` on
+UserPromptExpansion is `/probe`, the name of the probe command written for the
+capture, which the classifier reads as a path because it starts with a slash;
+and `.tool_input.content` on PermissionRequest is the two letters `ok`. They
+were not substituted by hand, because a hand edit would make the committed
+bytes impossible to reproduce from the two documented rules.
+
 ## Secret scan
 
 `TestNoCommittedTestdataCarriesASecretShape` (internal/lifecycle/ingress/secretscan_test.go)
@@ -286,6 +610,18 @@ PASS, zero hits, 2026-09-05. Reach control on the same run: an Anthropic
 API-key shape planted into a copy of one new fixture in this directory turned
 the scan RED naming that file and the byte offset; the copy was discarded.
 `TestSecretScanIsRedOnEachPlantedShape` (all nine shapes): PASS.
+
+### The second batch
+
+`TestNoCommittedTestdataCarriesASecretShape`
+(internal/lifecycle/ingress/secretscan_test.go) run over the whole module with
+these fourteen fixtures and their sidecars in place: PASS, zero hits,
+2026-09-05. `TestSecretScanIsRedOnEachPlantedShape`, the nine-shape
+non-vacuity control: PASS. Reach control on the same tree, which is what proves
+the scan reached these files: an Anthropic API-key shape was planted into a
+COPY of one of these new fixtures in this directory, the scan turned RED naming
+that copy, the shape and the byte offset, and the copy was then discarded and
+the scan returned to PASS.
 
 ## Refused classes
 
@@ -297,6 +633,26 @@ substituted by free-text-v1 and is committed as placeholder text of the same
 length. No payload is an environment dump. Every free-text field on every
 event was substituted. No payload was unclearable; no event is left withheld
 for clearance reasons.
+
+### The second batch
+
+No fixture of this batch carries a tool response at all, so none can be over
+the limit: the largest value under any response-shaped path is
+`.tool_input.content` on PermissionRequest, at 2 bytes. The largest whole
+payload is SubagentStop at 986 committed bytes, far below the 4096-byte
+threshold. No payload is an environment dump, and no object of these payloads
+holds three or more members shaped like environment variables. The inventory
+report over the batch named no refused class and no unclearable reason, and the
+same report over the committed bytes names none either. No payload was
+unclearable; no event of this batch is withheld for clearance reasons.
+
+Provider credentials, stated as a measurement rather than an expectation: no
+payload of this batch carries a field that could hold one. The fourteen
+payloads carry identifiers, paths, host enumerations, model names, two numbers
+about cache pricing, and the short text listed above; the secret scan over the
+nine committed shapes finds nothing in them; and no member name in the batch
+reads as a credential. This is a statement about these fourteen payloads, which
+were each read in full, and not a general claim about what the host may send.
 
 ## Fixtures
 
@@ -314,6 +670,29 @@ sidecar field changed each): `session_start_2_1_261_digest_mismatch.json`
 (rawFileDigest all zeros), `session_start_2_1_261_origin_authored.json`
 (origin `authored`), `session_start_2_1_261_version_out_of_range.json`
 (harnessVersion 2.1.260, one patch below the floor). Body sha256:36a997c6ca7aa99a6afcea563b1f9bde361410ce2181f8e29b03b53ec245b79d.
+
+### The second batch, committed and NOT yet activated
+
+These fourteen fixtures are cleared authentic captures of events the product
+does not enable. They are committed so that the work which enables a row has
+real bytes to hold it against. Committing them activates nothing: no row of the
+activation table names them, and nothing enables an event because a fixture
+exists.
+
+- `config_change_2_1_261.json` — ConfigChange — sha256:f28231875ec9f1485caed5f91e014d44ac740a1105b8fb9fed44b097c8e575cf (597 bytes)
+- `cwd_changed_2_1_261.json` — CwdChanged — sha256:0dd92eadb211df083321ab0b64a683876f8779343dac1de6a339fb938774ea00 (603 bytes)
+- `directory_added_2_1_261.json` — DirectoryAdded — sha256:e864af13aed72eef6ad686e9cd8fa40a9c9bea8576ada65feceb273e9b08a874 (570 bytes)
+- `instructions_loaded_2_1_261.json` — InstructionsLoaded — sha256:07eeb7ad0b1bcce0623ec64020d25d0e8a005f91d69bb4e6c95798abc9bb0eda (526 bytes)
+- `message_display_2_1_261.json` — MessageDisplay — sha256:e41da860b97f9e4e5fa26e007d64964db2ef7dfc0d6a0f6c713c3ba45abf1c46 (616 bytes)
+- `notification_2_1_261.json` — Notification — sha256:aab36db4e6ba2df02660c92ab744ac1e60159f077b8ed974c12ee9848ffd08ff (558 bytes)
+- `permission_request_2_1_261.json` — PermissionRequest — sha256:daff36bd80b769b087f340d798497d7f074a5d49360cc53f227be3f8001c9904 (723 bytes)
+- `post_model_switch_2_1_261.json` — PostModelSwitch — sha256:c92a88e2d6fd90ac9a6ffcd5a96c62006b478c8ef5abed9134bb0aa5d2bd6523 (715 bytes)
+- `pre_model_switch_2_1_261.json` — PreModelSwitch — sha256:268f7bdf78221e312e69cbfaa8de869f85aa6c816898d95c7b87e9c26dcfbc19 (714 bytes)
+- `stop_2_1_261.json` — Stop — sha256:db86aac9557f32615ea1446eb5599fb3dea7df35a6e95aa9b2970749063b6d79 (616 bytes)
+- `subagent_start_2_1_261.json` — SubagentStart — sha256:ba8a32004176dffc6c094b3d056b818887f0fc08e72caebc1569053367853372 (540 bytes)
+- `subagent_stop_2_1_261.json` — SubagentStop — sha256:d3f0e8dfbe6f7aa472f99107f950587b60f7299d66e1f3fd093847fa731bef37 (986 bytes)
+- `user_prompt_expansion_2_1_261.json` — UserPromptExpansion — sha256:dbfccc625b2f833876b4fa02a0b7a31447b6c73d3d780439e271ef80a6825ce6 (639 bytes)
+- `user_prompt_submit_2_1_261.json` — UserPromptSubmit — sha256:1f928b9073362ebaa2c0e2bc261cb6e02cde7d158f7101d597f65dc8976426e5 (548 bytes)
 
 ## User acceptance
 
@@ -340,6 +719,25 @@ Nothing in this directory reaches a remote before this section is filled. This
 file is the clearance authority a fixture's provenance names by path: a fixture
 may name this file only after this section holds the acceptance, so that a
 reader who follows the path finds the grant recorded and never a blank form.
+
+### The second batch, fourteen fixtures
+
+Accepted by the user on 2026-09-06, after the clearance evidence was presented.
+This is part of the 24-fixture cross-batch acceptance: 14 existing Claude
+fixtures plus 10 existing Codex fixtures. This Claude record covers only the
+14 existing Claude fixtures listed in the second batch in this file.
+
+The user answered, verbatim:
+
+```
+I accept teh 24 sanitized fixtures. we don't really even need to apply the documentation corrections, it won't matter once we've published them.
+```
+
+This acceptance excludes future FileChanged captures, sidecars and clearance
+addenda, and later generated transport or activation output. The user accepts
+publication without requiring the documented redaction-description and
+pending-state wording corrections. Those documentation corrections were not
+applied.
 
 ## Pull request
 

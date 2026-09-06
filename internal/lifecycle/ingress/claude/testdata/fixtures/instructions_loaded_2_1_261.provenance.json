@@ -1,0 +1,11 @@
+{
+  "origin": "authentic-capture",
+  "harness": "claude-code",
+  "harnessVersion": "2.1.261",
+  "captureSource": "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
+  "rawFileDigest": "sha256:07eeb7ad0b1bcce0623ec64020d25d0e8a005f91d69bb4e6c95798abc9bb0eda",
+  "capturedAt": "2026-09-05T21:10:22Z",
+  "event": "InstructionsLoaded",
+  "redaction": "home-path-v1",
+  "clearance": "internal/lifecycle/ingress/claude/testdata/fixtures/CLEARANCE.md"
+}
