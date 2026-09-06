@@ -742,3 +742,92 @@ applied.
 ## Pull request
 
 Appended by the integrator in the landing commit: the pull request URL.
+
+## FileChanged addendum — Claude Code 2.1.263
+
+This separate acceptance covers only `file_changed_2_1_263.json` and its paired
+provenance sidecar. It does not change the earlier 24-fixture acceptance or its
+records. The captured host version is **2.1.263**, not 2.1.261.
+
+### Capture and limits
+
+An agent drove one live Claude Code 2.1.263 session in a throwaway project.
+No model prompt was sent. At 2026-09-06T04:46:58Z, an external shell changed
+the existing `.env` from `PASTURE_FILECHANGED_CAPTURE=0` to
+`PASTURE_FILECHANGED_CAPTURE=1`, each followed by a newline. The host delivered
+FileChanged in the first three-second observation window. The event value is
+`change`. The `.envrc` fallback was not tried.
+
+The generated matcher was exactly `.envrc|.env`. It covers `.envrc` or `.env`
+in the current working directory only. This capture proves a change to `.env`,
+not arbitrary-file monitoring, `.envrc` firing, add/unlink firing, or policy
+enforcement. After substitution, the trigger path is
+`/home/user/.local/share/pasture-captures/s4/filechanged-20260906T041950Z/project/.env`.
+
+The capture kit used matcher source commit
+`879520f2d08da5de00a0b023a33c60772b3cc955`, with version roots moved to 2.1.263
+only in the external kit and placeholder proofs only for capture. The host
+reported `2.1.263 (Claude Code)` before and after the session. Neither the kit
+placeholders nor capture success are production activation evidence.
+
+The byte-recording seam was `cmd/pasture/hook_lifecycle.go` calling
+`DirectoryCaptureSink.Record` in `internal/handlers/capture_sink.go`, under
+`PASTURE_CAPTURE_DIR`. It runs before ingress admission. The current FileChanged
+catalogue does not allow the authentic `event` member. The fixture retains that
+member; production admission and activation require separate work. The existing
+production host roots and the accepted 2.1.261 fixtures remain unchanged.
+
+### Bytes and provenance
+
+| Artifact | Bytes | SHA256 |
+|---|---:|---|
+| Original capture | 644 | `c10796cd14a99d91876bdc6a12d22703d5ddeda5f1aeb50057cd702526abbe2c` |
+| `file_changed_2_1_263.json` | 658 | `2f23c616d536cc8a16420b475796cf261745ce09eb8d1062cd495a3f6e644dc7` |
+| `file_changed_2_1_263.provenance.json` | 519 | `3d9dfa4b7822365723a9fea3690b93a08694c5a3a68587e503e3debe3d5318ff` |
+| External corrected draft | 6689 | `809f4ac3b0cc84b02d7f1433a4bf3a71617fc886d91034e682038a1ae2721104` |
+
+The committed fixture and sidecar preserve the exact accepted bytes. The JSON
+uses two-space indentation and a final newline. The sidecar's `rawFileDigest`
+hashes the final sanitized fixture, not the original capture; both digests are
+listed above. Its `capturedAt` value, `2026-09-06T04:46:58.654230Z`, comes from
+the capture file's modification time, not a timestamp field in the host payload.
+
+### Inventory, substitution and scan
+
+The recorded inventory found seven string fields: three identifiers and four
+paths. Only `home-path-v1` was applied, to `transcript_path`, `cwd`,
+`scratchpad_dir` and `file_path`. It replaced the absolute home spelling and
+the home-derived slug with the `user` placeholder. A distinct relative home
+spelling was absent. Field names, order, types and semantics were preserved.
+No free text, file contents, tool response or environment dump was present;
+no `free-text-v1` operation was needed or declared.
+
+The accepted JSON retains the session UUID
+`d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e`, timestamp-derived capture directory,
+project and transcript path structure, and numeric scratchpad prefix
+`claude-1000`. All retained values are visible in the paired JSON. A session ID
+does not prove per-operation pairing, and no such pairing is claimed.
+
+The external review scanned the complete fixture, sidecar and corrected draft
+against all nine secret patterns from `internal/lifecycle/ingress/inventory.go`
+and checked that the capturing home segment was absent. No hit was found.
+A separate fixture copy with a planted Anthropic-shaped token was detected;
+that control is not part of the fixture set. This proves scanner reach for
+the recorded patterns, not the absence of every possible secret format.
+
+Launch configuration and sampled project/installed-plugin hook environments
+pointed to the external kit, capture directory and scratch database. These
+observations support isolation for the observed processes. The live Pasture
+database was not inspected; zero live-store writes were not independently
+established. No installed plugin or Git hook was changed for the capture.
+After host exit, two raw-directory listings agreed. Incidental duplicate
+SessionStart and SessionEnd captures and the separate hand-piped dry run are
+excluded from this publication.
+
+### Separate acceptance
+
+On 2026-09-06T07:25:03Z, the user accepted this FileChanged fixture for publication with these exact words: "I accept the FileChanged fixture."
+
+This acceptance does not activate FileChanged in production, approve other
+future captures, or approve production host-version root changes. FileChanged
+remains withheld and absent from the production `hooks/hooks.json` transport.
