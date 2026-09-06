@@ -9,22 +9,27 @@
 // event without an authentic fixture stays withheld upstream and never reaches
 // Bind in production.
 //
-// MEASURED: the self-contained ingress catalogue
-// (internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go, read by the
-// handler's admission) and the runtime Codex profile (read by Bind) disagree on
-// every registered event on at least one axis: the failure mode on 11 of the 12
-// (the catalogue declares report-and-continue or exit-2-blocks where the profile
-// declares strict-hook-failure or a demoted exit-2-blocks), the mutation mode on
-// PreToolUse and PostToolUse, the blocking mode on PostCompact, and the declared
-// identities on the 10 events without an authentic capture. The frontend
-// binds with the profile's row; the handler admits with the catalogue's row.
-// Re-deriving the catalogue from the profile is the OpenCode-style remedy and is
-// separate work; until it lands, this package states the divergence.
+// MEASURED: the committed manifest the handler admits with
+// (internal/lifecycle/registration/codex_0_153_0.gen.go, which code generation
+// renders from the self-contained ingress catalogue
+// internal/lifecycle/ingress/internal/hostcontract/codex_0_153_0.go) and the
+// runtime Codex profile (read by Bind) state the same failure mode on all 12 of
+// the 12 registered events, because that catalogue READS that field from the
+// profile.
 //
-// The counts above are read back from the tree by
-// internal/lifecycle/registration/failure_divergence_test.go, so a new
-// registration or a new capture turns that test RED instead of leaving a stale
-// number here.
+// Failure-arm agreement does not imply agreement elsewhere.
+// The gate-or-observation semantic differs on PostCompact, an
+// observation in the catalogue and a gate in the profile. The mutation mode
+// differs on PostToolUse, which mutates the tool OUTPUT in the profile and has
+// no output arm to be spelled with in the catalogue vocabulary. The correlation
+// identities are the widest: the profile declares on 8 rows where the catalogue
+// declares none, and 8 of those 8 are events with no authentic capture, because
+// the catalogue declares an identity only from a capture. The frontend binds
+// with the profile's row; the handler admits with the row code generation wrote
+// into internal/lifecycle/registration/codex_0_153_0.gen.go from the catalogue.
+//
+// See internal/lifecycle/registration/failure_divergence_test.go for the
+// sentence-specific measurements.
 package codex
 
 import (
@@ -36,7 +41,7 @@ import (
 )
 
 // codexLifecycle returns the Codex runtime lifecycle contract used to bind
-// native events into the waist: the sole runtime seam in this package.
+// native events into the waist.
 func codexLifecycle() runtime.LifecycleContract[runtime.CodexLifecycleEvent] {
 	return runtime.Codex0_153_0Lifecycle()
 }
@@ -46,18 +51,18 @@ func codexLifecycle() runtime.LifecycleContract[runtime.CodexLifecycleEvent] {
 // enumerations are separate contracts, so every ordinal is explicit here and a
 // test holds the pairing total and correct.
 var eventMappings = map[model.ContractEventKind]runtime.CodexLifecycleEvent{
-	registration.EventCodexSessionStart:      runtime.CodexEventSessionStart,      // SessionStart
-	registration.EventCodexUserPromptSubmit:  runtime.CodexEventUserPromptSubmit,  // UserPromptSubmit
-	registration.EventCodexPreToolUse:        runtime.CodexEventPreToolUse,        // PreToolUse
-	registration.EventCodexPermissionRequest: runtime.CodexEventPermissionRequest, // PermissionRequest
-	registration.EventCodexPostToolUse:       runtime.CodexEventPostToolUse,       // PostToolUse
-	registration.EventCodexPreCompact:        runtime.CodexEventPreCompact,        // PreCompact
-	registration.EventCodexPostCompact:       runtime.CodexEventPostCompact,       // PostCompact
-	registration.EventCodexSubagentStart:     runtime.CodexEventSubagentStart,     // SubagentStart
-	registration.EventCodexSubagentStop:      runtime.CodexEventSubagentStop,      // SubagentStop
-	registration.EventCodexStop:              runtime.CodexEventStop,              // Stop
-	registration.EventCodexSessionEnd:        runtime.CodexEventSessionEnd,        // SessionEnd
-	registration.EventCodexInterrupt:         runtime.CodexEventInterrupt,         // Interrupt
+	registration.EventCodexSessionStart:      runtime.CodexEventSessionStart,
+	registration.EventCodexUserPromptSubmit:  runtime.CodexEventUserPromptSubmit,
+	registration.EventCodexPreToolUse:        runtime.CodexEventPreToolUse,
+	registration.EventCodexPermissionRequest: runtime.CodexEventPermissionRequest,
+	registration.EventCodexPostToolUse:       runtime.CodexEventPostToolUse,
+	registration.EventCodexPreCompact:        runtime.CodexEventPreCompact,
+	registration.EventCodexPostCompact:       runtime.CodexEventPostCompact,
+	registration.EventCodexSubagentStart:     runtime.CodexEventSubagentStart,
+	registration.EventCodexSubagentStop:      runtime.CodexEventSubagentStop,
+	registration.EventCodexStop:              runtime.CodexEventStop,
+	registration.EventCodexSessionEnd:        runtime.CodexEventSessionEnd,
+	registration.EventCodexInterrupt:         runtime.CodexEventInterrupt,
 }
 
 // host is the pinned Codex data consumed by the generic frontend engine.

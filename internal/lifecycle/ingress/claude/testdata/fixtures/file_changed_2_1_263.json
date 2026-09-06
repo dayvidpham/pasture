@@ -1,0 +1,9 @@
+{
+  "session_id": "d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e",
+  "transcript_path": "/home/user/.claude/projects/-home-user--local-share-pasture-captures-s4-filechanged-20260906T041950Z-project/d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e.jsonl",
+  "cwd": "/home/user/.local/share/pasture-captures/s4/filechanged-20260906T041950Z/project",
+  "scratchpad_dir": "/tmp/claude-1000/-home-user--local-share-pasture-captures-s4-filechanged-20260906T041950Z-project/d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e/scratchpad",
+  "hook_event_name": "FileChanged",
+  "file_path": "/home/user/.local/share/pasture-captures/s4/filechanged-20260906T041950Z/project/.env",
+  "event": "change"
+}

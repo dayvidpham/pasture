@@ -148,6 +148,13 @@ type claudeHooksConfig struct {
 	Hooks       map[string][]claudeHookGroup `json:"hooks"`
 }
 
+// claudeLifecycleHookGroup renders one declared transport row. The activation
+// check in emitClaudeHooks decides whether that row may reach the host.
+func claudeLifecycleHookGroup(event registration.Event) claudeHookGroup {
+	command := claudeHookCommand{Type: "command", Command: fmt.Sprintf(`${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event %s --host-version "${CLAUDE_CODE_VERSION:-unknown}"`, event.NativeName), Timeout: 10}
+	return claudeHookGroup{Matcher: activation.ClaudeCode2_1_261Matcher(event.Kind), Hooks: []claudeHookCommand{command}}
+}
+
 func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
 	manifest := registration.ClaudeCode2_1_261()
 	states, err := activation.ClaudeCode2_1_261()
@@ -183,8 +190,12 @@ func emitClaudeHooks(root string, opts GenerateOptions, manifest registration.Ma
 			return nil, fmt.Errorf("codegen.emitClaudeHooks: generated event %q has no activation entry; add one exhaustive typed decision", event.NativeName)
 		}
 		if state.State == activation.Enabled {
-			command := claudeHookCommand{Type: "command", Command: fmt.Sprintf(`${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event %s --host-version "${CLAUDE_CODE_VERSION:-unknown}"`, event.NativeName), Timeout: 10}
-			config.Hooks[event.NativeName] = []claudeHookGroup{{Matcher: "", Hooks: []claudeHookCommand{command}}}
+			config.Hooks[event.NativeName] = []claudeHookGroup{claudeLifecycleHookGroup(event)}
+		}
+		for index := range support.Events {
+			if support.Events[index].Event == event.NativeName {
+				support.Events[index].Matcher = activation.ClaudeCode2_1_261Matcher(event.Kind)
+			}
 		}
 	}
 	if len(stateByKind) != len(manifest.Events) {

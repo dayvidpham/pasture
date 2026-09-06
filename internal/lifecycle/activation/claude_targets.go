@@ -51,6 +51,10 @@ var claudeTargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventPostToolBatch, captureProof: CaptureProofPostToolBatch, productionProof: ProductionProofPostToolBatch},
 	{event: registration.EventPreCompact, captureProof: CaptureProofPreCompact, productionProof: ProductionProofPreCompact},
 	{event: registration.EventPostCompact, captureProof: CaptureProofPostCompact, productionProof: ProductionProofPostCompact},
+	// Claude Code 2.1.261's embedded FileChanged help specifies filenames in
+	// the current directory, with ".envrc|.env" as its example. The watcher
+	// splits on "|", not a match-all regex. Metadata alone supplies no proof.
+	{event: registration.EventFileChanged, withheldReason: WithheldOutsideTargetSet, matcher: ".envrc|.env"},
 	{event: registration.EventElicitation, withheldReason: WithheldMissingRequestCorrelation},
 	{event: registration.EventElicitationResult, withheldReason: WithheldMissingRequestCorrelation},
 }
@@ -59,6 +63,14 @@ var claudeTargetEventDeclarations = [...]targetEventDeclaration{
 // order. The returned slice is independent of the static declaration table.
 func ClaudeCode2_1_261TargetEvents() []model.ContractEventKind {
 	return targetEvents(claudeTargetEventDeclarations[:])
+}
+
+// ClaudeCode2_1_261Matcher returns the host matcher declared for an event.
+// An undeclared matcher is empty, preserving the host's default behaviour.
+// Matcher metadata does not select or enable an event.
+func ClaudeCode2_1_261Matcher(event model.ContractEventKind) string {
+	declaration, _ := targetDeclaration(claudeTargetEventDeclarations[:], event)
+	return declaration.matcher
 }
 
 // ClaudeCode2_1_261 returns a fresh exhaustive activation manifest. The
