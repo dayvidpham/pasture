@@ -450,6 +450,16 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 		children = append(children, provenance.GovernedChildSpec{TaskID: ids[task.Handle], AssignmentID: childAssignment, Occupant: resolution.occupant, Title: title, Description: title, Type: provenance.TaskTypeTask, Priority: provenance.PriorityMedium, Phase: provenance.PhaseReview})
 		declared = append(declared, declaredEpisode{Task: ids[task.Handle], Assignment: childAssignment, Occupant: resolution.occupant, Role: role})
 	}
+	// The same declarations feed the durable facts and the post-commit index.
+	// If the index write fails, the composed transaction still records every
+	// child assignment for a bounded catch-up reader.
+	for _, episode := range declared {
+		started, err := MapMaterialEvent(AssignmentStartedEvent{Task: episode.Task, Assignment: episode.Assignment, Role: episode.Role, Occupant: episode.Occupant})
+		if err != nil {
+			return CommandResult{}, assignmentErr("allocateReviewBatch", fmt.Sprintf("the start fact for child %q could not be mapped", episode.Task), err.Error(), "repair the declared child task, assignment, role, and occupant before retrying; no batch was submitted")
+		}
+		effects = append(effects, started)
+	}
 	allocator := s.tracker.allocationRunner
 	if allocator == nil {
 		return CommandResult{}, assignmentErr("allocateReviewBatch", "the tracker has no engine-owned composed-batch allocator", "StartReview must allocate every generated review task in the engine-owned transaction", "construct and launch the engine with this tracker before starting a review")
