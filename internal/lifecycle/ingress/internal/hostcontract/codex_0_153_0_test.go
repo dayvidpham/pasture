@@ -1,6 +1,8 @@
 package hostcontract
 
 import (
+	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -29,10 +31,10 @@ import (
 // catalog, taken from the contract itself so a row added later is covered with
 // no edit here, and requires the failure mode to be the one the runtime profile
 // holds. It reaches the profile through the same by-name lookup the rest of the
-// tree uses, not through the constructor the catalog reads, so a catalog that
-// went back to a hand-written arm turns this RED naming the row.
+// tree uses, not through the constructor the catalog reads. A differing arm
+// turns this RED naming the row; a matching literal needs the constructed proof.
 //
-// TWO controls keep it from passing on nothing. WIDTH: the catalog must name the
+// WIDTH: the catalog must name the
 // same rows as the profile it reads from, so a catalog that LOST a row cannot
 // pass by never being asked about it. ARMS: the rows must carry more than one
 // distinct arm, which a constant read could not produce.
@@ -86,15 +88,15 @@ func TestEveryCodexCatalogRowCarriesTheRuntimeFailureMode(t *testing.T) {
 	}
 
 	// ARMS CONTROL, and its role is narrower than an earlier wording claimed.
-	// MEASURED, in all three citation worlds: a read that returns one CONSTANT
+	// A read that returns a CONSTANT
 	// is caught by the row equality above, which fails first and stops the test,
 	// so this control never fires on that break. What it does catch is a
 	// DEGENERATE PROFILE: a profile that gives every Codex row the same arm. The
 	// row equality cannot tell a read from a constant there, because every
 	// answer is the same value, and this control is what says so.
 	//
-	// A control that demanded a DEMOTED gate stood here. It is gone, for two
-	// measured reasons. It would turn RED on the day every Codex row cites host
+	// A control that demanded a DEMOTED gate stood here. It would turn RED when
+	// every Codex row cites host
 	// evidence, and it would then say the case is absent when the case has only
 	// changed direction. And it could never fire on its own: a row is demoted or
 	// promoted only if it is BLOCKING, a non-blocking row always carries the
@@ -169,10 +171,8 @@ func TestTheCodexFailureReadTakesTheEvidenceBoundArmAndNotTheDeclaredOne(t *test
 // catalog with the live profile. A row that carries a HAND-WRITTEN arm passes it
 // whenever the value written by hand equals the value the read would answer, and
 // in a profile where every declared gate cites host evidence that is true of
-// every blocking row at once. MEASURED: with every Codex row cited and every
-// gate row given a hand-written blocking arm, the row equality, the arms
-// control, the divergence subject and the two doc-comment subjects all report
-// ok. Nothing sees it.
+// every blocking row at once. A comparison with the current profile alone
+// does not prove that the catalogue depends on the read.
 //
 // THE CONSTRUCTED CASE. The catalog is built TWICE over the same row names with
 // DIFFERENT arms, and every row must follow the arm it was built over. No
@@ -218,20 +218,15 @@ func TestEveryCodexCatalogRowTakesItsFailureArmFromTheRead(t *testing.T) {
 // must name the event and both files, because the repair is in one of them.
 //
 // It also pins the COST the message states, and the cost is measured from the
-// import graph: "go list -deps ./cmd/..." names this package zero times, with
-// and without the recovery build tag, so no pasture binary links it and a
+// import graph; use "go list -deps ./cmd/..." to inspect that boundary. A
 // refusal here stops code generation and NEVER admission. A Codex hook is still
 // admitted from the committed generated manifest. A message that told the
 // reader the product was down for Codex would send that person to look for an
 // outage that is not there, so the phrase is held here.
 //
-// It ALSO pins that the message names no exclusive caller. FOUR packages build
-// this catalog in their tests, so a driven refusal reddens several packages in
-// one run. While the message called the generator the only caller outside this
-// package's own tests, a reader of one of the other red packages was told by
-// the message itself that it was not a caller, and had to decide whether that
-// red was a second, separate defect. The retired exclusivity phrasings are
-// refused below, so the class cannot come back in a new wording.
+// It also rejects the retired exclusive-caller claims. An import does not
+// prove that a package builds this catalogue; drive the refusal to measure
+// affected packages instead of using the importer population.
 func TestTheCodexFailureReaderRefusesAnEventTheProfileDoesNotDeclare(t *testing.T) {
 	t.Parallel()
 
@@ -269,13 +264,33 @@ func TestTheCodexFailureReaderRefusesAnEventTheProfileDoesNotDeclare(t *testing.
 		"one caller outside its own tests",
 	} {
 		require.NotContainsf(t, message, retired,
-			"the refusal must not name an exclusive caller, and it carries the retired phrase %q. FOUR packages build this catalog in their tests, "+
-				"so a driven refusal reddens several packages in one run; a reader of one of the others is then told by this message that it is not a caller, "+
-				"and goes hunting a cause that is not there. State the cost and say that several packages go red, and count no callers", retired)
+			"the refusal must not name an exclusive caller, and it carries the retired phrase %q. "+
+				"State the shared cause instead of excluding a caller that can reach this refusal", retired)
 	}
 	require.NotContains(t, message, "no Codex hook can be admitted",
 		"the refusal must not claim admission stops: no pasture binary links this package, and the Codex hook path admits with the committed generated manifest, "+
 			"so a reader who believes that phrase looks for an outage that is not there")
 	require.False(t, strings.Contains(message, "invalid"),
 		"the refusal must describe the state it found, not label it")
+}
+
+// TestCodexSourceCitationsCoverTheCatalogue compares the citation table's row
+// names with the catalogue it documents. Source line addresses are citations,
+// not population counts; the row membership is obtained from the constructor.
+func TestCodexSourceCitationsCoverTheCatalogue(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("codex_0_153_0.go")
+	require.NoError(t, err)
+	var documented []string
+	for _, match := range regexp.MustCompile(`(?m)^\s*//\s+(\w+)\s+core/src/hook_runtime\.rs:\d+\s+hooks/src/events/\S+`).FindAllStringSubmatch(string(raw), -1) {
+		documented = append(documented, match[1])
+	}
+	var actual []string
+	for _, event := range Codex0_153_0().Events {
+		actual = append(actual, event.Name)
+	}
+	require.NotEmpty(t, actual, "cannot check source citations against an empty Codex catalogue")
+	sort.Strings(actual)
+	sort.Strings(documented)
+	require.Equal(t, actual, documented, "the Codex source citation table must name exactly the catalogue rows; add a source citation for a missing row or remove a stale row citation")
 }

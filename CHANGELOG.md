@@ -94,12 +94,9 @@
   until their citation exists. No OpenCode event changes.
 - The generated Codex registration manifest states the failure mode the Codex
   runtime profile holds, because the Codex host-contract catalogue now READS
-  that field from the profile instead of declaring it a second time. The
-  manifest used to say that the host refuses a prompt, a tool call or a stop on
-  the pasture exit code for seven Codex events, while every code path ran those
-  events as report-and-continue, for want of a host citation. Nothing a host
-  sees changes: the hook path already read the profile. The catalogue keeps its
-  own gate-or-observation semantic, its mutation modes and its identities.
+  that field from the profile instead of declaring it independently. Nothing a
+  host sees changes: the hook path already read the profile. Other catalogue
+  properties remain independently declared.
 - The three internal failure-mode vocabularies are now one. Two of them folded
   six native behaviours into two, so a generated OpenCode manifest labelled a
   plugin throw as a Claude exit-2 block. OpenCode rows now carry their real
@@ -234,4 +231,3 @@
 
 ### Other
 - Epoch-protocol improvements I1–I10 + Impl-UAT-2 refinements (#6)
-
