@@ -23,6 +23,9 @@ import (
 // authenticClaudeVersion is the recorded host version; the corpus was captured at it.
 var authenticClaudeVersion = registration.ClaudeCode2_1_261().Version
 
+const authenticFileChangedVersion = "2.1.263"
+const authenticFileChangedSource = "cmd/pasture/hook_lifecycle.go:406 -> internal/handlers/capture_sink.go:DirectoryCaptureSink.Record (PASTURE_CAPTURE_DIR)"
+
 type authenticClaudeFixture struct {
 	name    string
 	fixture string
@@ -140,11 +143,10 @@ func TestAuthenticClaude2_1_261ElicitationRemainsUncorrelatedAndWithheld(t *test
 func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 	t.Parallel()
 
-	// The corpus holds two groups. The first eight are the events the
-	// activation table enables today. The fourteen below them are cleared
-	// authentic captures of events that are NOT enabled yet: the bytes are
-	// committed so the enabling work has real evidence to hold its rows
-	// against, and no row is enabled by their presence.
+	// The corpus holds enabled-event captures and accepted captures awaiting
+	// activation, including a separately captured FileChanged at 2.1.263.
+	// Presence on disk does not enable an event. Inventory every JSON file,
+	// regardless of host version, so a newer capture cannot escape privacy checks.
 	events := map[string]string{
 		"post_compact_2_1_261.json":          "PostCompact",
 		"post_tool_batch_2_1_261.json":       "PostToolBatch",
@@ -169,6 +171,7 @@ func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 		"subagent_stop_2_1_261.json":         "SubagentStop",
 		"user_prompt_expansion_2_1_261.json": "UserPromptExpansion",
 		"user_prompt_submit_2_1_261.json":    "UserPromptSubmit",
+		"file_changed_2_1_263.json":          "FileChanged",
 	}
 	// The three controls carry the SessionStart bytes with one sidecar member
 	// changed each; they are part of the closed inventory and are checked by
@@ -178,7 +181,7 @@ func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 		"session_start_2_1_261_origin_authored.json":      {},
 		"session_start_2_1_261_version_out_of_range.json": {},
 	}
-	fixtures, err := filepath.Glob(filepath.Join("testdata", "fixtures", "*_2_1_261*.json"))
+	fixtures, err := filepath.Glob(filepath.Join("testdata", "fixtures", "*.json"))
 	require.NoError(t, err)
 	var payloads, provenanceFiles []string
 	for _, fixture := range fixtures {
@@ -188,7 +191,7 @@ func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 			payloads = append(payloads, fixture)
 		}
 	}
-	require.Len(t, payloads, len(events)+len(controls), "every reviewed payload must be in the closed 2.1.261 inventory")
+	require.Len(t, payloads, len(events)+len(controls), "every reviewed payload must be in the closed Claude inventory")
 	require.Len(t, provenanceFiles, len(events)+len(controls), "every reviewed payload must have exactly one sidecar")
 
 	actualNames := make([]string, 0, len(payloads))
@@ -201,8 +204,12 @@ func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 			require.NoError(t, err)
 		} else {
 			event, expected := events[name]
-			require.True(t, expected, "unexpected 2.1.261 fixture %s", name)
-			raw = readAuthenticClaudeFixture(t, name, event)
+			require.True(t, expected, "unexpected Claude fixture %s", name)
+			if name == "file_changed_2_1_263.json" {
+				raw = readAuthenticClaudeFixtureAt(t, name, event, authenticFileChangedVersion, authenticFileChangedSource)
+			} else {
+				raw = readAuthenticClaudeFixture(t, name, event)
+			}
 		}
 		body := strings.ToLower(string(raw))
 		require.NotContains(t, body, "minttea", "the capturing user's name must not survive clearance in any spelling")
@@ -225,6 +232,11 @@ func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 
 func readAuthenticClaudeFixture(t *testing.T, fixture, expectedEvent string) []byte {
 	t.Helper()
+	return readAuthenticClaudeFixtureAt(t, fixture, expectedEvent, registration.ClaudeCode2_1_261().Version, "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)")
+}
+
+func readAuthenticClaudeFixtureAt(t *testing.T, fixture, expectedEvent, expectedVersion, expectedSource string) []byte {
+	t.Helper()
 	relativeFixture := filepath.Join("fixtures", fixture)
 	raw, err := os.ReadFile(filepath.Join("testdata", relativeFixture))
 	require.NoError(t, err)
@@ -242,8 +254,8 @@ func readAuthenticClaudeFixture(t *testing.T, fixture, expectedEvent string) []b
 	require.NoError(t, json.Unmarshal(provenanceBytes, &sidecar))
 	require.Equal(t, acceptance.OriginAuthenticCapture, sidecar.Origin)
 	require.Equal(t, acceptance.HarnessClaudeCode, sidecar.Harness)
-	require.Equal(t, registration.ClaudeCode2_1_261().Version, sidecar.HarnessVersion, "captured at the recorded host version")
-	require.Equal(t, "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)", sidecar.CaptureSource, "every fixture of this corpus came through the in-binary capture sink")
+	require.Equal(t, expectedVersion, sidecar.HarnessVersion, "captured at the recorded host version")
+	require.Equal(t, expectedSource, sidecar.CaptureSource, "fixture must retain its accepted capture-source provenance")
 	rules, err := acceptance.ParseRedaction(sidecar.Redaction)
 	require.NoError(t, err)
 	require.Equal(t, acceptance.RedactionHomePath, rules[0], "every Claude payload carries the home path, so home-path-v1 is applied first")
@@ -252,6 +264,58 @@ func readAuthenticClaudeFixture(t *testing.T, fixture, expectedEvent string) []b
 	require.Equal(t, digest.FromBytes(raw).String(), sidecar.RawFileDigest)
 	require.NoError(t, sidecar.ValidateFixture("testdata", relativeFixture))
 	return raw
+}
+
+func TestAuthenticClaudeFileChanged2_1_263AcceptedButNotAdmitted(t *testing.T) {
+	t.Parallel()
+	raw := readAuthenticClaudeFixtureAt(t, "file_changed_2_1_263.json", "FileChanged", authenticFileChangedVersion, authenticFileChangedSource)
+	var payload map[string]string
+	require.NoError(t, json.Unmarshal(raw, &payload))
+	require.Len(t, payload, 7)
+	require.Equal(t, "FileChanged", payload["hook_event_name"])
+	require.True(t, strings.HasSuffix(payload["file_path"], "/project/.env"))
+	require.Equal(t, payload["cwd"]+"/.env", payload["file_path"])
+	require.Equal(t, "change", payload["event"])
+
+	// Capture precedes admission. Preserve the authentic event member rather
+	// than removing it to fit the older catalogue. Parse records the supplied
+	// version as provenance; this test makes no version-admission claim.
+	registered := requireRegistrationEvent(t, registration.EventFileChanged)
+	capture := Parse(raw, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
+	require.Equal(t, model.CaptureUnsupportedSchema, capture.Disposition, "the current FileChanged catalogue does not yet admit the authentic payload")
+	require.Equal(t, raw, capture.Delivery.Body)
+	require.Equal(t, digest.FromBytes(raw), capture.Digest)
+	require.Equal(t, authenticFileChangedVersion, capture.Delivery.Envelope.HostVersion)
+	require.Equal(t, registration.EventFileChanged, capture.Delivery.Event)
+
+	entries, err := activation.ClaudeCode2_1_261()
+	require.NoError(t, err)
+	entry, found := activationEntry(entries, registration.EventFileChanged)
+	require.True(t, found)
+	require.Equal(t, activation.Withheld, entry.State)
+	require.Zero(t, entry.CaptureProof)
+	require.Zero(t, entry.ProductionProof)
+
+	sidecarBytes, err := os.ReadFile("testdata/fixtures/file_changed_2_1_263.provenance.json")
+	require.NoError(t, err)
+	var sidecar acceptance.CaptureProvenance
+	require.NoError(t, json.Unmarshal(sidecarBytes, &sidecar))
+	require.Equal(t, "home-path-v1", sidecar.Redaction)
+}
+
+func TestAuthenticClaudeFileChangedCaptureSourceExists(t *testing.T) {
+	t.Parallel()
+	// The line number in the accepted sidecar describes the capture-time
+	// source. Pin the named seams, not that historical line's current position.
+	cli, err := os.ReadFile("../../../../cmd/pasture/hook_lifecycle.go")
+	require.NoError(t, err)
+	require.Contains(t, string(cli), "PASTURE_CAPTURE_DIR")
+	require.Contains(t, string(cli), "handlers.NewDirectoryCaptureSink")
+	require.Contains(t, string(cli), "sink.Record(coords.Harness, coords.Event, coords.HostVersion, raw)")
+	sink, err := os.ReadFile("../../../handlers/capture_sink.go")
+	require.NoError(t, err)
+	require.Contains(t, string(sink), "func (s *DirectoryCaptureSink) Record(")
+	require.Contains(t, string(sink), "file.Write(raw)")
 }
 
 func activationEntry(entries []activation.Entry, event model.ContractEventKind) (activation.Entry, bool) {

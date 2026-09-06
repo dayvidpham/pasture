@@ -474,20 +474,27 @@ func NewWithheldByDecision(event model.ContractEventKind, reason WithheldReason,
 // An enabled row carries both proofs; a withheld row carries its reason, and
 // a reason that records a user decision also carries the committed
 // CLEARANCE.md path where that decision is recorded.
+// An outside-target-set row may declare matcher metadata without selecting
+// the event for activation. Only the Claude emitter reads matcher today.
 type targetEventDeclaration struct {
 	event           model.ContractEventKind
 	captureProof    CaptureProof
 	productionProof ProductionProof
 	withheldReason  WithheldReason
 	clearance       string
+	matcher         string
 }
 
 // targetEvents returns the typed target subset of one table in declaration
-// order, as a slice independent of the static table.
+// order, as a slice independent of the static table. An explicit
+// outside-target-set row carries metadata only and is not selected.
 func targetEvents(declarations []targetEventDeclaration) []model.ContractEventKind {
-	out := make([]model.ContractEventKind, len(declarations))
-	for index, declaration := range declarations {
-		out[index] = declaration.event
+	out := make([]model.ContractEventKind, 0, len(declarations))
+	for _, declaration := range declarations {
+		if declaration.withheldReason == WithheldOutsideTargetSet {
+			continue
+		}
+		out = append(out, declaration.event)
 	}
 	return out
 }
