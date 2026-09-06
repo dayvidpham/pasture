@@ -90,17 +90,39 @@ func recordAssignmentStart(ctx context.Context, db *sql.DB, episode startedEpiso
 	if err := episode.validate("recordAssignmentStart"); err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO pasture_actor_assignment (assignment_id, actor_id, task_id, role, authority_journal_id)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(assignment_id) DO UPDATE SET
-		   actor_id = excluded.actor_id,
-		   task_id = excluded.task_id,
-		   role = excluded.role,
-		   authority_journal_id = excluded.authority_journal_id`,
-		string(episode.Assignment), episode.Actor.String(), episode.Task.String(), episode.Role.String(), int64(episode.Authority),
-	); err != nil {
-		return indexError("recordAssignmentStart", fmt.Sprintf("writing the record for episode %q failed", episode.Assignment), "the database refused the write: "+err.Error())
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return recoveryFault("ordinary writer transaction", err)
+	}
+	defer tx.Rollback()
+	state, err := readAssignmentRecoveryState(ctx, tx)
+	if err != nil {
+		return recoveryFault("ordinary writer state; reopen through OpenTaskTracker", err)
+	}
+	if state.Status == assignmentCoverageDirty {
+		return recoveryFault("ordinary writer", fmt.Errorf("generation %d is dirty; reset required", state.Generation))
+	}
+	existing, found, err := readStartedEpisodeTx(ctx, tx, state.Generation, episode.Assignment)
+	if err != nil {
+		return commitAssignmentDirtyTx(ctx, tx, state, "existing index row cannot be decoded: "+err.Error())
+	}
+	if found && existing == episode {
+		return nil
+	}
+	if found || episode.Authority <= state.Through {
+		return commitAssignmentDirtyTx(ctx, tx, state, "ordinary write conflicts with an existing row or the certified prefix")
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO pasture_actor_assignment
+	 (assignment_id,actor_id,task_id,role,authority_journal_id,generation) VALUES(?,?,?,?,?,?)`,
+		string(episode.Assignment), episode.Actor.String(), episode.Task.String(), episode.Role.String(), int64(episode.Authority), state.Generation)
+	if err != nil {
+		return recoveryFault("ordinary index insert", err)
+	}
+	if err := updateRecoveryStateTx(ctx, tx, state, `state_revision=state_revision+1`); err != nil {
+		return recoveryFault("ordinary writer compare-and-swap", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return recoveryFault("ordinary writer commit", err)
 	}
 	return nil
 }

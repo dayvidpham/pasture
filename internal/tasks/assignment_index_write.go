@@ -15,9 +15,10 @@ import (
 // used for its journal read. Through is the last journal position fully covered
 // by that read, not the maximum of a journal with more unread facts.
 type assignmentIndexPage struct {
-	From    provenance.JournalID
-	Through provenance.JournalID
-	Rows    []startedEpisode
+	From     provenance.JournalID
+	Through  provenance.JournalID
+	Rows     []startedEpisode
+	Expected *assignmentRecoveryState
 }
 
 // IndexStaleError is a storage fault, not a policy decision. A caller can use its
@@ -28,7 +29,7 @@ type IndexStaleError struct{ Cause error }
 func (e *IndexStaleError) Error() string {
 	return "The gate assignment index was not persisted: " + e.Cause.Error() +
 		". Where: internal/tasks/assignment_index_write.go, during bounded catch-up persistence." +
-		" Impact: no partial page or watermark is committed; this storage fault is not a policy denial." +
+		" Impact: this storage fault is not a policy denial; a reported dirty invalidation may be committed, but no rejected page is certified." +
 		" Fix: release other writers or repair the store, then run pasture gate rebuild-index."
 }
 
@@ -81,9 +82,32 @@ func persistAssignmentIndex(ctx context.Context, db *sql.DB, profile timeouts.Pr
 		return err
 	}
 	defer tx.Rollback()
+	state, err := readAssignmentRecoveryState(bounded, tx)
+	if err != nil {
+		return err
+	}
+	if page.Expected != nil && state != *page.Expected {
+		return fmt.Errorf("the captured recovery state changed before persistence")
+	}
+	if state.Status != assignmentCoverageValid || state.Destructive != state.CertifiedDestructive {
+		return fmt.Errorf("index generation is not certified valid; run operator rebuild or reset")
+	}
+	for _, row := range page.Rows {
+		existing, found, err := readStartedEpisodeTx(bounded, tx, state.Generation, row.Assignment)
+		if err != nil {
+			return commitAssignmentDirtyTx(bounded, tx, state, "catch-up found an unreadable index row: "+err.Error())
+		}
+		if found && existing != row {
+			return commitAssignmentDirtyTx(bounded, tx, state, "catch-up conflicts with an existing assignment")
+		}
+	}
 	if len(values) != 0 {
-		_, err = tx.ExecContext(bounded, `INSERT INTO pasture_actor_assignment (assignment_id, actor_id, task_id, role, authority_journal_id) VALUES `+strings.Join(values, ",")+
-			` ON CONFLICT(assignment_id) DO UPDATE SET actor_id=excluded.actor_id, task_id=excluded.task_id, role=excluded.role, authority_journal_id=excluded.authority_journal_id`, args...)
+		// Generation is taken from the guarded state, never supplied by a row.
+		for i := range values {
+			values[i] = strings.TrimSuffix(values[i], ")") + fmt.Sprintf(", %d)", state.Generation)
+		}
+		_, err = tx.ExecContext(bounded, `INSERT INTO pasture_actor_assignment (assignment_id, actor_id, task_id, role, authority_journal_id,generation) VALUES `+strings.Join(values, ",")+
+			` ON CONFLICT(assignment_id) DO NOTHING`, args...)
 		if err != nil {
 			return err
 		}
@@ -100,6 +124,9 @@ func persistAssignmentIndex(ctx context.Context, db *sql.DB, profile timeouts.Pr
 	}
 	if written != 1 {
 		return fmt.Errorf("the stored watermark is absent or does not reach the page start %d", page.From)
+	}
+	if err := updateRecoveryStateTx(bounded, tx, state, `completed_through_jid=max(completed_through_jid,?),state_revision=state_revision+1`, page.Through); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

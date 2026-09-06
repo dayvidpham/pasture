@@ -22,6 +22,7 @@
 package tasks
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	stderrors "errors"
@@ -275,6 +276,12 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 		}
 	}
 
+	if err := ensureAssignmentIndexStateOnOpen(context.Background(), auditDB, prov.Journal()); err != nil {
+		_ = prov.Close()
+		_ = auditDB.Close()
+		_ = trail.Close()
+		return nil, err
+	}
 	tracker := newTrackerImpl(prov, trail, auditDB)
 	tracker.timeoutProfile = cfg.timeouts
 	tracker.storeClock = cfg.clock
