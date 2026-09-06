@@ -139,7 +139,7 @@ func TestContextDisclosureHostResponseByteIdenticalProceed(t *testing.T) {
 
 	preToolUse := readProductionClaudeFixture(t, "pre_tool_use_2_1_261.json", "PreToolUse")
 	bytesBefore := deliverClaudeBuilt(t, binary, dbPath, "PreToolUse", preToolUse)
-	require.JSONEq(t, `{"decision":"proceed"}`, bytesBefore)
+	require.Empty(t, bytesBefore, "evaluated Claude Proceed emits no directive")
 	require.Empty(t, disclosureRows(t, dbPath, disclosurePlanEvidenceKind), "a delivery must never commit a disclosure fact")
 
 	// Record a disclosure so the store now holds disclosure facts.

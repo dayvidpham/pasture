@@ -99,8 +99,8 @@ func registeredLifecycleHarnesses(t *testing.T) []ir.HarnessID {
 // three things over every harness with lifecycle registration rows: a
 // separate report file exists for it; the report names that harness; and
 // every row carries the responseCapability and failureEvidence KEYS, each
-// holding the unset token, the empty string (a genuinely absent source) or a
-// non-empty citation, and never anything else.
+// holding a derived capability, the unset token, the empty string (an absent
+// evidence source) or a non-empty citation, and never anything else.
 func TestEveryLifecycleHarnessHasOneActivationReportInTheSharedShape(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
@@ -133,6 +133,7 @@ func TestEveryLifecycleHarnessHasOneActivationReportInTheSharedShape(t *testing.
 				var text string
 				require.NoError(t, json.Unmarshal(value, &text), "%s row %q: %s is not a string", relative, event, column)
 				switch {
+				case column == "responseCapability" && (text == "none" || text == "deny" || text == "deny-ask"):
 				case text == codegen.ActivationColumnUnset, text == "":
 				case strings.HasPrefix(text, "https://"), strings.HasPrefix(text, "http://"), strings.Contains(text, "/"):
 				default:
@@ -147,9 +148,9 @@ func TestEveryLifecycleHarnessHasOneActivationReportInTheSharedShape(t *testing.
 
 // TestNotYetDerivedColumnsRenderTheUnsetTokenNotTheEmptyString reads the
 // committed reports and pins that a not-yet-derived column is the literal
-// token and never the empty string: every row's responseCapability is unset in
-// this build, and a blocking row without a citation renders unset for its
-// evidence while a non-blocking row renders the empty string.
+// token and never the empty string. Capability is derived for every row;
+// evidence without a supplied citation remains unset for declared gates and
+// absent for non-blocking rows. Runtime is the authority for both columns.
 func TestNotYetDerivedColumnsRenderTheUnsetTokenNotTheEmptyString(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
@@ -167,23 +168,26 @@ func TestNotYetDerivedColumnsRenderTheUnsetTokenNotTheEmptyString(t *testing.T) 
 		require.NoError(t, json.Unmarshal(raw, &report))
 		blockingByEvent := registeredBlockingModes(t, harness)
 		for _, row := range report.Events {
-			require.Equal(t, codegen.ActivationColumnUnset, row.ResponseCapability, "%s row %q: no build derives a response capability yet, so the column must carry the unset token and not the empty string", relative, row.Event)
 			policy, ok := pastureruntime.LookupLifecycleFailure(harness, row.Event)
 			require.True(t, ok, "%s row %q has no pinned profile row", relative, row.Event)
-			blocking, registered := blockingByEvent[row.Event]
+			require.True(t, policy.Response.IsValid())
+			require.Equal(t, policy.Response.String(), row.ResponseCapability, "%s row %q must render the derived capability", relative, row.Event)
+			require.NotEmpty(t, row.ResponseCapability)
+			require.NotEqual(t, codegen.ActivationColumnUnset, row.ResponseCapability)
+			_, registered := blockingByEvent[row.Event]
 			require.True(t, registered, "%s row %q is not a registered event", relative, row.Event)
 			switch {
 			case row.FailureEvidence == codegen.ActivationColumnUnset:
 				unsetEvidence++
 				require.False(t, policy.Evidence.IsPresent(), "%s row %q renders unset but the profile cites %q", relative, row.Event, policy.Evidence.Source)
-				require.NotEqual(t, registration.NonBlocking, blocking, "%s row %q is declared non-blocking, so its evidence source is genuinely absent and must render the empty string, not the unset token", relative, row.Event)
+				require.NotEqual(t, pastureruntime.NonBlocking, policy.Blocking, "%s row %q is declared non-blocking in runtime, so its evidence source is absent", relative, row.Event)
 			case row.FailureEvidence == "":
 				absentEvidence++
-				require.Equal(t, registration.NonBlocking, blocking, "%s row %q is declared blocking, so an empty evidence column claims a source that is genuinely absent when it is only not yet supplied; render the unset token", relative, row.Event)
+				require.Equal(t, pastureruntime.NonBlocking, policy.Blocking, "%s row %q is declared blocking in runtime, so its evidence is unset, not absent", relative, row.Event)
+				require.False(t, policy.Evidence.IsPresent(), "an empty column must not drop a citation")
 			default:
 				citedEvidence++
 				require.Equal(t, policy.Evidence.Source, row.FailureEvidence, "%s row %q cites something the profile does not", relative, row.Event)
-				require.NotEqual(t, registration.NonBlocking, blocking, "%s row %q is declared non-blocking and must not carry a citation", relative, row.Event)
 			}
 		}
 	}

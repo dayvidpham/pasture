@@ -6,105 +6,105 @@
       "event": "command.executed",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "file.edited",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "file.watcher.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "installation.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "installation.update-available",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "lsp.client.diagnostics",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "lsp.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "message.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "message.removed",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "message.part.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "message.part.removed",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "permission.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "permission.replied",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "server.connected",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "server.instance.disposed",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
@@ -112,154 +112,154 @@
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/session.created",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "session.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "session.deleted",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "session.compacted",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "session.diff",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "session.error",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "session.idle",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "session.status",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "todo.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "tui.prompt.append",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "tui.command.execute",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "tui.toast.show",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "pty.created",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "pty.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "pty.exited",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "pty.deleted",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "vcs.branch.updated",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "chat.message",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "chat.params",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "chat.headers",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "permission.ask",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "command.execute.before",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
@@ -267,70 +267,70 @@
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/tool.execute.before",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "shell.env",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "tool.execute.after",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "experimental.chat.messages.transform",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "experimental.chat.system.transform",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "experimental.provider.small_model",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "experimental.session.compacting",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "experimental.compaction.autocontinue",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "experimental.text.complete",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "tool.definition",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     }
   ]

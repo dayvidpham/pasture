@@ -3,6 +3,9 @@ package backend_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,7 +83,7 @@ func TestBuildConsultationRejectsInvalidInputs(t *testing.T) {
 
 func TestZeroDecisionAndHostResponse(t *testing.T) {
 	t.Parallel()
-	if backend.Decision(0).IsValid() || backend.Decision(0).String() != "" || backend.Decision(2).IsValid() {
+	if backend.DecisionKind(0).IsValid() || backend.DecisionKind(0).String() != "" || backend.DecisionKind(255).IsValid() {
 		t.Fatal("invalid Decision accepted")
 	}
 	if !backend.DecisionProceed.IsValid() || backend.DecisionProceed.String() != "proceed" {
@@ -92,6 +95,144 @@ func TestZeroDecisionAndHostResponse(t *testing.T) {
 	}
 	if raw, err := response.MarshalJSON(); err == nil || raw != nil {
 		t.Fatalf("zero HostResponse MarshalJSON = %q, %v", raw, err)
+	}
+}
+
+func TestDecisionFactoriesKeepPolicyAndFaultArmsDisjoint(t *testing.T) {
+	t.Parallel()
+
+	proceedReasons := map[backend.DecisionReason]bool{
+		backend.ReasonLegal:          true,
+		backend.ReasonUnboundSession: true,
+		backend.ReasonStopLoopGuard:  true,
+		backend.ReasonUnenforcedDeny: true,
+	}
+	denyReasons := map[backend.DecisionReason]bool{
+		backend.ReasonUnknownActor:       true,
+		backend.ReasonNoActiveAssignment: true,
+		backend.ReasonRoleForbidsAction:  true,
+		backend.ReasonPhaseForbidsAction: true,
+	}
+
+	for kind := backend.DecisionKindUnset; kind <= backend.DecisionRequireHuman+1; kind++ {
+		for reason := backend.ReasonUnset; reason <= backend.ReasonEvaluationFault+1; reason++ {
+			isContinuation := kind == backend.DecisionProceed && proceedReasons[reason]
+			isRefusal := (kind == backend.DecisionDeny || kind == backend.DecisionRequireHuman) && denyReasons[reason]
+			want := isContinuation || isRefusal
+
+			d, err := backend.NewDecision(kind, reason)
+			if (err == nil) != want || d.IsValid() != want {
+				t.Fatalf("kind=%d reason=%d: valid=%t err=%v want=%t", kind, reason, d.IsValid(), err, want)
+			}
+			if !want {
+				continue
+			}
+			if d.Kind() != kind || d.Reason() != reason {
+				t.Fatal("constructor changed verdict")
+			}
+
+			// Serialize and decode the same constructor-owned decision.
+			raw, err := json.Marshal(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantJSON := `{"decision":"` + kind.String() + `","reason":"` + reason.String() + `"}`
+			if string(raw) != wantJSON {
+				t.Fatalf("decision JSON=%s want=%s", raw, wantJSON)
+			}
+			var decoded backend.Decision
+			if err := json.Unmarshal(raw, &decoded); err != nil || decoded != d {
+				t.Fatalf("decision roundtrip=%#v err=%v", decoded, err)
+			}
+
+			// The host port must preserve the evaluated value and its reason.
+			r, err := backend.NewHostResponse(d)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, ok := r.Value()
+			if !ok || value != d || r.IsEvaluationFault() || r.Reason() != reason || r.Decision() != kind {
+				t.Fatal("host response lost evaluated identity")
+			}
+		}
+	}
+
+	// A failed evaluation must not become an evaluated policy refusal.
+	fault := backend.NewEvaluationFaultResponse()
+	if !fault.IsValid() || !fault.IsEvaluationFault() || fault.Reason() != backend.ReasonEvaluationFault {
+		t.Fatal("fault must carry evaluation-fault, never a policy reason")
+	}
+	if d, ok := fault.Value(); ok || d.IsValid() {
+		t.Fatal("fault manufactured an evaluated decision")
+	}
+	if !strings.Contains(fault.Reason().Message(), "could not evaluate") || !strings.Contains(fault.Reason().Message(), "not a policy denial") {
+		t.Fatal("fault text must distinguish no evaluation from policy denial")
+	}
+
+	// Callers cannot manufacture either value by setting exported fields.
+	for _, value := range []any{backend.Decision{}, backend.HostResponse{}} {
+		if _, err := json.Marshal(value); err == nil {
+			t.Fatalf("zero %T serialized", value)
+		}
+		typ := reflect.TypeOf(value)
+		for i := 0; i < typ.NumField(); i++ {
+			if typ.Field(i).IsExported() {
+				t.Fatalf("%s permits bypassing constructors", typ.Name())
+			}
+		}
+	}
+	if r, err := backend.NewHostResponse(backend.Decision{}); err == nil || r.IsValid() {
+		t.Fatal("zero verdict accepted")
+	}
+}
+
+func TestDecisionRecordRejectsMalformedOrUnevaluatedValues(t *testing.T) {
+	t.Parallel()
+
+	kinds := []string{"", "proceed", "deny", "require-human"}
+	for i, want := range kinds {
+		if got := backend.DecisionKind(i).String(); got != want {
+			t.Fatalf("kind %d=%q want %q", i, got, want)
+		}
+	}
+	reasons := []string{
+		"",
+		"legal",
+		"unbound-session",
+		"stop-loop-guard",
+		"unknown-actor",
+		"no-active-assignment",
+		"role-forbids-action",
+		"phase-forbids-action",
+		"unenforced-deny",
+		"evaluation-fault",
+	}
+	for i, want := range reasons {
+		if got := backend.DecisionReason(i).String(); got != want {
+			t.Fatalf("reason %d=%q want %q", i, got, want)
+		}
+	}
+
+	for _, raw := range []string{
+		`null`,
+		`{}`,
+		`{"decision":"deny"}`,
+		`{"decision":"deny","reason":null}`,
+		`{"decision":"deny","reason":"evaluation-fault"}`,
+		`{"decision":"proceed","reason":"unknown-actor"}`,
+		`{"decision":"deny","reason":"no-active-assignment","extra":true}`,
+		`{"decision":"deny","decision":"deny","reason":"no-active-assignment"}`,
+		`{"decision":"deny","reason":"no-active-assignment"} {}`,
+		`{"decision":2,"reason":"no-active-assignment"}`,
+		`{"reason":"no-active-assignment","decision":"deny"}`,
+	} {
+		d, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonNoActiveAssignment)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := d.UnmarshalJSON([]byte(raw)); err == nil || d.IsValid() {
+			t.Fatalf("invalid record %s retained a decision: %#v, %v", raw, d, err)
+		}
 	}
 }
 

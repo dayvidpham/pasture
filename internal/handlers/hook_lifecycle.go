@@ -155,7 +155,7 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
 		bind:                     claudefrontend.Bind,
-		encode:                   nativeresponse.CanonicalProceed,
+		encode:                   nativeresponse.ClaudeContinuation,
 		refusesUndeclaredMembers: true,
 		matchesFieldNamesExactly: true,
 	},

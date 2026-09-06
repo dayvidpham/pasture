@@ -60,7 +60,7 @@ func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	}
 	base := run("")
 	require.Equal(t, 0, base.ExitCode, base.Stderr)
-	require.Empty(t, base.Stdout, "a Claude proceed is exit 0 with empty standard output")
+	require.Empty(t, base.Stdout, "a withheld Claude observation uses the empty fail-open continuation, not an evaluated decision")
 	require.Contains(t, base.Stderr, "is withheld")
 	require.NotContains(t, base.Stderr, "capture", "without the variable the hook says nothing about capture")
 

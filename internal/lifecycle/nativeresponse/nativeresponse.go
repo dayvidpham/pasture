@@ -11,10 +11,9 @@
 // one shared IR to per-target machine code. The native shape a host expects is
 // therefore a property of the host's mandated extension medium:
 //
-//   - OpenCode and Claude accept the canonical Pasture host response
-//     {"decision":"proceed"} because their transports already carry a typed
-//     object protocol (OpenCode: an in-process TypeScript plugin object return;
-//     Claude: the documented hook JSON). Their bytes are unchanged from M2.
+//   - OpenCode accepts the canonical Pasture proceed response through its
+//     generated plugin. Claude uses empty stdout: no hook directive. The
+//     canonical Pasture "proceed" token is not a documented Claude enum.
 //   - Codex's only lifecycle surface is a command-hook that reads exact bytes on
 //     stdin and interprets a JSON continuation object on stdout. Because the ABI
 //     is a native byte stream, the typed Go pipeline carries all the way to the
@@ -85,17 +84,19 @@ var (
 // so that native bytes never precede persisted evidence.
 func CodexContinuation(response backend.HostResponse) ([]byte, error) {
 	if response.IsValid() {
+		if response.Decision() != backend.DecisionProceed {
+			return nil, fmt.Errorf("nativeresponse.CodexContinuation: this byte adapter accepts only Proceed; no bytes were emitted; use the capability-checked Outcome encoder for a refusal")
+		}
 		return append([]byte(nil), codexProceedContinuation...), nil
 	}
 	return append([]byte(nil), codexObservationContinuation...), nil
 }
 
 // CanonicalProceed returns the canonical Pasture host response bytes a host
-// reads on standard output (Claude and OpenCode): the marshaled host response
+// reads on standard output (OpenCode): the marshaled host response
 // object for a valid gate Proceed decision, or nil (no stdout) for an
-// observation that produced no decision. Claude and OpenCode carry the canonical
-// Pasture host response object; a gate proceed emits it and an observation emits
-// nothing. These bytes are byte-identical to M2.
+// observation that produced no decision. A gate proceed emits the canonical
+// Pasture response and an observation emits nothing.
 //
 // Callers MUST only invoke it after the durable receipt commit has completed,
 // so that native bytes never precede persisted evidence.
@@ -103,11 +104,135 @@ func CanonicalProceed(response backend.HostResponse) ([]byte, error) {
 	if !response.IsValid() {
 		return nil, nil
 	}
+	if response.Decision() != backend.DecisionProceed {
+		return nil, fmt.Errorf("nativeresponse.CanonicalProceed: the OpenCode byte adapter accepts only Proceed; no bytes were emitted; use the capability-checked Outcome encoder for a refusal")
+	}
 	encoded, err := response.MarshalJSON()
 	if err != nil {
 		return nil, fmt.Errorf("nativeresponse.CanonicalProceed: marshal canonical host response: %w", err)
 	}
 	return encoded, nil
+}
+
+// ClaudeContinuation is the current Claude dispatch adapter. Both an evaluated
+// Proceed and an observation emit empty stdout. Refusals cannot pass through a
+// byte-only adapter because their exit status and stderr would be lost.
+func ClaudeContinuation(response backend.HostResponse) ([]byte, error) {
+	if response.IsValid() && response.Decision() != backend.DecisionProceed {
+		return nil, fmt.Errorf("nativeresponse.ClaudeContinuation: a refusal needs exit status and stderr, not a byte-only continuation; no response was emitted; use EncodeClaude and preserve its complete Outcome")
+	}
+	return nil, nil
+}
+
+// UnsupportedResponseError means no source-backed native refusal channel is
+// available. It is not a policy decision. The caller must use its fault path,
+// not emit a guessed JSON object or treat the zero Outcome as exit 0.
+type UnsupportedResponseError struct {
+	Event      string
+	Surface    pastureruntime.HookSurface
+	Capability pastureruntime.ResponseCapability
+	Kind       backend.DecisionKind
+}
+
+func (e *UnsupportedResponseError) Error() string {
+	return fmt.Sprintf("nativeresponse: event %q on %s cannot encode %s with response capability %s; no evidenced native channel is implemented for this response, so nothing was emitted; use the fault continuation and add a source-backed channel with transport proofs before enabling this response", e.Event, e.Surface, e.Kind, e.Capability)
+}
+
+func unsupported(mapping pastureruntime.LifecycleEventMapping, kind backend.DecisionKind) error {
+	return &UnsupportedResponseError{Event: mapping.NativeName(), Surface: mapping.Surface(), Capability: mapping.Response(), Kind: kind}
+}
+
+// nativeDecision validates the mapping and response before any bytes exist.
+// Unenforced policy refusals use the host's Proceed identity. The policy caller
+// must normalize their record to Proceed/ReasonUnenforcedDeny BEFORE commit;
+// an encoder cannot rewrite durable evidence after the decision is committed.
+func nativeDecision(mapping pastureruntime.LifecycleEventMapping, response backend.HostResponse, surfaces ...pastureruntime.HookSurface) (backend.DecisionKind, error) {
+	if !mapping.IsValid() {
+		return backend.DecisionKindUnset, fmt.Errorf("nativeresponse: the lifecycle mapping is zero or not validated; no response was emitted; obtain the exact event from its pinned runtime LifecycleContract.Mapping")
+	}
+	matched := false
+	for _, surface := range surfaces {
+		matched = matched || mapping.Surface() == surface
+	}
+	if !matched {
+		return backend.DecisionKindUnset, fmt.Errorf("nativeresponse: event %q uses surface %s, which does not match this encoder; no bytes were emitted; select the per-harness encoder from the same dispatch row as the mapping", mapping.NativeName(), mapping.Surface())
+	}
+	if !response.IsValid() {
+		if mapping.Semantic() == pastureruntime.SemanticObservation {
+			return backend.DecisionProceed, nil
+		}
+		return backend.DecisionKindUnset, fmt.Errorf("nativeresponse: gate event %q has no constructed response; it was not evaluated, so no decision bytes were emitted; use the fault path or pass a backend.NewHostResponse value", mapping.NativeName())
+	}
+	kind := response.Decision()
+	if response.IsEvaluationFault() && !mapping.Response().AllowsDeny() {
+		return backend.DecisionKindUnset, unsupported(mapping, kind)
+	}
+	if kind == backend.DecisionDeny || kind == backend.DecisionRequireHuman {
+		if !mapping.Response().AllowsDeny() {
+			return backend.DecisionProceed, nil
+		}
+		if kind == backend.DecisionRequireHuman && !mapping.Response().AllowsAsk() {
+			return backend.DecisionDeny, nil
+		}
+	}
+	return kind, nil
+}
+
+// EncodeClaude is a pure Outcome encoder, not the current byte-only dispatch.
+// An evidenced denial uses only the documented exit-2/stderr channel. Call it
+// on the committed, capability-normalized response and preserve all streams.
+func EncodeClaude(mapping pastureruntime.LifecycleEventMapping, response backend.HostResponse) (hostexit.Outcome, error) {
+	kind, err := nativeDecision(mapping, response, pastureruntime.SurfaceClaudeCommandJSON)
+	if err != nil {
+		return hostexit.Outcome{}, err
+	}
+	switch kind {
+	case backend.DecisionProceed:
+		return hostexit.ForDecision(nil, hostexit.ExitContinue, ""), nil
+	case backend.DecisionDeny:
+		// Capability evidence alone cannot substitute for the documented exit
+		// channel: only the effective exit mode may choose exit 2.
+		if !mapping.Failure().BlocksByExitCode() || !mapping.Evidence().IsPresent() {
+			return hostexit.Outcome{}, unsupported(mapping, kind)
+		}
+		return hostexit.ForDecision(nil, hostexit.ExitBlock, response.Reason().Message()), nil
+	default:
+		return hostexit.Outcome{}, unsupported(mapping, kind)
+	}
+}
+
+// EncodeCodex preserves the observation and gate continuation identities.
+// The current source contract does not prove a policy Deny channel. In
+// particular, parser rejection of continue:false is not policy enforcement.
+func EncodeCodex(mapping pastureruntime.LifecycleEventMapping, response backend.HostResponse) (hostexit.Outcome, error) {
+	kind, err := nativeDecision(mapping, response, pastureruntime.SurfaceCodexStrictCommandJSON)
+	if err != nil {
+		return hostexit.Outcome{}, err
+	}
+	if kind != backend.DecisionProceed {
+		return hostexit.Outcome{}, unsupported(mapping, kind)
+	}
+	if mapping.Semantic() == pastureruntime.SemanticObservation {
+		return hostexit.ForDecision(append([]byte(nil), codexObservationContinuation...), hostexit.ExitContinue, ""), nil
+	}
+	return hostexit.ForDecision(append([]byte(nil), codexProceedContinuation...), hostexit.ExitContinue, ""), nil
+}
+
+// EncodeOpenCode preserves the plugin's current accept-Proceed protocol. A
+// typed refusal is unsupported until the plugin accepts it with reason-only
+// text and real transport evidence proves the host reaction.
+func EncodeOpenCode(mapping pastureruntime.LifecycleEventMapping, response backend.HostResponse) (hostexit.Outcome, error) {
+	kind, err := nativeDecision(mapping, response, pastureruntime.SurfaceOpenCodeNamedOutput, pastureruntime.SurfaceOpenCodeCatchAllSSE)
+	if err != nil {
+		return hostexit.Outcome{}, err
+	}
+	if kind != backend.DecisionProceed {
+		return hostexit.Outcome{}, unsupported(mapping, kind)
+	}
+	if mapping.Semantic() == pastureruntime.SemanticObservation {
+		return hostexit.ForDecision(nil, hostexit.ExitContinue, ""), nil
+	}
+	return hostexit.ForDecision(append([]byte(nil), canonicalProceedContinuation...), hostexit.ExitContinue, ""), nil
 }
 
 // # The fault continuation: what "fail open" costs in bytes
@@ -143,8 +268,8 @@ func CanonicalProceed(response backend.HostResponse) ([]byte, error) {
 // because pasture could not name its event.
 
 // canonicalProceedContinuation is the canonical Pasture host response body,
-// byte-identical to backend.HostResponse.MarshalJSON. Claude and OpenCode read
-// this object; the OpenCode generated plugin accepts exactly these bytes.
+// byte-identical to a Proceed backend.HostResponse.MarshalJSON. The OpenCode
+// generated plugin accepts exactly these bytes; Claude emits no directive.
 var canonicalProceedContinuation = []byte(`{"decision":"proceed"}`)
 
 // FaultContinuation returns the continuation a host reads as "you may continue"

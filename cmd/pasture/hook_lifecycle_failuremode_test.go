@@ -337,8 +337,8 @@ func TestLifecycleHookExitFollowsTheEffectiveFailureMode(t *testing.T) {
 
 		gateRun := runLifecycleHook(t, binary, dbPath, "PreToolUse", preToolUse, hookFailClosedEnv+"=1")
 		assert.Equal(t, 0, gateRun.ExitCode, "a healthy gate evaluation must not block the host")
-		assert.Equal(t, `{"decision":"proceed"}`, gateRun.Stdout,
-			"the native continuation is unchanged by the exit rework")
+		assert.Empty(t, gateRun.Stdout,
+			"an evaluated Claude Proceed emits no hook directive")
 		assert.Empty(t, gateRun.Stderr)
 
 		observeRun := runLifecycleHook(t, binary, dbPath, "SessionStart", sessionStart)

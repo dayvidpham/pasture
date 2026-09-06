@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -72,22 +74,24 @@ func (w *erroringWriter) Write(p []byte) (int, error) {
 // has already committed, so a failed stdout write must be reported with an
 // actionable diagnostic and the hook must still exit 0 rather than signalling
 // failure to the host. It drives the real command in-process with a stdout
-// writer that fails on Write, using an enabled Claude PreToolUse gate (which
-// produces native continuation bytes; Codex now enables two events and could
-// reach the write path through the built CLI; we use Claude to keep the test
-// harness-neutral and focused on the write-failure branch).
-// lost when the canonical-only writeLifecycleResponse helper was removed.
+// writer that fails on Write, using the enabled Codex PreToolUse gate. Codex
+// emits a continuation object and reaches this shared write branch. Claude's
+// evaluated Proceed emits empty stdout and must not attempt this write.
 //
 // SERIAL: this test executes the shared rootCmd in-process and sets its
 // streams, so it must not use t.Parallel.
 func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
-	raw := readProductionClaudeFixture(t, "pre_tool_use_2_1_261.json", "PreToolUse")
+	raw := readCodexProductionFixture(t, "pre_tool_use_0_153_0.json", "PreToolUse", activation.CaptureProofCodexPreToolUse)
 
 	failing := &erroringWriter{}
 	var stderr bytes.Buffer
-	rootCmd.SetArgs([]string{databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.261"})
+	rootCmd.SetArgs([]string{
+		databaseFlagName.Argument(), dbPath, "hook", "lifecycle",
+		"--harness", "codex", "--event", "PreToolUse",
+		"--host-version", registration.Codex0_153_0().Version,
+	})
 	rootCmd.SetIn(bytes.NewReader(raw))
 	rootCmd.SetOut(failing)
 	rootCmd.SetErr(&stderr)

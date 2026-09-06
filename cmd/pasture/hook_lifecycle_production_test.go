@@ -384,6 +384,39 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	require.Equal(t, 1, changed.ProcessState.ExitCode())
 }
 
+func TestEvaluatedClaudeProceedHasEmptyStdoutAndUnchangedConsultationV1(t *testing.T) {
+	t.Parallel()
+
+	binary := lifecycleBinary(t)
+	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	raw := readProductionClaudeFixture(t, "pre_tool_use_2_1_261.json", "PreToolUse")
+	command := exec.Command(
+		binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle",
+		"--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.261",
+	)
+	command.Stdin = bytes.NewReader(raw)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	require.NoError(t, err, stderr.String())
+	require.Empty(t, stdout.Bytes(), "an evaluated Claude Proceed is exit 0 with EMPTY stdout, not a non-enum decision object")
+	require.Empty(t, stderr.String())
+
+	// Empty stdout must follow a real, unchanged consultation record.
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+	require.Len(t, consultations, 1, "empty stdout must still follow a real committed consultation")
+	require.Equal(t, "pasture.lifecycle.consultation.v1", string(consultationEvidenceKind))
+	members := decodeJSONObject(t, consultations[0].Payload)
+	require.JSONEq(t, `{"decision":"proceed"}`, string(members["response"]), "the host byte correction must not version or annotate the legacy consultation port")
+}
+
 func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 	t.Parallel()
 
@@ -403,11 +436,7 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 			command.Stderr = &stderr
 			require.NoError(t, command.Run(), stdout.String()+stderr.String())
 			require.Empty(t, stderr.String())
-			if testCase.blocking {
-				require.JSONEq(t, `{"decision":"proceed"}`, stdout.String())
-			} else {
-				require.Empty(t, stdout.String())
-			}
+			require.Empty(t, stdout.String(), "an evaluated Claude Proceed or observation emits no hook directive")
 
 			tracker, err := tasks.OpenTaskTracker(dbPath)
 			require.NoError(t, err)
