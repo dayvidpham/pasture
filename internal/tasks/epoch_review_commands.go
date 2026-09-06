@@ -396,7 +396,7 @@ func (s *epochAssignmentService) StartReview(ctx context.Context, in StartReview
 		}
 		effects = append(effects, authorityEffect)
 	}
-	result, err := s.allocateReviewBatch(ctx, in, resolution, plan, planByHandle, struct {
+	result, err := s.allocateReviewBatch(ctx, in, resolution, reviewBatchChildSlot, plan, planByHandle, struct {
 		Subject ReviewSubjectRef `json:"subject"`
 		Kind    SubjectKind      `json:"kind"`
 	}{in.Subject, kind}, conditions, effects)
@@ -406,7 +406,21 @@ func (s *epochAssignmentService) StartReview(ctx context.Context, in StartReview
 	return ReviewStartResult{CommandResult: result, Round: round, Subject: in.Subject}, nil
 }
 
-func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in StartReviewInput, resolution assignmentResolution, plan ReviewRoundPlan, ids map[string]provenance.TaskID, payload any, conditions []provenance.Condition, effects []provenance.Effect) (CommandResult, error) {
+// reviewBatchChildSlot is the slot every child of a start-review allocation
+// holds: the round task, each axis task, and each finding-group task.
+//
+// IT IS DECLARED HERE, ONCE, at the definition of the batch that creates those
+// children, and the place that records the episodes READS it. It is deliberately
+// not written at the point of recording: the slot decides which actions the
+// occupant may take, so it belongs beside the command that hands the work out,
+// where a reader looking for the policy will find it.
+//
+// Every child of a review carries the reviewer slot, including the round and the
+// finding groups, because each exists to carry the review out and the restraints
+// on a reviewer are meant for whoever does that work.
+const reviewBatchChildSlot = RoleAxisReviewer
+
+func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in StartReviewInput, resolution assignmentResolution, role AssignmentRole, plan ReviewRoundPlan, ids map[string]provenance.TaskID, payload any, conditions []provenance.Condition, effects []provenance.Effect) (CommandResult, error) {
 	request, err := assignmentRequestCommand(MutationStartReview, in.Epoch, payload)
 	if err != nil {
 		return CommandResult{}, fmt.Errorf("encode fused StartReview command: %w", err)
@@ -424,6 +438,7 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 	activityID := provenance.ActivityID{Namespace: "pasture", UUID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("assignment-activity:"+string(in.Meta.OperationID)))}
 	effects = append(effects, provenance.Effect{Sort: provenance.EffectActivityCreate, ResultSlot: reviewActivityResultSlot, ActivityID: activityID, ActivityAgentID: resolution.occupant, ActivityPhase: provenance.PhaseReview, ActivityStage: provenance.StageComplete, ActivityNotes: "assignment-controlled epoch operation"})
 	children := make([]provenance.GovernedChildSpec, 0, len(plan.Tasks))
+	declared := make([]declaredEpisode, 0, len(plan.Tasks))
 	for _, task := range plan.Tasks {
 		title := "review round"
 		if task.Kind == ReviewTaskAxis {
@@ -431,7 +446,9 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 		} else if task.Kind == ReviewTaskGroup {
 			title = "review " + task.Axis.String() + " " + task.Severity.String() + " findings"
 		}
-		children = append(children, provenance.GovernedChildSpec{TaskID: ids[task.Handle], AssignmentID: provenance.AssignmentID(string(in.Meta.OperationID) + "-" + task.Handle), Occupant: resolution.occupant, Title: title, Description: title, Type: provenance.TaskTypeTask, Priority: provenance.PriorityMedium, Phase: provenance.PhaseReview})
+		childAssignment := provenance.AssignmentID(string(in.Meta.OperationID) + "-" + task.Handle)
+		children = append(children, provenance.GovernedChildSpec{TaskID: ids[task.Handle], AssignmentID: childAssignment, Occupant: resolution.occupant, Title: title, Description: title, Type: provenance.TaskTypeTask, Priority: provenance.PriorityMedium, Phase: provenance.PhaseReview})
+		declared = append(declared, declaredEpisode{Task: ids[task.Handle], Assignment: childAssignment, Occupant: resolution.occupant, Role: role})
 	}
 	allocator := s.tracker.allocationRunner
 	if allocator == nil {
@@ -460,6 +477,12 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 			return CommandResult{}, assignmentErr("allocateReviewBatch", fmt.Sprintf("the composed result child %d did not match the requested review binding", i), "StartReview preserves exact child order and identity", "repair the composed batch receipt before retrying")
 		}
 	}
+	// Every child of this batch is a started episode, so every child is
+	// recorded. The slot comes from the definition of the batch, not from here.
+	if err := s.indexComposedBatch(ctx, result, declared); err != nil {
+		return CommandResult{}, err
+	}
+
 	return CommandResult{OperationID: in.Meta.OperationID, Replayed: result.Replayed(), Epoch: in.Epoch, ActivityID: activityID, EventIDs: result.SupplementalEmittedEvents()}, nil
 }
 

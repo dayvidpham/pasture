@@ -155,7 +155,7 @@ func (s *epochAssignmentService) exactCandidateParentAuthority(ctx context.Conte
 	return resolution, nil
 }
 
-func (s *epochAssignmentService) allocateCandidateComposed(ctx context.Context, meta CommandMeta, epoch EpochRootID, resolution assignmentResolution, mutation EpochMutationKind, payload any, candidate provenance.TaskID, assignment provenance.AssignmentID, title string, phase provenance.Phase, effects []provenance.Effect) (CommandResult, error) {
+func (s *epochAssignmentService) allocateCandidateComposed(ctx context.Context, meta CommandMeta, epoch EpochRootID, resolution assignmentResolution, mutation EpochMutationKind, payload any, candidate provenance.TaskID, assignment provenance.AssignmentID, role AssignmentRole, title string, phase provenance.Phase, effects []provenance.Effect) (CommandResult, error) {
 	request, err := assignmentRequestCommand(mutation, epoch, payload)
 	if err != nil {
 		return CommandResult{}, fmt.Errorf("encode fused mutation %d command: %w", mutation, err)
@@ -188,6 +188,13 @@ func (s *epochAssignmentService) allocateCandidateComposed(ctx context.Context, 
 	if len(children) != 1 || children[0].TaskID != candidate || children[0].AssignmentID != assignment || children[0].Occupant != resolution.occupant {
 		return CommandResult{}, assignmentErr("allocateCandidateComposed", "the composed result did not contain the exact requested candidate, assignment, and occupant", "candidate commands return only their caller-stable governed child closure", "repair the composed receipt before retrying")
 	}
+	// The started-episode index is written HERE, after the commit, from the
+	// closure this command just received. The authority id does not exist before
+	// the commit, so this cannot move inside it.
+	if err := s.indexComposedEpisode(ctx, result, candidate, assignment, role, resolution.occupant); err != nil {
+		return CommandResult{}, err
+	}
+
 	needed := map[provenance.ResultSlotID]bool{assignmentCommandResultSlot: false, reviewActivityResultSlot: false, candidateCreatedEventSlot: false, candidateAssignmentEventSlot: false}
 	for _, effect := range effects {
 		if effect.Sort == provenance.EffectEvidence && effect.ResultSlot != assignmentCommandResultSlot {
@@ -214,7 +221,7 @@ func (s *epochAssignmentService) allocateCandidateComposed(ctx context.Context, 
 	return CommandResult{OperationID: meta.OperationID, Replayed: result.Replayed(), Epoch: epoch, ActivityID: activity, EventIDs: result.SupplementalEmittedEvents()}, nil
 }
 
-func (s *epochAssignmentService) createSliceComposed(ctx context.Context, in CreateSliceInput, resolution assignmentResolution, effects []provenance.Effect) (SliceResult, error) {
+func (s *epochAssignmentService) createSliceComposed(ctx context.Context, in CreateSliceInput, resolution assignmentResolution, role AssignmentRole, effects []provenance.Effect) (SliceResult, error) {
 	requestPayload := struct {
 		Plan       provenance.TaskID       `json:"plan"`
 		Assignment provenance.AssignmentID `json:"assignment"`
@@ -264,6 +271,10 @@ func (s *epochAssignmentService) createSliceComposed(ctx context.Context, in Cre
 	if activity == (provenance.ActivityID{}) {
 		return SliceResult{}, assignmentErr("createSliceComposed", "the composed result omitted the activity binding", "CreateSlice results must map the canonical activity slot", "repair the composed receipt before retrying")
 	}
+	if err := s.indexComposedEpisode(ctx, result, slice, childAssignment, role, resolution.occupant); err != nil {
+		return SliceResult{}, err
+	}
+
 	closure := result.Closure()
 	children := closure.Children()
 	if len(children) != 1 || children[0].TaskID != slice || children[0].AssignmentID != childAssignment || !bytes.Equal(request, commandRecordRequest(commandRecord)) {
@@ -278,4 +289,77 @@ func commandRecordRequest(encoded []byte) []byte {
 		return nil
 	}
 	return record.Request
+}
+
+// indexComposedEpisode records the episode a composed allocation just started.
+//
+// It is the ONE call every composed assignment command makes into the index, so
+// the choke point has one entry from this side. The authority id is read from
+// the closure the command already holds; nothing is scanned and nothing is
+// re-read from the journal.
+func (s *epochAssignmentService) indexComposedEpisode(
+	ctx context.Context,
+	result provenance.GovernedAllocationComposedResult,
+	task provenance.TaskID,
+	assignment provenance.AssignmentID,
+	role AssignmentRole,
+	occupant provenance.ActorID,
+) error {
+	authority, err := composedAssignmentAuthority(result.Closure(), task, assignment)
+	if err != nil {
+		return err
+	}
+	return recordAssignmentStart(ctx, s.tracker.auditDB, startedEpisode{
+		Assignment: assignment,
+		Actor:      occupant,
+		Task:       task,
+		Role:       role,
+		Authority:  authority,
+	})
+}
+
+// declaredEpisode is one child of a composed allocation together with the slot
+// its DEFINITION says the occupant holds.
+//
+// The slot travels WITH the child from the place that defines the allocation,
+// because the journal's own child specification has no room for it and because
+// the alternative — deciding it where the index is written — would put the
+// policy in the last place a reader looks for it.
+type declaredEpisode struct {
+	Task       provenance.TaskID
+	Assignment provenance.AssignmentID
+	Occupant   provenance.ActorID
+	Role       AssignmentRole
+}
+
+// indexComposedBatch records every episode a composed BATCH allocation started.
+//
+// A batch allocates many children in one commit, and each one is an episode. It
+// reads each child's authority from the same closure and writes one record per
+// child, so a command that creates several holders is not half recorded.
+func (s *epochAssignmentService) indexComposedBatch(
+	ctx context.Context,
+	result provenance.GovernedAllocationComposedResult,
+	declared []declaredEpisode,
+) error {
+	if len(declared) == 0 {
+		return indexError("indexComposedBatch", "the committed batch declared no episode to record", "a batch allocation always creates at least one child, and each child is an episode, so an empty list means the caller lost them")
+	}
+	closure := result.Closure()
+	for _, child := range declared {
+		authority, err := composedAssignmentAuthority(closure, child.Task, child.Assignment)
+		if err != nil {
+			return err
+		}
+		if err := recordAssignmentStart(ctx, s.tracker.auditDB, startedEpisode{
+			Assignment: child.Assignment,
+			Actor:      child.Occupant,
+			Task:       child.Task,
+			Role:       child.Role,
+			Authority:  authority,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

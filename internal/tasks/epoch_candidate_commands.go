@@ -313,7 +313,7 @@ func replacementAssignmentEvent(candidate provenance.TaskID, assignment provenan
 	return event, nil
 }
 
-func (s *epochAssignmentService) allocateReplacementComposed(ctx context.Context, meta CommandMeta, epoch EpochRootID, resolution assignmentResolution, mutation EpochMutationKind, payload any, candidate provenance.TaskID, assignment provenance.AssignmentID, title string, phase provenance.Phase, conditions []provenance.Condition, referencedDescendants []provenance.TaskID, effects []provenance.Effect) (CommandResult, error) {
+func (s *epochAssignmentService) allocateReplacementComposed(ctx context.Context, meta CommandMeta, epoch EpochRootID, resolution assignmentResolution, mutation EpochMutationKind, payload any, candidate provenance.TaskID, assignment provenance.AssignmentID, role AssignmentRole, title string, phase provenance.Phase, conditions []provenance.Condition, referencedDescendants []provenance.TaskID, effects []provenance.Effect) (CommandResult, error) {
 	if resolution.id == "" || !resolution.role.valid() || resolution.occupant == (provenance.ActorID{}) || resolution.authority <= 0 || resolution.task == (provenance.TaskID{}) {
 		return CommandResult{}, assignmentErr("allocateReplacementComposed", "the resolved replacement authority is incomplete", "governed replacement allocation requires one exact assignment, role, occupant, authority, and parent task", "resolve the command against one active parent assignment before allocating its replacement")
 	}
@@ -368,6 +368,11 @@ func (s *epochAssignmentService) allocateReplacementComposed(ctx context.Context
 	result, err := allocator.RunAllocateComposed(ctx, "pasture-candidate-rework:"+string(meta.OperationID), resolution.authority, composed)
 	if err != nil {
 		return CommandResult{}, fmt.Errorf("replacement mutation %d operation %q failed in its fused governed-allocation transaction; no partial allocation, state, review, graph, audit, or DBOS output committed: %w", mutation, meta.OperationID, err)
+	}
+
+	// The index is written after the commit, from this command's own closure.
+	if err := s.indexComposedEpisode(ctx, result, candidate, assignment, role, resolution.occupant); err != nil {
+		return CommandResult{}, err
 	}
 	children := result.Closure().Children()
 	if len(children) != 1 || children[0].TaskID != candidate || children[0].AssignmentID != assignment || children[0].Occupant != resolution.occupant {
@@ -460,7 +465,7 @@ func (s *epochAssignmentService) CreateSlice(ctx context.Context, in CreateSlice
 		return SliceResult{}, err
 	}
 	effects = append(effects, edgeEffect(in.Plan, slice), sliceBindingEffect, event, assignmentEvent)
-	return s.createSliceComposed(ctx, in, resolution, effects)
+	return s.createSliceComposed(ctx, in, resolution, RoleOwnerResponsibility, effects)
 }
 
 func (s *epochAssignmentService) SetSliceCandidate(ctx context.Context, in SetSliceCandidateInput) (CandidateResult, error) {
@@ -541,7 +546,7 @@ func (s *epochAssignmentService) SetSliceCandidate(ctx context.Context, in SetSl
 		return CandidateResult{}, err
 	}
 	effects := []provenance.Effect{stateEffect, edgeEffect(in.Slice, candidate), bindingEffect, event, assignmentEvent}
-	result, err := s.allocateCandidateComposed(ctx, in.Meta, in.Epoch, resolution, MutationSetSliceCandidate, commandPayload, candidate, childAssignment, "slice implementation candidate", provenance.PhaseWorkerSlices, effects)
+	result, err := s.allocateCandidateComposed(ctx, in.Meta, in.Epoch, resolution, MutationSetSliceCandidate, commandPayload, candidate, childAssignment, RoleOwnerResponsibility, "slice implementation candidate", provenance.PhaseWorkerSlices, effects)
 	if err != nil {
 		return CandidateResult{}, err
 	}
@@ -697,7 +702,7 @@ func (s *epochAssignmentService) ReworkSlice(ctx context.Context, in ReworkSlice
 		return CandidateResult{}, err
 	}
 	effects := []provenance.Effect{oldEffect, invalidatedEffect, roundEffect, newEffect, edgeEffect(in.Slice, newCandidate), replacementBinding, createdEvent, assignmentEvent, event}
-	result, err := s.allocateReplacementComposed(ctx, in.Meta, in.Epoch, resolution, MutationReworkSlice, commandPayload, newCandidate, childAssignment, "replacement slice implementation candidate", provenance.PhaseWorkerSlices, conditions, []provenance.TaskID{oldCandidate}, effects)
+	result, err := s.allocateReplacementComposed(ctx, in.Meta, in.Epoch, resolution, MutationReworkSlice, commandPayload, newCandidate, childAssignment, RoleOwnerResponsibility, "replacement slice implementation candidate", provenance.PhaseWorkerSlices, conditions, []provenance.TaskID{oldCandidate}, effects)
 	if err != nil {
 		return CandidateResult{}, err
 	}
@@ -885,7 +890,7 @@ func (s *epochAssignmentService) CreateIntegrationCandidate(ctx context.Context,
 		return IntegrationCandidateResult{}, err
 	}
 	effects = append(effects, manifestEffect, stateEffect, edgeEffect(in.Plan, candidate), integrationBinding, event, assignmentEvent)
-	result, err := s.allocateCandidateComposed(ctx, in.Meta, in.Epoch, resolution, MutationCreateIntegrationCandidate, commandPayload, candidate, childAssignment, "integration candidate set", provenance.PhaseImplUAT, effects)
+	result, err := s.allocateCandidateComposed(ctx, in.Meta, in.Epoch, resolution, MutationCreateIntegrationCandidate, commandPayload, candidate, childAssignment, RoleGoverningSupervisor, "integration candidate set", provenance.PhaseImplUAT, effects)
 	if err != nil {
 		return IntegrationCandidateResult{}, err
 	}
@@ -1055,7 +1060,7 @@ func (s *epochAssignmentService) ReworkIntegrationCandidate(ctx context.Context,
 		return IntegrationCandidateResult{}, err
 	}
 	effects := []provenance.Effect{oldStateEffect, invalidatedEffect, roundEffect, newManifestEffect, newStateEffect, edgeEffect(plan, newCandidate), replacementBinding, createdEvent, assignmentEvent, event}
-	result, err := s.allocateReplacementComposed(ctx, in.Meta, in.Epoch, resolution, MutationReworkIntegrationCandidate, commandPayload, newCandidate, childAssignment, "replacement integration candidate set", provenance.PhaseImplUAT, conditions, nil, effects)
+	result, err := s.allocateReplacementComposed(ctx, in.Meta, in.Epoch, resolution, MutationReworkIntegrationCandidate, commandPayload, newCandidate, childAssignment, RoleGoverningSupervisor, "replacement integration candidate set", provenance.PhaseImplUAT, conditions, nil, effects)
 	if err != nil {
 		return IntegrationCandidateResult{}, err
 	}

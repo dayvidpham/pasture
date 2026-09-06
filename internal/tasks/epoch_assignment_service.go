@@ -263,6 +263,19 @@ type assignmentStartPayload struct {
 	Assignment string `json:"assignment"`
 	Role       string `json:"role"`
 	Occupant   string `json:"occupant"`
+	// AuthorityJournalID is OPTIONAL and is omitted when it is not known.
+	//
+	// Most writers leave it empty, because the authority of their episode can be
+	// recovered from the journal by walking back from this very event. One
+	// writer cannot: a transfer starts its episode inside an operation that
+	// writes no event of its own, so nothing can be walked back from. That
+	// writer records the id HERE, and the rebuild uses it instead of walking.
+	//
+	// The field is omitempty, so a payload that does not set it is byte for byte
+	// what it was before this field existed. The decoder refuses unknown fields,
+	// so the field has to be declared here for a payload that carries it to be
+	// readable at all.
+	AuthorityJournalID int64 `json:"authorityJournalId,omitempty"`
 }
 
 // resolveAssignment validates the exact active assignment episode.  Assignment
