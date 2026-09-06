@@ -3,7 +3,7 @@ module github.com/dayvidpham/pasture
 go 1.26.0
 
 require (
-	github.com/dayvidpham/provenance v0.0.7
+	github.com/dayvidpham/provenance v0.1.1
 	github.com/dbos-inc/dbos-transact-golang v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/opencontainers/go-digest v1.0.0
