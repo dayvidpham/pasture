@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
@@ -294,24 +295,56 @@ func TestClaudeLifecycleTransportAllowsAuthentic2_1_261FieldShapes(t *testing.T)
 	if err != nil {
 		t.Fatalf("list authentic Claude fixtures: %v", err)
 	}
-	// One authentic fixture per ENABLED Claude event: the corpus is exactly the
-	// events the activation table enables, read from that table.
+	// The Claude fixture corpus holds two kinds of authentic capture, and this
+	// guard reads both from derived populations rather than a typed list.
+	//
+	// Rule A: every fixture names an event the REGISTRATION manifest declares.
+	// Rule B: every ENABLED event has EXACTLY ONE fixture naming it. This is
+	//   stronger than a count of fixtures against a count of enabled events: a
+	//   count is not an identity, so two fixtures for one enabled event and none
+	//   for another passes a count and fails Rule B.
+	// Rule C: every fixture of an ENABLED event carries only members the
+	//   generated transport metadata declares.
+	// Rule D is a SCOPE and not an assertion: a fixture of a registered event
+	//   that is NOT enabled is a cleared capture waiting for its row to be
+	//   enabled, so Rule C does not run over it. It asserts nothing, so it
+	//   cannot go vacuous. An undeclared member on such a fixture is therefore
+	//   GREEN here BY DESIGN, and Rule C catches it on the day the row is
+	//   enabled — which is what forces the registered field list to grow with
+	//   the enabling and not after it.
+	//
+	// The glob ends in _2_1_261.json, so the three sidecar controls
+	// (…_digest_mismatch, …_origin_authored, …_version_out_of_range) do not
+	// match it and must not begin to.
+	registered := registration.ClaudeCode2_1_261()
+	registeredNames := make(map[model.ContractEventKind]string, len(registered.Events))
+	registeredByName := make(map[string]struct{}, len(registered.Events))
+	for _, event := range registered.Entries() {
+		registeredNames[event.Kind] = event.NativeName
+		registeredByName[event.NativeName] = struct{}{}
+	}
+	if len(registeredByName) == 0 {
+		t.Fatal("the Claude registration manifest declares no event, so this walk would check nothing")
+	}
 	entries, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		t.Fatalf("derive the Claude activation manifest: %v", err)
 	}
-	enabled := 0
+	enabledNames := make(map[string]struct{})
 	for _, entry := range entries {
-		if entry.State == activation.Enabled {
-			enabled++
+		if entry.State != activation.Enabled {
+			continue
 		}
+		name, present := registeredNames[entry.Event]
+		if !present {
+			t.Fatalf("the Claude activation manifest enables event kind %v, which the registration manifest does not declare", entry.Event)
+		}
+		enabledNames[name] = struct{}{}
 	}
-	if enabled == 0 {
+	if len(enabledNames) == 0 {
 		t.Fatal("the Claude activation manifest enables no event, so this walk would check nothing")
 	}
-	if len(fixtures) != enabled {
-		t.Fatalf("authentic Claude fixture count = %d, want %d (one per enabled Claude event)", len(fixtures), enabled)
-	}
+	fixturesPerEnabledEvent := make(map[string][]string, len(enabledNames))
 	for _, fixture := range fixtures {
 		raw, err := os.ReadFile(fixture)
 		if err != nil {
@@ -325,15 +358,37 @@ func TestClaudeLifecycleTransportAllowsAuthentic2_1_261FieldShapes(t *testing.T)
 		if err := json.Unmarshal(payload["hook_event_name"], &eventName); err != nil {
 			t.Fatalf("decode hook_event_name in %q: %v", fixture, err)
 		}
-		event, present := events[eventName]
-		if !present {
-			t.Errorf("authentic Claude fixture %q names unknown lifecycle event %q", fixture, eventName)
+		// Rule A.
+		if _, declared := registeredByName[eventName]; !declared {
+			t.Errorf("authentic Claude fixture %q names event %q, which the Claude registration at %s does not declare", fixture, eventName, registered.Version)
 			continue
 		}
+		if _, enabled := enabledNames[eventName]; !enabled {
+			// Rule D: a cleared capture of a registered event that is not
+			// enabled. Rule C does not read it.
+			continue
+		}
+		fixturesPerEnabledEvent[eventName] = append(fixturesPerEnabledEvent[eventName], fixture)
+		event, present := events[eventName]
+		if !present {
+			t.Errorf("authentic Claude fixture %q names enabled event %q, which the generated lifecycle transport metadata does not carry", fixture, eventName)
+			continue
+		}
+		// Rule C.
 		for field := range payload {
 			if !slices.Contains(event.AllowedFields, field) {
 				t.Errorf("authentic Claude fixture %q field %q is absent from generated lifecycle transport metadata for %s", fixture, field, eventName)
 			}
+		}
+	}
+	// Rule B.
+	for name := range enabledNames {
+		switch got := fixturesPerEnabledEvent[name]; len(got) {
+		case 1:
+		case 0:
+			t.Errorf("the enabled Claude event %q has no authentic fixture; every enabled event is proved by exactly one committed capture", name)
+		default:
+			t.Errorf("the enabled Claude event %q has %d authentic fixtures (%v); every enabled event is proved by exactly one committed capture", name, len(got), got)
 		}
 	}
 }
