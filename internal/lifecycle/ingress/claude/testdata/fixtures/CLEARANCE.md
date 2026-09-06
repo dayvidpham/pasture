@@ -831,3 +831,5 @@ On 2026-09-06T07:25:03Z, the user accepted this FileChanged fixture for publicat
 This acceptance does not activate FileChanged in production, approve other
 future captures, or approve production host-version root changes. FileChanged
 remains withheld and absent from the production `hooks/hooks.json` transport.
+
+Publication pull request: https://github.com/dayvidpham/pasture/pull/148
