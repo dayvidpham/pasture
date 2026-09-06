@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/acceptance"
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/internal/hostcontract"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -153,4 +154,82 @@ func codexSidecar(t *testing.T, file string) acceptance.CaptureProvenance {
 	require.Equal(t, registration.Codex0_153_0().Version, sidecar.HarnessVersion, "captured at the recorded host version")
 	require.Equal(t, "internal/lifecycle/ingress/codex/testdata/fixtures/CLEARANCE.md", sidecar.Clearance)
 	return sidecar
+}
+
+// clearedNotEnabledCodexFixtures are the ten cleared Codex captures whose
+// events are registered but not yet enabled: the ingress parser has no
+// binding arm for them, and the activation target set does not name them. The
+// map is the closed set for this state, so the leaf that adds an arm must move
+// a row out of it deliberately rather than let a silent expectation drift.
+var clearedNotEnabledCodexFixtures = map[string]model.ContractEventKind{
+	"user_prompt_submit_0_153_0.json": registration.EventCodexUserPromptSubmit,
+	"permission_request_0_153_0.json": registration.EventCodexPermissionRequest,
+	"post_tool_use_0_153_0.json":      registration.EventCodexPostToolUse,
+	"pre_compact_0_153_0.json":        registration.EventCodexPreCompact,
+	"post_compact_0_153_0.json":       registration.EventCodexPostCompact,
+	"subagent_start_0_153_0.json":     registration.EventCodexSubagentStart,
+	"subagent_stop_0_153_0.json":      registration.EventCodexSubagentStop,
+	"stop_0_153_0.json":               registration.EventCodexStop,
+	"session_end_0_153_0.json":        registration.EventCodexSessionEnd,
+	"interrupt_0_153_0.json":          registration.EventCodexInterrupt,
+}
+
+// TestClearedCodexCapturesAreAdmittedAndCarryNoUnsubstitutedFreeText holds the
+// cleared captures whose events are not yet enabled to what a cleared capture
+// must be, and to what it must NOT yet claim.
+//
+// What it must be: the shared refusals admit the bytes; the production parser
+// retains them byte for byte; the sidecar validates against the committed
+// bytes and names this harness's clearance record by path; the payload carries
+// no refused class; and free-text-v1 has nothing left to substitute, which is
+// the structural signature of a cleared payload and holds on any machine
+// because it names no user.
+//
+// What it must not claim: a committed fixture is evidence of a capture, never
+// of an enabled row. The production parser has no binding arm for these ten
+// events, so it refuses them as an unsupported schema and binds no identity.
+// The leaf that adds an arm moves the event out of the closed map above and
+// gives it a real binding expectation.
+func TestClearedCodexCapturesAreAdmittedAndCarryNoUnsubstitutedFreeText(t *testing.T) {
+	t.Parallel()
+	manifest := registration.Codex0_153_0()
+	require.Len(t, clearedNotEnabledCodexFixtures, 10, "ten Codex events are cleared and not yet enabled")
+	for file, kind := range clearedNotEnabledCodexFixtures {
+		file, kind := file, kind
+		t.Run(file, func(t *testing.T) {
+			t.Parallel()
+			raw, err := os.ReadFile(filepath.Join(codexFixtureDir, file))
+			require.NoError(t, err)
+
+			event := eventByKind(t, manifest, kind)
+			sidecar := codexSidecar(t, file)
+			require.NoError(t, sidecar.ValidateFixture("testdata", "fixtures/"+file), "the committed bytes are the cleared bytes the sidecar records")
+			require.Equal(t, event.NativeName, sidecar.Event, "the sidecar names the native event the host declared")
+
+			require.Equal(t, model.CaptureValid, ingress.Validate(raw).Disposition, "a cleared capture still passes the refusals every harness shares")
+
+			refusals, err := ingress.RefusedFields(raw)
+			require.NoError(t, err)
+			require.Empty(t, refusals, "a refused class is never committed, whatever the substitution")
+
+			// The check is the BYTES, not the flag list. free-text-v1 writes a
+			// placeholder of the same raw length, and a long placeholder is
+			// still classed as free text, so a cleared payload can still flag
+			// a field. What a cleared payload cannot do is CHANGE when the
+			// rule runs again: a surviving free-text value would be rewritten
+			// to a placeholder and the bytes would move. A committed fixture
+			// is therefore a fixed point of the rule, and only a placeholder
+			// is one.
+			substituted, _, err := ingress.SubstituteFreeText(raw)
+			require.NoError(t, err)
+			require.Equal(t, raw, substituted, "free-text-v1 rewrote a committed fixture, so free text survived the clearance")
+
+			require.Empty(t, event.Identities, "a cleared capture is evidence of a capture, never of a proven identity")
+			capture := codex.Parse(raw, event, manifest.Version, model.OccurrenceEnvelopeRef{})
+			require.Equal(t, digest.FromBytes(raw), capture.Digest, "digest must be taken over the exact stdin bytes")
+			require.Equal(t, raw, capture.Delivery.Body, "the retained body is the exact bytes, for an unsupported event as much as a supported one")
+			require.Equal(t, model.CaptureUnsupportedSchema, capture.Disposition, "the parser has no binding arm for this event yet; the leaf that adds one moves this row")
+			require.Empty(t, capture.Delivery.Bindings)
+		})
+	}
 }

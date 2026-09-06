@@ -19,13 +19,24 @@ import (
 // CaptureProvenance shape every cleared capture carries, its digest is the
 // digest of the committed bytes, it names the native event, the recorded host
 // version and the clearance record, and the redaction it lists parses. The
-// corpus is the two events the capture session drove; a third fixture here
-// means the table below must grow deliberately.
+// corpus is the twelve events the capture sessions drove, one fixture per
+// event; a thirteenth fixture here means the table below must grow
+// deliberately.
 func TestClearedFixtureBytesMatchTheirSidecars(t *testing.T) {
 	t.Parallel()
 	expected := map[string]string{
-		"session_start_0_153_0.json": "SessionStart",
-		"pre_tool_use_0_153_0.json":  "PreToolUse",
+		"session_start_0_153_0.json":      "SessionStart",
+		"pre_tool_use_0_153_0.json":       "PreToolUse",
+		"user_prompt_submit_0_153_0.json": "UserPromptSubmit",
+		"permission_request_0_153_0.json": "PermissionRequest",
+		"post_tool_use_0_153_0.json":      "PostToolUse",
+		"pre_compact_0_153_0.json":        "PreCompact",
+		"post_compact_0_153_0.json":       "PostCompact",
+		"subagent_start_0_153_0.json":     "SubagentStart",
+		"subagent_stop_0_153_0.json":      "SubagentStop",
+		"stop_0_153_0.json":               "Stop",
+		"session_end_0_153_0.json":        "SessionEnd",
+		"interrupt_0_153_0.json":          "Interrupt",
 	}
 	fixtures, err := filepath.Glob(filepath.Join(codexFixtureDir, "*.json"))
 	require.NoError(t, err)
