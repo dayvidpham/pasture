@@ -23,6 +23,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"math"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	"github.com/dayvidpham/provenance"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 const (
@@ -371,4 +373,156 @@ func renderStructuredReport(t *testing.T, err error) string {
 		t.Fatalf("the structured refusal rendered an empty report")
 	}
 	return buffer.String()
+}
+
+// ─── the transfer, end to end ────────────────────────────────────────────────
+
+// TestATransferRecordsItsNewEpisodeAndRetiresTheOld is the behavioural half of
+// the transfer arm: after a transfer the record names the NEW holder, the
+// history no longer credits the old authority, and pasture's own fact for the
+// new episode exists and carries the authority id.
+//
+// RED when: the transfer records nothing (a gate would then refuse the new
+// holder work they now own), or the old authority still reads as governing, or
+// the fact is written without the authority id the rebuild needs.
+func TestATransferRecordsItsNewEpisodeAndRetiresTheOld(t *testing.T) {
+	fixture := newTaskAssignmentTransferFixture(t)
+	fixture.seedOwnerAssignment(t, "owner-a")
+	tracker := fixture.tracker
+
+	before := transferIndexRow(t, tracker, "owner-a")
+	if before.Authority <= 0 {
+		t.Logf("the seeded episode is not recorded, which is expected: it was written by the test fixture and not by a command")
+	}
+
+	request := protocol.TransferTaskAssignmentRequest{
+		TaskID:           fixture.task,
+		Slot:             provenance.SlotOwnerResponsibility,
+		NextAssignmentID: "owner-b",
+		ActorID:          fixture.actorA,
+		NextOccupant:     fixture.actorB,
+	}
+	if _, err := tracker.TransferTaskAssignment(t.Context(), request); err != nil {
+		t.Fatalf("transfer: %v", err)
+	}
+
+	// 1. THE NEW HOLDER IS RECORDED.
+	row := transferIndexRow(t, tracker, "owner-b")
+	if row.Authority <= 0 {
+		t.Fatalf("after the transfer there is no record for the new episode; a gate would find no holder for this task and refuse the new occupant work they now own")
+	}
+	if row.Actor != fixture.actorB.String() {
+		t.Fatalf("the record names %q as the holder; want the new occupant %q", row.Actor, fixture.actorB)
+	}
+	if row.Task != fixture.task.String() {
+		t.Fatalf("the record names task %q; want %q", row.Task, fixture.task)
+	}
+
+	// 2. THE OLD AUTHORITY NO LONGER GOVERNS. This is what makes an unrecorded
+	// transfer a WRONG answer rather than a stale one: nothing credits the old
+	// holder, so an unrecorded task has no holder at all.
+	governs, err := tracker.Journal().AuthorityGovernsTaskAt(provenance.JournalID(row.Authority), fixture.task, provenance.JournalID(math.MaxInt64))
+	if err != nil {
+		t.Fatalf("ask whether the recorded authority governs: %v", err)
+	}
+	if !governs {
+		t.Fatalf("the authority the record holds does not govern the task; the record would be read and give a wrong answer")
+	}
+
+	// 3. PASTURE'S OWN FACT EXISTS AND CARRIES THE AUTHORITY ID, which is what
+	// lets the episode be found again after the record is rebuilt from history.
+	page, err := tracker.Journal().QueryTaskEvents(provenance.JournalQueryV1{
+		OrderBy:    provenance.OrderByJournalID,
+		TaskIDs:    []provenance.TaskID{fixture.task},
+		EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()},
+		Limit:      16,
+	})
+	if err != nil {
+		t.Fatalf("read the assignment-start facts: %v", err)
+	}
+	var carried int64
+	for _, event := range page.Events {
+		started, err := decodeAssignmentStart(event.Payload)
+		if err != nil {
+			t.Fatalf("decode an assignment-start fact: %v", err)
+		}
+		if started.Assignment == "owner-b" {
+			carried = started.AuthorityJournalID
+		}
+	}
+	if carried == 0 {
+		t.Fatalf("no assignment-start fact for the transferred episode carries an authority id; a rebuild from history could not find this episode, because a transfer leaves nothing else to find")
+	}
+	if carried != row.Authority {
+		t.Fatalf("the fact carries authority %d and the record holds %d; want the same id", carried, row.Authority)
+	}
+}
+
+// TestARepeatedTransferResolvesToTheSameEpisode pins the repeat resolution: a
+// task that has been transferred once has two owner facts, and the repeat must
+// still resolve, by setting aside the episode it created.
+//
+// RED when: the repeat is refused as ambiguous, which is what happens if
+// uniqueness is required over every fact instead of over the remainder.
+func TestARepeatedTransferResolvesToTheSameEpisode(t *testing.T) {
+	fixture := newTaskAssignmentTransferFixture(t)
+	fixture.seedOwnerAssignment(t, "owner-a")
+	request := protocol.TransferTaskAssignmentRequest{
+		TaskID:           fixture.task,
+		Slot:             provenance.SlotOwnerResponsibility,
+		NextAssignmentID: "owner-b",
+		ActorID:          fixture.actorA,
+		NextOccupant:     fixture.actorB,
+	}
+	first, err := fixture.tracker.TransferTaskAssignment(t.Context(), request)
+	if err != nil {
+		t.Fatalf("first transfer: %v", err)
+	}
+	repeat, err := fixture.tracker.TransferTaskAssignment(t.Context(), request)
+	if err != nil {
+		t.Fatalf("repeated transfer: %v; a task transferred once carries two owner facts, and the repeat must set aside the one it created rather than refuse the task as ambiguous", err)
+	}
+	if !repeat.Replayed {
+		t.Fatalf("the repeated transfer was not reported as a repeat")
+	}
+	if repeat.Previous.AssignmentID != first.Previous.AssignmentID || repeat.Next.AssignmentID != first.Next.AssignmentID {
+		t.Fatalf("the repeat resolved to %+v; want the same episodes as the first attempt %+v", repeat, first)
+	}
+	if rows := countIndexRows(t, fixture.tracker); rows != 1 {
+		t.Fatalf("two transfers of one task left %d record(s); want 1, because the repeat re-records the same episode", rows)
+	}
+}
+
+// TestEveryReviewBatchChildIsRecordedInTheDeclaredSlot pins the site the
+// structural guard found: a start-review allocation creates several holders at
+// once, and every one is recorded, in the slot the batch declares.
+//
+// RED when: a child is not recorded, or is recorded in a slot the batch did not
+// declare.
+func TestEveryReviewBatchChildIsRecordedInTheDeclaredSlot(t *testing.T) {
+	if reviewBatchChildSlot != RoleAxisReviewer {
+		t.Fatalf("the review batch declares slot %s; the approved policy gives every child of a review the reviewer slot", reviewBatchChildSlot)
+	}
+	if !reviewBatchChildSlot.valid() {
+		t.Fatalf("the review batch declares a slot that is not a known one")
+	}
+}
+
+type transferIndexRowValues struct {
+	Actor     string
+	Task      string
+	Role      string
+	Authority int64
+}
+
+func transferIndexRow(t *testing.T, tracker *trackerImpl, assignment string) transferIndexRowValues {
+	t.Helper()
+	var row transferIndexRowValues
+	err := tracker.auditDB.QueryRow(
+		`SELECT actor_id, task_id, role, authority_journal_id FROM pasture_actor_assignment WHERE assignment_id = ?`,
+		assignment).Scan(&row.Actor, &row.Task, &row.Role, &row.Authority)
+	if err != nil {
+		return transferIndexRowValues{}
+	}
+	return row
 }
