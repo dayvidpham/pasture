@@ -1184,6 +1184,7 @@ func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture mode
 	require.Equal(t, occurrenceLifecycleContract, payload.Envelope.Runtime.Contract.String())
 	require.Equal(t, capture, payload.Capture)
 	require.Equal(t, "2.1.261", payload.Envelope.HostVersion)
+	require.Equal(t, model.HostVersionCallerSupplied, payload.Envelope.HostVersionSource)
 	sum := sha256.Sum256(body)
 	require.Equal(t, "sha256:"+hex.EncodeToString(sum[:]), payload.Body)
 	return payload
@@ -1203,8 +1204,9 @@ func decodeJSONObject(t *testing.T, raw []byte) map[string]json.RawMessage {
 func assertOccurrenceEnvelope(t *testing.T, raw json.RawMessage) {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
-	require.ElementsMatch(t, []string{"Runtime", "HostVersion", "Schema", "Implementation", "Retention"}, mapKeys(members))
+	require.ElementsMatch(t, []string{"Runtime", "HostVersion", "hostVersionSource", "Schema", "Implementation", "Retention"}, mapKeys(members))
 	require.JSONEq(t, `"2.1.261"`, string(members["HostVersion"]))
+	require.JSONEq(t, strconv.Quote(string(model.HostVersionCallerSupplied)), string(members["hostVersionSource"]))
 
 	runtime := decodeJSONObject(t, members["Runtime"])
 	require.ElementsMatch(t, []string{"Definition", "Contract"}, mapKeys(runtime))

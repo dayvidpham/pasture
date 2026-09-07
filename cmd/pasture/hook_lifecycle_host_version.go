@@ -60,6 +60,16 @@ func lifecycleHostVersionError(cause error) error {
 	return fmt.Errorf("resolveLifecycleHostVersion (cmd/pasture/hook_lifecycle_host_version.go): host version resolution failed before capture, admission or storage; no occurrence was recorded; check the explicit executable and its --version output, then retry the hook input: %w", cause)
 }
 
+// withLifecycleHostVersionSource adds attribution only when a version has an
+// established source. It does not promote a query into process attestation;
+// legacy and failed-query records omit the member rather than assert a source.
+func withLifecycleHostVersionSource(coords lifecycleCoordinates, fields map[string]any) map[string]any {
+	if coords.HostVersion != "" && coords.HostVersionSource != "" {
+		fields["hostVersionSource"] = coords.HostVersionSource
+	}
+	return fields
+}
+
 type hostVersionRead struct {
 	stdout bool
 	bytes  []byte

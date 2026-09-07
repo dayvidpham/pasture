@@ -341,3 +341,148 @@ func TestLifecycleQueriesExplicitExecutableBeforeDurableReceipt(t *testing.T) {
 	payload := decodeOccurrencePayload(t, rows[0].Payload)
 	require.Equal(t, "2.1.299", payload.Envelope.HostVersion)
 }
+
+func TestLifecycleVersionSourceReachesDurableAndFaultRecords(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	executable := versionExecutable(t, "printf '2.1.299 (Claude Code)\\n'")
+	transport := generatedClaudeLifecycleCommand(t, "SessionStart")
+	valid := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
+	var incompatible map[string]any
+	require.NoError(t, json.Unmarshal(valid, &incompatible))
+	incompatible["session_id"] = true
+	refused, err := json.Marshal(incompatible)
+	require.NoError(t, err)
+	cases := []struct {
+		name   string
+		source model.HostVersionSource
+		raw    []byte
+		valid  bool
+	}{
+		{name: "queried valid", source: model.HostVersionExecutableQuery, raw: valid, valid: true},
+		{name: "queried refused", source: model.HostVersionExecutableQuery, raw: refused},
+		{name: "supplied valid", source: model.HostVersionCallerSupplied, raw: valid, valid: true},
+		{name: "supplied refused", source: model.HostVersionCallerSupplied, raw: refused},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			initializeLifecycleTestDatabase(t, dbPath)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			var command *exec.Cmd
+			if tc.source == model.HostVersionExecutableQuery {
+				command = exec.CommandContext(ctx, "sh", "-c", transport)
+			} else {
+				command = exec.CommandContext(ctx, binary, "hook", "lifecycle", "--harness", "claude-code",
+					"--event", "SessionStart", "--host-version", "2.1.299")
+			}
+			command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
+				"CLAUDE_CODE_EXECPATH="+executable, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=")
+			command.Stdin = bytes.NewReader(tc.raw)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
+
+			err := command.Run()
+
+			require.NoError(t, err, stderr.String())
+			require.Empty(t, stdout.String())
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			defer tracker.Close()
+			rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+			require.Len(t, rows, 1)
+			occurrence := decodeOccurrencePayload(t, rows[0].Payload)
+			require.Equal(t, "2.1.299", occurrence.Envelope.HostVersion)
+			require.Equal(t, tc.source, occurrence.Envelope.HostVersionSource,
+				"the receipt must retain the selected source for valid AND refused captures")
+			require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+			reader, err := tasks.NewLifecycleReader(tracker)
+			require.NoError(t, err)
+			size, err := model.NewPageSize(1)
+			require.NoError(t, err)
+			page, err := reader.Records(context.Background(), model.OccurrenceQuery{
+				Page: model.PageRequest{Size: size},
+			})
+			require.NoError(t, err)
+			require.Len(t, page.Records(), 1)
+			projected := page.Records()[0].Occurrence.Envelope
+			require.Equal(t, "2.1.299", projected.HostVersion)
+			require.Equal(t, tc.source, projected.HostVersionSource)
+			faultPath := filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile)
+			if tc.valid {
+				require.Equal(t, model.CaptureValid, occurrence.Capture)
+				require.Empty(t, stderr.String())
+				_, err := os.Stat(faultPath)
+				require.ErrorIs(t, err, os.ErrNotExist)
+			} else {
+				require.Equal(t, model.CaptureUnsupportedSchema, occurrence.Capture)
+				require.NotEmpty(t, stderr.String())
+				fault, err := os.ReadFile(faultPath)
+				require.NoError(t, err)
+				var record struct {
+					HostVersion       string                  `json:"hostVersion"`
+					HostVersionSource model.HostVersionSource `json:"hostVersionSource"`
+					OutcomeClass      string                  `json:"outcomeClass"`
+				}
+				require.NoError(t, json.Unmarshal(fault, &record))
+				require.Equal(t, "2.1.299", record.HostVersion)
+				require.Equal(t, tc.source, record.HostVersionSource)
+				require.Equal(t, "fault", record.OutcomeClass, "a schema refusal is not a governance Deny")
+			}
+		})
+	}
+}
+
+func TestLifecycleFailedVersionQueryDoesNotAssertSource(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "pasture.db")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "sh", "-c", generatedClaudeLifecycleCommand(t, "SessionStart"))
+	command.Env = append(os.Environ(), "PASTURE_BIN="+lifecycleBinary(t), "PASTURE_DB_PATH="+dbPath,
+		"CLAUDE_CODE_EXECPATH=", "PASTURE_CAPTURE_DIR=")
+	command.Stdin = strings.NewReader("{}")
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err := command.Run()
+
+	require.NoError(t, err, stderr.String())
+	require.Empty(t, stdout.String())
+	require.Contains(t, stderr.String(), "supplied empty")
+	fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+	require.NoError(t, err)
+	record := decodeJSONObject(t, fault)
+	require.JSONEq(t, `""`, string(record["hostVersion"]))
+	require.NotContains(t, record, "hostVersionSource", "a failed query does not establish a version source")
+	_, err = os.Stat(dbPath)
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestLifecycleFaultVersionSourceIsOptional(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		version string
+		source  model.HostVersionSource
+	}{
+		{name: "legacy source unspecified", version: "2.1.261"},
+		{name: "no observed version", source: model.HostVersionExecutableQuery},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := map[string]any{"hostVersion": tc.version, "cause": "original fault"}
+			before, err := json.Marshal(fields)
+			require.NoError(t, err)
+			coords := lifecycleCoordinates{HostVersion: tc.version, HostVersionSource: tc.source}
+
+			after, err := json.Marshal(withLifecycleHostVersionSource(coords, fields))
+
+			require.NoError(t, err)
+			require.Equal(t, before, after, "unspecified provenance must leave the existing fault fields byte-identical")
+		})
+	}
+}
