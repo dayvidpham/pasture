@@ -147,7 +147,9 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 // the work goroutine runs, the one that calls handlers.HookLifecycleNative;
 // the handler's Input taken from the `input` variable that the goroutine
 // initialises from cmd.InOrStdin() immediately before the `if`; and no other
-// read of standard input anywhere in the command's production sources.
+// io.ReadAll of standard input anywhere in the command's production sources.
+// The other ReadAll site must read the bounded private version-query pipes;
+// its function-literal arguments are traced back to os.Pipe, never stdin.
 //
 // With the variable unset the `if` is not entered, so the handler reads
 // standard input itself exactly as before capture existed: the ordering and
@@ -159,7 +161,8 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 // WHAT IT VISITS: every non-test Go source of this command, found by glob
 // and not by a list, so a source added later is read the day it is written.
 // WHAT IT DOES NOT READ: the handler package, whose own read of standard
-// input on the unset path is pinned by its own tests; and whether the bytes
+// input on the unset path is pinned by its own tests; version-query cancellation
+// timing, covered by its runtime process tests; and whether the bytes
 // are identical to a build without capture, which is proven by running the
 // built binary beside a build of the previous release on the same host input
 // and comparing exit code, standard output and standard error byte for byte.
@@ -170,22 +173,40 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 
 	captureCalls := 0
 	stdinReads := 0
+	versionPipeReads := 0
 	for _, name := range sources {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
 		file, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, 0)
 		require.NoError(t, parseErr)
-		// Every call to io.ReadAll in production sources of this command: the
-		// only one allowed is the capture read inside captureHostPayload.
+		// Classify every ReadAll by its actual enclosing function and input
+		// expression. A new file or a new read in a known file is not exempt.
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, isCall := node.(*ast.CallExpr)
 			if !isCall {
 				return true
 			}
 			if sourceOf(call.Fun) == "io.ReadAll" {
-				stdinReads++
-				assert.Equal(t, "hook_lifecycle.go", name, "the only standard-input read on the command side is the capture read")
+				var owner *ast.FuncDecl
+				for _, ancestor := range enclosingChain(file, call) {
+					if function, ok := ancestor.(*ast.FuncDecl); ok {
+						owner = function
+						break
+					}
+				}
+				require.NotNil(t, owner, "every ReadAll site must have a classified production owner: %s", name)
+				require.Len(t, call.Args, 1)
+				switch owner.Name.Name {
+				case "captureHostPayload":
+					stdinReads++
+					assert.Equal(t, "io.LimitReader(input, model.MaxNativePayloadBytes+1)", sourceOf(call.Args[0]))
+				case "queryLifecycleHostVersion":
+					versionPipeReads++
+					assertVersionQueryReadUsesPrivatePipes(t, owner, call)
+				default:
+					t.Errorf("unclassified ReadAll site in %s: %s reads %s", name, owner.Name.Name, sourceOf(call.Args[0]))
+				}
 			}
 			return true
 		})
@@ -222,6 +243,13 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 				require.NotNil(t, guard, "the capture call must be guarded by an if")
 				assert.Contains(t, sourceOf(guard.Cond), "env.CaptureDir", "the guard must read the parsed capture directory; with it unset no capture read may run")
 				require.NotNil(t, literal, "the capture call must sit inside the work goroutine's function literal, so a stalled stdin is bounded by the invocation deadline")
+				launched := false
+				for _, ancestor := range enclosingChain(function.Body, literal) {
+					if launch, ok := ancestor.(*ast.GoStmt); ok && launch.Call.Fun == literal {
+						launched = true
+					}
+				}
+				assert.True(t, launched, "the capture function literal must actually run as a goroutine")
 				callsNative := false
 				ast.Inspect(literal.Body, func(inner ast.Node) bool {
 					innerCall, ok := inner.(*ast.CallExpr)
@@ -250,7 +278,71 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1, captureCalls, "exactly one capture call site exists on the host-facing path")
-	assert.Equal(t, 1, stdinReads, "exactly one io.ReadAll exists in the command's production sources, inside captureHostPayload")
+	assert.Equal(t, 1, stdinReads, "exactly one native stdin capture read exists, inside captureHostPayload")
+	assert.Equal(t, 1, versionPipeReads, "exactly one bounded private-pipe read site exists, shared by version stdout and stderr")
+}
+
+// assertVersionQueryReadUsesPrivatePipes traces the classified read helper from
+// its actual *os.File parameter to both actual os.Pipe allocations and child
+// stream assignments. A helper name alone is not evidence of its input source.
+func assertVersionQueryReadUsesPrivatePipes(t *testing.T, owner *ast.FuncDecl, call *ast.CallExpr) {
+	t.Helper()
+	require.Equal(t, "io.LimitReader(pipe, hostVersionOutputLimit+1)", sourceOf(call.Args[0]),
+		"the query reader must consume its bounded private-pipe parameter, never stdin")
+	var literal *ast.FuncLit
+	for _, ancestor := range enclosingChain(owner.Body, call) {
+		if candidate, ok := ancestor.(*ast.FuncLit); ok {
+			literal = candidate
+			break
+		}
+	}
+	require.NotNil(t, literal)
+	require.Equal(t, "func(pipe *os.File, isStdout bool)", sourceOfNode(literal.Type))
+	boundHelper := false
+	for _, ancestor := range enclosingChain(owner.Body, literal) {
+		if assignment, ok := ancestor.(*ast.AssignStmt); ok && len(assignment.Rhs) == 1 && assignment.Rhs[0] == literal {
+			require.Len(t, assignment.Lhs, 1)
+			require.Equal(t, "read", sourceOf(assignment.Lhs[0]))
+			boundHelper = true
+			break
+		}
+	}
+	require.True(t, boundHelper, "the classified literal must be the helper the actual pipe launches call")
+	bindings := map[string]string{
+		"stdout":         "stdout, stdoutWriter, err := os.Pipe()",
+		"stderr":         "stderr, stderrWriter, err := os.Pipe()",
+		"command.Stdout": "command.Stdout = stdoutWriter",
+		"command.Stderr": "command.Stderr = stderrWriter",
+	}
+	found := make(map[string]int)
+	launches := make(map[string]int)
+	ast.Inspect(owner.Body, func(node ast.Node) bool {
+		if assignment, ok := node.(*ast.AssignStmt); ok {
+			for _, lhs := range assignment.Lhs {
+				name := sourceOf(lhs)
+				assert.NotEqual(t, "pipe", name, "the private pipe parameter must not be reassigned to another input")
+				if want, tracked := bindings[name]; tracked {
+					found[name]++
+					assert.Equal(t, want, sourceOfNode(assignment), "private query pipe binding changed")
+				}
+			}
+		}
+		if invocation, ok := node.(*ast.CallExpr); ok && sourceOf(invocation.Fun) == "read" {
+			require.Len(t, invocation.Args, 2)
+			pipe := sourceOf(invocation.Args[0])
+			launches[pipe]++
+			assert.Contains(t, []string{"stdout", "stderr"}, pipe, "query read helper may not receive stdin or an unclassified file")
+			chain := enclosingChain(owner.Body, invocation)
+			require.NotEmpty(t, chain)
+			_, launched := chain[0].(*ast.GoStmt)
+			assert.True(t, launched, "both pipe reads run under the query's cancellation and collection loop")
+		}
+		return true
+	})
+	for name := range bindings {
+		assert.Equal(t, 1, found[name], "exactly one actual binding for %s; no reassignment to stdin", name)
+	}
+	assert.Equal(t, map[string]int{"stdout": 1, "stderr": 1}, launches)
 }
 
 // sourceOfNode renders any node back to source text.

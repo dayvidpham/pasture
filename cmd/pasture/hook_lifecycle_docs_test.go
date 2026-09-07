@@ -147,13 +147,11 @@ func TestRawHelpRendersBuiltCLI(t *testing.T) {
 	}
 }
 
-// TestNativeHelpGoldenBytesUnchanged is the ZERO-diff guard: the native help
-// surface (hook, hook lifecycle, manifest, list, lineage, context) must stay
-// byte-identical to the baseline golden captured from the pre-change binary.
-// No SLICE-4 edit may appear in any native help byte. When the raw subcommand
-// lands (SLICE-2), the `hook lifecycle` parent golden is a deliberate,
-// reviewable diff — it is regenerated with UPDATE_GOLDEN=1 by the landing
-// wave only.
+// TestNativeHelpGoldenBytesUnchanged compares each native help surface with
+// its committed, exact current contract. A deliberate CLI addition updates only
+// the affected golden in the same change; historical durable wire goldens are
+// separate and do not move with help text. No whitespace normalization hides a
+// flag, layout or wording change.
 // WHAT IT VISITS: the golden files listed below, one per native help surface
 // this command ships.
 // WHAT IT DOES NOT READ: a help surface with no golden. That every surface

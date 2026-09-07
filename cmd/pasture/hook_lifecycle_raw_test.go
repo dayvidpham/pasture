@@ -5,10 +5,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/dayvidpham/pasture/internal/codegen/ir"
-	"github.com/dayvidpham/pasture/internal/handlers"
-	"github.com/dayvidpham/pasture/internal/timeouts"
-	"github.com/stretchr/testify/assert"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -19,11 +15,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // The raw schema identities the binary accepts are the registration contracts,
@@ -286,6 +286,10 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 			// envelope equivalence modulo the origin carrier.
 			nativeEnvelope := decodeJSONObject(t, nativeMembers["envelope"])
 			rawEnvelope := decodeJSONObject(t, rawMembers["envelope"])
+			wantSource, err := json.Marshal(model.HostVersionCallerSupplied)
+			require.NoError(t, err)
+			require.JSONEq(t, string(wantSource), string(nativeEnvelope["hostVersionSource"]))
+			require.JSONEq(t, string(wantSource), string(rawEnvelope["hostVersionSource"]))
 			require.JSONEq(t, `"raw"`, string(rawEnvelope["origin"]), "raw envelope must carry the raw origin")
 			require.NotContains(t, nativeEnvelope, "origin", "native envelope must not carry an origin member")
 			assertMembersModuloOrigin(t, nativeEnvelope, rawEnvelope)
@@ -519,14 +523,15 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			require.Empty(t, previewErr.String(), "valid --dry-run must not report a diagnostic")
 
 			var preview struct {
-				DryRun      bool   `json:"dryRun"`
-				Harness     string `json:"harness"`
-				Event       string `json:"event"`
-				HostVersion string `json:"hostVersion"`
-				Schema      string `json:"schemaVersion"`
-				Origin      string `json:"origin"`
-				Contract    string `json:"contract"`
-				Effects     []struct {
+				DryRun            bool                    `json:"dryRun"`
+				Harness           string                  `json:"harness"`
+				Event             string                  `json:"event"`
+				HostVersion       string                  `json:"hostVersion"`
+				HostVersionSource model.HostVersionSource `json:"hostVersionSource"`
+				Schema            string                  `json:"schemaVersion"`
+				Origin            string                  `json:"origin"`
+				Contract          string                  `json:"contract"`
+				Effects           []struct {
 					Sort          string          `json:"sort"`
 					ResultSlot    string          `json:"resultSlot"`
 					EvidenceKind  string          `json:"evidenceKind"`
@@ -539,7 +544,7 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			}
 			previewMembers := decodeJSONObject(t, previewOut.Bytes())
 			require.ElementsMatch(t,
-				[]string{"dryRun", "harness", "event", "hostVersion", "schemaVersion", "origin", "contract", "effects", "continuation", "exitStatus", "stderr"},
+				[]string{"dryRun", "harness", "event", "hostVersion", "hostVersionSource", "schemaVersion", "origin", "contract", "effects", "continuation", "exitStatus", "stderr"},
 				mapKeys(previewMembers),
 				"preview JSON key set is a public operator contract",
 			)
@@ -548,6 +553,7 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			require.Equal(t, "Claude", preview.Harness)
 			require.Equal(t, tc.event, preview.Event)
 			require.Equal(t, "2.1.261", preview.HostVersion)
+			require.Equal(t, model.HostVersionCallerSupplied, preview.HostVersionSource)
 			require.Equal(t, claudeRawSchema, preview.Schema)
 			require.Equal(t, "raw", preview.Origin, "preview must disclose the raw origin")
 			require.Equal(t, claudeRawSchema, preview.Contract)
@@ -588,6 +594,10 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			require.Len(t, occurrences, 1, "real ingestion must commit one occurrence")
 			members := decodeJSONObject(t, occurrences[0].Payload)
 			require.JSONEq(t, `"`+preview.Contract+`"`, string(members["contract"]), "preview contract must match the committed occurrence")
+			var envelope model.OccurrenceEnvelopeRef
+			require.NoError(t, json.Unmarshal(members["envelope"], &envelope))
+			require.Equal(t, preview.HostVersionSource, envelope.HostVersionSource)
+			require.Equal(t, preview.HostVersion, envelope.HostVersion)
 			interpretedRows := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
 			consultationRows := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
 			committedEffects := append(interpretedRows, consultationRows...)
