@@ -31,6 +31,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -4286,10 +4287,10 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 		// ends were found by enumerating from the source, which is what the
 		// reason had claimed to do. The current routes are below.
 		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
-			"returned an error and committed nothing. Four routes pass it directly — the environment refusal and " +
+			"returned an error and committed nothing. Five routes pass it directly — the environment refusal and " +
 			"the argument refusal, neither of which opens a store, and the flag-parse refusal inside " +
 			"SetFlagErrorFunc, which runs before the command body, plus the multiple-decision input refusal " +
-			"before the work goroutine starts — and it is also the default of the computed " +
+			"and the host-version resolution refusal before the work goroutine starts — and it is also the default of the computed " +
 			"stage below",
 		"hostexit.FaultStageRecordUnknown": "expiry returned no published host Outcome after fence settlement; " +
 			"pre-fence work or a record-only refused capture can still have written non-decision evidence, " +
@@ -4381,15 +4382,17 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	for _, count := range found {
 		total += count
 	}
-	assert.Equal(t, 7, total,
-		"this command has seven fault routes: the panic recovery, the environment refusal, the argument "+
-			"refusal, the multiple-decision input refusal, the deadline fault, the handler error, and the flag-parse refusal inside "+
+	assert.Equal(t, 5, found["hostexit.FaultStageNotRecorded"],
+		"exactly five routes refuse directly before durable work; each must preserve the no-write stage")
+	assert.Equal(t, 8, total,
+		"this command has eight fault routes: the panic recovery, the environment refusal, the argument "+
+			"refusal, the multiple-decision input refusal, the host-version resolution refusal, the deadline fault, the handler error, and the flag-parse refusal inside "+
 			"SetFlagErrorFunc. A route added or removed without updating the judged reasons above leaves "+
 			"the prose describing a command that does not exist, which has happened once already")
 }
 
 // TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded drives, on the
-// built binary, the two fault routes that had no behavioural pin at all.
+// built binary, flag, argument and host-version resolution refusals.
 //
 // WHY THESE TWO. Four of the six routes are measured on host bytes somewhere in
 // this file. The FLAG-PARSE refusal inside SetFlagErrorFunc and the ARGUMENT
@@ -4402,13 +4405,13 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 // NEITHER NEEDS A STORE, A LOCK OR A FIXTURE: an unparseable flag and a
 // positional argument are both refused before the command body runs.
 //
-// MUTATION, AT THE DEFECT SITE: change either route's stage argument to
+// MUTATION, AT THE DEFECT SITE: change any driven route's stage argument to
 // hostexit.FaultStageRecorded. That subtest turns RED on the durable-state
 // assertion.
 //
-// WHAT IT VISITS: the TWO routes that refuse before the command body runs,
-// written out because each is one invocation shape and no source lists them.
-// WHAT IT DOES NOT READ: the other four fault routes, which have their own
+// WHAT IT VISITS: two routes before the command body, plus version resolution
+// before the handler goroutine starts. Each is one invocation shape.
+// WHAT IT DOES NOT READ: the other five fault routes, which have their own
 // behavioural pins; and it does not check that the route SET is complete, which
 // the route sweep reads from the package source.
 func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) {
@@ -4433,12 +4436,19 @@ func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) 
 				"--host-version", "2.1.261", "an-unexpected-argument"},
 			Says: "",
 		},
+		{
+			Name: "the host-version resolution refusal",
+			Args: []string{"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
+				"--host-executable", ""},
+			Says: "host version resolution failed before capture, admission or storage",
+		},
 	} {
 		t.Run(row.Name, func(t *testing.T) {
 			store := t.TempDir()
 			command := exec.Command(binary, append([]string{
 				databaseFlagName.Argument(), filepath.Join(store, "pasture.db")}, row.Args...)...)
 			command.Stdin = bytes.NewReader(nil)
+			command.Env = append(command.Environ(), "PASTURE_DB_PATH="+filepath.Join(store, "pasture.db"))
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
 			command.Stderr = &stderr
@@ -4890,9 +4900,8 @@ func claudePayloadWithAddedMember(t *testing.T) []byte {
 // WHAT IT VISITS: one payload per disposition this build states advice for,
 // on the harness whose parser can produce it, driven through the built
 // binary; the disposition set itself is derived from the advice table.
-// WHAT IT DOES NOT READ: which of a disposition's several CAUSES fired —
-// the parser does not report that — and every harness for every row. It
-// drove ONE harness until a harness-specific contradiction survived it.
+// Cause-level coverage lives in TestLifecycleTypedCaptureDiagnostics. This
+// test retains disposition coverage and the unchanged Codex fallback contract.
 func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	t.Parallel()
 
@@ -4902,6 +4911,7 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	const versionAdvice = "is the version the host actually runs"
 
 	refusals := []struct {
+		Disposition     model.CaptureDisposition
 		Name            string
 		Payload         []byte
 		Says            string
@@ -4933,58 +4943,55 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 		MentionsVersion bool
 	}{
 		{
-			Name:    "a payload that is not well-formed JSON",
-			Payload: []byte(`{"session_id":`),
-			Says:    "the payload is not a JSON object, so no field could be read from it",
-			Tells:   "Send a JSON OBJECT",
+			Name:        "a payload that is not well-formed JSON",
+			Disposition: model.CaptureMalformed,
+			Payload:     []byte(`{"session_id":`),
+			Says:        "the payload is not one complete, well-formed JSON value",
+			Tells:       "Send one complete JSON object",
 		},
 		{
-			Name:    "a payload that is not valid UTF-8",
-			Payload: []byte{'{', '"', 's', '"', ':', '"', 0xff, 0xfe, '"', '}'},
-			Says:    "the payload is not valid UTF-8, so it was never decoded",
-			Tells:   "Send UTF-8",
+			Name:        "a payload that is not valid UTF-8",
+			Disposition: model.CaptureInvalidUTF8,
+			Payload:     []byte{'{', '"', 's', '"', ':', '"', 0xff, 0xfe, '"', '}'},
+			Says:        "the payload is not valid UTF-8, so it was never decoded",
+			Tells:       "Send UTF-8",
 		},
 		{
-			Name:    "a payload that repeats a field",
-			Payload: []byte(`{"session_id":"a","session_id":"b","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
-			Says:    "the payload repeats a field",
-			Tells:   "Send each field once",
+			Name:        "a payload that repeats a field",
+			Disposition: model.CaptureDuplicateField,
+			Payload:     []byte(`{"session_id":"a","session_id":"b","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
+			Says:        "the payload repeats a field",
+			Tells:       "Send each field once",
 		},
 		{
-			Name:            "a payload whose identity fields are renamed",
-			Payload:         []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
-			Says:            "either an identity field is missing, renamed or unusable",
-			Tells:           identityAdvice,
-			NamesIdentities: true,
-			IdentityClause:  "; the identities this event requires are session, tool-call.",
-			MentionsVersion: true,
+			Name:        "a payload whose identity fields are renamed",
+			Disposition: model.CaptureUnsupportedSchema,
+			Payload:     []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
+			Says:        `member "renamed" is not declared by this event's registration`,
+			Tells:       "Compare that added member with the matching host contract",
 		},
 		{
 			// THE ROW THE WRITTEN LIST OMITTED, which is why nothing caught
 			// the inspection result invented for it. It shares a disposition
 			// with the renamed-identity row and differs in the cause that
 			// fired.
-			Name:            "a payload carrying a member the registration does not declare",
-			Payload:         claudePayloadWithAddedMember(t),
-			Says:            "carries a member the registration does not allow",
-			Tells:           identityAdvice,
-			NamesIdentities: true,
-			IdentityClause:  "; the identities this event requires are session, tool-call.",
-			MentionsVersion: true,
+			Name:        "a payload carrying a member the registration does not declare",
+			Disposition: model.CaptureUnsupportedSchema,
+			Payload:     claudePayloadWithAddedMember(t),
+			Says:        "is not declared by this event's registration",
+			Tells:       "Compare that added member with the matching host contract",
 		},
 		{
 			// A SINGLE-IDENTITY EVENT, which no row drove. The singular arm of
 			// the identity clause therefore rendered text nothing had ever
 			// read, and a reviewer restored the retired singular literal with
 			// the whole tree green.
-			Name:            "a renamed identity on an event that requires only one",
-			Event:           "SessionStart",
-			Payload:         []byte(`{"renamed":"s","hook_event_name":"SessionStart"}`),
-			Says:            "either an identity field is missing, renamed or unusable",
-			Tells:           identityAdvice,
-			NamesIdentities: true,
-			IdentityClause:  "; the identity this event requires is session.",
-			MentionsVersion: true,
+			Name:        "a renamed identity on an event that requires only one",
+			Disposition: model.CaptureUnsupportedSchema,
+			Event:       "SessionStart",
+			Payload:     []byte(`{"renamed":"s","hook_event_name":"SessionStart"}`),
+			Says:        `member "renamed" is not declared by this event's registration`,
+			Tells:       "Compare that added member with the matching host contract",
 		},
 		{
 			// THE SAME DISPOSITION ON A LENIENT PARSER. The row above drives it
@@ -4992,45 +4999,37 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			// true; this drives it where one clause is not, which is the case
 			// the single-harness sweep could not see.
 			Name:            "a renamed identity on a parser that ignores extra members but matches names exactly",
+			Disposition:     model.CaptureUnsupportedSchema,
 			Harness:         "codex",
 			Payload:         []byte(`{"renamed":"s","hook_event_name":"PreToolUse"}`),
-			Says:            "an identity field is missing, renamed or unusable",
+			Says:            "the adapter supplied no specific cause",
 			Tells:           identityAdvice,
 			NamesIdentities: true,
 			IdentityClause:  "; the identities this event requires are session, turn, tool-call.",
 			MentionsVersion: true,
 		},
 		{
-			Name:            "a renamed identity on a parser that decodes into a struct",
-			Harness:         "opencode",
-			Event:           "tool.execute.before",
-			Payload:         []byte(`{"input":{"renamed":"s","callID":"c","tool":"read"},"output":{"args":{}}}`),
-			Says:            "an identity field is missing or unusable",
-			Tells:           identityAdvice,
-			NamesIdentities: true,
-			IdentityClause:  "; the identities this event requires are session, tool-call.",
-			MentionsVersion: true,
+			Name:        "a renamed identity on a parser that decodes into a struct",
+			Disposition: model.CaptureUnsupportedSchema,
+			Harness:     "opencode",
+			Event:       "tool.execute.before",
+			Payload:     []byte(`{"input":{"renamed":"s","callID":"c","tool":"read"},"output":{"args":{}}}`),
+			Says:        `required member "input.sessionID" is absent`,
+			Tells:       `Supply "input.sessionID" as a JSON string at that path`,
 		},
 		{
-			Name:            "a payload that declares a different event",
-			Payload:         []byte(`{"session_id":"s","hook_event_name":"SessionEnd","tool_name":"R","tool_input":{}}`),
-			Says:            "the payload does not report this event — the field is absent, unreadable, or names a different event",
-			Tells:           "Invoke the hook with the event the payload actually describes",
-			MentionsVersion: true,
+			Name:        "a payload that declares a different event",
+			Disposition: model.CaptureEventMismatch,
+			Payload:     []byte(`{"session_id":"s","hook_event_name":"SessionEnd","tool_name":"R","tool_input":{}}`),
+			Says:        `member "hook_event_name" does not name the invoked event`,
+			Tells:       "Send the payload for the command's event",
 		},
 	}
 	// EVERY DISPOSITION THIS BUILD STATES ADVICE FOR MUST BE DRIVEN HERE,
 	// derived from the production advice table rather than trusted to a list.
 	//
-	// THE LIMIT, STATED, BECAUSE IT IS THE ONE THAT BIT. This derives
-	// DISPOSITIONS, and the population that matters is CAUSES. One disposition
-	// carries three of them, and the row that exposed an inspection result
-	// invented for a step that never ran was missing from the written list
-	// while its disposition was already covered — so this derivation would NOT
-	// have caught that omission either. Enumerating causes needs the classifier
-	// split, which lives in the ingress and the occurrence model and is not
-	// this slice's to make. What this closes is a disposition added with no
-	// payload driving it at all.
+	// Compare durable dispositions, not prose. Typed causes refine the reason
+	// without adding new numeric dispositions or new durable fields.
 	// THE DRIVEN SET, NOT ITS CARDINALITY. The sentence said EVERY DISPOSITION
 	// must be driven and the check compared COUNTS: replacing the
 	// event-mismatch row with a second renamed-identity row kept the total and
@@ -5041,12 +5040,10 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 		// reason is composed from the parser that refused, so asking against a
 		// single text made a composed disposition look undriven.
 		driven := false
-		for _, reason := range handlers.CaptureDispositionReasons(disposition) {
-			for _, row := range refusals {
-				if strings.Contains(reason, row.Says) {
-					driven = true
-					break
-				}
+		for _, row := range refusals {
+			if row.Disposition == disposition {
+				driven = true
+				break
 			}
 		}
 		assert.True(t, driven,
@@ -5077,6 +5074,7 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			}
 			run := runLifecycleHookOn(t, binary, database,
 				harness, event, version, row.Payload)
+			assertDiagnosticCaptureRecord(t, database, row.Payload, row.Disposition)
 
 			// THE REASON AND THE REMEDY MUST NOT DISAGREE. One offered an
 			// added member as a possible CAUSE while the other, three clauses
@@ -5225,11 +5223,8 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 // THE CONTROL IS PART OF THE TEST, because the claim is that ONE ADDED MEMBER
 // is the whole difference: the same payload without it binds and says nothing.
 //
-// AN HONEST LIMIT, STATED. This refusal shares ONE disposition with the missing
-// and unusable identity cases, so the sentence names all three causes rather
-// than the one that fired. It is true of every payload that reaches it and it
-// does not DISCRIMINATE. Telling them apart needs a new disposition in the
-// model enum and a parser that returns it, which are outside this slice's files.
+// The transient cause now identifies the added member without changing the
+// durable disposition or claiming that the identity loop ran.
 //
 // MUTATION: narrow the reason back to the identity half. This test turns RED on
 // the added-member clause.
@@ -5268,11 +5263,11 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 		require.Contains(t, run.Stderr, "WAS NOT EVALUATED",
 			"this subtest must reach the refusal; if it does not, nothing below is about it")
 
-		assert.Contains(t, run.Stderr, "carries a member the registration does not allow",
+		assert.Contains(t, run.Stderr, `member "a_field_this_build_does_not_declare" is not declared by this event's registration`,
 			"the reason must name the cause that actually fired. This payload carries EVERY identity "+
 				"field under the EXACT declared name, so a sentence about missing or renamed fields "+
 				"is false of it in both halves")
-		assert.Contains(t, run.Stderr, "must carry no member the registration does not declare",
+		assert.Contains(t, run.Stderr, "Compare that added member with the matching host contract",
 			"and the instruction must tell the reader to look in that direction too, or they check "+
 				"field names that are already correct")
 		assert.NotContains(t, run.Stderr, "does not carry the identity fields this event's registration declares",
@@ -6450,8 +6445,7 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 // variants, and on a payload that reaches the schema refusal. The payload rows
 // are written here and PINNED to the derived set, so a harness added to the
 // product fails by name until it has a row.
-// WHAT IT DOES NOT READ: which of a disposition's several causes fired, which
-// the parser does not report.
+// Typed adapters name the actual cause; Codex retains the disposition fallback.
 //
 // MUTATION: set refusesUndeclaredMembers or matchesFieldNamesExactly true on a
 // lenient harness's dispatch row, or make a lenient parser strict while its row
@@ -6528,7 +6522,7 @@ func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 			added := drive(withTopLevelMember(t, row.Valid, "a_member_this_build_does_not_declare", `"x"`))
 			refusesUndeclared := added.Stderr != ""
 			if refusesUndeclared {
-				require.Contains(t, added.Stderr, "Compare the payload with this build's",
+				require.Contains(t, added.Stderr, "is not declared by this event's registration",
 					"the added member was refused by something other than the schema check, so nothing "+
 						"below is about this parser's member rule\nstderr: %s", added.Stderr)
 			}
@@ -6537,12 +6531,29 @@ func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 			recased := drive(withMemberRecased(t, row.Valid, row.Identity))
 			matchesExactly := recased.Stderr != ""
 			if matchesExactly {
-				require.Contains(t, recased.Stderr, "Compare the payload with this build's",
+				require.Contains(t, recased.Stderr, "WAS NOT EVALUATED",
 					"the re-cased identity was refused by something other than the schema check\nstderr: %s",
 					recased.Stderr)
 			}
 
 			run := drive(row.Renamed)
+			if harness == "claude-code" {
+				require.True(t, refusesUndeclared)
+				require.True(t, matchesExactly)
+				assert.Contains(t, run.Stderr, `member "renamed" is not declared by this event's registration`)
+				assert.Contains(t, run.Stderr, "Compare that added member with the matching host contract")
+				assert.NotContains(t, run.Stderr, "identity field is missing")
+				return
+			}
+			if harness == "opencode" {
+				require.False(t, refusesUndeclared, "OpenCode must keep its ignored-extra-member contract")
+				require.False(t, matchesExactly, "OpenCode must keep its struct-match contract")
+				assert.Contains(t, run.Stderr, `required member "input.sessionID" is absent`)
+				assert.Contains(t, run.Stderr, `Supply "input.sessionID" as a JSON string at that path`)
+				assert.NotContains(t, run.Stderr, "is not declared by this event's registration")
+				assert.NotContains(t, run.Stderr, "spelled exactly")
+				return
+			}
 			require.Contains(t, run.Stderr, "Compare the payload with this build's",
 				"this subtest must reach the schema refusal, or nothing below is about it")
 

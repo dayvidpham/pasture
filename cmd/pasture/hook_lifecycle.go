@@ -54,13 +54,14 @@ const lifecycleFaultRecordFile = "lifecycle-faults.jsonl"
 // is what keeps that distinction readable after the fact.
 const lifecycleFaultOutcomeClass = "fault"
 
-// lifecycleCoordinates are the three host-supplied coordinates of one hook
-// invocation. They are read before anything else, because the declared failure
-// mode of the event decides what every later failure tells the host.
+// lifecycleCoordinates identify one hook invocation. Harness and event select
+// the fault policy before work starts. Version resolution then supplies its
+// observation and source before the work goroutine can read either value.
 type lifecycleCoordinates struct {
-	Harness     ir.HarnessID
-	Event       string
-	HostVersion string
+	Harness           ir.HarnessID
+	Event             string
+	HostVersion       string
+	HostVersionSource model.HostVersionSource
 }
 
 // lifecycleFailurePolicy resolves the declared failure behaviour of the named
@@ -312,6 +313,21 @@ func lifecycleOutcome(
 	if len(decisions) == 1 {
 		decision = &decisions[0]
 	}
+	// Resolve before starting the worker. Capture, admission, the deadline arm
+	// and panic recovery all read this one observed coordinate, never a value
+	// concurrently updated by the work goroutine.
+	hostVersion, versionErr := resolveLifecycleHostVersion(ctx, cmd, coords)
+	coords.HostVersion = hostVersion
+	if versionErr != nil {
+		return lifecycleFault(cmd, coords, failure, policy, continuation,
+			hostexit.FaultStageNotRecorded, versionErr)
+	}
+	switch {
+	case cmd.Flags().Changed("host-executable"):
+		coords.HostVersionSource = model.HostVersionExecutableQuery
+	case cmd.Flags().Changed("host-version") && strings.TrimSpace(hostVersion) != "":
+		coords.HostVersionSource = model.HostVersionCallerSupplied
+	}
 
 	// HookLifecycleNative returns the complete committed Outcome. The command
 	// shares its fence so expiry cannot choose Continue during commit return.
@@ -347,8 +363,10 @@ func lifecycleOutcome(
 		}
 		committed, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
 			DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
-			HostVersion: coords.HostVersion, Input: input,
-			Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+			HostVersion:       coords.HostVersion,
+			HostVersionSource: coords.HostVersionSource,
+			Input:             input,
+			Clock:             lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 			Barrier:    barrier,
 			ActorClaim: tasks.ActorClaim(env.ActorClaim),
 			Decision:   decision,
@@ -844,7 +862,7 @@ func recordLifecycleFault(
 		return
 	}
 
-	line, err := json.Marshal(map[string]any{
+	line, err := json.Marshal(withLifecycleHostVersionSource(coords, map[string]any{
 		"recordedAt": time.Now().UTC().Format(time.RFC3339Nano),
 		// outcomeClass is always "fault". It is written on every line so the
 		// file cannot be mistaken for a record of decisions: emitting the
@@ -888,7 +906,7 @@ func recordLifecycleFault(
 		// bytes were emitted WITHOUT an evaluation.
 		"hostContinuation": string(outcome.Stdout),
 		"cause":            recordedCause(cause),
-	})
+	}))
 	if err != nil {
 		// UNREACHABLE BY CONSTRUCTION: every member of the map above is a
 		// string, a []string or a value composed of them, and encoding/json
@@ -1107,7 +1125,8 @@ func init() {
 	flags := hookLifecycleCmd.Flags()
 	flags.String("harness", "", "Native harness whose payload is on standard input (required)")
 	flags.String("event", "", "Native event this generated hook is registered for (required)")
-	flags.String("host-version", "", "Observed native host version to retain with this occurrence (required)")
+	flags.String("host-version", "", "Observed native host version to retain (mutually exclusive with --host-executable)")
+	flags.String("host-executable", "", "Absolute Claude executable to query with --version inside the hook budget; Claude only, mutually exclusive with --host-version")
 	hookLifecycleCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if cmd != hookLifecycleCmd {
 			return err

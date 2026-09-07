@@ -833,3 +833,19 @@ future captures, or approve production host-version root changes. FileChanged
 remains withheld and absent from the production `hooks/hooks.json` transport.
 
 Publication pull request: https://github.com/dayvidpham/pasture/pull/148
+
+## Current transport digest: explicit executable version query
+
+The current generated `hooks/hooks.json` has SHA-256
+`7620c0e06111e52def05d513a9e7fe5a4393a4a9df3ee4904886c957dbb208de`.
+It supplies the observed, undocumented `CLAUDE_CODE_EXECPATH` as an executable
+path. The lifecycle CLI queries that executable with `--version` inside the
+invocation budget, before capture naming, admission or storage. Missing or
+unusable executable identity is a fault, not a version inferred from a path,
+an environment version fallback, or the generation pin.
+
+This digest identifies the current transport only. That transport did not
+participate in any historical capture recorded above. The historical transport
+and capture-kit digests, fixture bytes, provenance sidecars and acceptance text
+are unchanged. No new host session or capture is asserted by this addendum.
+The enabled set remains unchanged; FileChanged is not activated by this change.
