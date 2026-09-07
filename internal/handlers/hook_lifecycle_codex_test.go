@@ -16,6 +16,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -112,7 +113,11 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			semantic:     runtime.SemanticGateConsultation,
 			wantResponse: true,
 			wantNative:   []byte(`{"continue":true}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.consultation.v1"},
+			wantEvidence: []provenance.EvidenceKind{
+				"pasture.lifecycle.occurrence.v1",
+				"pasture.lifecycle.interpreted.v2",
+				receipt.CurrentConsultationEvidenceKind(),
+			},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession:  "session_id",
 				runtime.IdentityTurn:     "turn_id",
@@ -163,7 +168,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			}
 			if tc.wantResponse {
 				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v2")
-				consultation := queryOneEvidence(t, tracker, "pasture.lifecycle.consultation.v1")
+				consultation := queryOneEvidence(t, tracker, receipt.CurrentConsultationEvidenceKind())
 				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID, "one durable operation must group interpreted and consultation evidence")
 				require.Less(t, interpreted.JournalID, consultation.JournalID, "interpreted evidence must precede consultation evidence in the committed operation")
 			}

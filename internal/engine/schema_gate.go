@@ -201,7 +201,7 @@ func awaitSupportedDurableSchema(
 	first, err := probe(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
-			return durableSchemaWaitCancelledError(where, dbPath, err, durableLayoutObservation{})
+			return durableSchemaWaitCancelledError(where, dbPath, errors.Join(ctx.Err(), err), durableLayoutObservation{})
 		}
 		return unreadableDurableSchemaError(where, dbPath, err)
 	}
@@ -231,7 +231,7 @@ func awaitSupportedDurableSchema(
 			// cancelled wait, not an unreadable file: the statement's own
 			// context check is one more place the cancel can land.
 			if ctx.Err() != nil {
-				return durableSchemaWaitCancelledError(where, dbPath, err, last)
+				return durableSchemaWaitCancelledError(where, dbPath, errors.Join(ctx.Err(), err), last)
 			}
 			return unreadableDurableSchemaError(where, dbPath, err)
 		}

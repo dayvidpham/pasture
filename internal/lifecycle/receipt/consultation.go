@@ -18,6 +18,12 @@ import (
 const consultationSlot = provenance.ResultSlotID("consultation")
 const consultationKind = provenance.EvidenceKind("pasture.lifecycle.consultation.v1")
 
+// CurrentConsultationEvidenceKind identifies newly constructed consultations.
+// Readers may also support historical versions of this evidence kind.
+func CurrentConsultationEvidenceKind() provenance.EvidenceKind {
+	return consultationKind
+}
+
 type ConsultationRecord struct {
 	payload     []byte
 	constructed bool
