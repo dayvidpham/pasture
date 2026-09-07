@@ -78,13 +78,15 @@ func ParseRawSchemaVersion(value string) (RawSchemaVersion, error) {
 // the raw surface can never be reduced accidentally by callers of the native
 // entrypoint.
 type HookLifecycleRawInput struct {
-	Decision      *backend.Decision
-	Settlement    *receipt.CommitSettlement
-	DBPath        string
-	Harness       ir.HarnessID
-	Event         string
-	HostVersion   string
-	SchemaVersion RawSchemaVersion
+	Decision    *backend.Decision
+	Settlement  *receipt.CommitSettlement
+	DBPath      string
+	Harness     ir.HarnessID
+	Event       string
+	HostVersion string
+	// Zero preserves unspecified provenance for existing direct callers.
+	HostVersionSource model.HostVersionSource
+	SchemaVersion     RawSchemaVersion
 	// DryRun runs the admission, verification, and L1→L2 derivation chain
 	// and reports what would be committed without opening the store or
 	// writing any durable receipt (UAT FIX-NOW SLICE-5). Invalid input
@@ -155,6 +157,16 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil {
 		return nil, rawLifecycleError(pasterrors.CategoryValidation, "The raw lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, and store opener are required.", "Nothing was read or recorded.", "Invoke this path through the production raw lifecycle command.", nil)
 	}
+	if err := model.ValidateHostVersionSource(in.HostVersionSource); err != nil {
+		return nil, rawLifecycleError(
+			pasterrors.CategoryValidation,
+			"The raw host version source is not declared.",
+			"Observation provenance uses the shared closed model; it is not a version compatibility or policy decision.",
+			"The input was not read and no database was opened.",
+			"Use the shared model.HostVersionSource constants for an observed source, or leave legacy provenance unspecified.",
+			err,
+		)
+	}
 	if !in.SchemaVersion.IsValid() {
 		if parsed, err := ParseRawSchemaVersion(string(in.SchemaVersion)); err != nil {
 			return nil, rawLifecycleError(pasterrors.CategoryValidation, err.Error(), "The wire schema is the versioned decoder identity pinned to this build; only the closed set can be decoded.", "The input was not read and no database was opened.", "Pass one of the wire schema identities listed in the diagnostic.", nil)
@@ -180,7 +192,7 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 		activations = in.Activations
 	}
 	if strings.TrimSpace(in.HostVersion) == "" {
-		return nil, rawLifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records which host version produced it, without using the value as an admission check.", "The input was not read and no database was opened.", "Pass the observed version through --host-version.", nil)
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records an observed version, without using the value as an admission check.", "The input was not read and no database was opened.", "Pass the observed version through --host-version.", nil)
 	}
 	var event registration.Event
 	for _, candidate := range dispatch.manifest.Events {
@@ -208,6 +220,7 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 		return nil, rawLifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The raw payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "The raw input gate never truncates retained evidence: the same 1 MiB bound the native ingress enforces.", "No database was opened.", "Reduce the raw payload below the static bound.", nil)
 	}
 	capture := dispatch.rawParse(raw, event, in.HostVersion)
+	capture.delivery.Envelope.HostVersionSource = in.HostVersionSource
 	if capture.disposition != model.CaptureValid {
 		return nil, rawDispositionRefusal(dispatch.name, capture.disposition, in.SchemaVersion)
 	}
@@ -326,17 +339,18 @@ func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, host
 		return nil, fmt.Errorf("raw preview: candidate Outcome has no exit status; no preview emitted; use a validated encoder")
 	}
 	preview := rawDryRunView{
-		DryRun:        true,
-		Harness:       dispatch.name,
-		Event:         event.NativeName,
-		HostVersion:   hostVersion,
-		SchemaVersion: schema.String(),
-		Origin:        string(delivery.Origin),
-		Contract:      delivery.Contract.String(),
-		Effects:       effectViews,
-		Continuation:  string(prepared.outcome.Stdout),
-		ExitStatus:    exitCode,
-		Stderr:        prepared.outcome.Stderr,
+		DryRun:            true,
+		Harness:           dispatch.name,
+		Event:             event.NativeName,
+		HostVersion:       hostVersion,
+		HostVersionSource: delivery.Envelope.HostVersionSource,
+		SchemaVersion:     schema.String(),
+		Origin:            string(delivery.Origin),
+		Contract:          delivery.Contract.String(),
+		Effects:           effectViews,
+		Continuation:      string(prepared.outcome.Stdout),
+		ExitStatus:        exitCode,
+		Stderr:            prepared.outcome.Stderr,
 	}
 	out, err := json.MarshalIndent(preview, "", "  ")
 	if err != nil {
@@ -347,17 +361,18 @@ func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, host
 
 // rawDryRunView is the stable JSON shape of the dry-run preview.
 type rawDryRunView struct {
-	DryRun        bool                  `json:"dryRun"`
-	Harness       string                `json:"harness"`
-	Event         string                `json:"event"`
-	HostVersion   string                `json:"hostVersion"`
-	SchemaVersion string                `json:"schemaVersion"`
-	Origin        string                `json:"origin"`
-	Contract      string                `json:"contract"`
-	Effects       []rawDryRunEffectView `json:"effects"`
-	Continuation  string                `json:"continuation"`
-	ExitStatus    int                   `json:"exitStatus"`
-	Stderr        string                `json:"stderr"`
+	DryRun            bool                    `json:"dryRun"`
+	Harness           string                  `json:"harness"`
+	Event             string                  `json:"event"`
+	HostVersion       string                  `json:"hostVersion"`
+	HostVersionSource model.HostVersionSource `json:"hostVersionSource,omitempty"`
+	SchemaVersion     string                  `json:"schemaVersion"`
+	Origin            string                  `json:"origin"`
+	Contract          string                  `json:"contract"`
+	Effects           []rawDryRunEffectView   `json:"effects"`
+	Continuation      string                  `json:"continuation"`
+	ExitStatus        int                     `json:"exitStatus"`
+	Stderr            string                  `json:"stderr"`
 }
 
 // rawDryRunEffectView is the stable evidence representation passed to the

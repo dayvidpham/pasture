@@ -9,6 +9,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 )
@@ -59,16 +60,17 @@ var hookLifecycleRawCmd = &cobra.Command{
 		// the canonical Proceed bytes are emitted only on the nil-error path,
 		// so nothing reaches stdout before the durable commit completes.
 		ack, err := handlers.HookLifecycleRaw(ctx, handlers.HookLifecycleRawInput{
-			DBPath:        flagDBPath,
-			Harness:       ir.HarnessID(rawHookHarness),
-			Event:         rawHookEvent,
-			HostVersion:   rawHookHostVersion,
-			SchemaVersion: handlers.RawSchemaVersion(rawHookSchemaVersion),
-			DryRun:        rawHookDryRun,
-			Input:         cmd.InOrStdin(),
-			Clock:         lifecycleCLIClock{},
-			Operations:    lifecycleCLIOperations{},
-			Settlement:    settlement,
+			DBPath:            flagDBPath,
+			Harness:           ir.HarnessID(rawHookHarness),
+			Event:             rawHookEvent,
+			HostVersion:       rawHookHostVersion,
+			HostVersionSource: model.HostVersionCallerSupplied,
+			SchemaVersion:     handlers.RawSchemaVersion(rawHookSchemaVersion),
+			DryRun:            rawHookDryRun,
+			Input:             cmd.InOrStdin(),
+			Clock:             lifecycleCLIClock{},
+			Operations:        lifecycleCLIOperations{},
+			Settlement:        settlement,
 		})
 		if err != nil {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
