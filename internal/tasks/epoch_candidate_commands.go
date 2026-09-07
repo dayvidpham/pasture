@@ -219,7 +219,10 @@ func (s *epochAssignmentService) candidateBelongsToPlan(candidate provenance.Tas
 	var matchSlice, matchCandidate assignmentBinding
 	found := 0
 	for _, ancestor := range ancestors {
-		edges, err := s.tracker.prov.Edges(ancestor.ID, func() *provenance.EdgeKind { k := provenance.EdgeBlockedBy; return &k }())
+		edges, err := s.tracker.prov.Edges(ancestor.ID, func() *provenance.EdgeKind {
+			k := provenance.EdgeBlockedBy
+			return &k
+		}())
 		if err != nil {
 			return assignmentBinding{}, assignmentBinding{}, fmt.Errorf("read candidate parent edges for %q: %w", candidate, err)
 		}
@@ -254,7 +257,10 @@ func (s *epochAssignmentService) integrationBindingForCandidate(candidate proven
 	var found []assignmentBinding
 	var plan provenance.TaskID
 	for _, ancestor := range ancestors {
-		edges, err := s.tracker.prov.Edges(ancestor.ID, func() *provenance.EdgeKind { k := provenance.EdgeBlockedBy; return &k }())
+		edges, err := s.tracker.prov.Edges(ancestor.ID, func() *provenance.EdgeKind {
+			k := provenance.EdgeBlockedBy
+			return &k
+		}())
 		if err != nil {
 			return provenance.TaskID{}, assignmentBinding{}, fmt.Errorf("read integration candidate edges for %q: %w", candidate, err)
 		}
@@ -313,7 +319,7 @@ func replacementAssignmentEvent(candidate provenance.TaskID, assignment provenan
 	return event, nil
 }
 
-func (s *epochAssignmentService) allocateReplacementComposed(ctx context.Context, meta CommandMeta, epoch EpochRootID, resolution assignmentResolution, mutation EpochMutationKind, payload any, candidate provenance.TaskID, assignment provenance.AssignmentID, title string, phase provenance.Phase, conditions []provenance.Condition, referencedDescendants []provenance.TaskID, effects []provenance.Effect) (CommandResult, error) {
+func (s *epochAssignmentService) allocateReplacementComposed(ctx context.Context, meta CommandMeta, epoch EpochRootID, resolution assignmentResolution, mutation EpochMutationKind, payload any, candidate provenance.TaskID, assignment provenance.AssignmentID, role AssignmentRole, title string, phase provenance.Phase, conditions []provenance.Condition, referencedDescendants []provenance.TaskID, effects []provenance.Effect) (CommandResult, error) {
 	if resolution.id == "" || !resolution.role.valid() || resolution.occupant == (provenance.ActorID{}) || resolution.authority <= 0 || resolution.task == (provenance.TaskID{}) {
 		return CommandResult{}, assignmentErr("allocateReplacementComposed", "the resolved replacement authority is incomplete", "governed replacement allocation requires one exact assignment, role, occupant, authority, and parent task", "resolve the command against one active parent assignment before allocating its replacement")
 	}
@@ -368,6 +374,11 @@ func (s *epochAssignmentService) allocateReplacementComposed(ctx context.Context
 	result, err := allocator.RunAllocateComposed(ctx, "pasture-candidate-rework:"+string(meta.OperationID), resolution.authority, composed)
 	if err != nil {
 		return CommandResult{}, fmt.Errorf("replacement mutation %d operation %q failed in its fused governed-allocation transaction; no partial allocation, state, review, graph, audit, or DBOS output committed: %w", mutation, meta.OperationID, err)
+	}
+
+	// The index is written after the commit, from this command's own closure.
+	if err := s.indexComposedEpisode(ctx, result, candidate, assignment, role, resolution.occupant); err != nil {
+		return CommandResult{}, err
 	}
 	children := result.Closure().Children()
 	if len(children) != 1 || children[0].TaskID != candidate || children[0].AssignmentID != assignment || children[0].Occupant != resolution.occupant {
@@ -460,7 +471,7 @@ func (s *epochAssignmentService) CreateSlice(ctx context.Context, in CreateSlice
 		return SliceResult{}, err
 	}
 	effects = append(effects, edgeEffect(in.Plan, slice), sliceBindingEffect, event, assignmentEvent)
-	return s.createSliceComposed(ctx, in, resolution, effects)
+	return s.createSliceComposed(ctx, in, resolution, RoleOwnerResponsibility, effects)
 }
 
 func (s *epochAssignmentService) SetSliceCandidate(ctx context.Context, in SetSliceCandidateInput) (CandidateResult, error) {
@@ -541,7 +552,7 @@ func (s *epochAssignmentService) SetSliceCandidate(ctx context.Context, in SetSl
 		return CandidateResult{}, err
 	}
 	effects := []provenance.Effect{stateEffect, edgeEffect(in.Slice, candidate), bindingEffect, event, assignmentEvent}
-	result, err := s.allocateCandidateComposed(ctx, in.Meta, in.Epoch, resolution, MutationSetSliceCandidate, commandPayload, candidate, childAssignment, "slice implementation candidate", provenance.PhaseWorkerSlices, effects)
+	result, err := s.allocateCandidateComposed(ctx, in.Meta, in.Epoch, resolution, MutationSetSliceCandidate, commandPayload, candidate, childAssignment, RoleOwnerResponsibility, "slice implementation candidate", provenance.PhaseWorkerSlices, effects)
 	if err != nil {
 		return CandidateResult{}, err
 	}
@@ -697,7 +708,7 @@ func (s *epochAssignmentService) ReworkSlice(ctx context.Context, in ReworkSlice
 		return CandidateResult{}, err
 	}
 	effects := []provenance.Effect{oldEffect, invalidatedEffect, roundEffect, newEffect, edgeEffect(in.Slice, newCandidate), replacementBinding, createdEvent, assignmentEvent, event}
-	result, err := s.allocateReplacementComposed(ctx, in.Meta, in.Epoch, resolution, MutationReworkSlice, commandPayload, newCandidate, childAssignment, "replacement slice implementation candidate", provenance.PhaseWorkerSlices, conditions, []provenance.TaskID{oldCandidate}, effects)
+	result, err := s.allocateReplacementComposed(ctx, in.Meta, in.Epoch, resolution, MutationReworkSlice, commandPayload, newCandidate, childAssignment, RoleOwnerResponsibility, "replacement slice implementation candidate", provenance.PhaseWorkerSlices, conditions, []provenance.TaskID{oldCandidate}, effects)
 	if err != nil {
 		return CandidateResult{}, err
 	}
@@ -885,7 +896,7 @@ func (s *epochAssignmentService) CreateIntegrationCandidate(ctx context.Context,
 		return IntegrationCandidateResult{}, err
 	}
 	effects = append(effects, manifestEffect, stateEffect, edgeEffect(in.Plan, candidate), integrationBinding, event, assignmentEvent)
-	result, err := s.allocateCandidateComposed(ctx, in.Meta, in.Epoch, resolution, MutationCreateIntegrationCandidate, commandPayload, candidate, childAssignment, "integration candidate set", provenance.PhaseImplUAT, effects)
+	result, err := s.allocateCandidateComposed(ctx, in.Meta, in.Epoch, resolution, MutationCreateIntegrationCandidate, commandPayload, candidate, childAssignment, RoleGoverningSupervisor, "integration candidate set", provenance.PhaseImplUAT, effects)
 	if err != nil {
 		return IntegrationCandidateResult{}, err
 	}
@@ -927,13 +938,23 @@ func (s *epochAssignmentService) ReworkIntegrationCandidate(ctx context.Context,
 	if err != nil {
 		return IntegrationCandidateResult{}, err
 	}
-	resolution, err := s.resolveAssignment(ctx, oldCandidate, in.Assignment, RoleGoverningSupervisor)
+	// Replacing a plan's integration set mutates the plan itself. A candidate
+	// governor cannot acquire ancestor write authority through reference admission.
+	resolution, err := s.resolveAssignment(ctx, plan, in.Assignment, RoleGoverningSupervisor)
 	if err != nil {
 		return IntegrationCandidateResult{}, err
 	}
 	resolution, err = s.exactCandidateParentAuthority(ctx, resolution)
 	if err != nil {
 		return IntegrationCandidateResult{}, err
+	}
+	governsCandidate, err := s.tracker.prov.Journal().AuthorityGovernsTaskAt(
+		resolution.authority, oldCandidate, provenance.JournalID(^uint64(0)>>1))
+	if err != nil || !governsCandidate {
+		return IntegrationCandidateResult{}, assignmentErr("ReworkIntegrationCandidate",
+			"the active plan assignment does not govern the old integration candidate",
+			"replacement must atomically invalidate an old candidate in the plan assignment's active parent lineage",
+			"supply the active plan governing assignment and restore a valid candidate parent lineage before reworking")
 	}
 	oldState, err := s.currentCandidateState(epoch, oldCandidate)
 	if err != nil {
@@ -1055,7 +1076,7 @@ func (s *epochAssignmentService) ReworkIntegrationCandidate(ctx context.Context,
 		return IntegrationCandidateResult{}, err
 	}
 	effects := []provenance.Effect{oldStateEffect, invalidatedEffect, roundEffect, newManifestEffect, newStateEffect, edgeEffect(plan, newCandidate), replacementBinding, createdEvent, assignmentEvent, event}
-	result, err := s.allocateReplacementComposed(ctx, in.Meta, in.Epoch, resolution, MutationReworkIntegrationCandidate, commandPayload, newCandidate, childAssignment, "replacement integration candidate set", provenance.PhaseImplUAT, conditions, nil, effects)
+	result, err := s.allocateReplacementComposed(ctx, in.Meta, in.Epoch, resolution, MutationReworkIntegrationCandidate, commandPayload, newCandidate, childAssignment, RoleGoverningSupervisor, "replacement integration candidate set", provenance.PhaseImplUAT, conditions, []provenance.TaskID{oldCandidate}, effects)
 	if err != nil {
 		return IntegrationCandidateResult{}, err
 	}
@@ -1215,6 +1236,14 @@ func (s *epochAssignmentService) validateReworkFindings(ctx context.Context, epo
 	if err != nil {
 		return reviewAuthoritySnapshot{}, err
 	}
+	if start.subject != candidate || start.kind != SubjectImplementation ||
+		start.round != review.value.Round || start.epoch != epoch ||
+		review.value.Epoch != epoch || string(review.value.Candidate) != candidate.String() {
+		return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+			"the finalized review and started round identify different subjects or epochs",
+			"rework must consume the exact implementation review for its candidate",
+			"use the candidate's finalized review and repair inconsistent review bindings")
+	}
 	axisEvents, err := s.reviewAxisEvents(ctx, start)
 	if err != nil {
 		return reviewAuthoritySnapshot{}, err
@@ -1222,47 +1251,104 @@ func (s *epochAssignmentService) validateReworkFindings(ctx context.Context, epo
 	wanted := map[provenance.TaskID]struct{}{}
 	for i, axisEvent := range axisEvents {
 		axisTask := start.axisTasks[i]
-		query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: candidate}}, Kinds: []provenance.EvidenceKind{reviewSubmissionEvidenceKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
-		found := false
-		for {
-			page, err := s.tracker.prov.Journal().Facts().QueryEvidence(query)
-			if err != nil {
-				return reviewAuthoritySnapshot{}, fmt.Errorf("query review finding evidence for %q: %w", candidate, err)
-			}
-			for _, row := range page.Rows {
-				var envelope struct {
-					Epoch      EpochRootID        `json:"epoch"`
-					Round      ReviewRoundID      `json:"round"`
-					Axis       ReviewAxis         `json:"axis"`
-					Actor      provenance.ActorID `json:"actor"`
-					Kind       SubjectKind        `json:"kind"`
-					Submission json.RawMessage    `json:"submission"`
-				}
-				if err := strictJSON(row.Payload, &envelope); err != nil {
-					return reviewAuthoritySnapshot{}, fmt.Errorf("decode review finding evidence: %w", err)
-				}
-				if envelope.Epoch != epoch || envelope.Round != review.value.Round || envelope.Axis != ReviewAxis(i+1) || envelope.Kind != SubjectImplementation || envelope.Actor != axisEvent.actor || row.ProducingOperationID != axisEvent.operation {
-					continue
-				}
-				var implementation ImplementationReviewSubmission
-				if err := strictJSON(envelope.Submission, &implementation); err != nil {
-					return reviewAuthoritySnapshot{}, fmt.Errorf("decode implementation findings: %w", err)
-				}
-				for _, finding := range implementation.Findings {
-					wanted[finding.Task] = struct{}{}
-				}
-				found = true
-			}
-			if page.Next == nil {
-				break
-			}
-			query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
-			query.Page.AfterJournalID = page.Next.AfterJournalID
+		axis := ReviewAxis(i + 1)
+		finalizedAxis := review.value.Axes[i]
+		if axisEvent.axisTask != axisTask || axisEvent.event <= 0 ||
+			axisEvent.event > review.journalID || axisEvent.evidence <= 0 ||
+			axisEvent.evidence > review.journalID || finalizedAxis.Axis != axis ||
+			finalizedAxis.Event != axisEvent.event || finalizedAxis.Verdict != axisEvent.verdict {
+			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+				"the axis event is not the event bound by the finalized review",
+				"later or substituted axis history cannot replace finalized findings",
+				"repair the finalized review and its exact axis event bindings")
 		}
-		if !found {
+		axisEvidence, err := s.axisEvidenceForEvent(axisTask, start, axis, axisEvent.verdict, axisEvent.actor)
+		if err != nil {
+			return reviewAuthoritySnapshot{}, err
+		}
+		if axisEvidence.journalID != axisEvent.evidence || axisEvidence.Operation != axisEvent.operation ||
+			axisEvidence.Subject != candidate || axisEvidence.AxisTask != axisTask ||
+			axisEvidence.Assignment == "" || axisEvidence.Actor != axisEvent.actor {
+			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+				"the axis assignment evidence differs from the finalized event binding",
+				"a submission must name the assignment authenticated for that axis event",
+				"repair the axis submission evidence before reworking")
+		}
+		if err := ctx.Err(); err != nil {
+			return reviewAuthoritySnapshot{}, fmt.Errorf("read finalized finding submissions: context ended: %w", err)
+		}
+		page, err := s.tracker.prov.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
+			Filter: provenance.FactFilter{
+				TaskScope:    provenance.FactTaskScope{Kind: provenance.FactTaskExact, TaskID: axisTask},
+				OperationIDs: []provenance.OperationID{axisEvent.operation},
+			},
+			Kinds: []provenance.EvidenceKind{reviewSubmissionEvidenceKind},
+			Page:  provenance.FactPageRequest{Limit: 2, SnapshotMaxJournalID: review.journalID},
+		})
+		if err != nil {
+			return reviewAuthoritySnapshot{}, fmt.Errorf("query finalized finding submission for axis %q: %w", axisTask, err)
+		}
+		if len(page.Rows) == 0 {
 			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings", fmt.Sprintf("axis %q has no closed finding submission", canonicalReviewAxes()[i]), "the exact prior finding set must be materialized before rework", "repair the finalized review submission before reworking")
 		}
-		_ = axisTask
+		if len(page.Rows) != 1 || page.Next != nil {
+			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+				fmt.Sprintf("axis %q has duplicate or nonterminal submission evidence", axis),
+				"exact finalized findings require one bounded current submission, with no legacy fallback",
+				"repair duplicate or inconsistent submission evidence before reworking")
+		}
+		row := page.Rows[0]
+		if row.TaskID == nil || *row.TaskID != axisTask || row.EvidenceKind != reviewSubmissionEvidenceKind ||
+			row.ProducingOperationID != axisEvent.operation || row.EffectiveActorID != axisEvent.actor ||
+			row.JournalID <= 0 || row.JournalID > review.journalID ||
+			row.ProducingOperationJournalID <= 0 || row.ProducingOperationJournalID > review.journalID {
+			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+				"submission metadata does not match the finalized axis and snapshot",
+				"wrong-task, wrong-producer or later evidence cannot replace the closed finding set",
+				"repair the exact current submission evidence before reworking")
+		}
+		var envelope struct {
+			Epoch      EpochRootID             `json:"epoch"`
+			Round      ReviewRoundID           `json:"round"`
+			Axis       ReviewAxis              `json:"axis"`
+			Assignment provenance.AssignmentID `json:"assignment"`
+			Actor      provenance.ActorID      `json:"actor"`
+			Kind       SubjectKind             `json:"kind"`
+			Submission json.RawMessage         `json:"submission"`
+		}
+		if err := strictJSON(row.Payload, &envelope); err != nil {
+			return reviewAuthoritySnapshot{}, fmt.Errorf("decode current axis finding submission: %w", err)
+		}
+		if envelope.Epoch != epoch || envelope.Round != review.value.Round || envelope.Axis != axis ||
+			envelope.Kind != SubjectImplementation || envelope.Actor != axisEvent.actor ||
+			envelope.Assignment != axisEvidence.Assignment {
+			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+				"submission payload differs from the authenticated axis assignment or review",
+				"missing or mismatched current fields cannot fall back to legacy candidate evidence",
+				"repair the current axis-scoped submission before reworking")
+		}
+		var implementation ImplementationReviewSubmission
+		if err := strictJSON(envelope.Submission, &implementation); err != nil {
+			return reviewAuthoritySnapshot{}, fmt.Errorf("decode implementation findings: %w", err)
+		}
+		if err := implementation.Validate(); err != nil {
+			return reviewAuthoritySnapshot{}, err
+		}
+		if implementation.Verdict != axisEvent.verdict {
+			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+				"submission verdict differs from its finalized axis event",
+				"finding accounting must use the submission finalized for that axis",
+				"repair the submission and finalized verdict binding")
+		}
+		for _, finding := range implementation.Findings {
+			if _, duplicate := wanted[finding.Task]; duplicate {
+				return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+					fmt.Sprintf("finding %q occurs more than once in finalized submissions", finding.Task),
+					"the closed finding set must not silently collapse duplicate tasks",
+					"repair the duplicate finding submissions before reworking")
+			}
+			wanted[finding.Task] = struct{}{}
+		}
 	}
 	seen := map[provenance.TaskID]struct{}{}
 	for i, resolution := range submission.Findings {
@@ -1274,11 +1360,22 @@ func (s *epochAssignmentService) validateReworkFindings(ctx context.Context, epo
 			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings", fmt.Sprintf("finding %q is not in the finalized review", resolution.Finding), "rework cannot add or substitute findings", "dispose only the exact prior finding identities")
 		}
 		if resolution.Outcome == FindingFixed {
+			if len(resolution.Evidence) == 0 {
+				return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+					fmt.Sprintf("fixed finding %q has no fix evidence", resolution.Finding),
+					"a fixed disposition must cite committed fix evidence",
+					"provide the evidence journal ids or use an explicit deferred disposition")
+			}
 			for _, evidence := range resolution.Evidence {
 				if !s.evidenceJournalRowExists(evidence) {
 					return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings", fmt.Sprintf("fixed finding %q cites missing evidence %d", resolution.Finding, evidence), "fixed dispositions must cite committed evidence rows", "cite a committed evidence journal row produced by the fix")
 				}
 			}
+		} else if resolution.Outcome != FindingDeferred {
+			return reviewAuthoritySnapshot{}, assignmentErr("validateReworkFindings",
+				fmt.Sprintf("finding %q has an unknown disposition", resolution.Finding),
+				"finding dispositions are fixed or deferred",
+				"supply a supported disposition for every finalized finding")
 		}
 	}
 	if len(seen) != len(wanted) {

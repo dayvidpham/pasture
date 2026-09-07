@@ -60,6 +60,7 @@ const (
 	fRequestedSchema
 	fAction
 	fScratchpadDir
+	fFileEvent
 )
 
 var claudeFields = []Field{
@@ -74,6 +75,9 @@ var claudeFields = []Field{
 	{fContent, "FieldContent", "content"}, {fFields, "FieldFields", "fields"}, {fMCPServerName, "FieldMCPServerName", "mcp_server_name"}, {fResponse, "FieldResponse", "response"},
 	{fPromptID, "FieldPromptID", "prompt_id"}, {fToolResponse, "FieldToolResponse", "tool_response"}, {fDurationMS, "FieldDurationMS", "duration_ms"}, {fIsInterrupt, "FieldIsInterrupt", "is_interrupt"}, {fToolCalls, "FieldToolCalls", "tool_calls"},
 	{fCustomInstructions, "FieldCustomInstructions", "custom_instructions"}, {fCompactSummary, "FieldCompactSummary", "compact_summary"}, {fMode, "FieldMode", "mode"}, {fRequestedSchema, "FieldRequestedSchema", "requested_schema"}, {fAction, "FieldAction", "action"},
+	// FileChanged's accepted capture carries the watcher event as payload data,
+	// not as an identity or a field common to other hook events.
+	{fFileEvent, "FieldFileEvent", "event"},
 }
 
 // scratchpad_dir is present on every payload the 2.1.261 host wrote in the
@@ -110,7 +114,7 @@ func ClaudeCode2_1_261() Contract {
 		nativeEvent(6, "EventStop", "Stop", []model.NativeFieldID{fStopHookActive}, nil, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopConsultWhenInactive), o(7, "EventStopFailure", "StopFailure", fError, fErrorType),
 		nativeEvent(8, "EventPreToolUse", "PreToolUse", []model.NativeFieldID{fToolName, fToolInput, fToolUseID}, tool, Blocking, MutationInput, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), nativeEvent(9, "EventPermissionRequest", "PermissionRequest", []model.NativeFieldID{fToolName, fToolInput, fRequestID}, request, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable),
 		o(10, "EventPermissionDenied", "PermissionDenied", fToolName, fToolInput), nativeEvent(11, "EventPostToolUse", "PostToolUse", []model.NativeFieldID{fToolName, fToolInput, fToolOutput, fToolResponse, fDurationMS, fToolUseID}, tool, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable), nativeEvent(12, "EventPostToolUseFailure", "PostToolUseFailure", []model.NativeFieldID{fToolName, fToolInput, fError, fIsInterrupt, fDurationMS, fToolUseID}, tool, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable),
-		g(13, "EventPostToolBatch", "PostToolBatch", fBatchResults, fToolCalls), o(14, "EventFileChanged", "FileChanged", fFilePath), o(15, "EventCwdChanged", "CwdChanged"), nativeEvent(16, "EventConfigChange", "ConfigChange", []model.NativeFieldID{fConfigSource}, nil, ConditionallyBlocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), o(17, "EventInstructionsLoaded", "InstructionsLoaded", fFilePath, fMemoryType, fLoadReason, fGlobs, fTriggerFilePath, fParentFilePath), g(18, "EventWorktreeCreate", "WorktreeCreate"), o(19, "EventWorktreeRemove", "WorktreeRemove"),
+		g(13, "EventPostToolBatch", "PostToolBatch", fBatchResults, fToolCalls), o(14, "EventFileChanged", "FileChanged", fFilePath, fFileEvent), o(15, "EventCwdChanged", "CwdChanged"), nativeEvent(16, "EventConfigChange", "ConfigChange", []model.NativeFieldID{fConfigSource}, nil, ConditionallyBlocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), o(17, "EventInstructionsLoaded", "InstructionsLoaded", fFilePath, fMemoryType, fLoadReason, fGlobs, fTriggerFilePath, fParentFilePath), g(18, "EventWorktreeCreate", "WorktreeCreate"), o(19, "EventWorktreeRemove", "WorktreeRemove"),
 		nativeEvent(20, "EventSubagentStart", "SubagentStart", nil, agent, NonBlocking, MutationNone, pastureruntime.FailureReportAndContinue, StopLoopNotApplicable), nativeEvent(21, "EventSubagentStop", "SubagentStop", []model.NativeFieldID{fAgentTranscriptPath, fStopHookActive}, agent, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopConsultWhenInactive), g(22, "EventTeammateIdle", "TeammateIdle", fTeammateName), g(23, "EventTaskCreated", "TaskCreated", fTaskID), g(24, "EventTaskCompleted", "TaskCompleted", fTaskID), g(25, "EventPreCompact", "PreCompact", fTrigger, fCustomInstructions), o(26, "EventPostCompact", "PostCompact", fTrigger, fCompactSummary), o(27, "EventNotification", "Notification", fMessage, fNotificationType, fTitle), o(28, "EventMessageDisplay", "MessageDisplay", fMessage, fContent),
 		nativeEvent(29, "EventElicitation", "Elicitation", []model.NativeFieldID{fRequestID, fFields, fMCPServerName, fMessage, fMode, fRequestedSchema}, request, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable), nativeEvent(30, "EventElicitationResult", "ElicitationResult", []model.NativeFieldID{fRequestID, fResponse, fMCPServerName, fMode, fAction, fContent}, request, Blocking, MutationNone, pastureruntime.FailureExitTwoBlocks, StopLoopNotApplicable),
 		// Registered at Claude Code 2.1.261 from the installed binary's hook-event

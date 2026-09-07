@@ -139,7 +139,7 @@ func TestLineageDeliveryPathStaysByteEquivalent(t *testing.T) {
 
 	// Delivery BEFORE any lineage exists: capture the native continuation bytes.
 	bytesBefore := deliverClaudeBuilt(t, binary, dbPath, "PreToolUse", preToolUse)
-	require.JSONEq(t, `{"decision":"proceed"}`, bytesBefore)
+	require.Empty(t, bytesBefore, "evaluated Claude Proceed emits no directive")
 	// Deliveries never write link evidence — the delivery path has zero lineage
 	// reads or effects.
 	require.Zero(t, countLinkEvidence(t, dbPath), "a delivery must never commit a lineage link")

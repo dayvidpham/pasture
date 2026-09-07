@@ -59,4 +59,5 @@ var fieldNames = map[model.NativeFieldID]string{
 	registration.FieldMode:                "mode",
 	registration.FieldRequestedSchema:     "requested_schema",
 	registration.FieldAction:              "action",
+	registration.FieldFileEvent:           "event",
 }

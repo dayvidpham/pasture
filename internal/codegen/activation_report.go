@@ -78,7 +78,7 @@ const (
 	// empty string.
 	activationColumnUnset activationColumnState = iota + 1
 	// activationColumnAbsent: the column's source is genuinely absent for this
-	// row, so no future build will fill it. It renders the empty string.
+	// row in this build. It renders the empty string.
 	activationColumnAbsent
 	// activationColumnValue: a derived, non-empty value.
 	activationColumnValue
@@ -112,25 +112,31 @@ func renderActivationColumn(state activationColumnState, value string) (string, 
 }
 
 // failureEvidenceColumn derives the evidence column of one row from the
-// pinned lifecycle profile. A row the host contract declares NON-BLOCKING
-// makes no blocking claim, so its evidence source is genuinely absent (the
-// empty string). A blocking row renders its citation when the profile carries
-// one and the unset token while its harness has not yet supplied it.
-func failureEvidenceColumn(event registration.Event, policy runtime.LifecycleFailurePolicy) (string, error) {
-	if event.Blocking == registration.NonBlocking {
-		return renderActivationColumn(activationColumnAbsent, "")
-	}
+// pinned lifecycle profile. Both the mode and the citation come from that
+// profile, never partly from a registration catalogue. A citation is audit
+// evidence even if the row cannot enforce a pre-action denial.
+func failureEvidenceColumn(policy runtime.LifecycleFailurePolicy) (string, error) {
 	if policy.Evidence.IsPresent() {
 		return renderActivationColumn(activationColumnValue, policy.Evidence.Source)
+	}
+	if policy.Blocking == runtime.NonBlocking {
+		return renderActivationColumn(activationColumnAbsent, "")
+	}
+	if !policy.Blocking.IsValid() {
+		return "", fmt.Errorf("codegen.failureEvidenceColumn: the runtime blocking mode is unset or invalid; no audit column can be derived; obtain the policy from LookupLifecycleFailure")
 	}
 	return renderActivationColumn(activationColumnUnset, "")
 }
 
-// responseCapabilityColumn renders the capability column. No build derives a
-// response capability yet, so every row carries the unset token; the
-// derivation, when it exists, replaces this function's body and nothing else.
-func responseCapabilityColumn() (string, error) {
-	return renderActivationColumn(activationColumnUnset, "")
+// responseCapabilityColumn keeps not-yet-derived distinct from derived None.
+func responseCapabilityColumn(capability runtime.ResponseCapability) (string, error) {
+	if capability == runtime.CapabilityUnset {
+		return renderActivationColumn(activationColumnUnset, "")
+	}
+	if !capability.IsValid() {
+		return "", fmt.Errorf("codegen.responseCapabilityColumn: capability %d is not a supported derived value; no column was emitted; derive it through the runtime lifecycle contract", capability)
+	}
+	return renderActivationColumn(activationColumnValue, capability.String())
 }
 
 // activationSupportEntryFor renders one report row for one generated event of
@@ -146,11 +152,11 @@ func activationSupportEntryFor(harness ir.HarnessID, event registration.Event, s
 	if !ok {
 		return activationSupportEntry{}, fmt.Errorf("codegen.activationSupportEntryFor: generated event %q has no pinned lifecycle profile row for harness %q, so its failure evidence cannot be reported; align the registration and the runtime profile against the same pinned contract", event.NativeName, harness)
 	}
-	evidence, err := failureEvidenceColumn(event, policy)
+	evidence, err := failureEvidenceColumn(policy)
 	if err != nil {
 		return activationSupportEntry{}, fmt.Errorf("codegen.activationSupportEntryFor: event %q: %w", event.NativeName, err)
 	}
-	capability, err := responseCapabilityColumn()
+	capability, err := responseCapabilityColumn(policy.Response)
 	if err != nil {
 		return activationSupportEntry{}, fmt.Errorf("codegen.activationSupportEntryFor: event %q: %w", event.NativeName, err)
 	}

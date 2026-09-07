@@ -42,6 +42,8 @@ type HookLifecycleInput struct {
 	Input       io.Reader
 	Clock       receipt.Clock
 	Operations  receipt.OperationIDSource
+	// ActorClaim binds a session, not the receipt author. Zero means no claim.
+	ActorClaim tasks.ActorClaim
 	// Barrier is called ONCE, after the durable receipt has been committed and
 	// BEFORE the native continuation bytes are produced for the host. It names
 	// the commit-to-emit boundary, which is where the commit-before-stdout
@@ -153,7 +155,7 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
 		bind:                     claudefrontend.Bind,
-		encode:                   nativeresponse.CanonicalProceed,
+		encode:                   nativeresponse.ClaudeContinuation,
 		refusesUndeclaredMembers: true,
 		matchesFieldNamesExactly: true,
 	},
@@ -223,8 +225,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	//
 	// A ROW CAN EXIST ONLY WHERE A WRITE WAS ATTEMPTED, and in this function
 	// exactly two statements attempt one: the invalid-capture receipt, and the
-	// shared delivery commit. Nothing else here writes — not the open, not the
-	// service construction, not the gate. So the marker is set immediately
+	// shared delivery commit. Nothing else here writes an occurrence. The
+	// session claim is separate state after that commit. The marker is set immediately
 	// before each of those two, and TestTheDurableRegionBeginsAtItsWrites reads
 	// this function and refuses any write not preceded by it: the producers of
 	// this evidence are a population, and this slice's whole lesson is that an
@@ -379,6 +381,9 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	committed, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
 	if err != nil {
 		return backend.HostResponse{}, err
+	}
+	if err := tasks.RecordLifecycleSessionClaim(ctx, tracker, in.Harness, event.Kind, capture.delivery.Bindings, in.ActorClaim, in.Clock); err != nil {
+		return backend.HostResponse{}, fmt.Errorf("%w: %w", ErrLifecycleCommittedWithoutContinuation, err)
 	}
 	response = committed
 	return response, nil

@@ -22,6 +22,7 @@
 package tasks
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	stderrors "errors"
@@ -275,6 +276,12 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 		}
 	}
 
+	if err := ensureAssignmentIndexStateOnOpen(context.Background(), auditDB, prov.Journal()); err != nil {
+		_ = prov.Close()
+		_ = auditDB.Close()
+		_ = trail.Close()
+		return nil, err
+	}
 	tracker := newTrackerImpl(prov, trail, auditDB)
 	tracker.timeoutProfile = cfg.timeouts
 	tracker.storeClock = cfg.clock
@@ -448,6 +455,53 @@ func ensurePastureTables(db *sql.DB) error {
 			ddl: `CREATE TABLE IF NOT EXISTS pasture_well_known_agents (
 				agent_id  TEXT PRIMARY KEY,
 				name      TEXT NOT NULL UNIQUE
+			)`,
+		},
+		{
+			// pasture_actor_assignment is the started-episode INDEX the gate
+			// reads. One row per started assignment episode: who holds it, on
+			// which task, in which slot, and the journal id of the authority
+			// that governs it.
+			//
+			// There is NO active column and there never will be one. Whether an
+			// episode is still active is a question for the journal, answered at
+			// read time by the governance predicate, because an episode can end
+			// in the journal with no pasture-side write at all.
+			//
+			// authority_journal_id is NOT NULL and is CHECKed above zero: a row
+			// with no authority cannot be used to answer anything, so it must
+			// not exist rather than sit there unusable.
+			name: "pasture_actor_assignment",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_actor_assignment (
+				assignment_id         TEXT    PRIMARY KEY,
+				actor_id              TEXT    NOT NULL,
+				task_id               TEXT    NOT NULL,
+				role                  TEXT    NOT NULL,
+				authority_journal_id  INTEGER NOT NULL CHECK (authority_journal_id > 0)
+			)`,
+		},
+		{
+			name: "idx_pasture_actor_assignment_actor",
+			ddl:  `CREATE INDEX IF NOT EXISTS idx_pasture_actor_assignment_actor ON pasture_actor_assignment (actor_id)`,
+		},
+		{
+			// pasture_actor_assignment_watermark records how far the index has
+			// been brought level with the journal. It is a singleton, like the
+			// system identity row. Zero means nothing has been indexed yet.
+			name: "pasture_actor_assignment_watermark",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_actor_assignment_watermark (
+				singleton_id     INTEGER PRIMARY KEY CHECK (singleton_id = 0),
+				last_indexed_jid INTEGER NOT NULL
+			)`,
+		},
+		{
+			name: "pasture_session_claim",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_session_claim (
+				harness TEXT NOT NULL,
+				session TEXT NOT NULL,
+				actor TEXT NOT NULL,
+				claimed_at INTEGER NOT NULL,
+				PRIMARY KEY (harness, session)
 			)`,
 		},
 		{

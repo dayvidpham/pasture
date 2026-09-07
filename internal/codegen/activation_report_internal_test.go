@@ -47,28 +47,71 @@ func TestActivationColumnStatesRenderAsThreeDistinctStrings(t *testing.T) {
 // blocking row with a citation carries it, a blocking row without one is unset.
 func TestFailureEvidenceColumnFollowsTheDeclaredBlockingModeAndTheCitation(t *testing.T) {
 	t.Parallel()
-	cited := runtime.LifecycleFailurePolicy{Evidence: runtime.FailureEvidence{Source: "https://docs.claude.com/en/docs/claude-code/hooks"}}
-	var uncited runtime.LifecycleFailurePolicy
+	cited := runtime.LifecycleFailurePolicy{Blocking: runtime.Blocking, Evidence: runtime.FailureEvidence{Source: "https://docs.claude.com/en/docs/claude-code/hooks"}}
+	uncited := runtime.LifecycleFailurePolicy{Blocking: runtime.Blocking}
 
-	got, err := failureEvidenceColumn(registration.Event{NativeName: "SessionStart", Blocking: registration.NonBlocking}, cited)
+	got, err := failureEvidenceColumn(runtime.LifecycleFailurePolicy{Blocking: runtime.NonBlocking})
 	require.NoError(t, err)
-	require.Equal(t, "", got, "a non-blocking row makes no blocking claim, so its evidence source is absent even when the profile carries a citation")
+	require.Equal(t, "", got, "an uncited non-blocking row has no evidence source")
 
-	got, err = failureEvidenceColumn(registration.Event{NativeName: "PreToolUse", Blocking: registration.Blocking}, cited)
+	got, err = failureEvidenceColumn(cited)
 	require.NoError(t, err)
 	require.Equal(t, "https://docs.claude.com/en/docs/claude-code/hooks", got, "a blocking row carries its citation")
 
-	got, err = failureEvidenceColumn(registration.Event{NativeName: "Stop", Blocking: registration.Blocking}, uncited)
+	got, err = failureEvidenceColumn(uncited)
 	require.NoError(t, err)
 	require.Equal(t, "unset", got, "a blocking row without a citation is not yet derived")
 
-	got, err = failureEvidenceColumn(registration.Event{NativeName: "ConfigChange", Blocking: registration.ConditionallyBlocking}, uncited)
+	uncited.Blocking = runtime.ConditionallyBlocking
+	got, err = failureEvidenceColumn(uncited)
 	require.NoError(t, err)
 	require.Equal(t, "unset", got, "a conditionally blocking row needs evidence like a blocking one")
 
-	capability, err := responseCapabilityColumn()
+	capability, err := responseCapabilityColumn(runtime.CapabilityUnset)
 	require.NoError(t, err)
-	require.Equal(t, "unset", capability, "no build derives a response capability yet")
+	require.Equal(t, "unset", capability, "unset means derivation has not run")
+	policy, ok := runtime.LookupLifecycleFailure(ir.HarnessCodex, "PreToolUse")
+	require.True(t, ok)
+	capability, err = responseCapabilityColumn(policy.Response)
+	require.NoError(t, err)
+	require.Equal(t, "none", capability, "a derived None must not render unset or empty")
+	_, err = responseCapabilityColumn(runtime.ResponseCapability(255))
+	require.Error(t, err)
+}
+
+func TestPostCompactReportUsesRuntimeEvidenceEvenWhenCatalogueObserves(t *testing.T) {
+	t.Parallel()
+	manifest := registration.Codex0_153_0()
+	var event registration.Event
+	for _, candidate := range manifest.Events {
+		if candidate.NativeName == "PostCompact" {
+			event = candidate
+		}
+	}
+	require.NotZero(t, event.Kind)
+	require.Equal(t, registration.NonBlocking, event.Blocking, "this is the measured catalogue/profile divergence")
+	policy, ok := runtime.LookupLifecycleFailure(ir.HarnessCodex, event.NativeName)
+	require.True(t, ok)
+	require.Equal(t, runtime.Blocking, policy.Blocking)
+	state, err := activation.NewWithheld(event.Kind, activation.WithheldOutsideTargetSet)
+	require.NoError(t, err)
+	row, err := activationSupportEntryFor(ir.HarnessCodex, event, state)
+	require.NoError(t, err)
+	if policy.Evidence.IsPresent() {
+		require.Equal(t, policy.Evidence.Source, row.FailureEvidence, "a profile citation must survive the real report row builder")
+	} else {
+		require.Equal(t, "unset", row.FailureEvidence, "a declared gate waiting for evidence is not genuinely absent")
+	}
+	// Inject the reviewer's citation at the emitter input, not a second
+	// implementation. Profile-site mutation proves the shipped row as well.
+	policy.Evidence = runtime.FailureEvidence{Source: "internal/lifecycle/nativeresponse/nativeresponse.go"}
+	got, err := failureEvidenceColumn(policy)
+	require.NoError(t, err)
+	require.Equal(t, policy.Evidence.Source, got)
+	policy.Blocking = runtime.NonBlocking
+	got, err = failureEvidenceColumn(policy)
+	require.NoError(t, err)
+	require.Equal(t, policy.Evidence.Source, got, "even observation evidence must not disappear from an audit")
 }
 
 // TestActivationSupportEntryForIsTheOneRowBuilder pins the row shape every
@@ -96,7 +139,7 @@ func TestActivationSupportEntryForIsTheOneRowBuilder(t *testing.T) {
 	require.NoError(t, err)
 	row, err := activationSupportEntryFor(ir.HarnessClaudeCode, sessionStart, enabled)
 	require.NoError(t, err)
-	require.Equal(t, activationSupportEntry{Event: "SessionStart", State: "enabled", CaptureProof: activation.CaptureProofSessionStart.Name(), ProductionProof: activation.ProductionProofSessionStart.Name(), ResponseCapability: "unset", FailureEvidence: ""}, row)
+	require.Equal(t, activationSupportEntry{Event: "SessionStart", State: "enabled", CaptureProof: activation.CaptureProofSessionStart.Name(), ProductionProof: activation.ProductionProofSessionStart.Name(), ResponseCapability: "none", FailureEvidence: ""}, row)
 
 	gate, err := activation.NewEnabled(preToolUse.Kind, activation.CaptureProofPreToolUse, activation.ProductionProofPreToolUse)
 	require.NoError(t, err)
@@ -109,7 +152,7 @@ func TestActivationSupportEntryForIsTheOneRowBuilder(t *testing.T) {
 	require.NoError(t, err)
 	row, err = activationSupportEntryFor(ir.HarnessClaudeCode, setup, decision)
 	require.NoError(t, err)
-	require.Equal(t, activationSupportEntry{Event: "Setup", State: "withheld", Reason: "no-reachable-trigger", Clearance: clearance, ResponseCapability: "unset", FailureEvidence: ""}, row)
+	require.Equal(t, activationSupportEntry{Event: "Setup", State: "withheld", Reason: "no-reachable-trigger", Clearance: clearance, ResponseCapability: "none", FailureEvidence: ""}, row)
 
 	_, err = activationSupportEntryFor(ir.HarnessClaudeCode, setup, enabled)
 	require.ErrorContains(t, err, "pair each report row with its own entry")
@@ -153,6 +196,6 @@ func TestActivationSupportEntryForRendersEachNewWithholdingArm(t *testing.T) {
 		require.NoError(t, err)
 		row, err := activationSupportEntryFor(ir.HarnessClaudeCode, setup, decision)
 		require.NoError(t, err)
-		require.Equal(t, activationSupportEntry{Event: "Setup", State: "withheld", Reason: tc.want, Clearance: clearance, ResponseCapability: "unset", FailureEvidence: ""}, row, "reason %q must render as %q in the shared row builder", tc.reason, tc.want)
+		require.Equal(t, activationSupportEntry{Event: "Setup", State: "withheld", Reason: tc.want, Clearance: clearance, ResponseCapability: "none", FailureEvidence: ""}, row, "reason %q must render as %q in the shared row builder", tc.reason, tc.want)
 	}
 }

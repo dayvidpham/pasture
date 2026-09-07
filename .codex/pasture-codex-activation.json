@@ -7,14 +7,14 @@
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/SessionStart",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "UserPromptSubmit",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
@@ -22,70 +22,70 @@
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/PreToolUse",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "PermissionRequest",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "PostToolUse",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "PreCompact",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "PostCompact",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
-      "failureEvidence": ""
+      "responseCapability": "none",
+      "failureEvidence": "unset"
     },
     {
       "event": "SubagentStart",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "SubagentStop",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "Stop",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "SessionEnd",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "Interrupt",
       "state": "withheld",
       "reason": "outside-target-set",
-      "responseCapability": "unset",
+      "responseCapability": "none",
       "failureEvidence": ""
     }
   ]

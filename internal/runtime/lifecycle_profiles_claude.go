@@ -154,6 +154,7 @@ func claudeLifecycleMapping(
 		declaredFailure: declaredFailureArm(blocking, FailureExitTwoBlocks, FailureReportAndContinue),
 		evidence:        evidence,
 		stopLoop:        stopLoop,
+		preAction:       semantic == SemanticGateConsultation && event != ClaudeEventPostToolBatch,
 	}
 }
 

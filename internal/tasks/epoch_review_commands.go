@@ -396,7 +396,7 @@ func (s *epochAssignmentService) StartReview(ctx context.Context, in StartReview
 		}
 		effects = append(effects, authorityEffect)
 	}
-	result, err := s.allocateReviewBatch(ctx, in, resolution, plan, planByHandle, struct {
+	result, err := s.allocateReviewBatch(ctx, in, resolution, reviewBatchChildSlot, plan, planByHandle, struct {
 		Subject ReviewSubjectRef `json:"subject"`
 		Kind    SubjectKind      `json:"kind"`
 	}{in.Subject, kind}, conditions, effects)
@@ -406,7 +406,21 @@ func (s *epochAssignmentService) StartReview(ctx context.Context, in StartReview
 	return ReviewStartResult{CommandResult: result, Round: round, Subject: in.Subject}, nil
 }
 
-func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in StartReviewInput, resolution assignmentResolution, plan ReviewRoundPlan, ids map[string]provenance.TaskID, payload any, conditions []provenance.Condition, effects []provenance.Effect) (CommandResult, error) {
+// reviewBatchChildSlot is the slot every child of a start-review allocation
+// holds: the round task, each axis task, and each finding-group task.
+//
+// IT IS DECLARED HERE, ONCE, at the definition of the batch that creates those
+// children, and the place that records the episodes READS it. It is deliberately
+// not written at the point of recording: the slot decides which actions the
+// occupant may take, so it belongs beside the command that hands the work out,
+// where a reader looking for the policy will find it.
+//
+// Every child of a review carries the reviewer slot, including the round and the
+// finding groups, because each exists to carry the review out and the restraints
+// on a reviewer are meant for whoever does that work.
+const reviewBatchChildSlot = RoleAxisReviewer
+
+func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in StartReviewInput, resolution assignmentResolution, role AssignmentRole, plan ReviewRoundPlan, ids map[string]provenance.TaskID, payload any, conditions []provenance.Condition, effects []provenance.Effect) (CommandResult, error) {
 	request, err := assignmentRequestCommand(MutationStartReview, in.Epoch, payload)
 	if err != nil {
 		return CommandResult{}, fmt.Errorf("encode fused StartReview command: %w", err)
@@ -424,6 +438,7 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 	activityID := provenance.ActivityID{Namespace: "pasture", UUID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("assignment-activity:"+string(in.Meta.OperationID)))}
 	effects = append(effects, provenance.Effect{Sort: provenance.EffectActivityCreate, ResultSlot: reviewActivityResultSlot, ActivityID: activityID, ActivityAgentID: resolution.occupant, ActivityPhase: provenance.PhaseReview, ActivityStage: provenance.StageComplete, ActivityNotes: "assignment-controlled epoch operation"})
 	children := make([]provenance.GovernedChildSpec, 0, len(plan.Tasks))
+	declared := make([]declaredEpisode, 0, len(plan.Tasks))
 	for _, task := range plan.Tasks {
 		title := "review round"
 		if task.Kind == ReviewTaskAxis {
@@ -431,7 +446,19 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 		} else if task.Kind == ReviewTaskGroup {
 			title = "review " + task.Axis.String() + " " + task.Severity.String() + " findings"
 		}
-		children = append(children, provenance.GovernedChildSpec{TaskID: ids[task.Handle], AssignmentID: provenance.AssignmentID(string(in.Meta.OperationID) + "-" + task.Handle), Occupant: resolution.occupant, Title: title, Description: title, Type: provenance.TaskTypeTask, Priority: provenance.PriorityMedium, Phase: provenance.PhaseReview})
+		childAssignment := provenance.AssignmentID(string(in.Meta.OperationID) + "-" + task.Handle)
+		children = append(children, provenance.GovernedChildSpec{TaskID: ids[task.Handle], AssignmentID: childAssignment, Occupant: resolution.occupant, Title: title, Description: title, Type: provenance.TaskTypeTask, Priority: provenance.PriorityMedium, Phase: provenance.PhaseReview})
+		declared = append(declared, declaredEpisode{Task: ids[task.Handle], Assignment: childAssignment, Occupant: resolution.occupant, Role: role})
+	}
+	// The same declarations feed the durable facts and the post-commit index.
+	// If the index write fails, the composed transaction still records every
+	// child assignment for a bounded catch-up reader.
+	for _, episode := range declared {
+		started, err := MapMaterialEvent(AssignmentStartedEvent{Task: episode.Task, Assignment: episode.Assignment, Role: episode.Role, Occupant: episode.Occupant})
+		if err != nil {
+			return CommandResult{}, assignmentErr("allocateReviewBatch", fmt.Sprintf("the start fact for child %q could not be mapped", episode.Task), err.Error(), "repair the declared child task, assignment, role, and occupant before retrying; no batch was submitted")
+		}
+		effects = append(effects, started)
 	}
 	allocator := s.tracker.allocationRunner
 	if allocator == nil {
@@ -460,6 +487,12 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 			return CommandResult{}, assignmentErr("allocateReviewBatch", fmt.Sprintf("the composed result child %d did not match the requested review binding", i), "StartReview preserves exact child order and identity", "repair the composed batch receipt before retrying")
 		}
 	}
+	// Every child of this batch is a started episode, so every child is
+	// recorded. The slot comes from the definition of the batch, not from here.
+	if err := s.indexComposedBatch(ctx, result, declared); err != nil {
+		return CommandResult{}, err
+	}
+
 	return CommandResult{OperationID: in.Meta.OperationID, Replayed: result.Replayed(), Epoch: in.Epoch, ActivityID: activityID, EventIDs: result.SupplementalEmittedEvents()}, nil
 }
 
@@ -528,8 +561,8 @@ func (s *epochAssignmentService) SubmitReview(ctx context.Context, in SubmitRevi
 	if err != nil {
 		return ReviewSubmitResult{}, err
 	}
-	// The axis assignment owns the mutation; the mapped contexts still bind the
-	// event to the reviewed subject for timeline and provenance correlation.
+	// The action stays axis-bound even when sibling finding effects require the
+	// parent operation authority. Contexts retain the reviewed subject identity.
 	event.TaskID = axisTask
 	event.ResultSlot = reviewEventResultSlot
 	submissionPayload, err := canonicalJSON(struct {
@@ -562,6 +595,7 @@ func (s *epochAssignmentService) SubmitReview(ctx context.Context, in SubmitRevi
 		return ReviewSubmitResult{}, err
 	}
 	effects := []provenance.Effect{submissionEffect, axisEffect, event}
+	operationResolution := resolution
 	if implementation, ok := in.Submission.(ImplementationReviewSubmission); ok {
 		seen := map[provenance.TaskID]struct{}{}
 		for i, finding := range implementation.Findings {
@@ -578,8 +612,16 @@ func (s *epochAssignmentService) SubmitReview(ctx context.Context, in SubmitRevi
 			}
 			effects = append(effects, findingEffect)
 		}
+		if len(implementation.Findings) > 0 {
+			var actionCondition provenance.Condition
+			operationResolution, actionCondition, err = s.reviewParentForFindingSubmission(ctx, resolution, start, currentRound)
+			if err != nil {
+				return ReviewSubmitResult{}, err
+			}
+			conditions = append(conditions, actionCondition)
+		}
 	}
-	result, committed, err := s.apply(ctx, in.Meta, in.Epoch, resolution, MutationSubmitReview, payload, conditions, effects)
+	result, committed, err := s.apply(ctx, in.Meta, in.Epoch, operationResolution, MutationSubmitReview, payload, conditions, effects)
 	if err != nil {
 		return ReviewSubmitResult{}, err
 	}
@@ -588,6 +630,192 @@ func (s *epochAssignmentService) SubmitReview(ctx context.Context, in SubmitRevi
 		return ReviewSubmitResult{}, assignmentErr("SubmitReview", "the committed review submission has no event result binding", "review results must identify the immutable recorded event", "verify journal result-slot integrity and retry")
 	}
 	return ReviewSubmitResult{CommandResult: result, Round: in.Round, Axis: in.Axis, Event: eventID}, nil
+}
+
+// reviewParentForFindingSubmission authenticates the one authority that can
+// mutate both the axis and its sibling finding groups. This is not cross-actor
+// delegation: the action occupant must also occupy the recorded review parent.
+// The command's action payload stays axis-bound; only its actual operation
+// authority/task record changes. No mutable recovery index is read here.
+// The returned condition binds that exact action start inside the submission's
+// Apply transaction; parent reachability alone cannot authorize a revoked axis.
+func (s *epochAssignmentService) reviewParentForFindingSubmission(
+	ctx context.Context,
+	action assignmentResolution,
+	start reviewStartedRecord,
+	round reviewRoundSnapshot,
+) (assignmentResolution, provenance.Condition, error) {
+	refuse := func(problem string) error {
+		return assignmentErr("SubmitReview", problem,
+			"nonempty implementation findings also mutate sibling severity groups; no cross-actor delegation is inferred from task reachability",
+			"use an active axis and review-parent assignment held by the same actor, or obtain an explicitly approved delegation design")
+	}
+	journal := s.tracker.prov.Journal()
+	api, ok := journal.(provenance.AssignmentStartQueryAPI)
+	if !ok || action.authority <= 0 || start.kind != SubjectImplementation || round.value.State != reviewRoundStarted {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the current implementation review cannot supply a public parent proof")
+	}
+	if err := ctx.Err(); err != nil {
+		return assignmentResolution{}, provenance.Condition{}, err
+	}
+	axisPage, err := api.QueryAssignmentStarts(provenance.AssignmentStartQuery{
+		AssignmentIDs: []provenance.AssignmentID{action.id},
+		TaskIDs:       []provenance.TaskID{action.task},
+		ActorIDs:      []provenance.ActorID{action.occupant},
+		Page: provenance.AssignmentStartPageRequest{
+			Limit: 1, SnapshotPinned: true, SnapshotMaxJournalID: action.authority, AfterJournalID: action.authority - 1,
+		},
+	})
+	if err != nil {
+		return assignmentResolution{}, provenance.Condition{}, err
+	}
+	if len(axisPage.Rows) != 1 || axisPage.Next != nil || axisPage.Rows[0].AuthorityJournalID != action.authority ||
+		axisPage.Rows[0].ParentAssignmentID == nil || axisPage.Rows[0].PredecessorAssignmentID != nil {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the action axis has no exact recorded review-parent citation")
+	}
+	axisStart := axisPage.Rows[0]
+	operation := round.value.Operation
+	commandPage, err := journal.Facts().QueryEvidence(provenance.EvidenceQuery{
+		Filter: provenance.FactFilter{
+			TaskScope:    provenance.FactTaskScope{Kind: provenance.FactTaskAny},
+			OperationIDs: []provenance.OperationID{provenance.GovernedAllocationSupplementOperationID(operation)},
+		},
+		Kinds: []provenance.EvidenceKind{assignmentCommandEvidenceKind},
+		Page:  provenance.FactPageRequest{Limit: 2, SnapshotMaxJournalID: round.journalID},
+	})
+	if err != nil {
+		return assignmentResolution{}, provenance.Condition{}, err
+	}
+	if len(commandPage.Rows) != 1 || commandPage.Next != nil {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the review has no unique bounded command-parent evidence")
+	}
+	command, err := decodeRecoveryCommand(commandPage.Rows[0])
+	if err != nil {
+		return assignmentResolution{}, provenance.Condition{}, err
+	}
+	if command.Mutation != MutationStartReview || command.Assignment != *axisStart.ParentAssignmentID ||
+		command.Role != RoleGoverningSupervisor || command.Epoch != start.epoch {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the axis parent differs from the started review's governing assignment")
+	}
+	var reviewPayload struct {
+		Subject ReviewSubjectRef `json:"subject"`
+		Kind    SubjectKind      `json:"kind"`
+	}
+	if err := strictJSON(command.Payload, &reviewPayload); err != nil {
+		return assignmentResolution{}, provenance.Condition{}, err
+	}
+	if reviewPayload.Subject.SnapshotID != start.subject.String() || reviewPayload.Kind != start.kind ||
+		round.value.Subject != start.subject || round.value.Round != start.round {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the parent command evidence does not bind the current review subject and round")
+	}
+	parentPage, err := api.QueryAssignmentStarts(provenance.AssignmentStartQuery{
+		AssignmentIDs: []provenance.AssignmentID{command.Assignment},
+		TaskIDs:       []provenance.TaskID{command.Task},
+		Page: provenance.AssignmentStartPageRequest{
+			Limit: 1, SnapshotPinned: true, SnapshotMaxJournalID: command.Authority, AfterJournalID: command.Authority - 1,
+		},
+	})
+	if err != nil {
+		return assignmentResolution{}, provenance.Condition{}, err
+	}
+	if len(parentPage.Rows) != 1 || parentPage.Next != nil || parentPage.Rows[0].AuthorityJournalID != command.Authority {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the review parent has no exact public assignment authority")
+	}
+	parent := parentPage.Rows[0]
+	if parent.Occupant != action.occupant || command.Occupant != action.occupant {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the axis occupant differs from the review parent occupant; explicit delegation is unavailable")
+	}
+	var groups map[provenance.TaskID]provenance.AssignmentID
+	for _, axis := range round.value.Graph {
+		if axis.Task != action.task {
+			continue
+		}
+		groups = make(map[provenance.TaskID]provenance.AssignmentID, len(axis.Groups))
+		for _, group := range axis.Groups {
+			groups[group.Task] = provenance.AssignmentID(string(operation) + "-axis-" + axis.Axis.String() + ".group-" + group.Severity.String())
+		}
+	}
+	if len(groups) != 3 {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the action axis is not bound to three canonical severity groups")
+	}
+	var ids []provenance.AssignmentID
+	for _, assignment := range groups {
+		ids = append(ids, assignment)
+	}
+	// Native axis starts expose the allocation anchor. A later same-parent axis
+	// assignment uses a bounded historical search instead, never index authority.
+	after := command.Authority
+	if axisStart.ProducingOperationID == operation {
+		after = axisStart.ProducingOperationJournalID
+	}
+	seen := map[provenance.TaskID]bool{}
+	for pageNumber := 0; len(seen) != len(groups); pageNumber++ {
+		if pageNumber == 16 {
+			return assignmentResolution{}, provenance.Condition{}, refuse("review group lineage exceeds the bounded command proof budget")
+		}
+		if err := ctx.Err(); err != nil {
+			return assignmentResolution{}, provenance.Condition{}, err
+		}
+		page, err := api.QueryAssignmentStarts(provenance.AssignmentStartQuery{
+			AssignmentIDs: ids,
+			OperationIDs:  []provenance.OperationID{operation},
+			Page: provenance.AssignmentStartPageRequest{
+				Limit: 64, SnapshotPinned: true, SnapshotMaxJournalID: round.journalID, AfterJournalID: after,
+			},
+		})
+		if err != nil {
+			return assignmentResolution{}, provenance.Condition{}, err
+		}
+		for _, group := range page.Rows {
+			wanted, exists := groups[group.TaskID]
+			if !exists || seen[group.TaskID] || group.AssignmentID != wanted || group.ParentAssignmentID == nil ||
+				*group.ParentAssignmentID != parent.AssignmentID || group.PredecessorAssignmentID != nil ||
+				group.Occupant != action.occupant || group.SlotID != provenance.SlotOwnerResponsibility {
+				return assignmentResolution{}, provenance.Condition{}, refuse("a severity group has mismatched actor, parent or canonical identity")
+			}
+			seen[group.TaskID] = true
+		}
+		if len(seen) == len(groups) {
+			break
+		}
+		if page.Next == nil || page.Next.AfterJournalID <= after {
+			return assignmentResolution{}, provenance.Condition{}, refuse("the bounded review lineage query is missing a canonical group")
+		}
+		after = page.Next.AfterJournalID
+	}
+	governedTasks := []provenance.TaskID{parent.TaskID, action.task}
+	for task := range groups {
+		governedTasks = append(governedTasks, task)
+	}
+	for _, task := range governedTasks {
+		if err := ctx.Err(); err != nil {
+			return assignmentResolution{}, provenance.Condition{}, err
+		}
+		governs, err := journal.AuthorityGovernsTaskAt(parent.AuthorityJournalID, task, provenance.JournalID(^uint64(0)>>1))
+		if err != nil || !governs {
+			return assignmentResolution{}, provenance.Condition{}, refuse("the review parent is inactive or does not govern the action and finding tasks")
+		}
+	}
+	axisActive, err := journal.AuthorityGovernsTaskAt(action.authority, action.task, provenance.JournalID(^uint64(0)>>1))
+	if err != nil || !axisActive {
+		return assignmentResolution{}, provenance.Condition{}, refuse("the submitted axis assignment is no longer active")
+	}
+	parentResolution := assignmentResolution{
+		id: parent.AssignmentID, task: parent.TaskID, authority: parent.AuthorityJournalID,
+		role: command.Role, occupant: action.occupant,
+	}
+	parentResolution, err = s.exactCandidateParentAuthority(ctx, parentResolution)
+	if err != nil {
+		return assignmentResolution{}, provenance.Condition{}, err
+	}
+	return parentResolution, provenance.AssignmentActiveCondition(provenance.AssignmentActiveAssertion{
+		AssignmentID:       axisStart.AssignmentID,
+		TaskID:             axisStart.TaskID,
+		SlotID:             provenance.SlotOwnerResponsibility,
+		Occupant:           axisStart.Occupant,
+		AuthorityJournalID: axisStart.AuthorityJournalID,
+		ParentAssignmentID: axisStart.ParentAssignmentID,
+	}), nil
 }
 
 func (s *epochAssignmentService) FinalizeReview(ctx context.Context, in FinalizeReviewInput) (ReviewFinalizeResult, error) {

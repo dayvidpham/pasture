@@ -331,7 +331,8 @@ func lifecycleOutcome(
 			DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
 			HostVersion: coords.HostVersion, Input: input,
 			Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
-			Barrier: barrier,
+			Barrier:    barrier,
+			ActorClaim: tasks.ActorClaim(env.ActorClaim),
 		})
 		completed <- lifecycleWork{native: native, err: err}
 	}()
