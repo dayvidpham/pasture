@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/gateauthority"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -19,6 +18,7 @@ type assignmentIndexPage struct {
 	Through  provenance.JournalID
 	Rows     []startedEpisode
 	Expected *assignmentRecoveryState
+	Members  []recoveryMember
 }
 
 // IndexStaleError is a storage fault, not a policy decision. A caller can use its
@@ -42,9 +42,9 @@ func (e *IndexStaleError) Unwrap() error { return e.Cause }
 // older page cannot move the watermark backwards. An absent watermark means
 // zero; the first contiguous page creates the singleton in this transaction.
 //
-// There is one transaction, one bulk upsert, one watermark update, and no retry.
-// Only construction of the bounded VALUES list loops. This API does not yet
-// count caller invocations; the gate reader must call it at most once per read.
+// Success uses one bulk index write (unless empty), one watermark write and one
+// state CAS. Conflict uses only the dirty CAS and commits it in the SAME attempt.
+// The shared prefix core is called with operator side-table writes disabled.
 func persistAssignmentIndex(ctx context.Context, db *sql.DB, profile timeouts.Profile, page assignmentIndexPage) (err error) {
 	defer func() {
 		if err != nil {
@@ -63,8 +63,6 @@ func persistAssignmentIndex(ctx context.Context, db *sql.DB, profile timeouts.Pr
 	if len(page.Rows) > gateauthority.CatchUpPageSize {
 		return fmt.Errorf("the page has %d rows, above the catch-up bound %d", len(page.Rows), gateauthority.CatchUpPageSize)
 	}
-	args := make([]any, 0, len(page.Rows)*5)
-	values := make([]string, 0, len(page.Rows))
 	for _, row := range page.Rows {
 		if err := row.validate("persistAssignmentIndex"); err != nil {
 			return fmt.Errorf("the page contains an unusable episode: %s", err)
@@ -72,8 +70,6 @@ func persistAssignmentIndex(ctx context.Context, db *sql.DB, profile timeouts.Pr
 		if row.Authority > page.Through {
 			return fmt.Errorf("episode %q has authority %d above page bound %d", row.Assignment, row.Authority, page.Through)
 		}
-		values = append(values, "(?, ?, ?, ?, ?)")
-		args = append(args, string(row.Assignment), row.Actor.String(), row.Task.String(), row.Role.String(), int64(row.Authority))
 	}
 	bounded, cancel := context.WithTimeout(ctx, profile.SQLiteBusy())
 	defer cancel()
@@ -89,32 +85,19 @@ func persistAssignmentIndex(ctx context.Context, db *sql.DB, profile timeouts.Pr
 	if page.Expected != nil && state != *page.Expected {
 		return fmt.Errorf("the captured recovery state changed before persistence")
 	}
-	if state.Status != assignmentCoverageValid || state.Destructive != state.CertifiedDestructive {
+	if state.Status != assignmentCoverageValid || state.Destructive != state.CertifiedDestructive || !state.Complete {
 		return fmt.Errorf("index generation is not certified valid; run operator rebuild or reset")
 	}
-	for _, row := range page.Rows {
-		existing, found, err := readStartedEpisodeTx(bounded, tx, state.Generation, row.Assignment)
-		if err != nil {
-			return commitAssignmentDirtyTx(bounded, tx, state, "catch-up found an unreadable index row: "+err.Error())
-		}
-		if found && existing != row {
-			return commitAssignmentDirtyTx(bounded, tx, state, "catch-up conflicts with an existing assignment")
-		}
+	conflict, err := applyRecoveryPrefixTx(bounded, tx, state, assignmentRecoveryProof{Rows: page.Rows, Members: page.Members}, false)
+	if conflict {
+		return commitAssignmentDirtyTx(bounded, tx, state, err.Error())
 	}
-	if len(values) != 0 {
-		// Generation is taken from the guarded state, never supplied by a row.
-		for i := range values {
-			values[i] = strings.TrimSuffix(values[i], ")") + fmt.Sprintf(", %d)", state.Generation)
-		}
-		_, err = tx.ExecContext(bounded, `INSERT INTO pasture_actor_assignment (assignment_id, actor_id, task_id, role, authority_journal_id,generation) VALUES `+strings.Join(values, ",")+
-			` ON CONFLICT(assignment_id) DO NOTHING`, args...)
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return err
 	}
 	result, err := tx.ExecContext(bounded, `INSERT INTO pasture_actor_assignment_watermark (singleton_id, last_indexed_jid)
-		SELECT 0, ? WHERE COALESCE((SELECT last_indexed_jid FROM pasture_actor_assignment_watermark WHERE singleton_id = 0), 0) >= ?
-		ON CONFLICT(singleton_id) DO UPDATE SET last_indexed_jid = max(last_indexed_jid, excluded.last_indexed_jid)`, int64(page.Through), int64(page.From))
+		SELECT 0, ? WHERE ? >= ?
+		ON CONFLICT(singleton_id) DO UPDATE SET last_indexed_jid = max(last_indexed_jid, excluded.last_indexed_jid)`, int64(page.Through), int64(state.Through), int64(page.From))
 	if err != nil {
 		return err
 	}

@@ -52,13 +52,6 @@ func (t *trackerImpl) prepareAssignmentCatchUp(ctx context.Context, snapshot pro
 			tasks[row.TaskID] = true
 			taskIDs = append(taskIDs, row.TaskID)
 		}
-		if row.PredecessorAssignmentID == nil {
-			op := provenance.GovernedAllocationSupplementOperationID(row.ProducingOperationID)
-			if !operations[op] {
-				operations[op] = true
-				operationIDs = append(operationIDs, op)
-			}
-		}
 	}
 	var material []provenance.TaskEventRow
 	var evidence []provenance.EvidenceRow
@@ -77,6 +70,24 @@ func (t *trackerImpl) prepareAssignmentCatchUp(ctx context.Context, snapshot pro
 			return result, recoveryFault("gate material page", fmt.Errorf("material exactness requires an operator drain"))
 		}
 		material = facts.Events
+	}
+	decoded, err := decodeRecoveryMaterials(material, page.SnapshotMaxJournalID)
+	if err != nil {
+		return result, recoveryFault("gate material decoding", err)
+	}
+	for _, row := range page.Rows {
+		if row.PredecessorAssignmentID != nil {
+			continue
+		}
+		m, present := decoded[recoveryMaterialKey{row.TaskID, row.AssignmentID}]
+		if present && *m.Row.ProducedByOperationJournalID == row.ProducingOperationJournalID {
+			continue
+		}
+		op := provenance.GovernedAllocationSupplementOperationID(row.ProducingOperationID)
+		if !operations[op] {
+			operations[op] = true
+			operationIDs = append(operationIDs, op)
+		}
 	}
 	if len(operationIDs) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -114,7 +125,13 @@ func (t *trackerImpl) prepareAssignmentCatchUp(ctx context.Context, snapshot pro
 		}
 	}
 	result.State = state
-	result.Page = assignmentIndexPage{From: state.Through, Through: page.SnapshotMaxJournalID, Rows: proof.Rows, Expected: &result.State}
+	result.Page = assignmentIndexPage{
+		From:     state.Through,
+		Through:  page.SnapshotMaxJournalID,
+		Rows:     proof.Rows,
+		Expected: &result.State,
+		Members:  proof.Members,
+	}
 	result.HistoricalPredicates = proof.HistoricalPredicates
 	return result, nil
 }

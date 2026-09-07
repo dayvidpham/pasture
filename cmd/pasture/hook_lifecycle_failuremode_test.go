@@ -5740,6 +5740,7 @@ var guardSweepOwned = []string{
 var guardSweepForeign = map[string]string{
 	"bundle_export_test.go":                      "not changed by this slice",
 	"epoch_test.go":                              "not changed by this slice",
+	"gate_rebuild_index_test.go":                 "operator assignment-index command and generation tests, outside the lifecycle transport sweep",
 	"hook_lifecycle_context_production_test.go":  "not changed by this slice",
 	"hook_lifecycle_gate_test.go":                "not changed by this slice",
 	"hook_lifecycle_lineage_production_test.go":  "not changed by this slice",

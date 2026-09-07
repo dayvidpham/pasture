@@ -122,36 +122,180 @@ func CreateSliceAuditParticipant(ctx context.Context, tx provenance.GovernedAllo
 // exact parent assignment row, not merely an older authority that governed the
 // same task at the event timestamp.
 func (s *epochAssignmentService) exactCandidateParentAuthority(ctx context.Context, resolution assignmentResolution) (assignmentResolution, error) {
-	query := provenance.JournalQueryV1{OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{resolution.task}, EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()}, Limit: provenance.MaxFactPageSize}
-	var exact provenance.JournalID
-	for {
-		page, err := s.tracker.prov.Journal().QueryTaskEvents(query)
+	refuse := func(problem string) error {
+		return assignmentErr("exactCandidateParentAuthority", problem,
+			"a command parent must match an exact public assignment start and authenticated material, not a neighboring journal row",
+			"supply the exact active assignment; repair inconsistent history or request an explicitly reviewed larger command proof budget")
+	}
+	if resolution.authority <= 0 || resolution.id == "" || resolution.task == (provenance.TaskID{}) {
+		return assignmentResolution{}, refuse("the resolved parent identity is incomplete")
+	}
+	journal := s.tracker.prov.Journal()
+	api, ok := journal.(provenance.AssignmentStartQueryAPI)
+	if !ok {
+		return assignmentResolution{}, refuse("the journal lacks public assignment-start queries")
+	}
+	if err := ctx.Err(); err != nil {
+		return assignmentResolution{}, err
+	}
+	// The resolver supplies a candidate authority, not proof. Pin the identity
+	// query to that exact position so unrelated later candidates cannot make a
+	// point lookup incomplete. Current liveness is checked separately below.
+	identity, err := api.QueryAssignmentStarts(provenance.AssignmentStartQuery{
+		AssignmentIDs: []provenance.AssignmentID{resolution.id},
+		TaskIDs:       []provenance.TaskID{resolution.task},
+		ActorIDs:      []provenance.ActorID{resolution.occupant},
+		SlotIDs:       []provenance.AssignmentSlotID{provenance.SlotOwnerResponsibility},
+		Page: provenance.AssignmentStartPageRequest{
+			Limit:                1,
+			SnapshotPinned:       true,
+			SnapshotMaxJournalID: resolution.authority,
+			AfterJournalID:       resolution.authority - 1,
+		},
+	})
+	if err != nil {
+		return assignmentResolution{}, fmt.Errorf("read exact parent assignment %q: %w", resolution.id, err)
+	}
+	if len(identity.Rows) != 1 || identity.Next != nil || identity.Rows[0].AuthorityJournalID != resolution.authority {
+		return assignmentResolution{}, refuse("the proposed authority is missing, mismatched or not an exhausted exact start")
+	}
+	starts := identity.Rows
+	after := resolution.authority
+	// Transfer parents need their historical predecessor proof, not a guessed
+	// owner role. This command-only path has a finite history cap and no index
+	// dependency. Ordinary/composed parents keep the direct point lookup.
+	const maxParentProofPages = 16
+	if starts[0].PredecessorAssignmentID != nil {
+		birth, err := s.taskBirthJournalID(ctx, resolution.task)
 		if err != nil {
-			return assignmentResolution{}, fmt.Errorf("resolve exact candidate parent assignment %q: %w", resolution.id, err)
+			return assignmentResolution{}, err
 		}
-		for _, row := range page.Events {
-			value, err := decodeAssignmentStart(row.Payload)
+		after = birth
+		starts = nil
+		cursor := birth
+		for pageNumber := 0; ; pageNumber++ {
+			if pageNumber == maxParentProofPages {
+				return assignmentResolution{}, refuse("transfer parent history exceeds the bounded command proof budget")
+			}
+			if err := ctx.Err(); err != nil {
+				return assignmentResolution{}, err
+			}
+			page, err := api.QueryAssignmentStarts(provenance.AssignmentStartQuery{
+				TaskIDs: []provenance.TaskID{resolution.task},
+				Page: provenance.AssignmentStartPageRequest{
+					Limit: 64, SnapshotPinned: true, SnapshotMaxJournalID: resolution.authority, AfterJournalID: cursor,
+				},
+			})
 			if err != nil {
-				return assignmentResolution{}, fmt.Errorf("decode candidate parent assignment-start event %d: %w", row.JournalID, err)
+				return assignmentResolution{}, err
 			}
-			if provenance.AssignmentID(value.Assignment) == resolution.id && value.Occupant == resolution.occupant.String() && row.JournalID > 1 {
-				exact = row.JournalID - 1
+			starts = append(starts, page.Rows...)
+			if page.Next == nil {
+				break
 			}
+			if page.Next.AfterJournalID <= cursor {
+				return assignmentResolution{}, refuse("the parent history cursor made no progress")
+			}
+			cursor = page.Next.AfterJournalID
 		}
+	}
+	var material []provenance.TaskEventRow
+	var snapshot provenance.JournalID
+	for pageNumber := 0; ; pageNumber++ {
+		if pageNumber == maxParentProofPages {
+			return assignmentResolution{}, refuse("parent material history exceeds the bounded command proof budget")
+		}
+		if err := ctx.Err(); err != nil {
+			return assignmentResolution{}, err
+		}
+		page, err := journal.QueryTaskEvents(provenance.JournalQueryV1{
+			OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{resolution.task},
+			EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()}, Limit: 64,
+			AfterJournalID: after, SnapshotMaxJournalID: snapshot,
+		})
+		if err != nil {
+			return assignmentResolution{}, err
+		}
+		snapshot = page.SnapshotMaxJournalID
+		material = append(material, page.Events...)
 		if page.Next == nil {
 			break
 		}
-		query.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
-		query.AfterJournalID = page.Next.AfterJournalID
+		if page.Next.AfterJournalID <= after {
+			return assignmentResolution{}, refuse("the parent material cursor made no progress")
+		}
+		after = page.Next.AfterJournalID
 	}
-	if exact == 0 {
-		return assignmentResolution{}, assignmentErr("exactCandidateParentAuthority", fmt.Sprintf("assignment %q has no paired authority row", resolution.id), "governed candidate allocation requires the exact active parent assignment authority", "repair the assignment-start material event and retry")
+	decoded, err := decodeRecoveryMaterials(material, snapshot)
+	if err != nil {
+		return assignmentResolution{}, err
 	}
-	active, err := s.tracker.prov.Journal().AuthorityGovernsTaskAt(exact, resolution.task, provenance.JournalID(^uint64(0)>>1))
+	var operations []provenance.OperationID
+	seen := map[provenance.OperationID]bool{}
+	for _, start := range starts {
+		fact, present := decoded[recoveryMaterialKey{start.TaskID, start.AssignmentID}]
+		if start.PredecessorAssignmentID != nil || (present && *fact.Row.ProducedByOperationJournalID == start.ProducingOperationJournalID) {
+			continue
+		}
+		operation := provenance.GovernedAllocationSupplementOperationID(start.ProducingOperationID)
+		if !seen[operation] {
+			seen[operation] = true
+			operations = append(operations, operation)
+		}
+	}
+	if len(operations) > provenance.MaxFactFilterValues {
+		return assignmentResolution{}, refuse("parent supplement population exceeds the public filter bound")
+	}
+	var evidence []provenance.EvidenceRow
+	if len(operations) > 0 {
+		query := provenance.EvidenceQuery{
+			Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: operations},
+			Kinds:  []provenance.EvidenceKind{assignmentCommandEvidenceKind, reviewRoundAuthorityEvidenceKind},
+			Page:   provenance.FactPageRequest{Limit: 64, SnapshotMaxJournalID: snapshot},
+		}
+		for pageNumber := 0; ; pageNumber++ {
+			if pageNumber == maxParentProofPages {
+				return assignmentResolution{}, refuse("parent evidence exceeds the bounded command proof budget")
+			}
+			if err := ctx.Err(); err != nil {
+				return assignmentResolution{}, err
+			}
+			page, err := journal.Facts().QueryEvidence(query)
+			if err != nil {
+				return assignmentResolution{}, err
+			}
+			evidence = append(evidence, page.Rows...)
+			if page.Next == nil {
+				break
+			}
+			if page.Next.AfterJournalID <= query.Page.AfterJournalID {
+				return assignmentResolution{}, refuse("the parent evidence cursor made no progress")
+			}
+			query.Page.AfterJournalID = page.Next.AfterJournalID
+		}
+	}
+	proof, err := authenticateRecoveryRows(ctx, journal, provenance.AssignmentStartPage{
+		Rows: starts, SnapshotPinned: true, SnapshotMaxJournalID: snapshot,
+	}, material, evidence, map[provenance.AssignmentID]startedEpisode{}, snapshot)
+	if err != nil {
+		return assignmentResolution{}, err
+	}
+	matched := 0
+	for _, row := range proof.Rows {
+		if row.Assignment == resolution.id {
+			if row.Task != resolution.task || row.Actor != resolution.occupant || row.Role != resolution.role || row.Authority != resolution.authority {
+				return assignmentResolution{}, refuse("authenticated parent material differs from the resolved command parent")
+			}
+			matched++
+		}
+	}
+	if matched != 1 {
+		return assignmentResolution{}, refuse("the parent proof is missing or duplicated")
+	}
+	active, err := journal.AuthorityGovernsTaskAt(resolution.authority, resolution.task, provenance.JournalID(^uint64(0)>>1))
 	if err != nil || !active {
 		return assignmentResolution{}, assignmentErr("exactCandidateParentAuthority", fmt.Sprintf("assignment %q is not currently active", resolution.id), "governed candidate allocation cannot use an ended or malformed parent assignment", "start the required parent assignment and retry")
 	}
-	resolution.authority = exact
 	return resolution, nil
 }
 

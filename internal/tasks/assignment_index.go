@@ -1,7 +1,8 @@
 package tasks
 
-// assignment_index.go owns the started-episode index and the ONE place that
-// writes it.
+// assignment_index.go owns the ordinary command writer for the started-episode
+// index. Authenticated recovery pages use the shared guarded prefix core in
+// assignment_recovery.go; they do not create or change journal assignments.
 //
 // WHY AN INDEX AT ALL. A gate has milliseconds and must answer "which task does
 // this actor hold?". The journal can answer it, but only by walking, and a gate
@@ -74,18 +75,18 @@ func indexError(where, what, why string) error {
 	}
 }
 
-// recordAssignmentStart is THE ONE PLACE that writes a started-episode row.
+// recordAssignmentStart is the choke point for ordinary command index writes.
 //
 // Every writer of an assignment-start fact goes through here, and a test derives
 // that set from the source rather than trusting this comment: a writer added
 // later that does not call this function turns that test red.
 //
-// The write is an upsert keyed on the assignment id, so a replayed command or a
-// retried transfer lands the same row once. It runs AFTER the journal commit,
+// Exact replay is a no-op; a conflicting re-record commits dirty invalidation
+// without overwriting the original row. It runs AFTER the journal commit,
 // never inside it, because the authority id it stores does not exist until then.
 func recordAssignmentStart(ctx context.Context, db *sql.DB, episode startedEpisode) error {
-	if db == nil {
-		return indexError("recordAssignmentStart", "the database handle is missing", "an internal caller reached the index before the store was opened")
+	if db == nil || ctx == nil {
+		return indexError("recordAssignmentStart", "the database handle or cancellation context is missing", "an internal caller reached the index without its required store and operation context")
 	}
 	if err := episode.validate("recordAssignmentStart"); err != nil {
 		return err
@@ -116,7 +117,13 @@ func recordAssignmentStart(ctx context.Context, db *sql.DB, episode startedEpiso
 	 (assignment_id,actor_id,task_id,role,authority_journal_id,generation) VALUES(?,?,?,?,?,?)`,
 		string(episode.Assignment), episode.Actor.String(), episode.Task.String(), episode.Role.String(), int64(episode.Authority), state.Generation)
 	if err != nil {
-		return recoveryFault("ordinary index insert", err)
+		// Preserve the command writer's established structured storage error in
+		// the typed stale chain. Callers report its detailed database failure.
+		return recoveryFault("ordinary index insert", indexError(
+			"recordAssignmentStart",
+			fmt.Sprintf("writing the record for episode %q failed", episode.Assignment),
+			"the database refused the write: "+err.Error(),
+		))
 	}
 	if err := updateRecoveryStateTx(ctx, tx, state, `state_revision=state_revision+1`); err != nil {
 		return recoveryFault("ordinary writer compare-and-swap", err)

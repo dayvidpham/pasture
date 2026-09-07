@@ -269,7 +269,7 @@ func TestTheIndexRefusesARowItCouldNeverEvaluate(t *testing.T) {
 }
 
 // TestTheIndexWriteIsIdempotent proves a replayed command lands one row, not
-// two, and that a re-record updates rather than duplicates.
+// two, and that a conflicting re-record preserves the original authority.
 //
 // RED when: the write inserts a second row for one episode.
 func TestTheIndexWriteIsIdempotent(t *testing.T) {
@@ -289,10 +289,16 @@ func TestTheIndexWriteIsIdempotent(t *testing.T) {
 		t.Fatalf("three records of one episode left %d row(s); want 1, because a replayed command must not double an episode", rows)
 	}
 
-	// A later record of the same episode under a higher authority replaces it.
+	// A conflicting authority is not a replay. It commits dirty invalidation
+	// before returning a typed fault, and never overwrites the authentic row.
 	episode.Authority = 11
-	if err := recordAssignmentStart(t.Context(), tracker.auditDB, episode); err != nil {
-		t.Fatalf("re-record: %v", err)
+	var stale *IndexStaleError
+	if err := recordAssignmentStart(t.Context(), tracker.auditDB, episode); !stderrors.As(err, &stale) {
+		t.Fatalf("conflicting re-record error=%v, want typed stale", err)
+	}
+	state, err := readAssignmentRecoveryState(t.Context(), tracker.auditDB)
+	if err != nil || state.Status != assignmentCoverageDirty || state.Destructive == state.CertifiedDestructive {
+		t.Fatalf("returned conflict did not persist dirty invalidation: state=%+v err=%v", state, err)
 	}
 	if rows := countIndexRows(t, tracker); rows != 1 {
 		t.Fatalf("re-recording one episode left %d row(s); want 1", rows)
@@ -301,8 +307,8 @@ func TestTheIndexWriteIsIdempotent(t *testing.T) {
 	if err := tracker.auditDB.QueryRow(`SELECT authority_journal_id FROM pasture_actor_assignment WHERE assignment_id = ?`, "episode-1").Scan(&authority); err != nil {
 		t.Fatalf("read back the record: %v", err)
 	}
-	if authority != 11 {
-		t.Fatalf("the record holds authority %d after a re-record; want 11, the latest", authority)
+	if authority != 7 {
+		t.Fatalf("the record holds authority %d after a conflict; want original 7", authority)
 	}
 }
 

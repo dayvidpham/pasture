@@ -33,7 +33,18 @@ func indexWritePage(t *testing.T, store *trackerImpl) assignmentIndexPage {
 	actor := feasibilityActor(t, store, "index-writer")
 	task := createHumanTestTask(t, store, "index-write")
 	seed := seedFeasibilityEpisode(t, store, task, "first", actor, "index-first")
-	return assignmentIndexPage{Through: journalMaximum(t, store), Rows: []startedEpisode{{Assignment: "first", Actor: actor, Task: task, Role: RoleOwnerResponsibility, Authority: seed.authority}}}
+	return assignmentIndexPage{
+		Through: journalMaximum(t, store),
+		Rows: []startedEpisode{
+			{
+				Assignment: "first",
+				Actor:      actor,
+				Task:       task,
+				Role:       RoleOwnerResponsibility,
+				Authority:  seed.authority,
+			},
+		},
+	}
 }
 
 func assertIndexPage(t *testing.T, store *trackerImpl, page assignmentIndexPage) {
@@ -55,7 +66,10 @@ func assertIndexPage(t *testing.T, store *trackerImpl, page assignmentIndexPage)
 	}
 	require.ElementsMatch(t, want, got, "persisted rows must equal the input page, without duplicates")
 	var watermark provenance.JournalID
-	require.NoError(t, store.auditDB.QueryRow(`SELECT COALESCE((SELECT last_indexed_jid FROM pasture_actor_assignment_watermark WHERE singleton_id = 0), 0)`).Scan(&watermark))
+	require.NoError(
+		t,
+		store.auditDB.QueryRow(`SELECT COALESCE((SELECT last_indexed_jid FROM pasture_actor_assignment_watermark WHERE singleton_id = 0), 0)`).Scan(&watermark),
+	)
 	require.Equal(t, page.Through, watermark, "watermark must cover exactly the persisted page")
 }
 
@@ -99,7 +113,7 @@ func TestAssignmentIndexPersistRollsBackAndRefusesGaps(t *testing.T) {
 	err = persistAssignmentIndex(t.Context(), store.auditDB, timeouts.TestProfile(), page)
 	var stale *IndexStaleError
 	require.ErrorAs(t, err, &stale)
-	require.ErrorContains(t, err, "no partial page or watermark is committed")
+	require.ErrorContains(t, err, "no rejected page is certified")
 	assertIndexPage(t, store, assignmentIndexPage{})
 	_, err = store.auditDB.Exec(`DROP TRIGGER refuse_watermark`)
 	require.NoError(t, err)
@@ -158,15 +172,14 @@ func TestAssignmentIndexPersistFaultsUnderHeldLock(t *testing.T) {
 	assertIndexPage(t, store, page)
 }
 
-// RED: add a second transaction or a write in a loop. This narrow check reads
-// the two write APIs only. The reader's call count is checked when it exists;
-// this test does not claim to measure the whole gate's cost.
+// The claim keeps its unchanged one-write bound. Recovery's shared core is
+// accounted separately below: three success writes, or one dirty write, in one
+// transaction attempt. Operator-only member writes are not gate writes.
 func TestAssignmentIndexAndClaimWriteCountsAreBounded(t *testing.T) {
 	for _, subject := range []struct {
 		file, function string
 		want           map[string]int
 	}{
-		{"assignment_index_write.go", "persistAssignmentIndex", map[string]int{"BeginTx": 1, "ExecContext": 2, "Commit": 1}},
 		{"session_claim.go", "RecordLifecycleSessionClaim", map[string]int{"ExecContext": 1}},
 	} {
 		file, err := parser.ParseFile(token.NewFileSet(), subject.file, nil, 0)
@@ -205,5 +218,118 @@ func TestAssignmentIndexAndClaimWriteCountsAreBounded(t *testing.T) {
 			require.Equal(t, subject.want, calls, "write API must keep one bounded attempt")
 		}
 		require.True(t, found, "write-count guard must read its production function")
+	}
+
+	functions := map[string]*ast.FuncDecl{}
+	paths, err := filepath.Glob("*.go")
+	require.NoError(t, err)
+	for _, name := range paths {
+		isTest, err := filepath.Match("*_test.go", name)
+		require.NoError(t, err)
+		if isTest {
+			continue
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		require.NoError(t, err)
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
+				functions[fn.Name.Name] = fn
+			}
+		}
+	}
+	var counts func(string, map[string]bool) map[string]int
+	counts = func(name string, visited map[string]bool) map[string]int {
+		result := map[string]int{}
+		if visited[name] {
+			return result
+		}
+		visited[name] = true
+		fn := functions[name]
+		require.NotNil(t, fn, "guard must visit %s", name)
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if branch, ok := node.(*ast.IfStmt); ok && name == "applyRecoveryPrefixTx" {
+				if id, ok := branch.Cond.(*ast.Ident); ok && id.Name == "operator" {
+					return false
+				}
+			}
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+				switch sel.Sel.Name {
+				case "BeginTx", "ExecContext", "Commit":
+					result[sel.Sel.Name]++
+				}
+			}
+			if id, ok := call.Fun.(*ast.Ident); ok && functions[id.Name] != nil {
+				for key, n := range counts(id.Name, visited) {
+					result[key] += n
+				}
+			}
+			return true
+		})
+		return result
+	}
+	// Two syntactic commits are mutually exclusive: the conflict arm returns
+	// commitAssignmentDirtyTx immediately; only success reaches the final commit.
+	require.Equal(
+		t,
+		map[string]int{"BeginTx": 1, "ExecContext": 3, "Commit": 2},
+		counts("persistAssignmentIndex", map[string]bool{}),
+	)
+	root := functions["persistAssignmentIndex"]
+	sharedCalls := 0
+	dirtyReturns := 0
+	ast.Inspect(root.Body, func(node ast.Node) bool {
+		if call, ok := node.(*ast.CallExpr); ok {
+			if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "applyRecoveryPrefixTx" {
+				sharedCalls++
+				require.Len(t, call.Args, 5)
+				flag, ok := call.Args[4].(*ast.Ident)
+				require.True(t, ok)
+				require.Equal(t, "false", flag.Name)
+			}
+		}
+		if ret, ok := node.(*ast.ReturnStmt); ok && len(ret.Results) == 1 {
+			if call, ok := ret.Results[0].(*ast.CallExpr); ok {
+				if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "commitAssignmentDirtyTx" {
+					dirtyReturns++
+				}
+			}
+		}
+		return true
+	})
+	require.Equal(t, 1, sharedCalls)
+	require.Equal(t, 1, dirtyReturns)
+	for name := range functions {
+		if name != "persistAssignmentIndex" && name != "applyRecoveryPrefixTx" && name != "commitAssignmentDirtyTx" && name != "updateRecoveryStateTx" {
+			continue
+		}
+		ast.Inspect(functions[name].Body, func(node ast.Node) bool {
+			if branch, ok := node.(*ast.IfStmt); ok && name == "applyRecoveryPrefixTx" {
+				if id, ok := branch.Cond.(*ast.Ident); ok && id.Name == "operator" {
+					return false
+				}
+			}
+			switch node.(type) {
+			case *ast.ForStmt, *ast.RangeStmt:
+				ast.Inspect(node, func(child ast.Node) bool {
+					call, ok := child.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+						require.NotContains(t, []string{"BeginTx", "ExecContext", "Commit"}, sel.Sel.Name, "gate write in loop in %s", name)
+					}
+					if id, ok := call.Fun.(*ast.Ident); ok && functions[id.Name] != nil {
+						c := counts(id.Name, map[string]bool{})
+						require.Zero(t, c["BeginTx"]+c["ExecContext"]+c["Commit"], "helper write in loop in %s", name)
+					}
+					return true
+				})
+			}
+			return true
+		})
 	}
 }

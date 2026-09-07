@@ -9,13 +9,38 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/gateauthority"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
 
+// normalizeRecoveryJSON invokes the public pure preparation API only. No Apply,
+// tracker, journal, SQL or receipt is involved; field/mutation size limits and
+// duplicate-key rejection are exactly those of the stored Provenance payload.
+func normalizeRecoveryJSON(data []byte) ([]byte, error) {
+	prepared, err := provenance.Canonicalize(provenance.OperationInput{Effects: []provenance.Effect{{
+		Sort: provenance.EffectEvidence, EvidenceKind: assignmentCommandEvidenceKind, ContentDigest: []byte{1}, Payload: data,
+	}}})
+	if err != nil {
+		return nil, err
+	}
+	effects := prepared.NormalizedEffects()
+	if len(effects) != 1 {
+		return nil, fmt.Errorf("pure normalization did not return one evidence effect")
+	}
+	return effects[0].Payload, nil
+}
+
 func decodeRecoveryJSON(data []byte, value any) error {
+	normalized, err := normalizeRecoveryJSON(data)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(normalized, data) {
+		return fmt.Errorf("stored recovery JSON is not Provenance-normalized")
+	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
 	if err := d.Decode(value); err != nil {
@@ -29,8 +54,12 @@ func decodeRecoveryJSON(data []byte, value any) error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(encoded, data) {
-		return fmt.Errorf("recovery payload is not the producer's canonical encoding")
+	typedNormalized, err := normalizeRecoveryJSON(encoded)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(typedNormalized, data) {
+		return fmt.Errorf("recovery payload omits required fields or uses unsupported null/number forms")
 	}
 	return nil
 }
@@ -45,7 +74,10 @@ type recoveryMember struct {
 // commandRecoveryBinding validates closed nested command types without running
 // service replay, mutable eligibility, or receipt reconstruction. Repository
 // arrays remain in caller order; only membership validation uses maps.
-func commandRecoveryBinding(record assignmentCommandRecord, operation provenance.OperationID) (AssignmentRole, []recoveryMember, error) {
+// A nil operation reconstructs closed producer bytes for digest authentication.
+// The row-authentication caller supplies its public operation to additionally
+// bind deterministic replacement/member identities. Neither stage reads a store.
+func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenance.OperationID) (AssignmentRole, []recoveryMember, error) {
 	var typed any
 	var parent provenance.TaskID
 	var assignment provenance.AssignmentID
@@ -129,7 +161,7 @@ func commandRecoveryBinding(record assignmentCommandRecord, operation provenance
 		}
 		handle = "slice-candidate-replacement"
 		suffix = "-candidate-owner"
-		if string(p.Replacement) != deterministicTask(operation, handle).String() {
+		if operation != nil && string(p.Replacement) != deterministicTask(*operation, handle).String() {
 			return 0, nil, fmt.Errorf("wrong replacement identity")
 		}
 		if _, err := provenance.ParseTaskID(string(p.Candidate)); err != nil {
@@ -177,14 +209,17 @@ func commandRecoveryBinding(record assignmentCommandRecord, operation provenance
 		}
 		handle = "integration-candidate-replacement"
 		suffix = "-candidate-owner"
-		if string(p.Replacement) != deterministicTask(operation, handle).String() {
+		if operation != nil && string(p.Replacement) != deterministicTask(*operation, handle).String() {
 			return 0, nil, fmt.Errorf("wrong replacement identity")
 		}
 		var err error
-		parent, err = provenance.ParseTaskID(string(p.Candidate))
+		_, err = provenance.ParseTaskID(string(p.Candidate))
 		if err != nil {
 			return 0, nil, err
 		}
+		// New integration replacements are plan-governed. The old candidate is
+		// a separately validated payload identity, not the allocation parent.
+		parent = record.Task
 		validation = validRepositories(p.ReplacementValue.Repositories)
 		if validation == nil {
 			validation = validateReworkSubmission(p.Rework)
@@ -208,6 +243,12 @@ func commandRecoveryBinding(record assignmentCommandRecord, operation provenance
 		childRole = RoleAxisReviewer
 		subject = p.Subject
 		kind = p.Kind
+		if err := subject.validate(); err != nil {
+			return 0, nil, err
+		}
+		if !kind.valid() {
+			return 0, nil, fmt.Errorf("invalid review command kind")
+		}
 		if (subject.Kind == ReviewSubjectDocumentRevision && kind != SubjectPlan) || (subject.Kind == ReviewSubjectImplementationCandidate && kind != SubjectImplementation) {
 			return 0, nil, fmt.Errorf("review subject and kind disagree")
 		}
@@ -227,11 +268,38 @@ func commandRecoveryBinding(record assignmentCommandRecord, operation provenance
 	if err != nil {
 		return 0, nil, err
 	}
-	if !bytes.Equal(request, record.Request) {
+	var requestEnvelope struct {
+		Mutation EpochMutationKind `json:"mutation"`
+		Epoch    EpochRootID       `json:"epoch"`
+		Payload  json.RawMessage   `json:"payload"`
+	}
+	if err := decodeRecoveryJSON(record.Request, &requestEnvelope); err != nil {
+		return 0, nil, err
+	}
+	normalizedRequest, err := normalizeRecoveryJSON(request)
+	if err != nil {
+		return 0, nil, err
+	}
+	if !bytes.Equal(normalizedRequest, record.Request) {
 		return 0, nil, fmt.Errorf("nested command request does not match typed payload")
 	}
+	record.Payload, err = canonicalJSON(typed)
+	if err != nil {
+		return 0, nil, err
+	}
+	record.Request = request
+	if operation == nil {
+		return childRole, nil, nil
+	}
 	if record.Mutation != MutationStartReview {
-		return childRole, []recoveryMember{{Assignment: provenance.AssignmentID(string(operation) + suffix), Task: deterministicTask(operation, handle), Actor: record.Occupant, Producer: operation}}, nil
+		return childRole, []recoveryMember{
+			{
+				Assignment: provenance.AssignmentID(string(*operation) + suffix),
+				Task:       deterministicTask(*operation, handle),
+				Actor:      record.Occupant,
+				Producer:   *operation,
+			},
+		}, nil
 	}
 	subjectTask, err := provenance.ParseTaskID(subject.SnapshotID)
 	if err != nil {
@@ -243,7 +311,15 @@ func commandRecoveryBinding(record assignmentCommandRecord, operation provenance
 	}
 	var members []recoveryMember
 	for _, task := range plan.Tasks {
-		members = append(members, recoveryMember{Assignment: provenance.AssignmentID(string(operation) + "-" + task.Handle), Task: deterministicTask(operation, task.Handle), Actor: record.Occupant, Producer: operation})
+		members = append(
+			members,
+			recoveryMember{
+				Assignment: provenance.AssignmentID(string(*operation) + "-" + task.Handle),
+				Task:       deterministicTask(*operation, task.Handle),
+				Actor:      record.Occupant,
+				Producer:   *operation,
+			},
+		)
 	}
 	return childRole, members, nil
 }
@@ -253,12 +329,31 @@ func decodeRecoveryCommand(row provenance.EvidenceRow) (assignmentCommandRecord,
 	if err := decodeRecoveryJSON(row.Payload, &record); err != nil {
 		return record, err
 	}
-	digest := sha256.Sum256(row.Payload)
+	if _, _, err := commandRecoveryBinding(&record, nil); err != nil {
+		return record, err
+	}
+	producerBytes, err := canonicalJSON(record)
+	if err != nil {
+		return record, err
+	}
+	digest := sha256.Sum256(producerBytes)
 	if !bytes.Equal(digest[:], row.ContentDigest) {
 		return record, fmt.Errorf("command evidence content digest mismatch")
 	}
+	normalized, err := normalizeRecoveryJSON(producerBytes)
+	if err != nil {
+		return record, err
+	}
+	if !bytes.Equal(normalized, row.Payload) {
+		return record, fmt.Errorf("normalized producer command differs from stored evidence")
+	}
 	if row.TaskID == nil || *row.TaskID != record.Task || record.Task == (provenance.TaskID{}) || record.Assignment == "" || record.Authority <= 0 || record.Occupant == (provenance.ActorID{}) || row.EffectiveActorID != record.Occupant {
 		return record, fmt.Errorf("command evidence has inconsistent task, authority, assignment or actor")
+	}
+	// Return the stored closed record so later binding decodes normalized nested
+	// values again; producer-order RawMessages are not mistaken for stored bytes.
+	if err := decodeRecoveryJSON(row.Payload, &record); err != nil {
+		return record, err
 	}
 	return record, nil
 }
@@ -283,7 +378,7 @@ func applyRecoveryPrefixTx(ctx context.Context, tx *sql.Tx, state assignmentReco
 		if err != nil {
 			return true, err
 		}
-		if found && existing != row {
+		if (found && existing != row) || (!found && row.Authority <= state.Through) {
 			return true, fmt.Errorf("consumed prefix conflicts with existing assignment %q", row.Assignment)
 		}
 	}
@@ -307,9 +402,24 @@ func applyRecoveryPrefixTx(ctx context.Context, tx *sql.Tx, state assignmentReco
 			return true, fmt.Errorf("review member cache conflicts with authenticated member")
 		}
 	}
-	for _, row := range proof.Rows {
-		_, err := tx.ExecContext(ctx, `INSERT INTO pasture_actor_assignment(assignment_id,actor_id,task_id,role,authority_journal_id,generation)
-		 VALUES(?,?,?,?,?,?) ON CONFLICT(assignment_id) DO NOTHING`, string(row.Assignment), row.Actor.String(), row.Task.String(), row.Role.String(), row.Authority, state.Generation)
+	if len(proof.Rows) > 0 {
+		values := make([]string, 0, len(proof.Rows))
+		args := make([]any, 0, len(proof.Rows)*6)
+		for _, row := range proof.Rows {
+			values = append(values, "(?,?,?,?,?,?)")
+			args = append(
+				args,
+				string(row.Assignment),
+				row.Actor.String(),
+				row.Task.String(),
+				row.Role.String(),
+				row.Authority,
+				state.Generation,
+			)
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO pasture_actor_assignment(assignment_id,actor_id,task_id,role,authority_journal_id,generation) VALUES `+strings.Join(values, ",")+`
+		 ON CONFLICT(assignment_id) DO UPDATE SET actor_id=excluded.actor_id,task_id=excluded.task_id,role=excluded.role,authority_journal_id=excluded.authority_journal_id,generation=excluded.generation
+		 WHERE pasture_actor_assignment.generation != excluded.generation`, args...)
 		if err != nil {
 			return false, err
 		}
@@ -360,14 +470,24 @@ func publishAssignmentRecoveryPage(ctx context.Context, db *sql.DB, scan assignm
 		after = scan.Page.Next.AfterJournalID
 	} else {
 		var pending int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pasture_assignment_recovery_member WHERE generation=? AND snapshot_jid=? AND seen=0`, state.Generation, state.Snapshot).Scan(&pending); err != nil {
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM pasture_assignment_recovery_member WHERE generation=? AND snapshot_jid=? AND seen=0`,
+			state.Generation,
+			state.Snapshot,
+		).Scan(&pending); err != nil {
 			return state, recoveryFault("terminal member check", err)
 		}
 		if pending != 0 {
 			return state, recoveryFault("terminal member check", fmt.Errorf("%d authenticated review members were not seen", pending))
 		}
 		var bad int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT producer,COUNT(*) AS n FROM pasture_assignment_recovery_member WHERE generation=? AND snapshot_jid=? GROUP BY producer HAVING n NOT IN (4,13))`, state.Generation, state.Snapshot).Scan(&bad); err != nil {
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM (SELECT producer,COUNT(*) AS n FROM pasture_assignment_recovery_member WHERE generation=? AND snapshot_jid=? GROUP BY producer HAVING n NOT IN (4,13))`,
+			state.Generation,
+			state.Snapshot,
+		).Scan(&bad); err != nil {
 			return state, recoveryFault("terminal batch count", err)
 		}
 		if bad != 0 {
@@ -384,9 +504,19 @@ func publishAssignmentRecoveryPage(ctx context.Context, db *sql.DB, scan assignm
 		return state, recoveryFault("assignment cursor guard", fmt.Errorf("updated %d scan rows: %v", n, err))
 	}
 	if complete {
-		err = updateRecoveryStateTx(ctx, tx, state, `coverage_status='valid',completed_through_jid=?,in_progress_snapshot_jid=0,in_progress_after_jid=0,recovery_complete=1,certified_destructive_revision=destructive_revision,state_revision=state_revision+1`, state.Snapshot)
+		err = updateRecoveryStateTx(
+			ctx,
+			tx,
+			state,
+			`coverage_status='valid',completed_through_jid=?,in_progress_snapshot_jid=0,in_progress_after_jid=0,recovery_complete=1,certified_destructive_revision=destructive_revision,state_revision=state_revision+1`,
+			state.Snapshot,
+		)
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `INSERT INTO pasture_actor_assignment_watermark(singleton_id,last_indexed_jid) VALUES(0,?) ON CONFLICT(singleton_id) DO UPDATE SET last_indexed_jid=excluded.last_indexed_jid`, state.Snapshot)
+			_, err = tx.ExecContext(
+				ctx,
+				`INSERT INTO pasture_actor_assignment_watermark(singleton_id,last_indexed_jid) VALUES(0,?) ON CONFLICT(singleton_id) DO UPDATE SET last_indexed_jid=excluded.last_indexed_jid`,
+				state.Snapshot,
+			)
 		}
 	} else {
 		err = updateRecoveryStateTx(ctx, tx, state, `in_progress_after_jid=?,state_revision=state_revision+1`, after)
@@ -422,9 +552,19 @@ type recoveryEvidenceKey struct {
 func decodeRecoveryMaterials(rows []provenance.TaskEventRow, snapshot provenance.JournalID) (map[recoveryMaterialKey]recoveryMaterial, error) {
 	result := map[recoveryMaterialKey]recoveryMaterial{}
 	for _, row := range rows {
+		if _, err := normalizeRecoveryJSON(row.Payload); err != nil {
+			return nil, err
+		}
 		payload, err := decodeAssignmentStart(row.Payload)
 		if err != nil {
 			return nil, err
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(row.Payload, &fields); err != nil {
+			return nil, err
+		}
+		if _, present := fields["authorityJournalId"]; present && payload.AuthorityJournalID <= 0 {
+			return nil, fmt.Errorf("present material authority must be positive")
 		}
 		if payload.Assignment == "" || payload.AuthorityJournalID < 0 || row.ActorID == (provenance.ActorID{}) || row.ProducedByOperationJournalID == nil || *row.ProducedByOperationJournalID <= 0 || *row.ProducedByOperationJournalID > snapshot {
 			return nil, fmt.Errorf("assignment material %d has invalid identity or producer", row.JournalID)
@@ -474,7 +614,11 @@ func validateRecoveryEvidence(rows []provenance.EvidenceRow, snapshot provenance
 			if err := validateReviewRoundAuthority(value, *row.TaskID); err != nil {
 				return nil, err
 			}
-			digest := sha256.Sum256(row.Payload)
+			producerBytes, err := canonicalJSON(value)
+			if err != nil {
+				return nil, err
+			}
+			digest := sha256.Sum256(producerBytes)
 			if !bytes.Equal(digest[:], row.ContentDigest) {
 				return nil, fmt.Errorf("review evidence digest mismatch")
 			}
@@ -516,13 +660,16 @@ func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, p
 				return proof, recoveryFault("transfer predecessor", fmt.Errorf("no certified owner predecessor for %s", row.AssignmentID))
 			}
 			governance++
-			if governance > 64 {
+			if governance > gateauthority.CatchUpPageSize {
 				return proof, recoveryFault("transfer governance budget", fmt.Errorf("historical predicate budget exhausted"))
 			}
 			proof.HistoricalPredicates = governance
 			governs, err := journal.AuthorityGovernsTaskAt(previous.Authority, row.TaskID, row.ProducingOperationJournalID)
 			if err != nil || !governs {
-				return proof, recoveryFault("historical transfer predecessor", fmt.Errorf("predecessor does not govern at producer boundary: %v", err))
+				return proof, recoveryFault(
+					"historical transfer predecessor",
+					fmt.Errorf("predecessor does not govern at producer boundary: %v", err),
+				)
 			}
 			role = RoleOwnerResponsibility
 		case present && *m.Row.ProducedByOperationJournalID == row.ProducingOperationJournalID:
@@ -541,7 +688,7 @@ func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, p
 				return proof, recoveryFault("composed command binding", fmt.Errorf("parent, actor, authority or material producer mismatch"))
 			}
 			var members []recoveryMember
-			role, members, err = commandRecoveryBinding(record, row.ProducingOperationID)
+			role, members, err = commandRecoveryBinding(&record, &row.ProducingOperationID)
 			if err != nil {
 				return proof, recoveryFault("composed mutation binding", err)
 			}
@@ -588,7 +735,16 @@ func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, p
 				proof.Members = append(proof.Members, members...)
 			}
 		}
-		proof.Rows = append(proof.Rows, startedEpisode{Assignment: row.AssignmentID, Task: row.TaskID, Actor: row.Occupant, Role: role, Authority: row.AuthorityJournalID})
+		proof.Rows = append(
+			proof.Rows,
+			startedEpisode{
+				Assignment: row.AssignmentID,
+				Task:       row.TaskID,
+				Actor:      row.Occupant,
+				Role:       role,
+				Authority:  row.AuthorityJournalID,
+			},
+		)
 		predecessors[row.AssignmentID] = proof.Rows[len(proof.Rows)-1]
 	}
 	return proof, nil
@@ -622,6 +778,9 @@ func recoveryPredecessors(ctx context.Context, db *sql.DB, state assignmentRecov
 // RebuildAssignmentIndex is the operator production path. It never holds a
 // Pasture transaction across a journal query or the whole-store integrity audit.
 func RebuildAssignmentIndex(ctx context.Context, tracker protocol.TaskTracker, options AssignmentIndexRebuildOptions) error {
+	if ctx == nil {
+		return recoveryFault("operator context", fmt.Errorf("a nonnil cancellation context is required"))
+	}
 	t, ok := tracker.(*trackerImpl)
 	if !ok || t == nil {
 		return recoveryFault("operator store", fmt.Errorf("rebuild requires the unified task tracker"))
@@ -631,14 +790,20 @@ func RebuildAssignmentIndex(ctx context.Context, tracker protocol.TaskTracker, o
 		limit = gateauthority.CatchUpPageSize
 	}
 	if limit < 1 || limit > gateauthority.CatchUpPageSize {
-		return recoveryFault("operator page bound", fmt.Errorf("page size must be between 1 and %d", gateauthority.CatchUpPageSize))
+		return recoveryFault(
+			"operator page bound",
+			fmt.Errorf("page size must be between 1 and %d", gateauthority.CatchUpPageSize),
+		)
 	}
 	state, err := readAssignmentRecoveryState(ctx, t.auditDB)
 	if err != nil {
 		return recoveryFault("operator state", err)
 	}
 	if options.ExpectedGeneration != nil && state.Generation != *options.ExpectedGeneration {
-		return recoveryFault("operator expected generation", fmt.Errorf("generation changed from %d to %d", *options.ExpectedGeneration, state.Generation))
+		return recoveryFault(
+			"operator expected generation",
+			fmt.Errorf("generation changed from %d to %d", *options.ExpectedGeneration, state.Generation),
+		)
 	}
 	if options.Reset {
 		if _, err := resetAssignmentRecovery(ctx, t.auditDB, state); err != nil {
@@ -756,13 +921,26 @@ func authenticateOperatorTransfers(ctx context.Context, t *trackerImpl, state *a
 			return recoveryFault("transfer lookup cancellation", err)
 		}
 		if committed.Kind != provenance.CommittedExact || committed.AnchorJournalID <= 0 || committed.AnchorJournalID > state.Snapshot || committed.AnchorJournalID != *material.Row.ProducedByOperationJournalID {
-			return recoveryFault("operator transfer anchor", fmt.Errorf("transfer material anchor is unavailable or wrong at this snapshot"))
+			return recoveryFault(
+				"operator transfer anchor",
+				fmt.Errorf("transfer material anchor is unavailable or wrong at this snapshot"),
+			)
 		}
 		value, err := json.Marshal(committed.AnchorJournalID)
 		if err != nil {
 			return recoveryFault("transfer cache encoding", err)
 		}
-		if err := commitRecoveryAux(ctx, t.auditDB, state, "transfer", identity, after, state.Snapshot, true, []recoveryCacheRow{{committed.AnchorJournalID, value}}); err != nil {
+		if err := commitRecoveryAux(
+			ctx,
+			t.auditDB,
+			state,
+			"transfer",
+			identity,
+			after,
+			state.Snapshot,
+			true,
+			[]recoveryCacheRow{{committed.AnchorJournalID, value}},
+		); err != nil {
 			return recoveryFault("transfer cache publication", err)
 		}
 	}
@@ -789,9 +967,23 @@ func openRecoveryAux(ctx context.Context, db *sql.DB, state *assignmentRecoveryS
 	}
 	var after provenance.JournalID
 	var complete bool
-	err = tx.QueryRowContext(ctx, `SELECT after_jid,complete FROM pasture_assignment_recovery_scan WHERE generation=? AND snapshot_jid=? AND kind=? AND identity=?`, state.Generation, state.Snapshot, kind, identity).Scan(&after, &complete)
+	err = tx.QueryRowContext(
+		ctx,
+		`SELECT after_jid,complete FROM pasture_assignment_recovery_scan WHERE generation=? AND snapshot_jid=? AND kind=? AND identity=?`,
+		state.Generation,
+		state.Snapshot,
+		kind,
+		identity,
+	).Scan(&after, &complete)
 	if errors.Is(err, sql.ErrNoRows) {
-		_, err = tx.ExecContext(ctx, `INSERT INTO pasture_assignment_recovery_scan(generation,snapshot_jid,kind,identity,after_jid,complete) VALUES(?,?,?,?,0,0)`, state.Generation, state.Snapshot, kind, identity)
+		_, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO pasture_assignment_recovery_scan(generation,snapshot_jid,kind,identity,after_jid,complete) VALUES(?,?,?,?,0,0)`,
+			state.Generation,
+			state.Snapshot,
+			kind,
+			identity,
+		)
 		if err == nil {
 			err = updateRecoveryStateTx(ctx, tx, *state, `state_revision=state_revision+1`)
 		}
@@ -824,19 +1016,46 @@ func commitRecoveryAux(ctx context.Context, db *sql.DB, state *assignmentRecover
 	}
 	for _, row := range rows {
 		var prior []byte
-		err := tx.QueryRowContext(ctx, `SELECT value FROM pasture_assignment_recovery_cache WHERE generation=? AND snapshot_jid=? AND kind=? AND identity=? AND journal_id=?`, state.Generation, state.Snapshot, kind, identity, row.Journal).Scan(&prior)
+		err := tx.QueryRowContext(
+			ctx,
+			`SELECT value FROM pasture_assignment_recovery_cache WHERE generation=? AND snapshot_jid=? AND kind=? AND identity=? AND journal_id=?`,
+			state.Generation,
+			state.Snapshot,
+			kind,
+			identity,
+			row.Journal,
+		).Scan(&prior)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
 		if err == nil && !bytes.Equal(prior, row.Value) {
 			return fmt.Errorf("conflicting auxiliary cache row")
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO pasture_assignment_recovery_cache(generation,snapshot_jid,kind,identity,journal_id,value) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING`, state.Generation, state.Snapshot, kind, identity, row.Journal, row.Value)
+		_, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO pasture_assignment_recovery_cache(generation,snapshot_jid,kind,identity,journal_id,value) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING`,
+			state.Generation,
+			state.Snapshot,
+			kind,
+			identity,
+			row.Journal,
+			row.Value,
+		)
 		if err != nil {
 			return err
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE pasture_assignment_recovery_scan SET after_jid=?,complete=? WHERE generation=? AND snapshot_jid=? AND kind=? AND identity=? AND after_jid=? AND complete=0`, after, complete, state.Generation, state.Snapshot, kind, identity, from)
+	result, err := tx.ExecContext(
+		ctx,
+		`UPDATE pasture_assignment_recovery_scan SET after_jid=?,complete=? WHERE generation=? AND snapshot_jid=? AND kind=? AND identity=? AND after_jid=? AND complete=0`,
+		after,
+		complete,
+		state.Generation,
+		state.Snapshot,
+		kind,
+		identity,
+		from,
+	)
 	if err != nil {
 		return err
 	}
@@ -859,7 +1078,14 @@ func commitRecoveryAux(ctx context.Context, db *sql.DB, state *assignmentRecover
 }
 
 func loadRecoveryCache(ctx context.Context, db *sql.DB, state assignmentRecoveryState, kind, identity string) ([][]byte, error) {
-	rows, err := db.QueryContext(ctx, `SELECT value FROM pasture_assignment_recovery_cache WHERE generation=? AND snapshot_jid=? AND kind=? AND identity=? ORDER BY journal_id`, state.Generation, state.Snapshot, kind, identity)
+	rows, err := db.QueryContext(
+		ctx,
+		`SELECT value FROM pasture_assignment_recovery_cache WHERE generation=? AND snapshot_jid=? AND kind=? AND identity=? ORDER BY journal_id`,
+		state.Generation,
+		state.Snapshot,
+		kind,
+		identity,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -885,7 +1111,14 @@ func drainRecoveryMaterial(ctx context.Context, db *sql.DB, journal provenance.J
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		page, err := journal.QueryTaskEvents(provenance.JournalQueryV1{OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{task}, EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()}, Limit: 64, SnapshotMaxJournalID: state.Snapshot, AfterJournalID: after})
+		page, err := journal.QueryTaskEvents(provenance.JournalQueryV1{
+			OrderBy:              provenance.OrderByJournalID,
+			TaskIDs:              []provenance.TaskID{task},
+			EventKinds:           []provenance.EventKind{FamilyAssignmentStarted.EventKind()},
+			Limit:                64,
+			SnapshotMaxJournalID: state.Snapshot,
+			AfterJournalID:       after,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -941,7 +1174,14 @@ func drainRecoveryEvidence(ctx context.Context, db *sql.DB, journal provenance.J
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		page, err := journal.Facts().QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: []provenance.OperationID{operation}}, Kinds: []provenance.EvidenceKind{assignmentCommandEvidenceKind, reviewRoundAuthorityEvidenceKind}, Page: provenance.FactPageRequest{Limit: 64, SnapshotMaxJournalID: state.Snapshot, AfterJournalID: after}})
+		page, err := journal.Facts().QueryEvidence(provenance.EvidenceQuery{
+			Filter: provenance.FactFilter{
+				TaskScope:    provenance.FactTaskScope{Kind: provenance.FactTaskAny},
+				OperationIDs: []provenance.OperationID{operation},
+			},
+			Kinds: []provenance.EvidenceKind{assignmentCommandEvidenceKind, reviewRoundAuthorityEvidenceKind},
+			Page:  provenance.FactPageRequest{Limit: 64, SnapshotMaxJournalID: state.Snapshot, AfterJournalID: after},
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -1025,7 +1265,13 @@ func readAssignmentRecoveryState(ctx context.Context, q recoveryRowQuerier) (ass
 }
 
 func recoveryFault(step string, err error) error {
-	return &IndexStaleError{Cause: fmt.Errorf("assignment recovery %s failed: %w; no completeness certificate may be used from this attempt; run pasture gate rebuild-index, adding --reset when the generation is dirty", step, err)}
+	return &IndexStaleError{
+		Cause: fmt.Errorf(
+			"assignment recovery %s failed: %w; no completeness certificate may be used from this attempt; run pasture gate rebuild-index, adding --reset when the generation is dirty",
+			step,
+			err,
+		),
+	}
 }
 
 func recoveryGuard(state assignmentRecoveryState) []any {
@@ -1054,7 +1300,12 @@ func updateRecoveryStateTx(ctx context.Context, tx *sql.Tx, state assignmentReco
 // changed before this path is selected. Returning through a rollback-only helper
 // here would erase the invalidation and permit a later caller to trust the index.
 func commitAssignmentDirtyTx(ctx context.Context, tx *sql.Tx, state assignmentRecoveryState, reason string) error {
-	if err := updateRecoveryStateTx(ctx, tx, state, `coverage_status='dirty',destructive_revision=destructive_revision+1,state_revision=state_revision+1`); err != nil {
+	if err := updateRecoveryStateTx(
+		ctx,
+		tx,
+		state,
+		`coverage_status='dirty',destructive_revision=destructive_revision+1,state_revision=state_revision+1`,
+	); err != nil {
 		return recoveryFault("dirty marker not persisted", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -1140,16 +1391,31 @@ func ensureAssignmentRecoverySchema(ctx context.Context, db *sql.DB) error {
 		BEGIN UPDATE pasture_actor_assignment_state SET coverage_status='dirty',
 		 destructive_revision=destructive_revision+1,state_revision=state_revision+1
 		 WHERE singleton_id=0 AND generation=OLD.generation; END`,
-		`CREATE TRIGGER IF NOT EXISTS pasture_assignment_changed AFTER UPDATE ON pasture_actor_assignment
+	} {
+		if _, err := tx.ExecContext(ctx, ddl); err != nil {
+			return recoveryFault("invalidation trigger", err)
+		}
+	}
+	const changedTrigger = `CREATE TRIGGER pasture_assignment_changed AFTER UPDATE ON pasture_actor_assignment
 		WHEN OLD.assignment_id IS NOT NEW.assignment_id OR OLD.actor_id IS NOT NEW.actor_id
 		 OR OLD.task_id IS NOT NEW.task_id OR OLD.role IS NOT NEW.role
 		 OR OLD.authority_journal_id IS NOT NEW.authority_journal_id OR OLD.generation IS NOT NEW.generation
 		BEGIN UPDATE pasture_actor_assignment_state SET coverage_status='dirty',
 		 destructive_revision=destructive_revision+1,state_revision=state_revision+1
-		 WHERE singleton_id=0 AND generation=OLD.generation; END`,
-	} {
-		if _, err := tx.ExecContext(ctx, ddl); err != nil {
-			return recoveryFault("invalidation trigger", err)
+		 WHERE singleton_id=0 AND (generation=OLD.generation OR generation=NEW.generation); END`
+	var existingTrigger string
+	err = tx.QueryRowContext(ctx, `SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='pasture_assignment_changed'`).Scan(&existingTrigger)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return recoveryFault("owned trigger definition", err)
+	}
+	if strings.TrimSpace(existingTrigger) != strings.TrimSpace(changedTrigger) {
+		// Replace only during an actual schema upgrade, atomically inside this
+		// transaction. An ordinary reopen performs no trigger rewrite.
+		if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS pasture_assignment_changed`); err != nil {
+			return recoveryFault("owned trigger upgrade", err)
+		}
+		if _, err := tx.ExecContext(ctx, changedTrigger); err != nil {
+			return recoveryFault("owned trigger installation", err)
 		}
 	}
 	return tx.Commit()
@@ -1168,8 +1434,13 @@ func resetAssignmentRecovery(ctx context.Context, db *sql.DB, expected assignmen
 	 in_progress_snapshot_jid=0,in_progress_after_jid=0,completed_through_jid=0,recovery_complete=0`); err != nil {
 		return expected, recoveryFault("reset compare-and-swap", err)
 	}
-	for _, table := range []string{"pasture_actor_assignment", "pasture_assignment_recovery_scan", "pasture_assignment_recovery_cache", "pasture_assignment_recovery_member"} {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE generation=?`, expected.Generation); err != nil {
+	for _, table := range []string{
+		"pasture_actor_assignment",
+		"pasture_assignment_recovery_scan",
+		"pasture_assignment_recovery_cache",
+		"pasture_assignment_recovery_member",
+	} {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table); err != nil {
 			return expected, recoveryFault("reset retirement", err)
 		}
 	}
@@ -1179,6 +1450,25 @@ func resetAssignmentRecovery(ctx context.Context, db *sql.DB, expected assignmen
 	next, err := readAssignmentRecoveryState(ctx, tx)
 	if err != nil {
 		return expected, recoveryFault("reset readback", err)
+	}
+	// A manually imported row could claim even the generation just allocated by
+	// this reset. Its deletion correctly fires invalidation. Inside THIS reset's
+	// still-private transaction all derived rows/cursors are now gone, so clear
+	// that intermediate invalidation under its actual revision guard. No other
+	// writer or persistent rebuilding flag gets this exemption.
+	if next.Status != assignmentCoverageRebuilding || next.Destructive != 0 {
+		if err := updateRecoveryStateTx(
+			ctx,
+			tx,
+			next,
+			`coverage_status='rebuilding',destructive_revision=0,certified_destructive_revision=0,state_revision=state_revision+1`,
+		); err != nil {
+			return expected, recoveryFault("reset cleanup guard", err)
+		}
+		next, err = readAssignmentRecoveryState(ctx, tx)
+		if err != nil {
+			return expected, recoveryFault("reset final readback", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return expected, recoveryFault("reset commit", err)
@@ -1205,8 +1495,8 @@ func beginAssignmentRecoveryScan(ctx context.Context, db *sql.DB, journal proven
 	if err != nil {
 		return scan, recoveryFault("begin scan state", err)
 	}
-	if scan.State.Status == assignmentCoverageDirty {
-		return scan, recoveryFault("begin scan", fmt.Errorf("dirty generation requires reset"))
+	if scan.State.Status == assignmentCoverageDirty || scan.State.Destructive != scan.State.CertifiedDestructive {
+		return scan, recoveryFault("begin scan", fmt.Errorf("dirty or unexplained legacy index generation requires reset"))
 	}
 	var snapshot, after provenance.JournalID
 	err = tx.QueryRowContext(ctx, `SELECT snapshot_jid,after_jid FROM pasture_assignment_recovery_scan
@@ -1245,7 +1535,14 @@ func beginAssignmentRecoveryScan(ctx context.Context, db *sql.DB, journal proven
 		return scan, recoveryFault("bind scan transaction", err)
 	}
 	defer tx.Rollback()
-	if err := updateRecoveryStateTx(ctx, tx, scan.State, `in_progress_snapshot_jid=?,in_progress_after_jid=?,recovery_complete=0,state_revision=state_revision+1`, scan.Page.SnapshotMaxJournalID, after); err != nil {
+	if err := updateRecoveryStateTx(
+		ctx,
+		tx,
+		scan.State,
+		`in_progress_snapshot_jid=?,in_progress_after_jid=?,recovery_complete=0,state_revision=state_revision+1`,
+		scan.Page.SnapshotMaxJournalID,
+		after,
+	); err != nil {
 		return scan, recoveryFault("bind scan compare-and-swap", err)
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO pasture_assignment_recovery_scan(generation,snapshot_jid,kind,identity,after_jid,complete)
@@ -1307,10 +1604,17 @@ func ensureAssignmentIndexStateOnOpen(ctx context.Context, db *sql.DB, journal p
 	if len(page.Rows) == 0 && page.Next == nil && count == 0 {
 		status, through, complete = assignmentCoverageValid, page.SnapshotMaxJournalID, true
 	}
+	// Existing local rows with no metadata have no certificate at all. Preserve
+	// rebuilding status but require reset before replay: otherwise an unrelated
+	// old row not returned by the public scan could survive into a valid index.
+	destructive := 0
+	if count > 0 {
+		destructive = 1
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO pasture_actor_assignment_state
 		(singleton_id,generation,state_revision,destructive_revision,certified_destructive_revision,
 		coverage_status,in_progress_snapshot_jid,in_progress_after_jid,completed_through_jid,recovery_complete)
-		VALUES(0,0,1,0,0,?,0,0,?,?)`, status, through, complete)
+		VALUES(0,0,1,?,0,?,0,0,?,?)`, destructive, status, through, complete)
 	if err != nil {
 		return recoveryFault("factory state insert", err)
 	}
