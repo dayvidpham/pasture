@@ -489,13 +489,12 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 // are. If this test becomes too slow, the answer is to run it less often, not
 // to measure something else.
 //
-// THE CHILD IS THE RACE-INSTRUMENTED ONE, and this is the only proof that runs
-// it. Every other built-binary proof runs the plain shared child, because the
-// paths it drives are already read by the race detector in-process (see
-// lifecycleBinary). Here the thing under proof is a live process contending
+// The child is race-instrumented, as is the rebuild-index operator proof family.
+// Ordinary unrelated built-binary proofs retain the plain shared child. Here
+// the thing under proof is a live process contending
 // with a second opener for the real write lock while its deadline runs, and
 // that contention exists only across the process boundary, so the detector has
-// to ride in the child to read it. TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild
+// to ride in the child to read it. TestRaceChildrenServeOnlyDeclaredProofFamilies
 // holds this arrangement.
 func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testing.T) {
 	t.Parallel()
@@ -597,41 +596,41 @@ func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testin
 		"the durable record must agree with the host-facing diagnostic about which path ran")
 }
 
-// TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild pins the child-binary
-// arrangement that keeps this package's wall time down without losing its one
-// live-process race proof.
+// TestRaceChildrenServeOnlyDeclaredProofFamilies pins the deliberate choice of
+// race-instrumented children for the held-lock and rebuild-index proof families.
 //
 // The arrangement has three parts, and a drift in any one of them would leave
 // the package green while the proofs quietly changed what they measure:
 //
-//   - The held-lock deadline proof runs raceLifecycleBinary, and not the plain
-//     child. Pointed at the plain child it would still pass, still bound the
-//     elapsed time, and its doc would claim a detector that was not there.
+//   - The held-lock deadline proof and newRebuildCLI helper run the race child,
+//     never the plain child. Their functional assertions alone do not prove
+//     that a detector ran in the child process.
 //   - raceLifecycleBinary is built with -race and lifecycleBinary is not. This
 //     is read from the BUILD SETTINGS recorded in each binary, not from the
 //     helper's source: a build whose flags drifted would carry different
 //     settings whatever its source said.
-//   - No other test runs the race child. The plain child exists because a
-//     race-instrumented child costs 20x per invocation; a second caller of the
-//     race child is the cost coming back one test at a time, and it should
-//     arrive as a decision written here, not as a slow run.
+//   - Only these two callers and this build-settings guard use the race child.
+//     Its extra cost is accepted for both proof families, not silently imposed
+//     on unrelated CLI tests. A new caller requires a deliberate inventory change.
 //
-// WHAT IT VISITS: every test function declared in this package's test files,
+// WHAT IT VISITS: every function declared in this package's test files,
 // for the two identifiers it asks about; and the build settings of the two
 // shared children.
 // WHAT IT DOES NOT READ: whether either child is up to date with the source,
-// or whether the held-lock proof's assertions still hold; the proof itself
-// does that.
-func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
+// or whether either proof family's functional assertions hold; those tests do
+// that. MUTATION: switch newRebuildCLI to lifecycleBinary; this guard must fail.
+func TestRaceChildrenServeOnlyDeclaredProofFamilies(t *testing.T) {
 	t.Parallel()
 
 	const heldLockProof = "TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked"
-	const thisPin = "TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild"
+	const rebuildHelper = "newRebuildCLI"
+	const thisPin = "TestRaceChildrenServeOnlyDeclaredProofFamilies"
 
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err, "the package directory must be readable to find the tests it declares")
 	callers := map[string][]string{}
 	heldLockFound := false
+	rebuildFound := false
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
 			continue
@@ -659,11 +658,15 @@ func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
 			if function.Name.Name == heldLockProof {
 				heldLockFound = true
 			}
+			if function.Name.Name == rebuildHelper {
+				rebuildFound = true
+			}
 		}
 	}
 	require.True(t, heldLockFound,
 		"the held-lock proof %s is not declared in this package; if it was renamed, rename it here too, "+
 			"or this pin holds nothing", heldLockProof)
+	require.True(t, rebuildFound, "the rebuild-index helper %s must exist; otherwise this pin holds nothing", rebuildHelper)
 	require.NotEmpty(t, callers["lifecycleBinary"],
 		"no test calls lifecycleBinary; the built-binary proofs must run the plain shared child, and an "+
 			"empty population here means the walk found nothing and every assertion below is vacuous")
@@ -673,21 +676,23 @@ func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
 			"detector riding in the live process, and on the plain child that sentence is false")
 	assert.NotContains(t, callers["lifecycleBinary"], heldLockProof,
 		"the held-lock deadline proof must not also run the plain child")
+	assert.Contains(t, callers["raceLifecycleBinary"], rebuildHelper,
+		"the rebuild-index helper must keep its race-instrumented child")
+	assert.NotContains(t, callers["lifecycleBinary"], rebuildHelper,
+		"the rebuild-index helper must not also run the plain child")
 
 	sort.Strings(callers["raceLifecycleBinary"])
-	assert.Equal(t, []string{heldLockProof, thisPin}, callers["raceLifecycleBinary"],
-		"only the held-lock proof (and this pin, which reads the child's build settings) may run the "+
-			"race-instrumented child; a new caller pays 20x per hook invocation and must be a decision "+
-			"recorded here, not a slow run")
+	wantCallers := []string{heldLockProof, rebuildHelper, thisPin}
+	sort.Strings(wantCallers)
+	assert.Equal(t, wantCallers, callers["raceLifecycleBinary"],
+		"only the held-lock proof, rebuild-index helper and this build-settings guard may request the race child")
 
 	raceSettings := buildSettingsOf(t, raceLifecycleBinary(t))
 	plainSettings := buildSettingsOf(t, lifecycleBinary(t))
 	assert.Equal(t, "true", raceSettings["-race"],
-		"the race child must record -race=true in its build settings; without it the held-lock proof "+
-			"runs no detector and its doc is false")
+		"the race child must record -race=true so both declared proof families run a detector")
 	assert.NotEqual(t, "true", plainSettings["-race"],
-		"the plain child must not be race-instrumented; every other built-binary proof runs it, and "+
-			"instrumenting it is the 20x cost this arrangement exists to avoid")
+		"the ordinary plain child must not acquire the extra cost of race instrumentation")
 }
 
 // TestEveryTestThatReachesSharedProcessStateStaysSerial pins why the serial
