@@ -4287,10 +4287,10 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 		// ends were found by enumerating from the source, which is what the
 		// reason had claimed to do. The current routes are below.
 		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
-			"returned an error and committed nothing. Four routes pass it directly — the environment refusal and " +
+			"returned an error and committed nothing. Five routes pass it directly — the environment refusal and " +
 			"the argument refusal, neither of which opens a store, and the flag-parse refusal inside " +
 			"SetFlagErrorFunc, which runs before the command body, plus the multiple-decision input refusal " +
-			"before the work goroutine starts — and it is also the default of the computed " +
+			"and the host-version resolution refusal before the work goroutine starts — and it is also the default of the computed " +
 			"stage below",
 		"hostexit.FaultStageRecordUnknown": "expiry returned no published host Outcome after fence settlement; " +
 			"pre-fence work or a record-only refused capture can still have written non-decision evidence, " +
@@ -4382,15 +4382,17 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	for _, count := range found {
 		total += count
 	}
-	assert.Equal(t, 7, total,
-		"this command has seven fault routes: the panic recovery, the environment refusal, the argument "+
-			"refusal, the multiple-decision input refusal, the deadline fault, the handler error, and the flag-parse refusal inside "+
+	assert.Equal(t, 5, found["hostexit.FaultStageNotRecorded"],
+		"exactly five routes refuse directly before durable work; each must preserve the no-write stage")
+	assert.Equal(t, 8, total,
+		"this command has eight fault routes: the panic recovery, the environment refusal, the argument "+
+			"refusal, the multiple-decision input refusal, the host-version resolution refusal, the deadline fault, the handler error, and the flag-parse refusal inside "+
 			"SetFlagErrorFunc. A route added or removed without updating the judged reasons above leaves "+
 			"the prose describing a command that does not exist, which has happened once already")
 }
 
 // TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded drives, on the
-// built binary, the two fault routes that had no behavioural pin at all.
+// built binary, flag, argument and host-version resolution refusals.
 //
 // WHY THESE TWO. Four of the six routes are measured on host bytes somewhere in
 // this file. The FLAG-PARSE refusal inside SetFlagErrorFunc and the ARGUMENT
@@ -4403,13 +4405,13 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 // NEITHER NEEDS A STORE, A LOCK OR A FIXTURE: an unparseable flag and a
 // positional argument are both refused before the command body runs.
 //
-// MUTATION, AT THE DEFECT SITE: change either route's stage argument to
+// MUTATION, AT THE DEFECT SITE: change any driven route's stage argument to
 // hostexit.FaultStageRecorded. That subtest turns RED on the durable-state
 // assertion.
 //
-// WHAT IT VISITS: the TWO routes that refuse before the command body runs,
-// written out because each is one invocation shape and no source lists them.
-// WHAT IT DOES NOT READ: the other four fault routes, which have their own
+// WHAT IT VISITS: two routes before the command body, plus version resolution
+// before the handler goroutine starts. Each is one invocation shape.
+// WHAT IT DOES NOT READ: the other five fault routes, which have their own
 // behavioural pins; and it does not check that the route SET is complete, which
 // the route sweep reads from the package source.
 func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) {
@@ -4434,12 +4436,19 @@ func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) 
 				"--host-version", "2.1.261", "an-unexpected-argument"},
 			Says: "",
 		},
+		{
+			Name: "the host-version resolution refusal",
+			Args: []string{"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
+				"--host-executable", ""},
+			Says: "host version resolution failed before capture, admission or storage",
+		},
 	} {
 		t.Run(row.Name, func(t *testing.T) {
 			store := t.TempDir()
 			command := exec.Command(binary, append([]string{
 				databaseFlagName.Argument(), filepath.Join(store, "pasture.db")}, row.Args...)...)
 			command.Stdin = bytes.NewReader(nil)
+			command.Env = append(command.Environ(), "PASTURE_DB_PATH="+filepath.Join(store, "pasture.db"))
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
 			command.Stderr = &stderr
