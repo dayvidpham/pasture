@@ -29,7 +29,7 @@ func TestCaptureCauseIsTransientAndConsistent(t *testing.T) {
 }
 
 func TestCaptureCauseEscapesHostMemberNames(t *testing.T) {
-	cause := model.NewCaptureCause(model.CauseUndeclaredMember, "host\nmember", model.JSONKindUnknown, model.CaptureUnsupportedSchema)
+	cause := model.NewCaptureCause(model.CauseWrongKind, "host\nmember", model.JSONString, model.CaptureUnsupportedSchema)
 	reason, _, err := cause.Advice(model.CaptureUnsupportedSchema)
 	require.NoError(t, err)
 	require.Contains(t, reason, `"host\nmember"`)

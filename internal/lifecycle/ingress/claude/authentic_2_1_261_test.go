@@ -341,18 +341,20 @@ func TestAuthenticClaudeFileChangedAdmissionRemainsNarrow(t *testing.T) {
 		if event.Kind == registration.EventFileChanged {
 			require.Contains(t, event.AllowedFields, registration.FieldFileEvent)
 		} else {
-			require.NotContains(t, event.AllowedFields, registration.FieldFileEvent, "%s must not admit FileChanged's event member", event.NativeName)
+			require.NotContains(t, event.AllowedFields, registration.FieldFileEvent, "%s catalogue must not declare FileChanged's event member", event.NativeName)
 		}
 	}
-	t.Run("unknown member still refused", func(t *testing.T) {
+	t.Run("added member remains raw evidence only", func(t *testing.T) {
 		var members map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(raw, &members))
 		members["unknown_member"] = json.RawMessage(`true`)
 		changed, err := json.Marshal(members)
 		require.NoError(t, err)
 		capture := Parse(changed, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
-		require.Equal(t, model.CaptureUnsupportedSchema, capture.Disposition)
-		require.Empty(t, capture.Delivery.Bindings)
+		control := Parse(raw, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
+		require.Equal(t, model.CaptureValid, capture.Disposition)
+		require.Equal(t, model.CauseUnknown, capture.Cause.Kind())
+		require.Equal(t, control.Delivery.Bindings, capture.Delivery.Bindings)
 		require.Equal(t, changed, capture.Delivery.Body)
 		require.Equal(t, digest.FromBytes(changed), capture.Digest)
 	})
@@ -365,6 +367,18 @@ func TestAuthenticClaudeFileChangedAdmissionRemainsNarrow(t *testing.T) {
 		capture := Parse(changed, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
 		require.Equal(t, model.CaptureUnsupportedSchema, capture.Disposition)
 		require.Empty(t, capture.Delivery.Bindings)
+	})
+	t.Run("optional event member can be absent", func(t *testing.T) {
+		var members map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &members))
+		delete(members, "event")
+		changed, err := json.Marshal(members)
+		require.NoError(t, err)
+		control := Parse(raw, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
+		capture := Parse(changed, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
+		require.Equal(t, model.CaptureValid, capture.Disposition)
+		require.Equal(t, control.Delivery.Bindings, capture.Delivery.Bindings)
+		require.Equal(t, registration.EventFileChanged, capture.Delivery.Event)
 	})
 	t.Run("event member is not hook event name", func(t *testing.T) {
 		var members map[string]json.RawMessage

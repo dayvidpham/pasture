@@ -21,7 +21,6 @@ const (
 	CauseUnknown CaptureCauseKind = iota
 	CauseMalformedJSON
 	CauseNonObject
-	CauseUndeclaredMember
 	CauseMissingMember
 	CauseWrongKind
 	CauseEmptyIdentity
@@ -69,8 +68,6 @@ func (c CaptureCause) valid() bool {
 		return c == (CaptureCause{})
 	case CauseMalformedJSON, CauseNonObject:
 		return c.disposition == CaptureMalformed && c.field == "" && c.required == JSONKindUnknown
-	case CauseUndeclaredMember:
-		return c.disposition == CaptureUnsupportedSchema && c.required == JSONKindUnknown
 	case CauseMissingMember, CauseWrongKind:
 		return (c.disposition == CaptureUnsupportedSchema || c.disposition == CaptureEventMismatch || c.disposition == CaptureMalformed) && c.field != "" && (c.required == JSONString || c.required == JSONObject)
 	case CauseEmptyIdentity, CauseOverlengthIdentity, CauseUnusableIdentity:
@@ -118,8 +115,6 @@ func (c CaptureCause) Advice(disposition CaptureDisposition) (reason, fix string
 		return "the payload is not one complete, well-formed JSON value", "Send one complete JSON object with no trailing value or bytes; check the hook's stdin serialization.", nil
 	case CauseNonObject:
 		return "the payload is valid JSON but its top level is not an object", "Send a JSON object at the top level, not an array, scalar or null.", nil
-	case CauseUndeclaredMember:
-		return "member " + field + " is not declared by this event's registration", "Compare that added member with the matching host contract and update the pinned registration before admitting it; do not rename or remove valid identities.", nil
 	case CauseMissingMember:
 		return "required member " + field + " is absent", "Supply " + field + " as a JSON " + c.required.String() + " at that path; check for a dropped or renamed member in the host contract.", nil
 	case CauseWrongKind:

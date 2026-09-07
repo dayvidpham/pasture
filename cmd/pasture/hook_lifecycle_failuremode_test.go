@@ -4872,7 +4872,7 @@ func TestDeadlineReceivesSettlementSignalBeforeChoosingFault(t *testing.T) {
 
 // claudePayloadWithAddedMember is the authentic Claude fixture plus ONE member
 // this build does not declare: every identity present, correctly named and
-// usable, and refused all the same.
+// usable. The extra member is raw evidence, not a new binding or a refusal.
 func claudePayloadWithAddedMember(t *testing.T) []byte {
 	t.Helper()
 	var members map[string]json.RawMessage
@@ -4972,19 +4972,15 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			Name:        "a payload whose identity fields are renamed",
 			Disposition: model.CaptureUnsupportedSchema,
 			Payload:     []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
-			Says:        `member "renamed" is not declared by this event's registration`,
-			Tells:       "Compare that added member with the matching host contract",
+			Says:        `required member "session_id" is absent`,
+			Tells:       `Supply "session_id" as a JSON string at that path`,
 		},
 		{
-			// THE ROW THE WRITTEN LIST OMITTED, which is why nothing caught
-			// the inspection result invented for it. It shares a disposition
-			// with the renamed-identity row and differs in the cause that
-			// fired.
-			Name:        "a payload carrying a member the registration does not declare",
+			Name:        "an empty required identity beside an unrelated added member",
 			Disposition: model.CaptureUnsupportedSchema,
-			Payload:     claudePayloadWithAddedMember(t),
-			Says:        "is not declared by this event's registration",
-			Tells:       "Compare that added member with the matching host contract",
+			Payload:     []byte(`{"hook_event_name":"PreToolUse","session_id":"","extra":true}`),
+			Says:        `identity "session_id" is an empty string`,
+			Tells:       `Supply the nonempty host identity at "session_id"`,
 		},
 		{
 			// A SINGLE-IDENTITY EVENT, which no row drove. The singular arm of
@@ -4995,8 +4991,8 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			Disposition: model.CaptureUnsupportedSchema,
 			Event:       "SessionStart",
 			Payload:     []byte(`{"renamed":"s","hook_event_name":"SessionStart"}`),
-			Says:        `member "renamed" is not declared by this event's registration`,
-			Tells:       "Compare that added member with the matching host contract",
+			Says:        `required member "session_id" is absent`,
+			Tells:       `Supply "session_id" as a JSON string at that path`,
 		},
 		{
 			// THE SAME DISPOSITION ON A LENIENT PARSER. The row above drives it
@@ -5214,37 +5210,17 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 	})
 }
 
-// TestAHostThatAddsAFieldIsRefusedWithATrueSentence drives the refusal a host
-// meets when it ADDS a member, which nothing drove before.
-//
-// WHY THIS ROUTE MATTERS MOST. A host adding a field is the most ordinary thing
-// that happens to a payload over time, so this is the refusal most likely to be
-// met in practice. It was told "the payload does not carry the identity fields
-// this event's registration declares, or carries them under different names" —
-// FALSE IN BOTH HALVES for a payload that carries every one of them under the
-// exact declared name. A reader would spend the day checking field names that
-// were already correct.
-//
-// THE CONTROL IS PART OF THE TEST, because the claim is that ONE ADDED MEMBER
-// is the whole difference: the same payload without it binds and says nothing.
-//
-// The transient cause now identifies the added member without changing the
-// durable disposition or claiming that the identity loop ran.
-//
-// MUTATION: narrow the reason back to the identity half. This test turns RED on
-// the added-member clause.
-func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
+// TestAHostThatAddsAFieldKeepsTheSameGateOutcome uses an authentic gate control.
+// Adding unrelated evidence must preserve its complete native continuation,
+// while the expanded payload is retained. Restoring strict member rejection
+// must fail the added-member subtest, not send a valid host to a repair message.
+func TestAHostThatAddsAFieldKeepsTheSameGateOutcome(t *testing.T) {
 	t.Parallel()
 
 	binary := lifecycleBinary(t)
 
 	authentic := claudeFixture(t, "pre_tool_use_2_1_261.json")
-	var members map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(authentic, &members),
-		"the committed fixture must decode, or the control below proves nothing")
-	members["a_field_this_build_does_not_declare"] = json.RawMessage(`"x"`)
-	extended, err := json.Marshal(members)
-	require.NoError(t, err)
+	extended := claudePayloadWithAddedMember(t)
 
 	t.Run("the control: the same payload without the added member", func(t *testing.T) {
 		store := t.TempDir()
@@ -5252,9 +5228,11 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 		initializeLifecycleTestDatabase(t, database)
 		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.261", authentic)
 		require.Equal(t, 0, run.ExitCode)
+		require.Empty(t, run.Stdout)
 		require.Empty(t, run.Stderr,
 			"the authentic payload must bind in silence; if it does not, the added member is not "+
 				"the difference this test is about")
+		assertDiagnosticCaptureRecord(t, database, authentic, model.CaptureValid)
 	})
 
 	t.Run("one added member", func(t *testing.T) {
@@ -5263,20 +5241,11 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 		initializeLifecycleTestDatabase(t, database)
 		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.261", extended)
 
-		require.Equal(t, 0, run.ExitCode,
-			"an unreadable payload is fail-open: the host carries on with its own answer")
-		require.Contains(t, run.Stderr, "WAS NOT EVALUATED",
-			"this subtest must reach the refusal; if it does not, nothing below is about it")
-
-		assert.Contains(t, run.Stderr, `member "a_field_this_build_does_not_declare" is not declared by this event's registration`,
-			"the reason must name the cause that actually fired. This payload carries EVERY identity "+
-				"field under the EXACT declared name, so a sentence about missing or renamed fields "+
-				"is false of it in both halves")
-		assert.Contains(t, run.Stderr, "Compare that added member with the matching host contract",
-			"and the instruction must tell the reader to look in that direction too, or they check "+
-				"field names that are already correct")
-		assert.NotContains(t, run.Stderr, "does not carry the identity fields this event's registration declares",
-			"the retired sentence named one cause of a disposition that carries three")
+		require.Equal(t, 0, run.ExitCode)
+		require.Empty(t, run.Stdout)
+		require.Empty(t, run.Stderr, "added evidence must preserve the evaluated gate's continuation")
+		require.Empty(t, readFaultRecords(t, store))
+		assertDiagnosticCaptureRecord(t, database, extended, model.CaptureValid)
 	})
 }
 
@@ -6430,8 +6399,7 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 // THE ADVICE NAMED THE HARNESS AND DESCRIBED ANOTHER ONE'S BEHAVIOUR. It told
 // every reader, by harness name, that a member the registration does not
 // declare is refused and that identity field names must match exactly. Claude
-// validates the member set and looks names up in a map, so both hold there.
-// Codex now ignores added members but looks up identity names exactly, while
+// and Codex ignore added members but look up identity names exactly, while
 // OpenCode's struct decoder ignores added members and matches names without
 // case sensitivity. The advice must follow each of those independent traits.
 //
@@ -6543,11 +6511,11 @@ func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 
 			run := drive(row.Renamed)
 			if harness == "claude-code" {
-				require.True(t, refusesUndeclared)
+				require.False(t, refusesUndeclared, "Claude must preserve unrelated added evidence without refusing it")
 				require.True(t, matchesExactly)
-				assert.Contains(t, run.Stderr, `member "renamed" is not declared by this event's registration`)
-				assert.Contains(t, run.Stderr, "Compare that added member with the matching host contract")
-				assert.NotContains(t, run.Stderr, "identity field is missing")
+				assert.Contains(t, run.Stderr, `required member "session_id" is absent`)
+				assert.Contains(t, run.Stderr, `Supply "session_id" as a JSON string at that path`)
+				assert.NotContains(t, run.Stderr, "member the registration does not allow")
 				return
 			}
 			if harness == "opencode" {

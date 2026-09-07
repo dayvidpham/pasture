@@ -125,12 +125,8 @@ type lifecycleDispatch struct {
 	// refusesUndeclaredMembers says whether THIS harness's parser rejects a
 	// payload carrying a member the registration does not declare.
 	//
-	// IT IS A ROW FIELD BECAUSE THE ANSWER DIFFERS PER PARSER AND THE ADVICE
-	// NAMED THE HARNESS. Claude validates the member set against the allowed
-	// fields and refuses an extra one; Codex extracts declared identities from
-	// a map and OpenCode decodes into a struct, so both ignore added members.
-	// The advice is derived from this row rather than written once for whichever
-	// harness the author had in mind.
+	// The advice follows the actual parser, not the reviewed fixture catalogue.
+	// All current adapters retain unrelated extra members as raw evidence only.
 	refusesUndeclaredMembers bool
 	// matchesFieldNamesExactly says whether identity field names must match
 	// the registration's spelling. Claude and Codex look names up in a map;
@@ -168,7 +164,7 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 		bind:                     claudefrontend.Bind,
 		encode:                   nativeresponse.EncodeClaude,
 		mapping:                  mappingLookup(pastureruntime.ClaudeCode2_1_261Lifecycle()),
-		refusesUndeclaredMembers: true,
+		refusesUndeclaredMembers: false,
 		matchesFieldNamesExactly: true,
 	},
 	ir.HarnessOpenCode: {

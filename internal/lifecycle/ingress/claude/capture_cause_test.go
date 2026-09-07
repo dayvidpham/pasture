@@ -40,9 +40,6 @@ func TestClaudeCaptureNamesTheRefusalCause(t *testing.T) {
 		require.Equal(t, raw, capture.Delivery.Body)
 		require.Empty(t, capture.Delivery.Bindings)
 	}
-	t.Run("undeclared", func(t *testing.T) {
-		check(t, func(m map[string]json.RawMessage) { m["added_member"] = json.RawMessage(`"private-value"`) }, model.CauseUndeclaredMember, "added_member", model.JSONKindUnknown)
-	})
 	t.Run("missing", func(t *testing.T) {
 		check(t, func(m map[string]json.RawMessage) { delete(m, "session_id") }, model.CauseMissingMember, "session_id", model.JSONString)
 	})
@@ -67,7 +64,7 @@ func TestClaudeCaptureNamesTheRefusalCause(t *testing.T) {
 				m["z_added"] = json.RawMessage(`true`)
 				m["a_added"] = json.RawMessage(`true`)
 				delete(m, "session_id")
-			}, model.CauseUndeclaredMember, "a_added", model.JSONKindUnknown)
+			}, model.CauseMissingMember, "session_id", model.JSONString)
 		}
 	})
 }

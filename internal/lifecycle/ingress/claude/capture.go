@@ -5,7 +5,6 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
-	"sort"
 
 	digest "github.com/opencontainers/go-digest"
 
@@ -26,8 +25,8 @@ type Capture struct {
 // shared refusals run first, through ingress.Validate, so the digest and the
 // defensive body copy exist before any decode attempt and a malformed payload
 // is refused with the same disposition on every harness. What follows is
-// Claude-specific: the member set is validated against the fields the
-// registration allows, and the declared identities are bound by exact name.
+// Claude-specific: the event claim and declared identities are checked by
+// exact name. Extra members remain raw evidence and never become bindings.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
 	validation := ingress.Validate(raw)
 	manifest := registration.ClaudeCode2_1_261()
@@ -43,26 +42,13 @@ func Parse(raw []byte, event registration.Event, observedVersion string, envelop
 	return result
 }
 
-// Validate undeclared members in lexical order, then the event claim, then
-// identities in registration order. Multiple defects therefore select the same
-// cause regardless of Go map iteration or host member order.
+// Validate the event claim, then identities in registration order. Multiple
+// defects select the same cause regardless of map iteration or host member
+// order. AllowedFields describes the reviewed catalogue, not a runtime
+// whole-object allow-list; compatible hosts may add unrelated raw evidence.
 func validateMembers(members map[string]json.RawMessage, event registration.Event) (model.CaptureDisposition, []model.NativeBinding, model.CaptureCause) {
 	refuse := func(kind model.CaptureCauseKind, name string, required model.JSONKind, disposition model.CaptureDisposition) (model.CaptureDisposition, []model.NativeBinding, model.CaptureCause) {
 		return disposition, nil, model.NewCaptureCause(kind, name, required, disposition)
-	}
-	allowed := make(map[string]struct{}, len(event.AllowedFields))
-	for _, field := range event.AllowedFields {
-		allowed[fieldNames[field]] = struct{}{}
-	}
-	names := make([]string, 0, len(members))
-	for name := range members {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if _, ok := allowed[name]; !ok {
-			return refuse(model.CauseUndeclaredMember, name, model.JSONKindUnknown, model.CaptureUnsupportedSchema)
-		}
 	}
 	var reported string
 	raw, present := members["hook_event_name"]

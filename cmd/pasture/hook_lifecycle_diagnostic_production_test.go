@@ -72,10 +72,8 @@ func TestLifecycleTypedCaptureDiagnostics(t *testing.T) {
 	t.Run("opencode-native-control", func(t *testing.T) {
 		openCode(t, string(openCodeToolExecuteBeforeWire(t)), model.CaptureValid, "", "")
 	})
-	t.Run("claude-undeclared", func(t *testing.T) {
-		claude(t, changed(t, "added_member", []byte(`"private-host-value"`)), model.CaptureUnsupportedSchema,
-			`member "added_member" is not declared by this event's registration`,
-			"Compare that added member with the matching host contract and update the pinned registration before admitting it; do not rename or remove valid identities.")
+	t.Run("claude-added-member-control", func(t *testing.T) {
+		claude(t, changed(t, "added_member", []byte(`"private-host-value"`)), model.CaptureValid, "", "")
 	})
 	t.Run("claude-missing", func(t *testing.T) {
 		claude(t, changed(t, "session_id", nil), model.CaptureUnsupportedSchema,
