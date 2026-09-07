@@ -245,11 +245,46 @@ func TestTheIndexRefusesARowItCouldNeverEvaluate(t *testing.T) {
 		mutate func(startedEpisode) startedEpisode
 		phrase string
 	}{
-		{"no authority", func(e startedEpisode) startedEpisode { e.Authority = 0; return e }, "can never be evaluated"},
-		{"no actor", func(e startedEpisode) startedEpisode { e.Actor = provenance.ActorID{}; return e }, "can never be found"},
-		{"no task", func(e startedEpisode) startedEpisode { e.Task = provenance.TaskID{}; return e }, "says nothing a gate can use"},
-		{"no assignment", func(e startedEpisode) startedEpisode { e.Assignment = ""; return e }, "would overwrite another episode"},
-		{"unknown slot", func(e startedEpisode) startedEpisode { e.Role = AssignmentRole(99); return e }, "cannot be judged"},
+		{
+			name: "no authority",
+			mutate: func(e startedEpisode) startedEpisode {
+				e.Authority = 0
+				return e
+			},
+			phrase: "can never be evaluated",
+		},
+		{
+			name: "no actor",
+			mutate: func(e startedEpisode) startedEpisode {
+				e.Actor = provenance.ActorID{}
+				return e
+			},
+			phrase: "can never be found",
+		},
+		{
+			name: "no task",
+			mutate: func(e startedEpisode) startedEpisode {
+				e.Task = provenance.TaskID{}
+				return e
+			},
+			phrase: "says nothing a gate can use",
+		},
+		{
+			name: "no assignment",
+			mutate: func(e startedEpisode) startedEpisode {
+				e.Assignment = ""
+				return e
+			},
+			phrase: "would overwrite another episode",
+		},
+		{
+			name: "unknown slot",
+			mutate: func(e startedEpisode) startedEpisode {
+				e.Role = AssignmentRole(99)
+				return e
+			},
+			phrase: "cannot be judged",
+		},
 	} {
 		t.Run(broken.name, func(t *testing.T) {
 			err := recordAssignmentStart(t.Context(), tracker.auditDB, broken.mutate(sound))

@@ -112,6 +112,10 @@ type LifecycleFailurePolicy struct {
 	// the event is not declared by this build, and the caller must not guess a
 	// class from it.
 	Semantic EventSemantic
+	// Blocking and Response come from the same validated runtime row as
+	// Evidence. Reports must not combine these with another catalogue's mode.
+	Blocking BlockingMode
+	Response ResponseCapability
 }
 
 // Declared reports whether a row of this build's registration declares the
@@ -163,6 +167,8 @@ func lookupLifecycleFailure[E comparable](
 				DeclaredMode: mapping.DeclaredFailure(),
 				Evidence:     mapping.Evidence(),
 				Semantic:     mapping.Semantic(),
+				Blocking:     mapping.Blocking(),
+				Response:     mapping.Response(),
 			}, true
 		}
 	}

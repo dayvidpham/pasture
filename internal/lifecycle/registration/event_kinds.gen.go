@@ -156,4 +156,5 @@ const (
 	FieldCodexSessionID
 	FieldCodexTurnID
 	FieldCodexToolUseID
+	FieldFileEvent
 )

@@ -51,20 +51,38 @@ func TestAssignmentRecoveryEvidenceUsesProducerAndStoredRepresentations(t *testi
 	require.NoError(t, err)
 	originalRequest, err := assignmentRequestCommand(MutationCreateSlice, EpochRootID(parent.String()), payload)
 	require.NoError(t, err)
-	record := assignmentCommandRecord{Mutation: MutationCreateSlice, Epoch: EpochRootID(parent.String()), Payload: originalPayload, Request: originalRequest,
-		Assignment: payload.Assignment, Role: RoleGoverningSupervisor, Occupant: actor, Authority: 7, Task: parent}
+	record := assignmentCommandRecord{
+		Mutation:   MutationCreateSlice,
+		Epoch:      EpochRootID(parent.String()),
+		Payload:    originalPayload,
+		Request:    originalRequest,
+		Assignment: payload.Assignment,
+		Role:       RoleGoverningSupervisor,
+		Occupant:   actor,
+		Authority:  7,
+		Task:       parent,
+	}
 	original, err := canonicalJSON(record)
 	require.NoError(t, err)
 	normalized, err := normalizeRecoveryJSON(original)
 	require.NoError(t, err)
 	digest := sha256.Sum256(original)
-	row := provenance.EvidenceRow{TaskID: &parent, EffectiveActorID: actor, EvidenceKind: assignmentCommandEvidenceKind, Payload: normalized, ContentDigest: digest[:],
-		ProducingOperationID: provenance.GovernedAllocationSupplementOperationID("encoding-fixture"), ProducingOperationJournalID: 9}
+	row := provenance.EvidenceRow{
+		TaskID:                      &parent,
+		EffectiveActorID:            actor,
+		EvidenceKind:                assignmentCommandEvidenceKind,
+		Payload:                     normalized,
+		ContentDigest:               digest[:],
+		ProducingOperationID:        provenance.GovernedAllocationSupplementOperationID("encoding-fixture"),
+		ProducingOperationJournalID: 9,
+	}
 	require.NotEqual(t, original, normalized)
 	require.True(t, bytes.Contains(original, []byte("<&>")))
 	require.True(t, bytes.Contains(normalized, []byte(`\u003c`)))
+
 	_, err = decodeRecoveryCommand(row)
 	require.NoError(t, err)
+
 	var outer assignmentCommandRecord
 	require.NoError(t, json.Unmarshal(normalized, &outer))
 	outerBytes, err := canonicalJSON(outer)
@@ -73,6 +91,7 @@ func TestAssignmentRecoveryEvidenceUsesProducerAndStoredRepresentations(t *testi
 	require.NotEqual(t, digest, outerDigest)
 	storedDigest := sha256.Sum256(normalized)
 	require.NotEqual(t, digest, storedDigest)
+
 	reject := func(t *testing.T, payload []byte, hash []byte) {
 		t.Helper()
 		bad := row
@@ -81,16 +100,18 @@ func TestAssignmentRecoveryEvidenceUsesProducerAndStoredRepresentations(t *testi
 		_, err := decodeRecoveryCommand(bad)
 		require.Error(t, err)
 	}
-	t.Run("outer-only-digest", func(t *testing.T) { reject(t, normalized, outerDigest[:]) })
-	t.Run("stored-digest", func(t *testing.T) { reject(t, normalized, storedDigest[:]) })
-	t.Run(
-		"tampered-digest",
-		func(t *testing.T) { reject(t, normalized, bytes.Repeat([]byte{0}, sha256.Size)) },
-	)
-	t.Run(
-		"trailing",
-		func(t *testing.T) { reject(t, append(append([]byte{}, normalized...), []byte(` {}`)...), digest[:]) },
-	)
+	t.Run("outer-only-digest", func(t *testing.T) {
+		reject(t, normalized, outerDigest[:])
+	})
+	t.Run("stored-digest", func(t *testing.T) {
+		reject(t, normalized, storedDigest[:])
+	})
+	t.Run("tampered-digest", func(t *testing.T) {
+		reject(t, normalized, bytes.Repeat([]byte{0}, sha256.Size))
+	})
+	t.Run("trailing", func(t *testing.T) {
+		reject(t, append(append([]byte{}, normalized...), []byte(` {}`)...), digest[:])
+	})
 	t.Run("duplicate-nested-key", func(t *testing.T) {
 		reject(t, []byte(strings.Replace(string(normalized), `"plan":`, `"plan":null,"plan":`, 1)), digest[:])
 	})
@@ -138,8 +159,13 @@ func TestAssignmentRecoveryOrdinaryConflictCommitsDirtyWithoutOverwrite(t *testi
 	task := createHumanTestTask(t, store, "ordinary-conflict")
 	state, err := readAssignmentRecoveryState(t.Context(), store.auditDB)
 	require.NoError(t, err)
-	row := startedEpisode{Assignment: "conflict", Actor: actor, Task: task,
-		Role: RoleOwnerResponsibility, Authority: state.Through + 1}
+	row := startedEpisode{
+		Assignment: "conflict",
+		Actor:      actor,
+		Task:       task,
+		Role:       RoleOwnerResponsibility,
+		Authority:  state.Through + 1,
+	}
 	require.NoError(t, recordAssignmentStart(t.Context(), store.auditDB, row))
 	require.NoError(t, recordAssignmentStart(t.Context(), store.auditDB, row))
 	row.Authority++
@@ -753,10 +779,24 @@ func assertCurrentReworkReaderRefusals(
 	require.NoError(t, err)
 	original := store.prov
 	for _, attack := range []string{
-		"unknown-field", "missing-assignment", "wrong-assignment", "wrong-actor",
-		"wrong-axis", "wrong-round", "wrong-epoch", "wrong-kind", "wrong-producer",
-		"wrong-task", "post-finalized-row", "post-finalized-producer", "duplicate-row",
-		"nonterminal", "malformed-submission", "duplicate-finding", "wrong-verdict", "missing-current",
+		"unknown-field",
+		"missing-assignment",
+		"wrong-assignment",
+		"wrong-actor",
+		"wrong-axis",
+		"wrong-round",
+		"wrong-epoch",
+		"wrong-kind",
+		"wrong-producer",
+		"wrong-task",
+		"post-finalized-row",
+		"post-finalized-producer",
+		"duplicate-row",
+		"nonterminal",
+		"malformed-submission",
+		"duplicate-finding",
+		"wrong-verdict",
+		"missing-current",
 	} {
 		t.Run("current-rework-reader/"+attack, func(t *testing.T) {
 			journal := &reworkSubmissionReadJournal{Journal: original.Journal()}
@@ -1011,7 +1051,16 @@ func TestCurrentReworkSliceRealProducerRecovery(t *testing.T) {
 	require.Positive(t, row.Authority)
 }
 
-func finishRecoveryReviewWithDeferredFinding(t *testing.T, store *trackerImpl, service EpochService, epoch EpochRootID, started ReviewStartResult, governor provenance.AssignmentID, actor provenance.ActorID, prefix string) ReworkSubmission {
+func finishRecoveryReviewWithDeferredFinding(
+	t *testing.T,
+	store *trackerImpl,
+	service EpochService,
+	epoch EpochRootID,
+	started ReviewStartResult,
+	governor provenance.AssignmentID,
+	actor provenance.ActorID,
+	prefix string,
+) ReworkSubmission {
 	t.Helper()
 	finding := createHumanTestTask(t, store, prefix+"-finding")
 	for i, axis := range canonicalReviewAxes() {
@@ -1114,7 +1163,10 @@ func TestNativeCommandParentUsesPublicIdentityNotAdjacentOrIndexAuthority(t *tes
 	service, err := store.NewEpochService(EpochServiceOptions{})
 	require.NoError(t, err)
 	slice, err := service.CreateSlice(t.Context(), CreateSliceInput{
-		Meta: CommandMeta{OperationID: "native-parent-slice"}, Epoch: EpochRootID(epoch.String()), Plan: plan, Assignment: "native-plan",
+		Meta:       CommandMeta{OperationID: "native-parent-slice"},
+		Epoch:      EpochRootID(epoch.String()),
+		Plan:       plan,
+		Assignment: "native-plan",
 	})
 	require.NoError(t, err)
 	reader := service.(*epochService).EpochAssignmentService.(*epochAssignmentService)
@@ -1124,8 +1176,10 @@ func TestNativeCommandParentUsesPublicIdentityNotAdjacentOrIndexAuthority(t *tes
 	require.NoError(t, err)
 	require.Equal(t, resolution.authority, verified.authority)
 	material, err := store.Journal().QueryTaskEvents(provenance.JournalQueryV1{
-		OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{slice.Slice},
-		EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()}, Limit: 64,
+		OrderBy:    provenance.OrderByJournalID,
+		TaskIDs:    []provenance.TaskID{slice.Slice},
+		EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()},
+		Limit:      64,
 	})
 	require.NoError(t, err)
 	require.Len(t, material.Events, 1)
@@ -1162,16 +1216,24 @@ func TestNonemptyReviewDoesNotInferCrossActorDelegation(t *testing.T) {
 	service, err := store.NewEpochService(EpochServiceOptions{})
 	require.NoError(t, err)
 	slice, err := service.CreateSlice(t.Context(), CreateSliceInput{
-		Meta: CommandMeta{OperationID: "delegation-slice"}, Epoch: EpochRootID(epoch.String()), Plan: plan, Assignment: "delegation-plan",
+		Meta:       CommandMeta{OperationID: "delegation-slice"},
+		Epoch:      EpochRootID(epoch.String()),
+		Plan:       plan,
+		Assignment: "delegation-plan",
 	})
 	require.NoError(t, err)
 	member, err := service.SetSliceCandidate(t.Context(), SetSliceCandidateInput{
-		Meta: CommandMeta{OperationID: "delegation-member"}, Epoch: EpochRootID(epoch.String()), Slice: slice.Slice,
-		Repository: "repo", Commit: "0123456789abcdef0123456789abcdef01234567", Assignment: "delegation-slice-slice-owner",
+		Meta:       CommandMeta{OperationID: "delegation-member"},
+		Epoch:      EpochRootID(epoch.String()),
+		Slice:      slice.Slice,
+		Repository: "repo",
+		Commit:     "0123456789abcdef0123456789abcdef01234567",
+		Assignment: "delegation-slice-slice-owner",
 	})
 	require.NoError(t, err)
 	started, err := service.StartReview(t.Context(), StartReviewInput{
-		Meta: CommandMeta{OperationID: "delegation-review"}, Epoch: EpochRootID(epoch.String()),
+		Meta:    CommandMeta{OperationID: "delegation-review"},
+		Epoch:   EpochRootID(epoch.String()),
 		Subject: ReviewSubjectRef{Kind: ReviewSubjectImplementationCandidate, SnapshotID: string(member.Candidate)},
 	})
 	require.NoError(t, err)
@@ -1181,12 +1243,19 @@ func TestNonemptyReviewDoesNotInferCrossActorDelegation(t *testing.T) {
 		otherActor, "other-axis-reviewer-start", "delegation-plan")
 	finding := createHumanTestTask(t, store, "finding")
 	input := SubmitReviewInput{
-		Meta: CommandMeta{OperationID: "unsupported-delegation"}, Epoch: EpochRootID(epoch.String()),
-		Round: started.Round, Axis: axis, Assignment: "other-axis-reviewer",
-		Submission: ImplementationReviewSubmission{Verdict: VerdictAccept, Findings: []ReviewFinding{
-			{Task: finding, Severity: SeverityImportant, Summary: "A real finding"},
-		}},
+		Meta:       CommandMeta{OperationID: "unsupported-delegation"},
+		Epoch:      EpochRootID(epoch.String()),
+		Round:      started.Round,
+		Axis:       axis,
+		Assignment: "other-axis-reviewer",
+		Submission: ImplementationReviewSubmission{
+			Verdict: VerdictAccept,
+			Findings: []ReviewFinding{
+				{Task: finding, Severity: SeverityImportant, Summary: "A real finding"},
+			},
+		},
 	}
+
 	_, err = service.SubmitReview(t.Context(), input)
 	require.ErrorContains(t, err, "delegation")
 	committed, err := store.Journal().LookupCommitted(input.Meta.OperationID)
@@ -1532,8 +1601,11 @@ func TestAssignmentRecoveryRejectsUnrelatedGenuineSupplementMaterial(t *testing.
 	require.Len(t, starts.Rows, 1)
 	reader := service.(*epochService).EpochAssignmentService.(*epochAssignmentService)
 	_, err = reader.exactCandidateParentAuthority(t.Context(), assignmentResolution{
-		id: "victim-slice-owner", task: victim.Slice, occupant: actor,
-		role: RoleOwnerResponsibility, authority: starts.Rows[0].AuthorityJournalID,
+		id:        "victim-slice-owner",
+		task:      victim.Slice,
+		occupant:  actor,
+		role:      RoleOwnerResponsibility,
+		authority: starts.Rows[0].AuthorityJournalID,
 	})
 	require.ErrorContains(t, err, "producer mismatch", "command parent proof must reject the same transplant as recovery")
 }
@@ -1710,7 +1782,8 @@ func TestPartialReviewMaterialRecoversAllFourDeclaredMembers(t *testing.T) {
 	service, err := store.NewEpochService(EpochServiceOptions{})
 	require.NoError(t, err)
 	_, err = service.StartReview(t.Context(), StartReviewInput{
-		Meta: CommandMeta{OperationID: "partial-review-start"}, Epoch: EpochRootID(epoch.String()),
+		Meta:    CommandMeta{OperationID: "partial-review-start"},
+		Epoch:   EpochRootID(epoch.String()),
 		Subject: ReviewSubjectRef{Kind: ReviewSubjectDocumentRevision, SnapshotID: plan.String()},
 	})
 	require.NoError(t, err)
@@ -1728,8 +1801,10 @@ func TestRecoveryMaterialDecoderRejectsCorruptedPublicRows(t *testing.T) {
 	task := createHumanTestTask(t, store, "task")
 	seedFeasibilityEpisode(t, store, task, "material-defense", actor, "material-defense-start")
 	page, err := store.Journal().QueryTaskEvents(provenance.JournalQueryV1{
-		OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{task},
-		EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()}, Limit: 64,
+		OrderBy:    provenance.OrderByJournalID,
+		TaskIDs:    []provenance.TaskID{task},
+		EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()},
+		Limit:      64,
 	})
 	require.NoError(t, err)
 	require.Len(t, page.Events, 1)

@@ -266,7 +266,7 @@ func readAuthenticClaudeFixtureAt(t *testing.T, fixture, expectedEvent, expected
 	return raw
 }
 
-func TestAuthenticClaudeFileChanged2_1_263AcceptedButNotAdmitted(t *testing.T) {
+func TestAuthenticClaudeFileChanged2_1_263AdmittedButWithheld(t *testing.T) {
 	t.Parallel()
 	raw := readAuthenticClaudeFixtureAt(t, "file_changed_2_1_263.json", "FileChanged", authenticFileChangedVersion, authenticFileChangedSource)
 	var payload map[string]string
@@ -277,16 +277,19 @@ func TestAuthenticClaudeFileChanged2_1_263AcceptedButNotAdmitted(t *testing.T) {
 	require.Equal(t, payload["cwd"]+"/.env", payload["file_path"])
 	require.Equal(t, "change", payload["event"])
 
-	// Capture precedes admission. Preserve the authentic event member rather
-	// than removing it to fit the older catalogue. Parse records the supplied
+	// Member admission does not enable transport. Parse records the supplied
 	// version as provenance; this test makes no version-admission claim.
 	registered := requireRegistrationEvent(t, registration.EventFileChanged)
 	capture := Parse(raw, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
-	require.Equal(t, model.CaptureUnsupportedSchema, capture.Disposition, "the current FileChanged catalogue does not yet admit the authentic payload")
+	require.Equal(t, model.CaptureValid, capture.Disposition, "FileChanged must allow the authentic event member")
+	require.Equal(t, model.CaptureValid, capture.Delivery.Capture)
 	require.Equal(t, raw, capture.Delivery.Body)
 	require.Equal(t, digest.FromBytes(raw), capture.Digest)
 	require.Equal(t, authenticFileChangedVersion, capture.Delivery.Envelope.HostVersion)
 	require.Equal(t, registration.EventFileChanged, capture.Delivery.Event)
+	bindings, _ := expectedIdentities(t, raw, []authenticIdentity{sessionIdentity})
+	require.Equal(t, bindings, capture.Delivery.Bindings)
+	require.Equal(t, "d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e", payload["session_id"])
 
 	entries, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
@@ -295,9 +298,21 @@ func TestAuthenticClaudeFileChanged2_1_263AcceptedButNotAdmitted(t *testing.T) {
 	require.Equal(t, activation.Withheld, entry.State)
 	require.Zero(t, entry.CaptureProof)
 	require.Zero(t, entry.ProductionProof)
+	matcher := activation.ClaudeCode2_1_261Matcher(registration.EventFileChanged)
+	require.Equal(t, ".envrc|.env", matcher)
+	hooksBytes, err := os.ReadFile("../../../../hooks/hooks.json")
+	require.NoError(t, err)
+	var transport struct {
+		Hooks map[string]json.RawMessage `json:"hooks"`
+	}
+	require.NoError(t, json.Unmarshal(hooksBytes, &transport))
+	require.NotEmpty(t, transport.Hooks)
+	require.NotContains(t, transport.Hooks, "FileChanged")
 
 	sidecarBytes, err := os.ReadFile("testdata/fixtures/file_changed_2_1_263.provenance.json")
 	require.NoError(t, err)
+	require.Equal(t, "sha256:2f23c616d536cc8a16420b475796cf261745ce09eb8d1062cd495a3f6e644dc7", digest.FromBytes(raw).String())
+	require.Equal(t, "sha256:3d9dfa4b7822365723a9fea3690b93a08694c5a3a68587e503e3debe3d5318ff", digest.FromBytes(sidecarBytes).String())
 	var sidecar acceptance.CaptureProvenance
 	require.NoError(t, json.Unmarshal(sidecarBytes, &sidecar))
 	require.Equal(t, "home-path-v1", sidecar.Redaction)
@@ -316,6 +331,51 @@ func TestAuthenticClaudeFileChangedCaptureSourceExists(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(sink), "func (s *DirectoryCaptureSink) Record(")
 	require.Contains(t, string(sink), "file.Write(raw)")
+}
+
+func TestAuthenticClaudeFileChangedAdmissionRemainsNarrow(t *testing.T) {
+	t.Parallel()
+	raw := readAuthenticClaudeFixtureAt(t, "file_changed_2_1_263.json", "FileChanged", authenticFileChangedVersion, authenticFileChangedSource)
+	registered := requireRegistrationEvent(t, registration.EventFileChanged)
+	for _, event := range registration.ClaudeCode2_1_261().Events {
+		if event.Kind == registration.EventFileChanged {
+			require.Contains(t, event.AllowedFields, registration.FieldFileEvent)
+		} else {
+			require.NotContains(t, event.AllowedFields, registration.FieldFileEvent, "%s must not admit FileChanged's event member", event.NativeName)
+		}
+	}
+	t.Run("unknown member still refused", func(t *testing.T) {
+		var members map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &members))
+		members["unknown_member"] = json.RawMessage(`true`)
+		changed, err := json.Marshal(members)
+		require.NoError(t, err)
+		capture := Parse(changed, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
+		require.Equal(t, model.CaptureUnsupportedSchema, capture.Disposition)
+		require.Empty(t, capture.Delivery.Bindings)
+		require.Equal(t, changed, capture.Delivery.Body)
+		require.Equal(t, digest.FromBytes(changed), capture.Digest)
+	})
+	t.Run("required session still required", func(t *testing.T) {
+		var members map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &members))
+		delete(members, "session_id")
+		changed, err := json.Marshal(members)
+		require.NoError(t, err)
+		capture := Parse(changed, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
+		require.Equal(t, model.CaptureUnsupportedSchema, capture.Disposition)
+		require.Empty(t, capture.Delivery.Bindings)
+	})
+	t.Run("event member is not hook event name", func(t *testing.T) {
+		var members map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &members))
+		members["hook_event_name"] = members["event"]
+		changed, err := json.Marshal(members)
+		require.NoError(t, err)
+		capture := Parse(changed, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
+		require.Equal(t, model.CaptureEventMismatch, capture.Disposition)
+		require.Empty(t, capture.Delivery.Bindings)
+	})
 }
 
 func activationEntry(entries []activation.Entry, event model.ContractEventKind) (activation.Entry, bool) {

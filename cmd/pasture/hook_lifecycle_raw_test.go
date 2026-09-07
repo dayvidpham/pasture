@@ -159,7 +159,7 @@ func TestRawContinuationParityWithNativePerEvent(t *testing.T) {
 		{
 			name: "claude pre-tool-use gate", harness: "claude-code", event: "PreToolUse",
 			hostVersion: "2.1.261", schema: claudeRawSchema,
-			fixture: "pre_tool_use_2_1_261.json", pkg: "claude", want: `{"decision":"proceed"}`,
+			fixture: "pre_tool_use_2_1_261.json", pkg: "claude", want: "",
 		},
 		{
 			name: "codex session start observation", harness: "codex", event: "SessionStart",
@@ -212,7 +212,7 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 		wantReaction bool // gate consultations emit consultation evidence
 	}{
 		{name: "observation session start", fixture: "session_start_2_1_261.json", event: "SessionStart"},
-		{name: "gate pre-tool-use", fixture: "pre_tool_use_2_1_261.json", event: "PreToolUse", wantStdout: `{"decision":"proceed"}`, wantReaction: true},
+		{name: "gate pre-tool-use", fixture: "pre_tool_use_2_1_261.json", event: "PreToolUse", wantStdout: "", wantReaction: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			payload, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", tc.fixture))
@@ -265,8 +265,8 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 				require.JSONEq(t, tc.wantStdout, nativeStdout, "native gate must emit the canonical decision")
 				require.JSONEq(t, tc.wantStdout, rawStdout, "raw gate must emit the canonical decision")
 			} else {
-				require.Empty(t, nativeStdout, "native observation must emit nothing")
-				require.Empty(t, rawStdout, "raw observation must emit nothing (parity)")
+				require.Empty(t, nativeStdout, "Claude observation or evaluated Proceed must emit nothing")
+				require.Empty(t, rawStdout, "raw Claude continuation must emit nothing (parity)")
 			}
 
 			// committed occurrence equivalence: everything except the origin.
@@ -485,7 +485,7 @@ func checkNoDatabaseFiles(t *testing.T, dbPath string) {
 // `hook lifecycle raw --dry-run` reports the same contract, effect count, and
 // canonical host continuation as a real commit of the same payload, without
 // opening the store or issuing a receipt. Both an observation (empty
-// continuation) and a gate event (non-empty continuation) pin the parity.
+// continuation) and a gate event (also empty on Claude) pin the parity.
 func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 	t.Parallel()
 
@@ -499,7 +499,7 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 		wantContinuation string
 	}{
 		{name: "observation", fixture: "session_start_2_1_261.json", event: "SessionStart", wantEffects: 1},
-		{name: "gate", fixture: "pre_tool_use_2_1_261.json", event: "PreToolUse", wantEffects: 2, wantContinuation: `{"decision":"proceed"}`},
+		{name: "gate", fixture: "pre_tool_use_2_1_261.json", event: "PreToolUse", wantEffects: 2, wantContinuation: ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			payload, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", tc.fixture))

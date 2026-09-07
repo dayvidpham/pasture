@@ -155,6 +155,7 @@ func openCodeNamedMapping(event OpenCodeLifecycleEvent, eventIdentities ...Nativ
 		order:           OrderSequentialLoad,
 		reconciliation:  ReconcileSequentialMutation,
 		failure:         FailureThrowFailFast,
+		preAction:       event != OpenCodeEventToolExecuteAfter,
 		declaredFailure: FailureThrowFailFast,
 		stopLoop:        StopLoopNotApplicable,
 	}

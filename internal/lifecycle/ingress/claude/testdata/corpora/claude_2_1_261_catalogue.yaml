@@ -15,7 +15,7 @@ events:
   - {name: PostToolUse, fields: [tool_name, tool_input, tool_output, tool_response, duration_ms, tool_use_id], behavior: observation}
   - {name: PostToolUseFailure, fields: [tool_name, tool_input, error, is_interrupt, duration_ms, tool_use_id], behavior: observation}
   - {name: PostToolBatch, fields: [batch_results, tool_calls], behavior: gate}
-  - {name: FileChanged, fields: [file_path], behavior: observation}
+  - {name: FileChanged, fields: [file_path, event], behavior: observation}
   - {name: CwdChanged, fields: [], behavior: observation}
   - {name: ConfigChange, fields: [config_source], behavior: conditional-gate}
   - {name: InstructionsLoaded, fields: [file_path, memory_type, load_reason, globs, trigger_file_path, parent_file_path], behavior: observation}

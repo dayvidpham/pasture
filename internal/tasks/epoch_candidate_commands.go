@@ -219,7 +219,10 @@ func (s *epochAssignmentService) candidateBelongsToPlan(candidate provenance.Tas
 	var matchSlice, matchCandidate assignmentBinding
 	found := 0
 	for _, ancestor := range ancestors {
-		edges, err := s.tracker.prov.Edges(ancestor.ID, func() *provenance.EdgeKind { k := provenance.EdgeBlockedBy; return &k }())
+		edges, err := s.tracker.prov.Edges(ancestor.ID, func() *provenance.EdgeKind {
+			k := provenance.EdgeBlockedBy
+			return &k
+		}())
 		if err != nil {
 			return assignmentBinding{}, assignmentBinding{}, fmt.Errorf("read candidate parent edges for %q: %w", candidate, err)
 		}
@@ -254,7 +257,10 @@ func (s *epochAssignmentService) integrationBindingForCandidate(candidate proven
 	var found []assignmentBinding
 	var plan provenance.TaskID
 	for _, ancestor := range ancestors {
-		edges, err := s.tracker.prov.Edges(ancestor.ID, func() *provenance.EdgeKind { k := provenance.EdgeBlockedBy; return &k }())
+		edges, err := s.tracker.prov.Edges(ancestor.ID, func() *provenance.EdgeKind {
+			k := provenance.EdgeBlockedBy
+			return &k
+		}())
 		if err != nil {
 			return provenance.TaskID{}, assignmentBinding{}, fmt.Errorf("read integration candidate edges for %q: %w", candidate, err)
 		}

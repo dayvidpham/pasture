@@ -97,6 +97,7 @@ func codexLifecycleMapping(
 		declaredFailure: declaredFailureArm(blocking, FailureStrictExitTwoBlocks, FailureStrictHook),
 		evidence:        evidence,
 		stopLoop:        stopLoop,
+		preAction:       semantic == SemanticGateConsultation && event != CodexEventPostToolUse && event != CodexEventPostCompact,
 	}
 }
 

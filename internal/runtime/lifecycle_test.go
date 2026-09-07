@@ -18,6 +18,67 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPinnedResponseCapabilitiesKeepUnsupportedAndPostHocRowsNonEnforcing(t *testing.T) {
+	t.Parallel()
+
+	checkResponseMappings(t, runtime.ClaudeCode2_1_261Lifecycle())
+	checkResponseMappings(t, runtime.Codex0_153_0Lifecycle())
+	checkResponseMappings(t, runtime.OpenCode1_18_29Lifecycle())
+
+	claude, err := runtime.ClaudeCode2_1_261Lifecycle().Mapping(runtime.ClaudeEventPostToolBatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codex, err := runtime.Codex0_153_0Lifecycle().Mapping(runtime.CodexEventPostToolUse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := runtime.Codex0_153_0Lifecycle().Mapping(runtime.CodexEventPostCompact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opencode, err := runtime.OpenCode1_18_29Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteAfter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []runtime.LifecycleEventMapping{claude, codex, compact, opencode} {
+		if m.PreAction() || m.Response() != runtime.CapabilityNone {
+			t.Fatalf("post-hoc %s is enforcing", m.NativeName())
+		}
+	}
+}
+
+func checkResponseMappings[E comparable](t *testing.T, contract runtime.LifecycleContract[E]) {
+	t.Helper()
+
+	rows := 0
+	enforcing := 0
+	evidenced := 0
+	for _, event := range contract.Events() {
+		m, err := contract.Mapping(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows++
+		if !m.IsValid() || !m.Response().IsValid() {
+			t.Fatalf("invalid derived row %s", m.NativeName())
+		}
+		if m.Response().AllowsDeny() {
+			enforcing++
+		}
+		if m.PreAction() && m.Semantic() == runtime.SemanticGateConsultation && m.Evidence().IsPresent() {
+			evidenced++
+		}
+		if contract.Harness() != ir.HarnessClaudeCode && m.Response() != runtime.CapabilityNone {
+			t.Fatalf("%s/%s has no proved denial channel", contract.Harness(), m.NativeName())
+		}
+	}
+
+	if rows == 0 || enforcing != evidenced {
+		t.Fatalf("rows=%d deny=%d evidenced pre-action=%d", rows, enforcing, evidenced)
+	}
+}
+
 const lifecycleContractsFixture testutil.FixtureName = "lifecycle_contracts"
 
 type lifecycleFixture struct {

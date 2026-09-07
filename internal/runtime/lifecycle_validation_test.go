@@ -119,6 +119,71 @@ func validSessionStartMapping(t *testing.T) LifecycleEventMapping {
 	return mapping
 }
 
+func TestResponseCapabilityDerivesFromPreActionChannelEvidence(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		pre         bool
+		cited       bool
+		ask         bool
+		observation bool
+		want        ResponseCapability
+	}{
+		{name: "unevidenced pre-action", pre: true, want: CapabilityNone},
+		{name: "evidenced pre-action throw", pre: true, cited: true, want: CapabilityDeny},
+		{name: "evidenced ask", pre: true, cited: true, ask: true, want: CapabilityDenyAsk},
+		{name: "post-hoc", cited: true, want: CapabilityNone},
+		{name: "observation", cited: true, observation: true, want: CapabilityNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := openCodeNamedMapping(OpenCodeEventToolExecuteBefore)
+			if tc.observation {
+				m = openCodeObservationMapping(OpenCodeEventSessionCreated)
+			}
+			m.preAction = tc.pre
+			if tc.cited {
+				m.evidence = FailureEvidence{Source: "internal/codegen/opencode_hooks.go"}
+			}
+			if tc.ask {
+				m.askEvidence = FailureEvidence{Source: "https://example.test/ask-contract"}
+			}
+
+			c, err := newLifecycleContract(OpenCode1_18_29(), []int{1}, map[int]LifecycleEventMapping{1: m})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := c.Mapping(1)
+
+			if err != nil || !got.IsValid() || got.Response() != tc.want {
+				t.Fatalf("derived mapping response = %s, valid=%t, error=%v; want %s", got.Response(), got.IsValid(), err, tc.want)
+			}
+			if got.Response().String() == "" || got.Response().String() == "unset" {
+				t.Fatal("derived response must not render absent or unset")
+			}
+		})
+	}
+}
+
+func TestResponseCapabilityRejectsHandSetUnsupportedClaims(t *testing.T) {
+	t.Parallel()
+
+	for _, capability := range []ResponseCapability{CapabilityDeny, CapabilityDenyAsk, ResponseCapability(255)} {
+		m := openCodeNamedMapping(OpenCodeEventToolExecuteBefore)
+		m.response = capability
+
+		_, err := newLifecycleContract(OpenCode1_18_29(), []int{1}, map[int]LifecycleEventMapping{1: m})
+
+		if err == nil || !strings.Contains(err.Error(), "tool.execute.before") || !strings.Contains(err.Error(), "response capability") {
+			t.Fatalf("hand-set capability %d: want named refusal, got %v", capability, err)
+		}
+	}
+	if (LifecycleEventMapping{}).IsValid() || CapabilityUnset.IsValid() || CapabilityUnset.String() != "unset" {
+		t.Fatal("unset must be unusable and explicit")
+	}
+}
+
 // TestLifecycleContractBindsBlockingExitCodesToEvidence is the row-validation
 // table for the failure-evidence rule. A blocking exit code refuses the user's
 // prompt or tool call, so the row must cite where the host's blocking behavior

@@ -1,6 +1,7 @@
 package nativeresponse_test
 
 import (
+	"errors"
 	"os"
 	"sort"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
+	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
 	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/middleend"
@@ -21,7 +23,7 @@ import (
 )
 
 // TestEncodeGoldenNativeContinuationBytes pins the exact native bytes the
-// per-host encoders (CodexContinuation, CanonicalProceed) emit for every
+// per-host byte adapters emit for every
 // (harness, response-validity) pair — the encoders the frontendRegistry encode
 // members reference. The Codex shapes are
 // derived from the pinned Codex 0.153.0 command-hook output contract:
@@ -35,10 +37,7 @@ import (
 //     observation (SessionStart): every universal field defaults
 //     (default_continue=true) and an observation adds no hookSpecificOutput.
 //
-// The OpenCode and Claude shapes are the canonical Pasture host response and
-// MUST remain byte-identical to M2 (regression guard).
-//
-// FAILS until the L3 encoder bodies land.
+// OpenCode keeps its canonical Pasture response. Claude emits no directive.
 func TestEncodeGoldenNativeContinuationBytes(t *testing.T) {
 	t.Parallel()
 	proceed := proceedResponse(t)
@@ -54,7 +53,7 @@ func TestEncodeGoldenNativeContinuationBytes(t *testing.T) {
 		{name: "codex observation default", harness: ir.HarnessCodex, response: observation, want: []byte(`{}`)},
 		{name: "opencode gate proceed", harness: ir.HarnessOpenCode, response: proceed, want: []byte(`{"decision":"proceed"}`)},
 		{name: "opencode observation no stdout", harness: ir.HarnessOpenCode, response: observation, want: nil},
-		{name: "claude gate proceed", harness: ir.HarnessClaudeCode, response: proceed, want: []byte(`{"decision":"proceed"}`)},
+		{name: "claude gate proceed", harness: ir.HarnessClaudeCode, response: proceed, want: nil},
 		{name: "claude observation no stdout", harness: ir.HarnessClaudeCode, response: observation, want: nil},
 	}
 	for _, tc := range cases {
@@ -62,16 +61,15 @@ func TestEncodeGoldenNativeContinuationBytes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// Exercise the exact per-host encoder the registry row references:
-			// Codex routes through CodexContinuation, and the canonical-object
-			// harnesses (Claude, OpenCode) through CanonicalProceed. The former
-			// nativeresponse.Encode(harness, response) switch is deleted; the
-			// unknown-harness negative it hosted is relocated to the registry
-			// lookup (handlers.dispatchLifecycle + HookLifecycleNative).
+			// The production dispatch owns the harness selection; these are its
+			// byte adapters, not a central native-response dispatcher.
 			var (
 				got []byte
 				err error
 			)
 			switch tc.harness {
+			case ir.HarnessClaudeCode:
+				got, err = nativeresponse.ClaudeContinuation(tc.response)
 			case ir.HarnessCodex:
 				got, err = nativeresponse.CodexContinuation(tc.response)
 			default:
@@ -348,8 +346,169 @@ func TestTheFaultContinuationMatchesTheEvaluatedProceed(t *testing.T) {
 
 	claudeFault, err := nativeresponse.FaultContinuation(ir.HarnessClaudeCode, pastureruntime.SemanticObservation)
 	require.NoError(t, err)
-	claudeObservation, err := nativeresponse.CanonicalProceed(backend.HostResponse{})
+	claudeObservation, err := nativeresponse.ClaudeContinuation(backend.HostResponse{})
 	require.NoError(t, err)
 	require.Equal(t, claudeObservation, claudeFault.Bytes(),
 		"Claude reads an empty body as a proceed, and that is what a fault emits there")
+}
+
+func TestPureEncodersHonorCapabilitiesAndPreserveObservationIdentities(t *testing.T) {
+	t.Parallel()
+
+	claude := pastureruntime.ClaudeCode2_1_261Lifecycle()
+	codex := pastureruntime.Codex0_153_0Lifecycle()
+	openCode := pastureruntime.OpenCode1_18_29Lifecycle()
+
+	claudeGate, err := claude.Mapping(pastureruntime.ClaudeEventPreToolUse)
+	require.NoError(t, err)
+	claudeObservation, err := claude.Mapping(pastureruntime.ClaudeEventSessionStart)
+	require.NoError(t, err)
+	claudePostHoc, err := claude.Mapping(pastureruntime.ClaudeEventPostToolBatch)
+	require.NoError(t, err)
+	codexGate, err := codex.Mapping(pastureruntime.CodexEventPreToolUse)
+	require.NoError(t, err)
+	codexObservation, err := codex.Mapping(pastureruntime.CodexEventSessionStart)
+	require.NoError(t, err)
+	openCodeGate, err := openCode.Mapping(pastureruntime.OpenCodeEventToolExecuteBefore)
+	require.NoError(t, err)
+	openCodeObservation, err := openCode.Mapping(pastureruntime.OpenCodeEventSessionCreated)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name    string
+		mapping pastureruntime.LifecycleEventMapping
+		encode  func(pastureruntime.LifecycleEventMapping, backend.HostResponse) (hostexit.Outcome, error)
+		proceed string
+		blocks  bool
+	}{
+		{
+			name: "claude gate", mapping: claudeGate,
+			encode: nativeresponse.EncodeClaude, blocks: true,
+		},
+		{
+			name: "claude observation", mapping: claudeObservation,
+			encode: nativeresponse.EncodeClaude,
+		},
+		{
+			name: "claude post-hoc", mapping: claudePostHoc,
+			encode: nativeresponse.EncodeClaude,
+		},
+		{
+			name: "codex gate", mapping: codexGate,
+			encode: nativeresponse.EncodeCodex, proceed: `{"continue":true}`,
+		},
+		{
+			name: "codex observation", mapping: codexObservation,
+			encode: nativeresponse.EncodeCodex, proceed: `{}`,
+		},
+		{
+			name: "opencode gate", mapping: openCodeGate,
+			encode: nativeresponse.EncodeOpenCode, proceed: `{"decision":"proceed"}`,
+		},
+		{
+			name: "opencode observation", mapping: openCodeObservation,
+			encode: nativeresponse.EncodeOpenCode,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, kind := range []backend.DecisionKind{backend.DecisionProceed, backend.DecisionDeny, backend.DecisionRequireHuman} {
+				reason := backend.ReasonNoActiveAssignment
+				if kind == backend.DecisionProceed {
+					reason = backend.ReasonLegal
+				}
+				decision, err := backend.NewDecision(kind, reason)
+				require.NoError(t, err)
+				response, err := backend.NewHostResponse(decision)
+				require.NoError(t, err)
+
+				out, err := tc.encode(tc.mapping, response)
+
+				require.NoError(t, err)
+				if tc.blocks && kind != backend.DecisionProceed {
+					require.Equal(t, hostexit.ExitBlock, out.Exit, "RequireHuman must downgrade to Deny where Ask is absent")
+					require.Empty(t, out.Stdout, "Claude denial is stderr-only")
+					require.Equal(t, reason.Message(), out.Stderr)
+					require.Contains(t, out.Stderr, "no active assignment")
+				} else {
+					require.Equal(t, hostexit.ExitContinue, out.Exit)
+					require.Equal(t, tc.proceed, string(out.Stdout), "unsupported denial must preserve the proceed identity")
+					require.Empty(t, out.Stderr)
+				}
+			}
+
+			// Only an observation may supply an absent response.
+			out, err := tc.encode(tc.mapping, backend.HostResponse{})
+			if tc.mapping.Semantic() == pastureruntime.SemanticObservation {
+				require.NoError(t, err)
+				require.Equal(t, tc.proceed, string(out.Stdout))
+			} else {
+				require.Error(t, err)
+				require.Equal(t, hostexit.ExitStatusUnset, out.Exit)
+			}
+
+			// An unevaluated refusal needs its own evidenced channel.
+			out, err = tc.encode(tc.mapping, backend.NewEvaluationFaultResponse())
+			if tc.blocks {
+				require.NoError(t, err)
+				require.Equal(t, hostexit.ExitBlock, out.Exit)
+				require.Empty(t, out.Stdout)
+				require.Contains(t, out.Stderr, "could not evaluate")
+				require.Contains(t, out.Stderr, "not a policy denial")
+			} else {
+				var unsupported *nativeresponse.UnsupportedResponseError
+				require.ErrorAs(t, err, &unsupported)
+				require.Equal(t, tc.mapping.NativeName(), unsupported.Event)
+				require.Equal(t, hostexit.ExitStatusUnset, out.Exit)
+				require.Empty(t, out.Stdout)
+			}
+
+			_, err = tc.encode(pastureruntime.LifecycleEventMapping{}, backend.HostResponse{})
+			require.Error(t, err)
+		})
+	}
+
+	_, err = nativeresponse.EncodeClaude(codexGate, proceedResponse(t))
+	require.ErrorContains(t, err, "does not match this encoder")
+}
+
+func TestByteOnlyAdaptersRefuseNewDenialArms(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []backend.DecisionKind{backend.DecisionDeny, backend.DecisionRequireHuman} {
+		decision, err := backend.NewDecision(kind, backend.ReasonRoleForbidsAction)
+		require.NoError(t, err)
+		response, err := backend.NewHostResponse(decision)
+		require.NoError(t, err)
+
+		for _, encode := range []func(backend.HostResponse) ([]byte, error){
+			nativeresponse.ClaudeContinuation,
+			nativeresponse.CodexContinuation,
+			nativeresponse.CanonicalProceed,
+		} {
+			raw, err := encode(response)
+
+			require.Error(t, err)
+			require.Empty(t, raw)
+		}
+	}
+}
+
+func TestOnlyEffectiveFailureModeCanChooseAnExit(t *testing.T) {
+	t.Parallel()
+
+	// Evidence can exist without an effective exit channel (for example a
+	// post-hoc response). Keep this distinction testable independently of
+	// today's static rows, whose declarations and effective modes correlate.
+	out, ok := hostexit.ForFault(hostexit.Fault{
+		Mode:         pastureruntime.FailureReportAndContinue,
+		DeclaredMode: pastureruntime.FailureExitTwoBlocks,
+		Evidence:     pastureruntime.FailureEvidence{Source: "https://docs.claude.com/en/docs/claude-code/hooks"},
+		Policy:       hostexit.FaultFailClosed,
+		Stage:        hostexit.FaultStageNotRecorded,
+		Continuation: hostexit.EmptyContinuation(),
+		Cause:        errors.New("evaluation failed"),
+	})
+
+	require.True(t, ok)
+	require.Equal(t, hostexit.ExitContinue, out.Exit, "declared mode explains, only effective mode chooses the exit")
 }

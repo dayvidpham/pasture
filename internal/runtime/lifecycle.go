@@ -314,6 +314,36 @@ func (m FailureMode) String() string {
 	}
 }
 
+// ResponseCapability is the evidenced response channel of a pre-action gate.
+// Unset means derivation has not run; None means it ran and found no channel.
+// A capability is not activation permission and does not enable a transport.
+type ResponseCapability uint8
+
+const (
+	CapabilityUnset ResponseCapability = iota
+	CapabilityNone
+	CapabilityDeny
+	CapabilityDenyAsk
+)
+
+func (c ResponseCapability) IsValid() bool    { return c >= CapabilityNone && c <= CapabilityDenyAsk }
+func (c ResponseCapability) AllowsDeny() bool { return c == CapabilityDeny || c == CapabilityDenyAsk }
+func (c ResponseCapability) AllowsAsk() bool  { return c == CapabilityDenyAsk }
+func (c ResponseCapability) String() string {
+	switch c {
+	case CapabilityUnset:
+		return "unset"
+	case CapabilityNone:
+		return "none"
+	case CapabilityDeny:
+		return "deny"
+	case CapabilityDenyAsk:
+		return "deny-ask"
+	default:
+		return ""
+	}
+}
+
 // StopLoopPolicy records whether a Stop-family event carries host loop state.
 // ConsultWhenInactive prevents a generated adapter from re-blocking the stop
 // hook invocation that was itself triggered by an earlier block.
@@ -418,6 +448,10 @@ type LifecycleEventMapping struct {
 	declaredFailure FailureMode
 	evidence        FailureEvidence
 	stopLoop        StopLoopPolicy
+	// preAction is a reviewed profile fact, not inferred from an exit code.
+	preAction   bool
+	askEvidence FailureEvidence
+	response    ResponseCapability
 }
 
 func (m LifecycleEventMapping) NativeName() string                 { return m.nativeName }
@@ -435,8 +469,28 @@ func (m LifecycleEventMapping) Failure() FailureMode               { return m.fa
 // obeys.
 func (m LifecycleEventMapping) DeclaredFailure() FailureMode { return m.declaredFailure }
 
-func (m LifecycleEventMapping) Evidence() FailureEvidence { return m.evidence }
-func (m LifecycleEventMapping) StopLoop() StopLoopPolicy  { return m.stopLoop }
+func (m LifecycleEventMapping) Evidence() FailureEvidence    { return m.evidence }
+func (m LifecycleEventMapping) AskEvidence() FailureEvidence { return m.askEvidence }
+func (m LifecycleEventMapping) PreAction() bool              { return m.preAction }
+func (m LifecycleEventMapping) Response() ResponseCapability { return m.response }
+
+// IsValid rejects zero mappings and metadata not derived by a contract.
+func (m LifecycleEventMapping) IsValid() bool {
+	return m.response.IsValid() && m.validate("LifecycleEventMapping.IsValid") == nil
+}
+
+func (m LifecycleEventMapping) derivedResponse() ResponseCapability {
+	if !m.preAction || m.semantic != SemanticGateConsultation || m.blocking == NonBlocking || !m.evidence.IsPresent() {
+		return CapabilityNone
+	}
+	// A throw channel is a response channel too. BlocksByExitCode answers a
+	// different question and must not decide this capability.
+	if m.askEvidence.IsPresent() {
+		return CapabilityDenyAsk
+	}
+	return CapabilityDeny
+}
+func (m LifecycleEventMapping) StopLoop() StopLoopPolicy { return m.stopLoop }
 func (m LifecycleEventMapping) Identities() []NativeIdentityField {
 	return append([]NativeIdentityField(nil), m.identities...)
 }
@@ -482,6 +536,20 @@ func (m LifecycleEventMapping) validate(where string) error {
 	}
 
 	identityNames := make(map[string]struct{}, len(m.identities))
+	if m.response != CapabilityUnset && m.response != m.derivedResponse() {
+		return runtimeError(
+			fmt.Sprintf("lifecycle event %q has response capability %q but derives %q", m.nativeName, m.response, m.derivedResponse()),
+			"only pre-action gates with cited response-channel evidence may deny or ask",
+			where, "generation cannot authorize an unsupported response",
+			fmt.Sprintf("remove the hand-set response capability on %q or supply its exact channel evidence and pre-action classification", m.nativeName), nil,
+		)
+	}
+	if m.preAction && m.semantic != SemanticGateConsultation {
+		return runtimeError(fmt.Sprintf("lifecycle event %q marks a non-gate as pre-action", m.nativeName), "only gate consultation can refuse a pending action", where, "no response capability can be trusted", "remove the pre-action mark from the observation or human-response row", nil)
+	}
+	if m.askEvidence.IsPresent() && (!m.derivedResponse().AllowsDeny() || strings.TrimSpace(m.askEvidence.Source) != m.askEvidence.Source) {
+		return runtimeError(fmt.Sprintf("lifecycle event %q has unsupported or padded ask evidence", m.nativeName), "ask needs an evidenced pre-action denial channel and an exact citation", where, "no ask capability can be emitted", "supply both channel citations on a pre-action gate or remove the ask citation", nil)
+	}
 	identityKinds := make(map[NativeIdentityKind]struct{}, len(m.identities))
 	hasRequiredRequestIdentity := false
 	for _, identity := range m.identities {
@@ -719,6 +787,7 @@ func newLifecycleContract[E comparable](
 		if err := mapping.validate(where); err != nil {
 			return LifecycleContract[E]{}, err
 		}
+		mapping.response = mapping.derivedResponse()
 		if _, duplicate := seenNativeNames[mapping.nativeName]; duplicate {
 			return LifecycleContract[E]{}, runtimeError(
 				fmt.Sprintf("lifecycle contract %q maps native event name %q twice", base.ID(), mapping.nativeName),

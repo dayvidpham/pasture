@@ -18,12 +18,18 @@ import (
 
 type recoveryCountJournal struct {
 	provenance.Journal
-	starts                                                                 provenance.AssignmentStartQueryAPI
-	assignmentCalls, materialCalls, evidenceCalls, lookupCalls, auditCalls int
-	boundaries                                                             []provenance.JournalID
-	beforeAudit                                                            func() error
-	afterAssignmentQuery                                                   func(provenance.AssignmentStartPage) error
-	beforeLookup                                                           func(provenance.OperationID) error
+	starts provenance.AssignmentStartQueryAPI
+
+	assignmentCalls int
+	materialCalls   int
+	evidenceCalls   int
+	lookupCalls     int
+	auditCalls      int
+	boundaries      []provenance.JournalID
+
+	beforeAudit          func() error
+	afterAssignmentQuery func(provenance.AssignmentStartPage) error
+	beforeLookup         func(provenance.OperationID) error
 }
 
 func TestGateRecoveryReachabilityExcludesOperatorAndPrivateJournalReads(t *testing.T) {
@@ -45,9 +51,13 @@ func TestGateRecoveryReachabilityExcludesOperatorAndPrivateJournalReads(t *testi
 		}
 	}
 	forbidden := map[string]bool{
-		"LookupCommitted": true, "VerifyIntegrity": true, "ReplayProjections": true,
-		"TaskAttributions": true, "commandResultFromCommitted": true,
-		"RebuildAssignmentIndex": true, "authenticateOperatorTransfers": true,
+		"LookupCommitted":               true,
+		"VerifyIntegrity":               true,
+		"ReplayProjections":             true,
+		"TaskAttributions":              true,
+		"commandResultFromCommitted":    true,
+		"RebuildAssignmentIndex":        true,
+		"authenticateOperatorTransfers": true,
 	}
 	privateSQL := regexp.MustCompile(`(?i)\b(?:from|join|into|update)\s+(?:journal(?:\b|_)|tasks\b|edges\b|agents\b)`)
 	visited := map[string]bool{}
@@ -103,6 +113,7 @@ func (j *recoveryCountJournal) QueryAssignmentStarts(q provenance.AssignmentStar
 	}
 	return page, err
 }
+
 func (j *recoveryCountJournal) QueryTaskEvents(q provenance.JournalQueryV1) (provenance.JournalTaskEventPageV1, error) {
 	j.materialCalls++
 	if len(q.TaskIDs) == 0 {
@@ -110,9 +121,11 @@ func (j *recoveryCountJournal) QueryTaskEvents(q provenance.JournalQueryV1) (pro
 	}
 	return j.Journal.QueryTaskEvents(q)
 }
+
 func (j *recoveryCountJournal) Facts() provenance.FactQueryAPI {
 	return recoveryCountFacts{j.Journal.Facts(), j}
 }
+
 func (j *recoveryCountJournal) LookupCommitted(op provenance.OperationID) (provenance.CommittedResult, error) {
 	j.lookupCalls++
 	if j.beforeLookup != nil {
@@ -134,8 +147,11 @@ func TestOperatorTransferReceiptAfterSnapshotIsNotPublished(t *testing.T) {
 	_, err = store.auditDB.Exec(`CREATE TRIGGER hold_snapshot_transfer BEFORE INSERT ON pasture_actor_assignment WHEN NEW.assignment_id='snapshot-after' BEGIN SELECT RAISE(ABORT,'held index'); END`)
 	require.NoError(t, err)
 	request := protocol.TransferTaskAssignmentRequest{
-		TaskID: fixture.task, Slot: provenance.SlotOwnerResponsibility,
-		NextAssignmentID: "snapshot-after", ActorID: fixture.actorA, NextOccupant: fixture.actorB,
+		TaskID:           fixture.task,
+		Slot:             provenance.SlotOwnerResponsibility,
+		NextAssignmentID: "snapshot-after",
+		ActorID:          fixture.actorA,
+		NextOccupant:     fixture.actorB,
 	}
 	_, err = store.TransferTaskAssignment(t.Context(), request)
 	require.Error(t, err)
@@ -149,25 +165,34 @@ func TestOperatorTransferReceiptAfterSnapshotIsNotPublished(t *testing.T) {
 	require.Len(t, starts.Rows, 1)
 	start := starts.Rows[0]
 	material, err := MapMaterialEvent(AssignmentStartedEvent{
-		Task: start.TaskID, Assignment: start.AssignmentID, Role: RoleOwnerResponsibility, Occupant: start.Occupant,
+		Task:       start.TaskID,
+		Assignment: start.AssignmentID,
+		Role:       RoleOwnerResponsibility,
+		Occupant:   start.Occupant,
 	})
 	require.NoError(t, err)
 	material.Payload, err = canonicalJSON(assignmentStartPayload{
-		Assignment: string(start.AssignmentID), Role: RoleOwnerResponsibility.String(),
-		Occupant: start.Occupant.String(), AuthorityJournalID: int64(start.AuthorityJournalID),
+		Assignment:         string(start.AssignmentID),
+		Role:               RoleOwnerResponsibility.String(),
+		Occupant:           start.Occupant.String(),
+		AuthorityJournalID: int64(start.AuthorityJournalID),
 	})
 	require.NoError(t, err)
 	_, err = store.Journal().Apply(provenance.OperationInput{
-		OperationID: "uncertified-transfer-material", ActorID: start.Occupant,
-		AuthorityJournalID: &start.AuthorityJournalID, CommandDigest: []byte("uncertified"),
-		Effects: []provenance.Effect{material},
+		OperationID:        "uncertified-transfer-material",
+		ActorID:            start.Occupant,
+		AuthorityJournalID: &start.AuthorityJournalID,
+		CommandDigest:      []byte("uncertified"),
+		Effects:            []provenance.Effect{material},
 	})
 	require.NoError(t, err)
 	scan, err := beginAssignmentRecoveryScan(t.Context(), store.auditDB, store.Journal(), 64)
 	require.NoError(t, err)
 	facts, err := store.Journal().QueryTaskEvents(provenance.JournalQueryV1{
-		OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{fixture.task},
-		EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()}, Limit: 64,
+		OrderBy:              provenance.OrderByJournalID,
+		TaskIDs:              []provenance.TaskID{fixture.task},
+		EventKinds:           []provenance.EventKind{FamilyAssignmentStarted.EventKind()},
+		Limit:                64,
 		SnapshotMaxJournalID: scan.State.Snapshot,
 	})
 	require.NoError(t, err)
@@ -185,6 +210,7 @@ func TestOperatorTransferReceiptAfterSnapshotIsNotPublished(t *testing.T) {
 		store.prov = wrapped
 		return err
 	}
+
 	err = authenticateOperatorTransfers(t.Context(), store, &scan.State, starts.Rows, facts.Events)
 	require.ErrorContains(t, err, "operator transfer anchor")
 	receipt, err := original.Journal().LookupCommitted(operation)
@@ -194,6 +220,7 @@ func TestOperatorTransferReceiptAfterSnapshotIsNotPublished(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, cached)
 }
+
 func (j *recoveryCountJournal) VerifyIntegrity() error {
 	j.auditCalls++
 	if j.beforeAudit != nil {
@@ -203,6 +230,7 @@ func (j *recoveryCountJournal) VerifyIntegrity() error {
 	}
 	return j.Journal.VerifyIntegrity()
 }
+
 func (j *recoveryCountJournal) AuthorityGovernsTaskAt(auth provenance.JournalID, task provenance.TaskID, before provenance.JournalID) (bool, error) {
 	j.boundaries = append(j.boundaries, before)
 	return j.Journal.AuthorityGovernsTaskAt(auth, task, before)
@@ -226,11 +254,17 @@ type recoveryCountTracker struct {
 	journal provenance.Journal
 }
 
-func (t recoveryCountTracker) Journal() provenance.Journal { return t.journal }
+func (t recoveryCountTracker) Journal() provenance.Journal {
+	return t.journal
+}
+
 func countRecoveryJournal(t *testing.T, store *trackerImpl) *recoveryCountJournal {
 	t.Helper()
 	old := store.prov
-	j := &recoveryCountJournal{Journal: old.Journal(), starts: old.Journal().(provenance.AssignmentStartQueryAPI)}
+	j := &recoveryCountJournal{
+		Journal: old.Journal(),
+		starts:  old.Journal().(provenance.AssignmentStartQueryAPI),
+	}
 	store.prov = recoveryCountTracker{old, j}
 	t.Cleanup(func() { store.prov = old })
 	return j
@@ -268,12 +302,14 @@ func TestGateRecoverySkipsEmptyFiltersAndAggregatesQueries(t *testing.T) {
 	store := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
 	defer store.Close()
 	j := countRecoveryJournal(t, store)
+
 	prepared, err := store.prepareAssignmentCatchUp(t.Context(), 0, false)
 	require.NoError(t, err)
 	require.Equal(t, 1, j.assignmentCalls)
 	require.Zero(t, j.materialCalls)
 	require.Zero(t, j.evidenceCalls)
 	require.NoError(t, store.persistAssignmentCatchUp(t.Context(), prepared))
+
 	store.prov = store.prov.(recoveryCountTracker).Tracker
 	actor := feasibilityActor(t, store, "aggregate")
 	for i := 0; i < 3; i++ {
@@ -287,6 +323,7 @@ func TestGateRecoverySkipsEmptyFiltersAndAggregatesQueries(t *testing.T) {
 			provenance.OperationID(fmt.Sprintf("start-%d", i)),
 		)
 	}
+
 	j = countRecoveryJournal(t, store)
 	prepared, err = store.prepareAssignmentCatchUp(t.Context(), 0, false)
 	require.NoError(t, err)
@@ -294,6 +331,7 @@ func TestGateRecoverySkipsEmptyFiltersAndAggregatesQueries(t *testing.T) {
 	require.Equal(t, 1, j.materialCalls)
 	require.Zero(t, j.evidenceCalls, "same-Apply starts have no applicable supplement population")
 	require.Len(t, prepared.Page.Rows, 3)
+
 	for _, table := range []string{
 		"pasture_assignment_recovery_scan",
 		"pasture_assignment_recovery_cache",
@@ -434,7 +472,12 @@ func TestGateRecoverySameApplyDistinguishesProducerAndAssignee(t *testing.T) {
 		if wrongOccupant {
 			materialOccupant = producer
 		}
-		event, err := MapMaterialEvent(AssignmentStartedEvent{Task: task, Assignment: "assigned-b", Role: RoleOwnerResponsibility, Occupant: materialOccupant})
+		event, err := MapMaterialEvent(AssignmentStartedEvent{
+			Task:       task,
+			Assignment: "assigned-b",
+			Role:       RoleOwnerResponsibility,
+			Occupant:   materialOccupant,
+		})
 		require.NoError(t, err)
 		effects := []provenance.Effect{
 			{
@@ -467,6 +510,7 @@ func TestGateRecoverySameApplyDistinguishesProducerAndAssignee(t *testing.T) {
 			require.NoError(t, err)
 		}
 		require.NoError(t, store.Journal().VerifyIntegrity())
+
 		prepared, err := store.prepareAssignmentCatchUp(t.Context(), 0, false)
 		if wrongProducer || wrongOccupant {
 			require.Error(t, err)
@@ -477,9 +521,15 @@ func TestGateRecoverySameApplyDistinguishesProducerAndAssignee(t *testing.T) {
 		require.Equal(t, occupant, prepared.Page.Rows[0].Actor)
 		require.NoError(t, store.persistAssignmentCatchUp(t.Context(), prepared))
 	}
-	t.Run("producer-A-assignee-B", func(t *testing.T) { run(t, false, false) })
-	t.Run("wrong-producer", func(t *testing.T) { run(t, true, false) })
-	t.Run("wrong-occupant", func(t *testing.T) { run(t, false, true) })
+	t.Run("producer-A-assignee-B", func(t *testing.T) {
+		run(t, false, false)
+	})
+	t.Run("wrong-producer", func(t *testing.T) {
+		run(t, true, false)
+	})
+	t.Run("wrong-occupant", func(t *testing.T) {
+		run(t, false, true)
+	})
 }
 
 func TestGateRecoveryOverflowIsBoundedAndOperatorSeesLaterDuplicates(t *testing.T) {
@@ -521,7 +571,12 @@ func TestGateRecoveryOverflowIsBoundedAndOperatorSeesLaterDuplicates(t *testing.
 	_, authority, found, err := readSystemIdentity(store.auditDB)
 	require.NoError(t, err)
 	require.True(t, found)
-	duplicate, err := MapMaterialEvent(AssignmentStartedEvent{Task: task, Assignment: "overflow-0", Role: RoleOwnerResponsibility, Occupant: actor})
+	duplicate, err := MapMaterialEvent(AssignmentStartedEvent{
+		Task:       task,
+		Assignment: "overflow-0",
+		Role:       RoleOwnerResponsibility,
+		Occupant:   actor,
+	})
 	require.NoError(t, err)
 	_, err = store.Journal().Apply(provenance.OperationInput{
 		OperationID:        "late-duplicate",
