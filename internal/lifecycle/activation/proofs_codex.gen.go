@@ -5,24 +5,64 @@ package activation
 
 // Codex capture proofs, ordinals 100-199.
 const (
-	CaptureProofCodexSessionStart CaptureProof = 100
-	CaptureProofCodexPreToolUse   CaptureProof = 101
+	CaptureProofCodexSessionStart      CaptureProof = 100
+	CaptureProofCodexPreToolUse        CaptureProof = 101
+	CaptureProofCodexUserPromptSubmit  CaptureProof = 102
+	CaptureProofCodexPermissionRequest CaptureProof = 103
+	CaptureProofCodexPostToolUse       CaptureProof = 104
+	CaptureProofCodexPreCompact        CaptureProof = 105
+	CaptureProofCodexPostCompact       CaptureProof = 106
+	CaptureProofCodexSubagentStart     CaptureProof = 107
+	CaptureProofCodexSubagentStop      CaptureProof = 108
+	CaptureProofCodexStop              CaptureProof = 109
+	CaptureProofCodexSessionEnd        CaptureProof = 110
+	CaptureProofCodexInterrupt         CaptureProof = 111
 )
 
 // codexGeneratedCaptureProofs lists the generated capture proof arms of codex_targets.go by name, in ordinal order.
 var codexGeneratedCaptureProofs = []namedCaptureProof{
 	{name: "CodexSessionStart", proof: CaptureProofCodexSessionStart},
 	{name: "CodexPreToolUse", proof: CaptureProofCodexPreToolUse},
+	{name: "CodexUserPromptSubmit", proof: CaptureProofCodexUserPromptSubmit},
+	{name: "CodexPermissionRequest", proof: CaptureProofCodexPermissionRequest},
+	{name: "CodexPostToolUse", proof: CaptureProofCodexPostToolUse},
+	{name: "CodexPreCompact", proof: CaptureProofCodexPreCompact},
+	{name: "CodexPostCompact", proof: CaptureProofCodexPostCompact},
+	{name: "CodexSubagentStart", proof: CaptureProofCodexSubagentStart},
+	{name: "CodexSubagentStop", proof: CaptureProofCodexSubagentStop},
+	{name: "CodexStop", proof: CaptureProofCodexStop},
+	{name: "CodexSessionEnd", proof: CaptureProofCodexSessionEnd},
+	{name: "CodexInterrupt", proof: CaptureProofCodexInterrupt},
 }
 
 // Codex production proofs, ordinals 100-199.
 const (
-	ProductionProofCodexSessionStart ProductionProof = 100
-	ProductionProofCodexPreToolUse   ProductionProof = 101
+	ProductionProofCodexSessionStart      ProductionProof = 100
+	ProductionProofCodexPreToolUse        ProductionProof = 101
+	ProductionProofCodexUserPromptSubmit  ProductionProof = 102
+	ProductionProofCodexPermissionRequest ProductionProof = 103
+	ProductionProofCodexPostToolUse       ProductionProof = 104
+	ProductionProofCodexPreCompact        ProductionProof = 105
+	ProductionProofCodexPostCompact       ProductionProof = 106
+	ProductionProofCodexSubagentStart     ProductionProof = 107
+	ProductionProofCodexSubagentStop      ProductionProof = 108
+	ProductionProofCodexStop              ProductionProof = 109
+	ProductionProofCodexSessionEnd        ProductionProof = 110
+	ProductionProofCodexInterrupt         ProductionProof = 111
 )
 
 // codexGeneratedProductionProofs lists the generated production proof arms of codex_targets.go by name, in ordinal order.
 var codexGeneratedProductionProofs = []namedProductionProof{
 	{name: "CodexSessionStart", proof: ProductionProofCodexSessionStart},
 	{name: "CodexPreToolUse", proof: ProductionProofCodexPreToolUse},
+	{name: "CodexUserPromptSubmit", proof: ProductionProofCodexUserPromptSubmit},
+	{name: "CodexPermissionRequest", proof: ProductionProofCodexPermissionRequest},
+	{name: "CodexPostToolUse", proof: ProductionProofCodexPostToolUse},
+	{name: "CodexPreCompact", proof: ProductionProofCodexPreCompact},
+	{name: "CodexPostCompact", proof: ProductionProofCodexPostCompact},
+	{name: "CodexSubagentStart", proof: ProductionProofCodexSubagentStart},
+	{name: "CodexSubagentStop", proof: ProductionProofCodexSubagentStop},
+	{name: "CodexStop", proof: ProductionProofCodexStop},
+	{name: "CodexSessionEnd", proof: ProductionProofCodexSessionEnd},
+	{name: "CodexInterrupt", proof: ProductionProofCodexInterrupt},
 }

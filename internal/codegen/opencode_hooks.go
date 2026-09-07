@@ -118,6 +118,61 @@ func GenerateOpenCodeHooksModule() (string, error) {
 export const PASTURE_NATIVE_TOOLS = Object.freeze([%s]);
 export const PASTURE_RUNTIME_CONTRACT = %q;
 const METADATA = %s;
+type LifecycleResponse =
+  | { decision: "proceed" }
+  | { decision: "deny"; reason: string };
+
+const CHILD_WAIT_MS = 8000;
+const CONFIGURATION_ADVICE = "; verify PASTURE_BIN and the generated OpenCode %s configuration";
+
+async function forwardDiagnostic(stderr: string, event: string): Promise<void> {
+  const sink = process.stderr;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error | null) => {
+        if (settled) return;
+        settled = true;
+        // Writable calls its write callback BEFORE emitting the error event.
+        // Keep the listener through that turn, then remove both listeners.
+        setImmediate(() => {
+          sink.off("error", onError);
+          sink.off("close", onClose);
+          if (error) reject(error);
+          else resolve();
+        });
+      };
+      const onError = (error: Error) => finish(error);
+      const onClose = () => finish(new Error("standard error closed before the diagnostic was written"));
+      sink.on("error", onError);
+      sink.on("close", onClose);
+      if (sink.destroyed || sink.closed || sink.writableEnded) {
+        finish(new Error("standard error is not writable"));
+        return;
+      }
+      try {
+        // One write, no further chunks while backpressured. The callback means
+        // the entire chunk was handled, even when write() returned false.
+        sink.write(stderr, "utf8", finish);
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  } catch (error) {
+    throw new Error("pasture hook lifecycle diagnostic forwarding for " + event + " failed: " + error + "; restore the OpenCode standard-error sink and retry" + CONFIGURATION_ADVICE);
+  }
+}
+
+async function drain(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+  const decoder = new TextDecoder();
+  let text = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
 async function invokeLifecycle(command, event, value) {
   const binary = process.env.%s ?? "pasture";
   const child = Bun.spawn({
@@ -126,32 +181,49 @@ async function invokeLifecycle(command, event, value) {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + "; verify PASTURE_BIN and the generated OpenCode %s configuration");
-  // FORWARD THE CHILD'S DIAGNOSTIC, VERBATIM, ONTO THIS PROCESS'S STANDARD
-  // ERROR. fd 2 is PIPED and not inherited, so anything pasture writes there
-  // reaches no stream at all unless this function puts it on one. The
-  // non-zero-exit throw above already surfaces it; on exit 0 it was read into a
-  // local and dropped, which is every fail-open fault and every empty-body
-  // belt. An operator told to read the pasture diagnostic on standard error
-  // found nothing there, because this callback had already swallowed it.
-  //
-  // IT GOES TO Bun.stderr AND NOT THROUGH console.error, on purpose. These
-  // bytes are PASTURE'S OWN operator text, not a message from this plugin:
-  // writing them verbatim keeps the diagnostic exactly as the binary composed
-  // it, and keeps this plugin's own reporting — the belt line below, and the
-  // observation-failure line — countable as the plugin's, which is what the
-  // generated-plugin contract proof reads. A successful evaluation writes
-  // nothing here, so this is silent in the ordinary case.
-  if (stderr.trim() !== "") await Bun.write(Bun.stderr, stderr.endsWith("\n") ? stderr : stderr + "\n");
+  const stdoutReader = child.stdout.getReader();
+  const stderrReader = child.stderr.getReader();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  let result: [string, string, number];
+  try {
+    // This outer bound includes BOTH pipe drains and exit. It sits above the
+    // binary's 5s cancellation budget; it is not a measured universal host limit.
+    // Killing the process can interrupt settlement after cancellation. This
+    // outer bound cannot promise delivery of a committed response afterward.
+    result = await Promise.race([
+      Promise.all([drain(stdoutReader), drain(stderrReader), child.exited]),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGKILL");
+          reject(new Error("timed out after " + CHILD_WAIT_MS + " ms"));
+        }, CHILD_WAIT_MS);
+      }),
+    ]);
+  } catch (error) {
+    if (!timedOut && child.exitCode === null) child.kill("SIGKILL");
+    // Cancel pending reads as well: inherited pipes can remain open even after
+    // the direct child exits. Always wait for the direct child to be reaped.
+    await Promise.allSettled([stdoutReader.cancel(), stderrReader.cancel(), child.exited]);
+    throw new Error("pasture hook lifecycle for " + event + " " + (error instanceof Error ? error.message : String(error)) + CONFIGURATION_ADVICE);
+  } finally {
+    clearTimeout(timer);
+    stdoutReader.releaseLock();
+    stderrReader.releaseLock();
+  }
+  const [stdout, stderr, exitCode] = result;
+  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + CONFIGURATION_ADVICE);
+  // fd 2 is piped, not inherited. Preserve the child's diagnostic and the
+  // existing terminal-newline policy without console.error decoration.
+  // Bun.write(Bun.stderr, ...) stalled after a partial write in the generated
+  // plugin's spawned-child/pipe context under Bun 1.3.13. Writable completion
+  // is exercised in that same context; Bun's internal cause is not established.
+  if (stderr.trim() !== "") await forwardDiagnostic(stderr.endsWith("\n") ? stderr : stderr + "\n", event);
   return stdout;
 }
 
-function acceptProceed(stdout, event) {
+function parseResponse(stdout: string, event: string): LifecycleResponse | undefined {
   // An EMPTY body at exit 0 means pasture could not evaluate the event and let
   // this host continue. It is not a decision and it is not a fault of this
   // callback, so the callback continues and reports on the console. This belt
@@ -176,12 +248,24 @@ function acceptProceed(stdout, event) {
     console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. Read the pasture diagnostic on standard error first: this plugin forwards it there, and pasture reports every such fault there, including the case where it could not write a durable record. A line may also have been appended to lifecycle-faults.jsonl beside the pasture database, but a fault whose record could not be placed or written leaves none, and the diagnostic then quotes the path it tried.");
     return;
   }
-  let response;
-  try { response = JSON.parse(stdout); }
-  catch (error) { throw new Error("pasture hook lifecycle response is not JSON: " + error); }
-  if (Object.keys(response).length !== 1 || response.decision !== "proceed") {
-    throw new Error('pasture hook lifecycle response must be exactly {"decision":"proceed"}');
+  let response: unknown;
+  try {
+    response = JSON.parse(stdout);
+  } catch (error) {
+    throw new Error("pasture hook lifecycle response is not JSON for " + event + ": " + error + CONFIGURATION_ADVICE);
   }
+  if (response !== null && typeof response === "object" && !Array.isArray(response)) {
+    const record = response as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (keys.length === 1 && record.decision === "proceed") {
+      return { decision: "proceed" };
+    }
+    if (keys.length === 2 && record.decision === "deny" &&
+        typeof record.reason === "string" && record.reason.length > 0) {
+      return { decision: "deny", reason: record.reason };
+    }
+  }
+  throw new Error('pasture hook lifecycle response must be exactly {"decision":"proceed"} or {"decision":"deny","reason":<nonempty string>} for ' + event + CONFIGURATION_ADVICE);
 }
 
 export async function sessionCreated(callback) {
@@ -196,7 +280,8 @@ export async function sessionCreated(callback) {
 export async function toolExecuteBefore(input, output) {
   const args = output.args;
   const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", %q], "tool.execute.before", { input, output: { args } });
-  acceptProceed(stdout, "tool.execute.before");
+  const response = parseResponse(stdout, "tool.execute.before");
+  if (response?.decision === "deny") throw new Error(response.reason);
   // Proceed is a decision, not a mutation. Preserve the host-owned args value.
   output.args = args;
 }
@@ -225,8 +310,8 @@ export default { id: "pasture-lifecycle", server: PastureLifecycle };
 		allowList,
 		metadata.Contract,
 		string(metadataJSON),
-		adapterBinaryEnv,
 		openCodeHostVersion(),
+		adapterBinaryEnv,
 		openCodeHostVersion(),
 		openCodeHostVersion(),
 	), nil

@@ -140,9 +140,10 @@ been retired with the Temporal daemon role.
 ### Timeout tiers (`internal/timeouts`)
 
 Every SQLite busy timeout, and the four deadlines above it, come from one
-immutable `timeouts.Profile`. A SQLite lock wait must end before either caller
-window can expire; both of those must end before one hook invocation runs out of
-time; and that must end before the caller stops waiting for the whole workflow.
+immutable `timeouts.Profile`. Their configured budgets are ordered: SQLite
+lock acquisition sits inside the caller budgets, which sit inside the hook
+cancellation budget and the outer workflow budget. These are cancellation
+budgets, not an absolute response-time guarantee after receipt commit entry.
 `Ingress` and `StartSlice` are siblings: neither is inside the other, and the
 constructor does not order them against each other. It refuses any profile that
 inverts the rest:
@@ -152,7 +153,7 @@ inverts the rest:
 | innermost | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
 | caller window | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
 | caller window | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
-| host window | `HookInvocation` | **5 s** | how long one whole lifecycle hook invocation may take before it reports a fault to its host |
+| host window | `HookInvocation` | **5 s** | when the lifecycle hook requests cancellation; an entered receipt commit waits for settlement |
 | outermost | `WorkflowResult` | **30 s** | how long a caller waits for a whole workflow to report a result |
 
 The other two profiles keep the same ordering with different budgets:
@@ -164,26 +165,36 @@ is tight on purpose so tests can prove deadline-breach behaviour quickly.
 `HookInvocation` is the budget the HOST pays for. A host freezes while it waits
 for a lifecycle hook, so the tier sits below the smallest host budget this tree
 has evidence for, with headroom for process start: Claude Code allows a hook
-10 s (`hooks/hooks.json`), and the OpenCode plugin awaits the child process with
-no timeout of its own; this tree carries no measurement of the Codex hook
-budget, so the tier is sized against Claude's. The hook enforces this deadline
-around its own work rather than only handing a context down, because the retry
-ceilings below are longer than the smallest host budget.
+10 s (`hooks/hooks.json`). The generated OpenCode plugin separately bounds child
+exit and both pipe drains at 8 s; that is a plugin limit, not a measured native
+host budget. This tree carries no measurement of the Codex hook budget, so the
+tier is sized against Claude's. The hook requests cancellation at this deadline
+and uses the settlement rule below when receipt append has already entered.
 
-The tier bounds the WORK, not the whole process. After the deadline fires, three
-things still run outside it: mapping the fault, appending one line to the
-lifecycle fault record, and writing the two output streams. That is a fixed
-number of local syscalls with no retry and no lock, so on a healthy filesystem
-the guarantee holds in practice. If the fault record ever grows a retry or a
-lock, it moves inside the bound.
+Before receipt commit entry, expiry can abandon the work and report a fault.
+That choice atomically prevents the abandoned invocation from entering its
+receipt append later. Once the commit fence is entered, expiry cancels the
+context but the command WAITS FOR SETTLEMENT: the actual Apply result and
+publication of the complete Outcome. SQLite COMMIT can succeed before Apply
+returns, so an after-return flag alone cannot decide whether to fail open.
+The configured deadline is NOT an absolute response-time cap in this phase;
+the extension is not guaranteed brief. A committed Deny must never become a
+fail-open Continue merely because the deadline fired. A failed append remains
+a fault, not a policy denial.
+
+Fault reporting and stream writes also run after cancellation. External host
+or plugin process-kill limits are separate: the in-process fence cannot promise
+delivery after the process is terminated. The fence does not lengthen a work
+context or retry an append; it waits for the existing append to settle.
 
 The context does NOT reach the code that waits. `OpenTaskTracker` takes no
 context and `audit.Migrate` has none either, so the retry loop below opens with
 its own background context and runs to its own ceiling. The loops themselves do
 honour a context; they are simply never given one. The goroutine and select at
-the hook boundary is therefore the ONLY thing that bounds a lifecycle hook
-invocation today. Threading a context through the opener is tracked separately,
-and until it lands nothing may claim the deadline bounds the retry loop.
+the hook boundary can abandon this pre-fence work. Once receipt commit is in
+flight it instead waits for settlement as described above. Threading a context
+through the opener is tracked separately; the deadline does not bound that
+opener's retry loop.
 
 Two longer retry ceilings sit **above** the profile and are not part of it.
 Both bound a retry loop, not a single wait, and both are 30 s:
@@ -306,7 +317,7 @@ file to clear it. Retention and reclaim are deferred, and this file is one of
 the surfaces that work inherits.
 
 A second unreclaimed surface comes from the same failure class. A lifecycle
-invocation abandoned at its deadline can leave a committed payload blob with no
+invocation abandoned before commit entry, or whose append fails, can leave a committed payload blob with no
 occurrence — one orphan per abandoned invocation, holding that invocation's raw
 host payload, bounded by the 1 MiB ingress payload cap. The write order is
 deliberate: an orphan blob is reclaimable, while a journal row naming an absent

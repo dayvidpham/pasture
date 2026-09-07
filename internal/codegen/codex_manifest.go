@@ -150,21 +150,10 @@ func codexRunnerRelPath(event string) string {
 	return codexHooksRoot + "/events/" + event + ".sh"
 }
 
-// codexAuthenticMatchers pins the two authentically-proven, activation-bound
-// Codex events to the EXACT matcher values recorded by the irreplaceable
-// authentic capture configuration. Matcher input-selection semantics carry no
-// in-tree contract backing (the host contract documents identities/semantics and
-// nativeresponse documents only OUTPUT continuation), and Codex usage is
-// exhausted, so these proven values can never be re-verified or regained. If a
-// non-proven value ("") were shipped for these two events and the recorded Codex version selects
-// differently at runtime, S5/Wave-3 activation would silently fail to fire with
-// no evidence left to diagnose. These are exactly the two events M3 activates,
-// so they must carry the proven matcher, not the inherited empty convention.
-//
-// Provenance: authentic Codex capture configuration recorded 2026-08-03 —
-// SessionStart used "startup", PreToolUse used "*". Any deviation from these
-// values must be justified against an in-tree contract fact (none currently
-// exists).
+// codexAuthenticMatchers preserves the explicit matcher selections in the
+// captured configuration. The remaining empty/omitted matcher values below
+// were exercised by the accepted capture kit; see the Capture section in
+// internal/lifecycle/ingress/codex/testdata/fixtures/CLEARANCE.md.
 var codexAuthenticMatchers = map[string]string{
 	"SessionStart": "startup",
 	"PreToolUse":   "*",
@@ -185,10 +174,8 @@ func renderCodexHooksConfigWithRunner(eventNames []string, runner func(string) s
 		} else {
 			switch name {
 			case "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop":
-				// Non-authentic events, never activated in M3: no matcher
-				// evidence exists, so retain the inherited empty-matcher
-				// convention rather than invent a value. Stop and
-				// UserPromptSubmit omit the matcher entirely.
+				// Preserve the match-all spelling used by the capture kit.
+				// Stop, UserPromptSubmit, SessionEnd and Interrupt omit it.
 				value := ""
 				matcher = &value
 			}
@@ -327,8 +314,7 @@ func codexEnabledEventNamesFrom(manifest registration.Manifest, states []activat
 // written to .codex/pasture-codex-activation.json. It is emitted
 // UNCONDITIONALLY (Claude precedent, emitClaudeHooks): every generated Codex
 // event appears exactly once, carrying either its typed withholding reason or —
-// for the two authentically-proven, activation-bound events (SessionStart,
-// PreToolUse) — the event-bound capture and production proofs. The withheld
+// for enabled events — the event-bound capture and production proofs. The withheld
 // dispositions are the audit payload, not a side effect of enablement.
 //
 // The report derives solely from the pinned Codex registration manifest
@@ -356,6 +342,12 @@ func renderCodexActivationReport() (string, error) {
 	report, err := buildActivationSupportReport("codegen.renderCodexActivationReport", manifest, states)
 	if err != nil {
 		return "", err
+	}
+	for i := range report.Events {
+		if report.Events[i].Event == "PermissionRequest" {
+			report.Events[i].Condition = "Emitted when the session uses Ask for approval; the captured account default Approve for me does not emit this event."
+			report.Events[i].ConditionSource = "internal/lifecycle/ingress/codex/testdata/fixtures/CLEARANCE.md#fixtures"
+		}
 	}
 	wire, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {

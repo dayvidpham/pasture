@@ -164,12 +164,29 @@ var clearanceTransports = map[string][]string{
 	},
 	"codex": {
 		".codex/hooks.json",
-		".codex/hooks/events/SessionStart.sh",
-		".codex/hooks/events/PreToolUse.sh",
 	},
 	"opencode": {
 		".opencode/plugins/pasture-lifecycle.ts",
 	},
+}
+
+// clearanceTransportPaths includes every generated Codex runner so expanding
+// activation cannot leave a new transport outside the digest guard.
+func clearanceTransportPaths(t *testing.T, root, harness string) []string {
+	t.Helper()
+	paths := append([]string(nil), clearanceTransports[harness]...)
+	if harness != "codex" {
+		return paths
+	}
+	runners, err := filepath.Glob(filepath.Join(root, ".codex", "hooks", "events", "*.sh"))
+	require.NoError(t, err)
+	require.NotEmpty(t, runners, "Codex declares no generated runner, so the transport guard would be incomplete")
+	for _, runner := range runners {
+		relative, err := filepath.Rel(root, runner)
+		require.NoError(t, err)
+		paths = append(paths, filepath.ToSlash(relative))
+	}
+	return paths
 }
 
 // sha256Hex is the digest spelling every clearance record uses.
@@ -213,7 +230,7 @@ func TestEveryClearanceRecordQuotesTheCommittedTransportDigest(t *testing.T) {
 		t.Run(dir, func(t *testing.T) {
 			t.Parallel()
 			harness := strings.Split(dir, string(filepath.Separator))[0]
-			transports := clearanceTransports[harness]
+			transports := clearanceTransportPaths(t, root, harness)
 			require.NotEmptyf(t, transports, "harness %q declares no transport, so this guard would hold nothing for it", harness)
 
 			raw, err := os.ReadFile(filepath.Join(dir, "CLEARANCE.md"))

@@ -169,3 +169,34 @@ reader who follows the path finds the grant recorded and never a blank form.
 ## Pull request
 
 Appended by the integrator in the landing commit: the pull request URL.
+
+## Current source revision transport — 2026-09-07
+
+For this source revision, the generated `.opencode/plugins/pasture-lifecycle.ts`
+artifact has SHA-256
+`c0f4b2ab8956fcf6ae8c15bd58e1f952e939b4cd4bddeee325ca77a55c20aaf3`.
+This is not the transport used for the historical captures above.
+
+The capture-kit transport remains
+`bfd1f25bfcef8d8f3f5b6b784816a15f1a238cc42ac3d7edd2f00a7d3ea0a879`.
+The previous repository transport, recorded on September 5, remains
+`900e45e7d91bd390ea2474eebb8b82c9de755f7eb393e88bfc01791791b5ebb6`.
+The September 5 description of exactly one differing METADATA line applies
+only to that previous repository transport compared with the capture kit. It
+does not describe the transport in this source revision.
+
+The current transport adds an 8-second bound on the child process and both
+pipe drains, with termination and reaping on timeout. It also adds a closed
+Proceed/Deny response parser and asynchronous diagnostic forwarding through
+the Node-compatible writable completion API. These changes were not in the
+capture kit. Tests in `internal/codegen/opencode_target_test.go` exercise the
+generated plugin under Bun 1.3.13, including exact diagnostic bytes and a
+restoration of the earlier forwarding call that reproduces its stalled write.
+The forwarding change is a tested workaround in that context; Bun's internal
+cause remains unestablished.
+
+No fixture bytes, sidecar hashes, substitutions or user acceptance above have
+changed. The enabled callbacks remain `session.created` and
+`tool.execute.before`, and response capability remains None. This addendum
+records no new capture or host-displayed Deny acceptance. It does not extend
+the historical capture-isolation or acceptance evidence.

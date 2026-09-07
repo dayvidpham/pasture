@@ -672,8 +672,12 @@ func requireSameEvents(t *testing.T, artifact string, enabled, wired map[string]
 // not when somebody remembers to type it here.
 var enabledFloor = map[string][]string{
 	"claude-code": {"SessionStart", "SessionEnd", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch", "PreCompact", "PostCompact"},
-	"codex":       {"SessionStart", "PreToolUse"},
-	"opencode":    {"session.created", "tool.execute.before"},
+	"codex": {
+		"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest",
+		"PostToolUse", "PreCompact", "PostCompact", "SubagentStart",
+		"SubagentStop", "Stop", "SessionEnd", "Interrupt",
+	},
+	"opencode": {"session.created", "tool.execute.before"},
 }
 
 // derivedEnabledEvents reads the enabled set of every harness from the

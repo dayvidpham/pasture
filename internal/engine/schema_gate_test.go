@@ -365,6 +365,50 @@ func TestTheRealClockPauseReturnsAtCancellation(t *testing.T) {
 	}
 }
 
+func TestCancelledSchemaProbePreservesContextAndDriverCauses(t *testing.T) {
+	t.Parallel()
+	for _, failedProbe := range []int{1, 2} {
+		t.Run(fmt.Sprintf("probe-%d", failedProbe), func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			driverCause := errors.New("driver interrupted the statement")
+			calls := 0
+			probe := func(context.Context) (durableLayoutObservation, error) {
+				calls++
+				if calls > failedProbe {
+					t.Fatal("a failed probe must end the schema wait")
+				}
+				if calls < failedProbe {
+					return durableLayoutObservation{state: durableLayoutWriterHeld}, nil
+				}
+				cancel()
+				return durableLayoutObservation{}, driverCause
+			}
+			clock := schemaGateClock{
+				now:   func() time.Time { return time.Unix(0, 0) },
+				pause: func(context.Context, time.Duration) error { return nil },
+			}
+
+			err := awaitSupportedDurableSchema(ctx, engineConstructionSite, "cancelled.db", probe, timeouts.DeadlineTestProfile(), clock)
+
+			structured := requireStructuredStorageError(t, err)
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("cancelled probe lost the caller's context cause: %v", err)
+			}
+			if !errors.Is(err, driverCause) {
+				t.Errorf("cancelled probe lost the driver's diagnostic cause: %v", err)
+			}
+			if !strings.Contains(structured.What, "was cancelled") {
+				t.Errorf("cancelled probe reported the wrong failure: %s", structured.What)
+			}
+			if calls != failedProbe {
+				t.Errorf("read %d probes, want the failure at probe %d", calls, failedProbe)
+			}
+		})
+	}
+}
+
 // A cancel that lands during the REAL wait — while the real look is blocked
 // on the driver's busy window, or in a real pause — comes back promptly as the
 // cancelled sentence, never as an unreadable, damaged file. The gate is held

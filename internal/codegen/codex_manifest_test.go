@@ -201,11 +201,11 @@ func TestCodexHooksMatchersMatchAuthenticCapture(t *testing.T) {
 	requireMatcher("SessionStart", "startup")
 	requireMatcher("PreToolUse", "*")
 
-	// No non-activated event is wired at all: the transport carries only the
-	// activated set, so a withheld event owns no hooks configuration entry.
+	// The accepted capture kit exercised these empty matchers and omitted
+	// matchers. Each captured event must now be wired.
 	for _, event := range []string{"PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop", "Stop", "UserPromptSubmit"} {
-		if groups, wired := config.Hooks[event]; wired {
-			t.Errorf("withheld event %s is wired as %+v; the transport must carry only activated events", event, groups)
+		if _, wired := config.Hooks[event]; !wired {
+			t.Errorf("cleared event %s has no transport", event)
 		}
 	}
 
@@ -313,9 +313,12 @@ func TestCodexEnabledEventNamesFailsClosed(t *testing.T) {
 			alsoByKind:   true,
 		},
 		"invalid-reason": {
-			mutateStates: func(in []activation.Entry) []activation.Entry { in[1].Reason = 0; return in },
-			want:         "is invalid",
-			alsoByKind:   true,
+			mutateStates: func(in []activation.Entry) []activation.Entry {
+				in[1] = activation.Entry{Event: in[1].Event, State: activation.Withheld}
+				return in
+			},
+			want:       "is invalid",
+			alsoByKind: true,
 		},
 		"duplicate": {
 			mutateStates: func(in []activation.Entry) []activation.Entry { return append(in, in[0]) },

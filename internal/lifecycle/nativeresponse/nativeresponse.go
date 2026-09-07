@@ -142,6 +142,25 @@ func unsupported(mapping pastureruntime.LifecycleEventMapping, kind backend.Deci
 	return &UnsupportedResponseError{Event: mapping.NativeName(), Surface: mapping.Surface(), Capability: mapping.Response(), Kind: kind}
 }
 
+// NormalizeDecision runs the same mechanical capability downgrade as encoding,
+// but returns the value that must be persisted BEFORE commit. It evaluates no
+// policy or authority. The subsequent encoder must receive this same decision.
+func NormalizeDecision(mapping pastureruntime.LifecycleEventMapping, decision backend.Decision) (backend.Decision, error) {
+	response, err := backend.NewHostResponse(decision)
+	if err != nil {
+		return backend.Decision{}, err
+	}
+	kind, err := nativeDecision(mapping, response, mapping.Surface())
+	if err != nil {
+		return backend.Decision{}, err
+	}
+	reason := decision.Reason()
+	if kind == backend.DecisionProceed && decision.Kind() != backend.DecisionProceed {
+		reason = backend.ReasonUnenforcedDeny
+	}
+	return backend.NewDecision(kind, reason)
+}
+
 // nativeDecision validates the mapping and response before any bytes exist.
 // Unenforced policy refusals use the host's Proceed identity. The policy caller
 // must normalize their record to Proceed/ReasonUnenforcedDeny BEFORE commit;

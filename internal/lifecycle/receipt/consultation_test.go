@@ -11,7 +11,9 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/provenance"
+	digest "github.com/opencontainers/go-digest"
 )
 
 type jsonPort struct {
@@ -21,15 +23,20 @@ type jsonPort struct {
 }
 type nilJSONPort struct{}
 
-func (*nilJSONPort) MarshalJSON() ([]byte, error) { return []byte(`{"ok":true}`), nil }
-func (*nilJSONPort) IsValid() bool                { return true }
-func (*nilJSONPort) ConsultationLegalized()       {}
-func (*nilJSONPort) ConsultationResponse()        {}
+func (*nilJSONPort) MarshalJSON() ([]byte, error)  { return []byte(`{"ok":true}`), nil }
+func (*nilJSONPort) IsValid() bool                 { return true }
+func (*nilJSONPort) ConsultationLegalized()        {}
+func (*nilJSONPort) ConsultationResponse()         {}
+func (*nilJSONPort) Value() (waist.Decision, bool) { return waist.Decision{}, false }
 
 func (p jsonPort) MarshalJSON() ([]byte, error) { return append([]byte(nil), p.raw...), p.err }
 func (p jsonPort) IsValid() bool                { return p.valid }
 func (jsonPort) ConsultationLegalized()         {}
 func (jsonPort) ConsultationResponse()          {}
+func (p jsonPort) Value() (waist.Decision, bool) {
+	decision, err := waist.NewDecision(waist.DecisionProceed, waist.ReasonLegal)
+	return decision, p.valid && err == nil
+}
 
 func TestNewConsultationCanonicalAndOwned(t *testing.T) {
 	t.Parallel()
@@ -44,7 +51,10 @@ func TestNewConsultationCanonicalAndOwned(t *testing.T) {
 		t.Fatal(err)
 	}
 	effect := record.Effect()
-	if !bytes.HasPrefix(effect.Payload, []byte(`{"legalized":{"rule":"allow"},"response":{"decision":"proceed"},"interpreted":`)) {
+	if effect.EvidenceKind != provenance.EvidenceKind("pasture.lifecycle.consultation.v2") {
+		t.Fatalf("new consultation kind=%s, want consultation.v2", effect.EvidenceKind)
+	}
+	if !bytes.HasPrefix(effect.Payload, []byte(`{"decision":{"decision":"proceed","reason":"legal"},"interpreted":`)) {
 		t.Fatalf("payload=%s", effect.Payload)
 	}
 	sum := sha256.Sum256(effect.Payload)
@@ -171,5 +181,158 @@ func TestReceiveRejectsInvalidPairMatrixBeforeWrites(t *testing.T) {
 				t.Fatalf("writes occurred calls=%v inputs=%d", calls, len(inputs))
 			}
 		})
+	}
+}
+
+func TestConsultationV2RejectsMalformedDecisionVersionAndDigest(t *testing.T) {
+	t.Parallel()
+	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "v2-reader"), mustClaudeLifecycleContract(t), metamodel.Active())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := jsonPort{raw: []byte(`{"ok":true}`), valid: true}
+	record, err := NewConsultation(interpreted, port, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeConsultation(record.Effect(), interpreted.Effect())
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, ok := decoded.Decision()
+	if !ok || decision.Kind() != waist.DecisionProceed || decision.Reason() != waist.ReasonLegal {
+		t.Fatal("current record lost its explicit evaluated decision")
+	}
+
+	for _, tc := range []struct {
+		name string
+		from string
+		to   string
+	}{
+		{name: "missing reason", from: `,"reason":"legal"`, to: ""},
+		{name: "fault as policy", from: `"legal"`, to: `"evaluation-fault"`},
+		{name: "wrong pair", from: `"proceed"`, to: `"deny"`},
+		{name: "null decision", from: `{"decision":"proceed","reason":"legal"}`, to: `null`},
+		{name: "null reason", from: `"reason":"legal"`, to: `"reason":null`},
+		{name: "duplicate reason", from: `"reason":"legal"`, to: `"reason":"legal","reason":"legal"`},
+		{name: "unknown field", from: `"reason":"legal"`, to: `"reason":"legal","unknown":true`},
+		{name: "wrong digest", from: digest.FromBytes(interpreted.Effect().Payload).String(), to: digest.FromString("different payload").String()},
+		{name: "wrong slot", from: `"result_slot":"interpreted"`, to: `"result_slot":"other"`},
+		{name: "null legalized", from: `"legalized":{"ok":true}`, to: `"legalized":null`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			effect := record.Effect()
+			changed := strings.Replace(string(effect.Payload), tc.from, tc.to, 1)
+			if changed == string(effect.Payload) {
+				t.Fatal("attack did not change its intended field")
+			}
+			effect.Payload = []byte(changed)
+			sum := sha256.Sum256(effect.Payload)
+			effect.ContentDigest = sum[:]
+
+			if _, err := DecodeConsultation(effect, interpreted.Effect()); err == nil {
+				t.Fatal("malformed v2 accepted after recomputing outer hash")
+			}
+			if _, err := CanonicalizeLifecycleEffects([]provenance.Effect{interpreted.Effect(), effect}); err == nil {
+				t.Fatal("canonicalization repaired a forged consultation")
+			}
+		})
+	}
+	for _, kind := range []provenance.EvidenceKind{consultationKindV1, "pasture.lifecycle.consultation.v3", ""} {
+		effect := record.Effect()
+		effect.EvidenceKind = kind
+		if _, err := DecodeConsultation(effect, interpreted.Effect()); err == nil {
+			t.Fatalf("v2 payload accepted under kind %q", kind)
+		}
+	}
+	effect := record.Effect()
+	effect.ContentDigest[0] ^= 1
+	if _, err := DecodeConsultation(effect, interpreted.Effect()); err == nil {
+		t.Fatal("changed outer hash accepted")
+	}
+}
+
+func TestLegacyConsultationRemainsReadableAndRebindableWithoutInventedReason(t *testing.T) {
+	t.Parallel()
+	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "legacy-reader"), mustClaudeLifecycleContract(t), metamodel.Active())
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte(`{"legalized":{"ok":true},"response":{"decision":"proceed"},"interpreted":{"result_slot":"interpreted","content_digest":"` + digest.FromBytes(interpreted.Effect().Payload).String() + `"}}`)
+	sum := sha256.Sum256(legacy)
+	effect := provenance.Effect{
+		Sort:          provenance.EffectEvidence,
+		ResultSlot:    consultationSlot,
+		EvidenceKind:  consultationKindV1,
+		ContentDigest: sum[:],
+		Payload:       legacy,
+	}
+	decoded, err := DecodeConsultation(effect, interpreted.Effect())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.Effect().Payload, legacy) || !bytes.Equal(decoded.Effect().ContentDigest, sum[:]) {
+		t.Fatal("legacy read rewrote historical bytes or digest")
+	}
+	if decoded.Effect().EvidenceKind != consultationKindV1 {
+		t.Fatal("legacy read silently changed the evidence version")
+	}
+	if _, evaluated := decoded.Decision(); evaluated {
+		t.Fatal("legacy host port manufactured a policy reason")
+	}
+	// Reproduce the old writer's producer-hash/stored-normalized-payload
+	// distinction with the real public Provenance normalizer. Do not rewrite
+	// either historical identity while reading it.
+	normalizedInput, err := provenance.Canonicalize(provenance.OperationInput{Effects: []provenance.Effect{interpreted.Effect()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldInterpreted := normalizedInput.NormalizedEffects()[0]
+	interpretedSum := sha256.Sum256(oldInterpreted.Payload)
+	oldInterpreted.ContentDigest = interpretedSum[:]
+	producer, err := rebindConsultationPayload(legacy, oldInterpreted.Payload, consultationKindV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	producerSum := sha256.Sum256(producer)
+	oldEffect := effect
+	oldEffect.Payload = producer
+	oldEffect.ContentDigest = producerSum[:]
+	normalizedRecord, err := provenance.Canonicalize(provenance.OperationInput{Effects: []provenance.Effect{oldEffect}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedLegacy := normalizedRecord.NormalizedEffects()[0]
+	if bytes.Equal(storedLegacy.Payload, producer) {
+		t.Fatal("legacy proof failed to exercise distinct producer/stored encodings")
+	}
+	oldDecoded, err := DecodeConsultation(storedLegacy, oldInterpreted)
+	if err != nil {
+		t.Fatalf("historical normalized row rejected: %v", err)
+	}
+	if !bytes.Equal(oldDecoded.Effect().Payload, storedLegacy.Payload) || !bytes.Equal(oldDecoded.Effect().ContentDigest, producerSum[:]) {
+		t.Fatal("legacy read rewrote the stored payload or producer digest")
+	}
+	if oldDecoded.Effect().EvidenceKind != consultationKindV1 {
+		t.Fatal("normalized legacy read silently upgraded its version")
+	}
+	badHash := storedLegacy
+	badHash.ContentDigest = append([]byte(nil), producerSum[:]...)
+	badHash.ContentDigest[0] ^= 1
+	if _, err := DecodeConsultation(badHash, oldInterpreted); err == nil {
+		t.Fatal("legacy compatibility ignored a corrupt producer digest")
+	}
+	canonical, err := CanonicalizeLifecycleEffects([]provenance.Effect{interpreted.Effect(), effect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical[1].EvidenceKind != consultationKindV1 {
+		t.Fatal("rebind silently upgraded the legacy version")
+	}
+	if _, err := DecodeConsultation(canonical[1], canonical[0]); err != nil {
+		t.Fatalf("legacy normalized/rebound pair is unreadable: %v", err)
+	}
+	if err := validateLifecycleExtras([]provenance.Effect{interpreted.Effect(), effect}); err == nil {
+		t.Fatal("new writer accepted historical v1 instead of requiring v2")
 	}
 }

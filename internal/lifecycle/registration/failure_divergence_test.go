@@ -607,12 +607,8 @@ func TestTheCodexArtefactsDisagreeOnExactlyTheseOtherAxes(t *testing.T) {
 		{
 			name: "the declared identities",
 			got:  counts.identityAbsent,
-			want: []string{
-				"PermissionRequest", "PostCompact", "PostToolUse", "PreCompact",
-				"Stop", "SubagentStart", "SubagentStop", "UserPromptSubmit",
-			},
-			why: "the catalogue declares an identity only from an authentic capture, and these rows have none; " +
-				"a capture is what removes a row from this list",
+			want: nil,
+			why:  "the cleared per-event captures now support the catalogue identities; a new mismatch needs its own evidence",
 		},
 	} {
 		if len(axis.got) != len(axis.want) {

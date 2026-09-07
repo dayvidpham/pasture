@@ -46,6 +46,8 @@ const OpenCodeActivationReportPath = ".opencode/pasture-opencode-activation.json
 // their empty string is a value with a meaning (see activationColumnState),
 // so a reader must be able to tell it from a missing key.
 type activationSupportEntry struct {
+	Condition          string `json:"condition,omitempty"`
+	ConditionSource    string `json:"conditionSource,omitempty"`
 	Matcher            string `json:"matcher,omitempty"`
 	Event              string `json:"event"`
 	State              string `json:"state"`

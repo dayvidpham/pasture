@@ -53,10 +53,10 @@ var (
 // consultationMembers and its nested sets are the closed member sets of the
 // consultation record a gate row derives beside its interpreted record.
 var (
-	consultationMembers            = []string{"legalized", "response", "interpreted"}
+	consultationMembers            = []string{"legalized", "decision", "interpreted"}
 	consultationInterpretedMembers = []string{"result_slot", "content_digest"}
 	consultationLegalizedMembers   = []string{"authority"}
-	consultationResponseMembers    = []string{"decision"}
+	consultationDecisionMembers    = []string{"decision", "reason"}
 )
 
 // identifierFieldName is the shape every native correlation field the hosts
@@ -179,6 +179,7 @@ func TestEveryProfileRowIsTiedToOneRegistrationRow(t *testing.T) {
 		declared := row.mapping.Identities()
 		if len(event.Identities) == 0 && len(declared) > 0 {
 			silent++
+			t.Logf("registration identity gap: %s", row.name())
 		}
 		require.LessOrEqual(t, len(event.Identities), len(declared),
 			"registration row %s declares %d identities but its profile row declares %d; a registration may not lift a field into an L2 that the profile does not declare as correlation", row.name(), len(event.Identities), len(declared))
@@ -211,9 +212,9 @@ func TestEveryProfileRowIsTiedToOneRegistrationRow(t *testing.T) {
 
 // registrationSilentOnIdentitiesRows is the number of profile rows whose
 // registration row declares no identity while the profile declares at least
-// one. They are the unproven Codex and OpenCode rows whose ingress catalogue
-// has not been completed yet.
-const registrationSilentOnIdentitiesRows = 19
+// one. The remaining gaps are OpenCode rows whose ingress catalogue has not
+// been completed; the captured Codex rows now declare their identities.
+const registrationSilentOnIdentitiesRows = 11
 
 // memberNames returns the sorted member names of one JSON object.
 func memberNames(t *testing.T, raw json.RawMessage, what string) ([]string, map[string]json.RawMessage) {
@@ -304,8 +305,11 @@ func TestEveryProfileRowDerivesOnlyTheClosedWireShape(t *testing.T) {
 			assert.ElementsMatch(t, consultationInterpretedMembers, nested, "the interpreted reference of %s carries members %v; the closed set is %v", row.name(), nested, consultationInterpretedMembers)
 			nested, _ = memberNames(t, object["legalized"], "the legalized member of "+row.name())
 			assert.ElementsMatch(t, consultationLegalizedMembers, nested, "the legalized member of %s carries members %v; the closed set is %v", row.name(), nested, consultationLegalizedMembers)
-			nested, _ = memberNames(t, object["response"], "the response member of "+row.name())
-			assert.ElementsMatch(t, consultationResponseMembers, nested, "the response member of %s carries members %v; the closed set is %v", row.name(), nested, consultationResponseMembers)
+			nested, _ = memberNames(t, object["decision"], "the decision member of "+row.name())
+			assert.ElementsMatch(t, consultationDecisionMembers, nested, "the decision member of %s carries members %v; the closed set is %v", row.name(), nested, consultationDecisionMembers)
+			var decision waist.Decision
+			require.NoError(t, json.Unmarshal(object["decision"], &decision), "the durable decision must use the single shared closed validator")
+			require.True(t, decision.IsValid())
 		})
 	}
 }

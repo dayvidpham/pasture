@@ -38,7 +38,8 @@ func TestFieldAllocationPreservesExistingIDs(t *testing.T) {
 	// FileChanged belongs to the first contract, not the final contract. Its
 	// addition must nevertheless allocate after every pre-existing field.
 	require.Equal(t, "FieldFileEvent", contracts[0].Fields[len(contracts[0].Fields)-1].Symbol)
-	require.Len(t, ids, len(baseline)+1)
+	require.Equal(t, len(baseline)+2, ids["FieldCodexAgentID"])
+	require.Len(t, ids, len(baseline)+2)
 }
 
 func renderedFieldIDs(t *testing.T, source []byte) map[string]int {

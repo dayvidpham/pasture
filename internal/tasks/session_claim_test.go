@@ -21,6 +21,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/provadapter"
@@ -111,20 +112,37 @@ func TestSessionStartStoresClaimAndKeepsSystemReceiptAuthor(t *testing.T) {
 			require.NoError(t, err)
 			ctx, cancel := context.WithTimeout(t.Context(), timeouts.TestProfile().WorkflowResult())
 			defer cancel()
-			invoke := func(id string) error {
-				_, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{DBPath: path, Harness: tc.harness, Event: tc.event, HostVersion: tc.version, Input: bytes.NewReader(raw), Clock: claimClock{}, Operations: claimOperation(id), ActorClaim: tasks.ActorClaim(claimedActor.ID.String())})
-				return err
+			invoke := func(id string) (hostexit.Outcome, error) {
+				return handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
+					DBPath:      path,
+					Harness:     tc.harness,
+					Event:       tc.event,
+					HostVersion: tc.version,
+					Input:       bytes.NewReader(raw),
+					Clock:       claimClock{},
+					Operations:  claimOperation(id),
+					ActorClaim:  tasks.ActorClaim(claimedActor.ID.String()),
+				})
 			}
-			require.NoError(t, invoke("claim.first"))
+			firstOutcome, err := invoke("claim.first")
+			require.NoError(t, err)
+			require.Equal(t, hostexit.ExitContinue, firstOutcome.Exit)
+			require.Empty(t, firstOutcome.Stderr)
 			var count int
 			var actor string
 			require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ?`, string(tc.harness)).Scan(&count, &actor))
 			require.Equal(t, 1, count, "session-start handler must store one claim")
 			require.Equal(t, claimedActor.ID.String(), actor)
 			// This second receipt is appended after the claim already exists.
-			err = invoke("claim.second")
+			secondOutcome, err := invoke("claim.second")
 			require.ErrorContains(t, err, "already has an actor claim")
 			require.ErrorIs(t, err, handlers.ErrLifecycleCommittedWithoutContinuation)
+			require.ErrorContains(t, err, "this claim failure is not a policy decision")
+			require.Equal(t, firstOutcome, secondOutcome,
+				"the duplicate remains an error without replacing the committed observation Outcome")
+			require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ?`, string(tc.harness)).Scan(&count, &actor))
+			require.Equal(t, 1, count, "duplicate refusal must not add a claim")
+			require.Equal(t, claimedActor.ID.String(), actor, "duplicate refusal must not overwrite the original actor")
 			page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1"}, Page: provenance.FactPageRequest{Limit: 10}})
 			require.NoError(t, err)
 			require.Len(t, page.Rows, 2, "both receipt operations must exist")

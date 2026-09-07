@@ -1,5 +1,69 @@
 {
   "hooks": {
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/Interrupt.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/PermissionRequest.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/PostCompact.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/PostToolUse.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/PreCompact.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "*",
@@ -13,6 +77,18 @@
         ]
       }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/SessionEnd.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup",
@@ -20,6 +96,56 @@
           {
             "type": "command",
             "command": "sh .codex/hooks/events/SessionStart.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/Stop.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/SubagentStart.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/SubagentStop.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/UserPromptSubmit.sh",
             "timeout": 600,
             "statusMessage": "Consulting Pasture lifecycle state"
           }

@@ -22,8 +22,8 @@
 // observation in the catalogue and a gate in the profile. The mutation mode
 // differs on PostToolUse, which mutates the tool OUTPUT in the profile and has
 // no output arm to be spelled with in the catalogue vocabulary. The correlation
-// identities are the widest: the profile declares on 8 rows where the catalogue
-// declares none, and 8 of those 8 are events with no authentic capture, because
+// identities agree: the profile declares on 0 rows where the catalogue
+// declares none, and 0 of those 0 are events with no authentic capture, because
 // the catalogue declares an identity only from a capture. The frontend binds
 // with the profile's row; the handler admits with the row code generation wrote
 // into internal/lifecycle/registration/codex_0_153_0.gen.go from the catalogue.

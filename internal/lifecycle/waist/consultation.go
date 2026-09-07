@@ -11,5 +11,6 @@ type ConsultationLegalized interface {
 type ConsultationResponse interface {
 	json.Marshaler
 	IsValid() bool
+	Value() (Decision, bool)
 	ConsultationResponse()
 }

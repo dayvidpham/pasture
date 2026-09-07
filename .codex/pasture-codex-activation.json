@@ -6,14 +6,15 @@
       "event": "SessionStart",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/session_start_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/SessionStart",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/SessionStart",
       "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "UserPromptSubmit",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/user_prompt_submit_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/UserPromptSubmit",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
@@ -21,70 +22,81 @@
       "event": "PreToolUse",
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/pre_tool_use_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
-      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledCodexHandlersToDurableReadBack/PreToolUse",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/PreToolUse",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
+      "condition": "Emitted when the session uses Ask for approval; the captured account default Approve for me does not emit this event.",
+      "conditionSource": "internal/lifecycle/ingress/codex/testdata/fixtures/CLEARANCE.md#fixtures",
       "event": "PermissionRequest",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/permission_request_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/PermissionRequest",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "PostToolUse",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/post_tool_use_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/PostToolUse",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "PreCompact",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/pre_compact_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/PreCompact",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "PostCompact",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/post_compact_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/PostCompact",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "SubagentStart",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/subagent_start_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/SubagentStart",
       "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "SubagentStop",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/subagent_stop_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/SubagentStop",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "Stop",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/stop_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/Stop",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "SessionEnd",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/session_end_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/SessionEnd",
       "responseCapability": "none",
       "failureEvidence": ""
     },
     {
       "event": "Interrupt",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/codex/testdata/fixtures/interrupt_0_153_0.json (Codex 0.153.0 authentic command-hook capture)",
+      "productionProof": "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/Interrupt",
       "responseCapability": "none",
       "failureEvidence": ""
     }

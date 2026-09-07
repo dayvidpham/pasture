@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
@@ -1197,8 +1199,9 @@ const preCommitStallCeiling = 30 * time.Second
 //     has not been told anything;
 //  2. the test trips the deadline, which is the signal the production select
 //     waits on, and only then;
-//  3. the outcome arrives, and the barrier is released afterwards, so the
-//     encode could not have run before the outcome was decided.
+//  3. the committed Outcome arrives, and the barrier is released afterwards.
+//     Encoding and publication already completed at settlement, so the delayed
+//     post-commit handler cannot change the host decision.
 //
 // No clock orders any step; the only clock in the function is the failure
 // ceiling below, which can only fail the proof, never pass it. A proof that
@@ -1208,14 +1211,14 @@ const preCommitStallCeiling = 30 * time.Second
 // and the proof failed with "finished without reaching the commit boundary".
 // That failure is what this shape makes impossible. The tier is the production
 // one, and it is printed and never started.
-func abandonAfterTheCommit(t *testing.T, cmd *cobra.Command) hostexit.Outcome {
+func abandonAfterTheCommit(t *testing.T, cmd *cobra.Command, decisions ...backend.Decision) hostexit.Outcome {
 	t.Helper()
 
 	barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
 	deadline := newTrippedDeadline(t)
 	outcomes := make(chan hostexit.Outcome, 1)
 	go func() {
-		outcomes <- lifecycleOutcome(cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive)
+		outcomes <- lifecycleOutcome(cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive, decisions...)
 	}()
 
 	select {
@@ -1239,53 +1242,28 @@ func abandonAfterTheCommit(t *testing.T, cmd *cobra.Command) hostexit.Outcome {
 	return outcome
 }
 
-// TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth is the honesty
-// proof for the abandonment path.
-//
-// The hook bounds its own work and abandons it at the deadline. The receipt
-// commits BEFORE the native bytes are produced, so an expiry can land AFTER the
-// commit. The hook then cannot claim the event was not evaluated, and it used to
-// claim exactly that.
-//
-// The interleaving is deterministic and owned by the test: the invocation is
-// held at the named commit-to-emit boundary, and the deadline is tripped THERE
-// by the test, so no clock orders the expiry against the commit. The shape is
-// abandonAfterTheCommit. The state is then read back through the PRODUCTION
-// read path.
-//
-// This is the FOURTH of the four states an abandoned invocation can land in — a
-// committed occurrence with no continuation to the host. The other three, and
-// the invariant that no occurrence ever names an absent blob, are proven at the
-// commit sequence itself in internal/engine/budget/abandonment_test.go.
-func TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth(t *testing.T) {
+// Once the real receipt has committed, expiry cannot replace its Deny. This
+// is the command/host half of the proof; receipt's real-journal test holds the
+// earlier COMMIT-to-Apply-return gap before publication is possible.
+func TestCommittedDenySurvivesExpiryAfterTheDurableCommit(t *testing.T) {
+	// Serial: lifecycleTestCommand sets shared command state. This supplies a
+	// validated decision input, not a fake Reader or proof of authority policy.
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.261", dbPath)
-	cmd.SetIn(bytes.NewReader(claudeFixture(t, "session_start_2_1_261.json")))
+	cmd := lifecycleTestCommand(t, "claude-code", "PreToolUse", "2.1.261", dbPath)
+	cmd.SetIn(bytes.NewReader(claudeFixture(t, "pre_tool_use_2_1_261.json")))
+	decision, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonNoActiveAssignment)
+	require.NoError(t, err)
 
-	outcome := abandonAfterTheCommit(t, cmd)
+	outcome := abandonAfterTheCommit(t, cmd, decision)
 
-	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
-		"an abandoned invocation fails open, so the host is never stopped by it")
-	assert.Empty(t, outcome.Stdout,
-		"the host received NO continuation, because the work never reached the encode")
-	assert.Contains(t, outcome.Stderr, "hook-invocation deadline",
-		"the diagnostic must name the deadline path, not any fault")
-	assert.Contains(t, outcome.Stderr, "abandoned the work",
-		"and it must say the work was abandoned, which is why the record state is unknown")
-	assert.NotContains(t, outcome.Stderr, "the hook could not evaluate event",
-		"that is the wording of the store-error path; if it appears, this test proved nothing about the deadline")
-	assert.Contains(t, outcome.Stderr, "MAY OR MAY NOT exist",
-		"the receipt IS committed here, so claiming the event was not recorded would be false")
-	assert.NotContains(t, outcome.Stderr, "no occurrence was recorded for it")
-
-	records := readFaultRecords(t, dir)
-	require.Len(t, records, 1)
-	assert.Equal(t, "record-unknown", records[0]["faultStage"],
-		"the durable record must agree with the host-facing text about what is known")
-	assert.Equal(t, "fault", records[0]["outcomeClass"])
+	require.Equal(t, hostexit.ExitBlock, outcome.Exit, "expiry must not replace a committed Deny with Continue")
+	require.Empty(t, outcome.Stdout)
+	require.Equal(t, decision.Reason().Message(), outcome.Stderr)
+	_, statErr := os.Stat(filepath.Join(dir, lifecycleFaultRecordFile))
+	require.ErrorIs(t, statErr, os.ErrNotExist, "a committed decision is not an evaluation fault")
 
 	// THE STATE, read back through the production read path rather than by
 	// inspecting files: the occurrence IS there, so this run produced the
@@ -1301,8 +1279,77 @@ func TestAnInvocationAbandonedAfterItsCommitTellsTheHostTheTruth(t *testing.T) {
 	require.NoError(t, json.Unmarshal(listed.Bytes(), &page))
 	require.Len(t, page.Items, 1,
 		"the receipt committed before the deadline fired, so exactly one occurrence must be readable")
-	t.Log("this run produced the COMMITTED-RECEIPT-WITH-NO-CONTINUATION outcome, " +
-		"which is the one the barrier makes deterministic")
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+	require.Len(t, consultations, 1)
+	members := decodeJSONObject(t, consultations[0].Payload)
+	require.JSONEq(t, `{"decision":"deny","reason":"no-active-assignment"}`, string(members["decision"]))
+}
+
+type preCommitReader struct {
+	*bytes.Reader
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *preCommitReader) Read(buffer []byte) (int, error) {
+	r.once.Do(func() { close(r.reached) })
+	<-r.release
+	return r.Reader.Read(buffer)
+}
+
+func expireBeforeCommit(t *testing.T, cmd *cobra.Command, raw []byte, decisions ...backend.Decision) hostexit.Outcome {
+	t.Helper()
+	input := &preCommitReader{Reader: bytes.NewReader(raw), reached: make(chan struct{}), release: make(chan struct{})}
+	cmd.SetIn(input)
+	deadline := newTrippedDeadline(t)
+	outcomes := make(chan hostexit.Outcome, 1)
+	go func() {
+		outcomes <- lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), deadline.derive, decisions...)
+	}()
+	defer close(input.release)
+	select {
+	case <-input.reached:
+	case outcome := <-outcomes:
+		t.Fatalf("invocation ended before input hold: %+v", outcome)
+	case <-time.After(preCommitStallCeiling):
+		t.Fatal("invocation did not reach pre-commit input hold")
+	}
+	deadline.trip()
+	select {
+	case outcome := <-outcomes:
+		return outcome
+	case <-time.After(preCommitStallCeiling):
+		t.Fatal("pre-fence expiry did not return a fault")
+		return hostexit.Outcome{}
+	}
+}
+
+func TestExpiryBeforeCommitDoesNotEmitTheSuppliedDeny(t *testing.T) {
+	// Serial: shared command state; no Reader or authority policy is injected.
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	cmd := lifecycleTestCommand(t, "claude-code", "PreToolUse", "2.1.261", dbPath)
+	decision, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonNoActiveAssignment)
+	require.NoError(t, err)
+
+	outcome := expireBeforeCommit(t, cmd, claudeFixture(t, "pre_tool_use_2_1_261.json"), decision)
+
+	require.Equal(t, hostexit.ExitContinue, outcome.Exit)
+	require.Empty(t, outcome.Stdout)
+	require.Contains(t, outcome.Stderr, "hook-invocation deadline")
+	require.NotContains(t, outcome.Stderr, decision.Reason().Message())
+	records := readFaultRecords(t, dir)
+	require.Len(t, records, 1)
+	require.Equal(t, "fault", records[0]["outcomeClass"])
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind))
 }
 
 // TestTheRecoverIsInstalledBeforeAnythingElseRuns pins the POSITION of the main
@@ -4237,15 +4284,16 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 		// holds a lifecycleFault call — and it OMITTED the flag-parse route
 		// inside SetFlagErrorFunc, the only one outside lifecycleOutcome. Both
 		// ends were found by enumerating from the source, which is what the
-		// reason had claimed to do. The six real routes are below.
+		// reason had claimed to do. The current routes are below.
 		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
-			"returned an error and committed nothing. Three routes pass it directly — the environment refusal and " +
+			"returned an error and committed nothing. Four routes pass it directly — the environment refusal and " +
 			"the argument refusal, neither of which opens a store, and the flag-parse refusal inside " +
-			"SetFlagErrorFunc, which runs before the command body — and it is also the default of the computed " +
+			"SetFlagErrorFunc, which runs before the command body, plus the multiple-decision input refusal " +
+			"before the work goroutine starts — and it is also the default of the computed " +
 			"stage below",
-		"hostexit.FaultStageRecordUnknown": "the hook was abandoned at its deadline: the work runs in a goroutine and " +
-			"the receipt commits before the native bytes are produced, so the expiry can land on either side of it " +
-			"and pasture genuinely does not know",
+		"hostexit.FaultStageRecordUnknown": "expiry returned no published host Outcome after fence settlement; " +
+			"pre-fence work or a record-only refused capture can still have written non-decision evidence, " +
+			"so the fault route does not make an unproved empty-journal claim",
 		"hostexit.FaultStageRecorded": "pasture observed the commit: a receipt committed without a continuation, and " +
 			"a delivery whose capture could not be bound, whose row carries the refusing disposition",
 		"panicStage": "the panic recovery's local, which is not-recorded until the work goroutine is started and " +
@@ -4327,14 +4375,15 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 
 	// THE ROUTE COUNT IS PINNED, because the published enumeration was wrong at
 	// both ends: it invented one route and missed another, and no count stood
-	// between the prose and the source. Six is what the source holds.
+	// between the prose and the source. The added decision-input refusal is
+	// before work starts and must remain part of the source-derived population.
 	total := 0
 	for _, count := range found {
 		total += count
 	}
-	assert.Equal(t, 6, total,
-		"this command has SIX fault routes: the panic recovery, the environment refusal, the argument "+
-			"refusal, the deadline abandonment, the handler error, and the flag-parse refusal inside "+
+	assert.Equal(t, 7, total,
+		"this command has seven fault routes: the panic recovery, the environment refusal, the argument "+
+			"refusal, the multiple-decision input refusal, the deadline fault, the handler error, and the flag-parse refusal inside "+
 			"SetFlagErrorFunc. A route added or removed without updating the judged reasons above leaves "+
 			"the prose describing a command that does not exist, which has happened once already")
 }
@@ -4521,9 +4570,15 @@ func TestEveryWorkErrorMapsToTheDurableStateItCanSupport(t *testing.T) {
 // panickingCommitBarrier panics AFTER the durable receipt is committed. It is
 // injected through the barrier parameter the command already has, so no
 // production branch exists whose only user is a test.
-type panickingCommitBarrier struct{ message string }
+type panickingCommitBarrier struct {
+	message string
+	invoked chan struct{}
+}
 
 func (b panickingCommitBarrier) AfterCommit(context.Context, handlers.CommitBoundary) error {
+	if b.invoked != nil {
+		close(b.invoked)
+	}
 	panic(b.message)
 }
 
@@ -4563,27 +4618,20 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 	cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
 
+	invoked := make(chan struct{})
 	outcome := lifecycleOutcome(cmd, nil,
-		panickingCommitBarrier{message: "the commit boundary failed after the receipt was written"},
+		panickingCommitBarrier{message: "the commit boundary failed after the receipt was written", invoked: invoked},
 		timeouts.ProductionProfile(), context.WithTimeout)
 
+	select {
+	case <-invoked:
+	default:
+		t.Fatal("post-commit panic seam was not exercised")
+	}
 	require.Equal(t, hostexit.ExitContinue, outcome.Exit,
-		"a pasture panic must still let the host carry on")
-	require.Contains(t, outcome.Stderr, "the hook panicked",
-		"this test must drive the panic path; if it does not, the assertions below prove nothing")
-
-	assert.Contains(t, outcome.Stderr, "durable state record-unknown",
-		"the commit had already happened when this panic landed, so the recovery may not say the "+
-			"delivery was never written. It said not-recorded while the row sat in the journal")
-	assert.Contains(t, outcome.Stderr, "MAY OR MAY NOT exist",
-		"and the sentence must match the machine-readable stage: pasture knows the write became "+
-			"possible, not that it completed")
-	assert.NotContains(t, outcome.Stderr, "no occurrence was recorded for it",
-		"this is the sentence that was false: an operator was told nothing was recorded and the "+
-			"journal held the row with a full interpreted set")
-	assert.NotContains(t, outcome.Stderr, "IS committed in the lifecycle occurrence journal",
-		"and the recovery must not overreach the other way either: it does not OBSERVE the commit, "+
-			"so it may not claim one")
+		"the already committed Proceed must survive a later panic")
+	require.Equal(t, `{"decision":"proceed"}`, string(outcome.Stdout))
+	require.Empty(t, outcome.Stderr, "the committed Outcome is not replaced by a fault")
 }
 
 // TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport reads the
@@ -4594,16 +4642,19 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 // the work goroutine starts is: a select on the completion channel and the
 // context; a read of the work struct; the deferred cancel, whose statement
 // stands above the go statement and runs on return; no composite literal; and
-// these EIGHT CALLS, in source order:
+// these calls, in source order:
 //
 //	ctx.Done()                in the select
+//	cancel()                  requests cancellation
+//	settlement.Expire()       serializes expiry and waits for entered commit
+//	settlement.CommittedOutcome() reads the settled result
 //	lifecycleFault(...)       the deadline arm
 //	fmt.Errorf(...)           that arm's message
 //	ctx.Err()                 wrapped into it
+//	settlement.CommittedOutcome() preserves commit on normal completion too
 //	faultStageForWorkError()  the handler-error arm
 //	lifecycleFault(...)       that arm
 //	fmt.Errorf(...)           its message
-//	hostexit.ForDecision()    the success path
 //
 // THE ENUMERATION HAS BEEN WIDENED TWICE AND BOTH TIMES BY THE CONSTRUCTS
 // SOMEBODY FOUND INTERESTING. It first named four cheap statements and no
@@ -4618,8 +4669,11 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 //
 // THE CONCLUSION IS UNCHANGED AND EACH IS CHECKED: ctx.Done and ctx.Err read a
 // context that is non-nil for the whole region; both fmt.Errorf calls compose
-// values already in hand; faultStageForWorkError walks a table; ForDecision
-// composes an outcome. One of the eight is the recovery's OWN handler, so a
+// values already in hand; faultStageForWorkError walks a table. The new fence
+// is constructed before work starts: its mutex/channel state machine closes
+// its signal once, and expiry waits rather than making a deadline-cap claim.
+// A committed result bypasses fault recovery instead of being rewrapped as
+// exit 0. One call family is the recovery's OWN handler, so a
 // panic inside lifecycleFault would be caught by the defer that called it.
 //
 // So no input drives it, and no behavioural test can. The local is defensive:
@@ -4754,16 +4808,51 @@ func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.
 		return true
 	})
 	assert.Equal(t, []string{
-		"ctx.Done", "lifecycleFault", "fmt.Errorf", "ctx.Err",
-		"faultStageForWorkError", "lifecycleFault", "fmt.Errorf", "hostexit.ForDecision",
+		"ctx.Done", "cancel", "settlement.Expire", "settlement.CommittedOutcome",
+		"lifecycleFault", "fmt.Errorf", "ctx.Err", "settlement.CommittedOutcome",
+		"faultStageForWorkError", "lifecycleFault", "fmt.Errorf",
 	}, calls,
-		"the calls after the go statement are not the eight the doc of this test enumerates. The "+
+		"the calls after the go statement differ from the source-audited enumeration. The "+
 			"conclusion that none of them can panic was checked against THAT list, so a call added "+
 			"or removed here must be re-examined and the enumeration rewritten with it")
 	assert.Zero(t, literals,
 		"the region after the go statement now holds %d composite literal(s), and the doc of this "+
 			"test says it holds none; re-examine whether the new one can panic and rewrite the "+
 			"enumeration", literals)
+}
+
+func TestDeadlineReceivesSettlementSignalBeforeChoosingFault(t *testing.T) {
+	t.Parallel()
+	file, err := parser.ParseFile(token.NewFileSet(), "hook_lifecycle.go", nil, 0)
+	require.NoError(t, err)
+	statementSource := func(node ast.Node) string {
+		var text bytes.Buffer
+		require.NoError(t, printer.Fprint(&text, token.NewFileSet(), node))
+		return text.String()
+	}
+	var function *ast.FuncDecl
+	for _, declaration := range file.Decls {
+		if candidate, ok := declaration.(*ast.FuncDecl); ok && candidate.Name.Name == "lifecycleOutcome" {
+			function = candidate
+		}
+	}
+	require.NotNil(t, function)
+
+	var deadlineCase *ast.CommClause
+	ast.Inspect(function, func(node ast.Node) bool {
+		clause, ok := node.(*ast.CommClause)
+		if ok && clause.Comm != nil && statementSource(clause.Comm) == "<-ctx.Done()" {
+			deadlineCase = clause
+		}
+		return true
+	})
+	require.NotNil(t, deadlineCase)
+	require.GreaterOrEqual(t, len(deadlineCase.Body), 3)
+	require.Equal(t, "cancel()", statementSource(deadlineCase.Body[0]))
+	require.Equal(t, "<-settlement.Expire()", statementSource(deadlineCase.Body[1]),
+		"calling Expire without RECEIVING its signal reopens the COMMIT-to-return race")
+	require.Contains(t, statementSource(deadlineCase.Body[2]), "settlement.CommittedOutcome()",
+		"fault choice must follow settlement and preserve the complete published Outcome")
 }
 
 // claudePayloadWithAddedMember is the authentic Claude fixture plus ONE member
@@ -4902,13 +4991,24 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			// on the validating parser, where every clause of the reason is
 			// true; this drives it where one clause is not, which is the case
 			// the single-harness sweep could not see.
-			Name:            "a renamed identity on a parser that decodes into a struct",
+			Name:            "a renamed identity on a parser that ignores extra members but matches names exactly",
 			Harness:         "codex",
 			Payload:         []byte(`{"renamed":"s","hook_event_name":"PreToolUse"}`),
-			Says:            "an identity field is missing or unusable",
+			Says:            "an identity field is missing, renamed or unusable",
 			Tells:           identityAdvice,
 			NamesIdentities: true,
 			IdentityClause:  "; the identities this event requires are session, turn, tool-call.",
+			MentionsVersion: true,
+		},
+		{
+			Name:            "a renamed identity on a parser that decodes into a struct",
+			Harness:         "opencode",
+			Event:           "tool.execute.before",
+			Payload:         []byte(`{"input":{"renamed":"s","callID":"c","tool":"read"},"output":{"args":{}}}`),
+			Says:            "an identity field is missing or unusable",
+			Tells:           identityAdvice,
+			NamesIdentities: true,
+			IdentityClause:  "; the identities this event requires are session, tool-call.",
 			MentionsVersion: true,
 		},
 		{
@@ -4972,6 +5072,8 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			}
 			if harness == "codex" {
 				version = "0.153.0"
+			} else if harness == "opencode" {
+				version = "1.18.29"
 			}
 			run := runLifecycleHookOn(t, binary, database,
 				harness, event, version, row.Payload)
@@ -5070,9 +5172,9 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 		initializeLifecycleTestDatabase(t, dbPath)
 
 		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
-		cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
+		cmd.SetIn(panickingReader{message: "the input reader failed before commit"})
 		outcome := lifecycleOutcome(cmd, nil,
-			panickingCommitBarrier{message: "the commit boundary failed after the receipt was written"},
+			handlers.PassThroughCommitBarrier{},
 			timeouts.ProductionProfile(), context.WithTimeout)
 
 		require.Contains(t, outcome.Stderr, "durable state record-unknown",
@@ -5097,7 +5199,7 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 		// invocation is HELD at the commit boundary and the deadline is tripped
 		// there by the test, so the abandonment is driven by conditions and
 		// never by a clock or a sleep.
-		outcome := abandonAfterTheCommit(t, cmd)
+		outcome := expireBeforeCommit(t, cmd, openCodeToolExecuteBeforeWire(t))
 
 		require.Contains(t, outcome.Stderr, "durable state record-unknown",
 			"this subtest must reach the same stage as the one above; the two differ only in CAUSE")
@@ -6329,10 +6431,9 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 // every reader, by harness name, that a member the registration does not
 // declare is refused and that identity field names must match exactly. Claude
 // validates the member set and looks names up in a map, so both hold there.
-// Codex and OpenCode decode into a struct: an added member is IGNORED and the
-// event is recorded, and a field name matches case-insensitively. A Codex
-// operator was sent to remove a field that was never the problem and to
-// re-spell names that already bind.
+// Codex now ignores added members but looks up identity names exactly, while
+// OpenCode's struct decoder ignores added members and matches names without
+// case sensitivity. The advice must follow each of those independent traits.
 //
 // THE EXPECTATION IS TAKEN FROM THE PARSER, NOT FROM THE DISPATCH ROW. The
 // first version asserted the lenient wording on the harness whose row said
@@ -6354,7 +6455,7 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 //
 // MUTATION: set refusesUndeclaredMembers or matchesFieldNamesExactly true on a
 // lenient harness's dispatch row, or make a lenient parser strict while its row
-// stays false (decode with DisallowUnknownFields in the Codex ingress). The
+// stays false (for example, reject undeclared members in the OpenCode ingress). The
 // subtest for that harness turns RED.
 func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 	t.Parallel()

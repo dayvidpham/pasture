@@ -76,11 +76,10 @@ func TestRawOriginReadBackDisclosedInListTextAndJSON(t *testing.T) {
 	require.Equal(t, "raw", page.Items[0].Origin)
 }
 
-// TestNativeListReadBackGoldenBytesUnchanged pins the native ZERO-diff
-// invariant on the PRODUCTION BINARY: a store holding only native captures
-// read back through the built binary must render byte-identical list output in
-// BOTH formats to the pre-M4 read surface. The golden files were captured from
-// the SLICE-3 baseline binary (pre-origin rendering); they must match exactly.
+// TestNativeListReadBackGoldenBytesUnchanged pins the fresh native read surface
+// through the production binary. Native origin remains omitted in both formats.
+// The coordinate in these goldens is the current interpretation vocabulary:
+// changing its declared identities deliberately changes that fingerprint.
 func TestNativeListReadBackGoldenBytesUnchanged(t *testing.T) {
 	t.Parallel()
 
@@ -98,12 +97,12 @@ func TestNativeListReadBackGoldenBytesUnchanged(t *testing.T) {
 	text := runLifecycleList(t, binary, dbPath, "text")
 	require.NotContains(t, text, "origin=", "native text list must not render an origin clause")
 	require.Equal(t, readGolden(t, "lifecycle_list_native_text.golden"), text,
-		"native text list output must stay byte-identical to the pre-M4 read surface")
+		"fresh native text list must match the current metamodel golden exactly")
 
 	textJSON := runLifecycleList(t, binary, dbPath, "json")
 	require.NotContains(t, textJSON, `"origin"`, "native JSON list must not render an origin member")
 	require.Equal(t, readGolden(t, "lifecycle_list_native_json.golden"), textJSON,
-		"native JSON list output must stay byte-identical to the pre-M4 read surface")
+		"fresh native JSON list must match the current metamodel golden exactly")
 }
 
 func seedRawOriginOccurrence(t *testing.T, dbPath string) {

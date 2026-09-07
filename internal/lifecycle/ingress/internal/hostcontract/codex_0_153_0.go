@@ -15,12 +15,14 @@ const (
 	fCodexSessionID model.NativeFieldID = 5001 + iota
 	fCodexTurnID
 	fCodexToolUseID
+	fCodexAgentID
 )
 
 var codexFields = []Field{
 	{fCodexSessionID, "FieldCodexSessionID", "session_id"},
 	{fCodexTurnID, "FieldCodexTurnID", "turn_id"},
 	{fCodexToolUseID, "FieldCodexToolUseID", "tool_use_id"},
+	{fCodexAgentID, "FieldCodexAgentID", "agent_id"},
 }
 
 // codexReaderRefusalCost explains a failure to build the source catalogue.
@@ -151,8 +153,8 @@ func codexFailureReaderOver(rows []codexRuntimeRow) func(name string) pasturerun
 // package comment names the differing rows. Resolve semantics from the host
 // emission sites, not from the failure-mode read.
 //
-// Of the 12 registered Codex events, 10 have no authentic capture, and this
-// source declares identities for 0 of those 10.
+// Of the 12 registered Codex events, 0 have no authentic capture, and this
+// source declares identities for 0 of those 0.
 //
 // The diverging metadata never reaches ingest, and the mechanism that stops it
 // is the ACTIVATION TABLE, which withholds every event without a capture proof
@@ -182,8 +184,7 @@ func Codex0_153_0() Contract {
 // dependence that a literal cannot satisfy.
 func codex0_153_0Over(rows []codexRuntimeRow) Contract {
 	failure := codexFailureReaderOver(rows)
-	// observe builds a non-blocking catalog event with no declared
-	// identities (source-derived metadata only). Its failure mode is read.
+	// Builders set semantics first; the captured identities are bound below.
 	observe := func(kind model.ContractEventKind, symbol, name string) Event {
 		return Event{
 			Kind: kind, Symbol: symbol, Name: name,
@@ -191,8 +192,7 @@ func codex0_153_0Over(rows []codexRuntimeRow) Contract {
 			Failure: failure(name), StopLoop: StopLoopNotApplicable,
 		}
 	}
-	// gate builds a blocking catalog event with no declared identities
-	// (source-derived metadata only). Its failure mode is read, so a gate whose
+	// gate builds a blocking catalog event. Its failure mode is read, so a gate whose
 	// blocking exit code cites nothing carries the demoted arm here too.
 	gate := func(kind model.ContractEventKind, symbol, name string, mutation MutationMode, stop StopLoopPolicy) Event {
 		return Event{
@@ -203,41 +203,30 @@ func codex0_153_0Over(rows []codexRuntimeRow) Contract {
 	}
 
 	sessionStart := observe(1, "EventCodexSessionStart", "SessionStart")
-	sessionStart.Fields = []model.NativeFieldID{fCodexSessionID}
-	sessionStart.Identities = []Identity{
-		{Field: fCodexSessionID, Binding: model.BindingSession, Required: true},
-	}
 
 	preToolUse := gate(3, "EventCodexPreToolUse", "PreToolUse", MutationInput, StopLoopNotApplicable)
-	preToolUse.Fields = []model.NativeFieldID{fCodexSessionID, fCodexTurnID, fCodexToolUseID}
-	preToolUse.Identities = []Identity{
-		{Field: fCodexSessionID, Binding: model.BindingSession, Required: true},
-		{Field: fCodexTurnID, Binding: model.BindingTurn, Required: true},
-		{Field: fCodexToolUseID, Binding: model.BindingToolCall, Required: true},
-	}
 
 	// SessionEnd was emitted by the host before this catalogue held it, and BOTH
 	// pinned versions emit it from the SAME function, run_session_end_hooks:
 	// codex-rs/core/src/hook_runtime.rs:369 at rust-v0.146.0 (root session only at
 	// :378-382) and :455 at rust-v0.153.0 (root session only at :464-468). The
 	// payload shape is defined at codex-rs/hooks/src/events/session_end.rs:64-68
-	// at rust-v0.153.0, not a declared identity here. Like every other
-	// unproven Codex row, this row declares no identity and no payload field until
-	// an authentic capture proves what the host writes on the wire.
+	// at rust-v0.153.0. The cleared session_end_0_153_0.json confirms session_id
+	// but no turn_id on the wire (the request's internal turn is not serialized).
 	sessionEnd := observe(11, "EventCodexSessionEnd", "SessionEnd")
 	// Interrupt arrived BETWEEN the two pinned versions. At rust-v0.146.0 there is
 	// no codex-rs/hooks/src/events/interrupt.rs and no interrupt emitter in
 	// codex-rs/core/src/hook_runtime.rs; at rust-v0.153.0 both exist, and the
 	// emitter is run_turn_interrupt_hooks at :486. See the payload definition at
 	// codex-rs/hooks/src/events/interrupt.rs:76-82 at rust-v0.153.0: the cited
-	// shape, not declared identities, for the same reason as SessionEnd above.
+	// shape, confirmed by the cleared interrupt_0_153_0.json.
 	interrupt := observe(12, "EventCodexInterrupt", "Interrupt")
 
 	// WHERE EACH ROW WAS READ IN THE HOST, at tag rust-v0.153.0 of
 	// github.com/openai/codex. The first path is the emission site, which is the
 	// function that builds the hook request; the second is the payload the host
-	// serializes on the wire, which is the cited SHAPE and never a declared
-	// identity here.
+	// serializes on the wire. Each identity below also has a cleared capture in
+	// internal/lifecycle/ingress/codex/testdata/fixtures; source alone is not proof.
 	//
 	//   SessionStart      core/src/hook_runtime.rs:124  hooks/src/events/session_start.rs:130
 	//   UserPromptSubmit  core/src/hook_runtime.rs:661  hooks/src/events/user_prompt_submit.rs:83
@@ -265,6 +254,33 @@ func codex0_153_0Over(rows []codexRuntimeRow) Contract {
 		gate(10, "EventCodexStop", "Stop", MutationNone, StopLoopConsultWhenInactive),
 		sessionEnd,
 		interrupt,
+	}
+	// The accepted per-event captures confirm these names and scopes. Do not
+	// infer a pair between independently captured events: retain each identifier
+	// verbatim. agent_id identifies a native agent, not a Pasture actor claim.
+	for i := range events {
+		event := &events[i]
+		// This list selects the cleared capture population, not the catalogue
+		// population. A future catalogue row receives no identity automatically.
+		switch event.Name {
+		case "SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "PreCompact", "PostCompact", "SubagentStart", "SubagentStop", "Stop", "SessionEnd", "Interrupt":
+		default:
+			continue
+		}
+		event.Fields = []model.NativeFieldID{fCodexSessionID}
+		event.Identities = []Identity{{Field: fCodexSessionID, Binding: model.BindingSession, Required: true}}
+		if event.Name != "SessionStart" && event.Name != "SessionEnd" {
+			event.Fields = append(event.Fields, fCodexTurnID)
+			event.Identities = append(event.Identities, Identity{Field: fCodexTurnID, Binding: model.BindingTurn, Required: true})
+		}
+		switch event.Name {
+		case "PreToolUse", "PostToolUse":
+			event.Fields = append(event.Fields, fCodexToolUseID)
+			event.Identities = append(event.Identities, Identity{Field: fCodexToolUseID, Binding: model.BindingToolCall, Required: true})
+		case "SubagentStart", "SubagentStop":
+			event.Fields = append(event.Fields, fCodexAgentID)
+			event.Identities = append(event.Identities, Identity{Field: fCodexAgentID, Binding: model.BindingAgent, Required: true})
+		}
 	}
 	return Contract{Version: "0.153.0", Fields: append([]Field(nil), codexFields...), Events: events}
 }
