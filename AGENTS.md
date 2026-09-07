@@ -789,11 +789,27 @@ one host-facing path. Its scope is a glob and not a list of file names, so a
 source added later is covered the day it is written rather than escaping in
 silence.
 
-### Quality gates (must pass before every commit)
+### Atomic local commits and integration gates
+
+Commit coherent changes frequently on the worker's own feature branch. Keep
+production code, its direct tests, and generated consequences together, and run
+the relevant focused checks before each atomic commit. A local commit records
+work; it does not by itself declare the change integrated or ready to land.
+
+A consumer of an explicitly agreed peer interface may be committed as a dependent
+checkpoint. Record the exact dependency and pending checks in the commit body and
+handoff. Do not add placeholder interfaces or claim that unexecuted checks passed.
+Preserve unfinished work and original failure evidence when separating commits.
+
+The full gates below must pass on the combined integration tree before acceptance
+and landing. Do not repeat a successful full suite solely because the same tested
+tree now has a commit. Test, generation, and build results must identify the exact
+tree; verify that the actual landed merge tree matches it.
+
 ```bash
 make fmt    # gofmt — fails if any file needs formatting
 make lint   # go vet ./...
-make test   # go test -race ./...
+make test-race # mandatory race-instrumented test suite
 make build  # CGO_ENABLED=0 go build ./...
 ```
 
