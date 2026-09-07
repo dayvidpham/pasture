@@ -4081,28 +4081,36 @@ var unbindableHostPayloads = []struct {
 	HostVersion string
 	Payload     string
 	Continue    string
-	Identities  string
+	Cause       string
+	Recovery    string
+	// GenericContext is schema context from an adapter that supplies no typed
+	// cause. It must not be presented as a list of identities that failed.
+	GenericContext string
 }{
 	{
 		Harness: "opencode", Event: "tool.execute.before", HostVersion: "1.18.29",
-		Payload:    `{"input":{"session_id":"s","call_id":"c"},"output":{"args":{}}}`,
-		Continue:   `{"decision":"proceed"}`,
-		Identities: "session, tool-call",
+		Payload:  `{"input":{"session_id":"s","call_id":"c"},"output":{"args":{}}}`,
+		Continue: `{"decision":"proceed"}`,
+		Cause:    `required member "input.sessionID" is absent.`,
+		Recovery: `Supply "input.sessionID" as a JSON string at that path; check for a dropped or renamed member in the host contract.`,
 	},
 	{
 		Harness: "codex", Event: "PreToolUse", HostVersion: "0.153.0",
-		Payload:    `{"renamed_session":"s","hook_event_name":"PreToolUse"}`,
-		Continue:   `{"continue":true}`,
-		Identities: "session, turn, tool-call",
+		Payload:        `{"renamed_session":"s","hook_event_name":"PreToolUse"}`,
+		Continue:       `{"continue":true}`,
+		Cause:          "the payload was refused by this event's schema check; the adapter supplied no specific cause",
+		Recovery:       `Compare the payload with this build's Codex registration for "PreToolUse": every identity field it declares must be present under the name it expects, spelled exactly, and carry a usable value.`,
+		GenericContext: "; the identities this event requires are session, turn, tool-call.",
 	},
 	{
 		// Claude's continuation IS the empty body, so this row's continue bytes
 		// are empty on purpose. The claim it carries is the diagnostic and the
 		// record, which are what a Claude operator has.
 		Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.261",
-		Payload:    `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`,
-		Continue:   "",
-		Identities: "session",
+		Payload:  `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`,
+		Continue: "",
+		Cause:    `required member "session_id" is absent.`,
+		Recovery: `Supply "session_id" as a JSON string at that path; check for a dropped or renamed member in the host contract.`,
 	},
 }
 
@@ -4135,7 +4143,9 @@ var unbindableHostPayloads = []struct {
 // non-valid-capture arm of hookLifecycle in internal/handlers/hook_lifecycle.go,
 // as it did. Every subtest turns RED — on the continue bytes for the two
 // harnesses that have them, and on the diagnostic and the fault record for all
-// three.
+// three. Substituting a different field in the typed cause must also fail the
+// independent Claude/OpenCode field-and-recovery oracles below. Codex retains
+// its explicit unspecified-cause fallback, not invented field precision.
 func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing.T) {
 	t.Parallel()
 
@@ -4164,14 +4174,19 @@ func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing
 			require.Contains(t, run.Stderr, "could not be bound, so the event WAS NOT EVALUATED",
 				"the operator must be told the event was NOT EVALUATED. This route said nothing at "+
 					"all: zero bytes on standard error, on a healthy machine")
-			assert.Contains(t, run.Stderr, row.Identities,
-				"the diagnostic must NAME the identities that could not be bound, taken from this "+
-					"build's generated registration; an operator told only that binding failed cannot "+
-					"tell which correlation field their host renamed")
-			assert.Contains(t, run.Stderr, "is the version the host actually runs",
-				"the diagnostic must point at the host version too: this build retains the version "+
-					"without using it as an admission check, so a host that changes a field name "+
-					"between versions arrives here by construction")
+			assert.Contains(t, run.Stderr, "WAS NOT EVALUATED: "+row.Cause,
+				"the independent oracle must identify this parser's actual missing field or truthful unspecified-cause fallback")
+			assert.Contains(t, run.Stderr, row.Recovery,
+				"the recovery must address that exact field and required kind, not a guessed version mismatch")
+			if row.GenericContext != "" {
+				assert.Contains(t, run.Stderr, row.GenericContext,
+					"an unchanged adapter may name required identities as schema context, not claim they all failed")
+			} else {
+				assert.NotContains(t, run.Stderr, "identities this event requires",
+					"a typed cause names the actual defect, not an invented list of failed identities")
+				assert.NotContains(t, run.Stderr, "is the version the host actually runs",
+					"payload diagnosis must not imply that an observed executable version attests the running process")
+			}
 
 			// THE DURABLE STATE IS READ ON THE RENDERED BYTES, not on the
 			// value the code constructed. This route was told "no occurrence
@@ -4188,9 +4203,14 @@ func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing
 				"the retired sentence must not survive on any arm of the impact switch")
 
 			records := readFaultRecords(t, run.FaultDir)
-			assert.Len(t, records, 1,
+			require.Len(t, records, 1,
 				"an unevaluated event must leave a durable fault record like every other one. This "+
 					"route wrote none, so nothing outlived the process to say the event was skipped")
+			assert.Equal(t, "fault", records[0]["outcomeClass"])
+			assert.Equal(t, "fail-open", records[0]["faultPolicy"])
+			assert.Equal(t, "recorded", records[0]["faultStage"])
+			assert.Equal(t, "continue", records[0]["hostExit"])
+			assertDiagnosticCaptureRecord(t, database, []byte(row.Payload), model.CaptureUnsupportedSchema)
 		})
 	}
 }
