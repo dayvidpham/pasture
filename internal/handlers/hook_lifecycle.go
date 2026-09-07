@@ -17,6 +17,7 @@ import (
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	codexingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/codex"
@@ -28,13 +29,22 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
+	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/provenance"
 )
 
 const hookLifecycleWhere = "Receiving a native lifecycle event (internal/handlers/hook_lifecycle.go in handlers.HookLifecycle)."
 
 type HookLifecycleInput struct {
+	// Decision is an optional evaluated verdict supplied by a policy caller.
+	// Nil retains the current middle-end Proceed default. This is not a Reader
+	// implementation: callers must supply real authority evaluation separately.
+	Decision *backend.Decision
+	// Settlement is shared with the command's timeout choice. Native callers
+	// that omit it get a fresh fence, never a post-Apply committed flag.
+	Settlement  *receipt.CommitSettlement
 	DBPath      string
 	Harness     ir.HarnessID
 	Event       string
@@ -106,7 +116,8 @@ type lifecycleDispatch struct {
 	// envelope produced for imports and migration.
 	rawParse func([]byte, registration.Event, string) lifecycleCapture
 	bind     func(model.ContractEventKind, []model.NativeBinding) (waist.L1, []waist.Identity, error)
-	encode   func(backend.HostResponse) ([]byte, error)
+	encode   func(pastureruntime.LifecycleEventMapping, backend.HostResponse) (hostexit.Outcome, error)
+	mapping  func(string) (pastureruntime.LifecycleEventMapping, error)
 	// refusesUndeclaredMembers says whether THIS harness's parser rejects a
 	// payload carrying a member the registration does not declare.
 	//
@@ -155,7 +166,8 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
 		bind:                     claudefrontend.Bind,
-		encode:                   nativeresponse.ClaudeContinuation,
+		encode:                   nativeresponse.EncodeClaude,
+		mapping:                  mappingLookup(pastureruntime.ClaudeCode2_1_261Lifecycle()),
 		refusesUndeclaredMembers: true,
 		matchesFieldNamesExactly: true,
 	},
@@ -171,8 +183,9 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
-		bind:   opencodefrontend.Bind,
-		encode: nativeresponse.CanonicalProceed,
+		bind:    opencodefrontend.Bind,
+		encode:  nativeresponse.EncodeOpenCode,
+		mapping: mappingLookup(pastureruntime.OpenCode1_18_29Lifecycle()),
 		// This parser decodes into a struct, so an undeclared member is
 		// IGNORED and a field name matches case-insensitively. Both schema
 		// flags stay false, and the refusal text says only what holds here.
@@ -191,14 +204,30 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 			capture := codexingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
 			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
 		},
-		bind:   codexfrontend.Bind,
-		encode: nativeresponse.CodexContinuation,
+		bind:    codexfrontend.Bind,
+		encode:  nativeresponse.EncodeCodex,
+		mapping: mappingLookup(pastureruntime.Codex0_153_0Lifecycle()),
 		// Same decoder shape as OpenCode: an added member is ignored and the
 		// event is recorded. Measured on the built binary, rc 0 with zero bytes
 		// on standard error.
 		refusesUndeclaredMembers: false,
 		matchesFieldNamesExactly: false,
 	},
+}
+
+func mappingLookup[E comparable](contract pastureruntime.LifecycleContract[E]) func(string) (pastureruntime.LifecycleEventMapping, error) {
+	return func(name string) (pastureruntime.LifecycleEventMapping, error) {
+		for _, event := range contract.Events() {
+			mapping, err := contract.Mapping(event)
+			if err != nil {
+				return pastureruntime.LifecycleEventMapping{}, err
+			}
+			if mapping.NativeName() == name {
+				return mapping, nil
+			}
+		}
+		return pastureruntime.LifecycleEventMapping{}, fmt.Errorf("lifecycle dispatch: event %q has no immutable mapping in %s; no response can be encoded; use the matching pinned registration", name, contract.ID())
+	}
 }
 
 func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener) (response backend.HostResponse, err error) {
@@ -327,6 +356,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
+	service.Settlement = in.Settlement
 	// The native path is the only producer of the invalid-capture receipt row:
 	// it records the disposition evidence for a malformed host payload without
 	// the derived effects. Raw ingestion refuses outright instead, so
@@ -378,7 +408,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	// the two handlers.
 	// A WRITE IS ATTEMPTED HERE. See durablePossible.
 	durablePossible = true
-	committed, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
+	committed, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery, in.Decision)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
@@ -394,7 +424,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 // deliveryDerive (typed bind → NewEvent → Derive) → Receive. The ordering is
 // compatibility-sensitive: metamodel activation precedes derivation exactly
 // as it did before dry-run existed.
-func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery) (backend.HostResponse, error) {
+func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery, decisions ...*backend.Decision) (backend.HostResponse, error) {
 	// THIS REFUSAL IS BEFORE ANY WRITE, AND IT IS PAST THE CALLER'S MARKER.
 	//
 	// The marker stands at the call to this function, because the metamodel
@@ -425,10 +455,64 @@ func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifec
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	if _, err := service.Receive(ctx, warrant, delivery, derivation.Effects()...); err != nil {
+	prepared, err := prepareDelivery(dispatch, event, derivation, decisions...)
+	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	return derivation.Response(), nil
+	service.Outcome = prepared.outcome
+	if _, err := service.Receive(ctx, warrant, delivery, prepared.effects...); err != nil {
+		return backend.HostResponse{}, err
+	}
+	return prepared.response, nil
+}
+
+type preparedDelivery struct {
+	response backend.HostResponse
+	effects  []provenance.Effect
+	outcome  hostexit.Outcome
+}
+
+// prepareDelivery is shared by commit and preview. It performs no I/O and
+// never describes the encoded candidate as already committed.
+func prepareDelivery(dispatch lifecycleDispatch, event registration.Event, derivation middleend.Derivation, decisions ...*backend.Decision) (preparedDelivery, error) {
+	mapping, err := dispatch.mapping(event.NativeName)
+	if err != nil {
+		return preparedDelivery{}, err
+	}
+	response := derivation.Response()
+	effects := derivation.Effects()
+	if len(decisions) > 1 {
+		return preparedDelivery{}, fmt.Errorf("lifecycle delivery: more than one decision was supplied; no receipt committed; provide one evaluated verdict")
+	}
+	if len(decisions) == 1 && decisions[0] != nil && !response.IsValid() {
+		return preparedDelivery{}, fmt.Errorf("lifecycle delivery: event %q is not an evaluated gate; no receipt committed; do not supply policy decisions for observations", event.NativeName)
+	}
+	if response.IsValid() {
+		decision, ok := response.Value()
+		if !ok {
+			return preparedDelivery{}, fmt.Errorf("lifecycle delivery: an evaluation fault cannot become a consultation; use the fault path")
+		}
+		if len(decisions) == 1 && decisions[0] != nil {
+			decision = *decisions[0]
+		}
+		decision, err = nativeresponse.NormalizeDecision(mapping, decision)
+		if err != nil {
+			return preparedDelivery{}, err
+		}
+		response, err = backend.NewHostResponse(decision)
+		if err != nil {
+			return preparedDelivery{}, err
+		}
+		effects, err = receipt.ReplaceConsultationDecision(effects, decision)
+		if err != nil {
+			return preparedDelivery{}, err
+		}
+	}
+	outcome, err := dispatch.encode(mapping, response)
+	if err != nil {
+		return preparedDelivery{}, err
+	}
+	return preparedDelivery{response: response, effects: effects, outcome: outcome}, nil
 }
 
 // deliveryVerify composes the same pure warrant and derivation helpers as the
@@ -574,15 +658,16 @@ var ErrLifecycleDeliveryRefused = errors.New("the lifecycle delivery was recorde
 // pre-store refusals keep the precise one.
 var ErrLifecycleBeforeDurableWrite = errors.New("the lifecycle fault happened before any durable write was attempted")
 
-// HookLifecycleNative records the lifecycle receipt and, only after the durable
-// commit has completed, returns the exact native continuation bytes the harness
-// reads on standard output — the single dispatch surface the CLI invokes. The
-// commit-before-stdout invariant is structural: the per-target encoder runs
-// solely on the nil error path of HookLifecycleResponse, so native bytes never
-// precede persisted evidence. An unsupported harness resolves no registry row
-// and returns the unchanged unsupported-harness error with nil bytes, so nothing
-// is written to stdout.
-func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, error) {
+// HookLifecycleNative returns the complete committed Outcome: exit, stdout and
+// stderr. The per-row encoder prepares a candidate before Receive, but nothing
+// is published until the receipt appender settles successfully. The same fence
+// serializes the CLI's timeout choice with entry into Apply, including the
+// COMMIT-to-return gap. No write to the host occurs inside this handler.
+// A post-commit ancillary failure can return BOTH the immutable Outcome and
+// an error. Programmatic callers retain that error (for example a duplicate
+// session claim); host-facing callers must not replace the committed Outcome
+// with a fault continuation. Errors before commit return the zero Outcome.
+func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) (hostexit.Outcome, error) {
 	// THIS REFUSAL NEVER REACHED hookLifecycle's WRAPPER, so it fell to the
 	// caller's weakest-claim default and told an operator its occurrence "MAY
 	// OR MAY NOT exist" and to read the record "beside the database" — on a run
@@ -597,11 +682,17 @@ func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, er
 	// wherever it is raised.
 	dispatch, err := dispatchLifecycle(in.Harness)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrLifecycleBeforeDurableWrite, err)
+		return hostexit.Outcome{}, fmt.Errorf("%w: %w", ErrLifecycleBeforeDurableWrite, err)
 	}
-	response, err := HookLifecycleResponse(ctx, in)
+	if in.Settlement == nil {
+		in.Settlement = receipt.NewCommitSettlement()
+	}
+	_, err = HookLifecycleResponse(ctx, in)
 	if err != nil {
-		return nil, err
+		if outcome, committed := in.Settlement.CommittedOutcome(); committed {
+			return outcome, err
+		}
+		return hostexit.Outcome{}, err
 	}
 	// The named commit-to-emit boundary. Everything above it is durable;
 	// nothing below it has reached the host yet.
@@ -610,22 +701,18 @@ func HookLifecycleNative(ctx context.Context, in HookLifecycleInput) ([]byte, er
 		barrier = PassThroughCommitBarrier{}
 	}
 	if err := barrier.AfterCommit(ctx, CommitBoundary{Harness: in.Harness, Event: in.Event}); err != nil {
-		return nil, fmt.Errorf("%s: %w: %w", dispatch.name, ErrLifecycleCommittedWithoutContinuation, err)
+		if outcome, committed := in.Settlement.CommittedOutcome(); committed {
+			return outcome, fmt.Errorf("%s post-commit barrier: %w: %w", dispatch.name, ErrLifecycleCommittedWithoutContinuation, err)
+		}
+		return hostexit.Outcome{}, fmt.Errorf("%s: %w: %w", dispatch.name, ErrLifecycleCommittedWithoutContinuation, err)
 	}
-	// The encode runs only AFTER the lifecycle receipt has been durably
-	// committed by HookLifecycleResponse, so any failure here means the
-	// receipt is persisted but the native continuation was not delivered to
-	// the host. Wrap it so the operator knows the durable state is intact and
-	// only the stdout continuation is missing. This branch is provably
-	// unreachable today (both encoders return nil,nil on an invalid/absent
-	// response: CanonicalProceed and CodexContinuation never fail on a valid
-	// HostResponse); the guard exists as a post-commit audit guarantee so a
-	// future encoder that can fail cannot silently drop the continuation.
-	native, err := dispatch.encode(response)
-	if err != nil {
-		return nil, fmt.Errorf("%s lifecycle receipt committed but native continuation was not delivered (encode failed): %w: %w", dispatch.name, ErrLifecycleCommittedWithoutContinuation, err)
+	// Do not re-encode or rewrap the result after commit. These are the exact
+	// bytes and status fixed by the decision whose evidence was appended.
+	outcome, committed := in.Settlement.CommittedOutcome()
+	if !committed {
+		return hostexit.Outcome{}, fmt.Errorf("%s lifecycle commit has no published Outcome; no host response can be claimed; preserve the shared commit settlement fence", dispatch.name)
 	}
-	return native, nil
+	return outcome, nil
 }
 
 func activationFor(kind model.ContractEventKind, entries []activation.Entry) (activation.Entry, bool) {

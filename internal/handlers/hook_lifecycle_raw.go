@@ -11,6 +11,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -76,6 +78,8 @@ func ParseRawSchemaVersion(value string) (RawSchemaVersion, error) {
 // the raw surface can never be reduced accidentally by callers of the native
 // entrypoint.
 type HookLifecycleRawInput struct {
+	Decision      *backend.Decision
+	Settlement    *receipt.CommitSettlement
 	DBPath        string
 	Harness       ir.HarnessID
 	Event         string
@@ -147,7 +151,7 @@ func rawSchemaVersionFor(harness ir.HarnessID) RawSchemaVersion {
 // malformed stdin — happens BEFORE the store opens, preserving the M1 §8
 // property that an invalid invocation creates no database file (nor -wal/-
 // shm sidecar). The store opens only after the capture classifies valid.
-func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, error) {
+func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecycleResult, error) {
 	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil {
 		return nil, rawLifecycleError(pasterrors.CategoryValidation, "The raw lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, and store opener are required.", "Nothing was read or recorded.", "Invoke this path through the production raw lifecycle command.", nil)
 	}
@@ -215,11 +219,11 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, er
 	// material a real commit would persist, minus any I/O. No database file
 	// is created, opened, or written (M1 §8), and no receipt is issued.
 	if in.DryRun {
-		preview, previewErr := rawDryRunPreview(dispatch, event, in.HostVersion, in.SchemaVersion, capture.delivery)
+		preview, previewErr := rawDryRunPreview(dispatch, event, in.HostVersion, in.SchemaVersion, capture.delivery, in.Decision)
 		if previewErr != nil {
 			return nil, previewErr
 		}
-		return preview, nil
+		return &RawLifecycleResult{preview: preview}, nil
 	}
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {
@@ -235,8 +239,15 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, er
 	// Derive, pure) → EnsureActiveMetamodel → Receive. There is no second
 	// copy of the sequence here, so gate/metamodel/metadata parity cannot
 	// drift.
-	response, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery)
+	if in.Settlement == nil {
+		in.Settlement = receipt.NewCommitSettlement()
+	}
+	service.Settlement = in.Settlement
+	_, err = deliveryCommit(ctx, service, dispatch, event, capture.delivery, in.Decision)
 	if err != nil {
+		if outcome, committed := in.Settlement.CommittedOutcome(); committed {
+			return &RawLifecycleResult{outcome: outcome, committed: true}, nil
+		}
 		return nil, err
 	}
 	// The continuation bytes come from the registry encoder seam exactly as
@@ -244,11 +255,35 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, er
 	// Claude/OpenCode observation emits nothing, and a Codex observation emits
 	// {} — per-event byte parity with native, with no raw-specific reply
 	// shape.
-	native, err := dispatch.encode(response)
-	if err != nil {
-		return nil, fmt.Errorf("%s lifecycle receipt committed but native continuation was not delivered (encode failed): %w", dispatch.name, err)
+	outcome, committed := in.Settlement.CommittedOutcome()
+	if !committed {
+		return nil, fmt.Errorf("%s raw lifecycle has no settled Outcome; do not claim a commit; preserve the shared settlement fence", dispatch.name)
 	}
-	return native, nil
+	return &RawLifecycleResult{outcome: outcome, committed: true}, nil
+}
+
+// RawLifecycleResult distinguishes a preview document from a committed host
+// Outcome. Preview never manufactures a committed result or process status.
+type RawLifecycleResult struct {
+	preview   []byte
+	outcome   hostexit.Outcome
+	committed bool
+}
+
+func (r *RawLifecycleResult) Preview() []byte {
+	if r == nil {
+		return nil
+	}
+	return append([]byte(nil), r.preview...)
+}
+
+func (r *RawLifecycleResult) Outcome() (hostexit.Outcome, bool) {
+	if r == nil || !r.committed {
+		return hostexit.Outcome{}, false
+	}
+	out := r.outcome
+	out.Stdout = append([]byte(nil), out.Stdout...)
+	return out, true
 }
 
 // rawDryRunPreview renders what a real raw ingestion WOULD commit, without
@@ -256,16 +291,16 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) ([]byte, er
 // exact pure L1→L2 derivation tail the committing path runs (deliveryVerify),
 // so the preview is byte-faithful to the commit's binding material and its
 // canonical continuation — minus any durable write.
-func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, hostVersion string, schema RawSchemaVersion, delivery receipt.Delivery) ([]byte, error) {
+func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, hostVersion string, schema RawSchemaVersion, delivery receipt.Delivery, decisions ...*backend.Decision) ([]byte, error) {
 	_, derivation, err := deliveryVerify(dispatch, event, delivery)
 	if err != nil {
 		return nil, err
 	}
-	continuation, err := dispatch.encode(derivation.Response())
+	prepared, err := prepareDelivery(dispatch, event, derivation, decisions...)
 	if err != nil {
 		return nil, fmt.Errorf("%s dry-run continuation could not be rendered (encode failed): %w", dispatch.name, err)
 	}
-	effects, err := receipt.CanonicalizeLifecycleEffects(derivation.Effects())
+	effects, err := receipt.CanonicalizeLifecycleEffects(prepared.effects)
 	if err != nil {
 		return nil, rawLifecycleError(
 			pasterrors.CategoryValidation,
@@ -286,6 +321,10 @@ func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, host
 			Payload:       append(json.RawMessage(nil), effect.Payload...),
 		})
 	}
+	exitCode, known := prepared.outcome.Exit.Code()
+	if !known {
+		return nil, fmt.Errorf("raw preview: candidate Outcome has no exit status; no preview emitted; use a validated encoder")
+	}
 	preview := rawDryRunView{
 		DryRun:        true,
 		Harness:       dispatch.name,
@@ -295,7 +334,9 @@ func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, host
 		Origin:        string(delivery.Origin),
 		Contract:      delivery.Contract.String(),
 		Effects:       effectViews,
-		Continuation:  string(continuation),
+		Continuation:  string(prepared.outcome.Stdout),
+		ExitStatus:    exitCode,
+		Stderr:        prepared.outcome.Stderr,
 	}
 	out, err := json.MarshalIndent(preview, "", "  ")
 	if err != nil {
@@ -315,6 +356,8 @@ type rawDryRunView struct {
 	Contract      string                `json:"contract"`
 	Effects       []rawDryRunEffectView `json:"effects"`
 	Continuation  string                `json:"continuation"`
+	ExitStatus    int                   `json:"exitStatus"`
+	Stderr        string                `json:"stderr"`
 }
 
 // rawDryRunEffectView is the stable evidence representation passed to the

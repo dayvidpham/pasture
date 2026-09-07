@@ -81,6 +81,40 @@ func TestBuildConsultationRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestEvaluationFaultCannotBePersistedAsPolicyConsultation(t *testing.T) {
+	t.Parallel()
+	gateL2 := realL2(t, runtime.ClaudeEventPreToolUse)
+	interpreted := interpretedRecord(t, gateL2)
+	result, err := legalize.Event(gateL2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legalized, ok := result.Legalized()
+	if !ok {
+		t.Fatal("real gate did not legalize")
+	}
+	fault := backend.NewEvaluationFaultResponse()
+
+	record, err := receipt.NewConsultation(interpreted, legalized, fault)
+
+	if err == nil || record.IsValid() {
+		t.Fatal("an unevaluated fault manufactured durable policy evidence")
+	}
+	if !strings.Contains(err.Error(), "evaluation-fault path") {
+		t.Fatalf("fault refusal is not actionable: %v", err)
+	}
+	// This assignment has one concrete shared type, not mirrored enums or
+	// two validators that can disagree across the package dependency boundary.
+	decision, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonUnknownActor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var portValue waist.Decision = decision
+	if portValue != decision || !portValue.IsValid() {
+		t.Fatal("backend alias does not preserve the waist decision value")
+	}
+}
+
 func TestZeroDecisionAndHostResponse(t *testing.T) {
 	t.Parallel()
 	if backend.DecisionKind(0).IsValid() || backend.DecisionKind(0).String() != "" || backend.DecisionKind(255).IsValid() {

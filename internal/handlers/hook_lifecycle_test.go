@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
@@ -27,6 +30,50 @@ func (fixedLifecycleClock) Now() time.Time { return time.Unix(1_700_000_000, 0).
 type fixedLifecycleOperations struct{ id string }
 
 func (s fixedLifecycleOperations) NewOperationID() (string, error) { return s.id, nil }
+
+type failedAfterCommit struct{ cause error }
+
+func (b failedAfterCommit) AfterCommit(context.Context, handlers.CommitBoundary) error {
+	return b.cause
+}
+
+func TestNativePostCommitFailurePreservesBothOutcomeAndError(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	bootstrap, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	_, err = bootstrap.Create("file://post-commit-error", "bootstrap", "initialize ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	require.NoError(t, bootstrap.Close())
+	raw, err := os.ReadFile("../lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_261.json")
+	require.NoError(t, err)
+	decision, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonNoActiveAssignment)
+	require.NoError(t, err)
+	cause := errors.New("post-commit observer failed")
+
+	outcome, err := handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
+		DBPath:      dbPath,
+		Harness:     ir.HarnessClaudeCode,
+		Event:       "PreToolUse",
+		HostVersion: registration.ClaudeCode2_1_261().Version,
+		Input:       bytes.NewReader(raw),
+		Clock:       fixedLifecycleClock{},
+		Operations:  fixedLifecycleOperations{id: "test.post-commit-error"},
+		Decision:    &decision,
+		Barrier:     failedAfterCommit{cause: cause},
+	})
+
+	require.ErrorIs(t, err, cause)
+	require.ErrorIs(t, err, handlers.ErrLifecycleCommittedWithoutContinuation)
+	require.Equal(t, hostexit.ExitBlock, outcome.Exit)
+	require.Empty(t, outcome.Stdout)
+	require.Equal(t, decision.Reason().Message(), outcome.Stderr)
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	consultation := queryOneEvidence(t, tracker, receipt.CurrentConsultationEvidenceKind())
+	require.Contains(t, string(consultation.Payload), `"decision":{"decision":"deny","reason":"no-active-assignment"}`)
+}
 
 type readTrackingLifecycleInput struct{ reads int }
 
@@ -79,7 +126,7 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 		wantEvidence         []provenance.EvidenceKind
 	}{
 		{name: "observation", fixture: "session_created_1_18_29.json", event: "session.created", wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2"}},
-		{name: "gate", fixture: "tool_execute_before_1_18_29.json", event: "tool.execute.before", wantResponse: true, wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.consultation.v1"}},
+		{name: "gate", fixture: "tool_execute_before_1_18_29.json", event: "tool.execute.before", wantResponse: true, wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", receipt.CurrentConsultationEvidenceKind()}},
 	}
 	for _, test := range tests {
 		test := test
@@ -119,7 +166,7 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 			if test.wantResponse {
 				occurrence := queryOneEvidence(t, tracker, "pasture.lifecycle.occurrence.v1")
 				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v2")
-				consultation := queryOneEvidence(t, tracker, "pasture.lifecycle.consultation.v1")
+				consultation := queryOneEvidence(t, tracker, receipt.CurrentConsultationEvidenceKind())
 				require.Equal(t, occurrence.ProducingOperationJournalID, interpreted.ProducingOperationJournalID)
 				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID)
 				require.Less(t, interpreted.JournalID, consultation.JournalID, "interpreted evidence must precede consultation evidence in the committed operation")

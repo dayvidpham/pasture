@@ -295,7 +295,7 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 			require.JSONEq(t, string(nativeInterpreted), string(rawInterpreted), "interpreted.v2 derivation must be byte-identical")
 			if tc.wantReaction {
 				require.NotEmpty(t, nativeConsultation)
-				require.JSONEq(t, string(nativeConsultation), string(rawConsultation), "consultation.v1 derivation must be byte-identical")
+				require.JSONEq(t, string(nativeConsultation), string(rawConsultation), "current consultation derivation must be byte-identical")
 			}
 		})
 	}
@@ -534,10 +534,12 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 					Payload       json.RawMessage `json:"payload"`
 				} `json:"effects"`
 				Continuation string `json:"continuation"`
+				ExitStatus   int    `json:"exitStatus"`
+				Stderr       string `json:"stderr"`
 			}
 			previewMembers := decodeJSONObject(t, previewOut.Bytes())
 			require.ElementsMatch(t,
-				[]string{"dryRun", "harness", "event", "hostVersion", "schemaVersion", "origin", "contract", "effects", "continuation"},
+				[]string{"dryRun", "harness", "event", "hostVersion", "schemaVersion", "origin", "contract", "effects", "continuation", "exitStatus", "stderr"},
 				mapKeys(previewMembers),
 				"preview JSON key set is a public operator contract",
 			)
@@ -551,6 +553,8 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 			require.Equal(t, claudeRawSchema, preview.Contract)
 			require.Len(t, preview.Effects, tc.wantEffects)
 			require.Equal(t, tc.wantContinuation, preview.Continuation)
+			require.Zero(t, preview.ExitStatus)
+			require.Empty(t, preview.Stderr)
 			for _, effect := range preview.Effects {
 				effectBytes, err := json.Marshal(effect)
 				require.NoError(t, err)

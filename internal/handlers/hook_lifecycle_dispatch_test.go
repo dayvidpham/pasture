@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 )
 
 // TestDispatchLifecycleRejectsUnsupportedHarness is the relocated home of the
@@ -40,5 +41,5 @@ func TestDispatchLifecycleRejectsUnsupportedHarness(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "grok-build",
 		"HookLifecycleNative must surface the unsupported-harness error naming the harness")
-	require.Nil(t, native, "an unsupported harness produces no native stdout bytes")
+	require.Equal(t, hostexit.Outcome{}, native, "an unsupported harness produces no usable Outcome")
 }

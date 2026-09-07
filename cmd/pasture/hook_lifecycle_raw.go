@@ -9,6 +9,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
@@ -29,8 +30,14 @@ var hookLifecycleRawCmd = &cobra.Command{
 	Long:  hookLifecycleRawLong,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
+		settlement := receipt.NewCommitSettlement()
 		defer func() {
 			if recovered := recover(); recovered != nil {
+				if outcome, committed := settlement.CommittedOutcome(); committed {
+					emitLifecycleOutcome(cmd, outcome)
+					runErr = nil
+					return
+				}
 				fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle raw hook recovered from panic %v; the event may not have been recorded; inspect the database and retry the hook input\n", recovered)
 				runErr = nil
 			}
@@ -61,6 +68,7 @@ var hookLifecycleRawCmd = &cobra.Command{
 			Input:         cmd.InOrStdin(),
 			Clock:         lifecycleCLIClock{},
 			Operations:    lifecycleCLIOperations{},
+			Settlement:    settlement,
 		})
 		if err != nil {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -69,12 +77,17 @@ var hookLifecycleRawCmd = &cobra.Command{
 			printError(err)
 			return nil
 		}
-		if len(ack) > 0 {
-			if _, writeErr := cmd.OutOrStdout().Write(ack); writeErr != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "pasture: lifecycle raw hook could not write its committed host continuation: %v; the event was recorded but the host received no continuation; inspect the database and retry the hook input\n", writeErr)
-				return nil
+		if preview := ack.Preview(); preview != nil {
+			if _, writeErr := cmd.OutOrStdout().Write(preview); writeErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "pasture: could not write raw lifecycle preview: %v; no delivery was committed; retry with a writable output\n", writeErr)
 			}
+			return nil
 		}
+		outcome, committed := ack.Outcome()
+		if !committed {
+			return fmt.Errorf("raw lifecycle returned neither preview nor committed Outcome; inspect the handler result contract")
+		}
+		emitLifecycleOutcome(cmd, outcome)
 		return nil
 	},
 }

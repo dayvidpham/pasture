@@ -12,6 +12,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
@@ -42,6 +43,11 @@ type Service struct {
 	Identity   IdentityResolver
 	Clock      Clock
 	Operations OperationIDSource
+	// Settlement is supplied by the host-facing invocation. A standalone
+	// synchronous receipt caller may omit it because it makes no concurrent
+	// timeout-to-host decision. Outcome is encoded before entering the fence.
+	Settlement *CommitSettlement
+	Outcome    hostexit.Outcome
 	// Window is the longest time any writer may hold between the payload blob
 	// write and the journal append: the WorkflowResult tier of the injected
 	// timeout profile. Receive refuses a context with no deadline, or with a
@@ -82,6 +88,11 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 	}
 	if err := validateLifecycleExtras(extra); err != nil {
 		return Receipt{}, err
+	}
+	if s.Settlement != nil && delivery.Capture == model.CaptureValid {
+		if _, known := s.Outcome.Exit.Code(); !known {
+			return Receipt{}, fmt.Errorf("receive lifecycle delivery: validated event has no candidate Outcome for settlement; no receipt was written; encode its complete response before Receive")
+		}
 	}
 	if s.Blobs == nil || s.Identity == nil || s.Clock == nil || s.Operations == nil {
 		return Receipt{}, structured(pasterrors.CategoryValidation, "The lifecycle receipt service is incompletely wired.", "Blob storage, identity resolution, clock, and operation identity are all required to produce an attributable durable receipt.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "Nothing was recorded.", "Construct the service through the unified production opener with every dependency supplied.", nil)
@@ -131,7 +142,19 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 	if err := validateLifecycleExtras(input.Effects[1:]); err != nil {
 		return Receipt{}, err
 	}
-	id, err := s.Appender.Append(ctx, input)
+	appendReceipt := func() (model.OccurrenceID, error) {
+		return s.Appender.Append(ctx, input)
+	}
+	var id model.OccurrenceID
+	if s.Settlement != nil {
+		if delivery.Capture != model.CaptureValid {
+			id, err = s.Settlement.RunRecordOnly(ctx, appendReceipt)
+		} else {
+			id, err = s.Settlement.Run(ctx, s.Outcome, appendReceipt)
+		}
+	} else {
+		id, err = appendReceipt()
+	}
 	if err != nil {
 		return Receipt{}, err
 	}
@@ -189,6 +212,19 @@ func (s Service) boundedWriter(ctx context.Context) error {
 // uses this same boundary so its displayed effects match durable evidence
 // byte-for-byte rather than approximating the pre-canonical derivation.
 func CanonicalizeLifecycleEffects(effects []provenance.Effect) ([]provenance.Effect, error) {
+	// Validate the original reference BEFORE normalization changes the
+	// interpreted bytes. Rebinding must not repair a forged input digest.
+	for index, effect := range effects {
+		if effect.ResultSlot != consultationSlot {
+			continue
+		}
+		if index == 0 {
+			return nil, fmt.Errorf("canonicalize lifecycle effects: consultation has no preceding interpreted effect")
+		}
+		if _, err := DecodeConsultation(effect, effects[index-1]); err != nil {
+			return nil, err
+		}
+	}
 	canonical, err := provenance.Canonicalize(provenance.OperationInput{Effects: effects})
 	if err != nil {
 		return nil, err
@@ -198,12 +234,25 @@ func CanonicalizeLifecycleEffects(effects []provenance.Effect) ([]provenance.Eff
 		if normalized[index].Sort != provenance.EffectEvidence {
 			continue
 		}
-		if normalized[index].EvidenceKind == consultationKind && index > 0 {
-			payload, bindErr := rebindConsultationPayload(normalized[index].Payload, normalized[index-1].Payload)
+		if (normalized[index].EvidenceKind == consultationKind || normalized[index].EvidenceKind == consultationKindV1) && index > 0 {
+			payload, bindErr := rebindConsultationPayload(normalized[index].Payload, normalized[index-1].Payload, normalized[index].EvidenceKind)
 			if bindErr != nil {
 				return nil, bindErr
 			}
 			normalized[index].Payload = payload
+		}
+	}
+	// Rebinding can restore producer field order. Normalize ONCE MORE before
+	// hashing so the new digest authenticates the bytes Apply will store, not
+	// an intermediate representation. Interpreted bytes do not change here.
+	rebound, err := provenance.Canonicalize(provenance.OperationInput{Effects: normalized})
+	if err != nil {
+		return nil, err
+	}
+	normalized = rebound.NormalizedEffects()
+	for index := range normalized {
+		if normalized[index].Sort != provenance.EffectEvidence {
+			continue
 		}
 		sum := sha256.Sum256(normalized[index].Payload)
 		normalized[index].ContentDigest = append([]byte(nil), sum[:]...)
@@ -232,7 +281,7 @@ func validateLifecycleExtras(extra []provenance.Effect) error {
 	if consultation.Sort != provenance.EffectEvidence || consultation.ResultSlot != consultationSlot || consultation.EvidenceKind != consultationKind || !effectDigestValid(consultation) {
 		return invalid("The lifecycle delivery contains a forged consultation effect.", "Its slot, kind, or content digest is not canonical consultation evidence.", "Use receipt.ConsultationRecord.Effect without modifying it.")
 	}
-	if err := validateConsultationPayload(consultation.Payload, interpreted.Payload); err != nil {
+	if _, err := DecodeConsultation(consultation, interpreted); err != nil {
 		return invalid("The lifecycle consultation does not reference its immediately preceding interpreted effect.", "The operation-local slot and exact interpreted payload digest must match as one ordered pair.", "Construct both records together and preserve interpreted-then-consultation order.")
 	}
 	return nil

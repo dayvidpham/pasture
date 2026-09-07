@@ -8,6 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/url"
 	"os"
@@ -31,6 +34,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
@@ -126,7 +130,7 @@ console.log(JSON.stringify({argsUnchanged: true}));
 	require.NotZero(t, gateInterpreted.JournalID)
 	require.Equal(t, gateInterpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID)
 	require.Less(t, gateInterpreted.JournalID, consultation.JournalID, "one durable gate operation must order interpreted before consultation evidence")
-	require.Contains(t, string(consultation.Payload), `"response":{"decision":"proceed"}`)
+	require.Contains(t, string(consultation.Payload), `"decision":{"decision":"proceed","reason":"legal"}`)
 
 	// Claude is deliberately non-live regression evidence here. Compare only the
 	// shared gate semantic, blocking mode, and canonical Proceed decision.
@@ -145,12 +149,12 @@ console.log(JSON.stringify({argsUnchanged: true}));
 var (
 	occurrenceLifecycleContract  = registration.ClaudeCode2_1_261().Contract.String()
 	interpretedLifecycleContract = runtime.ClaudeCode2_1_261().ID().String()
+	consultationEvidenceKind     = receipt.CurrentConsultationEvidenceKind()
 )
 
 const (
 	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
-	consultationEvidenceKind      = provenance.EvidenceKind("pasture.lifecycle.consultation.v1")
 	expectedSessionIdentity       = "c02859c0-10ab-49c3-9b93-29280bd45fbb"
 	expectedInterpretedIdentities = `[{"kind":1,"value":"c02859c0-10ab-49c3-9b93-29280bd45fbb"}]`
 )
@@ -384,7 +388,7 @@ func TestEnabledClaudeEventToOccurrenceAndInterpretedEvidence(t *testing.T) {
 	require.Equal(t, 1, changed.ProcessState.ExitCode())
 }
 
-func TestEvaluatedClaudeProceedHasEmptyStdoutAndUnchangedConsultationV1(t *testing.T) {
+func TestEvaluatedClaudeProceedHasEmptyStdoutAndTypedConsultationV2(t *testing.T) {
 	t.Parallel()
 
 	binary := lifecycleBinary(t)
@@ -406,15 +410,15 @@ func TestEvaluatedClaudeProceedHasEmptyStdoutAndUnchangedConsultationV1(t *testi
 	require.Empty(t, stdout.Bytes(), "an evaluated Claude Proceed is exit 0 with EMPTY stdout, not a non-enum decision object")
 	require.Empty(t, stderr.String())
 
-	// Empty stdout must follow a real, unchanged consultation record.
+	// Empty stdout must follow a real consultation with an explicit reason.
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
 	defer tracker.Close()
 	consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
 	require.Len(t, consultations, 1, "empty stdout must still follow a real committed consultation")
-	require.Equal(t, "pasture.lifecycle.consultation.v1", string(consultationEvidenceKind))
+	require.Equal(t, "pasture.lifecycle.consultation.v2", string(consultationEvidenceKind))
 	members := decodeJSONObject(t, consultations[0].Payload)
-	require.JSONEq(t, `{"decision":"proceed"}`, string(members["response"]), "the host byte correction must not version or annotate the legacy consultation port")
+	require.JSONEq(t, `{"decision":"proceed","reason":"legal"}`, string(members["decision"]), "durable policy reason is independent of the empty host response")
 }
 
 func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
@@ -1127,8 +1131,8 @@ func decodeInterpretedPayload(t *testing.T, raw []byte) interpretedEvidencePaylo
 func assertProceedConsultation(t *testing.T, raw []byte) {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
-	require.ElementsMatch(t, []string{"legalized", "response", "interpreted"}, mapKeys(members))
-	require.JSONEq(t, `{"decision":"proceed"}`, string(members["response"]))
+	require.ElementsMatch(t, []string{"legalized", "decision", "interpreted"}, mapKeys(members))
+	require.JSONEq(t, `{"decision":"proceed","reason":"legal"}`, string(members["decision"]))
 	interpreted := decodeJSONObject(t, members["interpreted"])
 	require.ElementsMatch(t, []string{"result_slot", "content_digest"}, mapKeys(interpreted))
 	require.JSONEq(t, `"interpreted"`, string(interpreted["result_slot"]))
@@ -1292,7 +1296,7 @@ type codexProductionFixture struct {
 	wantEvidence    []provenance.EvidenceKind
 	identities      map[runtime.NativeIdentityKind]string
 	captureProof    activation.CaptureProof    // must cite the fixture this proof actually reads
-	productionProof activation.ProductionProof // must cite this exact running test
+	productionProof activation.ProductionProof // event-bound accepted proof; this test also checks durable read-back
 }
 
 var codexProductionFixtures = []codexProductionFixture{
@@ -1335,12 +1339,32 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 	for _, tc := range codexProductionFixtures {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			// Production-proof linkage (constant -> running test): the activation
-			// catalog's ProductionProof referent must name this exact test, so a
-			// rename of the function or subtest breaks this assertion immediately
-			// instead of leaving the constant silently stale.
-			require.Equal(t, "cmd/pasture/hook_lifecycle_production_test.go:"+t.Name(), tc.productionProof.Name(),
-				"ProductionProof.Name() must cite this exact running production test")
+			// The legacy accepted pair cited this running test. The generated
+			// runner campaign owns the stronger transport proof after expansion.
+			// Keep both real source owners explicit, without claiming this direct
+			// handler test executes the generated runner on its owner's behalf.
+			proofEvent, bound := tc.productionProof.Event()
+			require.True(t, bound)
+			require.Equal(t, tc.kind, proofEvent)
+			proofHarness, bound := tc.productionProof.Harness()
+			require.True(t, bound)
+			require.Equal(t, ir.HarnessCodex, proofHarness)
+			reference := tc.productionProof.Name()
+			legacyReference := "cmd/pasture/hook_lifecycle_production_test.go:" + t.Name()
+			runnerReference := "internal/codegen/codex_transport_e2e_test.go:TestCodexGeneratedRunnerDrivesBuiltCLI/" + tc.event
+			require.Contains(t, []string{legacyReference, runnerReference}, reference,
+				"the proof must cite the actual event-bound legacy or generated-runner proof, never an invented owner")
+			parts := strings.SplitN(reference, ":", 2)
+			require.Len(t, parts, 2)
+			proofSource, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", parts[0]), nil, 0)
+			require.NoError(t, err)
+			proofFunction := strings.SplitN(parts[1], "/", 2)[0]
+			found := false
+			for _, declaration := range proofSource.Decls {
+				function, ok := declaration.(*ast.FuncDecl)
+				found = found || ok && function.Name.Name == proofFunction
+			}
+			require.True(t, found, "the cited production proof function must exist in its real source file")
 
 			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 			initializeLifecycleTestDatabase(t, dbPath)
@@ -1373,7 +1397,7 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 				consultation := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)[0]
 				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID, "one durable operation groups interpreted and consultation evidence")
 				require.Less(t, interpreted.JournalID, consultation.JournalID, "interpreted evidence precedes consultation evidence")
-				require.Contains(t, string(consultation.Payload), `"response":{"decision":"proceed"}`)
+				require.Contains(t, string(consultation.Payload), `"decision":{"decision":"proceed","reason":"legal"}`)
 			} else {
 				require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind), "an observation produces no consultation evidence")
 			}
@@ -1474,6 +1498,7 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	require.Contains(t, string(claudeActivation), `"harness": "claude-code"`, "the shared activation report remains the Claude-only artifact")
 	require.NotContains(t, string(claudeActivation), "ingress/codex", "no Codex capture proof may leak into the Claude activation artifact")
 	require.NotContains(t, string(claudeActivation), "TestEnabledCodexHandlersToDurableReadBack", "no Codex production proof may leak into the Claude activation artifact")
+	require.NotContains(t, string(claudeActivation), "codex_transport_e2e_test.go", "no generated-runner Codex proof may leak into the Claude artifact")
 
 	openCodeManifest, err := os.ReadFile(filepath.Join(root, ".opencode", "pasture-opencode.json"))
 	require.NoError(t, err)
@@ -1493,8 +1518,8 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	wantReport := deriveCodexActivationReport(t)
 	require.Equal(t, string(wantReport), string(codexReport), "the committed Codex activation report must equal the report freshly derived from the pinned Codex registration + activation catalogs")
 
-	// Literal invariants on the committed artifact: exactly 10 exhaustive
-	// entries, and exactly the two authentically-proven events enabled.
+	// Exhaustive registration order and exact enabled membership follow the
+	// actual validated activation declarations, not a stale two-event list.
 	var parsed struct {
 		Harness string `json:"harness"`
 		Events  []struct {
@@ -1505,13 +1530,39 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	require.NoError(t, json.Unmarshal(codexReport, &parsed))
 	require.Equal(t, "codex", parsed.Harness, "the Codex audit report is the Codex-only artifact")
 	require.Len(t, parsed.Events, len(registration.Codex0_153_0().Entries()), "the Codex activation report is exhaustive over every generated Codex event")
-	enabled := make([]string, 0, 2)
+	states, err := activation.Codex0_153_0()
+	require.NoError(t, err)
+	byKind := make(map[model.ContractEventKind]activation.Entry, len(states))
+	for _, state := range states {
+		require.True(t, state.IsValid())
+		_, duplicate := byKind[state.Event]
+		require.False(t, duplicate)
+		byKind[state.Event] = state
+	}
+	var expectedEnabled []string
+	for index, event := range registration.Codex0_153_0().Entries() {
+		require.Equal(t, event.NativeName, parsed.Events[index].Event, "report order follows registration")
+		state, declared := byKind[event.Kind]
+		require.True(t, declared)
+		require.Equal(t, state.State.String(), parsed.Events[index].State)
+		if state.State == activation.Enabled {
+			proofEvent, bound := state.ProductionProof.Event()
+			require.True(t, bound)
+			require.Equal(t, event.Kind, proofEvent)
+			captureEvent, bound := state.CaptureProof.Event()
+			require.True(t, bound)
+			require.Equal(t, event.Kind, captureEvent)
+			expectedEnabled = append(expectedEnabled, event.NativeName)
+		}
+	}
+	require.NotEmpty(t, expectedEnabled, "the enabled-membership proof must not be vacuous")
+	var enabled []string
 	for _, entry := range parsed.Events {
 		if entry.State == "enabled" {
 			enabled = append(enabled, entry.Event)
 		}
 	}
-	require.Equal(t, []string{"SessionStart", "PreToolUse"}, enabled, "exactly the two authentically-proven Codex events (SessionStart, PreToolUse) are enabled; the other 8 are withheld")
+	require.Equal(t, expectedEnabled, enabled, "report membership must equal the event-bound activation declarations")
 
 	// The legacy Codex activation filename must never be emitted: the report
 	// lives only at pasture-codex-activation.json.

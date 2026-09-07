@@ -18,9 +18,11 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -172,7 +174,9 @@ func lifecycleOutcome(
 	barrier handlers.CommitBarrier,
 	budget timeouts.Profile,
 	deadline lifecycleDeadline,
+	decisions ...backend.Decision,
 ) (outcome hostexit.Outcome) {
+	var settlement *receipt.CommitSettlement
 	// The recover is installed FIRST, before the coordinates and the
 	// environment are read, so a panic in either is a fault and not a process
 	// crash. Until those reads finish the fault is described by the safe
@@ -217,11 +221,18 @@ func lifecycleOutcome(
 	// back.
 	defer func() {
 		if recovered := recover(); recovered != nil {
+			if settlement != nil {
+				if committed, ok := settlement.CommittedOutcome(); ok {
+					outcome = committed
+					return
+				}
+			}
 			outcome = lifecycleFault(cmd, coords, failure, policy, continuation,
 				panicStage, lifecyclePanicCause(coords, recovered))
 		}
 	}()
 
+	settlement = receipt.NewCommitSettlement()
 	coords = lifecycleCoordinatesFrom(cmd)
 	failure = lifecycleFailurePolicy(coords)
 	continuation = lifecycleContinuation(coords, failure)
@@ -247,10 +258,11 @@ func lifecycleOutcome(
 				args, coords.Event, coords.Harness))
 	}
 
-	// The WORK runs under the hook-invocation deadline. The HOST pays for a
-	// hook that does not return: its session freezes while it waits. pasture
-	// stops first, well inside the smallest host budget, and reports the expiry
-	// as a fault, which fails open by default.
+	// The work context carries the hook-invocation cancellation deadline.
+	// Before receipt commit entry, expiry can abandon the work and fail open.
+	// After entry, cancellation still fires but the command waits for actual
+	// settlement and Outcome publication. This extension is not guaranteed
+	// brief; no delivery is promised after an external host kills the process.
 	//
 	// The deadline is enforced HERE, around the work, and not only by handing a
 	// context down. Layers below retry a locked SQLite database on their own
@@ -259,21 +271,21 @@ func lifecycleOutcome(
 	// migrator below it runs to its own ceiling whatever this deadline says.
 	// Measured on a database held under a write lock, the hook returned after
 	// about 31 seconds, three times the Claude budget. Selecting on the deadline
-	// bounds the invocation whatever the layers below do, and it is the ONLY
-	// thing that bounds it today.
+	// bounds pre-fence waiting despite that opener. It is NOT a hard response
+	// cap after entry into the receipt commit fence.
 	//
-	// The reporting path AFTER the select is outside the bound: mapping the
-	// fault, appending one line to the fault record, and writing the streams.
-	// That is a fixed number of local syscalls with no retry and no lock. If the
-	// fault record ever grows a retry or a lock, it moves inside the bound.
+	// Waiting for entered commit settlement, fault reporting and stream writes
+	// can occur after cancellation. The fence does not retry or extend the
+	// append's work context; it waits for the result that fixes the answer.
 	//
-	// On expiry the work is ABANDONED. That is safe only because the process
+	// On expiry BEFORE COMMIT ENTRY the work is abandoned. That is safe only because the process
 	// reports the fault and exits immediately: the abandoned goroutine still
 	// holds a store handle, so a future caller that runs this function
 	// in-process and keeps running would leak it. An abandoned SQLite
-	// transaction is rolled back when the process ends. What the abandonment
-	// CANNOT know is whether the receipt committed first, so the fault is
-	// reported with an unknown durable state rather than a false claim.
+	// transaction is rolled back when the process ends. The expiry choice
+	// atomically prevents a later receipt append from entering. If commit entry
+	// won, the command waits instead; a late flag after Apply would miss the
+	// interval between SQLite COMMIT and the return to Pasture.
 	//
 	// The tier and the deadline both arrive as parameters: the tier so an
 	// in-process proof can observe this PATH under a value it chooses, and the
@@ -292,11 +304,17 @@ func lifecycleOutcome(
 	tier := budget.HookInvocation()
 	ctx, cancel := deadline(cmd.Context(), tier)
 	defer cancel()
+	var decision *backend.Decision
+	if len(decisions) > 1 {
+		return lifecycleFault(cmd, coords, failure, policy, continuation,
+			hostexit.FaultStageNotRecorded, fmt.Errorf("multiple lifecycle decisions supplied; no invocation started; provide one evaluated verdict"))
+	}
+	if len(decisions) == 1 {
+		decision = &decisions[0]
+	}
 
-	// HookLifecycleNative is the single dispatch surface: it commits the
-	// durable receipt and, only on the nil-error path, returns the exact
-	// native continuation bytes this harness reads on stdout — so nothing is
-	// written to stdout before the commit completes.
+	// HookLifecycleNative returns the complete committed Outcome. The command
+	// shares its fence so expiry cannot choose Continue during commit return.
 	completed := make(chan lifecycleWork, 1)
 	// FROM HERE THE DURABLE WRITE MAY ALREADY HAVE HAPPENED. See panicStage.
 	panicStage = hostexit.FaultStageRecordUnknown
@@ -327,20 +345,27 @@ func lifecycleOutcome(
 		if env.CaptureDir != "" {
 			input = captureHostPayload(cmd, coords, env.CaptureDir, input)
 		}
-		native, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
+		committed, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
 			DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
 			HostVersion: coords.HostVersion, Input: input,
 			Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 			Barrier:    barrier,
 			ActorClaim: tasks.ActorClaim(env.ActorClaim),
+			Decision:   decision,
+			Settlement: settlement,
 		})
-		completed <- lifecycleWork{native: native, err: err}
+		completed <- lifecycleWork{outcome: committed, err: err}
 	}()
 
 	var work lifecycleWork
 	select {
 	case work = <-completed:
 	case <-ctx.Done():
+		cancel()
+		<-settlement.Expire()
+		if committed, ok := settlement.CommittedOutcome(); ok {
+			return committed
+		}
 		return lifecycleFault(cmd, coords, failure, policy, continuation,
 			hostexit.FaultStageRecordUnknown, fmt.Errorf(
 				"the hook stopped waiting at its %s hook-invocation deadline and abandoned the work for event %q of harness %q "+
@@ -350,6 +375,9 @@ func lifecycleOutcome(
 				coords.Event, coords.Harness, coords.HostVersion, ctx.Err()))
 	}
 
+	if committed, ok := settlement.CommittedOutcome(); ok {
+		return committed
+	}
 	if work.err != nil {
 		// A fault raised AFTER the durable commit leaves an occurrence behind.
 		// Saying "not recorded" there would send a maintainer to look in the
@@ -359,9 +387,7 @@ func lifecycleOutcome(
 			"the hook could not evaluate event %q of harness %q at host version %q: %w",
 			coords.Event, coords.Harness, coords.HostVersion, work.err))
 	}
-	native := work.native
-
-	return hostexit.ForDecision(native, hostexit.ExitContinue, "")
+	return work.outcome
 }
 
 // captureHostPayload records the host payload to the capture directory and
@@ -442,8 +468,8 @@ func lifecycleContinuation(
 // lifecycleWork is what one hook evaluation produced: the native continuation
 // bytes, or the error that stopped it.
 type lifecycleWork struct {
-	native []byte
-	err    error
+	outcome hostexit.Outcome
+	err     error
 }
 
 // errLifecycleWorkPanicked marks a panic raised INSIDE the work goroutine. It

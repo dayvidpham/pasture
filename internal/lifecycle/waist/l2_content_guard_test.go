@@ -53,10 +53,10 @@ var (
 // consultationMembers and its nested sets are the closed member sets of the
 // consultation record a gate row derives beside its interpreted record.
 var (
-	consultationMembers            = []string{"legalized", "response", "interpreted"}
+	consultationMembers            = []string{"legalized", "decision", "interpreted"}
 	consultationInterpretedMembers = []string{"result_slot", "content_digest"}
 	consultationLegalizedMembers   = []string{"authority"}
-	consultationResponseMembers    = []string{"decision"}
+	consultationDecisionMembers    = []string{"decision", "reason"}
 )
 
 // identifierFieldName is the shape every native correlation field the hosts
@@ -304,8 +304,11 @@ func TestEveryProfileRowDerivesOnlyTheClosedWireShape(t *testing.T) {
 			assert.ElementsMatch(t, consultationInterpretedMembers, nested, "the interpreted reference of %s carries members %v; the closed set is %v", row.name(), nested, consultationInterpretedMembers)
 			nested, _ = memberNames(t, object["legalized"], "the legalized member of "+row.name())
 			assert.ElementsMatch(t, consultationLegalizedMembers, nested, "the legalized member of %s carries members %v; the closed set is %v", row.name(), nested, consultationLegalizedMembers)
-			nested, _ = memberNames(t, object["response"], "the response member of "+row.name())
-			assert.ElementsMatch(t, consultationResponseMembers, nested, "the response member of %s carries members %v; the closed set is %v", row.name(), nested, consultationResponseMembers)
+			nested, _ = memberNames(t, object["decision"], "the decision member of "+row.name())
+			assert.ElementsMatch(t, consultationDecisionMembers, nested, "the decision member of %s carries members %v; the closed set is %v", row.name(), nested, consultationDecisionMembers)
+			var decision waist.Decision
+			require.NoError(t, json.Unmarshal(object["decision"], &decision), "the durable decision must use the single shared closed validator")
+			require.True(t, decision.IsValid())
 		})
 	}
 }
