@@ -5780,10 +5780,10 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 			"which is not a fact about their invocation. Found: %q", returned)
 }
 
-// guardSweepOwned are the test files in this package that this slice changed,
-// and so may change again. The sweep below reads these and no others, because a
-// guard it flags is a guard somebody must be able to change, and reaching into
-// another slice's file is how ownership statements stop meaning anything.
+// guardSweepOwned are this lifecycle transport wave's test files. The sweep
+// audits all of them, including the additive, diagnostic and version subjects.
+// Each file still has its assigned owner: an audit finding is a handoff, not
+// permission for another worker to edit that file.
 // guardSweepForeign are the package's other test files, each with the reason.
 // Together they must be EXACTLY the directory.
 //
@@ -5799,10 +5799,14 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 // down as foreign, and a new file cannot arrive without being classified at all.
 var guardSweepOwned = []string{
 	"hook_environment_test.go",
+	"hook_lifecycle_additive_test.go",
 	"hook_lifecycle_capture_test.go",
 	"hook_lifecycle_codex_test.go",
+	"hook_lifecycle_diagnostic_production_test.go",
 	"hook_lifecycle_docs_test.go",
 	"hook_lifecycle_failuremode_test.go",
+	"hook_lifecycle_host_version_test.go",
+	"hook_lifecycle_host_version_unix_test.go",
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
 	"hook_lifecycle_raw_test.go",
