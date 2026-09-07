@@ -433,7 +433,10 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 			initializeLifecycleTestDatabase(t, dbPath)
 			raw := readProductionClaudeFixture(t, testCase.fixture, testCase.name)
 
-			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", testCase.name, "--host-version", "2.1.261")
+			executable := versionExecutable(t, "printf '2.1.261 (Claude Code)\\n'")
+			command := exec.Command("sh", "-c", generatedClaudeLifecycleCommand(t, testCase.name))
+			command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
+				"CLAUDE_CODE_EXECPATH="+executable, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=")
 			command.Stdin = bytes.NewReader(raw)
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout

@@ -312,6 +312,15 @@ func lifecycleOutcome(
 	if len(decisions) == 1 {
 		decision = &decisions[0]
 	}
+	// Resolve before starting the worker. Capture, admission, the deadline arm
+	// and panic recovery all read this one observed coordinate, never a value
+	// concurrently updated by the work goroutine.
+	hostVersion, versionErr := resolveLifecycleHostVersion(ctx, cmd, coords)
+	coords.HostVersion = hostVersion
+	if versionErr != nil {
+		return lifecycleFault(cmd, coords, failure, policy, continuation,
+			hostexit.FaultStageNotRecorded, versionErr)
+	}
 
 	// HookLifecycleNative returns the complete committed Outcome. The command
 	// shares its fence so expiry cannot choose Continue during commit return.
@@ -1107,7 +1116,8 @@ func init() {
 	flags := hookLifecycleCmd.Flags()
 	flags.String("harness", "", "Native harness whose payload is on standard input (required)")
 	flags.String("event", "", "Native event this generated hook is registered for (required)")
-	flags.String("host-version", "", "Observed native host version to retain with this occurrence (required)")
+	flags.String("host-version", "", "Observed native host version to retain (mutually exclusive with --host-executable)")
+	flags.String("host-executable", "", "Absolute Claude executable to query with --version inside the hook budget; Claude only, mutually exclusive with --host-version")
 	hookLifecycleCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if cmd != hookLifecycleCmd {
 			return err

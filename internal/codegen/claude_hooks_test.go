@@ -149,7 +149,7 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 						t.Errorf("withheld lifecycle event emitted: %s", event)
 					}
 					lifecycleByEvent[event]++
-					want := `${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event ` + event + ` --host-version "${CLAUDE_CODE_VERSION:-unknown}"`
+					want := `"${PASTURE_BIN:-pasture}" hook lifecycle --harness claude-code --event ` + event + ` --host-executable "${CLAUDE_CODE_EXECPATH:-}"`
 					if hook.Command != want || hook.Type != "command" || hook.Timeout != 10 {
 						t.Errorf("%s lifecycle command=%+v, want %q", event, hook, want)
 					}
@@ -172,7 +172,7 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	if session[0].Hooks[0].Command != "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1" {
 		t.Errorf("SessionStart bd-prime command=%q", session[0].Hooks[0].Command)
 	}
-	wantLifecycle := `${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event SessionStart --host-version "${CLAUDE_CODE_VERSION:-unknown}"`
+	wantLifecycle := `"${PASTURE_BIN:-pasture}" hook lifecycle --harness claude-code --event SessionStart --host-executable "${CLAUDE_CODE_EXECPATH:-}"`
 	if session[0].Hooks[1].Command != wantLifecycle || session[0].Hooks[1].Type != "command" || session[0].Hooks[1].Timeout != 10 {
 		t.Errorf("SessionStart lifecycle command=%+v, want %q", session[0].Hooks[1], wantLifecycle)
 	}
