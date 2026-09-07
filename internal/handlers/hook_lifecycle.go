@@ -49,9 +49,12 @@ type HookLifecycleInput struct {
 	Harness     ir.HarnessID
 	Event       string
 	HostVersion string
-	Input       io.Reader
-	Clock       receipt.Clock
-	Operations  receipt.OperationIDSource
+	// HostVersionSource classifies the caller's observation route, not a
+	// running-process attestation or a compatibility decision.
+	HostVersionSource model.HostVersionSource
+	Input             io.Reader
+	Clock             receipt.Clock
+	Operations        receipt.OperationIDSource
 	// ActorClaim binds a session, not the receipt author. Zero means no claim.
 	ActorClaim tasks.ActorClaim
 	// Barrier is called ONCE, after the durable receipt has been committed and
@@ -283,7 +286,13 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		activations = in.Activations
 	}
 	if strings.TrimSpace(in.HostVersion) == "" {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records which host version produced it, without using the value as an admission check.", "The input was not read and no database was opened.", "Pass the observed version through --host-version.", nil)
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records a version observation, without using the value as an admission check or treating an executable query as running-process attestation.", "The input was not read and no database was opened.", "Supply a version observation through the lifecycle command.", nil)
+	}
+	if err := model.ValidateHostVersionSource(in.HostVersionSource); err != nil {
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation,
+			err.Error(), "Version provenance must describe the actual observation route.",
+			"The input was not read and no database was opened.",
+			"Use a declared source for the route that supplied the version, or leave legacy provenance unspecified.", nil)
 	}
 	// The event is resolved by the one validating reverse lookup every ingress
 	// path shares, so a name the registration does not declare is refused with
@@ -340,6 +349,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The native payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "Ingress never truncates retained evidence.", "No database was opened.", "Reduce the host payload below the static bound.", nil)
 	}
 	capture := dispatch.parse(raw, event, in.HostVersion)
+	capture.delivery.Envelope.HostVersionSource = in.HostVersionSource
 	if err := capture.cause.Check(capture.disposition); err != nil {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation,
 			"The lifecycle parser returned inconsistent diagnostic evidence. "+err.Error(),
@@ -740,21 +750,8 @@ type captureDispositionAdvice struct {
 	Reason string
 	// Fix is the instruction that follows from THAT reason.
 	Fix string
-	// NamesIdentities says whether the message may name the event's identities
-	// AT ALL, and it deliberately no longer claims a RESULT for them.
-	//
-	// IT WAS ReachedIdentities, KEYED ON THE DISPOSITION, AND THE THREE CAUSES
-	// OF ONE DISPOSITION DISAGREE ON EXACTLY THAT QUESTION. A payload carrying
-	// every identity present, correctly named and usable is refused for an
-	// unknown MEMBER, and the allowed-member loop returns BEFORE the identity
-	// loop — so "none of the identities this event requires was bound" reported
-	// the result of a step that did not run. That is not imprecision about
-	// which cause fired; it is an inspection result invented for an inspection
-	// that never happened.
-	//
-	// So where the causes disagree, the message NAMES the identities as context
-	// and asserts nothing about them. Where a single cause is certain — the
-	// decode failures — it names nothing, because nothing was looked at.
+	// NamesIdentities permits schema context only, not a claimed inspection
+	// result. A fallback has no evidence of which identity failed.
 	NamesIdentities bool
 }
 
@@ -909,15 +906,9 @@ func unsupportedSchemaReason(_ lifecycleDispatch) string {
 	return "the payload was refused by this event's schema check; the adapter supplied no specific cause"
 }
 
-// unbindableCaptureError says that an event WAS NOT EVALUATED, and says which
-// correlation identities could not be bound.
-//
-// IT NAMES THE IDENTITIES FROM THE GENERATED REGISTRATION and never from a list
-// written here, so the message cannot drift from the contract it describes: the
-// required identities of the event are what ingress had to bind, and whatever
-// is missing from the bindings the parser DID recover is what it could not.
-// A host that renames or drops a correlation field between versions lands here
-// by construction, which is why the message points at the host version too.
+// unbindableCaptureError reports an unevaluated delivery using the transient
+// cause when supplied. An unchanged adapter receives only disposition-level
+// context; its nil bindings are not evidence of which field failed.
 func unbindableCaptureError(
 	dispatch lifecycleDispatch,
 	event registration.Event,

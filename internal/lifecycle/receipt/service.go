@@ -293,6 +293,10 @@ func effectDigestValid(effect provenance.Effect) bool {
 }
 
 func validateDelivery(d Delivery) error {
+	if err := model.ValidateHostVersionSource(d.Envelope.HostVersionSource); err != nil {
+		return invalid(err.Error(), "Version source is provenance, not a version compatibility or policy decision.",
+			"Supply the declared source for the actual observation route, or leave legacy provenance unspecified.")
+	}
 	switch {
 	case !d.Contract.IsValid():
 		return invalid("The lifecycle delivery has no runtime contract.", "A receipt must preserve the exact host contract that produced the delivery.", "Supply the generated runtime contract coordinate.")
