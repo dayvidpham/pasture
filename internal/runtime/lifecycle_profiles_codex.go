@@ -102,18 +102,9 @@ func codexLifecycleMapping(
 }
 
 func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
-	// No Codex row cites evidence in THIS revision, because the citation work is
-	// limited here to the four documented Claude rows. Every Codex gate
-	// therefore runs as report-and-continue until the Codex coverage work fills
-	// the citation in.
-	//
-	// The evidence itself is NOT missing. The Codex command-hook
-	// output contract IS committed in this repository, with its inspected source
-	// revision, in internal/lifecycle/nativeresponse/nativeresponse.go: it
-	// records that a blocking hook is rejected unless continue == true. That
-	// file is the citation the Codex coverage work is expected to use. Do not
-	// read this comment as a reason to run a live capture campaign for a fact
-	// the repository already holds.
+	// Input captures prove occurrence and identity, not a reason-bearing denial
+	// channel. No row cites such a channel, so capability remains None. The
+	// continue:true encoding is not evidence that continue:false enforces Deny.
 	var unevidenced FailureEvidence
 
 	gate := func(event CodexLifecycleEvent, mutation MutationMode, extra ...NativeIdentityField) LifecycleEventMapping {
@@ -130,32 +121,8 @@ func codexLifecycleMappings() map[CodexLifecycleEvent]LifecycleEventMapping {
 		CodexEventSubagentStart:     codexLifecycleMapping(CodexEventSubagentStart, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, true, unevidenced, codexAgentIdentity),
 		CodexEventSubagentStop:      codexLifecycleMapping(CodexEventSubagentStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced, codexAgentIdentity),
 		CodexEventStop:              codexLifecycleMapping(CodexEventStop, SemanticGateConsultation, Blocking, MutationNone, StopLoopConsultWhenInactive, true, unevidenced),
-		CodexEventSessionEnd:        codexUnprovenObservationMapping(CodexEventSessionEnd, unevidenced),
-		CodexEventInterrupt:         codexUnprovenObservationMapping(CodexEventInterrupt, unevidenced),
-	}
-}
-
-// codexUnprovenObservationMapping builds a non-blocking observation row that
-// declares NO identity, so its IdentityPolicy is None. A declared identity is a
-// claim the product acts on (the L2 content guard, the frontend Bind), and this
-// tree derives such claims from authentic captures only. SessionEnd's emitter
-// names session_id, but no capture has shown what the host writes on the wire,
-// so the row stays identity-free until one does; the same rule gave the other
-// unproven Codex rows their shape in the host contract.
-func codexUnprovenObservationMapping(event CodexLifecycleEvent, evidence FailureEvidence) LifecycleEventMapping {
-	return LifecycleEventMapping{
-		nativeName:      event.NativeName(),
-		semantic:        SemanticObservation,
-		surface:         SurfaceCodexStrictCommandJSON,
-		blocking:        NonBlocking,
-		identities:      identities(nil),
-		mutation:        MutationNone,
-		order:           OrderConcurrentNative,
-		reconciliation:  ReconcileNoAdapterMerge,
-		failure:         evidenceBoundFailure(NonBlocking, evidence, FailureStrictExitTwoBlocks, FailureStrictHook),
-		declaredFailure: declaredFailureArm(NonBlocking, FailureStrictExitTwoBlocks, FailureStrictHook),
-		evidence:        evidence,
-		stopLoop:        StopLoopNotApplicable,
+		CodexEventSessionEnd:        codexLifecycleMapping(CodexEventSessionEnd, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, false, unevidenced),
+		CodexEventInterrupt:         codexLifecycleMapping(CodexEventInterrupt, SemanticObservation, NonBlocking, MutationNone, StopLoopNotApplicable, true, unevidenced),
 	}
 }
 

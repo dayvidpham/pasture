@@ -157,4 +157,5 @@ const (
 	FieldCodexTurnID
 	FieldCodexToolUseID
 	FieldFileEvent
+	FieldCodexAgentID
 )

@@ -219,7 +219,7 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 	for _, required := range []string{
 		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", %q]`, openCodeHostVersion()),
 		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", %q]`, openCodeHostVersion()),
-		`{ input, output: { args } }`, `response.decision !== "proceed"`, `output.args = args`,
+		`{ input, output: { args } }`, `record.decision === "proceed"`, `output.args = args`,
 	} {
 		if !strings.Contains(module, required) {
 			t.Errorf("generated plugin lacks %q", required)
@@ -247,7 +247,7 @@ func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
 	}
 	// The module lives under a plugin/ directory alone; write only itself so the
 	// parse exercises isolated loading with no sibling present.
-	path := filepath.Join(t.TempDir(), "pasture-hooks.mjs")
+	path := filepath.Join(t.TempDir(), "pasture-hooks.ts")
 	if err := os.WriteFile(path, []byte(module), 0o644); err != nil {
 		t.Fatalf("write module: %v", err)
 	}
@@ -396,7 +396,7 @@ console.log(JSON.stringify({ rejected: cases.length, observationLogged: true }))
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	proof := exec.CommandContext(ctx, bun, runner)
-	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
 	output, err := proof.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatalf("Bun failure-path proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
@@ -427,6 +427,387 @@ func TestOpenCodeGeneratedOutputs_NoOperationalBd(t *testing.T) {
 }
 
 var digestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// runOpenCodeMechanics executes freshly generated production code. The fake
+// binary is a transport peer, not an encoder or a claim about host acceptance.
+func runOpenCodeMechanics(t *testing.T, script string) string {
+	t.Helper()
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode child-process proof")
+	}
+	dir := t.TempDir()
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate production plugin: %v", err)
+	}
+	modulePath := filepath.Join(dir, "plugin.ts")
+	if err := os.WriteFile(modulePath, []byte(module), 0o600); err != nil {
+		t.Fatalf("write generated plugin: %v", err)
+	}
+	fakePath := filepath.Join(dir, "fake-pasture")
+	fake := "#!" + bun + "\n" + `
+import { closeSync } from "node:fs";
+if (!process.env.PASTURE_DB_PATH) throw new Error("scratch database path is required");
+const value = JSON.parse(await Bun.stdin.text());
+const mode = value.input?.tool ?? "observation-stall";
+if (mode === "reply") {
+  process.stdout.write(value.input.body);
+  process.stderr.write(value.input.diagnostic ?? "");
+  process.exitCode = value.input.exitCode ?? 0;
+} else {
+  // Keep the actual process alive without using a sleep to order the proof.
+  Bun.serve({ port: 0, fetch() { return new Response("held"); } });
+  if (mode === "exit-stall" || mode === "stderr-stall") closeSync(1);
+  if (mode === "exit-stall" || mode === "stdout-stall") closeSync(2);
+}
+`
+	if err := os.WriteFile(fakePath, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write actual fake child: %v", err)
+	}
+	runner := filepath.Join(dir, "proof.ts")
+	preamble := fmt.Sprintf(`
+import assert from "node:assert/strict";
+const { default: plugin } = await import(%q);
+const hooks = await plugin.server({ client: {} });
+const children = [];
+const originalSpawn = Bun.spawn;
+Bun.spawn = (options) => {
+  const child = originalSpawn(options);
+  const record = { child, kills: 0, reaped: false };
+  children.push(record);
+  const exited = child.exited.then((code) => {
+    record.reaped = true;
+    return code;
+  });
+  return new Proxy(child, {
+    get(target, key) {
+      if (key === "exited") return exited;
+      if (key === "kill") return (...args) => {
+        record.kills++;
+        return target.kill(...args);
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+};
+async function bounded(promise, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(label + " exceeded its 12s condition bound")), 12000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function gate(input) {
+  const args = { path: "unchanged", nested: [1, true, null] };
+  const output = { args };
+  let failure;
+  try {
+    await bounded(hooks["tool.execute.before"](input, output), "whole-child completion");
+  } catch (error) {
+    failure = error;
+  }
+  assert.strictEqual(output.args, args, "native args identity on every outcome");
+  assert.deepEqual(args, { path: "unchanged", nested: [1, true, null] }, "native args content");
+  return failure;
+}
+try {
+`, modulePath)
+	cleanup := `
+  console.log("mechanics assertions passed");
+} finally {
+  Bun.spawn = originalSpawn;
+  // Also reap a timer-removal mutant after the named bounded assertion fails.
+  for (const { child } of children) {
+    if (child.exitCode === null) child.kill("SIGKILL");
+    await child.exited;
+  }
+}
+`
+	if err := os.WriteFile(runner, []byte(preamble+script+cleanup), 0o600); err != nil {
+		t.Fatalf("write Bun mechanics proof: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bun, runner)
+	cmd.Env = append(os.Environ(), "PASTURE_BIN="+fakePath, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err != nil {
+		t.Fatalf("generated OpenCode mechanics assertion failed: %v (outer bound: %v)\nstdout: %s\nstderr: %s", err, ctx.Err(), stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "mechanics assertions passed") {
+		t.Fatalf("Bun did not reach the mechanics assertions: %s", stdout.String())
+	}
+	return stderr.String()
+}
+
+func TestOpenCodeGeneratedPluginClosedResponses(t *testing.T) {
+	runOpenCodeMechanics(t, `
+  const reason = "  role cannot write\nretain this exact reason  ";
+  const denied = await gate({ tool: "reply", body: JSON.stringify({ decision: "deny", reason }) });
+  assert(denied instanceof Error, "valid Deny rejects the callback");
+  assert.equal(denied.message, reason, "valid Deny is reason-only, not installation advice");
+  const invalid = [
+    "not-json", "null", "[]", "[1]", "true", "7", '"proceed"', "{}",
+    '{"decision":"unknown"}', '{"decision":null}', '{"decision":1}',
+    '{"decision":"proceed","reason":"extra"}', '{"decision":"proceed","extra":true}',
+    '{"decision":"deny"}', '{"decision":"deny","reason":""}',
+    '{"decision":"deny","reason":null}', '{"decision":"deny","reason":7}',
+    '{"decision":"deny","reason":true}', '{"decision":"deny","reason":[]}',
+    '{"decision":"deny","reason":["x"]}', '{"decision":"deny","reason":{"length":1}}',
+    '{"decision":"deny","reason":{}}', '{"decision":"deny","reason":"x","extra":0}',
+    '{"reason":"missing decision"}',
+  ];
+  for (const body of invalid) {
+    const failure = await gate({ tool: "reply", body });
+    assert(failure instanceof Error, "invalid response accepted: " + body);
+    assert.match(failure.message, /pasture hook lifecycle response/, "response fault, not a policy Deny: " + body);
+    assert.match(failure.message, /tool.execute.before/, "fault names event: " + body);
+    assert.match(failure.message, /verify PASTURE_BIN and the generated OpenCode/, "response fault configuration advice: " + body);
+  }
+  assert.equal(await gate({ tool: "reply", body: '{"decision":"proceed"}' }), undefined, "exact Proceed accepted");
+  const nonzero = await gate({ tool: "reply", body: '{"decision":"deny","reason":"not a decision at nonzero"}', diagnostic: "synthetic lifecycle diagnostic", exitCode: 7 });
+  assert.match(nonzero.message, /exited 7: synthetic lifecycle diagnostic; verify PASTURE_BIN and the generated OpenCode/, "nonzero remains invocation fault");
+`)
+}
+
+func TestOpenCodeGeneratedPluginBoundsWholeChildAndReaps(t *testing.T) {
+	runOpenCodeMechanics(t, `
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...args) => logged.push(args.join(" "));
+  try {
+    await Promise.all([
+      ...["stdout-stall", "stderr-stall", "exit-stall"].map(async (tool) => {
+        const start = performance.now();
+        const failure = await gate({ tool });
+        assert(failure instanceof Error, tool + " must fault");
+        assert.match(failure.message, /timed out after 8000 ms/, tool + " must hit the plugin timer, not the test bound");
+        assert.match(failure.message, /verify PASTURE_BIN and the generated OpenCode/, tool + " retains configuration advice");
+        assert(performance.now() - start >= 7900, "actual 8s timer was not shortened");
+      }),
+      bounded(hooks.event({ event: { type: "session.created" } }), "observation completion"),
+    ]);
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(logged.length, 1, "observation logs once and continues");
+  assert.match(logged[0], /observation failed for session.created:.*timed out after 8000 ms/);
+  assert.equal(children.length, 4, "all stalled real children were invoked");
+  for (const record of children) {
+    assert(record.kills > 0, "stalled actual child was killed");
+    assert(record.reaped, "callback waits for child reaping");
+    assert.equal(record.child.signalCode, "SIGKILL", "force kill, not a cooperative exit");
+    assert.throws(() => process.kill(record.child.pid, 0), { code: "ESRCH" }, "no surviving process or zombie");
+  }
+`)
+}
+
+func TestOpenCodeGeneratedPluginClearsTimerAfterCompletion(t *testing.T) {
+	runOpenCodeMechanics(t, `
+  const originalSet = globalThis.setTimeout;
+  const originalClear = globalThis.clearTimeout;
+  const pending = new Map();
+  let scheduled = 0;
+  globalThis.setTimeout = (callback, ms, ...args) => {
+    const handle = originalSet(callback, ms, ...args);
+    if (ms === 8000) {
+      scheduled++;
+      pending.set(handle, () => callback(...args));
+    }
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    pending.delete(handle);
+    originalClear(handle);
+  };
+  try {
+    for (const exitCode of [0, 7]) {
+      const failure = await gate({ tool: "reply", body: '{"decision":"proceed"}', exitCode });
+      assert.equal(Boolean(failure), exitCode !== 0, "healthy/nonzero outcome before timer cleanup check");
+      const record = children.at(-1);
+      assert(record.reaped, "completed child is reaped");
+      // Advance only still-live timer callbacks after completion. This is a
+      // deterministic late-kill negative control, not a sleep-based ordering.
+      for (const [handle, fire] of pending) {
+        originalClear(handle);
+        fire();
+      }
+      assert.equal(record.kills, 0, "timer must not kill after healthy or nonzero completion");
+      assert.equal(pending.size, 0, "whole-child timer cleared on resolution and rejection");
+    }
+    assert.equal(scheduled, 2, "one real 8s timer per child");
+  } finally {
+    for (const handle of pending.keys()) originalClear(handle);
+    globalThis.setTimeout = originalSet;
+    globalThis.clearTimeout = originalClear;
+  }
+`)
+}
+
+func TestOpenCodeGeneratedPluginDrainsBothPipesVerbatim(t *testing.T) {
+	stderr := runOpenCodeMechanics(t, `
+  // Both streams exceed ordinary pipe capacity. Sequential draining would
+  // deadlock a writer that fills stderr before closing stdout.
+  const diagnostic = "  diagnostic α\n".repeat(32768);
+  const failure = await gate({
+    tool: "reply",
+    body: " ".repeat(262144) + '{"decision":"proceed"}',
+    diagnostic,
+  });
+  assert.equal(failure, undefined, "both large streams drain before the 8s bound");
+  assert(children[0].reaped, "healthy child reaped before return");
+  assert.equal(children[0].kills, 0, "healthy child was not killed");
+`)
+	want := strings.Repeat("  diagnostic α\n", 32768)
+	if stderr != want {
+		t.Fatalf("child diagnostic forwarding changed bytes: got %d bytes, want exact %d bytes", len(stderr), len(want))
+	}
+}
+
+func TestOpenCodeGeneratedPluginForwardingFailureCleansListeners(t *testing.T) {
+	runOpenCodeMechanics(t, `
+  const { Writable } = await import("node:stream");
+  const original = Object.getOwnPropertyDescriptor(process, "stderr");
+  for (const mode of ["failed-write", "closed", "close-during-write"]) {
+    const sink = new Writable({
+      write(chunk, encoding, callback) {
+        if (mode === "close-during-write") {
+          this.destroy();
+          return;
+        }
+        callback(new Error("controlled diagnostic sink failure"));
+      },
+    });
+    if (mode === "closed") {
+      await new Promise((resolve) => {
+        sink.once("close", resolve);
+        sink.destroy();
+      });
+    }
+    let failure;
+    let listeners;
+    try {
+      Object.defineProperty(process, "stderr", { configurable: true, value: sink });
+      failure = await gate({ tool: "reply", body: '{"decision":"proceed"}', diagnostic: "must not disappear" });
+      listeners = [sink.listenerCount("error"), sink.listenerCount("close")];
+    } finally {
+      Object.defineProperty(process, "stderr", original);
+      sink.destroy();
+    }
+    assert(failure instanceof Error, mode + " must reject, not silently proceed");
+    assert.match(failure.message, /diagnostic forwarding for tool.execute.before failed/, mode + " identifies forwarding fault");
+    assert.match(failure.message, /restore the OpenCode standard-error sink and retry/, mode + " gives sink repair advice");
+    assert.deepEqual(listeners, [0, 0], mode + " leaves no error or close listeners");
+    assert(children.at(-1).reaped, mode + " has already reaped the healthy child");
+    assert.equal(children.at(-1).kills, 0, mode + " does not kill a completed child");
+  }
+`)
+}
+
+func TestOpenCodeGeneratedPluginEmptyBodyDiagnostic(t *testing.T) {
+	stderr := runOpenCodeMechanics(t, `
+  const logged = [];
+  const originalError = console.error;
+  console.error = (...values) => logged.push(values.join(" "));
+  let failure;
+  try {
+    failure = await gate({ tool: "reply", body: " \n\t", diagnostic: "  old binary diagnostic α" });
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(failure, undefined, "empty-body belt continues unevaluated");
+  assert.equal(logged.length, 1, "empty-body belt logs once");
+  assert.match(logged[0], /did not evaluate tool.execute.before/, "empty-body diagnostic names event");
+  assert.match(logged[0], /Read the pasture diagnostic on standard error first/, "empty-body diagnostic directs operator to forwarded bytes");
+`)
+	if stderr != "  old binary diagnostic α\n" {
+		t.Fatalf("empty-body diagnostic = %q, want exact child bytes plus the existing terminal newline", stderr)
+	}
+}
+
+func TestOpenCodeGeneratedPluginBoundsPipesAfterExit(t *testing.T) {
+	runOpenCodeMechanics(t, `
+  const spawn = Bun.spawn;
+  const canceled = [];
+  Bun.spawn = (options) => {
+    const child = spawn(options);
+    const index = children.length - 1;
+    const pipe = index === 0 ? "stdout" : "stderr";
+    // An externally held pipe after a real child exits. Stream cancellation
+    // is observable independently of child.exited; no descendant is orphaned.
+    const held = new ReadableStream({ cancel() { canceled.push(pipe); } });
+    return new Proxy(child, {
+      get(target, key) {
+        if (key === pipe) return held;
+        return Reflect.get(target, key);
+      },
+    });
+  };
+  await Promise.all([0, 1].map(async () => {
+    const failure = await gate({ tool: "reply", body: '{"decision":"proceed"}' });
+    assert.match(failure?.message ?? "", /timed out after 8000 ms/, "drains remain bounded after actual exit");
+  }));
+  assert.deepEqual(canceled.sort(), ["stderr", "stdout"], "both stuck readers canceled");
+  for (const record of children) {
+    assert(record.reaped, "already exited child was still reaped");
+    assert.equal(record.child.exitCode, 0, "direct child actually exited normally before pipe timeout");
+  }
+`)
+}
+
+func TestOpenCodeGeneratedPluginCleansUpReadFailure(t *testing.T) {
+	runOpenCodeMechanics(t, `
+  const originalSet = globalThis.setTimeout;
+  const originalClear = globalThis.clearTimeout;
+  const timers = new Set();
+  globalThis.setTimeout = (callback, ms, ...args) => {
+    const handle = originalSet(callback, ms, ...args);
+    if (ms === 8000) timers.add(handle);
+    return handle;
+  };
+  globalThis.clearTimeout = (handle) => {
+    timers.delete(handle);
+    originalClear(handle);
+  };
+  const spawn = Bun.spawn;
+  let canceled = false;
+  Bun.spawn = (options) => {
+    const child = spawn(options);
+    const broken = new ReadableStream({ start(controller) { controller.error(new Error("synthetic read failure")); } });
+    const held = new ReadableStream({ cancel() { canceled = true; } });
+    return new Proxy(child, {
+      get(target, key) {
+        if (key === "stdout") return broken;
+        if (key === "stderr") return held;
+        return Reflect.get(target, key);
+      },
+    });
+  };
+  try {
+    const failure = await gate({ tool: "exit-stall" });
+    assert.match(failure?.message ?? "", /synthetic read failure; verify PASTURE_BIN/, "read failure is an invocation fault");
+    assert(canceled, "other pending reader canceled on rejection");
+    assert(children[0].reaped, "read failure reaps actual child");
+    assert.equal(children[0].child.signalCode, "SIGKILL", "read failure kills actual child");
+    assert.equal(timers.size, 0, "rejected drain clears timer");
+  } finally {
+    for (const handle of timers) originalClear(handle);
+    globalThis.setTimeout = originalSet;
+    globalThis.clearTimeout = originalClear;
+  }
+`)
+}
 
 func TestOpenCodeTargetDescriptor_BundleManifestOracle(t *testing.T) {
 	desc, err := NewOpenCodeTargetDescriptor()
@@ -606,7 +987,7 @@ console.log(JSON.stringify({ continued: true, argsUnchanged: true }));
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	proof := exec.CommandContext(ctx, bun, runner)
-	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
 	// THE STREAMS ARE READ APART, AND THIS USED TO BE CombinedOutput. The
 	// assertion below required the combined bytes to EQUAL the confirmation, so
 	// the contract it stated was "the plugin emits nothing on any stream except

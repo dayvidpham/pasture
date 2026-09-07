@@ -4991,13 +4991,24 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			// on the validating parser, where every clause of the reason is
 			// true; this drives it where one clause is not, which is the case
 			// the single-harness sweep could not see.
-			Name:            "a renamed identity on a parser that decodes into a struct",
+			Name:            "a renamed identity on a parser that ignores extra members but matches names exactly",
 			Harness:         "codex",
 			Payload:         []byte(`{"renamed":"s","hook_event_name":"PreToolUse"}`),
-			Says:            "an identity field is missing or unusable",
+			Says:            "an identity field is missing, renamed or unusable",
 			Tells:           identityAdvice,
 			NamesIdentities: true,
 			IdentityClause:  "; the identities this event requires are session, turn, tool-call.",
+			MentionsVersion: true,
+		},
+		{
+			Name:            "a renamed identity on a parser that decodes into a struct",
+			Harness:         "opencode",
+			Event:           "tool.execute.before",
+			Payload:         []byte(`{"input":{"renamed":"s","callID":"c","tool":"read"},"output":{"args":{}}}`),
+			Says:            "an identity field is missing or unusable",
+			Tells:           identityAdvice,
+			NamesIdentities: true,
+			IdentityClause:  "; the identities this event requires are session, tool-call.",
 			MentionsVersion: true,
 		},
 		{
@@ -5061,6 +5072,8 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			}
 			if harness == "codex" {
 				version = "0.153.0"
+			} else if harness == "opencode" {
+				version = "1.18.29"
 			}
 			run := runLifecycleHookOn(t, binary, database,
 				harness, event, version, row.Payload)
@@ -6418,10 +6431,9 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 // every reader, by harness name, that a member the registration does not
 // declare is refused and that identity field names must match exactly. Claude
 // validates the member set and looks names up in a map, so both hold there.
-// Codex and OpenCode decode into a struct: an added member is IGNORED and the
-// event is recorded, and a field name matches case-insensitively. A Codex
-// operator was sent to remove a field that was never the problem and to
-// re-spell names that already bind.
+// Codex now ignores added members but looks up identity names exactly, while
+// OpenCode's struct decoder ignores added members and matches names without
+// case sensitivity. The advice must follow each of those independent traits.
 //
 // THE EXPECTATION IS TAKEN FROM THE PARSER, NOT FROM THE DISPATCH ROW. The
 // first version asserted the lenient wording on the harness whose row said
@@ -6443,7 +6455,7 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 //
 // MUTATION: set refusesUndeclaredMembers or matchesFieldNamesExactly true on a
 // lenient harness's dispatch row, or make a lenient parser strict while its row
-// stays false (decode with DisallowUnknownFields in the Codex ingress). The
+// stays false (for example, reject undeclared members in the OpenCode ingress). The
 // subtest for that harness turns RED.
 func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 	t.Parallel()

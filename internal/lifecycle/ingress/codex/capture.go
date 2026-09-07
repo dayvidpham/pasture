@@ -40,44 +40,55 @@ func Parse(raw []byte, event registration.Event, observedVersion string, envelop
 	result.Delivery = receipt.Delivery{Contract: manifest.Contract, Event: event.Kind, Envelope: envelope, Body: validation.Body}
 
 	if validation.Disposition == model.CaptureValid {
-		var value payload
-		if err := json.Unmarshal(validation.Body, &value); err != nil {
+		// The caller selects a pinned event; it cannot replace that event's
+		// required fields with a weaker, caller-authored registration row.
+		pinned, err := ingress.EventByNativeName(manifest, event.NativeName)
+		var value map[string]json.RawMessage
+		if err != nil || pinned.Kind != event.Kind {
+			result.Disposition = model.CaptureUnsupportedSchema
+		} else if err := json.Unmarshal(validation.Body, &value); err != nil {
 			result.Disposition = model.CaptureMalformed
 		} else {
-			result.Disposition, result.Delivery.Bindings = bindingsFor(event.NativeName, value)
+			result.Disposition, result.Delivery.Bindings = bindingsFor(pinned, value)
 		}
 	}
 	result.Delivery.Capture = result.Disposition
 	return result
 }
 
-// payload holds only the native correlation fields extracted at ingress. All
-// other keys in the command-hook stdin JSON remain in the retained body.
-type payload struct {
-	SessionID string `json:"session_id"`
-	TurnID    string `json:"turn_id"`
-	ToolUseID string `json:"tool_use_id"`
-}
-
-func bindingsFor(nativeName string, value payload) (model.CaptureDisposition, []model.NativeBinding) {
-	switch nativeName {
-	case "SessionStart":
-		if value.SessionID == "" {
-			return model.CaptureUnsupportedSchema, nil
-		}
-		return model.CaptureValid, []model.NativeBinding{
-			{Kind: model.BindingSession, NativeName: "session_id", Value: value.SessionID},
-		}
-	case "PreToolUse":
-		if value.SessionID == "" || value.TurnID == "" || value.ToolUseID == "" {
-			return model.CaptureUnsupportedSchema, nil
-		}
-		return model.CaptureValid, []model.NativeBinding{
-			{Kind: model.BindingSession, NativeName: "session_id", Value: value.SessionID},
-			{Kind: model.BindingTurn, NativeName: "turn_id", Value: value.TurnID},
-			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: value.ToolUseID},
-		}
-	default:
+// bindingsFor reads only the identities declared by the generated pinned
+// catalogue. fieldNames is generated from the same source. Unknown payload
+// members stay in the exact retained body and never become bindings.
+func bindingsFor(event registration.Event, value map[string]json.RawMessage) (model.CaptureDisposition, []model.NativeBinding) {
+	var nativeName string
+	if err := json.Unmarshal(value["hook_event_name"], &nativeName); err != nil {
 		return model.CaptureUnsupportedSchema, nil
 	}
+	if nativeName != event.NativeName {
+		return model.CaptureUnsupportedSchema, nil
+	}
+	bindings := make([]model.NativeBinding, 0, len(event.Identities))
+	for _, identity := range event.Identities {
+		name, declared := fieldNames[identity.Field]
+		if !declared {
+			return model.CaptureUnsupportedSchema, nil
+		}
+		wire, present := value[name]
+		if !present {
+			if identity.Required {
+				return model.CaptureUnsupportedSchema, nil
+			}
+			continue
+		}
+		var text string
+		if err := json.Unmarshal(wire, &text); err != nil {
+			return model.CaptureMalformed, nil
+		}
+		binding := model.NativeBinding{Kind: identity.Binding, NativeName: name, Value: text}
+		if err := model.ValidateNativeBinding(binding); err != nil {
+			return model.CaptureUnsupportedSchema, nil
+		}
+		bindings = append(bindings, binding)
+	}
+	return model.CaptureValid, bindings
 }

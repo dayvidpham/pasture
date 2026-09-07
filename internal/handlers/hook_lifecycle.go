@@ -123,18 +123,14 @@ type lifecycleDispatch struct {
 	//
 	// IT IS A ROW FIELD BECAUSE THE ANSWER DIFFERS PER PARSER AND THE ADVICE
 	// NAMED THE HARNESS. Claude validates the member set against the allowed
-	// fields and refuses an extra one; Codex and OpenCode decode into a struct,
-	// so an added member is IGNORED and the event is recorded — measured, rc 0
-	// with zero bytes on standard error. The refusal text told a Codex operator
-	// BY NAME that added members are refused and that identity names must match
-	// exactly, and both halves are false of that parser. The advice is derived
-	// from this row rather than written once for whichever harness the author
-	// had in mind.
+	// fields and refuses an extra one; Codex extracts declared identities from
+	// a map and OpenCode decodes into a struct, so both ignore added members.
+	// The advice is derived from this row rather than written once for whichever
+	// harness the author had in mind.
 	refusesUndeclaredMembers bool
 	// matchesFieldNamesExactly says whether identity field names must match
-	// the registration's spelling. Claude looks names up in a map, so they
-	// must; the struct decoders accept a case-insensitive match, so SESSION_ID
-	// and sessionid bind where the advice said they would not.
+	// the registration's spelling. Claude and Codex look names up in a map;
+	// OpenCode's struct decoder accepts a case-insensitive match.
 	matchesFieldNamesExactly bool
 }
 
@@ -207,11 +203,10 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 		bind:    codexfrontend.Bind,
 		encode:  nativeresponse.EncodeCodex,
 		mapping: mappingLookup(pastureruntime.Codex0_153_0Lifecycle()),
-		// Same decoder shape as OpenCode: an added member is ignored and the
-		// event is recorded. Measured on the built binary, rc 0 with zero bytes
-		// on standard error.
+		// Declared identity names are exact map keys. Unrelated members remain
+		// in the captured body without participating in identity extraction.
 		refusesUndeclaredMembers: false,
-		matchesFieldNamesExactly: false,
+		matchesFieldNamesExactly: true,
 	},
 }
 

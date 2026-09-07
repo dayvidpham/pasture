@@ -13,7 +13,6 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
-	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
@@ -22,20 +21,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
-// enabledCodexActivation is the injected pre-activation configuration used by
-// the production proof. The committed Codex catalog now enables the two
-// accepted events (SessionStart, PreToolUse) at M3 UAT; this helper exercises
-// the same durable handler path by injecting an enabled manifest for the
-// production proof. The handler gates on State==Enabled only, so this is the
-// activation configuration the committed manifest supplies — not a separate
-// test-only code path.
-func enabledCodexActivation() []activation.Entry {
-	return []activation.Entry{
-		{Event: registration.EventCodexSessionStart, State: activation.Enabled},
-		{Event: registration.EventCodexPreToolUse, State: activation.Enabled},
-	}
-}
-
 func codexFixture(t *testing.T, name string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "codex", "testdata", "fixtures", name))
@@ -43,16 +28,11 @@ func codexFixture(t *testing.T, name string) []byte {
 	return raw
 }
 
-// TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage proves the
-// committed production Codex activation catalog withholds every non-selected
-// event before any stdin or storage access, mirroring the accepted M2
-// enforcement pattern. After M3 UAT the two accepted events (SessionStart,
-// PreToolUse) are enabled, so this refusal proof uses non-selected catalog
-// events (Stop, PostToolUse) and no activation is injected: the statically
-// dispatched production manifest activation.Codex0_153_0() governs admission.
-func TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage(t *testing.T) {
+// Unsupported native names still refuse before input or storage, even when
+// every registered Codex event is enabled. No valid event is held back here.
+func TestHookLifecycleResponseRejectsUnsupportedCodexBeforeInputAndStorage(t *testing.T) {
 	t.Parallel()
-	for _, event := range []string{"Stop", "PostToolUse"} {
+	for _, event := range []string{"NotRegistered", "SessionStarted"} {
 		event := event
 		t.Run(event, func(t *testing.T) {
 			t.Parallel()
@@ -62,7 +42,7 @@ func TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage(t *testi
 				DBPath: dbPath, Harness: ir.HarnessCodex, Event: event, HostVersion: registration.Codex0_153_0().Version,
 				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.codex"},
 			})
-			require.ErrorContains(t, err, `Codex event "`+event+`" is withheld (reason outside-target-set)`)
+			require.ErrorContains(t, err, `declares no native event named "`+event+`"`)
 			require.False(t, response.IsValid(), "withheld Codex event must emit no host response")
 			require.Zero(t, input.reads, "withheld Codex event must be rejected before stdin access")
 			_, statErr := os.Stat(dbPath)
@@ -72,15 +52,12 @@ func TestHookLifecycleResponseRejectsWithheldCodexBeforeInputAndStorage(t *testi
 }
 
 // TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes
-// drives the two authentic Codex fixtures through the real durable handler with
-// an injected enabled activation configuration. It proves, on the production
+// drives authentic Codex fixtures through the real durable handler with
+// the production activation configuration. It proves, on the production
 // path, that the durable receipt commits before the response is available for
 // native encoding, that the native continuation bytes match the pinned golden
 // shapes, and that the persisted evidence is provider-correct on bounded
 // public read-back.
-//
-// FAILS until the L3 static Codex dispatch, activation override, and native
-// encoder wiring land.
 func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -124,6 +101,24 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 				runtime.IdentityToolCall: "tool_use_id",
 			},
 		},
+		{
+			name: "Stop gate", fixture: "stop_0_153_0.json", event: "Stop",
+			kind: registration.EventCodexStop, semantic: runtime.SemanticGateConsultation,
+			wantResponse: true, wantNative: []byte(`{"continue":true}`),
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", receipt.CurrentConsultationEvidenceKind()},
+			wantIdentities: map[runtime.NativeIdentityKind]string{
+				runtime.IdentitySession: "session_id", runtime.IdentityTurn: "turn_id",
+			},
+		},
+		{
+			name: "PostToolUse gate", fixture: "post_tool_use_0_153_0.json", event: "PostToolUse",
+			kind: registration.EventCodexPostToolUse, semantic: runtime.SemanticGateConsultation,
+			wantResponse: true, wantNative: []byte(`{"continue":true}`),
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", receipt.CurrentConsultationEvidenceKind()},
+			wantIdentities: map[runtime.NativeIdentityKind]string{
+				runtime.IdentitySession: "session_id", runtime.IdentityTurn: "turn_id", runtime.IdentityToolCall: "tool_use_id",
+			},
+		},
 	}
 	for _, tc := range tests {
 		tc := tc
@@ -140,7 +135,6 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_153_0().Version,
 				Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.codex." + tc.name},
-				Activations: enabledCodexActivation(),
 			})
 			require.NoError(t, err)
 			require.Equal(t, tc.wantResponse, response.IsValid())

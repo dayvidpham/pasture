@@ -514,8 +514,11 @@ contracts:
       by_event:
         SessionStart:
           - session:session_id:required
-        SessionEnd: []
-        Interrupt: []
+        SessionEnd:
+          - session:session_id:required
+        Interrupt:
+          - session:session_id:required
+          - turn:turn_id:required
         PreToolUse:
           - session:session_id:required
           - turn:turn_id:required

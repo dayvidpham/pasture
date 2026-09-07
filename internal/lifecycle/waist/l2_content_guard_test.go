@@ -179,6 +179,7 @@ func TestEveryProfileRowIsTiedToOneRegistrationRow(t *testing.T) {
 		declared := row.mapping.Identities()
 		if len(event.Identities) == 0 && len(declared) > 0 {
 			silent++
+			t.Logf("registration identity gap: %s", row.name())
 		}
 		require.LessOrEqual(t, len(event.Identities), len(declared),
 			"registration row %s declares %d identities but its profile row declares %d; a registration may not lift a field into an L2 that the profile does not declare as correlation", row.name(), len(event.Identities), len(declared))
@@ -211,9 +212,9 @@ func TestEveryProfileRowIsTiedToOneRegistrationRow(t *testing.T) {
 
 // registrationSilentOnIdentitiesRows is the number of profile rows whose
 // registration row declares no identity while the profile declares at least
-// one. They are the unproven Codex and OpenCode rows whose ingress catalogue
-// has not been completed yet.
-const registrationSilentOnIdentitiesRows = 19
+// one. The remaining gaps are OpenCode rows whose ingress catalogue has not
+// been completed; the captured Codex rows now declare their identities.
+const registrationSilentOnIdentitiesRows = 11
 
 // memberNames returns the sorted member names of one JSON object.
 func memberNames(t *testing.T, raw json.RawMessage, what string) ([]string, map[string]json.RawMessage) {
