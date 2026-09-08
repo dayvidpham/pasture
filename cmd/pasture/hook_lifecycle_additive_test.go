@@ -91,13 +91,13 @@ func TestClaudeAddedMembersDoNotRescueRequiredContractDefects(t *testing.T) {
 func TestClaudeAddedMembersCannotActivateWithheldEvent(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)
-	raw := claudeFixture(t, "file_changed_2_1_263.json")
+	raw := claudeFixture(t, "notification_2_1_261.json")
 	expanded := withTopLevelMember(t, raw, "future_host_metadata", `{"enable":true}`)
 	database := filepath.Join(t.TempDir(), "pasture.db")
-	run := runLifecycleHookOn(t, binary, database, "claude-code", "FileChanged", "2.1.300", expanded)
+	run := runLifecycleHookOn(t, binary, database, "claude-code", "Notification", "2.1.300", expanded)
 	require.Equal(t, 0, run.ExitCode)
 	require.Empty(t, run.Stdout)
-	require.Contains(t, run.Stderr, `event "FileChanged" is withheld`)
+	require.Contains(t, run.Stderr, `event "Notification" is withheld`)
 	_, err := os.Stat(database)
 	require.ErrorIs(t, err, os.ErrNotExist, "added evidence must not bypass the event activation gate")
 }

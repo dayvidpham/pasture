@@ -87,6 +87,7 @@ func TestCodexEvidenceLeavesOpenCodeAndClaudeActivationUnchanged(t *testing.T) {
 		registration.EventPostToolUse,
 		registration.EventPostToolUseFailure,
 		registration.EventPostToolBatch,
+		registration.EventFileChanged,
 		registration.EventPreCompact,
 		registration.EventPostCompact,
 	}, enabledEvents(claude), "the accepted Claude enabled set must be unchanged")
