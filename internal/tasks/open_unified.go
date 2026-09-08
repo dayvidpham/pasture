@@ -244,11 +244,9 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 		return nil, err
 	}
 
-	// Open Provenance on the same file. provenance.OpenSQLite manages its
-	// own *sql.DB handle (separate from auditDB). Both handles target the
-	// same on-disk file via the modernc/sqlite driver; WAL mode + the
-	// profile's busy_timeout (applied via the shared DSN on the pasture
-	// handles) provide cross-handle serialisation.
+	// Provenance borrows auditDB, not the audit trail's separate pool. The
+	// returned tracker owns auditDB and must close it after the borrower has
+	// drained its scopes; closing Provenance alone never closes this pool.
 	prov, err := provenance.OpenBorrowedSQLite(auditDB)
 	if err != nil {
 		_ = auditDB.Close()

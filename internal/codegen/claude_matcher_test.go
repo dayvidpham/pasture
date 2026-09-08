@@ -98,7 +98,7 @@ func TestClaudeLifecycleMatchersFollowTargetDeclarations(t *testing.T) {
 			if group.Matcher == nil || *group.Matcher != want {
 				t.Errorf("%s generated row = %s, want matcher string %q", event.NativeName, encoded, want)
 			}
-			wantCommand := `${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event ` + event.NativeName + ` --host-version "${CLAUDE_CODE_VERSION:-unknown}"`
+			wantCommand := `"${PASTURE_BIN:-pasture}" hook lifecycle --harness claude-code --event ` + event.NativeName + ` --host-executable "${CLAUDE_CODE_EXECPATH:-}"`
 			if len(group.Hooks) != 1 || group.Hooks[0].Command != wantCommand || group.Hooks[0].Type != "command" || group.Hooks[0].Timeout != 10 {
 				t.Errorf("%s lifecycle command changed: %s", event.NativeName, encoded)
 			}

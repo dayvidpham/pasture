@@ -31,6 +31,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -488,13 +489,12 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 // are. If this test becomes too slow, the answer is to run it less often, not
 // to measure something else.
 //
-// THE CHILD IS THE RACE-INSTRUMENTED ONE, and this is the only proof that runs
-// it. Every other built-binary proof runs the plain shared child, because the
-// paths it drives are already read by the race detector in-process (see
-// lifecycleBinary). Here the thing under proof is a live process contending
+// The child is race-instrumented, as is the rebuild-index operator proof family.
+// Ordinary unrelated built-binary proofs retain the plain shared child. Here
+// the thing under proof is a live process contending
 // with a second opener for the real write lock while its deadline runs, and
 // that contention exists only across the process boundary, so the detector has
-// to ride in the child to read it. TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild
+// to ride in the child to read it. TestRaceChildrenServeOnlyDeclaredProofFamilies
 // holds this arrangement.
 func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testing.T) {
 	t.Parallel()
@@ -596,41 +596,41 @@ func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testin
 		"the durable record must agree with the host-facing diagnostic about which path ran")
 }
 
-// TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild pins the child-binary
-// arrangement that keeps this package's wall time down without losing its one
-// live-process race proof.
+// TestRaceChildrenServeOnlyDeclaredProofFamilies pins the deliberate choice of
+// race-instrumented children for the held-lock and rebuild-index proof families.
 //
 // The arrangement has three parts, and a drift in any one of them would leave
 // the package green while the proofs quietly changed what they measure:
 //
-//   - The held-lock deadline proof runs raceLifecycleBinary, and not the plain
-//     child. Pointed at the plain child it would still pass, still bound the
-//     elapsed time, and its doc would claim a detector that was not there.
+//   - The held-lock deadline proof and newRebuildCLI helper run the race child,
+//     never the plain child. Their functional assertions alone do not prove
+//     that a detector ran in the child process.
 //   - raceLifecycleBinary is built with -race and lifecycleBinary is not. This
 //     is read from the BUILD SETTINGS recorded in each binary, not from the
 //     helper's source: a build whose flags drifted would carry different
 //     settings whatever its source said.
-//   - No other test runs the race child. The plain child exists because a
-//     race-instrumented child costs 20x per invocation; a second caller of the
-//     race child is the cost coming back one test at a time, and it should
-//     arrive as a decision written here, not as a slow run.
+//   - Only these two callers and this build-settings guard use the race child.
+//     Its extra cost is accepted for both proof families, not silently imposed
+//     on unrelated CLI tests. A new caller requires a deliberate inventory change.
 //
-// WHAT IT VISITS: every test function declared in this package's test files,
+// WHAT IT VISITS: every function declared in this package's test files,
 // for the two identifiers it asks about; and the build settings of the two
 // shared children.
 // WHAT IT DOES NOT READ: whether either child is up to date with the source,
-// or whether the held-lock proof's assertions still hold; the proof itself
-// does that.
-func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
+// or whether either proof family's functional assertions hold; those tests do
+// that. MUTATION: switch newRebuildCLI to lifecycleBinary; this guard must fail.
+func TestRaceChildrenServeOnlyDeclaredProofFamilies(t *testing.T) {
 	t.Parallel()
 
 	const heldLockProof = "TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked"
-	const thisPin = "TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild"
+	const rebuildHelper = "newRebuildCLI"
+	const thisPin = "TestRaceChildrenServeOnlyDeclaredProofFamilies"
 
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err, "the package directory must be readable to find the tests it declares")
 	callers := map[string][]string{}
 	heldLockFound := false
+	rebuildFound := false
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
 			continue
@@ -658,11 +658,15 @@ func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
 			if function.Name.Name == heldLockProof {
 				heldLockFound = true
 			}
+			if function.Name.Name == rebuildHelper {
+				rebuildFound = true
+			}
 		}
 	}
 	require.True(t, heldLockFound,
 		"the held-lock proof %s is not declared in this package; if it was renamed, rename it here too, "+
 			"or this pin holds nothing", heldLockProof)
+	require.True(t, rebuildFound, "the rebuild-index helper %s must exist; otherwise this pin holds nothing", rebuildHelper)
 	require.NotEmpty(t, callers["lifecycleBinary"],
 		"no test calls lifecycleBinary; the built-binary proofs must run the plain shared child, and an "+
 			"empty population here means the walk found nothing and every assertion below is vacuous")
@@ -672,21 +676,23 @@ func TestTheHeldLockProofRunsTheOnlyRaceInstrumentedChild(t *testing.T) {
 			"detector riding in the live process, and on the plain child that sentence is false")
 	assert.NotContains(t, callers["lifecycleBinary"], heldLockProof,
 		"the held-lock deadline proof must not also run the plain child")
+	assert.Contains(t, callers["raceLifecycleBinary"], rebuildHelper,
+		"the rebuild-index helper must keep its race-instrumented child")
+	assert.NotContains(t, callers["lifecycleBinary"], rebuildHelper,
+		"the rebuild-index helper must not also run the plain child")
 
 	sort.Strings(callers["raceLifecycleBinary"])
-	assert.Equal(t, []string{heldLockProof, thisPin}, callers["raceLifecycleBinary"],
-		"only the held-lock proof (and this pin, which reads the child's build settings) may run the "+
-			"race-instrumented child; a new caller pays 20x per hook invocation and must be a decision "+
-			"recorded here, not a slow run")
+	wantCallers := []string{heldLockProof, rebuildHelper, thisPin}
+	sort.Strings(wantCallers)
+	assert.Equal(t, wantCallers, callers["raceLifecycleBinary"],
+		"only the held-lock proof, rebuild-index helper and this build-settings guard may request the race child")
 
 	raceSettings := buildSettingsOf(t, raceLifecycleBinary(t))
 	plainSettings := buildSettingsOf(t, lifecycleBinary(t))
 	assert.Equal(t, "true", raceSettings["-race"],
-		"the race child must record -race=true in its build settings; without it the held-lock proof "+
-			"runs no detector and its doc is false")
+		"the race child must record -race=true so both declared proof families run a detector")
 	assert.NotEqual(t, "true", plainSettings["-race"],
-		"the plain child must not be race-instrumented; every other built-binary proof runs it, and "+
-			"instrumenting it is the 20x cost this arrangement exists to avoid")
+		"the ordinary plain child must not acquire the extra cost of race instrumentation")
 }
 
 // TestEveryTestThatReachesSharedProcessStateStaysSerial pins why the serial
@@ -1080,7 +1086,7 @@ func TestAPanicInTheWorkGoroutineIsAFaultAndNeverABlock(t *testing.T) {
 	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 	cmd.SetIn(panickingReader{message: "the host payload reader failed"})
 
-	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
+	outcome := lifecycleTestOutcome(t, cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"a pasture panic must not stop the user working")
@@ -1124,7 +1130,7 @@ func TestAPanicBeforeTheWorkStartsIsAFaultAndNeverACrash(t *testing.T) {
 	//nolint:staticcheck // A nil context is the injected fault; cobra owns this seam.
 	cmd.SetContext(nil)
 
-	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
+	outcome := lifecycleTestOutcome(t, cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"the main-path recover must turn a panic into a fault that lets the host continue")
@@ -1185,8 +1191,9 @@ func (d *trippedDeadline) derive(parent context.Context, _ time.Duration) (conte
 	}
 }
 
-// preCommitStallCeiling bounds how long a proof waits for the invocation to
-// reach the commit boundary. It is a failure ceiling and not a wait: the proof
+// preCommitStallCeiling bounds phase waits in the invocation proofs. A stalled
+// Join reports this ceiling but still waits before resource cleanup; expiry is
+// never proof of worker completion. It is a failure ceiling and not a wait: the proof
 // never passes because of it, it only fails with a sentence instead of hanging
 // until the test binary is killed. Nothing in the proof is ordered by it.
 const preCommitStallCeiling = 30 * time.Second
@@ -1202,6 +1209,8 @@ const preCommitStallCeiling = 30 * time.Second
 //  3. the committed Outcome arrives, and the barrier is released afterwards.
 //     Encoding and publication already completed at settlement, so the delayed
 //     post-commit handler cannot change the host decision.
+//  4. the test joins foreground and background completion before returning;
+//     its assertions and cleanup cannot race the delayed worker.
 //
 // No clock orders any step; the only clock in the function is the failure
 // ceiling below, which can only fail the proof, never pass it. A proof that
@@ -1213,33 +1222,36 @@ const preCommitStallCeiling = 30 * time.Second
 // one, and it is printed and never started.
 func abandonAfterTheCommit(t *testing.T, cmd *cobra.Command, decisions ...backend.Decision) hostexit.Outcome {
 	t.Helper()
+	outcome, err := abandonAfterTheCommitWithHooks(t, cmd, lifecycleTestHooks{}, decisions...)
+	require.NoError(t, err)
+	return outcome
+}
 
+func abandonAfterTheCommitWithHooks(t *testing.T, cmd *cobra.Command, hooks lifecycleTestHooks, decisions ...backend.Decision) (hostexit.Outcome, error) {
+	t.Helper()
 	barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
 	deadline := newTrippedDeadline(t)
-	outcomes := make(chan hostexit.Outcome, 1)
-	go func() {
-		outcomes <- lifecycleOutcome(cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive, decisions...)
-	}()
-
-	select {
-	case <-barrier.reached:
-	case outcome := <-outcomes:
-		close(barrier.release)
-		t.Fatalf("the invocation finished without reaching the commit boundary, so the work returned or "+
-			"faulted before the receipt committed and nothing here proves an abandonment after the "+
-			"commit; the outcome it returned instead is %+v", outcome)
-	case <-time.After(preCommitStallCeiling):
-		close(barrier.release)
-		t.Fatalf("the invocation did not reach the commit boundary within %s: the store work before the "+
-			"commit (open, migrate, blob, journal row) stalled, and no deadline in this proof can end it "+
-			"because the proof owns the deadline; look for another writer holding %s",
-			preCommitStallCeiling, flagDBPath)
+	release := sync.OnceFunc(func() { close(barrier.release) })
+	i := startLifecycleTestInvocation(t, cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive, release, hooks, decisions...)
+	defer i.Join()
+	if err := waitLifecycleHold(barrier.reached, i, hooks, "post-commit"); err != nil {
+		return hostexit.Outcome{}, err
 	}
-
 	deadline.trip()
-	outcome := <-outcomes
-	close(barrier.release)
-	return outcome
+	select {
+	case outcome := <-i.outcomes:
+		select {
+		case <-barrier.release:
+			return hostexit.Outcome{}, fmt.Errorf("post-commit hold was released before the host Outcome was observed")
+		default:
+		}
+		if hooks.observed != nil {
+			hooks.observed(outcome)
+		}
+		return outcome, nil
+	case <-hooks.failureCeiling():
+		return hostexit.Outcome{}, fmt.Errorf("post-commit expiry did not publish the committed Outcome within its test failure ceiling")
+	}
 }
 
 // Once the real receipt has committed, expiry cannot replace its Deny. This
@@ -1303,28 +1315,36 @@ func (r *preCommitReader) Read(buffer []byte) (int, error) {
 
 func expireBeforeCommit(t *testing.T, cmd *cobra.Command, raw []byte, decisions ...backend.Decision) hostexit.Outcome {
 	t.Helper()
+	outcome, err := expireBeforeCommitWithHooks(t, cmd, raw, lifecycleTestHooks{}, decisions...)
+	require.NoError(t, err)
+	return outcome
+}
+
+func expireBeforeCommitWithHooks(t *testing.T, cmd *cobra.Command, raw []byte, hooks lifecycleTestHooks, decisions ...backend.Decision) (hostexit.Outcome, error) {
+	t.Helper()
 	input := &preCommitReader{Reader: bytes.NewReader(raw), reached: make(chan struct{}), release: make(chan struct{})}
 	cmd.SetIn(input)
 	deadline := newTrippedDeadline(t)
-	outcomes := make(chan hostexit.Outcome, 1)
-	go func() {
-		outcomes <- lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), deadline.derive, decisions...)
-	}()
-	defer close(input.release)
-	select {
-	case <-input.reached:
-	case outcome := <-outcomes:
-		t.Fatalf("invocation ended before input hold: %+v", outcome)
-	case <-time.After(preCommitStallCeiling):
-		t.Fatal("invocation did not reach pre-commit input hold")
+	release := sync.OnceFunc(func() { close(input.release) })
+	i := startLifecycleTestInvocation(t, cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), deadline.derive, release, hooks, decisions...)
+	defer i.Join()
+	if err := waitLifecycleHold(input.reached, i, hooks, "pre-commit input"); err != nil {
+		return hostexit.Outcome{}, err
 	}
 	deadline.trip()
 	select {
-	case outcome := <-outcomes:
-		return outcome
-	case <-time.After(preCommitStallCeiling):
-		t.Fatal("pre-fence expiry did not return a fault")
-		return hostexit.Outcome{}
+	case outcome := <-i.outcomes:
+		select {
+		case <-input.release:
+			return hostexit.Outcome{}, fmt.Errorf("pre-commit input was released before the host Outcome was observed")
+		default:
+		}
+		if hooks.observed != nil {
+			hooks.observed(outcome)
+		}
+		return outcome, nil
+	case <-hooks.failureCeiling():
+		return hostexit.Outcome{}, fmt.Errorf("pre-fence expiry did not return a fault within its test failure ceiling")
 	}
 }
 
@@ -1355,7 +1375,7 @@ func TestExpiryBeforeCommitDoesNotEmitTheSuppliedDeny(t *testing.T) {
 // TestTheRecoverIsInstalledBeforeAnythingElseRuns pins the POSITION of the main
 // recover, which no injected input can exercise.
 //
-// The recover must be the FIRST thing lifecycleOutcome does, so that a panic in
+// The recover must precede all fallible work in lifecycleOutcome's shared core, so that a panic in
 // the coordinate read or in the environment parse is a fault and not a process
 // crash. Nothing between the top of the function and the deadline setup has a
 // seam a test can make panic, so moving the recover back down would not turn any
@@ -1370,12 +1390,12 @@ func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
 	var body []ast.Stmt
 	for _, node := range file.Decls {
 		function, isFunction := node.(*ast.FuncDecl)
-		if isFunction && function.Name.Name == "lifecycleOutcome" {
+		if isFunction && function.Name.Name == "lifecycleOutcomeWithCompletion" {
 			body = function.Body.List
 			break
 		}
 	}
-	require.NotEmpty(t, body, "lifecycleOutcome must exist to be the single exit authority")
+	require.NotEmpty(t, body, "the shared lifecycle core must exist and contain the real exit authority")
 
 	deferAt := -1
 	for index, statement := range body {
@@ -1384,7 +1404,7 @@ func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
 			break
 		}
 	}
-	require.NotEqual(t, -1, deferAt, "lifecycleOutcome must install a recover")
+	require.NotEqual(t, -1, deferAt, "the shared lifecycle core must install a recover")
 
 	// Only the declaration of the values the recover reads may precede it.
 	for index := 0; index < deferAt; index++ {
@@ -1433,18 +1453,46 @@ func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *test
 	require.NoError(t, err)
 
 	calls := 0
+	coreCalls := 0
+	wrappers := 0
 	for _, name := range sources {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
 		file, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, 0)
 		require.NoError(t, parseErr, "every production source of this command must be readable")
+		for _, declaration := range file.Decls {
+			wrapper, ok := declaration.(*ast.FuncDecl)
+			if !ok || wrapper.Name.Name != "lifecycleOutcome" {
+				continue
+			}
+			wrappers++
+			require.NotNil(t, wrapper.Body)
+			require.Len(t, wrapper.Body.List, 1, "the public boundary must only delegate to the protected shared core")
+			returned, ok := wrapper.Body.List[0].(*ast.ReturnStmt)
+			require.True(t, ok)
+			require.Len(t, returned.Results, 1)
+			delegation, ok := returned.Results[0].(*ast.CallExpr)
+			require.True(t, ok)
+			require.Equal(t, "lifecycleOutcomeWithCompletion", sourceOf(delegation.Fun))
+			require.Len(t, delegation.Args, 7)
+			got := make([]string, 0, len(delegation.Args))
+			for _, argument := range delegation.Args {
+				got = append(got, sourceOf(argument))
+			}
+			assert.Equal(t, []string{"cmd", "args", "barrier", "budget", "deadline", "nil", "decisions"}, got,
+				"production forwards unchanged inputs with no completion observer or pre-fence join")
+			assert.True(t, delegation.Ellipsis.IsValid(), "all supplied decisions must be forwarded, not reinterpreted")
+		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, isCall := node.(*ast.CallExpr)
 			if !isCall {
 				return true
 			}
 			function, isIdentifier := call.Fun.(*ast.Ident)
+			if isIdentifier && function.Name == "lifecycleOutcomeWithCompletion" {
+				coreCalls++
+			}
 			if !isIdentifier || function.Name != "lifecycleOutcome" {
 				return true
 			}
@@ -1466,6 +1514,8 @@ func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *test
 	assert.Equal(t, 1, calls,
 		"the command has exactly ONE production entry into the exit authority; a second one is a "+
 			"second host-facing path, and every guarantee here is stated over one")
+	assert.Equal(t, 1, wrappers, "exactly one wrapper supplies the production defaults")
+	assert.Equal(t, 1, coreCalls, "production must reach the core only through the pinned nil-observer wrapper")
 }
 
 // sourceOf renders an expression back to source text, so an assertion can name
@@ -4075,28 +4125,36 @@ var unbindableHostPayloads = []struct {
 	HostVersion string
 	Payload     string
 	Continue    string
-	Identities  string
+	Cause       string
+	Recovery    string
+	// GenericContext is schema context from an adapter that supplies no typed
+	// cause. It must not be presented as a list of identities that failed.
+	GenericContext string
 }{
 	{
 		Harness: "opencode", Event: "tool.execute.before", HostVersion: "1.18.29",
-		Payload:    `{"input":{"session_id":"s","call_id":"c"},"output":{"args":{}}}`,
-		Continue:   `{"decision":"proceed"}`,
-		Identities: "session, tool-call",
+		Payload:  `{"input":{"session_id":"s","call_id":"c"},"output":{"args":{}}}`,
+		Continue: `{"decision":"proceed"}`,
+		Cause:    `required member "input.sessionID" is absent.`,
+		Recovery: `Supply "input.sessionID" as a JSON string at that path; check for a dropped or renamed member in the host contract.`,
 	},
 	{
 		Harness: "codex", Event: "PreToolUse", HostVersion: "0.153.0",
-		Payload:    `{"renamed_session":"s","hook_event_name":"PreToolUse"}`,
-		Continue:   `{"continue":true}`,
-		Identities: "session, turn, tool-call",
+		Payload:        `{"renamed_session":"s","hook_event_name":"PreToolUse"}`,
+		Continue:       `{"continue":true}`,
+		Cause:          "the payload was refused by this event's schema check; the adapter supplied no specific cause",
+		Recovery:       `Compare the payload with this build's Codex registration for "PreToolUse": every identity field it declares must be present under the name it expects, spelled exactly, and carry a usable value.`,
+		GenericContext: "; the identities this event requires are session, turn, tool-call.",
 	},
 	{
 		// Claude's continuation IS the empty body, so this row's continue bytes
 		// are empty on purpose. The claim it carries is the diagnostic and the
 		// record, which are what a Claude operator has.
 		Harness: "claude-code", Event: "PreToolUse", HostVersion: "2.1.261",
-		Payload:    `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`,
-		Continue:   "",
-		Identities: "session",
+		Payload:  `{"renamed_session":"s","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{}}`,
+		Continue: "",
+		Cause:    `required member "session_id" is absent.`,
+		Recovery: `Supply "session_id" as a JSON string at that path; check for a dropped or renamed member in the host contract.`,
 	},
 }
 
@@ -4129,7 +4187,9 @@ var unbindableHostPayloads = []struct {
 // non-valid-capture arm of hookLifecycle in internal/handlers/hook_lifecycle.go,
 // as it did. Every subtest turns RED — on the continue bytes for the two
 // harnesses that have them, and on the diagnostic and the fault record for all
-// three.
+// three. Substituting a different field in the typed cause must also fail the
+// independent Claude/OpenCode field-and-recovery oracles below. Codex retains
+// its explicit unspecified-cause fallback, not invented field precision.
 func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing.T) {
 	t.Parallel()
 
@@ -4158,14 +4218,19 @@ func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing
 			require.Contains(t, run.Stderr, "could not be bound, so the event WAS NOT EVALUATED",
 				"the operator must be told the event was NOT EVALUATED. This route said nothing at "+
 					"all: zero bytes on standard error, on a healthy machine")
-			assert.Contains(t, run.Stderr, row.Identities,
-				"the diagnostic must NAME the identities that could not be bound, taken from this "+
-					"build's generated registration; an operator told only that binding failed cannot "+
-					"tell which correlation field their host renamed")
-			assert.Contains(t, run.Stderr, "is the version the host actually runs",
-				"the diagnostic must point at the host version too: this build retains the version "+
-					"without using it as an admission check, so a host that changes a field name "+
-					"between versions arrives here by construction")
+			assert.Contains(t, run.Stderr, "WAS NOT EVALUATED: "+row.Cause,
+				"the independent oracle must identify this parser's actual missing field or truthful unspecified-cause fallback")
+			assert.Contains(t, run.Stderr, row.Recovery,
+				"the recovery must address that exact field and required kind, not a guessed version mismatch")
+			if row.GenericContext != "" {
+				assert.Contains(t, run.Stderr, row.GenericContext,
+					"an unchanged adapter may name required identities as schema context, not claim they all failed")
+			} else {
+				assert.NotContains(t, run.Stderr, "identities this event requires",
+					"a typed cause names the actual defect, not an invented list of failed identities")
+				assert.NotContains(t, run.Stderr, "is the version the host actually runs",
+					"payload diagnosis must not imply that an observed executable version attests the running process")
+			}
 
 			// THE DURABLE STATE IS READ ON THE RENDERED BYTES, not on the
 			// value the code constructed. This route was told "no occurrence
@@ -4182,9 +4247,14 @@ func TestAnUnbindableHostPayloadIsTreatedAsAnEventThatWasNotEvaluated(t *testing
 				"the retired sentence must not survive on any arm of the impact switch")
 
 			records := readFaultRecords(t, run.FaultDir)
-			assert.Len(t, records, 1,
+			require.Len(t, records, 1,
 				"an unevaluated event must leave a durable fault record like every other one. This "+
 					"route wrote none, so nothing outlived the process to say the event was skipped")
+			assert.Equal(t, "fault", records[0]["outcomeClass"])
+			assert.Equal(t, "fail-open", records[0]["faultPolicy"])
+			assert.Equal(t, "recorded", records[0]["faultStage"])
+			assert.Equal(t, "continue", records[0]["hostExit"])
+			assertDiagnosticCaptureRecord(t, database, []byte(row.Payload), model.CaptureUnsupportedSchema)
 		})
 	}
 }
@@ -4286,10 +4356,10 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 		// ends were found by enumerating from the source, which is what the
 		// reason had claimed to do. The current routes are below.
 		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
-			"returned an error and committed nothing. Four routes pass it directly — the environment refusal and " +
+			"returned an error and committed nothing. Five routes pass it directly — the environment refusal and " +
 			"the argument refusal, neither of which opens a store, and the flag-parse refusal inside " +
 			"SetFlagErrorFunc, which runs before the command body, plus the multiple-decision input refusal " +
-			"before the work goroutine starts — and it is also the default of the computed " +
+			"and the host-version resolution refusal before the work goroutine starts — and it is also the default of the computed " +
 			"stage below",
 		"hostexit.FaultStageRecordUnknown": "expiry returned no published host Outcome after fence settlement; " +
 			"pre-fence work or a record-only refused capture can still have written non-decision evidence, " +
@@ -4381,15 +4451,17 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	for _, count := range found {
 		total += count
 	}
-	assert.Equal(t, 7, total,
-		"this command has seven fault routes: the panic recovery, the environment refusal, the argument "+
-			"refusal, the multiple-decision input refusal, the deadline fault, the handler error, and the flag-parse refusal inside "+
+	assert.Equal(t, 5, found["hostexit.FaultStageNotRecorded"],
+		"exactly five routes refuse directly before durable work; each must preserve the no-write stage")
+	assert.Equal(t, 8, total,
+		"this command has eight fault routes: the panic recovery, the environment refusal, the argument "+
+			"refusal, the multiple-decision input refusal, the host-version resolution refusal, the deadline fault, the handler error, and the flag-parse refusal inside "+
 			"SetFlagErrorFunc. A route added or removed without updating the judged reasons above leaves "+
 			"the prose describing a command that does not exist, which has happened once already")
 }
 
 // TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded drives, on the
-// built binary, the two fault routes that had no behavioural pin at all.
+// built binary, flag, argument and host-version resolution refusals.
 //
 // WHY THESE TWO. Four of the six routes are measured on host bytes somewhere in
 // this file. The FLAG-PARSE refusal inside SetFlagErrorFunc and the ARGUMENT
@@ -4402,13 +4474,13 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 // NEITHER NEEDS A STORE, A LOCK OR A FIXTURE: an unparseable flag and a
 // positional argument are both refused before the command body runs.
 //
-// MUTATION, AT THE DEFECT SITE: change either route's stage argument to
+// MUTATION, AT THE DEFECT SITE: change any driven route's stage argument to
 // hostexit.FaultStageRecorded. That subtest turns RED on the durable-state
 // assertion.
 //
-// WHAT IT VISITS: the TWO routes that refuse before the command body runs,
-// written out because each is one invocation shape and no source lists them.
-// WHAT IT DOES NOT READ: the other four fault routes, which have their own
+// WHAT IT VISITS: two routes before the command body, plus version resolution
+// before the handler goroutine starts. Each is one invocation shape.
+// WHAT IT DOES NOT READ: the other five fault routes, which have their own
 // behavioural pins; and it does not check that the route SET is complete, which
 // the route sweep reads from the package source.
 func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) {
@@ -4433,12 +4505,19 @@ func TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded(t *testing.T) 
 				"--host-version", "2.1.261", "an-unexpected-argument"},
 			Says: "",
 		},
+		{
+			Name: "the host-version resolution refusal",
+			Args: []string{"hook", "lifecycle", "--harness", "claude-code", "--event", "PreToolUse",
+				"--host-executable", ""},
+			Says: "host version resolution failed before capture, admission or storage",
+		},
 	} {
 		t.Run(row.Name, func(t *testing.T) {
 			store := t.TempDir()
 			command := exec.Command(binary, append([]string{
 				databaseFlagName.Argument(), filepath.Join(store, "pasture.db")}, row.Args...)...)
 			command.Stdin = bytes.NewReader(nil)
+			command.Env = append(command.Environ(), "PASTURE_DB_PATH="+filepath.Join(store, "pasture.db"))
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
 			command.Stderr = &stderr
@@ -4619,7 +4698,7 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 	cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
 
 	invoked := make(chan struct{})
-	outcome := lifecycleOutcome(cmd, nil,
+	outcome := lifecycleTestOutcome(t, cmd, nil,
 		panickingCommitBarrier{message: "the commit boundary failed after the receipt was written", invoked: invoked},
 		timeouts.ProductionProfile(), context.WithTimeout)
 
@@ -4705,12 +4784,12 @@ func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.
 	var outcome *ast.FuncDecl
 	for _, node := range file.Decls {
 		function, isFunction := node.(*ast.FuncDecl)
-		if isFunction && function.Name.Name == "lifecycleOutcome" {
+		if isFunction && function.Name.Name == "lifecycleOutcomeWithCompletion" {
 			outcome = function
 			break
 		}
 	}
-	require.NotNil(t, outcome, "lifecycleOutcome must exist: it is where the outer recovery stands")
+	require.NotNil(t, outcome, "the shared lifecycle core must exist: it is where the outer recovery stands")
 
 	const local = "panicStage"
 	assignments := []struct {
@@ -4775,7 +4854,7 @@ func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.
 		return true
 	})
 	require.True(t, goStatement.IsValid(),
-		"lifecycleOutcome must still start its work in a goroutine; that statement is what the "+
+		"the shared lifecycle core must still start its work in a goroutine; that statement is what the "+
 			"widening below is positioned against")
 	assert.Less(t, int(assignments[0].Pos), int(goStatement),
 		"the widening must stand ABOVE the `go` statement at hook_lifecycle.go:%d. Below it, a panic "+
@@ -4832,7 +4911,7 @@ func TestDeadlineReceivesSettlementSignalBeforeChoosingFault(t *testing.T) {
 	}
 	var function *ast.FuncDecl
 	for _, declaration := range file.Decls {
-		if candidate, ok := declaration.(*ast.FuncDecl); ok && candidate.Name.Name == "lifecycleOutcome" {
+		if candidate, ok := declaration.(*ast.FuncDecl); ok && candidate.Name.Name == "lifecycleOutcomeWithCompletion" {
 			function = candidate
 		}
 	}
@@ -4857,7 +4936,7 @@ func TestDeadlineReceivesSettlementSignalBeforeChoosingFault(t *testing.T) {
 
 // claudePayloadWithAddedMember is the authentic Claude fixture plus ONE member
 // this build does not declare: every identity present, correctly named and
-// usable, and refused all the same.
+// usable. The extra member is raw evidence, not a new binding or a refusal.
 func claudePayloadWithAddedMember(t *testing.T) []byte {
 	t.Helper()
 	var members map[string]json.RawMessage
@@ -4890,9 +4969,8 @@ func claudePayloadWithAddedMember(t *testing.T) []byte {
 // WHAT IT VISITS: one payload per disposition this build states advice for,
 // on the harness whose parser can produce it, driven through the built
 // binary; the disposition set itself is derived from the advice table.
-// WHAT IT DOES NOT READ: which of a disposition's several CAUSES fired —
-// the parser does not report that — and every harness for every row. It
-// drove ONE harness until a harness-specific contradiction survived it.
+// Cause-level coverage lives in TestLifecycleTypedCaptureDiagnostics. This
+// test retains disposition coverage and the unchanged Codex fallback contract.
 func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	t.Parallel()
 
@@ -4902,6 +4980,7 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 	const versionAdvice = "is the version the host actually runs"
 
 	refusals := []struct {
+		Disposition     model.CaptureDisposition
 		Name            string
 		Payload         []byte
 		Says            string
@@ -4933,58 +5012,51 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 		MentionsVersion bool
 	}{
 		{
-			Name:    "a payload that is not well-formed JSON",
-			Payload: []byte(`{"session_id":`),
-			Says:    "the payload is not a JSON object, so no field could be read from it",
-			Tells:   "Send a JSON OBJECT",
+			Name:        "a payload that is not well-formed JSON",
+			Disposition: model.CaptureMalformed,
+			Payload:     []byte(`{"session_id":`),
+			Says:        "the payload is not one complete, well-formed JSON value",
+			Tells:       "Send one complete JSON object",
 		},
 		{
-			Name:    "a payload that is not valid UTF-8",
-			Payload: []byte{'{', '"', 's', '"', ':', '"', 0xff, 0xfe, '"', '}'},
-			Says:    "the payload is not valid UTF-8, so it was never decoded",
-			Tells:   "Send UTF-8",
+			Name:        "a payload that is not valid UTF-8",
+			Disposition: model.CaptureInvalidUTF8,
+			Payload:     []byte{'{', '"', 's', '"', ':', '"', 0xff, 0xfe, '"', '}'},
+			Says:        "the payload is not valid UTF-8, so it was never decoded",
+			Tells:       "Send UTF-8",
 		},
 		{
-			Name:    "a payload that repeats a field",
-			Payload: []byte(`{"session_id":"a","session_id":"b","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
-			Says:    "the payload repeats a field",
-			Tells:   "Send each field once",
+			Name:        "a payload that repeats a field",
+			Disposition: model.CaptureDuplicateField,
+			Payload:     []byte(`{"session_id":"a","session_id":"b","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
+			Says:        "the payload repeats a field",
+			Tells:       "Send each field once",
 		},
 		{
-			Name:            "a payload whose identity fields are renamed",
-			Payload:         []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
-			Says:            "either an identity field is missing, renamed or unusable",
-			Tells:           identityAdvice,
-			NamesIdentities: true,
-			IdentityClause:  "; the identities this event requires are session, tool-call.",
-			MentionsVersion: true,
+			Name:        "a payload whose identity fields are renamed",
+			Disposition: model.CaptureUnsupportedSchema,
+			Payload:     []byte(`{"renamed":"s","hook_event_name":"PreToolUse","tool_name":"R","tool_input":{}}`),
+			Says:        `required member "session_id" is absent`,
+			Tells:       `Supply "session_id" as a JSON string at that path`,
 		},
 		{
-			// THE ROW THE WRITTEN LIST OMITTED, which is why nothing caught
-			// the inspection result invented for it. It shares a disposition
-			// with the renamed-identity row and differs in the cause that
-			// fired.
-			Name:            "a payload carrying a member the registration does not declare",
-			Payload:         claudePayloadWithAddedMember(t),
-			Says:            "carries a member the registration does not allow",
-			Tells:           identityAdvice,
-			NamesIdentities: true,
-			IdentityClause:  "; the identities this event requires are session, tool-call.",
-			MentionsVersion: true,
+			Name:        "an empty required identity beside an unrelated added member",
+			Disposition: model.CaptureUnsupportedSchema,
+			Payload:     []byte(`{"hook_event_name":"PreToolUse","session_id":"","extra":true}`),
+			Says:        `identity "session_id" is an empty string`,
+			Tells:       `Supply the nonempty host identity at "session_id"`,
 		},
 		{
 			// A SINGLE-IDENTITY EVENT, which no row drove. The singular arm of
 			// the identity clause therefore rendered text nothing had ever
 			// read, and a reviewer restored the retired singular literal with
 			// the whole tree green.
-			Name:            "a renamed identity on an event that requires only one",
-			Event:           "SessionStart",
-			Payload:         []byte(`{"renamed":"s","hook_event_name":"SessionStart"}`),
-			Says:            "either an identity field is missing, renamed or unusable",
-			Tells:           identityAdvice,
-			NamesIdentities: true,
-			IdentityClause:  "; the identity this event requires is session.",
-			MentionsVersion: true,
+			Name:        "a renamed identity on an event that requires only one",
+			Disposition: model.CaptureUnsupportedSchema,
+			Event:       "SessionStart",
+			Payload:     []byte(`{"renamed":"s","hook_event_name":"SessionStart"}`),
+			Says:        `required member "session_id" is absent`,
+			Tells:       `Supply "session_id" as a JSON string at that path`,
 		},
 		{
 			// THE SAME DISPOSITION ON A LENIENT PARSER. The row above drives it
@@ -4992,45 +5064,37 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			// true; this drives it where one clause is not, which is the case
 			// the single-harness sweep could not see.
 			Name:            "a renamed identity on a parser that ignores extra members but matches names exactly",
+			Disposition:     model.CaptureUnsupportedSchema,
 			Harness:         "codex",
 			Payload:         []byte(`{"renamed":"s","hook_event_name":"PreToolUse"}`),
-			Says:            "an identity field is missing, renamed or unusable",
+			Says:            "the adapter supplied no specific cause",
 			Tells:           identityAdvice,
 			NamesIdentities: true,
 			IdentityClause:  "; the identities this event requires are session, turn, tool-call.",
 			MentionsVersion: true,
 		},
 		{
-			Name:            "a renamed identity on a parser that decodes into a struct",
-			Harness:         "opencode",
-			Event:           "tool.execute.before",
-			Payload:         []byte(`{"input":{"renamed":"s","callID":"c","tool":"read"},"output":{"args":{}}}`),
-			Says:            "an identity field is missing or unusable",
-			Tells:           identityAdvice,
-			NamesIdentities: true,
-			IdentityClause:  "; the identities this event requires are session, tool-call.",
-			MentionsVersion: true,
+			Name:        "a renamed identity on a parser that decodes into a struct",
+			Disposition: model.CaptureUnsupportedSchema,
+			Harness:     "opencode",
+			Event:       "tool.execute.before",
+			Payload:     []byte(`{"input":{"renamed":"s","callID":"c","tool":"read"},"output":{"args":{}}}`),
+			Says:        `required member "input.sessionID" is absent`,
+			Tells:       `Supply "input.sessionID" as a JSON string at that path`,
 		},
 		{
-			Name:            "a payload that declares a different event",
-			Payload:         []byte(`{"session_id":"s","hook_event_name":"SessionEnd","tool_name":"R","tool_input":{}}`),
-			Says:            "the payload does not report this event — the field is absent, unreadable, or names a different event",
-			Tells:           "Invoke the hook with the event the payload actually describes",
-			MentionsVersion: true,
+			Name:        "a payload that declares a different event",
+			Disposition: model.CaptureEventMismatch,
+			Payload:     []byte(`{"session_id":"s","hook_event_name":"SessionEnd","tool_name":"R","tool_input":{}}`),
+			Says:        `member "hook_event_name" does not name the invoked event`,
+			Tells:       "Send the payload for the command's event",
 		},
 	}
 	// EVERY DISPOSITION THIS BUILD STATES ADVICE FOR MUST BE DRIVEN HERE,
 	// derived from the production advice table rather than trusted to a list.
 	//
-	// THE LIMIT, STATED, BECAUSE IT IS THE ONE THAT BIT. This derives
-	// DISPOSITIONS, and the population that matters is CAUSES. One disposition
-	// carries three of them, and the row that exposed an inspection result
-	// invented for a step that never ran was missing from the written list
-	// while its disposition was already covered — so this derivation would NOT
-	// have caught that omission either. Enumerating causes needs the classifier
-	// split, which lives in the ingress and the occurrence model and is not
-	// this slice's to make. What this closes is a disposition added with no
-	// payload driving it at all.
+	// Compare durable dispositions, not prose. Typed causes refine the reason
+	// without adding new numeric dispositions or new durable fields.
 	// THE DRIVEN SET, NOT ITS CARDINALITY. The sentence said EVERY DISPOSITION
 	// must be driven and the check compared COUNTS: replacing the
 	// event-mismatch row with a second renamed-identity row kept the total and
@@ -5041,12 +5105,10 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 		// reason is composed from the parser that refused, so asking against a
 		// single text made a composed disposition look undriven.
 		driven := false
-		for _, reason := range handlers.CaptureDispositionReasons(disposition) {
-			for _, row := range refusals {
-				if strings.Contains(reason, row.Says) {
-					driven = true
-					break
-				}
+		for _, row := range refusals {
+			if row.Disposition == disposition {
+				driven = true
+				break
 			}
 		}
 		assert.True(t, driven,
@@ -5077,6 +5139,7 @@ func TestEachRefusalDispositionCarriesTheFixThatFollowsIt(t *testing.T) {
 			}
 			run := runLifecycleHookOn(t, binary, database,
 				harness, event, version, row.Payload)
+			assertDiagnosticCaptureRecord(t, database, row.Payload, row.Disposition)
 
 			// THE REASON AND THE REMEDY MUST NOT DISAGREE. One offered an
 			// added member as a possible CAUSE while the other, three clauses
@@ -5173,7 +5236,7 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 
 		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 		cmd.SetIn(panickingReader{message: "the input reader failed before commit"})
-		outcome := lifecycleOutcome(cmd, nil,
+		outcome := lifecycleTestOutcome(t, cmd, nil,
 			handlers.PassThroughCommitBarrier{},
 			timeouts.ProductionProfile(), context.WithTimeout)
 
@@ -5211,40 +5274,17 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 	})
 }
 
-// TestAHostThatAddsAFieldIsRefusedWithATrueSentence drives the refusal a host
-// meets when it ADDS a member, which nothing drove before.
-//
-// WHY THIS ROUTE MATTERS MOST. A host adding a field is the most ordinary thing
-// that happens to a payload over time, so this is the refusal most likely to be
-// met in practice. It was told "the payload does not carry the identity fields
-// this event's registration declares, or carries them under different names" —
-// FALSE IN BOTH HALVES for a payload that carries every one of them under the
-// exact declared name. A reader would spend the day checking field names that
-// were already correct.
-//
-// THE CONTROL IS PART OF THE TEST, because the claim is that ONE ADDED MEMBER
-// is the whole difference: the same payload without it binds and says nothing.
-//
-// AN HONEST LIMIT, STATED. This refusal shares ONE disposition with the missing
-// and unusable identity cases, so the sentence names all three causes rather
-// than the one that fired. It is true of every payload that reaches it and it
-// does not DISCRIMINATE. Telling them apart needs a new disposition in the
-// model enum and a parser that returns it, which are outside this slice's files.
-//
-// MUTATION: narrow the reason back to the identity half. This test turns RED on
-// the added-member clause.
-func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
+// TestAHostThatAddsAFieldKeepsTheSameGateOutcome uses an authentic gate control.
+// Adding unrelated evidence must preserve its complete native continuation,
+// while the expanded payload is retained. Restoring strict member rejection
+// must fail the added-member subtest, not send a valid host to a repair message.
+func TestAHostThatAddsAFieldKeepsTheSameGateOutcome(t *testing.T) {
 	t.Parallel()
 
 	binary := lifecycleBinary(t)
 
 	authentic := claudeFixture(t, "pre_tool_use_2_1_261.json")
-	var members map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(authentic, &members),
-		"the committed fixture must decode, or the control below proves nothing")
-	members["a_field_this_build_does_not_declare"] = json.RawMessage(`"x"`)
-	extended, err := json.Marshal(members)
-	require.NoError(t, err)
+	extended := claudePayloadWithAddedMember(t)
 
 	t.Run("the control: the same payload without the added member", func(t *testing.T) {
 		store := t.TempDir()
@@ -5252,9 +5292,11 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 		initializeLifecycleTestDatabase(t, database)
 		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.261", authentic)
 		require.Equal(t, 0, run.ExitCode)
+		require.Empty(t, run.Stdout)
 		require.Empty(t, run.Stderr,
 			"the authentic payload must bind in silence; if it does not, the added member is not "+
 				"the difference this test is about")
+		assertDiagnosticCaptureRecord(t, database, authentic, model.CaptureValid)
 	})
 
 	t.Run("one added member", func(t *testing.T) {
@@ -5263,20 +5305,11 @@ func TestAHostThatAddsAFieldIsRefusedWithATrueSentence(t *testing.T) {
 		initializeLifecycleTestDatabase(t, database)
 		run := runLifecycleHookOn(t, binary, database, "claude-code", "PreToolUse", "2.1.261", extended)
 
-		require.Equal(t, 0, run.ExitCode,
-			"an unreadable payload is fail-open: the host carries on with its own answer")
-		require.Contains(t, run.Stderr, "WAS NOT EVALUATED",
-			"this subtest must reach the refusal; if it does not, nothing below is about it")
-
-		assert.Contains(t, run.Stderr, "carries a member the registration does not allow",
-			"the reason must name the cause that actually fired. This payload carries EVERY identity "+
-				"field under the EXACT declared name, so a sentence about missing or renamed fields "+
-				"is false of it in both halves")
-		assert.Contains(t, run.Stderr, "must carry no member the registration does not declare",
-			"and the instruction must tell the reader to look in that direction too, or they check "+
-				"field names that are already correct")
-		assert.NotContains(t, run.Stderr, "does not carry the identity fields this event's registration declares",
-			"the retired sentence named one cause of a disposition that carries three")
+		require.Equal(t, 0, run.ExitCode)
+		require.Empty(t, run.Stdout)
+		require.Empty(t, run.Stderr, "added evidence must preserve the evaluated gate's continuation")
+		require.Empty(t, readFaultRecords(t, store))
+		assertDiagnosticCaptureRecord(t, database, extended, model.CaptureValid)
 	})
 }
 
@@ -5811,10 +5844,10 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 			"which is not a fact about their invocation. Found: %q", returned)
 }
 
-// guardSweepOwned are the test files in this package that this slice changed,
-// and so may change again. The sweep below reads these and no others, because a
-// guard it flags is a guard somebody must be able to change, and reaching into
-// another slice's file is how ownership statements stop meaning anything.
+// guardSweepOwned are this lifecycle transport wave's test files. The sweep
+// audits all of them, including the additive, diagnostic and version subjects.
+// Each file still has its assigned owner: an audit finding is a handoff, not
+// permission for another worker to edit that file.
 // guardSweepForeign are the package's other test files, each with the reason.
 // Together they must be EXACTLY the directory.
 //
@@ -5830,13 +5863,18 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 // down as foreign, and a new file cannot arrive without being classified at all.
 var guardSweepOwned = []string{
 	"hook_environment_test.go",
+	"hook_lifecycle_additive_test.go",
 	"hook_lifecycle_capture_test.go",
 	"hook_lifecycle_codex_test.go",
+	"hook_lifecycle_diagnostic_production_test.go",
 	"hook_lifecycle_docs_test.go",
 	"hook_lifecycle_failuremode_test.go",
+	"hook_lifecycle_host_version_test.go",
+	"hook_lifecycle_host_version_unix_test.go",
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
 	"hook_lifecycle_raw_test.go",
+	"hook_lifecycle_worker_lifetime_test.go",
 	"hook_lifecycle_writers_test.go",
 }
 
@@ -6430,8 +6468,7 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 // THE ADVICE NAMED THE HARNESS AND DESCRIBED ANOTHER ONE'S BEHAVIOUR. It told
 // every reader, by harness name, that a member the registration does not
 // declare is refused and that identity field names must match exactly. Claude
-// validates the member set and looks names up in a map, so both hold there.
-// Codex now ignores added members but looks up identity names exactly, while
+// and Codex ignore added members but look up identity names exactly, while
 // OpenCode's struct decoder ignores added members and matches names without
 // case sensitivity. The advice must follow each of those independent traits.
 //
@@ -6450,8 +6487,7 @@ func assertNoInternalReferenceInPackage(t *testing.T, where, text string) {
 // variants, and on a payload that reaches the schema refusal. The payload rows
 // are written here and PINNED to the derived set, so a harness added to the
 // product fails by name until it has a row.
-// WHAT IT DOES NOT READ: which of a disposition's several causes fired, which
-// the parser does not report.
+// Typed adapters name the actual cause; Codex retains the disposition fallback.
 //
 // MUTATION: set refusesUndeclaredMembers or matchesFieldNamesExactly true on a
 // lenient harness's dispatch row, or make a lenient parser strict while its row
@@ -6528,7 +6564,7 @@ func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 			added := drive(withTopLevelMember(t, row.Valid, "a_member_this_build_does_not_declare", `"x"`))
 			refusesUndeclared := added.Stderr != ""
 			if refusesUndeclared {
-				require.Contains(t, added.Stderr, "Compare the payload with this build's",
+				require.Contains(t, added.Stderr, "is not declared by this event's registration",
 					"the added member was refused by something other than the schema check, so nothing "+
 						"below is about this parser's member rule\nstderr: %s", added.Stderr)
 			}
@@ -6537,12 +6573,29 @@ func TestTheSchemaAdviceFollowsTheParserThatRefused(t *testing.T) {
 			recased := drive(withMemberRecased(t, row.Valid, row.Identity))
 			matchesExactly := recased.Stderr != ""
 			if matchesExactly {
-				require.Contains(t, recased.Stderr, "Compare the payload with this build's",
+				require.Contains(t, recased.Stderr, "WAS NOT EVALUATED",
 					"the re-cased identity was refused by something other than the schema check\nstderr: %s",
 					recased.Stderr)
 			}
 
 			run := drive(row.Renamed)
+			if harness == "claude-code" {
+				require.False(t, refusesUndeclared, "Claude must preserve unrelated added evidence without refusing it")
+				require.True(t, matchesExactly)
+				assert.Contains(t, run.Stderr, `required member "session_id" is absent`)
+				assert.Contains(t, run.Stderr, `Supply "session_id" as a JSON string at that path`)
+				assert.NotContains(t, run.Stderr, "member the registration does not allow")
+				return
+			}
+			if harness == "opencode" {
+				require.False(t, refusesUndeclared, "OpenCode must keep its ignored-extra-member contract")
+				require.False(t, matchesExactly, "OpenCode must keep its struct-match contract")
+				assert.Contains(t, run.Stderr, `required member "input.sessionID" is absent`)
+				assert.Contains(t, run.Stderr, `Supply "input.sessionID" as a JSON string at that path`)
+				assert.NotContains(t, run.Stderr, "is not declared by this event's registration")
+				assert.NotContains(t, run.Stderr, "spelled exactly")
+				return
+			}
 			require.Contains(t, run.Stderr, "Compare the payload with this build's",
 				"this subtest must reach the schema refusal, or nothing below is about it")
 

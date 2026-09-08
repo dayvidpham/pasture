@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PostCompact --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event PostCompact --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
             "timeout": 10
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PostToolBatch --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event PostToolBatch --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
             "timeout": 10
           }
         ]
@@ -31,7 +31,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PostToolUse --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event PostToolUse --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
             "timeout": 10
           }
         ]
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PostToolUseFailure --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event PostToolUseFailure --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
             "timeout": 10
           }
         ]
@@ -59,7 +59,7 @@
           },
           {
             "type": "command",
-            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PreCompact --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event PreCompact --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
             "timeout": 10
           }
         ]
@@ -81,7 +81,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event PreToolUse --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event PreToolUse --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
             "timeout": 10
           }
         ]
@@ -93,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event SessionEnd --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event SessionEnd --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
             "timeout": 10
           }
         ]
@@ -109,7 +109,7 @@
           },
           {
             "type": "command",
-            "command": "${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event SessionStart --host-version \"${CLAUDE_CODE_VERSION:-unknown}\"",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event SessionStart --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
             "timeout": 10
           }
         ]

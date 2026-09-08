@@ -49,9 +49,12 @@ type HookLifecycleInput struct {
 	Harness     ir.HarnessID
 	Event       string
 	HostVersion string
-	Input       io.Reader
-	Clock       receipt.Clock
-	Operations  receipt.OperationIDSource
+	// HostVersionSource classifies the caller's observation route, not a
+	// running-process attestation or a compatibility decision.
+	HostVersionSource model.HostVersionSource
+	Input             io.Reader
+	Clock             receipt.Clock
+	Operations        receipt.OperationIDSource
 	// ActorClaim binds a session, not the receipt author. Zero means no claim.
 	ActorClaim tasks.ActorClaim
 	// Barrier is called ONCE, after the durable receipt has been committed and
@@ -91,6 +94,7 @@ func HookLifecycleResponse(ctx context.Context, in HookLifecycleInput) (backend.
 
 type lifecycleCapture struct {
 	disposition model.CaptureDisposition
+	cause       model.CaptureCause
 	delivery    receipt.Delivery
 }
 
@@ -121,12 +125,8 @@ type lifecycleDispatch struct {
 	// refusesUndeclaredMembers says whether THIS harness's parser rejects a
 	// payload carrying a member the registration does not declare.
 	//
-	// IT IS A ROW FIELD BECAUSE THE ANSWER DIFFERS PER PARSER AND THE ADVICE
-	// NAMED THE HARNESS. Claude validates the member set against the allowed
-	// fields and refuses an extra one; Codex extracts declared identities from
-	// a map and OpenCode decodes into a struct, so both ignore added members.
-	// The advice is derived from this row rather than written once for whichever
-	// harness the author had in mind.
+	// The advice follows the actual parser, not the reviewed fixture catalogue.
+	// All current adapters retain unrelated extra members as raw evidence only.
 	refusesUndeclaredMembers bool
 	// matchesFieldNamesExactly says whether identity field names must match
 	// the registration's spelling. Claude and Codex look names up in a map;
@@ -155,16 +155,16 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 		activations: activation.ClaudeCode2_1_261,
 		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
-			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+			return lifecycleCapture{disposition: capture.Disposition, cause: capture.Cause, delivery: capture.Delivery}
 		},
 		rawParse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
-			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
+			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, cause: capture.Cause, delivery: capture.Delivery})
 		},
 		bind:                     claudefrontend.Bind,
 		encode:                   nativeresponse.EncodeClaude,
 		mapping:                  mappingLookup(pastureruntime.ClaudeCode2_1_261Lifecycle()),
-		refusesUndeclaredMembers: true,
+		refusesUndeclaredMembers: false,
 		matchesFieldNamesExactly: true,
 	},
 	ir.HarnessOpenCode: {
@@ -173,11 +173,11 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 		activations: activation.OpenCode1_18_29,
 		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
-			return lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery}
+			return lifecycleCapture{disposition: capture.Disposition, cause: capture.Cause, delivery: capture.Delivery}
 		},
 		rawParse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
-			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, delivery: capture.Delivery})
+			return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, cause: capture.Cause, delivery: capture.Delivery})
 		},
 		bind:    opencodefrontend.Bind,
 		encode:  nativeresponse.EncodeOpenCode,
@@ -282,7 +282,13 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		activations = in.Activations
 	}
 	if strings.TrimSpace(in.HostVersion) == "" {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records which host version produced it, without using the value as an admission check.", "The input was not read and no database was opened.", "Pass the observed version through --host-version.", nil)
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records a version observation, without using the value as an admission check or treating an executable query as running-process attestation.", "The input was not read and no database was opened.", "Supply a version observation through the lifecycle command.", nil)
+	}
+	if err := model.ValidateHostVersionSource(in.HostVersionSource); err != nil {
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation,
+			err.Error(), "Version provenance must describe the actual observation route.",
+			"The input was not read and no database was opened.",
+			"Use a declared source for the route that supplied the version, or leave legacy provenance unspecified.", nil)
 	}
 	// The event is resolved by the one validating reverse lookup every ingress
 	// path shares, so a name the registration does not declare is refused with
@@ -339,6 +345,12 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The native payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "Ingress never truncates retained evidence.", "No database was opened.", "Reduce the host payload below the static bound.", nil)
 	}
 	capture := dispatch.parse(raw, event, in.HostVersion)
+	capture.delivery.Envelope.HostVersionSource = in.HostVersionSource
+	if err := capture.cause.Check(capture.disposition); err != nil {
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation,
+			"The lifecycle parser returned inconsistent diagnostic evidence. "+err.Error(),
+			err.Error(), "No occurrence was written or evaluated.", "Report the parser result; do not infer a payload repair from it.", nil)
+	}
 	tracker, err := open(in.DBPath)
 	if err != nil {
 		return backend.HostResponse{}, err
@@ -734,26 +746,13 @@ type captureDispositionAdvice struct {
 	Reason string
 	// Fix is the instruction that follows from THAT reason.
 	Fix string
-	// NamesIdentities says whether the message may name the event's identities
-	// AT ALL, and it deliberately no longer claims a RESULT for them.
-	//
-	// IT WAS ReachedIdentities, KEYED ON THE DISPOSITION, AND THE THREE CAUSES
-	// OF ONE DISPOSITION DISAGREE ON EXACTLY THAT QUESTION. A payload carrying
-	// every identity present, correctly named and usable is refused for an
-	// unknown MEMBER, and the allowed-member loop returns BEFORE the identity
-	// loop — so "none of the identities this event requires was bound" reported
-	// the result of a step that did not run. That is not imprecision about
-	// which cause fired; it is an inspection result invented for an inspection
-	// that never happened.
-	//
-	// So where the causes disagree, the message NAMES the identities as context
-	// and asserts nothing about them. Where a single cause is certain — the
-	// decode failures — it names nothing, because nothing was looked at.
+	// NamesIdentities permits schema context only, not a claimed inspection
+	// result. A fallback has no evidence of which identity failed.
 	NamesIdentities bool
 }
 
-// captureDispositionAdviceByDisposition covers every disposition a parser on
-// this path can produce.
+// captureDispositionAdviceByDisposition is the fallback for adapters that do
+// not supply a transient cause. Specific cause advice lives in model.CaptureCause.
 //
 // CaptureTruncated AND CaptureOverLimit ARE ABSENT ON PURPOSE. They are
 // declared in the model and NO parser produces either: the over-limit condition
@@ -763,18 +762,12 @@ type captureDispositionAdvice struct {
 // which is a sentence nobody can check. If a parser ever produces one, the
 // unlisted default below refuses to invent a reason for it and says so.
 var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]captureDispositionAdvice{
-	// "NOT WELL-FORMED JSON" IS FALSE FOR HALF THIS ARM'S INPUTS. `[]`,
-	// `"hello"` and `123` are all perfectly well-formed JSON and all three land
-	// here, because what the parser needs is a JSON OBJECT and it got a value
-	// of another kind. The sentence that is true of every input is the one
-	// about the SHAPE, and it covers the genuinely malformed case too: a
-	// fragment that does not parse is not an object either.
+	// A disposition alone does not identify a syntax, top-level or member-kind
+	// defect. Do not invent one when an adapter has not supplied a cause.
 	model.CaptureMalformed: {
-		Reason: "the payload is not a JSON object, so no field could be read from it",
-		Fix: "Send a JSON OBJECT: a well-formed array, string or number is refused here too, because the " +
-			"event's fields are read from an object's members. Nothing about the fields or the host version " +
-			"was inspected on this route, because ingress stopped at the decode; capture the exact bytes the " +
-			"host sent and check both that they parse AND that the top level is an object.",
+		Reason: "the adapter could not decode the payload and supplied no specific cause",
+		Fix: "Preserve the exact stdin bytes and compare them with the adapter's JSON contract; " +
+			"this result does not identify a field or a required JSON kind.",
 		NamesIdentities: false,
 	},
 	model.CaptureInvalidUTF8: {
@@ -790,41 +783,16 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 			"check was reached on this route; look for a payload assembled by concatenation or merged from two sources.",
 		NamesIdentities: false,
 	},
-	// ONE DISPOSITION, THREE CAUSES, AND THE SENTENCE NAMED ONLY ONE OF THEM.
-	// A payload carrying EVERY identity field under the EXACT declared name is
-	// refused when it also carries ONE MEMBER the registration does not allow,
-	// and it was told its identity fields were missing or renamed — false of
-	// that payload in both halves. Measured with a control: remove the extra
-	// member and the same identity binds with zero bytes of stderr.
-	//
-	// A HOST ADDING A FIELD IS THE MOST ORDINARY THING THAT HAPPENS TO A
-	// PAYLOAD OVER TIME, so this is the route most likely to be met and the one
-	// most likely to cost its reader a day chasing field names that are
-	// correct. The sentence now names every cause this disposition carries, so
-	// it is true whichever fired. Telling them APART needs the classifier
-	// split, which is a change to the model enum and to the parsers.
+	// The compatibility fallback gives schema context, not an inspection result.
 	model.CaptureUnsupportedSchema: {
-		// Reason is COMPOSED PER HARNESS where it is assembled, because the
-		// causes this disposition carries differ by parser: only a validating
-		// parser can refuse an undeclared member. Offering that cause to a
-		// struct decoder made ONE MESSAGE CONTRADICT ITSELF — the reason said
-		// an added member may be why, and the remedy three sentences later said
-		// added members are ignored. This entry holds the half that is true of
-		// every parser; unsupportedSchemaReason adds the rest.
 		Reason:          "",
 		Fix:             "", // composed per call: it names the event and the host version.
 		NamesIdentities: true,
 	},
-	// THREE CAUSES, ONE LINE, AND THE SENTENCE NAMED ONLY THE THIRD. The parser
-	// returns this disposition when the event field is ABSENT, when it cannot
-	// be read, and when it names a different event — and a payload carrying no
-	// event at all was told it describes a different one. The cause does not
-	// survive the classification, so the sentence covers all three rather than
-	// guessing which fired; the same repair the identity clause took.
+	// Event identity is the failed check, not evidence of one particular cause.
 	model.CaptureEventMismatch: {
-		Reason: "the payload does not report this event — the field is absent, unreadable, or names a " +
-			"different event",
-		Fix: "", // composed per call: it names the event and the host version.
+		Reason: "the payload did not satisfy the event identity check; the adapter supplied no specific cause",
+		Fix:    "", // composed per call: it names the event and the host version.
 		// The event claim is checked BEFORE the identities, so this one did not
 		// reach them either: the payload decoded, and the refusal happened at
 		// the coordinate rather than at a field.
@@ -832,14 +800,8 @@ var captureDispositionAdviceByDisposition = map[model.CaptureDisposition]capture
 	},
 }
 
-// CaptureDispositionReasons returns every reason text a disposition can render,
-// across every harness this build dispatches on.
-//
-// IT IS A SET AND NOT A STRING because one disposition's reason is COMPOSED
-// FROM THE PARSER that refused: a validating parser can offer an undeclared
-// member as a cause and a struct decoder cannot. A test asking "is this
-// disposition driven" must ask against what it can actually say, or a
-// disposition whose reason is composed looks undriven.
+// CaptureDispositionReasons returns the fallback reason texts for adapters
+// without cause evidence. Typed cause text is supplied by CaptureCause.Advice.
 func CaptureDispositionReasons(disposition model.CaptureDisposition) []string {
 	advice, known := captureDispositionAdviceByDisposition[disposition]
 	if !known {
@@ -935,56 +897,35 @@ func CaptureDispositionAdvice() map[model.CaptureDisposition]captureDispositionA
 	return copied
 }
 
-// unsupportedSchemaReason names the causes THIS harness's parser can produce.
-//
-// THE DIAGNOSIS HALF WAS LEFT BEHIND WHEN THE REMEDY HALF WAS FIXED. The remedy
-// learned that a struct decoder IGNORES an undeclared member; the shared reason
-// went on offering that cause to every harness, so one rendered message told a
-// Codex operator both that an added member may be why their payload was refused
-// and that added members are ignored. A message that contradicts itself costs
-// its reader more than one that is merely incomplete.
-//
-// Both facts are on the dispatch row this already receives.
-func unsupportedSchemaReason(dispatch lifecycleDispatch) string {
-	naming := "an identity field is missing or unusable"
-	if dispatch.matchesFieldNamesExactly {
-		naming = "an identity field is missing, renamed or unusable"
-	}
-	if !dispatch.refusesUndeclaredMembers {
-		return "the payload does not match the shape this event's registration declares: " + naming
-	}
-	return "the payload does not match the shape this event's registration declares: either " +
-		naming + ", or the payload carries a member the registration does not allow"
+// An adapter with no cause evidence cannot identify a particular failed field.
+func unsupportedSchemaReason(_ lifecycleDispatch) string {
+	return "the payload was refused by this event's schema check; the adapter supplied no specific cause"
 }
 
-// unbindableCaptureError says that an event WAS NOT EVALUATED, and says which
-// correlation identities could not be bound.
-//
-// IT NAMES THE IDENTITIES FROM THE GENERATED REGISTRATION and never from a list
-// written here, so the message cannot drift from the contract it describes: the
-// required identities of the event are what ingress had to bind, and whatever
-// is missing from the bindings the parser DID recover is what it could not.
-// A host that renames or drops a correlation field between versions lands here
-// by construction, which is why the message points at the host version too.
+// unbindableCaptureError reports an unevaluated delivery using the transient
+// cause when supplied. An unchanged adapter receives only disposition-level
+// context; its nil bindings are not evidence of which field failed.
 func unbindableCaptureError(
 	dispatch lifecycleDispatch,
 	event registration.Event,
 	in HookLifecycleInput,
 	capture lifecycleCapture,
 ) error {
-	// THE LIST IS EVERY IDENTITY THE EVENT REQUIRES, AND IT NEVER DISCRIMINATES.
-	// It once filtered by which bindings survived, which read as a claim that
-	// the message names the fields that actually failed. IT DOES NOT AND CANNOT:
-	// every ingress parser returns NIL BINDINGS on a non-valid capture, so the
-	// filter removed nothing on any input a user can produce, and a payload
-	// missing one identity rendered a message byte-identical to one missing all
-	// of them. Dropping the filter changed no output anywhere.
-	//
-	// So the sentence says what is true — these are the identities the event
-	// REQUIRES, one of which is unsatisfied — rather than implying a
-	// discrimination the data cannot support. Narrowing it to the field that
-	// actually failed would need the parsers to report which one, and they do
-	// not; that is a change to ingress, not a rewording here.
+	if capture.cause.Kind() != model.CauseUnknown {
+		reason, fix, err := capture.cause.Advice(capture.disposition)
+		if err != nil {
+			return lifecycleError(pasterrors.CategoryValidation, err.Error(), err.Error(),
+				"The event was not evaluated; no specific payload repair can be inferred.", "Report the parser's inconsistent diagnosis.", nil)
+		}
+		impact := "Nothing was derived from this delivery and no gate was consulted, so the event had no part in the " +
+			"host's answer; the row carries the disposition that refused it and an empty interpreted set."
+		return lifecycleError(pasterrors.CategoryValidation,
+			fmt.Sprintf("The %s payload for event %q at host version %q could not be bound, so the event WAS NOT EVALUATED: %s. %s %s",
+				dispatch.name, event.NativeName, in.HostVersion, reason, impact, fix),
+			reason, impact, fix, nil)
+	}
+	// Without a cause, list required identities only as schema context. This
+	// does not say that any particular identity failed or was inspected.
 	required := []string{}
 	for _, identity := range event.IdentityFields() {
 		if identity.Required {

@@ -433,7 +433,10 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 			initializeLifecycleTestDatabase(t, dbPath)
 			raw := readProductionClaudeFixture(t, testCase.fixture, testCase.name)
 
-			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "claude-code", "--event", testCase.name, "--host-version", "2.1.261")
+			executable := versionExecutable(t, "printf '2.1.261 (Claude Code)\\n'")
+			command := exec.Command("sh", "-c", generatedClaudeLifecycleCommand(t, testCase.name))
+			command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
+				"CLAUDE_CODE_EXECPATH="+executable, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=")
 			command.Stdin = bytes.NewReader(raw)
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
@@ -1181,6 +1184,7 @@ func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture mode
 	require.Equal(t, occurrenceLifecycleContract, payload.Envelope.Runtime.Contract.String())
 	require.Equal(t, capture, payload.Capture)
 	require.Equal(t, "2.1.261", payload.Envelope.HostVersion)
+	require.Equal(t, model.HostVersionCallerSupplied, payload.Envelope.HostVersionSource)
 	sum := sha256.Sum256(body)
 	require.Equal(t, "sha256:"+hex.EncodeToString(sum[:]), payload.Body)
 	return payload
@@ -1200,8 +1204,9 @@ func decodeJSONObject(t *testing.T, raw []byte) map[string]json.RawMessage {
 func assertOccurrenceEnvelope(t *testing.T, raw json.RawMessage) {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
-	require.ElementsMatch(t, []string{"Runtime", "HostVersion", "Schema", "Implementation", "Retention"}, mapKeys(members))
+	require.ElementsMatch(t, []string{"Runtime", "HostVersion", "hostVersionSource", "Schema", "Implementation", "Retention"}, mapKeys(members))
 	require.JSONEq(t, `"2.1.261"`, string(members["HostVersion"]))
+	require.JSONEq(t, strconv.Quote(string(model.HostVersionCallerSupplied)), string(members["hostVersionSource"]))
 
 	runtime := decodeJSONObject(t, members["Runtime"])
 	require.ElementsMatch(t, []string{"Definition", "Contract"}, mapKeys(runtime))

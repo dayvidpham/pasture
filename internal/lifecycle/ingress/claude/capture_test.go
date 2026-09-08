@@ -66,7 +66,6 @@ func TestCaptureClassifiesBeforeExtraction(t *testing.T) {
 		{"duplicate", []byte(`{"hook_event_name":"SessionStart","hook_event_name":"SessionStart"}`), model.CaptureDuplicateField},
 		{"invalid utf8", []byte{0xff}, model.CaptureInvalidUTF8},
 		{"event mismatch", []byte(`{"session_id":"s","hook_event_name":"SessionEnd"}`), model.CaptureEventMismatch},
-		{"event-specific unknown", []byte(`{"session_id":"s","hook_event_name":"SessionStart","tool_input":{}}`), model.CaptureUnsupportedSchema},
 	}
 	for _, test := range tests {
 		test := test
@@ -110,4 +109,27 @@ func TestCaptureDropsBindingsWhenLaterRequiredIdentityFails(t *testing.T) {
 			require.Empty(t, got.Delivery.Bindings, "later required identity failure must discard earlier bindings")
 		})
 	}
+}
+
+func TestAddedClaudeMembersStayOutsideBindings(t *testing.T) {
+	t.Parallel()
+	raw, _, _ := authenticSessionStart(t)
+	event := registration.ClaudeCode2_1_261().Events[0]
+	control := claude.Parse(raw, event, "2.1.300", model.OccurrenceEnvelopeRef{})
+	require.Equal(t, model.CaptureValid, control.Disposition)
+	var members map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &members))
+	members["future_identity"] = json.RawMessage(`{"value":"not-a-binding"}`)
+	// A field catalogued for a different event is also unrelated evidence here.
+	members["tool_input"] = json.RawMessage(`{"text":"not-an-operand"}`)
+	expanded, err := json.Marshal(members)
+	require.NoError(t, err)
+	capture := claude.Parse(expanded, event, "2.1.300", model.OccurrenceEnvelopeRef{})
+	require.Equal(t, model.CaptureValid, capture.Disposition)
+	require.Equal(t, model.CauseUnknown, capture.Cause.Kind())
+	require.Equal(t, control.Delivery.Bindings, capture.Delivery.Bindings)
+	require.Equal(t, expanded, capture.Delivery.Body)
+	require.Equal(t, digest.FromBytes(expanded), capture.Digest)
+	expanded[0] = '!'
+	require.Equal(t, byte('{'), capture.Delivery.Body[0], "retained evidence remains a defensive copy")
 }

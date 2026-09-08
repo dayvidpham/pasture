@@ -8,10 +8,13 @@ type OccurrenceEnvelopeRef struct {
 	// HostVersion records the version observed at ingress. It is provenance,
 	// not an admission check; payloads are retained even when this value falls
 	// outside the currently described range.
-	HostVersion    string
-	Schema         LifecycleSchemaDefinitionRef
-	Implementation EpochImplementationRef
-	Retention      RetentionPolicyDefinitionRef
+	HostVersion string
+	// HostVersionSource is optional provenance, never running-process
+	// attestation. Omission preserves the exact encoding of legacy envelopes.
+	HostVersionSource HostVersionSource `json:"hostVersionSource,omitempty"`
+	Schema            LifecycleSchemaDefinitionRef
+	Implementation    EpochImplementationRef
+	Retention         RetentionPolicyDefinitionRef
 	// Origin records the capture provenance origin of the occurrence (M4 raw
 	// ingestion carrier). It is provenance-only: the write gate never observes
 	// it. The empty value means the native sentinel (authentic-capture) for

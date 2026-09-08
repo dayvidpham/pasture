@@ -151,7 +151,11 @@ type claudeHooksConfig struct {
 // claudeLifecycleHookGroup renders one declared transport row. The activation
 // check in emitClaudeHooks decides whether that row may reach the host.
 func claudeLifecycleHookGroup(event registration.Event) claudeHookGroup {
-	command := claudeHookCommand{Type: "command", Command: fmt.Sprintf(`${PASTURE_BIN:-pasture} hook lifecycle --harness claude-code --event %s --host-version "${CLAUDE_CODE_VERSION:-unknown}"`, event.NativeName), Timeout: 10}
+	command := claudeHookCommand{
+		Type:    "command",
+		Command: fmt.Sprintf(`"${PASTURE_BIN:-pasture}" hook lifecycle --harness claude-code --event %s --host-executable "${CLAUDE_CODE_EXECPATH:-}"`, event.NativeName),
+		Timeout: 10,
+	}
 	return claudeHookGroup{Matcher: activation.ClaudeCode2_1_261Matcher(event.Kind), Hooks: []claudeHookCommand{command}}
 }
 
