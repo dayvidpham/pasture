@@ -83,7 +83,7 @@ func TestClaudeLifecycleMatchersFollowTargetDeclarations(t *testing.T) {
 				t.Errorf("%s declared matcher = %q, want %q", event.NativeName, got, want)
 			}
 			// This is the row renderer used by emitClaudeHooks, including for
-			// a future proven FileChanged row. No capture proof is invented.
+			// the proven FileChanged row. No capture proof is invented.
 			encoded, err := json.Marshal(claudeLifecycleHookGroup(event))
 			if err != nil {
 				t.Fatal(err)
@@ -106,7 +106,7 @@ func TestClaudeLifecycleMatchersFollowTargetDeclarations(t *testing.T) {
 	}
 }
 
-func TestClaudeMatcherMetadataDoesNotEnableFileChanged(t *testing.T) {
+func TestClaudeFileChangedTransportRequiresProofsAndPreservesMatcher(t *testing.T) {
 	t.Parallel()
 	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
@@ -117,11 +117,48 @@ func TestClaudeMatcherMetadataDoesNotEnableFileChanged(t *testing.T) {
 		t.Fatal("FileChanged is absent from the exhaustive Claude activation manifest")
 	}
 	entry := states[index]
-	if entry.State != activation.Withheld || entry.Reason != activation.WithheldOutsideTargetSet || entry.CaptureProof != 0 || entry.ProductionProof != 0 {
-		t.Fatalf("matcher metadata must not change FileChanged admission: %+v", entry)
+	if entry.State != activation.Enabled || !entry.IsValid() {
+		t.Fatalf("FileChanged needs accepted event-bound proofs: %+v", entry)
 	}
-	if slices.Contains(activation.ClaudeCode2_1_261TargetEvents(), registration.EventFileChanged) {
-		t.Fatal("matcher metadata selected FileChanged without accepted capture and production proofs")
+	// Metadata cannot replace either proof even after the row is activated.
+	for _, proofs := range []struct {
+		capture    activation.CaptureProof
+		production activation.ProductionProof
+	}{{0, entry.ProductionProof}, {entry.CaptureProof, 0}, {0, 0}} {
+		if _, err := activation.NewEnabled(registration.EventFileChanged, proofs.capture, proofs.production); err == nil {
+			t.Fatal("FileChanged enabled without both event-bound proofs")
+		}
+	}
+	if !slices.Contains(activation.ClaudeCode2_1_261TargetEvents(), registration.EventFileChanged) {
+		t.Fatal("proven FileChanged is absent from the selected target set")
+	}
+	// Remove the proofs in the emitter input while keeping the real matcher
+	// declaration. Metadata alone must still leave the transport unsubscribed.
+	unproven := append([]activation.Entry(nil), states...)
+	unproven[index], err = activation.NewWithheld(registration.EventFileChanged, activation.WithheldOutsideTargetSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	negative, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, registration.ClaudeCode2_1_261(), unproven)
+	if err != nil {
+		t.Fatal(err)
+	}
+	negativeFound := false
+	for _, file := range negative {
+		if filepath.Base(file.Path) != "hooks.json" {
+			continue
+		}
+		negativeFound = true
+		var config claudeHooksConfig
+		if err := json.Unmarshal([]byte(file.Content), &config); err != nil {
+			t.Fatal(err)
+		}
+		if _, present := config.Hooks["FileChanged"]; present {
+			t.Fatal("matcher metadata wired FileChanged after its proofs were removed")
+		}
+	}
+	if !negativeFound {
+		t.Fatal("unproven-row control emitted no hooks.json")
 	}
 	files, err := (claudeHooksEmitter{}).Emit(t.TempDir(), GenerateOptions{})
 	if err != nil {
@@ -141,14 +178,18 @@ func TestClaudeMatcherMetadataDoesNotEnableFileChanged(t *testing.T) {
 	if !found {
 		t.Fatal("Claude emitter returned no hooks.json; admission check would read no transport")
 	}
-	if _, present := config.Hooks["FileChanged"]; present {
-		t.Fatal("unproven FileChanged row reached the generated transport")
+	if _, present := config.Hooks["FileChanged"]; !present {
+		t.Fatal("proven FileChanged row did not reach the generated transport")
 	}
 	for name, groups := range config.Hooks {
 		for _, group := range groups {
 			for _, hook := range group.Hooks {
-				if strings.Contains(hook.Command, "hook lifecycle") && group.Matcher != "" {
-					t.Errorf("%s existing lifecycle matcher changed from empty to %q", name, group.Matcher)
+				want := ""
+				if name == "FileChanged" {
+					want = ".envrc|.env"
+				}
+				if strings.Contains(hook.Command, "hook lifecycle") && group.Matcher != want {
+					t.Errorf("%s lifecycle matcher = %q, want %q", name, group.Matcher, want)
 				}
 			}
 		}

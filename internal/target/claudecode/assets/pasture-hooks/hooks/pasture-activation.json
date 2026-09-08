@@ -102,8 +102,9 @@
     {
       "matcher": ".envrc|.env",
       "event": "FileChanged",
-      "state": "withheld",
-      "reason": "outside-target-set",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/claude/testdata/fixtures/file_changed_2_1_263.json (Claude Code 2.1.263 authentic capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/FileChanged",
       "responseCapability": "none",
       "failureEvidence": ""
     },

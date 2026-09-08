@@ -202,6 +202,7 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 		registration.EventPreToolUse: {}, registration.EventPostToolUse: {},
 		registration.EventPostToolUseFailure: {}, registration.EventPostToolBatch: {},
 		registration.EventPreCompact: {}, registration.EventPostCompact: {},
+		registration.EventFileChanged: {},
 	}, admittedEvents)
 	require.Equal(t, enabledEvents, admittedEvents, "every enabled event needs independent real-corpus admission")
 

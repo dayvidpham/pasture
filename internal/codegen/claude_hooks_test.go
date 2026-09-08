@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -91,9 +92,10 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 		t.Fatalf("support entries=%d, want %d (one per registered Claude event)", len(report.Events), want)
 	}
 	expected := []struct{ event, state, reason string }{
-		{"SessionStart", "enabled", ""}, {"Setup", "withheld", "outside-target-set"}, {"SessionEnd", "enabled", ""}, {"UserPromptSubmit", "withheld", "outside-target-set"}, {"UserPromptExpansion", "withheld", "outside-target-set"}, {"Stop", "withheld", "outside-target-set"}, {"StopFailure", "withheld", "outside-target-set"}, {"PreToolUse", "enabled", ""}, {"PermissionRequest", "withheld", "outside-target-set"}, {"PermissionDenied", "withheld", "outside-target-set"}, {"PostToolUse", "enabled", ""}, {"PostToolUseFailure", "enabled", ""}, {"PostToolBatch", "enabled", ""}, {"FileChanged", "withheld", "outside-target-set"}, {"CwdChanged", "withheld", "outside-target-set"}, {"ConfigChange", "withheld", "outside-target-set"}, {"InstructionsLoaded", "withheld", "outside-target-set"}, {"WorktreeCreate", "withheld", "outside-target-set"}, {"WorktreeRemove", "withheld", "outside-target-set"}, {"SubagentStart", "withheld", "outside-target-set"}, {"SubagentStop", "withheld", "outside-target-set"}, {"TeammateIdle", "withheld", "outside-target-set"}, {"TaskCreated", "withheld", "outside-target-set"}, {"TaskCompleted", "withheld", "outside-target-set"}, {"PreCompact", "enabled", ""}, {"PostCompact", "enabled", ""}, {"Notification", "withheld", "outside-target-set"}, {"MessageDisplay", "withheld", "outside-target-set"}, {"Elicitation", "withheld", "missing-request-correlation"}, {"ElicitationResult", "withheld", "missing-request-correlation"}, {"PreModelSwitch", "withheld", "outside-target-set"}, {"PostModelSwitch", "withheld", "outside-target-set"}, {"DirectoryAdded", "withheld", "outside-target-set"},
+		{"SessionStart", "enabled", ""}, {"Setup", "withheld", "outside-target-set"}, {"SessionEnd", "enabled", ""}, {"UserPromptSubmit", "withheld", "outside-target-set"}, {"UserPromptExpansion", "withheld", "outside-target-set"}, {"Stop", "withheld", "outside-target-set"}, {"StopFailure", "withheld", "outside-target-set"}, {"PreToolUse", "enabled", ""}, {"PermissionRequest", "withheld", "outside-target-set"}, {"PermissionDenied", "withheld", "outside-target-set"}, {"PostToolUse", "enabled", ""}, {"PostToolUseFailure", "enabled", ""}, {"PostToolBatch", "enabled", ""}, {"FileChanged", "enabled", ""}, {"CwdChanged", "withheld", "outside-target-set"}, {"ConfigChange", "withheld", "outside-target-set"}, {"InstructionsLoaded", "withheld", "outside-target-set"}, {"WorktreeCreate", "withheld", "outside-target-set"}, {"WorktreeRemove", "withheld", "outside-target-set"}, {"SubagentStart", "withheld", "outside-target-set"}, {"SubagentStop", "withheld", "outside-target-set"}, {"TeammateIdle", "withheld", "outside-target-set"}, {"TaskCreated", "withheld", "outside-target-set"}, {"TaskCompleted", "withheld", "outside-target-set"}, {"PreCompact", "enabled", ""}, {"PostCompact", "enabled", ""}, {"Notification", "withheld", "outside-target-set"}, {"MessageDisplay", "withheld", "outside-target-set"}, {"Elicitation", "withheld", "missing-request-correlation"}, {"ElicitationResult", "withheld", "missing-request-correlation"}, {"PreModelSwitch", "withheld", "outside-target-set"}, {"PostModelSwitch", "withheld", "outside-target-set"}, {"DirectoryAdded", "withheld", "outside-target-set"},
 	}
 	enabledProofs := map[string]struct{ capture, production string }{
+		"FileChanged":        {"internal/lifecycle/ingress/claude/testdata/fixtures/file_changed_2_1_263.json (Claude Code 2.1.263 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/FileChanged"},
 		"SessionStart":       {"internal/lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionStart"},
 		"SessionEnd":         {"internal/lifecycle/ingress/claude/testdata/fixtures/session_end_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/SessionEnd"},
 		"PreToolUse":         {"internal/lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_261.json (Claude Code 2.1.261 authentic capture)", "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreToolUse"},
@@ -273,7 +275,7 @@ func TestLifecycleIdentityFieldsBelongToPinnedPayloadShapes(t *testing.T) {
 	// path in codex_transport_test.go.
 }
 
-func TestClaudeLifecycleTransportAllowsAuthentic2_1_261FieldShapes(t *testing.T) {
+func TestClaudeLifecycleTransportAllowsAuthenticFieldShapes(t *testing.T) {
 	t.Parallel()
 	metadata, err := lifecycleMetadata(runtime.ClaudeCode2_1_261Lifecycle(), runtime.ClaudeCode2_1_261Lifecycle().Versions().Min().String(), claudeNativeFields)
 	if err != nil {
@@ -291,9 +293,21 @@ func TestClaudeLifecycleTransportAllowsAuthentic2_1_261FieldShapes(t *testing.T)
 		events[event.Name] = event
 	}
 	fixtureRoot := filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures")
-	fixtures, err := filepath.Glob(filepath.Join(fixtureRoot, "*_2_1_261.json"))
+	candidates, err := filepath.Glob(filepath.Join(fixtureRoot, "*.json"))
 	if err != nil {
 		t.Fatalf("list authentic Claude fixtures: %v", err)
+	}
+	// Positive payload names end in their capture version. Sidecars and
+	// metadata controls have suffixes after that version and are not positives.
+	positive := regexp.MustCompile(`^[a-z]+(?:_[a-z]+)*_[0-9]+_[0-9]+_[0-9]+\.json$`)
+	var fixtures []string
+	for _, candidate := range candidates {
+		if positive.MatchString(filepath.Base(candidate)) {
+			fixtures = append(fixtures, candidate)
+		}
+	}
+	if len(fixtures) == 0 {
+		t.Fatal("no positive Claude captures selected across capture versions")
 	}
 	// The Claude fixture corpus holds two kinds of authentic capture, and this
 	// guard reads both from derived populations rather than a typed list.
@@ -313,9 +327,8 @@ func TestClaudeLifecycleTransportAllowsAuthentic2_1_261FieldShapes(t *testing.T)
 	//   enabled — which is what forces the registered field list to grow with
 	//   the enabling and not after it.
 	//
-	// The glob ends in _2_1_261.json, so the three sidecar controls
-	// (…_digest_mismatch, …_origin_authored, …_version_out_of_range) do not
-	// match it and must not begin to.
+	// The three metadata-control payloads and all provenance sidecars are
+	// excluded by the positive filename grammar, independently of their bytes.
 	registered := registration.ClaudeCode2_1_261()
 	registeredNames := make(map[model.ContractEventKind]string, len(registered.Events))
 	registeredByName := make(map[string]struct{}, len(registered.Events))

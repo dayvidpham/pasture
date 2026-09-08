@@ -1,6 +1,18 @@
 {
   "description": "Pasture lifecycle adapters and shared-worktree git discipline for the pinned Claude Code contract.",
   "hooks": {
+    "FileChanged": [
+      {
+        "matcher": ".envrc|.env",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event FileChanged --host-executable \"${CLAUDE_CODE_EXECPATH:-}\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostCompact": [
       {
         "matcher": "",

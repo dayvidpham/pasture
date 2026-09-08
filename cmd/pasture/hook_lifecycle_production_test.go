@@ -166,36 +166,42 @@ var expectedEnabledClaudeEvents = []model.ContractEventKind{
 	registration.EventPostToolUse,
 	registration.EventPostToolUseFailure,
 	registration.EventPostToolBatch,
+	registration.EventFileChanged,
 	registration.EventPreCompact,
 	registration.EventPostCompact,
 }
 
 type claudeProductionFixture struct {
-	name       string
-	fixture    string
-	event      model.ContractEventKind
-	bindings   []lifecycleBindingPayload
-	semantic   runtime.EventSemantic
-	identities []interpretedIdentityPayload
-	unresolved []interpretedUnresolvedPayload
-	blocking   bool
+	captureVersion string
+	captureSource  string
+	name           string
+	fixture        string
+	event          model.ContractEventKind
+	bindings       []lifecycleBindingPayload
+	semantic       runtime.EventSemantic
+	identities     []interpretedIdentityPayload
+	unresolved     []interpretedUnresolvedPayload
+	blocking       bool
 }
 
 var claudeProductionFixtures = []claudeProductionFixture{
 	{
 		name: "SessionStart", fixture: "session_start_2_1_261.json", event: registration.EventSessionStart,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticObservation,
 		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 	},
 	{
 		name: "SessionEnd", fixture: "session_end_2_1_261.json", event: registration.EventSessionEnd,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticObservation,
 		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 	},
 	{
 		name: "PreToolUse", fixture: "pre_tool_use_2_1_261.json", event: registration.EventPreToolUse,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings: []lifecycleBindingPayload{
 			{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
 			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01DECpiEtdNZxsYNXCTg5tb1"},
@@ -209,6 +215,7 @@ var claudeProductionFixtures = []claudeProductionFixture{
 	},
 	{
 		name: "PostToolUse", fixture: "post_tool_use_2_1_261.json", event: registration.EventPostToolUse,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings: []lifecycleBindingPayload{
 			{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
 			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01DECpiEtdNZxsYNXCTg5tb1"},
@@ -221,6 +228,7 @@ var claudeProductionFixtures = []claudeProductionFixture{
 	},
 	{
 		name: "PostToolUseFailure", fixture: "post_tool_use_failure_2_1_261.json", event: registration.EventPostToolUseFailure,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings: []lifecycleBindingPayload{
 			{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"},
 			{Kind: model.BindingToolCall, NativeName: "tool_use_id", Value: "toolu_01JnozEijp6Ly4oYGZ478HGD"},
@@ -233,6 +241,7 @@ var claudeProductionFixtures = []claudeProductionFixture{
 	},
 	{
 		name: "PostToolBatch", fixture: "post_tool_batch_2_1_261.json", event: registration.EventPostToolBatch,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticGateConsultation,
 		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
@@ -241,6 +250,7 @@ var claudeProductionFixtures = []claudeProductionFixture{
 	},
 	{
 		name: "PreCompact", fixture: "pre_compact_2_1_261.json", event: registration.EventPreCompact,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticGateConsultation,
 		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
@@ -248,9 +258,17 @@ var claudeProductionFixtures = []claudeProductionFixture{
 	},
 	{
 		name: "PostCompact", fixture: "post_compact_2_1_261.json", event: registration.EventPostCompact,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 		semantic:   runtime.SemanticObservation,
 		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
+	},
+	{
+		name: "FileChanged", fixture: "file_changed_2_1_263.json", event: registration.EventFileChanged,
+		captureVersion: "2.1.263", captureSource: "cmd/pasture/hook_lifecycle.go:406 -> internal/handlers/capture_sink.go:DirectoryCaptureSink.Record (PASTURE_CAPTURE_DIR)",
+		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e"}},
+		semantic:   runtime.SemanticObservation,
+		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e"}},
 	},
 }
 
@@ -431,9 +449,9 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 			initializeLifecycleTestDatabase(t, dbPath)
-			raw := readProductionClaudeFixture(t, testCase.fixture, testCase.name)
+			raw := readProductionClaudeFixtureAt(t, testCase.fixture, testCase.name, testCase.captureVersion, testCase.captureSource)
 
-			executable := versionExecutable(t, "printf '2.1.261 (Claude Code)\\n'")
+			executable := versionExecutable(t, "printf '"+testCase.captureVersion+" (Claude Code)\\n'")
 			command := exec.Command("sh", "-c", generatedClaudeLifecycleCommand(t, testCase.name))
 			command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
 				"CLAUDE_CODE_EXECPATH="+executable, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=")
@@ -462,10 +480,16 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 			require.Equal(t, occurrenceLifecycleContract, occurrencePayload.Contract)
 			require.Equal(t, testCase.event, occurrencePayload.Event)
 			require.Equal(t, occurrenceLifecycleContract, occurrencePayload.Envelope.Runtime.Contract.String())
-			require.Equal(t, "2.1.261", occurrencePayload.Envelope.HostVersion)
+			require.Equal(t, testCase.captureVersion, occurrencePayload.Envelope.HostVersion)
+			require.Equal(t, model.HostVersionExecutableQuery, occurrencePayload.Envelope.HostVersionSource)
 			require.Equal(t, model.CaptureValid, occurrencePayload.Capture)
 			require.Equal(t, digest.FromBytes(raw).String(), occurrencePayload.Body)
 			require.Equal(t, testCase.bindings, occurrencePayload.Bindings)
+			reader, err := tasks.NewLifecycleReader(tracker)
+			require.NoError(t, err)
+			body, err := reader.Payload(context.Background(), digest.FromBytes(raw))
+			require.NoError(t, err)
+			require.Equal(t, raw, body, "durable payload bytes must match the accepted capture")
 
 			interpretedPayload := decodeInterpretedPayload(t, interpreted[0].Payload)
 			require.Equal(t, uint8(testCase.semantic), interpretedPayload.Semantic)
@@ -518,6 +542,86 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 			for _, privateValue := range []string{string(raw), dbPath, "/home/user", "authentic-capture", "tools/capture-claude-hook.sh", "home-path-v1"} {
 				require.NotContains(t, stdout.String(), privateValue)
 			}
+		})
+	}
+}
+
+func TestFileChangedGeneratedCommandCompatibleObservationAndIdentityRefusal(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	generated := generatedClaudeLifecycleCommand(t, "FileChanged")
+	authentic := readProductionClaudeFixtureAt(t, "file_changed_2_1_263.json", "FileChanged", "2.1.263",
+		"cmd/pasture/hook_lifecycle.go:406 -> internal/handlers/capture_sink.go:DirectoryCaptureSink.Record (PASTURE_CAPTURE_DIR)")
+	for _, control := range []string{"compatible newer executable", "missing session", "non-string session"} {
+		t.Run(control, func(t *testing.T) {
+			raw := authentic
+			valid := control == "compatible newer executable"
+			if !valid {
+				var members map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(authentic, &members))
+				if control == "missing session" {
+					delete(members, "session_id")
+				} else {
+					members["session_id"] = json.RawMessage(`42`)
+				}
+				var err error
+				raw, err = json.Marshal(members)
+				require.NoError(t, err)
+				require.NotEqual(t, authentic, raw, "the negative control must change required identity")
+			}
+			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+			initializeLifecycleTestDatabase(t, dbPath)
+			executable := versionExecutable(t, "printf '2.1.299 (Claude Code)\\n'")
+			command := exec.Command("sh", "-c", generated)
+			command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
+				"CLAUDE_CODE_EXECPATH="+executable, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=", "PASTURE_HOOK_FAIL_CLOSED=")
+			command.Stdin = bytes.NewReader(raw)
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			require.Empty(t, stdout.Bytes())
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			defer tracker.Close()
+			occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+			require.Len(t, occurrences, 1)
+			occurrence := decodeOccurrencePayload(t, occurrences[0].Payload)
+			require.Equal(t, registration.EventFileChanged, occurrence.Event)
+			require.Equal(t, occurrenceLifecycleContract, occurrence.Contract)
+			require.Equal(t, "2.1.299", occurrence.Envelope.HostVersion)
+			require.Equal(t, model.HostVersionExecutableQuery, occurrence.Envelope.HostVersionSource)
+			require.Equal(t, digest.FromBytes(raw).String(), occurrence.Body)
+			require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind), "FileChanged never consults policy")
+			interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
+			if valid {
+				require.Empty(t, stderr.Bytes())
+				require.Equal(t, model.CaptureValid, occurrence.Capture)
+				require.Equal(t, []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e"}}, occurrence.Bindings)
+				require.Len(t, interpreted, 1)
+				payload := decodeInterpretedPayload(t, interpreted[0].Payload)
+				require.Equal(t, interpretedLifecycleContract, payload.Contract)
+				require.Equal(t, uint8(runtime.SemanticObservation), payload.Semantic)
+				require.Equal(t, []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "d4c368f4-ca7b-41ff-b9b1-9b3489c34f2e"}}, payload.Identities)
+				require.Empty(t, payload.UnresolvedFacts)
+				assertSharedOperation(t, occurrences[0], interpreted[0])
+			} else {
+				require.NotEmpty(t, stderr.Bytes(), "required identity refusal must be diagnosed, not silently treated as an observation")
+				require.Equal(t, model.CaptureUnsupportedSchema, occurrence.Capture)
+				require.Empty(t, occurrence.Bindings)
+				require.Empty(t, interpreted)
+			}
+			require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+			reader, err := tasks.NewLifecycleReader(tracker)
+			require.NoError(t, err)
+			body, err := reader.Payload(context.Background(), digest.FromBytes(raw))
+			require.NoError(t, err)
+			require.Equal(t, raw, body)
+			size, err := model.NewPageSize(1)
+			require.NoError(t, err)
+			page, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: size}})
+			require.NoError(t, err)
+			require.Len(t, page.Records(), 1)
+			require.Equal(t, occurrence.Envelope, page.Records()[0].Occurrence.Envelope)
 		})
 	}
 }
@@ -1078,6 +1182,11 @@ func queryLifecycleEvidence(t *testing.T, journal provenance.Journal, kind prove
 
 func readProductionClaudeFixture(t *testing.T, fixture, expectedEvent string) []byte {
 	t.Helper()
+	return readProductionClaudeFixtureAt(t, fixture, expectedEvent, "2.1.261", "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)")
+}
+
+func readProductionClaudeFixtureAt(t *testing.T, fixture, expectedEvent, expectedVersion, expectedSource string) []byte {
+	t.Helper()
 	root := filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata")
 	relativeFixture := filepath.Join("fixtures", fixture)
 	raw, err := os.ReadFile(filepath.Join(root, relativeFixture))
@@ -1094,8 +1203,10 @@ func readProductionClaudeFixture(t *testing.T, fixture, expectedEvent string) []
 	require.NoError(t, json.Unmarshal(provenanceBytes, &sidecar))
 	require.Equal(t, acceptance.OriginAuthenticCapture, sidecar.Origin)
 	require.Equal(t, acceptance.HarnessClaudeCode, sidecar.Harness)
-	require.Equal(t, registration.ClaudeCode2_1_261().Version, sidecar.HarnessVersion, "the Claude fixture was captured at the recorded host version")
-	require.Equal(t, "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)", sidecar.CaptureSource, "every fixture of this corpus came through the in-binary capture sink")
+	require.NotEmpty(t, expectedVersion)
+	require.NotEmpty(t, expectedSource)
+	require.Equal(t, expectedVersion, sidecar.HarnessVersion, "capture version is independent of the registration root")
+	require.Equal(t, expectedSource, sidecar.CaptureSource)
 	rules, err := acceptance.ParseRedaction(sidecar.Redaction)
 	require.NoError(t, err)
 	require.Equal(t, acceptance.RedactionHomePath, rules[0], "every Claude fixture carries the home path, so home-path-v1 is applied first")

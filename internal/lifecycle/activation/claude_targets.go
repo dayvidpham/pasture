@@ -25,6 +25,7 @@ var claudeCaptureProofs = [...]captureProofDeclaration{
 	{ordinal: 6, arm: "PostToolBatch", event: registration.EventPostToolBatch, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_tool_batch_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
 	{ordinal: 7, arm: "PreCompact", event: registration.EventPreCompact, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
 	{ordinal: 8, arm: "PostCompact", event: registration.EventPostCompact, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
+	{ordinal: 9, arm: "FileChanged", event: registration.EventFileChanged, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/file_changed_2_1_263.json (Claude Code 2.1.263 authentic capture)"},
 }
 
 // claudeProductionProofs declares every Claude Code production proof: the
@@ -39,6 +40,7 @@ var claudeProductionProofs = [...]productionProofDeclaration{
 	{ordinal: 6, arm: "PostToolBatch", event: registration.EventPostToolBatch, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostToolBatch"},
 	{ordinal: 7, arm: "PreCompact", event: registration.EventPreCompact, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreCompact"},
 	{ordinal: 8, arm: "PostCompact", event: registration.EventPostCompact, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostCompact"},
+	{ordinal: 9, arm: "FileChanged", event: registration.EventFileChanged, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/FileChanged"},
 }
 
 // claudeTargetEventDeclarations is the static Claude Code target table.
@@ -54,7 +56,7 @@ var claudeTargetEventDeclarations = [...]targetEventDeclaration{
 	// Claude Code 2.1.261's embedded FileChanged help specifies filenames in
 	// the current directory, with ".envrc|.env" as its example. The watcher
 	// splits on "|", not a match-all regex. Metadata alone supplies no proof.
-	{event: registration.EventFileChanged, withheldReason: WithheldOutsideTargetSet, matcher: ".envrc|.env"},
+	{event: registration.EventFileChanged, captureProof: CaptureProofFileChanged, productionProof: ProductionProofFileChanged, matcher: ".envrc|.env"},
 	{event: registration.EventElicitation, withheldReason: WithheldMissingRequestCorrelation},
 	{event: registration.EventElicitationResult, withheldReason: WithheldMissingRequestCorrelation},
 }
