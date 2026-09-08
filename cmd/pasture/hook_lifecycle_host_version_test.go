@@ -137,7 +137,7 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 		}
 		raw, err := os.ReadFile(filepath.Join("..", "..", "internal/lifecycle/ingress", harness, "testdata/fixtures", fixture))
 		require.NoError(t, err)
-		for _, mode := range []string{"first", "reverse", "explicit executable", "explicit version", "missing", "malformed", "nonzero", "overflow", "explicit failure", "conflict", "empty conflict", "empty executable", "relative executable", "refused"} {
+		for _, mode := range []string{"first", "reverse", "explicit executable", "explicit version", "missing", "malformed", "nonzero", "overflow", "explicit failure", "conflict", "empty conflict", "empty executable", "relative executable", "refused", "supplied refused"} {
 			t.Run(harness+"/"+mode, func(t *testing.T) {
 				markers := t.TempDir()
 				firstDir, secondDir := t.TempDir(), t.TempDir()
@@ -167,7 +167,7 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 				case "explicit executable", "explicit failure":
 					args = append(args, "--host-executable", first)
 					path = secondDir
-				case "explicit version":
+				case "explicit version", "supplied refused":
 					args = append(args, "--host-version", "host-local")
 					wantVersion, wantMarker, source = "host-local", "", model.HostVersionCallerSupplied
 				case "missing":
@@ -186,8 +186,17 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 					wantMarker, wantFault = "", "complete absolute path"
 				}
 				input := raw
-				if mode == "refused" {
-					input = []byte(`{}`)
+				refused := mode == "refused" || mode == "supplied refused"
+				if refused {
+					var shape map[string]any
+					require.NoError(t, json.Unmarshal(raw, &shape))
+					if harness == "codex" {
+						delete(shape, "session_id")
+					} else {
+						delete(shape["event"].(map[string]any)["properties"].(map[string]any), "sessionID")
+					}
+					input, err = json.Marshal(shape)
+					require.NoError(t, err)
 				}
 				dbPath := filepath.Join(t.TempDir(), "pasture.db")
 				if wantFault == "" {
@@ -244,7 +253,7 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 				body, err := reader.Payload(context.Background(), projected.Payload.Digest)
 				require.NoError(t, err)
 				require.Equal(t, input, body)
-				if mode == "refused" {
+				if refused {
 					require.Equal(t, model.CaptureUnsupportedSchema, projected.Capture)
 					require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind))
 					fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
