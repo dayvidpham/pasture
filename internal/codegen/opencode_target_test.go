@@ -1297,6 +1297,15 @@ func TestOpenCodeGeneratedGateSurvivesARealPastureFault(t *testing.T) {
 	if err := os.Mkdir(unopenable, 0o755); err != nil {
 		t.Fatalf("create the unopenable store path: %v", err)
 	}
+	// Reach the intended storage fault after a controlled successful query,
+	// never by invoking whichever OpenCode happens to be installed on the host.
+	versionPath := filepath.Join(dir, "bin")
+	if err := os.Mkdir(versionPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(versionPath, "opencode"), []byte("#!/bin/sh\nprintf '1.19.0\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
 	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
@@ -1329,7 +1338,8 @@ console.log(JSON.stringify({ toolCallProceeded: true }));
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			proof := exec.CommandContext(ctx, bun, runner)
-			proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+unopenable)
+			proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+unopenable,
+				"PATH="+versionPath, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=", "PASTURE_HOOK_FAIL_CLOSED=")
 			proof.Env = append(proof.Env, policy.env...)
 			output, err := proof.CombinedOutput()
 			if ctx.Err() != nil {
@@ -1356,6 +1366,8 @@ console.log(JSON.stringify({ toolCallProceeded: true }));
 		`"event":"tool.execute.before"`,
 		`"hostExit":"continue"`,
 		`"hostContinuation":"{\"decision\":\"proceed\"}"`,
+		`"hostVersion":"1.19.0"`,
+		`"hostVersionSource":"executable-query"`,
 	} {
 		if !strings.Contains(string(records), required) {
 			t.Errorf("the fault record lacks %s, so a reader cannot tell an unevaluated proceed from a decision: %s", required, records)
