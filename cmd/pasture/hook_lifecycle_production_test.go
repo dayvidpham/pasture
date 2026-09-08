@@ -12,10 +12,12 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,9 +40,348 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	opencodetarget "github.com/dayvidpham/pasture/internal/target/opencode"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
 )
+
+// This is an installed-transport compatibility proof, not a live host capture.
+// Version executables and in-memory metadata/identity variants are test controls.
+func TestInstalledOpenCodePluginObservesUpdatesWithoutReinstall(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	require.NoError(t, err)
+	binary := lifecycleBinary(t)
+	target, err := opencodetarget.Descriptor()
+	require.NoError(t, err)
+	module, err := fs.ReadFile(target.Hooks().Bundle(), "pasture-hooks.ts")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	installed := filepath.Join(dir, ".config", "opencode", "plugins", "pasture-hooks.ts")
+	require.NoError(t, os.MkdirAll(filepath.Dir(installed), 0o700))
+	require.NoError(t, os.WriteFile(installed, module, 0o600)) // exactly one install
+	installedHash := sha256.Sum256(module)
+	fixtureDir := filepath.Join("..", "..", "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
+	sessionRaw, err := os.ReadFile(filepath.Join(fixtureDir, "session_created_1_18_29.json"))
+	require.NoError(t, err)
+	toolRaw, err := os.ReadFile(filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
+	require.NoError(t, err)
+
+	for _, variant := range []string{"accepted", "new creation version", "absent", "empty", "whitespace", "number", "null", "object", "array", "bool", "missing session", "unusable session", "missing call"} {
+		t.Run(variant, func(t *testing.T) {
+			var session, tool map[string]any
+			require.NoError(t, json.Unmarshal(sessionRaw, &session))
+			require.NoError(t, json.Unmarshal(toolRaw, &tool))
+			properties := session["event"].(map[string]any)["properties"].(map[string]any)
+			info := properties["info"].(map[string]any)
+			creationVersion := "1.18.29"
+			creationSource := model.HostVersionCallerSupplied
+			creationValid, toolValid := true, true
+			switch variant {
+			case "new creation version":
+				info["version"], creationVersion = "1.22.0+runtime", "1.22.0+runtime"
+			case "absent":
+				delete(info, "version")
+			case "empty":
+				info["version"] = ""
+			case "whitespace":
+				info["version"] = " \t\n"
+			case "number":
+				info["version"] = 42
+			case "null":
+				info["version"] = nil
+			case "object":
+				info["version"] = map[string]any{"version": "1.18.29"}
+			case "array":
+				info["version"] = []any{"1.18.29"}
+			case "bool":
+				info["version"] = true
+			case "missing session":
+				delete(properties, "sessionID")
+				creationValid = false
+			case "unusable session":
+				properties["sessionID"] = " "
+				creationValid = false
+			case "missing call":
+				delete(tool["input"].(map[string]any), "callID")
+				toolValid = false
+			}
+			if value, ok := info["version"].(string); !ok || strings.TrimSpace(value) == "" {
+				creationSource = model.HostVersionExecutableQuery
+			}
+			sessionBytes, err := json.Marshal(session)
+			require.NoError(t, err)
+			toolBytes, err := json.Marshal(tool)
+			require.NoError(t, err)
+			// Keep the actual accepted serialization on unchanged positive routes.
+			// Only constructed controls use a newly serialized payload.
+			if variant == "accepted" || variant == "missing call" {
+				sessionBytes = sessionRaw
+			}
+			if variant != "missing call" {
+				toolBytes = toolRaw
+			}
+			scratch := t.TempDir()
+			path := filepath.Join(scratch, "bin")
+			require.NoError(t, os.Mkdir(path, 0o700))
+			executable := filepath.Join(path, "opencode")
+			marker := filepath.Join(scratch, "queries")
+			// The executable's path stays fixed. Each query appends, so exact counts
+			// detect a cached value, a second query, or an unexpected metadata query.
+			banners := []string{"1.19.0", "1.20.0+updated"}
+			var scripts []string
+			dbPath := filepath.Join(scratch, tasks.DefaultDBFilename.String())
+			initializeLifecycleTestDatabase(t, dbPath)
+			for _, version := range banners {
+				scripts = append(scripts, "#!/bin/sh\n[ \"$#\" = 1 ] && [ \"$1\" = --version ] || exit 9\nprintf 'x' >> '"+marker+"'\nprintf '"+version+"\\n'\n")
+			}
+			require.NoError(t, os.WriteFile(executable, []byte(scripts[0]), 0o700))
+			runner := filepath.Join(scratch, "installed.ts")
+			jsonScripts, err := json.Marshal(scripts)
+			require.NoError(t, err)
+			code := fmt.Sprintf(`
+import assert from "node:assert/strict";
+import {writeFileSync} from "node:fs";
+const {default: plugin} = await import(%q);
+assert.ok(plugin && typeof plugin === "object" && !Array.isArray(plugin), "installed V1 default must be an object");
+assert.equal(plugin.id, "pasture-lifecycle");
+assert.equal(typeof plugin.server, "function", "installed V1 default must expose server()");
+const hooks = await plugin.server({client:{}}, {});
+const session = %s, tool = %s;
+const freeze = value => { if (value && typeof value === "object") { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
+freeze(session); freeze(tool);
+const info = session.event.properties.info, input = tool.input, output = tool.output, args = output.args;
+const sessionBefore = JSON.stringify(session), toolBefore = JSON.stringify(tool);
+const scripts = %s;
+const calls = [];
+const spawn = Bun.spawn;
+// Observe real child bytes with a tee; never replace the CLI or its response.
+Bun.spawn = options => {
+  const child = spawn(options);
+  const [stdout, observedOut] = child.stdout.tee();
+  const [stderr, observedErr] = child.stderr.tee();
+  const observed = Promise.all([options.stdin.text(), new Response(observedOut).text(), new Response(observedErr).text(), child.exited]);
+  calls.push(observed);
+  return {stdout, stderr, exited:child.exited, get exitCode(){return child.exitCode;}, kill:signal=>child.kill(signal)};
+};
+try {
+  for (let index = 0; index < scripts.length; index++) {
+    writeFileSync(%q, scripts[index], {mode:0o700});
+    await hooks.event(session);
+    await hooks["tool.execute.before"](input, output);
+    assert.equal(JSON.stringify(session), sessionBefore);
+    assert.equal(JSON.stringify(tool), toolBefore);
+    assert.strictEqual(session.event.properties.info, info);
+    assert.strictEqual(tool.input, input);
+    assert.strictEqual(tool.output, output);
+    assert.strictEqual(output.args, args);
+  }
+  console.log(JSON.stringify(await Promise.all(calls)));
+} finally { Bun.spawn = spawn; }
+`, installed, sessionBytes, toolBytes, jsonScripts, executable)
+			require.NoError(t, os.WriteFile(runner, []byte(code), 0o600))
+			command := exec.Command(bun, runner)
+			command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "PASTURE_BIN": &binary,
+				"PASTURE_DB_PATH": &dbPath, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			var calls [][]json.RawMessage
+			require.NoError(t, json.Unmarshal(stdout.Bytes(), &calls), stdout.String())
+			require.Len(t, calls, 4)
+			queryCount := 2
+			if creationSource == model.HostVersionExecutableQuery {
+				queryCount = 4
+			}
+			queries, err := os.ReadFile(marker)
+			require.NoError(t, err, "tool callbacks must query the installed executable, not supply a compiled or cached version")
+			require.Equal(t, strings.Repeat("x", queryCount), string(queries), "each selected executable must be queried exactly once; creation metadata bypasses queries")
+			for index := range banners {
+				observedCreationVersion := creationVersion
+				if creationSource == model.HostVersionExecutableQuery {
+					observedCreationVersion = banners[index]
+				}
+				assertInstalledOpenCodeOccurrence(t, binary, dbPath, index, sessionBytes, toolBytes, observedCreationVersion, banners[index], creationSource, creationValid, toolValid)
+				for eventIndex, raw := range [][]byte{sessionBytes, toolBytes} {
+					call := calls[index*2+eventIndex]
+					require.Len(t, call, 4)
+					var body, native, diagnostic string
+					var exit int
+					require.NoError(t, json.Unmarshal(call[0], &body))
+					require.NoError(t, json.Unmarshal(call[1], &native))
+					require.NoError(t, json.Unmarshal(call[2], &diagnostic))
+					require.NoError(t, json.Unmarshal(call[3], &exit))
+					require.Equal(t, string(raw), body)
+					require.Zero(t, exit)
+					if eventIndex == 0 {
+						require.Empty(t, native)
+					} else {
+						require.Equal(t, `{"decision":"proceed"}`, native)
+					}
+					valid := (eventIndex == 0 && creationValid) || (eventIndex == 1 && toolValid)
+					if valid {
+						require.Empty(t, diagnostic)
+					} else {
+						require.Contains(t, diagnostic, "WAS NOT EVALUATED")
+					}
+				}
+			}
+			current, err := os.ReadFile(installed)
+			require.NoError(t, err)
+			require.Equal(t, installedHash, sha256.Sum256(current), "host update must not rewrite the installed plugin")
+		})
+	}
+}
+
+func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, updateIndex int, sessionRaw, toolRaw []byte, creationVersion, toolVersion string, creationSource model.HostVersionSource, creationValid, toolValid bool) {
+	t.Helper()
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+	require.Len(t, occurrences, 4, "both updates must append distinct occurrences in the same scratch store")
+	sort.Slice(occurrences, func(i, j int) bool { return occurrences[i].JournalID < occurrences[j].JournalID })
+	occurrences = occurrences[updateIndex*2 : updateIndex*2+2]
+	require.Equal(t, registration.EventOpenCodeSessionCreated, decodeOccurrencePayload(t, occurrences[0].Payload).Event)
+	require.Equal(t, registration.EventOpenCodeToolExecuteBefore, decodeOccurrencePayload(t, occurrences[1].Payload).Event)
+	interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
+	consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+	wantInterpreted, wantConsultations := 0, 0
+	if creationValid {
+		wantInterpreted++
+	}
+	if toolValid {
+		wantInterpreted++
+		wantConsultations++
+	}
+	require.Len(t, interpreted, 2*wantInterpreted)
+	require.Len(t, consultations, 2*wantConsultations)
+	sort.Slice(consultations, func(i, j int) bool { return consultations[i].JournalID < consultations[j].JournalID })
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	size, err := model.NewPageSize(4)
+	require.NoError(t, err)
+	page, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: size}})
+	require.NoError(t, err)
+	require.Len(t, page.Records(), 4)
+	for _, row := range occurrences {
+		payload := decodeOccurrencePayload(t, row.Payload)
+		raw, version, source, valid := toolRaw, toolVersion, model.HostVersionExecutableQuery, toolValid
+		semantic := runtime.SemanticGateConsultation
+		identities := []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "ses_f8e723e13ffeUWnfE2vlRBO1xN"}, {Kind: uint8(runtime.IdentityToolCall), Value: "call_4zMdLgUBV12aE7yHvuYQolSx"}}
+		if payload.Event == registration.EventOpenCodeSessionCreated {
+			raw, version, source, valid = sessionRaw, creationVersion, creationSource, creationValid
+			semantic = runtime.SemanticObservation
+			identities = identities[:1]
+		} else {
+			require.Equal(t, registration.EventOpenCodeToolExecuteBefore, payload.Event)
+		}
+		require.Equal(t, registration.OpenCode1_18_29().Contract.String(), payload.Contract)
+		require.Equal(t, registration.OpenCode1_18_29().Contract, payload.Envelope.Runtime.Contract)
+		require.Equal(t, version, payload.Envelope.HostVersion)
+		require.Equal(t, source, payload.Envelope.HostVersionSource)
+		require.Equal(t, digest.FromBytes(raw).String(), payload.Body)
+		body, err := reader.Payload(context.Background(), digest.FromBytes(raw))
+		require.NoError(t, err)
+		require.Equal(t, raw, body)
+		matches := 0
+		for _, irRow := range interpreted {
+			if irRow.ProducingOperationID != row.ProducingOperationID {
+				continue
+			}
+			matches++
+			assertSharedOperation(t, row, irRow)
+			value := decodeInterpretedPayload(t, irRow.Payload)
+			require.Equal(t, runtime.OpenCode1_18_29().ID().String(), value.Contract)
+			require.Equal(t, uint8(semantic), value.Semantic)
+			require.Equal(t, identities, value.Identities)
+			require.Empty(t, value.UnresolvedFacts)
+		}
+		if valid {
+			require.Equal(t, model.CaptureValid, payload.Capture)
+			require.Equal(t, 1, matches)
+			bindings := []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "sessionID", Value: identities[0].Value}}
+			if payload.Event == registration.EventOpenCodeToolExecuteBefore {
+				bindings = append(bindings, lifecycleBindingPayload{Kind: model.BindingToolCall, NativeName: "callID", Value: identities[1].Value})
+			}
+			require.Equal(t, bindings, payload.Bindings)
+		} else {
+			require.Equal(t, model.CaptureUnsupportedSchema, payload.Capture)
+			require.Empty(t, payload.Bindings)
+			require.Zero(t, matches)
+		}
+		projected := 0
+		for _, record := range page.Records() {
+			if record.Occurrence.JournalID() != row.JournalID {
+				continue
+			}
+			projected++
+			require.Equal(t, payload.Envelope, record.Occurrence.Envelope)
+			require.Len(t, record.Interpreted(), matches)
+		}
+		require.Equal(t, 1, projected)
+		if valid && payload.Event == registration.EventOpenCodeToolExecuteBefore {
+			require.Equal(t, row.ProducingOperationID, consultations[updateIndex].ProducingOperationID)
+			require.Equal(t, row.ProducingOperationJournalID, consultations[updateIndex].ProducingOperationJournalID)
+			assertProceedConsultation(t, consultations[updateIndex].Payload)
+		}
+	}
+	faultPath := filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile)
+	if creationValid && toolValid {
+		_, err := os.Stat(faultPath)
+		require.ErrorIs(t, err, os.ErrNotExist, "native continuation must reflect real evaluation, not a fail-open fault")
+	} else {
+		fault, err := os.ReadFile(faultPath)
+		require.NoError(t, err)
+		var record struct {
+			HostVersion string                  `json:"hostVersion"`
+			Source      model.HostVersionSource `json:"hostVersionSource"`
+			Outcome     string                  `json:"outcomeClass"`
+		}
+		lines := bytes.Split(bytes.TrimSpace(fault), []byte("\n"))
+		require.Len(t, lines, 2, "each refused update must retain a fault record")
+		require.NoError(t, json.Unmarshal(lines[updateIndex], &record))
+		version, source := creationVersion, creationSource
+		if !toolValid {
+			version, source = toolVersion, model.HostVersionExecutableQuery
+		}
+		require.Equal(t, version, record.HostVersion)
+		require.Equal(t, source, record.Source)
+		require.Equal(t, "fault", record.Outcome)
+	}
+	require.NoError(t, tracker.Close())
+	list := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
+	var out, diagnostic bytes.Buffer
+	list.Stdout, list.Stderr = &out, &diagnostic
+	require.NoError(t, list.Run(), diagnostic.String())
+	require.Empty(t, diagnostic.String())
+	var public struct {
+		Items []struct {
+			Event       model.ContractEventKind  `json:"event"`
+			Capture     model.CaptureDisposition `json:"capture"`
+			Digest      string                   `json:"payloadDigest"`
+			Interpreted []json.RawMessage        `json:"interpreted"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &public))
+	require.Len(t, public.Items, 4)
+	for _, item := range public.Items {
+		raw, valid := toolRaw, toolValid
+		if item.Event == registration.EventOpenCodeSessionCreated {
+			raw, valid = sessionRaw, creationValid
+		} else {
+			require.Equal(t, registration.EventOpenCodeToolExecuteBefore, item.Event)
+		}
+		require.Equal(t, digest.FromBytes(raw).String(), item.Digest)
+		if valid {
+			require.Equal(t, model.CaptureValid, item.Capture)
+			require.Len(t, item.Interpreted, 1)
+		} else {
+			require.Equal(t, model.CaptureUnsupportedSchema, item.Capture)
+			require.Empty(t, item.Interpreted)
+		}
+	}
+}
 
 func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
 	t.Parallel()
