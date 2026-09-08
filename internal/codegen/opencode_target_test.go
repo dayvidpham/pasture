@@ -219,8 +219,8 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 		t.Fatalf("generate: %v", err)
 	}
 	for _, required := range []string{
-		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", %q]`, openCodeHostVersion()),
-		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", %q]`, openCodeHostVersion()),
+		`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created"]`,
+		`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before"]`,
 		`{ input, output: { args: output.args } }`, `record.decision === "proceed"`,
 	} {
 		if !strings.Contains(module, required) {
@@ -306,6 +306,42 @@ assert.equal(calls.length, count, "unsupported callback shape must not spawn");
 	}
 }
 
+// This tests command construction, not Go executable discovery or durable receipts.
+// The version controls are constructed values, not new host captures.
+func TestOpenCodeCreationVersionIsOccurrenceLocal(t *testing.T) {
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runOpenCodeDispatchModule(t, module, `
+const base = ["hook", "lifecycle", "--harness", "opencode", "--event"];
+const input = Object.freeze({sessionID:"constructed", callID:"call", tool:"task"});
+const args = Object.freeze({nested:Object.freeze([1, null, true])});
+const output = Object.freeze({args});
+for (const version of ["1.19.0", " local ", "1.20.0+build", undefined, "", " \t\n", null, 42, false, {}, []]) {
+  const info = Object.freeze(version === undefined ? {id:"constructed"} : {id:"constructed", version});
+  const callback = Object.freeze({event:Object.freeze({type:"session.created", properties:Object.freeze({info})})});
+  const before = JSON.stringify(callback);
+  await hooks.event(callback);
+  const expected = [...base, "session.created"];
+  if (typeof version === "string" && version.trim() !== "") expected.push("--host-version", version);
+  assert.deepEqual(calls.at(-1).argv, expected, "creation occurrence selects original usable metadata only");
+  assert.deepEqual(calls.at(-1).payload, callback);
+  assert.equal(JSON.stringify(callback), before);
+  assert.strictEqual(callback.event.properties.info, info);
+  await hooks["tool.execute.before"](input, output);
+  assert.deepEqual(calls.at(-1).argv, [...base, "tool.execute.before"], "later tool must omit all version arguments, never cache creation metadata");
+  assert.deepEqual(calls.at(-1).payload, {input, output:{args}});
+  assert.strictEqual(output.args, args);
+}
+for (const event of [{type:"session.created"}, {type:"session.created", properties:{}}, {type:"session.created", properties:{info:null}}]) {
+  await hooks.event({event});
+  assert.deepEqual(calls.at(-1).argv, [...base, "session.created"]);
+}
+assert.equal(calls.length, 25, "all metadata and later-callback controls must run");
+`)
+}
+
 func runOpenCodeDispatchModule(t *testing.T, module, assertions string) {
 	t.Helper()
 	bun, err := exec.LookPath("bun")
@@ -330,7 +366,10 @@ Bun.spawn = options => {
   calls.push(record);
   const exited = options.stdin.text().then(text => {
     record.payload = JSON.parse(text);
-    assert.deepEqual(record.argv, ["hook", "lifecycle", "--harness", "opencode", "--event", record.argv[5], "--host-version", %q]);
+    const expected = ["hook", "lifecycle", "--harness", "opencode", "--event", record.argv[5]];
+    const version = record.payload.event?.properties?.info?.version;
+    if (record.argv[5] === "session.created" && typeof version === "string" && version.trim() !== "") expected.push("--host-version", version);
+    assert.deepEqual(record.argv, expected);
     return 0;
   });
   return {stdout: new Blob(['{"decision":"proceed"}']).stream(), stderr: new Blob([]).stream(), exited, exitCode: 0, kill() {throw new Error("unexpected kill");}};
@@ -339,7 +378,7 @@ try {
 %s
   console.log("dispatch assertions passed");
 } finally { Bun.spawn = originalSpawn; }
-`, path, openCodeHostVersion(), assertions)
+`, path, assertions)
 	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}

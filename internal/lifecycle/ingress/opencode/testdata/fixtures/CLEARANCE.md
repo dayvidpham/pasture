@@ -225,3 +225,25 @@ The accepted fixture bytes, sidecars and acceptance text above are unchanged.
 Production remains two enabled events out of 47 registered, both with response
 capability None. This addendum clears no additional captured row and does not
 extend the historical capture-isolation evidence.
+
+## Invocation-version transport addendum — 2026-09-08
+
+The generated plugin and installed `pasture-hooks.ts` payload now have SHA-256
+`d73061e1b130a983ff72d423ec41c02ef6a32799fed6daf5cc55aba92172e00a`.
+Their source remains `internal/codegen/opencode_hooks.go`. This is a transport
+identity, not a new capture-kit or fixture identity.
+
+The plugin no longer supplies a compiled version as an invocation observation.
+For `session.created`, a nonempty string at `event.properties.info.version`
+is passed unchanged through the explicit version argument for that occurrence.
+Missing, empty, whitespace-only or wrong-kind optional metadata leaves version
+discovery to the CLI. Later tool callbacks always leave discovery to the CLI;
+they never reuse the stored creation version. Static contract metadata remains
+the build baseline. The callback bodies, default loader, response parser,
+diagnostic forwarding and child/pipe bounds are unchanged.
+
+This addendum records no new live capture, fixture acceptance or host capability.
+All historical fixture bytes, sidecars, pairing and acceptance records above
+remain unchanged. Constructed version controls are transport tests, not evidence
+of a capture from a newer host. Production remains two enabled events out of 47,
+both with response capability None.

@@ -157,7 +157,12 @@ function parseResponse(stdout: string, event: string): LifecycleResponse | undef
 
 export async function sessionCreated(callback) {
   try {
-    await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", "1.18.29"], "session.created", callback);
+    const command = ["hook", "lifecycle", "--harness", "opencode", "--event", "session.created"];
+    // V1 supplies the creating host's version on this occurrence only.
+    // Do not cache it for later callbacks or change the original payload.
+    const version = callback.event?.properties?.info?.version;
+    if (typeof version === "string" && version.trim() !== "") command.push("--host-version", version);
+    await invokeLifecycle(command, "session.created", callback);
   } catch (error) {
     // Observation is never a gate and cannot terminate the native event bus.
     console.error("Pasture lifecycle observation failed for session.created: " + error);
@@ -169,7 +174,7 @@ export async function toolExecuteBefore(input, output) {
       output === null || typeof output !== "object" || Array.isArray(output)) {
     throw new Error("pasture hook lifecycle callback tool.execute.before requires input and output objects; check the host plugin API" + CONFIGURATION_ADVICE);
   }
-  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.29"], "tool.execute.before", { input, output: { args: output.args } });
+  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before"], "tool.execute.before", { input, output: { args: output.args } });
   const response = parseResponse(stdout, "tool.execute.before");
   if (response?.decision === "deny") throw new Error(response.reason);
   // Proceed is a decision, not a mutation. Never write host-owned objects.

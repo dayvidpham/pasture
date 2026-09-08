@@ -333,19 +333,28 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 			return "", "", fmt.Errorf("codegen.openCodeCallbacks: callback %q collides with another generated key during emission; correct the native registration", event.NativeName)
 		}
 		names[helper] = true
-		command := fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", %q, "--host-version", %q]`, event.NativeName, openCodeHostVersion())
+		command := fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", %q]`, event.NativeName)
 		switch surfaces[event.NativeName] {
 		case runtime.SurfaceOpenCodeCatchAllSSE:
+			versionSelection := ""
+			if event.NativeName == "session.created" {
+				versionSelection = `    // V1 supplies the creating host's version on this occurrence only.
+    // Do not cache it for later callbacks or change the original payload.
+    const version = callback.event?.properties?.info?.version;
+    if (typeof version === "string" && version.trim() !== "") command.push("--host-version", version);
+`
+			}
 			fmt.Fprintf(&callbacks, `export async function %s(callback) {
   try {
-    await invokeLifecycle(%s, %q, callback);
+    const command = %s;
+%s    await invokeLifecycle(command, %q, callback);
   } catch (error) {
     // Observation is never a gate and cannot terminate the native event bus.
     console.error(%q + error);
   }
 }
 
-`, helper, command, event.NativeName, "Pasture lifecycle observation failed for "+event.NativeName+": ")
+`, helper, command, versionSelection, event.NativeName, "Pasture lifecycle observation failed for "+event.NativeName+": ")
 			fmt.Fprintf(&observations, "    if (callback.event?.type === %q) {\n      await %s(callback);\n      return;\n    }\n", event.NativeName, helper)
 		case runtime.SurfaceOpenCodeNamedOutput:
 			// The pinned plugin Hooks API supplies two objects to named hooks.
@@ -410,10 +419,8 @@ func openCodeActivationEntries() ([]activation.Entry, error) {
 	return entries, nil
 }
 
-// openCodeHostVersion is the OpenCode host version this target generates for,
-// read from the OpenCode runtime contract, the one root. The generated plugin
-// passes it to every hook invocation and the target manifest records it, so
-// neither restates a number that could drift from the contract.
+// openCodeHostVersion is the build baseline recorded in target metadata, read
+// from the runtime contract. It is not an invocation-time host observation.
 func openCodeHostVersion() string {
 	return runtime.OpenCode1_18_29().Versions().Min().String()
 }
