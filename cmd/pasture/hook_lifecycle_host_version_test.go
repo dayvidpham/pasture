@@ -83,6 +83,50 @@ func discoveryPathExecutable(t *testing.T, body string) (string, string) {
 	return dir, executable
 }
 
+// Direct CLI proofs intentionally do not claim generated consumer readiness.
+func TestNativeDefaultVersionQuery(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	for _, tc := range []struct{ harness, event, fixture, banner, version, response string }{
+		{"codex", "SessionStart", "session_start_0_153_0.json", "codex-cli 0.154.1-beta.2+build.7", "0.154.1-beta.2+build.7", `{}`},
+		{"opencode", "session.created", "session_created_1_18_29.json", "1.19.1-beta.2+build.7", "1.19.1-beta.2+build.7", ""},
+	} {
+		t.Run(tc.harness, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", tc.harness, "testdata", "fixtures", tc.fixture))
+			require.NoError(t, err)
+			path := t.TempDir()
+			marker := filepath.Join(t.TempDir(), "queries")
+			executable := versionExecutable(t, "printf x >> '"+marker+"'; printf '%s\\n' '"+tc.banner+"'")
+			require.NoError(t, os.Symlink(executable, filepath.Join(path, tc.harness)))
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			initializeLifecycleTestDatabase(t, dbPath)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, binary, "hook", "lifecycle", "--harness", tc.harness, "--event", tc.event)
+			command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "CLAUDE_CODE_EXECPATH": nil,
+				"PASTURE_DB_PATH": &dbPath, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			command.Stdin = bytes.NewReader(raw)
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			queried, err := os.ReadFile(marker)
+			require.NoError(t, err, "default must query the selected native executable")
+			require.Equal(t, "x", string(queried))
+			require.Empty(t, stderr.String())
+			require.Equal(t, tc.response, stdout.String())
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			defer tracker.Close()
+			rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+			require.Len(t, rows, 1)
+			payload := decodeOccurrencePayload(t, rows[0].Payload)
+			require.Equal(t, tc.version, payload.Envelope.HostVersion)
+			require.Equal(t, model.HostVersionExecutableQuery, payload.Envelope.HostVersionSource)
+			require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind), 1)
+		})
+	}
+}
+
 func TestClaudeDefaultDiscoverySelectsOneExecutable(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)
@@ -202,7 +246,7 @@ func TestClaudeDefaultDiscoveryResolutionFaultsPrecedeCaptureAndStorage(t *testi
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			path := discoveryValue(dir)
-			want := "no usable Claude executable"
+			want := "no usable claude executable"
 			switch mode {
 			case "absent PATH":
 				path = nil
@@ -214,7 +258,7 @@ func TestClaudeDefaultDiscoveryResolutionFaultsPrecedeCaptureAndStorage(t *testi
 				want = "relative to current directory"
 			case "missing interpreter":
 				require.NoError(t, os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/nonexistent/claude-test-interpreter\n"), 0o700))
-				want = "start selected Claude executable"
+				want = "start selected host executable"
 			case "malformed", "stdout cap", "stderr cap":
 				body := "printf 'not a version\\n'"
 				want = "does not match"
@@ -323,10 +367,10 @@ func TestLifecycleHostVersionFailuresNeverReachStorage(t *testing.T) {
 		want    string
 	}{
 		{name: "empty", args: []string{"--host-executable", ""}, want: "supplied empty"},
-		{name: "missing executable", args: []string{"--host-executable", filepath.Join(t.TempDir(), "missing")}, want: "start selected Claude executable"},
+		{name: "missing executable", args: []string{"--host-executable", filepath.Join(t.TempDir(), "missing")}, want: "start selected host executable"},
 		{name: "relative", args: []string{"--host-executable", "claude"}, want: "complete absolute path"},
-		{name: "not executable", args: []string{"--host-executable", nonExecutable}, want: "start selected Claude executable"},
-		{name: "wrong harness", harness: "codex", args: []string{"--host-executable", good}, want: "only for --harness claude-code"},
+		{name: "not executable", args: []string{"--host-executable", nonExecutable}, want: "start selected host executable"},
+		{name: "wrong product banner", harness: "codex", args: []string{"--host-executable", good}, want: "does not match"},
 		{name: "conflicting sources", args: []string{"--host-executable", good, "--host-version", "2.1.261"}, want: "mutually exclusive"},
 		{name: "empty explicit conflict", args: []string{"--host-executable", good, "--host-version", ""}, want: "mutually exclusive"},
 		{name: "both empty conflict", args: []string{"--host-executable", "", "--host-version", ""}, want: "mutually exclusive"},
@@ -397,7 +441,7 @@ func TestGeneratedClaudeMissingExecutableDoesNotInventVersion(t *testing.T) {
 
 	require.NoError(t, err, stderr.String())
 	require.Empty(t, stdout.String())
-	require.Contains(t, stderr.String(), "no usable Claude executable")
+	require.Contains(t, stderr.String(), "no usable claude executable")
 	require.Contains(t, stderr.String(), "install Claude and expose it on PATH")
 	require.Contains(t, stderr.String(), "CLAUDE_CODE_EXECPATH")
 	require.Contains(t, stderr.String(), "no occurrence was recorded")

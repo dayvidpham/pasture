@@ -22,9 +22,21 @@ const hostVersionOutputLimit = 4096
 // evidence of a version. Keep the accepted grammar closed until observed anew.
 var claudeVersionOutput = regexp.MustCompile(`\A([0-9]+\.[0-9]+\.[0-9]+) \(Claude Code\)(?:\r?\n)?\z`)
 
+// Codex's clap banner uses its package name (codex-rs/cli at
+// 41e22fee981a63b3698df7ed36bad393cda24715). OpenCode prints InstallationVersion
+// alone (packages/opencode/src/index.ts at
+// 16747470f976aca3d362ad730bcd3fe82ecc2c9a). ParseHostVersion validates the
+// captured release, including suffix/build metadata, without an equality gate.
+var codexVersionOutput = regexp.MustCompile(`\Acodex-cli ([^\r\n ]+)(?:\r?\n)?\z`)
+var openCodeVersionOutput = regexp.MustCompile(`\A([^\r\n ]+)(?:\r?\n)?\z`)
+
+func lifecycleVersionQuerySupported(harness ir.HarnessID) bool {
+	return harness == ir.HarnessClaudeCode || harness == ir.HarnessCodex || harness == ir.HarnessOpenCode
+}
+
 func resolveLifecycleHostVersion(ctx context.Context, cmd *cobra.Command, coords lifecycleCoordinates) (string, error) {
 	explicit := cmd.Flags().Changed("host-executable")
-	if !explicit && (cmd.Flags().Changed("host-version") || coords.Harness != ir.HarnessClaudeCode) {
+	if !explicit && (cmd.Flags().Changed("host-version") || !lifecycleVersionQuerySupported(coords.Harness)) {
 		return coords.HostVersion, nil
 	}
 	executable, _ := cmd.Flags().GetString("host-executable")
@@ -32,30 +44,37 @@ func resolveLifecycleHostVersion(ctx context.Context, cmd *cobra.Command, coords
 	switch {
 	case explicit && cmd.Flags().Changed("host-version"):
 		cause = errors.New("--host-executable and --host-version are mutually exclusive; supply only one version source")
-	case coords.Harness != ir.HarnessClaudeCode:
-		cause = errors.New("--host-executable is supported only for --harness claude-code; use --host-version for other harnesses")
+	case !lifecycleVersionQuerySupported(coords.Harness):
+		cause = errors.New("--host-executable supports claude-code, codex and opencode; use --host-version for other harnesses")
 	case explicit && executable == "":
-		cause = errors.New("--host-executable was supplied empty; provide an absolute Claude executable path, omit the flag for default discovery, or supply an explicitly observed --host-version")
+		cause = errors.New("--host-executable was supplied empty; provide an absolute host executable path, omit the flag for default discovery, or supply an explicitly observed --host-version")
 	case explicit && !filepath.IsAbs(executable):
-		cause = errors.New("--host-executable must be a complete absolute path; omit the flag to discover the first claude executable on PATH")
+		cause = errors.New("--host-executable must be a complete absolute path; omit the flag to discover the first native harness executable on PATH")
 	}
 	if cause != nil {
 		return "", lifecycleHostVersionError(cause)
+	}
+	name, banner := "claude", claudeVersionOutput
+	switch coords.Harness {
+	case ir.HarnessCodex:
+		name, banner = "codex", codexVersionOutput
+	case ir.HarnessOpenCode:
+		name, banner = "opencode", openCodeVersionOutput
 	}
 	if !explicit {
 		// A usable hint is optional executable evidence, not process attestation.
 		// LookPath tests absolute hints without searching PATH or splitting text.
 		hint := os.Getenv("CLAUDE_CODE_EXECPATH")
-		if filepath.IsAbs(hint) {
+		if coords.Harness == ir.HarnessClaudeCode && filepath.IsAbs(hint) {
 			if usable, err := exec.LookPath(hint); err == nil {
 				executable = usable
 			}
 		}
 		if executable == "" {
 			var err error
-			executable, err = exec.LookPath("claude")
+			executable, err = exec.LookPath(name)
 			if err != nil {
-				return "", lifecycleHostVersionError(fmt.Errorf("no usable Claude executable was selected: install Claude and expose it on PATH, fix the optional CLAUDE_CODE_EXECPATH hint, or supply --host-executable or an observed --host-version: %w", err))
+				return "", lifecycleHostVersionError(fmt.Errorf("no usable %s executable was selected: install the native harness and expose it on PATH, or supply --host-executable or an observed --host-version: %w", name, err))
 			}
 		}
 	}
@@ -64,13 +83,13 @@ func resolveLifecycleHostVersion(ctx context.Context, cmd *cobra.Command, coords
 	if err != nil {
 		return "", lifecycleHostVersionError(err)
 	}
-	match := claudeVersionOutput.FindSubmatch(output)
+	match := banner.FindSubmatch(output)
 	if match == nil {
-		return "", lifecycleHostVersionError(errors.New("Claude --version stdout does not match the supported '<major>.<minor>.<patch> (Claude Code)' line; arbitrary process output was not retained as a version"))
+		return "", lifecycleHostVersionError(fmt.Errorf("%s --version stdout does not match the supported product version line; arbitrary process output was not retained as a version", name))
 	}
 	version, err := pastureruntime.ParseHostVersion(string(match[1]))
 	if err != nil {
-		return "", lifecycleHostVersionError(errors.New("Claude --version supplied an invalid release number; no version was established"))
+		return "", lifecycleHostVersionError(fmt.Errorf("%s --version supplied an invalid release number; no version was established", name))
 	}
 	return version.String(), nil
 }
@@ -123,7 +142,7 @@ func queryLifecycleHostVersion(ctx context.Context, executable string) ([]byte, 
 	command.Stderr = stderrWriter
 	prepareHostVersionProcess(command)
 	if err := command.Start(); err != nil {
-		return nil, fmt.Errorf("start selected Claude executable with --version (check that it exists and is executable): %w", err)
+		return nil, fmt.Errorf("start selected host executable with --version (check that it exists and is executable): %w", err)
 	}
 	// Only the child now owns the writing ends; our reads can observe its EOF.
 	stdoutWriter.Close()
@@ -132,7 +151,7 @@ func queryLifecycleHostVersion(ctx context.Context, executable string) ([]byte, 
 	read := func(pipe *os.File, isStdout bool) {
 		body, err := io.ReadAll(io.LimitReader(pipe, hostVersionOutputLimit+1))
 		if len(body) > hostVersionOutputLimit {
-			err = fmt.Errorf("Claude --version output exceeded the %d-byte per-stream limit", hostVersionOutputLimit)
+			err = fmt.Errorf("host --version output exceeded the %d-byte per-stream limit", hostVersionOutputLimit)
 		}
 		reads <- hostVersionRead{stdout: isStdout, bytes: body, err: err}
 	}
@@ -159,7 +178,7 @@ func queryLifecycleHostVersion(ctx context.Context, executable string) ([]byte, 
 		case err := <-waited:
 			waited = nil
 			if err != nil {
-				failure = errors.Join(failure, fmt.Errorf("Claude --version process did not exit successfully: %w", err))
+				failure = errors.Join(failure, fmt.Errorf("host --version process did not exit successfully: %w", err))
 			}
 		case <-done:
 			failure = errors.Join(failure, ctx.Err(), context.Cause(ctx))
