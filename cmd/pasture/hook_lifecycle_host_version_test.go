@@ -590,11 +590,18 @@ func TestGeneratedClaudeMissingExecutableDoesNotInventVersion(t *testing.T) {
 	require.NoError(t, err, stderr.String())
 	require.Empty(t, stdout.String())
 	require.Contains(t, stderr.String(), "no usable claude executable")
-	require.Contains(t, stderr.String(), "install Claude and expose it on PATH")
-	require.Contains(t, stderr.String(), "CLAUDE_CODE_EXECPATH")
+	require.Contains(t, stderr.String(), "install the native harness and expose it on PATH")
+	require.Contains(t, stderr.String(), "supply --host-executable or an observed --host-version")
 	require.Contains(t, stderr.String(), "no occurrence was recorded")
 	_, err = os.Stat(dbPath)
 	require.ErrorIs(t, err, os.ErrNotExist)
+	fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+	require.NoError(t, err)
+	record := decodeJSONObject(t, fault)
+	require.JSONEq(t, `""`, string(record["hostVersion"]))
+	require.NotContains(t, record, "hostVersionSource")
+	require.JSONEq(t, `"not-recorded"`, string(record["faultStage"]))
+	require.JSONEq(t, `"fault"`, string(record["outcomeClass"]))
 }
 
 func TestGeneratedClaudeCommandSurvivesExecutableUpdate(t *testing.T) {
