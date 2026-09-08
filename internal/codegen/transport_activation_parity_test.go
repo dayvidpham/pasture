@@ -697,7 +697,7 @@ func requireSameEvents(t *testing.T, artifact string, enabled, wired map[string]
 // an event enabled by a later capture is protected the moment it is enabled and
 // not when somebody remembers to type it here.
 var enabledFloor = map[string][]string{
-	"claude-code": {"SessionStart", "SessionEnd", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch", "PreCompact", "PostCompact"},
+	"claude-code": {"SessionStart", "SessionEnd", "PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch", "FileChanged", "PreCompact", "PostCompact"},
 	"codex": {
 		"SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest",
 		"PostToolUse", "PreCompact", "PostCompact", "SubagentStart",

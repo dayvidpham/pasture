@@ -319,15 +319,20 @@ func TestLifecycleTestInvocationJoinsDuringPanicAndGoexit(t *testing.T) {
 
 func TestLifecycleTestInvocationJoinsEarlyHoldFailure(t *testing.T) {
 	database := filepath.Join(t.TempDir(), "pasture.db")
-	cmd := lifecycleTestCommand(t, "claude-code", "FileChanged", "2.1.261", database)
+	// WorktreeCreate remains deferred as a provider hook. Its activation
+	// refusal precedes the input read, so these bytes are never a fixture.
+	cmd := lifecycleTestCommand(t, "claude-code", "WorktreeCreate", "2.1.261", database)
 	var joins, finishes atomic.Int32
 	_, err := expireBeforeCommitWithHooks(t, cmd, []byte(`{}`), lifecycleTestHooks{
 		joining:  func() { joins.Add(1) },
 		finished: func() { finishes.Add(1) },
 	})
 	require.ErrorContains(t, err, "ended before pre-commit input hold")
+	require.ErrorContains(t, err, `event "WorktreeCreate" is withheld`, "the actual activation refusal must cause the early return")
 	require.EqualValues(t, 1, joins.Load(), "failure must drain before the wrapper can call require.NoError")
 	require.EqualValues(t, 1, finishes.Load())
+	_, statErr := os.Stat(database)
+	require.ErrorIs(t, statErr, os.ErrNotExist, "early activation refusal must not open the store")
 }
 
 func TestLifecycleTestInvocationManualPhaseTimeoutDrainsWorker(t *testing.T) {
