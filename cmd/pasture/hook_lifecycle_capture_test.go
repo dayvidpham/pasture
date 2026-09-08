@@ -224,7 +224,8 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 					return true
 				}
 				captureCalls++
-				assert.Equal(t, "lifecycleOutcome", function.Name.Name, "the capture call lives in the one host-facing path")
+				assert.Equal(t, "lifecycleOutcomeWithCompletion", function.Name.Name,
+					"capture lives in the shared worker core; the production-wiring guard pins the sole wrapper delegation")
 				enclosing := enclosingChain(function.Body, call)
 				var guard *ast.IfStmt
 				var literal *ast.FuncLit

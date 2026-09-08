@@ -177,7 +177,24 @@ func lifecycleOutcome(
 	deadline lifecycleDeadline,
 	decisions ...backend.Decision,
 ) (outcome hostexit.Outcome) {
+	return lifecycleOutcomeWithCompletion(cmd, args, barrier, budget, deadline, nil, decisions...)
+}
+
+// lifecycleOutcomeWithCompletion is the shared execution core. An optional,
+// trusted observer records background completion for an in-process owner; it
+// must not panic. Production supplies nil and never joins pre-fence abandoned
+// work. Completion is separate from receipt settlement and from the host Outcome.
+func lifecycleOutcomeWithCompletion(
+	cmd *cobra.Command,
+	args []string,
+	barrier handlers.CommitBarrier,
+	budget timeouts.Profile,
+	deadline lifecycleDeadline,
+	finished func(),
+	decisions ...backend.Decision,
+) (outcome hostexit.Outcome) {
 	var settlement *receipt.CommitSettlement
+	var workerStarted bool
 	// The recover is installed FIRST, before the coordinates and the
 	// environment are read, so a panic in either is a fault and not a process
 	// crash. Until those reads finish the fault is described by the safe
@@ -221,6 +238,13 @@ func lifecycleOutcome(
 	// argument with a refused zero value, and a widening local would put one
 	// back.
 	defer func() {
+		// This inner defer runs after recovery has rendered any early fault.
+		// With no worker, there is no later goroutine to signal completion.
+		defer func() {
+			if !workerStarted && finished != nil {
+				finished()
+			}
+		}()
 		if recovered := recover(); recovered != nil {
 			if settlement != nil {
 				if committed, ok := settlement.CommittedOutcome(); ok {
@@ -280,10 +304,10 @@ func lifecycleOutcome(
 	// append's work context; it waits for the result that fixes the answer.
 	//
 	// On expiry BEFORE COMMIT ENTRY the work is abandoned. That is safe only because the process
-	// reports the fault and exits immediately: the abandoned goroutine still
-	// holds a store handle, so a future caller that runs this function
-	// in-process and keeps running would leak it. An abandoned SQLite
-	// transaction is rolled back when the process ends. The expiry choice
+	// reports the fault and exits immediately. The abandoned worker may still
+	// open or hold a store until its handler returns and closes it. In-process
+	// owners must separately observe worker completion before removing resources;
+	// the host-facing deadline branch must not join that work. The expiry choice
 	// atomically prevents a later receipt append from entering. If commit entry
 	// won, the command waits instead; a late flag after Apply would miss the
 	// interval between SQLite COMMIT and the return to Pasture.
@@ -334,7 +358,15 @@ func lifecycleOutcome(
 	completed := make(chan lifecycleWork, 1)
 	// FROM HERE THE DURABLE WRITE MAY ALREADY HAVE HAPPENED. See panicStage.
 	panicStage = hostexit.FaultStageRecordUnknown
+	workerStarted = true
 	go func() {
+		// Registered first, run last: native cleanup and panic recovery/result
+		// publication must finish before an in-process owner can tear down.
+		defer func() {
+			if finished != nil {
+				finished()
+			}
+		}()
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				// A panic INSIDE the work is by construction after the work

@@ -789,6 +789,21 @@ one host-facing path. Its scope is a glob and not a list of file names, so a
 source added later is covered the day it is written rather than escaping in
 silence.
 
+The unchanged `lifecycleOutcome` entry delegates once to the shared private
+`lifecycleOutcomeWithCompletion` core with a nil completion observer. The same
+wiring guard pins that exact delegation and forbids another production core
+entry. Recovery and capture-placement guards inspect the real core, not the
+thin wrapper. In-process test owners can supply a per-invocation observer;
+it runs after native resource cleanup and worker recovery/result publication,
+or after outer recovery when no worker started. This signal is not receipt
+settlement and never changes the host Outcome or adds a production pre-fence
+join. Tests first observe the host answer while their input/barrier hold is
+closed, then release and join both foreground and background completion before
+returning to assertions, restoring command globals or removing temporary data.
+Their release/cancel/join cleanup is installed before launch and also runs on
+failure unwinding. A failure ceiling diagnoses a stalled join; it does not
+permit removing resources while the worker still runs.
+
 ### Atomic local commits and integration gates
 
 Commit coherent changes frequently on the worker's own feature branch. Keep

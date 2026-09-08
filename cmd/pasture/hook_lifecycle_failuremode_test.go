@@ -1086,7 +1086,7 @@ func TestAPanicInTheWorkGoroutineIsAFaultAndNeverABlock(t *testing.T) {
 	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 	cmd.SetIn(panickingReader{message: "the host payload reader failed"})
 
-	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
+	outcome := lifecycleTestOutcome(t, cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"a pasture panic must not stop the user working")
@@ -1130,7 +1130,7 @@ func TestAPanicBeforeTheWorkStartsIsAFaultAndNeverACrash(t *testing.T) {
 	//nolint:staticcheck // A nil context is the injected fault; cobra owns this seam.
 	cmd.SetContext(nil)
 
-	outcome := lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
+	outcome := lifecycleTestOutcome(t, cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
 
 	assert.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"the main-path recover must turn a panic into a fault that lets the host continue")
@@ -1191,8 +1191,9 @@ func (d *trippedDeadline) derive(parent context.Context, _ time.Duration) (conte
 	}
 }
 
-// preCommitStallCeiling bounds how long a proof waits for the invocation to
-// reach the commit boundary. It is a failure ceiling and not a wait: the proof
+// preCommitStallCeiling bounds phase waits in the invocation proofs. A stalled
+// Join reports this ceiling but still waits before resource cleanup; expiry is
+// never proof of worker completion. It is a failure ceiling and not a wait: the proof
 // never passes because of it, it only fails with a sentence instead of hanging
 // until the test binary is killed. Nothing in the proof is ordered by it.
 const preCommitStallCeiling = 30 * time.Second
@@ -1208,6 +1209,8 @@ const preCommitStallCeiling = 30 * time.Second
 //  3. the committed Outcome arrives, and the barrier is released afterwards.
 //     Encoding and publication already completed at settlement, so the delayed
 //     post-commit handler cannot change the host decision.
+//  4. the test joins foreground and background completion before returning;
+//     its assertions and cleanup cannot race the delayed worker.
 //
 // No clock orders any step; the only clock in the function is the failure
 // ceiling below, which can only fail the proof, never pass it. A proof that
@@ -1219,33 +1222,36 @@ const preCommitStallCeiling = 30 * time.Second
 // one, and it is printed and never started.
 func abandonAfterTheCommit(t *testing.T, cmd *cobra.Command, decisions ...backend.Decision) hostexit.Outcome {
 	t.Helper()
+	outcome, err := abandonAfterTheCommitWithHooks(t, cmd, lifecycleTestHooks{}, decisions...)
+	require.NoError(t, err)
+	return outcome
+}
 
+func abandonAfterTheCommitWithHooks(t *testing.T, cmd *cobra.Command, hooks lifecycleTestHooks, decisions ...backend.Decision) (hostexit.Outcome, error) {
+	t.Helper()
 	barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
 	deadline := newTrippedDeadline(t)
-	outcomes := make(chan hostexit.Outcome, 1)
-	go func() {
-		outcomes <- lifecycleOutcome(cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive, decisions...)
-	}()
-
-	select {
-	case <-barrier.reached:
-	case outcome := <-outcomes:
-		close(barrier.release)
-		t.Fatalf("the invocation finished without reaching the commit boundary, so the work returned or "+
-			"faulted before the receipt committed and nothing here proves an abandonment after the "+
-			"commit; the outcome it returned instead is %+v", outcome)
-	case <-time.After(preCommitStallCeiling):
-		close(barrier.release)
-		t.Fatalf("the invocation did not reach the commit boundary within %s: the store work before the "+
-			"commit (open, migrate, blob, journal row) stalled, and no deadline in this proof can end it "+
-			"because the proof owns the deadline; look for another writer holding %s",
-			preCommitStallCeiling, flagDBPath)
+	release := sync.OnceFunc(func() { close(barrier.release) })
+	i := startLifecycleTestInvocation(t, cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive, release, hooks, decisions...)
+	defer i.Join()
+	if err := waitLifecycleHold(barrier.reached, i, hooks, "post-commit"); err != nil {
+		return hostexit.Outcome{}, err
 	}
-
 	deadline.trip()
-	outcome := <-outcomes
-	close(barrier.release)
-	return outcome
+	select {
+	case outcome := <-i.outcomes:
+		select {
+		case <-barrier.release:
+			return hostexit.Outcome{}, fmt.Errorf("post-commit hold was released before the host Outcome was observed")
+		default:
+		}
+		if hooks.observed != nil {
+			hooks.observed(outcome)
+		}
+		return outcome, nil
+	case <-hooks.failureCeiling():
+		return hostexit.Outcome{}, fmt.Errorf("post-commit expiry did not publish the committed Outcome within its test failure ceiling")
+	}
 }
 
 // Once the real receipt has committed, expiry cannot replace its Deny. This
@@ -1309,28 +1315,36 @@ func (r *preCommitReader) Read(buffer []byte) (int, error) {
 
 func expireBeforeCommit(t *testing.T, cmd *cobra.Command, raw []byte, decisions ...backend.Decision) hostexit.Outcome {
 	t.Helper()
+	outcome, err := expireBeforeCommitWithHooks(t, cmd, raw, lifecycleTestHooks{}, decisions...)
+	require.NoError(t, err)
+	return outcome
+}
+
+func expireBeforeCommitWithHooks(t *testing.T, cmd *cobra.Command, raw []byte, hooks lifecycleTestHooks, decisions ...backend.Decision) (hostexit.Outcome, error) {
+	t.Helper()
 	input := &preCommitReader{Reader: bytes.NewReader(raw), reached: make(chan struct{}), release: make(chan struct{})}
 	cmd.SetIn(input)
 	deadline := newTrippedDeadline(t)
-	outcomes := make(chan hostexit.Outcome, 1)
-	go func() {
-		outcomes <- lifecycleOutcome(cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), deadline.derive, decisions...)
-	}()
-	defer close(input.release)
-	select {
-	case <-input.reached:
-	case outcome := <-outcomes:
-		t.Fatalf("invocation ended before input hold: %+v", outcome)
-	case <-time.After(preCommitStallCeiling):
-		t.Fatal("invocation did not reach pre-commit input hold")
+	release := sync.OnceFunc(func() { close(input.release) })
+	i := startLifecycleTestInvocation(t, cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), deadline.derive, release, hooks, decisions...)
+	defer i.Join()
+	if err := waitLifecycleHold(input.reached, i, hooks, "pre-commit input"); err != nil {
+		return hostexit.Outcome{}, err
 	}
 	deadline.trip()
 	select {
-	case outcome := <-outcomes:
-		return outcome
-	case <-time.After(preCommitStallCeiling):
-		t.Fatal("pre-fence expiry did not return a fault")
-		return hostexit.Outcome{}
+	case outcome := <-i.outcomes:
+		select {
+		case <-input.release:
+			return hostexit.Outcome{}, fmt.Errorf("pre-commit input was released before the host Outcome was observed")
+		default:
+		}
+		if hooks.observed != nil {
+			hooks.observed(outcome)
+		}
+		return outcome, nil
+	case <-hooks.failureCeiling():
+		return hostexit.Outcome{}, fmt.Errorf("pre-fence expiry did not return a fault within its test failure ceiling")
 	}
 }
 
@@ -1361,7 +1375,7 @@ func TestExpiryBeforeCommitDoesNotEmitTheSuppliedDeny(t *testing.T) {
 // TestTheRecoverIsInstalledBeforeAnythingElseRuns pins the POSITION of the main
 // recover, which no injected input can exercise.
 //
-// The recover must be the FIRST thing lifecycleOutcome does, so that a panic in
+// The recover must precede all fallible work in lifecycleOutcome's shared core, so that a panic in
 // the coordinate read or in the environment parse is a fault and not a process
 // crash. Nothing between the top of the function and the deadline setup has a
 // seam a test can make panic, so moving the recover back down would not turn any
@@ -1376,12 +1390,12 @@ func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
 	var body []ast.Stmt
 	for _, node := range file.Decls {
 		function, isFunction := node.(*ast.FuncDecl)
-		if isFunction && function.Name.Name == "lifecycleOutcome" {
+		if isFunction && function.Name.Name == "lifecycleOutcomeWithCompletion" {
 			body = function.Body.List
 			break
 		}
 	}
-	require.NotEmpty(t, body, "lifecycleOutcome must exist to be the single exit authority")
+	require.NotEmpty(t, body, "the shared lifecycle core must exist and contain the real exit authority")
 
 	deferAt := -1
 	for index, statement := range body {
@@ -1390,7 +1404,7 @@ func TestTheRecoverIsInstalledBeforeAnythingElseRuns(t *testing.T) {
 			break
 		}
 	}
-	require.NotEqual(t, -1, deferAt, "lifecycleOutcome must install a recover")
+	require.NotEqual(t, -1, deferAt, "the shared lifecycle core must install a recover")
 
 	// Only the declaration of the values the recover reads may precede it.
 	for index := 0; index < deferAt; index++ {
@@ -1439,18 +1453,46 @@ func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *test
 	require.NoError(t, err)
 
 	calls := 0
+	coreCalls := 0
+	wrappers := 0
 	for _, name := range sources {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
 		file, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, 0)
 		require.NoError(t, parseErr, "every production source of this command must be readable")
+		for _, declaration := range file.Decls {
+			wrapper, ok := declaration.(*ast.FuncDecl)
+			if !ok || wrapper.Name.Name != "lifecycleOutcome" {
+				continue
+			}
+			wrappers++
+			require.NotNil(t, wrapper.Body)
+			require.Len(t, wrapper.Body.List, 1, "the public boundary must only delegate to the protected shared core")
+			returned, ok := wrapper.Body.List[0].(*ast.ReturnStmt)
+			require.True(t, ok)
+			require.Len(t, returned.Results, 1)
+			delegation, ok := returned.Results[0].(*ast.CallExpr)
+			require.True(t, ok)
+			require.Equal(t, "lifecycleOutcomeWithCompletion", sourceOf(delegation.Fun))
+			require.Len(t, delegation.Args, 7)
+			got := make([]string, 0, len(delegation.Args))
+			for _, argument := range delegation.Args {
+				got = append(got, sourceOf(argument))
+			}
+			assert.Equal(t, []string{"cmd", "args", "barrier", "budget", "deadline", "nil", "decisions"}, got,
+				"production forwards unchanged inputs with no completion observer or pre-fence join")
+			assert.True(t, delegation.Ellipsis.IsValid(), "all supplied decisions must be forwarded, not reinterpreted")
+		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, isCall := node.(*ast.CallExpr)
 			if !isCall {
 				return true
 			}
 			function, isIdentifier := call.Fun.(*ast.Ident)
+			if isIdentifier && function.Name == "lifecycleOutcomeWithCompletion" {
+				coreCalls++
+			}
 			if !isIdentifier || function.Name != "lifecycleOutcome" {
 				return true
 			}
@@ -1472,6 +1514,8 @@ func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *test
 	assert.Equal(t, 1, calls,
 		"the command has exactly ONE production entry into the exit authority; a second one is a "+
 			"second host-facing path, and every guarantee here is stated over one")
+	assert.Equal(t, 1, wrappers, "exactly one wrapper supplies the production defaults")
+	assert.Equal(t, 1, coreCalls, "production must reach the core only through the pinned nil-observer wrapper")
 }
 
 // sourceOf renders an expression back to source text, so an assertion can name
@@ -4654,7 +4698,7 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 	cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
 
 	invoked := make(chan struct{})
-	outcome := lifecycleOutcome(cmd, nil,
+	outcome := lifecycleTestOutcome(t, cmd, nil,
 		panickingCommitBarrier{message: "the commit boundary failed after the receipt was written", invoked: invoked},
 		timeouts.ProductionProfile(), context.WithTimeout)
 
@@ -4740,12 +4784,12 @@ func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.
 	var outcome *ast.FuncDecl
 	for _, node := range file.Decls {
 		function, isFunction := node.(*ast.FuncDecl)
-		if isFunction && function.Name.Name == "lifecycleOutcome" {
+		if isFunction && function.Name.Name == "lifecycleOutcomeWithCompletion" {
 			outcome = function
 			break
 		}
 	}
-	require.NotNil(t, outcome, "lifecycleOutcome must exist: it is where the outer recovery stands")
+	require.NotNil(t, outcome, "the shared lifecycle core must exist: it is where the outer recovery stands")
 
 	const local = "panicStage"
 	assignments := []struct {
@@ -4810,7 +4854,7 @@ func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.
 		return true
 	})
 	require.True(t, goStatement.IsValid(),
-		"lifecycleOutcome must still start its work in a goroutine; that statement is what the "+
+		"the shared lifecycle core must still start its work in a goroutine; that statement is what the "+
 			"widening below is positioned against")
 	assert.Less(t, int(assignments[0].Pos), int(goStatement),
 		"the widening must stand ABOVE the `go` statement at hook_lifecycle.go:%d. Below it, a panic "+
@@ -4867,7 +4911,7 @@ func TestDeadlineReceivesSettlementSignalBeforeChoosingFault(t *testing.T) {
 	}
 	var function *ast.FuncDecl
 	for _, declaration := range file.Decls {
-		if candidate, ok := declaration.(*ast.FuncDecl); ok && candidate.Name.Name == "lifecycleOutcome" {
+		if candidate, ok := declaration.(*ast.FuncDecl); ok && candidate.Name.Name == "lifecycleOutcomeWithCompletion" {
 			function = candidate
 		}
 	}
@@ -5192,7 +5236,7 @@ func TestAdviceFollowsTheCauseAndNotTheClassifier(t *testing.T) {
 
 		cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 		cmd.SetIn(panickingReader{message: "the input reader failed before commit"})
-		outcome := lifecycleOutcome(cmd, nil,
+		outcome := lifecycleTestOutcome(t, cmd, nil,
 			handlers.PassThroughCommitBarrier{},
 			timeouts.ProductionProfile(), context.WithTimeout)
 
@@ -5830,6 +5874,7 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
 	"hook_lifecycle_raw_test.go",
+	"hook_lifecycle_worker_lifetime_test.go",
 	"hook_lifecycle_writers_test.go",
 }
 
