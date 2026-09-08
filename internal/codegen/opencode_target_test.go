@@ -526,7 +526,15 @@ console.log(JSON.stringify({ argsUnchanged: true }));
 		t.Fatalf("initialize real temporary Pasture store through production CLI: %v\n%s", bootstrapErr, bootstrapOutput)
 	}
 	proof := exec.Command(bun, runner)
-	proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath)
+	versionPath := filepath.Join(dir, "bin")
+	if err := os.Mkdir(versionPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(versionPath, "opencode"), []byte("#!/bin/sh\nprintf '1.19.0\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
+		"PATH="+versionPath, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=", "PASTURE_HOOK_FAIL_CLOSED=")
 	output, err := proof.CombinedOutput()
 	if err != nil {
 		t.Fatalf("execute generated OpenCode callbacks through built CLI: %v\n%s", err, output)

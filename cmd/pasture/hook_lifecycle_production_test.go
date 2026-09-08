@@ -73,7 +73,12 @@ console.log(JSON.stringify({argsUnchanged: true}));
 		filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
 	require.NoError(t, os.WriteFile(runner, []byte(script), 0o600))
 	command := exec.Command(bun, runner)
-	command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath)
+	// A controlled installed-executable observation, not a new host capture.
+	path := filepath.Join(dir, "bin")
+	require.NoError(t, os.Mkdir(path, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "opencode"), []byte("#!/bin/sh\nprintf '1.19.0\\n'\n"), 0o700))
+	command.Env = discoveryChildEnv(map[string]*string{"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath,
+		"PATH": &path, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, string(output))
 	require.Equal(t, `{"argsUnchanged":true}`, strings.TrimSpace(string(output)))
@@ -94,7 +99,13 @@ console.log(JSON.stringify({argsUnchanged: true}));
 	identities := make(map[model.ContractEventKind]map[runtime.NativeIdentityKind]string, 2)
 	for _, record := range page.Records() {
 		require.Equal(t, registration.OpenCode1_18_29().Contract, record.Occurrence.RuntimeContract)
-		require.Equal(t, registration.OpenCode1_18_29().Version, record.Occurrence.Envelope.HostVersion)
+		if record.Occurrence.Kind == registration.EventOpenCodeSessionCreated {
+			require.Equal(t, registration.OpenCode1_18_29().Version, record.Occurrence.Envelope.HostVersion)
+			require.Equal(t, model.HostVersionCallerSupplied, record.Occurrence.Envelope.HostVersionSource)
+		} else {
+			require.Equal(t, "1.19.0", record.Occurrence.Envelope.HostVersion)
+			require.Equal(t, model.HostVersionExecutableQuery, record.Occurrence.Envelope.HostVersionSource)
+		}
 		require.Len(t, record.Interpreted(), 1)
 		interpreted := record.Interpreted()[0]
 		require.Equal(t, runtime.OpenCode1_18_29().ID(), interpreted.Contract())
