@@ -23,24 +23,43 @@ const hostVersionOutputLimit = 4096
 var claudeVersionOutput = regexp.MustCompile(`\A([0-9]+\.[0-9]+\.[0-9]+) \(Claude Code\)(?:\r?\n)?\z`)
 
 func resolveLifecycleHostVersion(ctx context.Context, cmd *cobra.Command, coords lifecycleCoordinates) (string, error) {
-	if !cmd.Flags().Changed("host-executable") {
+	explicit := cmd.Flags().Changed("host-executable")
+	if !explicit && (cmd.Flags().Changed("host-version") || coords.Harness != ir.HarnessClaudeCode) {
 		return coords.HostVersion, nil
 	}
 	executable, _ := cmd.Flags().GetString("host-executable")
 	var cause error
 	switch {
-	case cmd.Flags().Changed("host-version"):
+	case explicit && cmd.Flags().Changed("host-version"):
 		cause = errors.New("--host-executable and --host-version are mutually exclusive; supply only one version source")
 	case coords.Harness != ir.HarnessClaudeCode:
 		cause = errors.New("--host-executable is supported only for --harness claude-code; use --host-version for other harnesses")
-	case executable == "":
-		cause = errors.New("--host-executable was supplied empty; the generated hook reads the observed, undocumented CLAUDE_CODE_EXECPATH variable, which this host did not supply; provide the absolute Claude executable path or an explicitly observed --host-version")
-	case !filepath.IsAbs(executable):
-		cause = errors.New("--host-executable must be a complete absolute path; PATH lookup and installation-path version inference are not supported")
+	case explicit && executable == "":
+		cause = errors.New("--host-executable was supplied empty; provide an absolute Claude executable path, omit the flag for default discovery, or supply an explicitly observed --host-version")
+	case explicit && !filepath.IsAbs(executable):
+		cause = errors.New("--host-executable must be a complete absolute path; omit the flag to discover the first claude executable on PATH")
 	}
 	if cause != nil {
 		return "", lifecycleHostVersionError(cause)
 	}
+	if !explicit {
+		// A usable hint is optional executable evidence, not process attestation.
+		// LookPath tests absolute hints without searching PATH or splitting text.
+		hint := os.Getenv("CLAUDE_CODE_EXECPATH")
+		if filepath.IsAbs(hint) {
+			if usable, err := exec.LookPath(hint); err == nil {
+				executable = usable
+			}
+		}
+		if executable == "" {
+			var err error
+			executable, err = exec.LookPath("claude")
+			if err != nil {
+				return "", lifecycleHostVersionError(fmt.Errorf("no usable Claude executable was selected: install Claude and expose it on PATH, fix the optional CLAUDE_CODE_EXECPATH hint, or supply --host-executable or an observed --host-version: %w", err))
+			}
+		}
+	}
+	// Selection is complete. A failed query must not start a version hunt.
 	output, err := queryLifecycleHostVersion(ctx, executable)
 	if err != nil {
 		return "", lifecycleHostVersionError(err)
@@ -57,7 +76,7 @@ func resolveLifecycleHostVersion(ctx context.Context, cmd *cobra.Command, coords
 }
 
 func lifecycleHostVersionError(cause error) error {
-	return fmt.Errorf("resolveLifecycleHostVersion (cmd/pasture/hook_lifecycle_host_version.go): host version resolution failed before capture, admission or storage; no occurrence was recorded; check the explicit executable and its --version output, then retry the hook input: %w", cause)
+	return fmt.Errorf("resolveLifecycleHostVersion (cmd/pasture/hook_lifecycle_host_version.go): host version resolution failed before capture, admission or storage; no occurrence was recorded; check the selected executable and its --version output, then retry the hook input: %w", cause)
 }
 
 // withLifecycleHostVersionSource adds attribution only when a version has an
@@ -104,7 +123,7 @@ func queryLifecycleHostVersion(ctx context.Context, executable string) ([]byte, 
 	command.Stderr = stderrWriter
 	prepareHostVersionProcess(command)
 	if err := command.Start(); err != nil {
-		return nil, fmt.Errorf("start explicit Claude executable with --version (check that it exists and is executable): %w", err)
+		return nil, fmt.Errorf("start selected Claude executable with --version (check that it exists and is executable): %w", err)
 	}
 	// Only the child now owns the writing ends; our reads can observe its EOF.
 	stdoutWriter.Close()

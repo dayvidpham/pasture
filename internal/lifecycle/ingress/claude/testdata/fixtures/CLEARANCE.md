@@ -867,3 +867,19 @@ This is a transport and durable-readback proof, not a new live watcher sitting.
 It does not extend the prior evidence to `.envrc`, add/unlink events, arbitrary
 files, or a host reaction to a denial. All historical digests and acceptance
 statements above remain historical records.
+
+## Current transport digest: optional executable discovery (2026-09-08)
+
+The generated `hooks/hooks.json` now has SHA-256
+`9674bf4d5ba7d87bad6b343b6c25a89a55fff0ce62e36a5436d60fa5cb56673c`.
+All nine lifecycle commands omit `--host-executable`. With neither explicit
+version override, the CLI selects a usable absolute `CLAUDE_CODE_EXECPATH`
+hint if available, otherwise the first `claude` executable on PATH. The hint
+is optional. The selected executable is queried once under the existing hook
+budget; a failed query does not select another executable. This observation
+is executable-query provenance, not attestation of the running host process.
+
+The event set, matcher, activation metadata and budgets are unchanged. All
+accepted fixture and sidecar bytes and historical statements above remain
+unchanged. Scratch replay through the generated shell command, built CLI and
+durable store is not a new live capture or a new clearance decision.

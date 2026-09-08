@@ -16,8 +16,8 @@ Flags:
       --event string             Native event this generated hook is registered for (required)
       --harness string           Native harness whose payload is on standard input (required)
   -h, --help                     help for lifecycle
-      --host-executable string   Absolute Claude executable to query with --version inside the hook budget; Claude only, mutually exclusive with --host-version
-      --host-version string      Observed native host version to retain (mutually exclusive with --host-executable)
+      --host-executable string   Absolute Claude executable override; otherwise query a usable optional CLAUDE_CODE_EXECPATH hint or the first claude on PATH inside the hook budget; mutually exclusive with --host-version
+      --host-version string      Observed native host version to retain without discovery (mutually exclusive with --host-executable)
 
 Global Flags:
       --db string          Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)

@@ -443,104 +443,114 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 	t.Parallel()
 
 	binary := lifecycleBinary(t)
+	shell, err := exec.LookPath("sh")
+	require.NoError(t, err)
 
-	for _, testCase := range claudeProductionFixtures {
-		testCase := testCase
-		t.Run(testCase.name, func(t *testing.T) {
-			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
-			initializeLifecycleTestDatabase(t, dbPath)
-			raw := readProductionClaudeFixtureAt(t, testCase.fixture, testCase.name, testCase.captureVersion, testCase.captureSource)
+	for _, hintState := range []string{"absent", "empty"} {
+		t.Run(hintState, func(t *testing.T) {
+			for _, testCase := range claudeProductionFixtures {
+				testCase := testCase
+				t.Run(testCase.name, func(t *testing.T) {
+					dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+					initializeLifecycleTestDatabase(t, dbPath)
+					raw := readProductionClaudeFixtureAt(t, testCase.fixture, testCase.name, testCase.captureVersion, testCase.captureSource)
 
-			executable := versionExecutable(t, "printf '"+testCase.captureVersion+" (Claude Code)\\n'")
-			command := exec.Command("sh", "-c", generatedClaudeLifecycleCommand(t, testCase.name))
-			command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
-				"CLAUDE_CODE_EXECPATH="+executable, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=")
-			command.Stdin = bytes.NewReader(raw)
-			var stdout, stderr bytes.Buffer
-			command.Stdout = &stdout
-			command.Stderr = &stderr
-			require.NoError(t, command.Run(), stdout.String()+stderr.String())
-			require.Empty(t, stderr.String())
-			require.Empty(t, stdout.String(), "an evaluated Claude Proceed or observation emits no hook directive")
+					path, _ := discoveryPathExecutable(t, "printf '"+testCase.captureVersion+" (Claude Code)\\n'")
+					command := exec.Command(shell, "-c", generatedClaudeLifecycleCommand(t, testCase.name))
+					var hint *string
+					if hintState == "empty" {
+						hint = discoveryValue("")
+					}
+					command.Env = discoveryChildEnv(map[string]*string{"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath,
+						"PATH": &path, "CLAUDE_CODE_EXECPATH": hint, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+					command.Stdin = bytes.NewReader(raw)
+					var stdout, stderr bytes.Buffer
+					command.Stdout = &stdout
+					command.Stderr = &stderr
+					require.NoError(t, command.Run(), stdout.String()+stderr.String())
+					require.Empty(t, stderr.String())
+					require.Empty(t, stdout.String(), "an evaluated Claude Proceed or observation emits no hook directive")
 
-			tracker, err := tasks.OpenTaskTracker(dbPath)
-			require.NoError(t, err)
-			occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
-			interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
-			consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
-			require.Len(t, occurrences, 1)
-			require.Len(t, interpreted, 1)
-			if testCase.blocking {
-				require.Len(t, consultations, 1)
-			} else {
-				require.Empty(t, consultations)
-			}
+					tracker, err := tasks.OpenTaskTracker(dbPath)
+					require.NoError(t, err)
+					occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+					interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
+					consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+					require.Len(t, occurrences, 1)
+					require.Len(t, interpreted, 1)
+					if testCase.blocking {
+						require.Len(t, consultations, 1)
+					} else {
+						require.Empty(t, consultations)
+					}
 
-			occurrencePayload := decodeOccurrencePayload(t, occurrences[0].Payload)
-			require.Equal(t, occurrenceLifecycleContract, occurrencePayload.Contract)
-			require.Equal(t, testCase.event, occurrencePayload.Event)
-			require.Equal(t, occurrenceLifecycleContract, occurrencePayload.Envelope.Runtime.Contract.String())
-			require.Equal(t, testCase.captureVersion, occurrencePayload.Envelope.HostVersion)
-			require.Equal(t, model.HostVersionExecutableQuery, occurrencePayload.Envelope.HostVersionSource)
-			require.Equal(t, model.CaptureValid, occurrencePayload.Capture)
-			require.Equal(t, digest.FromBytes(raw).String(), occurrencePayload.Body)
-			require.Equal(t, testCase.bindings, occurrencePayload.Bindings)
-			reader, err := tasks.NewLifecycleReader(tracker)
-			require.NoError(t, err)
-			body, err := reader.Payload(context.Background(), digest.FromBytes(raw))
-			require.NoError(t, err)
-			require.Equal(t, raw, body, "durable payload bytes must match the accepted capture")
+					occurrencePayload := decodeOccurrencePayload(t, occurrences[0].Payload)
+					require.Equal(t, occurrenceLifecycleContract, occurrencePayload.Contract)
+					require.Equal(t, testCase.event, occurrencePayload.Event)
+					require.Equal(t, occurrenceLifecycleContract, occurrencePayload.Envelope.Runtime.Contract.String())
+					require.Equal(t, testCase.captureVersion, occurrencePayload.Envelope.HostVersion)
+					require.Equal(t, model.HostVersionExecutableQuery, occurrencePayload.Envelope.HostVersionSource)
+					require.Equal(t, model.CaptureValid, occurrencePayload.Capture)
+					require.Equal(t, digest.FromBytes(raw).String(), occurrencePayload.Body)
+					require.Equal(t, testCase.bindings, occurrencePayload.Bindings)
+					reader, err := tasks.NewLifecycleReader(tracker)
+					require.NoError(t, err)
+					body, err := reader.Payload(context.Background(), digest.FromBytes(raw))
+					require.NoError(t, err)
+					require.Equal(t, raw, body, "durable payload bytes must match the accepted capture")
 
-			interpretedPayload := decodeInterpretedPayload(t, interpreted[0].Payload)
-			require.Equal(t, uint8(testCase.semantic), interpretedPayload.Semantic)
-			require.Equal(t, testCase.identities, interpretedPayload.Identities)
-			require.ElementsMatch(t, testCase.unresolved, interpretedPayload.UnresolvedFacts)
-			require.Equal(t, interpretedLifecycleContract, interpretedPayload.Contract)
-			assertSharedOperation(t, occurrences[0], interpreted[0])
-			require.Less(t, occurrences[0].JournalID, interpreted[0].JournalID)
-			if testCase.blocking {
-				require.Equal(t, interpreted[0].ProducingOperationID, consultations[0].ProducingOperationID)
-				require.Equal(t, interpreted[0].ProducingOperationJournalID, consultations[0].ProducingOperationJournalID)
-				require.Less(t, interpreted[0].JournalID, consultations[0].JournalID)
-				assertProceedConsultation(t, consultations[0].Payload)
-			}
-			require.NoError(t, tracker.Close())
+					interpretedPayload := decodeInterpretedPayload(t, interpreted[0].Payload)
+					require.Equal(t, uint8(testCase.semantic), interpretedPayload.Semantic)
+					require.Equal(t, testCase.identities, interpretedPayload.Identities)
+					require.ElementsMatch(t, testCase.unresolved, interpretedPayload.UnresolvedFacts)
+					require.Equal(t, interpretedLifecycleContract, interpretedPayload.Contract)
+					assertSharedOperation(t, occurrences[0], interpreted[0])
+					require.Less(t, occurrences[0].JournalID, interpreted[0].JournalID)
+					if testCase.blocking {
+						require.Equal(t, interpreted[0].ProducingOperationID, consultations[0].ProducingOperationID)
+						require.Equal(t, interpreted[0].ProducingOperationJournalID, consultations[0].ProducingOperationJournalID)
+						require.Less(t, interpreted[0].JournalID, consultations[0].JournalID)
+						assertProceedConsultation(t, consultations[0].Payload)
+					}
+					require.NoError(t, tracker.Close())
 
-			binding := testCase.bindings[0]
-			list := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "list", "--format", "json", "--binding", binding.Kind.String()+":"+binding.NativeName+"="+binding.Value)
-			stdout.Reset()
-			stderr.Reset()
-			list.Stdout = &stdout
-			list.Stderr = &stderr
-			require.NoError(t, list.Run(), stdout.String()+stderr.String())
-			require.Empty(t, stderr.String())
-			var page struct {
-				Items []struct {
-					Event                model.ContractEventKind  `json:"event"`
-					RegistrationContract string                   `json:"registrationContract"`
-					Capture              model.CaptureDisposition `json:"capture"`
-					PayloadDigest        string                   `json:"payloadDigest"`
-					Interpreted          []struct {
-						Semantic   runtime.EventSemantic    `json:"semantic"`
-						Identities []waist.SemanticIdentity `json:"identities"`
-						Unresolved []waist.UnresolvedFact   `json:"unresolved"`
-						Contract   string                   `json:"contract"`
-					} `json:"interpreted"`
-				} `json:"items"`
-			}
-			require.NoError(t, json.Unmarshal(stdout.Bytes(), &page))
-			require.Len(t, page.Items, 1)
-			require.Equal(t, testCase.event, page.Items[0].Event)
-			require.Equal(t, occurrenceLifecycleContract, page.Items[0].RegistrationContract)
-			require.Equal(t, model.CaptureValid, page.Items[0].Capture)
-			require.Equal(t, digest.FromBytes(raw).String(), page.Items[0].PayloadDigest)
-			require.Len(t, page.Items[0].Interpreted, 1)
-			require.Equal(t, testCase.semantic, page.Items[0].Interpreted[0].Semantic)
-			require.Equal(t, testCase.identities, publicIdentityPayloads(page.Items[0].Interpreted[0].Identities))
-			require.ElementsMatch(t, testCase.unresolved, publicUnresolvedPayloads(page.Items[0].Interpreted[0].Unresolved))
-			require.Equal(t, interpretedLifecycleContract, page.Items[0].Interpreted[0].Contract)
-			for _, privateValue := range []string{string(raw), dbPath, "/home/user", "authentic-capture", "tools/capture-claude-hook.sh", "home-path-v1"} {
-				require.NotContains(t, stdout.String(), privateValue)
+					binding := testCase.bindings[0]
+					list := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "list", "--format", "json", "--binding", binding.Kind.String()+":"+binding.NativeName+"="+binding.Value)
+					stdout.Reset()
+					stderr.Reset()
+					list.Stdout = &stdout
+					list.Stderr = &stderr
+					require.NoError(t, list.Run(), stdout.String()+stderr.String())
+					require.Empty(t, stderr.String())
+					var page struct {
+						Items []struct {
+							Event                model.ContractEventKind  `json:"event"`
+							RegistrationContract string                   `json:"registrationContract"`
+							Capture              model.CaptureDisposition `json:"capture"`
+							PayloadDigest        string                   `json:"payloadDigest"`
+							Interpreted          []struct {
+								Semantic   runtime.EventSemantic    `json:"semantic"`
+								Identities []waist.SemanticIdentity `json:"identities"`
+								Unresolved []waist.UnresolvedFact   `json:"unresolved"`
+								Contract   string                   `json:"contract"`
+							} `json:"interpreted"`
+						} `json:"items"`
+					}
+					require.NoError(t, json.Unmarshal(stdout.Bytes(), &page))
+					require.Len(t, page.Items, 1)
+					require.Equal(t, testCase.event, page.Items[0].Event)
+					require.Equal(t, occurrenceLifecycleContract, page.Items[0].RegistrationContract)
+					require.Equal(t, model.CaptureValid, page.Items[0].Capture)
+					require.Equal(t, digest.FromBytes(raw).String(), page.Items[0].PayloadDigest)
+					require.Len(t, page.Items[0].Interpreted, 1)
+					require.Equal(t, testCase.semantic, page.Items[0].Interpreted[0].Semantic)
+					require.Equal(t, testCase.identities, publicIdentityPayloads(page.Items[0].Interpreted[0].Identities))
+					require.ElementsMatch(t, testCase.unresolved, publicUnresolvedPayloads(page.Items[0].Interpreted[0].Unresolved))
+					require.Equal(t, interpretedLifecycleContract, page.Items[0].Interpreted[0].Contract)
+					for _, privateValue := range []string{string(raw), dbPath, "/home/user", "authentic-capture", "tools/capture-claude-hook.sh", "home-path-v1"} {
+						require.NotContains(t, stdout.String(), privateValue)
+					}
+				})
 			}
 		})
 	}

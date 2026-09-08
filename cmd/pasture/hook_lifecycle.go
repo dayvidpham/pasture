@@ -347,7 +347,7 @@ func lifecycleOutcomeWithCompletion(
 			hostexit.FaultStageNotRecorded, versionErr)
 	}
 	switch {
-	case cmd.Flags().Changed("host-executable"):
+	case cmd.Flags().Changed("host-executable") || (coords.Harness == ir.HarnessClaudeCode && !cmd.Flags().Changed("host-version")):
 		coords.HostVersionSource = model.HostVersionExecutableQuery
 	case cmd.Flags().Changed("host-version") && strings.TrimSpace(hostVersion) != "":
 		coords.HostVersionSource = model.HostVersionCallerSupplied
@@ -1157,8 +1157,8 @@ func init() {
 	flags := hookLifecycleCmd.Flags()
 	flags.String("harness", "", "Native harness whose payload is on standard input (required)")
 	flags.String("event", "", "Native event this generated hook is registered for (required)")
-	flags.String("host-version", "", "Observed native host version to retain (mutually exclusive with --host-executable)")
-	flags.String("host-executable", "", "Absolute Claude executable to query with --version inside the hook budget; Claude only, mutually exclusive with --host-version")
+	flags.String("host-version", "", "Observed native host version to retain without discovery (mutually exclusive with --host-executable)")
+	flags.String("host-executable", "", "Absolute Claude executable override; otherwise query a usable optional CLAUDE_CODE_EXECPATH hint or the first claude on PATH inside the hook budget; mutually exclusive with --host-version")
 	hookLifecycleCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		if cmd != hookLifecycleCmd {
 			return err
