@@ -72,21 +72,32 @@ func GenerateOpenCodeHooksModule() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: activation: %w", err)
 	}
-	enabled := make(map[model.ContractEventKind]bool, 2)
-	manifest := registration.OpenCode1_18_29().Entries()
-	for index, entry := range activationEntries {
-		enabled[manifest[index].Kind] = entry.State == activation.Enabled
+	surfaces := make(map[string]runtime.HookSurface)
+	contract := runtime.OpenCode1_18_29Lifecycle()
+	for _, event := range contract.Events() {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			return "", err
+		}
+		surfaces[mapping.NativeName()] = mapping.Surface()
 	}
-	sessionEvent, err := openCodeEventByKind(registration.EventOpenCodeSessionCreated)
+	return generateOpenCodeHooksModule(registration.OpenCode1_18_29().Entries(), activationEntries, surfaces)
+}
+
+// generateOpenCodeHooksModule consumes the validated activation result from the
+// public generator. Constructed inputs exercise emission mechanics only; this
+// function neither grants activation nor evaluates capture evidence.
+func generateOpenCodeHooksModule(manifest []registration.Event, activationEntries []activation.Entry, surfaces map[string]runtime.HookSurface) (string, error) {
+	enabled := make(map[model.ContractEventKind]bool)
+	for _, entry := range activationEntries {
+		if _, duplicate := enabled[entry.Event]; duplicate {
+			return "", fmt.Errorf("codegen.generateOpenCodeHooksModule: duplicate activation kind %d during emission; restore one classification per registration", entry.Event)
+		}
+		enabled[entry.Event] = entry.State == activation.Enabled
+	}
+	callbacks, factory, err := openCodeCallbacks(manifest, enabled, surfaces)
 	if err != nil {
 		return "", err
-	}
-	toolEvent, err := openCodeEventByKind(registration.EventOpenCodeToolExecuteBefore)
-	if err != nil {
-		return "", err
-	}
-	if !enabled[sessionEvent.Kind] || !enabled[toolEvent.Kind] {
-		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: selected OpenCode handlers lack complete activation proof; add matching capture and production proof before generation")
 	}
 	toolNames, err := deriveOpenCodeNativeToolNames()
 	if err != nil {
@@ -268,34 +279,9 @@ function parseResponse(stdout: string, event: string): LifecycleResponse | undef
   throw new Error('pasture hook lifecycle response must be exactly {"decision":"proceed"} or {"decision":"deny","reason":<nonempty string>} for ' + event + CONFIGURATION_ADVICE);
 }
 
-export async function sessionCreated(callback) {
-  try {
-    await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", %q], "session.created", callback);
-  } catch (error) {
-    // Observation is never a gate and cannot terminate the native event bus.
-    console.error("Pasture lifecycle observation failed for session.created: " + error);
-  }
-}
-
-export async function toolExecuteBefore(input, output) {
-  const args = output.args;
-  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", %q], "tool.execute.before", { input, output: { args } });
-  const response = parseResponse(stdout, "tool.execute.before");
-  if (response?.decision === "deny") throw new Error(response.reason);
-  // Proceed is a decision, not a mutation. Preserve the host-owned args value.
-  output.args = args;
-}
-
+%s
 export const PastureLifecycle = async ({ client }) => ({
-  async event(callback) {
-    if (callback.event?.type !== "session.created") return;
-    await sessionCreated(callback);
-    void client;
-  },
-  async "tool.execute.before"(input, output) {
-    await toolExecuteBefore(input, output);
-  },
-});
+%s});
 
 // OpenCode reads the default export first. When it is an object whose server()
 // is the plugin function, the loader uses it and reads nothing else. A bare
@@ -312,9 +298,99 @@ export default { id: "pasture-lifecycle", server: PastureLifecycle };
 		string(metadataJSON),
 		openCodeHostVersion(),
 		adapterBinaryEnv,
-		openCodeHostVersion(),
-		openCodeHostVersion(),
+		callbacks,
+		factory,
 	), nil
+}
+
+func openCodeCallbacks(manifest []registration.Event, enabled map[model.ContractEventKind]bool, surfaces map[string]runtime.HookSurface) (string, string, error) {
+	var callbacks, observations, named strings.Builder
+	seen := make(map[model.ContractEventKind]bool)
+	names := make(map[string]bool)
+	for _, event := range manifest {
+		active, classified := enabled[event.Kind]
+		if !classified || seen[event.Kind] {
+			return "", "", fmt.Errorf("codegen.openCodeCallbacks: registration %q has missing or duplicate activation join during emission; restore one classification per kind", event.NativeName)
+		}
+		seen[event.Kind] = true
+		if !active {
+			continue
+		}
+		// Event names become identifiers as well as quoted host keys. Refuse
+		// malformed or colliding names rather than emit ambiguous JavaScript.
+		parts := strings.Split(event.NativeName, ".")
+		for _, part := range parts {
+			if part == "" || part[0] < 'a' || part[0] > 'z' || strings.IndexFunc(part, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-') }) >= 0 {
+				return "", "", fmt.Errorf("codegen.openCodeCallbacks: unsupported callback name %q during emission; use the source-proven dotted native name", event.NativeName)
+			}
+		}
+		helper := parts[0]
+		for _, part := range parts[1:] {
+			helper += strings.ToUpper(part[:1]) + part[1:]
+		}
+		helper = strings.ReplaceAll(helper, "-", "_")
+		if names[helper] || helper == "event" {
+			return "", "", fmt.Errorf("codegen.openCodeCallbacks: callback %q collides with another generated key during emission; correct the native registration", event.NativeName)
+		}
+		names[helper] = true
+		command := fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", %q]`, event.NativeName)
+		switch surfaces[event.NativeName] {
+		case runtime.SurfaceOpenCodeCatchAllSSE:
+			versionSelection := ""
+			if event.NativeName == "session.created" {
+				versionSelection = `    // V1 supplies the creating host's version on this occurrence only.
+    // Do not cache it for later callbacks or change the original payload.
+    const version = callback.event?.properties?.info?.version;
+    if (typeof version === "string" && version.trim() !== "") command.push("--host-version", version);
+`
+			}
+			fmt.Fprintf(&callbacks, `export async function %s(callback) {
+  try {
+    const command = %s;
+%s    await invokeLifecycle(command, %q, callback);
+  } catch (error) {
+    // Observation is never a gate and cannot terminate the native event bus.
+    console.error(%q + error);
+  }
+}
+
+`, helper, command, versionSelection, event.NativeName, "Pasture lifecycle observation failed for "+event.NativeName+": ")
+			fmt.Fprintf(&observations, "    if (callback.event?.type === %q) {\n      await %s(callback);\n      return;\n    }\n", event.NativeName, helper)
+		case runtime.SurfaceOpenCodeNamedOutput:
+			// The pinned plugin Hooks API supplies two objects to named hooks.
+			// tool.execute.before retains its cleared, args-only projection.
+			payload := "{ input, output }"
+			if event.NativeName == "tool.execute.before" {
+				payload = "{ input, output: { args: output.args } }"
+			}
+			fmt.Fprintf(&callbacks, `export async function %s(input, output) {
+  if (input === null || typeof input !== "object" || Array.isArray(input) ||
+      output === null || typeof output !== "object" || Array.isArray(output)) {
+    throw new Error(%q + CONFIGURATION_ADVICE);
+  }
+  const stdout = await invokeLifecycle(%s, %q, %s);
+  const response = parseResponse(stdout, %q);
+  if (response?.decision === "deny") throw new Error(response.reason);
+  // Proceed is a decision, not a mutation. Never write host-owned objects.
+}
+
+`, helper, "pasture hook lifecycle callback "+event.NativeName+" requires input and output objects; check the host plugin API", command, event.NativeName, payload, event.NativeName)
+			fmt.Fprintf(&named, "  async %q(input, output) {\n    await %s(input, output);\n  },\n", event.NativeName, helper)
+		default:
+			return "", "", fmt.Errorf("codegen.openCodeCallbacks: enabled callback %q has unsupported runtime surface %v during emission; supply its source-proven OpenCode surface before generation", event.NativeName, surfaces[event.NativeName])
+		}
+	}
+	if len(seen) != len(enabled) {
+		return "", "", fmt.Errorf("codegen.openCodeCallbacks: activation contains an unregistered kind during emission; regenerate matching activation and registration tables")
+	}
+	var factory strings.Builder
+	if observations.Len() > 0 {
+		factory.WriteString("  async event(callback) {\n")
+		factory.WriteString(observations.String())
+		factory.WriteString("    void client;\n  },\n")
+	}
+	factory.WriteString(named.String())
+	return callbacks.String(), factory.String(), nil
 }
 
 func openCodeEventByKind(kind model.ContractEventKind) (registration.Event, error) {
@@ -343,10 +419,8 @@ func openCodeActivationEntries() ([]activation.Entry, error) {
 	return entries, nil
 }
 
-// openCodeHostVersion is the OpenCode host version this target generates for,
-// read from the OpenCode runtime contract, the one root. The generated plugin
-// passes it to every hook invocation and the target manifest records it, so
-// neither restates a number that could drift from the contract.
+// openCodeHostVersion is the build baseline recorded in target metadata, read
+// from the runtime contract. It is not an invocation-time host observation.
 func openCodeHostVersion() string {
 	return runtime.OpenCode1_18_29().Versions().Min().String()
 }

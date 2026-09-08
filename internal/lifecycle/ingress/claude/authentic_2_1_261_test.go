@@ -266,7 +266,7 @@ func readAuthenticClaudeFixtureAt(t *testing.T, fixture, expectedEvent, expected
 	return raw
 }
 
-func TestAuthenticClaudeFileChanged2_1_263AdmittedButWithheld(t *testing.T) {
+func TestAuthenticClaudeFileChanged2_1_263AdmittedAndActivated(t *testing.T) {
 	t.Parallel()
 	raw := readAuthenticClaudeFixtureAt(t, "file_changed_2_1_263.json", "FileChanged", authenticFileChangedVersion, authenticFileChangedSource)
 	var payload map[string]string
@@ -277,8 +277,7 @@ func TestAuthenticClaudeFileChanged2_1_263AdmittedButWithheld(t *testing.T) {
 	require.Equal(t, payload["cwd"]+"/.env", payload["file_path"])
 	require.Equal(t, "change", payload["event"])
 
-	// Member admission does not enable transport. Parse records the supplied
-	// version as provenance; this test makes no version-admission claim.
+	// Capture version is provenance, distinct from the interpretation root.
 	registered := requireRegistrationEvent(t, registration.EventFileChanged)
 	capture := Parse(raw, registered, authenticFileChangedVersion, model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, capture.Disposition, "FileChanged must allow the authentic event member")
@@ -295,9 +294,15 @@ func TestAuthenticClaudeFileChanged2_1_263AdmittedButWithheld(t *testing.T) {
 	require.NoError(t, err)
 	entry, found := activationEntry(entries, registration.EventFileChanged)
 	require.True(t, found)
-	require.Equal(t, activation.Withheld, entry.State)
-	require.Zero(t, entry.CaptureProof)
-	require.Zero(t, entry.ProductionProof)
+	require.Equal(t, activation.Enabled, entry.State)
+	captureEvent, capturePresent := entry.CaptureProof.Event()
+	productionEvent, productionPresent := entry.ProductionProof.Event()
+	require.True(t, capturePresent)
+	require.True(t, productionPresent)
+	require.Equal(t, registration.EventFileChanged, captureEvent)
+	require.Equal(t, registration.EventFileChanged, productionEvent)
+	require.Contains(t, entry.CaptureProof.Name(), "file_changed_2_1_263.json")
+	require.Contains(t, entry.ProductionProof.Name(), "TestEnabledClaudeAuthenticFixturesToDurableEvidence/FileChanged")
 	matcher := activation.ClaudeCode2_1_261Matcher(registration.EventFileChanged)
 	require.Equal(t, ".envrc|.env", matcher)
 	hooksBytes, err := os.ReadFile("../../../../hooks/hooks.json")
@@ -307,7 +312,7 @@ func TestAuthenticClaudeFileChanged2_1_263AdmittedButWithheld(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(hooksBytes, &transport))
 	require.NotEmpty(t, transport.Hooks)
-	require.NotContains(t, transport.Hooks, "FileChanged")
+	require.Contains(t, transport.Hooks, "FileChanged")
 
 	sidecarBytes, err := os.ReadFile("testdata/fixtures/file_changed_2_1_263.provenance.json")
 	require.NoError(t, err)

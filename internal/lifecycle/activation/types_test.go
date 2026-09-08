@@ -24,12 +24,13 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 	for _, event := range activation.ClaudeCode2_1_261TargetEvents() {
 		targets[event] = struct{}{}
 	}
-	require.Len(t, targets, 10)
+	require.Len(t, targets, 11)
 	enabledTargets := map[model.ContractEventKind]struct{}{
 		registration.EventSessionStart: {}, registration.EventSessionEnd: {},
 		registration.EventPreToolUse: {}, registration.EventPostToolUse: {},
 		registration.EventPostToolUseFailure: {}, registration.EventPostToolBatch: {},
 		registration.EventPreCompact: {}, registration.EventPostCompact: {},
+		registration.EventFileChanged: {},
 	}
 	seen := make(map[model.ContractEventKind]struct{}, len(entries))
 	enabled := 0
@@ -68,7 +69,7 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 			t.Fatalf("unexpected activation state %d", entry.State)
 		}
 	}
-	require.Equal(t, 8, enabled)
+	require.Equal(t, len(enabledTargets), enabled)
 	require.Equal(t, 2, missingCorrelation)
 	require.Equal(t, len(entries)-len(targets), outsideTarget, "every registered event outside the declared target set is withheld outside-target-set")
 	require.Equal(t, registration.EventSessionStart, entries[0].Event)
@@ -77,7 +78,7 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 func TestActivationTargetEventsReturnsDefensiveCopyAndManifestIsFresh(t *testing.T) {
 	t.Parallel()
 	targets := activation.ClaudeCode2_1_261TargetEvents()
-	require.Len(t, targets, 10)
+	require.Len(t, targets, 11)
 	targets[0] = model.ContractEventKind(999)
 	freshTargets := activation.ClaudeCode2_1_261TargetEvents()
 	require.Equal(t, registration.EventSessionStart, freshTargets[0])

@@ -526,7 +526,7 @@ func TestClaudeEvaluatorDecidesTheCommittedClaudeCorpusAsBefore(t *testing.T) {
 	corpus, err := activation.LoadCorpus(filepath.Join(root, "captures.yaml"))
 	require.NoError(t, err)
 	cases := corpus.Cases()
-	require.Len(t, cases, 12, "the committed Claude corpus has twelve rows")
+	require.Len(t, cases, 13, "nine authentic enabled events and four controls")
 	selected, err := activation.EvaluatorFor(acceptance.HarnessClaudeCode)
 	require.NoError(t, err)
 	enabled := 0
@@ -545,7 +545,7 @@ func TestClaudeEvaluatorDecidesTheCommittedClaudeCorpusAsBefore(t *testing.T) {
 			enabled++
 		}
 	}
-	require.Equal(t, 8, enabled, "the eight enabled Claude targets evaluate as enabled")
+	require.Equal(t, 9, enabled, "the authentic Claude targets evaluate as enabled")
 	require.Equal(t, acceptance.HarnessClaudeCode, selected.Harness())
 	require.Equal(t, activation.ClaudeCode2_1_261TargetEvents(), selected.TargetEvents())
 }

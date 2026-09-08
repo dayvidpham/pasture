@@ -54,44 +54,448 @@ func generatedClaudeLifecycleCommand(t *testing.T, event string) string {
 	return commands[0]
 }
 
+// Child environments keep parallel proofs independent of the test process.
+// A nil value removes a key; an empty string deliberately retains an empty key.
+func discoveryChildEnv(values map[string]*string) []string {
+	env := make([]string, 0, len(os.Environ())+len(values))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if _, replaced := values[key]; !replaced {
+			env = append(env, entry)
+		}
+	}
+	for key, value := range values {
+		if value != nil {
+			env = append(env, key+"="+*value)
+		}
+	}
+	return env
+}
+
+func discoveryValue(value string) *string { return &value }
+
+func discoveryPathExecutable(t *testing.T, body string) (string, string) {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "path space ; $(not-a-command)")
+	require.NoError(t, os.Mkdir(dir, 0o700))
+	executable := filepath.Join(dir, "claude")
+	require.NoError(t, os.Symlink(versionExecutable(t, body), executable))
+	return dir, executable
+}
+
+// Direct CLI proofs intentionally do not claim generated consumer readiness.
+func TestNativeDefaultVersionQuery(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	for _, tc := range []struct{ harness, event, fixture, banner, version, response string }{
+		{"codex", "SessionStart", "session_start_0_153_0.json", "codex-cli 0.154.1-beta.2+build.7", "0.154.1-beta.2+build.7", `{}`},
+		{"opencode", "session.created", "session_created_1_18_29.json", "1.19.1-beta.2+build.7", "1.19.1-beta.2+build.7", ""},
+	} {
+		t.Run(tc.harness, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", tc.harness, "testdata", "fixtures", tc.fixture))
+			require.NoError(t, err)
+			path := t.TempDir()
+			marker := filepath.Join(t.TempDir(), "queries")
+			executable := versionExecutable(t, "printf x >> '"+marker+"'; printf '%s\\n' '"+tc.banner+"'")
+			require.NoError(t, os.Symlink(executable, filepath.Join(path, tc.harness)))
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			initializeLifecycleTestDatabase(t, dbPath)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, binary, "hook", "lifecycle", "--harness", tc.harness, "--event", tc.event)
+			command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "CLAUDE_CODE_EXECPATH": nil,
+				"PASTURE_DB_PATH": &dbPath, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			command.Stdin = bytes.NewReader(raw)
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			queried, err := os.ReadFile(marker)
+			require.NoError(t, err, "default must query the selected native executable")
+			require.Equal(t, "x", string(queried))
+			require.Empty(t, stderr.String())
+			require.Equal(t, tc.response, stdout.String())
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			defer tracker.Close()
+			rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+			require.Len(t, rows, 1)
+			payload := decodeOccurrencePayload(t, rows[0].Payload)
+			require.Equal(t, tc.version, payload.Envelope.HostVersion)
+			require.Equal(t, model.HostVersionExecutableQuery, payload.Envelope.HostVersionSource)
+			require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind), 1)
+		})
+	}
+}
+
+func TestNativeVersionSelectionAndRefusal(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	for _, harness := range []string{"codex", "opencode"} {
+		event, fixture, prefix, native := "SessionStart", "session_start_0_153_0.json", "codex-cli ", `{}`
+		if harness == "opencode" {
+			event, fixture, prefix, native = "session.created", "session_created_1_18_29.json", "", ""
+		}
+		raw, err := os.ReadFile(filepath.Join("..", "..", "internal/lifecycle/ingress", harness, "testdata/fixtures", fixture))
+		require.NoError(t, err)
+		for _, mode := range []string{"first", "reverse", "explicit executable", "explicit version", "missing", "malformed", "nonzero", "overflow", "explicit failure", "conflict", "empty conflict", "empty executable", "relative executable", "refused", "supplied refused"} {
+			t.Run(harness+"/"+mode, func(t *testing.T) {
+				markers := t.TempDir()
+				firstDir, secondDir := t.TempDir(), t.TempDir()
+				write := func(dir, marker, body string) string {
+					p := filepath.Join(dir, harness)
+					require.NoError(t, os.Symlink(versionExecutable(t, "printf x >> '"+filepath.Join(markers, marker)+"'; "+body), p))
+					return p
+				}
+				firstBody := "printf '%s\\n' '" + prefix + "3.4.5'"
+				wantFault := ""
+				switch mode {
+				case "malformed":
+					firstBody, wantFault = "printf 'junk banner\\n'", "host version resolution failed"
+				case "nonzero", "explicit failure":
+					firstBody, wantFault = "exit 17", "exit status 17"
+				case "overflow":
+					firstBody, wantFault = "printf '%4097s' x", "4096-byte"
+				}
+				first := write(firstDir, "first", firstBody)
+				write(secondDir, "second", "printf '%s\\n' '"+prefix+"3.4.6'")
+				path := firstDir + string(os.PathListSeparator) + secondDir
+				args := []string{"hook", "lifecycle", "--harness", harness, "--event", event}
+				wantVersion, wantMarker, source := "3.4.5", "first", model.HostVersionExecutableQuery
+				switch mode {
+				case "reverse":
+					path, wantVersion, wantMarker = secondDir+string(os.PathListSeparator)+firstDir, "3.4.6", "second"
+				case "explicit executable", "explicit failure":
+					args = append(args, "--host-executable", first)
+					path = secondDir
+				case "explicit version", "supplied refused":
+					args = append(args, "--host-version", "host-local")
+					wantVersion, wantMarker, source = "host-local", "", model.HostVersionCallerSupplied
+				case "missing":
+					path, wantMarker, wantFault = t.TempDir(), "", "no usable "+harness+" executable"
+				case "conflict":
+					args = append(args, "--host-executable", first, "--host-version", "3.4.5")
+					wantMarker, wantFault = "", "mutually exclusive"
+				case "empty conflict":
+					args = append(args, "--host-executable", "", "--host-version", "")
+					wantMarker, wantFault = "", "mutually exclusive"
+				case "empty executable":
+					args = append(args, "--host-executable", "")
+					wantMarker, wantFault = "", "supplied empty"
+				case "relative executable":
+					args = append(args, "--host-executable", harness)
+					wantMarker, wantFault = "", "complete absolute path"
+				}
+				input := raw
+				refused := mode == "refused" || mode == "supplied refused"
+				if refused {
+					var shape map[string]any
+					require.NoError(t, json.Unmarshal(raw, &shape))
+					if harness == "codex" {
+						delete(shape, "session_id")
+					} else {
+						delete(shape["event"].(map[string]any)["properties"].(map[string]any), "sessionID")
+					}
+					input, err = json.Marshal(shape)
+					require.NoError(t, err)
+				}
+				dbPath := filepath.Join(t.TempDir(), "pasture.db")
+				if wantFault == "" {
+					initializeLifecycleTestDatabase(t, dbPath)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				command := exec.CommandContext(ctx, binary, args...)
+				command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "CLAUDE_CODE_EXECPATH": discoveryValue("/unused-claude-hint"), "PASTURE_DB_PATH": &dbPath,
+					"PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+				command.Stdin = bytes.NewReader(input)
+				var stdout, stderr bytes.Buffer
+				command.Stdout, command.Stderr = &stdout, &stderr
+				require.NoError(t, command.Run(), stderr.String())
+				require.Equal(t, native, stdout.String())
+				for _, marker := range []string{"first", "second"} {
+					body, err := os.ReadFile(filepath.Join(markers, marker))
+					if marker == wantMarker {
+						require.NoError(t, err)
+						require.Equal(t, "x", string(body))
+					} else {
+						require.ErrorIs(t, err, os.ErrNotExist, "must not hunt another candidate")
+					}
+				}
+				if wantFault != "" {
+					require.Contains(t, stderr.String(), wantFault)
+					_, err := os.Stat(dbPath)
+					require.ErrorIs(t, err, os.ErrNotExist)
+					fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+					require.NoError(t, err)
+					record := decodeJSONObject(t, fault)
+					require.JSONEq(t, `""`, string(record["hostVersion"]))
+					require.NotContains(t, record, "hostVersionSource")
+					return
+				}
+				tracker, err := tasks.OpenTaskTracker(dbPath)
+				require.NoError(t, err)
+				defer tracker.Close()
+				rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+				require.Len(t, rows, 1)
+				occurrence := decodeOccurrencePayload(t, rows[0].Payload)
+				require.Equal(t, wantVersion, occurrence.Envelope.HostVersion)
+				require.Equal(t, source, occurrence.Envelope.HostVersionSource)
+				require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+				reader, err := tasks.NewLifecycleReader(tracker)
+				require.NoError(t, err)
+				size, err := model.NewPageSize(1)
+				require.NoError(t, err)
+				page, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: size}})
+				require.NoError(t, err)
+				require.Len(t, page.Records(), 1)
+				projected := page.Records()[0].Occurrence
+				require.Equal(t, occurrence.Envelope, projected.Envelope)
+				body, err := reader.Payload(context.Background(), projected.Payload.Digest)
+				require.NoError(t, err)
+				require.Equal(t, input, body)
+				if refused {
+					require.Equal(t, model.CaptureUnsupportedSchema, projected.Capture)
+					require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind))
+					fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+					require.NoError(t, err)
+					var record struct {
+						HostVersion string                  `json:"hostVersion"`
+						Source      model.HostVersionSource `json:"hostVersionSource"`
+					}
+					require.NoError(t, json.Unmarshal(fault, &record))
+					require.Equal(t, wantVersion, record.HostVersion)
+					require.Equal(t, source, record.Source)
+				} else {
+					require.Empty(t, stderr.String())
+					require.Equal(t, model.CaptureValid, projected.Capture)
+					require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind), 1)
+				}
+			})
+		}
+	}
+}
+
+func TestClaudeDefaultDiscoverySelectsOneExecutable(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	shell, err := exec.LookPath("sh")
+	require.NoError(t, err)
+	raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
+	for _, mode := range []string{"absent", "empty", "reverse", "hint", "relative hint", "missing hint", "directory hint", "nonexecutable hint", "dangling hint", "explicit executable", "explicit version", "failed PATH query", "failed hint query"} {
+		t.Run(mode, func(t *testing.T) {
+			markers := t.TempDir()
+			firstDir, first := discoveryPathExecutable(t, "printf x >> '"+filepath.Join(markers, "first")+"'; printf '2.1.299 (Claude Code)\\n'")
+			secondDir, _ := discoveryPathExecutable(t, "printf x >> '"+filepath.Join(markers, "second")+"'; printf '2.1.300 (Claude Code)\\n'")
+			hint := versionExecutable(t, "printf x >> '"+filepath.Join(markers, "hint")+"'; printf '2.1.301 (Claude Code)\\n'")
+			path := firstDir + string(os.PathListSeparator) + secondDir
+			var hintValue *string
+			wantVersion, wantMarker := "2.1.299", "first"
+			args := generatedClaudeLifecycleCommand(t, "SessionStart")
+			failed := false
+			switch mode {
+			case "empty":
+				hintValue = discoveryValue("")
+			case "reverse":
+				path = secondDir + string(os.PathListSeparator) + firstDir
+				wantVersion, wantMarker = "2.1.300", "second"
+			case "hint":
+				hintValue = &hint
+				wantVersion, wantMarker = "2.1.301", "hint"
+			case "relative hint":
+				hintValue = discoveryValue("claude")
+			case "missing hint":
+				hintValue = discoveryValue(filepath.Join(markers, "missing"))
+			case "directory hint":
+				hintValue = &markers
+			case "nonexecutable hint":
+				p := filepath.Join(markers, "not-executable")
+				require.NoError(t, os.WriteFile(p, []byte("no"), 0o600))
+				hintValue = &p
+			case "dangling hint":
+				p := filepath.Join(markers, "dangling")
+				require.NoError(t, os.Symlink(filepath.Join(markers, "missing"), p))
+				hintValue = &p
+			case "explicit executable":
+				hintValue = &hint
+				args += " --host-executable '" + first + "'"
+			case "explicit version":
+				hintValue = &hint
+				args += " --host-version 2.1.302"
+				wantVersion, wantMarker = "2.1.302", ""
+			case "failed PATH query":
+				bad := versionExecutable(t, "printf x >> '"+filepath.Join(markers, "first")+"'; exit 17")
+				require.NoError(t, os.Remove(first))
+				require.NoError(t, os.Symlink(bad, first))
+				failed = true
+			case "failed hint query":
+				hint = versionExecutable(t, "printf x >> '"+filepath.Join(markers, "hint")+"'; exit 17")
+				hintValue = &hint
+				wantMarker = "hint"
+				failed = true
+			}
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			if !failed {
+				initializeLifecycleTestDatabase(t, dbPath)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, shell, "-c", args)
+			command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "CLAUDE_CODE_EXECPATH": hintValue,
+				"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			command.Stdin = bytes.NewReader(raw)
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			require.Empty(t, stdout.String())
+			for _, marker := range []string{"first", "second", "hint"} {
+				body, err := os.ReadFile(filepath.Join(markers, marker))
+				if marker == wantMarker {
+					require.NoError(t, err)
+					require.Equal(t, "x", string(body))
+				} else {
+					require.ErrorIs(t, err, os.ErrNotExist, "must not query another candidate")
+				}
+			}
+			if failed {
+				require.Contains(t, stderr.String(), "exit status 17")
+				_, err := os.Stat(dbPath)
+				require.ErrorIs(t, err, os.ErrNotExist)
+				fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+				require.NoError(t, err)
+				record := decodeJSONObject(t, fault)
+				require.NotContains(t, record, "hostVersionSource")
+				require.JSONEq(t, `""`, string(record["hostVersion"]))
+				return
+			}
+			require.Empty(t, stderr.String())
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			defer tracker.Close()
+			rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+			require.Len(t, rows, 1)
+			payload := decodeOccurrencePayload(t, rows[0].Payload)
+			require.Equal(t, wantVersion, payload.Envelope.HostVersion)
+			wantSource := model.HostVersionExecutableQuery
+			if mode == "explicit version" {
+				wantSource = model.HostVersionCallerSupplied
+			}
+			require.Equal(t, wantSource, payload.Envelope.HostVersionSource)
+			require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind), 1)
+		})
+	}
+}
+
+func TestClaudeDefaultDiscoveryResolutionFaultsPrecedeCaptureAndStorage(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	shell, err := exec.LookPath("sh")
+	require.NoError(t, err)
+	for _, mode := range []string{"absent PATH", "empty PATH", "no match", "ErrDot", "missing interpreter", "malformed", "stdout cap", "stderr cap"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			path := discoveryValue(dir)
+			want := "no usable claude executable"
+			switch mode {
+			case "absent PATH":
+				path = nil
+			case "empty PATH":
+				path = discoveryValue("")
+			case "ErrDot":
+				require.NoError(t, os.Symlink(versionExecutable(t, "exit 91"), filepath.Join(dir, "claude")))
+				path = discoveryValue(".")
+				want = "relative to current directory"
+			case "missing interpreter":
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "claude"), []byte("#!/nonexistent/claude-test-interpreter\n"), 0o700))
+				want = "start selected host executable"
+			case "malformed", "stdout cap", "stderr cap":
+				body := "printf 'not a version\\n'"
+				want = "does not match"
+				if mode != "malformed" {
+					body = "printf '%4097s' x"
+					want = "4096-byte"
+					if mode == "stderr cap" {
+						body += " >&2; printf '2.1.299 (Claude Code)\\n'"
+					}
+				}
+				require.NoError(t, os.Symlink(versionExecutable(t, body), filepath.Join(dir, "claude")))
+			}
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			captureDir := t.TempDir()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, shell, "-c", generatedClaudeLifecycleCommand(t, "SessionStart"))
+			command.Dir = dir
+			command.Env = discoveryChildEnv(map[string]*string{"PATH": path, "CLAUDE_CODE_EXECPATH": nil, "GODEBUG": discoveryValue("execerrdot=1"),
+				"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath, "PASTURE_CAPTURE_DIR": &captureDir, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			command.Stdin = strings.NewReader("{}")
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			require.Empty(t, stdout.String())
+			require.Contains(t, stderr.String(), want)
+			require.Contains(t, stderr.String(), "no occurrence was recorded")
+			require.NotContains(t, stderr.String(), "variable is required")
+			_, err := os.Stat(dbPath)
+			require.ErrorIs(t, err, os.ErrNotExist)
+			files, err := os.ReadDir(captureDir)
+			require.NoError(t, err)
+			require.Empty(t, files)
+			fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+			require.NoError(t, err)
+			record := decodeJSONObject(t, fault)
+			require.NotContains(t, record, "hostVersionSource")
+			require.JSONEq(t, `""`, string(record["hostVersion"]))
+		})
+	}
+}
+
 func TestGeneratedClaudeCommandRetainsObservedVersionAndCaptureName(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)
-	executable := versionExecutable(t, "printf '2.1.299 (Claude Code)\\n'")
-	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	initializeLifecycleTestDatabase(t, dbPath)
-	captureDir := t.TempDir()
-	raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	command := exec.CommandContext(ctx, "sh", "-c", generatedClaudeLifecycleCommand(t, "SessionStart"))
-	command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
-		"CLAUDE_CODE_EXECPATH="+executable, "CLAUDE_CODE_VERSION=not-a-version",
-		"PASTURE_CAPTURE_DIR="+captureDir, "PASTURE_ACTOR_ID=")
-	command.Stdin = bytes.NewReader(raw)
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
+	path, _ := discoveryPathExecutable(t, "printf '2.1.299 (Claude Code)\\n'")
+	for _, state := range []string{"absent", "empty"} {
+		t.Run(state, func(t *testing.T) {
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			initializeLifecycleTestDatabase(t, dbPath)
+			captureDir := t.TempDir()
+			raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, "sh", "-c", generatedClaudeLifecycleCommand(t, "SessionStart"))
+			var hint *string
+			if state == "empty" {
+				hint = discoveryValue("")
+			}
+			command.Env = discoveryChildEnv(map[string]*string{"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath,
+				"PATH": &path, "CLAUDE_CODE_EXECPATH": hint, "CLAUDE_CODE_VERSION": discoveryValue("not-a-version"),
+				"PASTURE_CAPTURE_DIR": &captureDir, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			command.Stdin = bytes.NewReader(raw)
+			var stdout, stderr bytes.Buffer
+			command.Stdout = &stdout
+			command.Stderr = &stderr
 
-	err := command.Run()
+			err := command.Run()
 
-	require.NoError(t, err, stderr.String())
-	require.Empty(t, stdout.String())
-	require.Contains(t, stderr.String(), "capture mode is recording")
-	require.NotContains(t, stderr.String(), "could not")
-	files, err := os.ReadDir(captureDir)
-	require.NoError(t, err)
-	require.Len(t, files, 1)
-	require.Contains(t, files[0].Name(), "2_1_299")
-	captured, err := os.ReadFile(filepath.Join(captureDir, files[0].Name()))
-	require.NoError(t, err)
-	require.Equal(t, raw, captured, "this is a scratch replay of existing cleared bytes, not a new authentic capture")
-	tracker, err := tasks.OpenTaskTracker(dbPath)
-	require.NoError(t, err)
-	defer tracker.Close()
-	rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
-	require.Len(t, rows, 1)
-	require.Equal(t, "2.1.299", decodeOccurrencePayload(t, rows[0].Payload).Envelope.HostVersion)
+			require.NoError(t, err, stderr.String())
+			require.Empty(t, stdout.String())
+			require.Contains(t, stderr.String(), "capture mode is recording")
+			require.NotContains(t, stderr.String(), "could not")
+			files, err := os.ReadDir(captureDir)
+			require.NoError(t, err)
+			require.Len(t, files, 1)
+			require.Contains(t, files[0].Name(), "2_1_299")
+			captured, err := os.ReadFile(filepath.Join(captureDir, files[0].Name()))
+			require.NoError(t, err)
+			require.Equal(t, raw, captured, "this is a scratch replay of existing cleared bytes, not a new authentic capture")
+			tracker, err := tasks.OpenTaskTracker(dbPath)
+			require.NoError(t, err)
+			defer tracker.Close()
+			rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+			require.Len(t, rows, 1)
+			require.Equal(t, "2.1.299", decodeOccurrencePayload(t, rows[0].Payload).Envelope.HostVersion)
+			require.Equal(t, model.HostVersionExecutableQuery, decodeOccurrencePayload(t, rows[0].Payload).Envelope.HostVersionSource)
+		})
+	}
 }
 
 func TestLifecycleHostVersionFailuresNeverReachStorage(t *testing.T) {
@@ -111,12 +515,13 @@ func TestLifecycleHostVersionFailuresNeverReachStorage(t *testing.T) {
 		want    string
 	}{
 		{name: "empty", args: []string{"--host-executable", ""}, want: "supplied empty"},
-		{name: "missing executable", args: []string{"--host-executable", filepath.Join(t.TempDir(), "missing")}, want: "start explicit Claude executable"},
+		{name: "missing executable", args: []string{"--host-executable", filepath.Join(t.TempDir(), "missing")}, want: "start selected host executable"},
 		{name: "relative", args: []string{"--host-executable", "claude"}, want: "complete absolute path"},
-		{name: "not executable", args: []string{"--host-executable", nonExecutable}, want: "start explicit Claude executable"},
-		{name: "wrong harness", harness: "codex", args: []string{"--host-executable", good}, want: "only for --harness claude-code"},
+		{name: "not executable", args: []string{"--host-executable", nonExecutable}, want: "start selected host executable"},
+		{name: "wrong product banner", harness: "codex", args: []string{"--host-executable", good}, want: "does not match"},
 		{name: "conflicting sources", args: []string{"--host-executable", good, "--host-version", "2.1.261"}, want: "mutually exclusive"},
 		{name: "empty explicit conflict", args: []string{"--host-executable", good, "--host-version", ""}, want: "mutually exclusive"},
+		{name: "both empty conflict", args: []string{"--host-executable", "", "--host-version", ""}, want: "mutually exclusive"},
 		{name: "malformed output", args: []string{"--host-executable", malformed}, want: "does not match"},
 		{name: "oversized output", args: []string{"--host-executable", oversized}, want: "4096-byte"},
 		{name: "oversized diagnostic", args: []string{"--host-executable", oversizedStderr}, want: "4096-byte"},
@@ -173,8 +578,8 @@ func TestGeneratedClaudeMissingExecutableDoesNotInventVersion(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "sh", "-c", generatedClaudeLifecycleCommand(t, "SessionStart"))
-	command.Env = append(os.Environ(), "PASTURE_BIN="+lifecycleBinary(t), "PASTURE_DB_PATH="+dbPath,
-		"CLAUDE_CODE_EXECPATH=", "CLAUDE_CODE_VERSION=2.1.299", "PASTURE_CAPTURE_DIR=")
+	command.Env = discoveryChildEnv(map[string]*string{"PASTURE_BIN": discoveryValue(lifecycleBinary(t)), "PASTURE_DB_PATH": &dbPath,
+		"PATH": nil, "CLAUDE_CODE_EXECPATH": nil, "CLAUDE_CODE_VERSION": discoveryValue("2.1.299"), "PASTURE_CAPTURE_DIR": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
 	command.Stdin = strings.NewReader("{}")
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -184,11 +589,19 @@ func TestGeneratedClaudeMissingExecutableDoesNotInventVersion(t *testing.T) {
 
 	require.NoError(t, err, stderr.String())
 	require.Empty(t, stdout.String())
-	require.Contains(t, stderr.String(), "supplied empty")
-	require.Contains(t, stderr.String(), "CLAUDE_CODE_EXECPATH")
+	require.Contains(t, stderr.String(), "no usable claude executable")
+	require.Contains(t, stderr.String(), "install the native harness and expose it on PATH")
+	require.Contains(t, stderr.String(), "supply --host-executable or an observed --host-version")
 	require.Contains(t, stderr.String(), "no occurrence was recorded")
 	_, err = os.Stat(dbPath)
 	require.ErrorIs(t, err, os.ErrNotExist)
+	fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+	require.NoError(t, err)
+	record := decodeJSONObject(t, fault)
+	require.JSONEq(t, `""`, string(record["hostVersion"]))
+	require.NotContains(t, record, "hostVersionSource")
+	require.JSONEq(t, `"not-recorded"`, string(record["faultStage"]))
+	require.JSONEq(t, `"fault"`, string(record["outcomeClass"]))
 }
 
 func TestGeneratedClaudeCommandSurvivesExecutableUpdate(t *testing.T) {
@@ -293,6 +706,49 @@ func TestLifecycleVersionQueryPreservesCancellationCause(t *testing.T) {
 	require.ErrorIs(t, err, cause)
 }
 
+func TestClaudeDefaultQueryUsesInvocationProcessAndPipeBounds(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	shell, err := exec.LookPath("sh")
+	require.NoError(t, err)
+	// This child is the stalled-query stimulus, not a test synchronization wait.
+	// Resolve it before replacing PATH so the failure cannot be a missing utility.
+	sleeper, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+	for _, mode := range []string{"process", "inherited stdout", "inherited stderr"} {
+		t.Run(mode, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "selected")
+			body := "printf x > '" + marker + "'\nexec '" + sleeper + "' 30"
+			if mode != "process" {
+				stream := ""
+				if mode == "inherited stderr" {
+					stream = " >&2"
+				}
+				body = "printf x > '" + marker + "'\n'" + sleeper + "' 30" + stream + " &\nprintf '2.1.299 (Claude Code)\\n'\nexit 0"
+			}
+			path, _ := discoveryPathExecutable(t, body)
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, shell, "-c", generatedClaudeLifecycleCommand(t, "SessionStart"))
+			command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "CLAUDE_CODE_EXECPATH": nil,
+				"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			command.Stdin = strings.NewReader("{}")
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			require.NoError(t, ctx.Err(), "the query must finish under its invocation budget, not the test watchdog")
+			selected, err := os.ReadFile(marker)
+			require.NoError(t, err)
+			require.Equal(t, "x", string(selected))
+			require.Empty(t, stdout.String())
+			require.Contains(t, stderr.String(), "context deadline exceeded")
+			_, err = os.Stat(dbPath)
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
+}
+
 func TestLifecycleExplicitHostVersionDoesNotRequestProbing(t *testing.T) {
 	t.Parallel()
 	for _, harness := range []ir.HarnessID{ir.HarnessClaudeCode, ir.HarnessCodex, ir.HarnessOpenCode} {
@@ -345,7 +801,7 @@ func TestLifecycleQueriesExplicitExecutableBeforeDurableReceipt(t *testing.T) {
 func TestLifecycleVersionSourceReachesDurableAndFaultRecords(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)
-	executable := versionExecutable(t, "printf '2.1.299 (Claude Code)\\n'")
+	path, _ := discoveryPathExecutable(t, "printf '2.1.299 (Claude Code)\\n'")
 	transport := generatedClaudeLifecycleCommand(t, "SessionStart")
 	valid := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
 	var incompatible map[string]any
@@ -377,8 +833,8 @@ func TestLifecycleVersionSourceReachesDurableAndFaultRecords(t *testing.T) {
 				command = exec.CommandContext(ctx, binary, "hook", "lifecycle", "--harness", "claude-code",
 					"--event", "SessionStart", "--host-version", "2.1.299")
 			}
-			command.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
-				"CLAUDE_CODE_EXECPATH="+executable, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=")
+			command.Env = discoveryChildEnv(map[string]*string{"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath,
+				"PATH": &path, "CLAUDE_CODE_EXECPATH": nil, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
 			command.Stdin = bytes.NewReader(tc.raw)
 			var stdout, stderr bytes.Buffer
 			command.Stdout = &stdout
@@ -441,8 +897,9 @@ func TestLifecycleFailedVersionQueryDoesNotAssertSource(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "sh", "-c", generatedClaudeLifecycleCommand(t, "SessionStart"))
-	command.Env = append(os.Environ(), "PASTURE_BIN="+lifecycleBinary(t), "PASTURE_DB_PATH="+dbPath,
-		"CLAUDE_CODE_EXECPATH=", "PASTURE_CAPTURE_DIR=")
+	path, _ := discoveryPathExecutable(t, "exit 17")
+	command.Env = discoveryChildEnv(map[string]*string{"PASTURE_BIN": discoveryValue(lifecycleBinary(t)), "PASTURE_DB_PATH": &dbPath,
+		"PATH": &path, "CLAUDE_CODE_EXECPATH": discoveryValue(""), "PASTURE_CAPTURE_DIR": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
 	command.Stdin = strings.NewReader("{}")
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -452,7 +909,7 @@ func TestLifecycleFailedVersionQueryDoesNotAssertSource(t *testing.T) {
 
 	require.NoError(t, err, stderr.String())
 	require.Empty(t, stdout.String())
-	require.Contains(t, stderr.String(), "supplied empty")
+	require.Contains(t, stderr.String(), "exit status 17")
 	fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
 	require.NoError(t, err)
 	record := decodeJSONObject(t, fault)

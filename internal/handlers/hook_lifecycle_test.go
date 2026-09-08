@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,10 +17,14 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -73,6 +78,122 @@ func TestNativePostCommitFailurePreservesBothOutcomeAndError(t *testing.T) {
 	defer tracker.Close()
 	consultation := queryOneEvidence(t, tracker, receipt.CurrentConsultationEvidenceKind())
 	require.Contains(t, string(consultation.Payload), `"decision":{"decision":"deny","reason":"no-active-assignment"}`)
+}
+
+// This proves agreement for supplied valid decisions, not assignment-derived
+// policy or a live host refusal. Neither real mapping has an evidenced refusal
+// channel, so the durable reason must explain why the host continues.
+func TestNativeUnenforcedDecisionAgreesWithDurableConsultation(t *testing.T) {
+	codexMapping, err := runtime.Codex0_153_0Lifecycle().Mapping(runtime.CodexEventPreToolUse)
+	require.NoError(t, err)
+	openCodeMapping, err := runtime.OpenCode1_18_29Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteBefore)
+	require.NoError(t, err)
+	for _, route := range []struct {
+		harness         ir.HarnessID
+		mapping         runtime.LifecycleEventMapping
+		manifest        registration.Manifest
+		fixture, stdout string
+		activations     func() ([]activation.Entry, error)
+	}{
+		{ir.HarnessCodex, codexMapping, registration.Codex0_153_0(), "codex/testdata/fixtures/pre_tool_use_0_153_0.json", `{"continue":true}`, activation.Codex0_153_0},
+		{ir.HarnessOpenCode, openCodeMapping, registration.OpenCode1_18_29(), "opencode/testdata/fixtures/tool_execute_before_1_18_29.json", `{"decision":"proceed"}`, activation.OpenCode1_18_29},
+	} {
+		t.Run(string(route.harness), func(t *testing.T) {
+			require.Equal(t, runtime.CapabilityNone, route.mapping.Response())
+			require.True(t, route.mapping.PreAction())
+			require.Equal(t, runtime.SemanticGateConsultation, route.mapping.Semantic())
+			require.Empty(t, route.mapping.Evidence().Source)
+			require.Empty(t, route.mapping.AskEvidence().Source)
+			entries, err := route.activations()
+			require.NoError(t, err)
+			event, err := ingress.EventByNativeName(route.manifest, route.mapping.NativeName())
+			require.NoError(t, err)
+			admitted := false
+			for _, entry := range entries {
+				if entry.Event == event.Kind {
+					require.True(t, entry.IsValid())
+					require.Equal(t, activation.Enabled, entry.State)
+					admitted = true
+				}
+			}
+			require.True(t, admitted, "actual activation catalog must admit the supplied fixture")
+			raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", route.fixture))
+			require.NoError(t, err)
+			for _, kind := range []backend.DecisionKind{backend.DecisionDeny, backend.DecisionRequireHuman} {
+				for _, reason := range []backend.DecisionReason{backend.ReasonUnknownActor, backend.ReasonNoActiveAssignment, backend.ReasonRoleForbidsAction, backend.ReasonPhaseForbidsAction} {
+					t.Run(kind.String()+"/"+reason.String(), func(t *testing.T) {
+						decision, err := backend.NewDecision(kind, reason)
+						require.NoError(t, err)
+						dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+						t.Setenv("PASTURE_DB_PATH", dbPath)
+						bootstrap, err := tasks.OpenTaskTracker(dbPath)
+						require.NoError(t, err)
+						t.Cleanup(func() { require.NoError(t, bootstrap.Close()) })
+						_, err = bootstrap.Create("file://unenforced-decision", "bootstrap", "initialize ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+						require.NoError(t, err)
+						require.NoError(t, bootstrap.Close())
+						operation := "test.unenforced-decision"
+						outcome, err := handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
+							DBPath: dbPath, Harness: route.harness, Event: route.mapping.NativeName(), HostVersion: route.manifest.Version,
+							Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: operation}, Decision: &decision,
+						})
+						require.NoError(t, err, "a valid but unenforceable decision is not a fault")
+						require.Equal(t, hostexit.ExitContinue, outcome.Exit)
+						require.Equal(t, route.stdout, string(outcome.Stdout))
+						require.Empty(t, outcome.Stderr)
+						tracker, err := tasks.OpenTaskTracker(dbPath)
+						require.NoError(t, err)
+						t.Cleanup(func() { require.NoError(t, tracker.Close()) })
+						page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
+							Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
+							Kinds:  []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", receipt.CurrentConsultationEvidenceKind()},
+							Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
+						})
+						require.NoError(t, err)
+						require.Nil(t, page.Next)
+						require.Len(t, page.Rows, 3, "exactly one ordinary occurrence, interpretation and current consultation must commit")
+						rows := make(map[provenance.EvidenceKind]provenance.EvidenceRow)
+						for _, row := range page.Rows {
+							require.Equal(t, provenance.OperationID(operation), row.ProducingOperationID)
+							sum := sha256.Sum256(row.Payload)
+							require.Equal(t, sum[:], row.ContentDigest)
+							rows[row.EvidenceKind] = row
+						}
+						require.Len(t, rows, 3)
+						occurrence := rows["pasture.lifecycle.occurrence.v1"]
+						interpreted := rows["pasture.lifecycle.interpreted.v2"]
+						consultation := rows[receipt.CurrentConsultationEvidenceKind()]
+						require.NotZero(t, occurrence.ProducingOperationJournalID)
+						require.Equal(t, occurrence.ProducingOperationJournalID, interpreted.ProducingOperationJournalID)
+						require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID)
+						require.Less(t, occurrence.JournalID, interpreted.JournalID)
+						require.Less(t, interpreted.JournalID, consultation.JournalID)
+						var captured struct {
+							Capture model.CaptureDisposition `json:"capture"`
+							Body    string                   `json:"body_digest"`
+						}
+						require.NoError(t, json.Unmarshal(occurrence.Payload, &captured))
+						require.Equal(t, model.CaptureValid, captured.Capture)
+						require.Equal(t, fmt.Sprintf("sha256:%x", sha256.Sum256(raw)), captured.Body)
+						// EvidenceRow omits result slots; reconstruct only the documented
+						// effect slots. The decoder validates the payload's exact reference
+						// and digest against the actual linked interpreted evidence.
+						decoded, err := receipt.DecodeConsultation(provenance.Effect{
+							Sort: provenance.EffectEvidence, ResultSlot: "consultation", EvidenceKind: consultation.EvidenceKind, Payload: consultation.Payload, ContentDigest: consultation.ContentDigest,
+						}, provenance.Effect{
+							Sort: provenance.EffectEvidence, ResultSlot: "interpreted", EvidenceKind: interpreted.EvidenceKind, Payload: interpreted.Payload, ContentDigest: interpreted.ContentDigest,
+						})
+						require.NoError(t, err)
+						require.Equal(t, receipt.CurrentConsultationEvidenceKind(), decoded.Effect().EvidenceKind)
+						stored, evaluated := decoded.Decision()
+						require.True(t, evaluated, "current consultation must contain an evaluated decision")
+						require.Equal(t, backend.DecisionProceed, stored.Kind(), "durable decision must agree with the host continuation")
+						require.Equal(t, backend.ReasonUnenforcedDeny, stored.Reason(), "durable reason must retain the unenforced refusal, not claim legality")
+					})
+				}
+			}
+		})
+	}
 }
 
 type readTrackingLifecycleInput struct{ reads int }
