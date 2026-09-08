@@ -507,6 +507,49 @@ func TestLifecycleVersionQueryPreservesCancellationCause(t *testing.T) {
 	require.ErrorIs(t, err, cause)
 }
 
+func TestClaudeDefaultQueryUsesInvocationProcessAndPipeBounds(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	shell, err := exec.LookPath("sh")
+	require.NoError(t, err)
+	// This child is the stalled-query stimulus, not a test synchronization wait.
+	// Resolve it before replacing PATH so the failure cannot be a missing utility.
+	sleeper, err := exec.LookPath("sleep")
+	require.NoError(t, err)
+	for _, mode := range []string{"process", "inherited stdout", "inherited stderr"} {
+		t.Run(mode, func(t *testing.T) {
+			marker := filepath.Join(t.TempDir(), "selected")
+			body := "printf x > '" + marker + "'\nexec '" + sleeper + "' 30"
+			if mode != "process" {
+				stream := ""
+				if mode == "inherited stderr" {
+					stream = " >&2"
+				}
+				body = "printf x > '" + marker + "'\n'" + sleeper + "' 30" + stream + " &\nprintf '2.1.299 (Claude Code)\\n'\nexit 0"
+			}
+			path, _ := discoveryPathExecutable(t, body)
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, shell, "-c", generatedClaudeLifecycleCommand(t, "SessionStart"))
+			command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "CLAUDE_CODE_EXECPATH": nil,
+				"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath, "PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			command.Stdin = strings.NewReader("{}")
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			require.NoError(t, ctx.Err(), "the query must finish under its invocation budget, not the test watchdog")
+			selected, err := os.ReadFile(marker)
+			require.NoError(t, err)
+			require.Equal(t, "x", string(selected))
+			require.Empty(t, stdout.String())
+			require.Contains(t, stderr.String(), "context deadline exceeded")
+			_, err = os.Stat(dbPath)
+			require.ErrorIs(t, err, os.ErrNotExist)
+		})
+	}
+}
+
 func TestLifecycleExplicitHostVersionDoesNotRequestProbing(t *testing.T) {
 	t.Parallel()
 	for _, harness := range []ir.HarnessID{ir.HarnessClaudeCode, ir.HarnessCodex, ir.HarnessOpenCode} {
