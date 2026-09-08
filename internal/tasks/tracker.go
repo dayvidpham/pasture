@@ -7,19 +7,20 @@
 //
 //   - SetAgentCategories / AgentCategories  → pasture_agent_categories
 //   - AttachContext / EventContexts / Timeline → context_edges
-//   - Close → closes both wrapped subsystems exactly once
+//   - Close → drains the borrowed tracker and closes the owned pools exactly once
 //
 // The constructor lives in open_unified.go; this file contains only the
 // wrapper type and its methods so the file boundary mirrors the conceptual
 // split between "what the type IS" (here) and "how it's wired up" (open_unified).
 //
-// The wrapper uses a pasture-side *sql.DB (the same handle backing the audit
-// subsystem) for the 6 new methods. Single-writer serialisation (sqlite.go's
+// The wrapper owns a pasture-side *sql.DB, also borrowed by Provenance, for the
+// 6 new methods. The audit trail normally owns a separate pool on the same file.
+// Single-writer serialisation (sqlite.go's
 // SetMaxOpenConns(1) + the busy-timeout retry + WAL mode) gives us cross-subsystem
 // safety on one file. The race test in tracker_race_test.go proves D11/C5.
 //
 // Concurrency note: the io.Closer-style Close() is idempotent (sync.Once); a
-// double-close returns nil rather than a use-after-free. The 6 new methods are
+// repeated close returns the same completed result. The 6 new methods are
 // safe for concurrent use because *sql.DB is itself goroutine-safe.
 //
 // Package-name divergence (issue #43 text vs delivered surface): issue #43 refers to
@@ -56,7 +57,7 @@ import (
 type trackerImpl struct {
 	prov             provenance.Tracker
 	trail            audit.Trail
-	auditDB          *sql.DB // shared with trail; used for pasture-only table writes
+	auditDB          *sql.DB // owned here, borrowed by Provenance; may alias a test trail's pool
 	closeOnce        sync.Once
 	closeErr         error
 	allocationRunner composedAllocationRunner
@@ -129,8 +130,9 @@ func (t *trackerImpl) lifecycleDiagnosticSink() io.Writer        { return t.diag
 // helper is package-private so it can also be used by tests with mocked
 // dependencies.
 //
-// auditDB MUST be the same *sql.DB handle used by trail; the race test relies
-// on single-writer serialisation through this one handle.
+// The caller transfers ownership of auditDB to the tracker. Provenance borrows
+// this pool; the audit trail normally owns a separate pool on the same file.
+// A test may alias the two pools: sql.DB.Close is idempotent.
 //
 // newTrackerImpl calls ensurePastureTables once and caches the
 // audit_events column-presence flags (hasRoleColumn, hasEpochIDColumn) so
@@ -970,76 +972,40 @@ func auditEventsHasColumn(ctx context.Context, db *sql.DB, column string) (bool,
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
-// Close closes both wrapped subsystems exactly once. Safe for concurrent
-// callers and idempotent (a second call returns the cached result of the
-// first). The audit *sql.DB is the same handle held by trail (when trail is a
-// *audit.SqliteAuditTrail), so closing trail releases auditDB; we do not call
-// auditDB.Close() separately to avoid a double-close panic in modernc/sqlite.
+// Close drains the Provenance borrower before closing the pools this tracker
+// owns. Provenance's borrowed Close does not close auditDB; the audit trail owns
+// a separate pool in production. All resources are attempted even after an
+// error, and concurrent callers receive the same cached result. An aliased test
+// trail is safe because sql.DB.Close is idempotent; its first error is retained.
 func (t *trackerImpl) Close() error {
 	t.closeOnce.Do(func() {
-		// Close the Provenance tracker first; it owns its own *sql.DB
-		// (separate from auditDB even though both point at the same file).
-		var provErr error
+		var closeErrors []error
+		// The borrower must finish its scope cancellation/drain before its
+		// parent pool closes. Do not parallelize these close operations.
 		if t.prov != nil {
-			provErr = t.prov.Close()
+			if err := t.prov.Close(); err != nil {
+				closeErrors = append(closeErrors, fmt.Errorf("close Provenance tracker: %w", err))
+			}
 		}
-
-		// Close the audit subsystem next. SqliteAuditTrail.Close() releases
-		// auditDB; for non-SQLite trails (e.g. InMemoryAuditTrail) Close is
-		// a no-op or method-missing and we skip it.
-		var trailErr error
 		if closer, ok := t.trail.(interface{ Close() error }); ok {
-			trailErr = closer.Close()
+			if err := closer.Close(); err != nil {
+				closeErrors = append(closeErrors, fmt.Errorf("close audit trail: %w", err))
+			}
 		}
-
-		switch {
-		case provErr != nil && trailErr != nil:
+		if t.auditDB != nil {
+			if err := t.auditDB.Close(); err != nil {
+				closeErrors = append(closeErrors, fmt.Errorf("close owned database pool: %w", err))
+			}
+		}
+		if err := errors.Join(closeErrors...); err != nil {
 			t.closeErr = &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     "Pasture couldn't close the database cleanly.",
-				Why: "Both halves of the database (the task store and the audit log) failed\n" +
-					"to close.",
-				Where: "Closing the database (internal/tasks/tracker.go in trackerImpl.Close).",
-				Impact: "The database file may be left locked. The next process that tries to\n" +
-					"open it may have to wait or see a \"database is locked\" error briefly.",
-				Fix: "1. Wait about 5 seconds for the lock to clear, then retry.\n" +
-					"2. If the error keeps happening, restart any process still holding the\n" +
-					"   file open:\n" +
-					"     pgrep -af pastured\n" +
-					"     pkill -f pastured",
-				Cause: errors.Join(provErr, trailErr),
-			}
-		case provErr != nil:
-			t.closeErr = &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What:     "Pasture couldn't close the task store cleanly.",
-				Why:      "Closing the task-store half of the database failed.",
+				Why:      "One or more resources reported an error during shutdown; each failed resource is named in the cause.",
 				Where:    "Closing the database (internal/tasks/tracker.go in trackerImpl.Close).",
-				Impact: "The task-store connection may be left open. The next process that tries\n" +
-					"to open the database may have to wait or see a \"database is locked\"\n" +
-					"error briefly.",
-				Fix: "1. Wait about 5 seconds for the lock to clear, then retry.\n" +
-					"2. If the error keeps happening, restart any process still holding the\n" +
-					"   file open:\n" +
-					"     pgrep -af pastured\n" +
-					"     pkill -f pastured",
-				Cause: provErr,
-			}
-		case trailErr != nil:
-			t.closeErr = &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What:     "Pasture couldn't close the audit log cleanly.",
-				Why:      "Closing the audit-log half of the database failed.",
-				Where:    "Closing the database (internal/tasks/tracker.go in trackerImpl.Close).",
-				Impact: "The audit-log connection may be left open. The next process that tries\n" +
-					"to open the database may have to wait or see a \"database is locked\"\n" +
-					"error briefly.",
-				Fix: "1. Wait about 5 seconds for the lock to clear, then retry.\n" +
-					"2. If the error keeps happening, restart any process still holding the\n" +
-					"   file open:\n" +
-					"     pgrep -af pastured\n" +
-					"     pkill -f pastured",
-				Cause: trailErr,
+				Impact:   "Shutdown was attempted for all resources, but some may not have been released cleanly.",
+				Fix:      "Inspect the named close errors and storage health before reopening the database; do not assume every resource was released.",
+				Cause:    err,
 			}
 		}
 	})
