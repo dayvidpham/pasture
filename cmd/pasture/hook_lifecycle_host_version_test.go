@@ -92,9 +92,9 @@ func TestClaudeDefaultDiscoverySelectsOneExecutable(t *testing.T) {
 	for _, mode := range []string{"absent", "empty", "reverse", "hint", "relative hint", "missing hint", "directory hint", "nonexecutable hint", "dangling hint", "explicit executable", "explicit version", "failed PATH query", "failed hint query"} {
 		t.Run(mode, func(t *testing.T) {
 			markers := t.TempDir()
-			firstDir, first := discoveryPathExecutable(t, "printf x > '"+filepath.Join(markers, "first")+"'; printf '2.1.299 (Claude Code)\\n'")
-			secondDir, _ := discoveryPathExecutable(t, "printf x > '"+filepath.Join(markers, "second")+"'; printf '2.1.300 (Claude Code)\\n'")
-			hint := versionExecutable(t, "printf x > '"+filepath.Join(markers, "hint")+"'; printf '2.1.301 (Claude Code)\\n'")
+			firstDir, first := discoveryPathExecutable(t, "printf x >> '"+filepath.Join(markers, "first")+"'; printf '2.1.299 (Claude Code)\\n'")
+			secondDir, _ := discoveryPathExecutable(t, "printf x >> '"+filepath.Join(markers, "second")+"'; printf '2.1.300 (Claude Code)\\n'")
+			hint := versionExecutable(t, "printf x >> '"+filepath.Join(markers, "hint")+"'; printf '2.1.301 (Claude Code)\\n'")
 			path := firstDir + string(os.PathListSeparator) + secondDir
 			var hintValue *string
 			wantVersion, wantMarker := "2.1.299", "first"
@@ -131,12 +131,12 @@ func TestClaudeDefaultDiscoverySelectsOneExecutable(t *testing.T) {
 				args += " --host-version 2.1.302"
 				wantVersion, wantMarker = "2.1.302", ""
 			case "failed PATH query":
-				bad := versionExecutable(t, "printf x > '"+filepath.Join(markers, "first")+"'; exit 17")
+				bad := versionExecutable(t, "printf x >> '"+filepath.Join(markers, "first")+"'; exit 17")
 				require.NoError(t, os.Remove(first))
 				require.NoError(t, os.Symlink(bad, first))
 				failed = true
 			case "failed hint query":
-				hint = versionExecutable(t, "printf x > '"+filepath.Join(markers, "hint")+"'; exit 17")
+				hint = versionExecutable(t, "printf x >> '"+filepath.Join(markers, "hint")+"'; exit 17")
 				hintValue = &hint
 				wantMarker = "hint"
 				failed = true
