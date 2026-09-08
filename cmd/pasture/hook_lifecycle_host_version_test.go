@@ -127,6 +127,145 @@ func TestNativeDefaultVersionQuery(t *testing.T) {
 	}
 }
 
+func TestNativeVersionSelectionAndRefusal(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	for _, harness := range []string{"codex", "opencode"} {
+		event, fixture, prefix, native := "SessionStart", "session_start_0_153_0.json", "codex-cli ", `{}`
+		if harness == "opencode" {
+			event, fixture, prefix, native = "session.created", "session_created_1_18_29.json", "", ""
+		}
+		raw, err := os.ReadFile(filepath.Join("..", "..", "internal/lifecycle/ingress", harness, "testdata/fixtures", fixture))
+		require.NoError(t, err)
+		for _, mode := range []string{"first", "reverse", "explicit executable", "explicit version", "missing", "malformed", "nonzero", "overflow", "explicit failure", "conflict", "empty conflict", "empty executable", "relative executable", "refused"} {
+			t.Run(harness+"/"+mode, func(t *testing.T) {
+				markers := t.TempDir()
+				firstDir, secondDir := t.TempDir(), t.TempDir()
+				write := func(dir, marker, body string) string {
+					p := filepath.Join(dir, harness)
+					require.NoError(t, os.Symlink(versionExecutable(t, "printf x >> '"+filepath.Join(markers, marker)+"'; "+body), p))
+					return p
+				}
+				firstBody := "printf '%s\\n' '" + prefix + "3.4.5'"
+				wantFault := ""
+				switch mode {
+				case "malformed":
+					firstBody, wantFault = "printf 'junk banner\\n'", "host version resolution failed"
+				case "nonzero", "explicit failure":
+					firstBody, wantFault = "exit 17", "exit status 17"
+				case "overflow":
+					firstBody, wantFault = "printf '%4097s' x", "4096-byte"
+				}
+				first := write(firstDir, "first", firstBody)
+				write(secondDir, "second", "printf '%s\\n' '"+prefix+"3.4.6'")
+				path := firstDir + string(os.PathListSeparator) + secondDir
+				args := []string{"hook", "lifecycle", "--harness", harness, "--event", event}
+				wantVersion, wantMarker, source := "3.4.5", "first", model.HostVersionExecutableQuery
+				switch mode {
+				case "reverse":
+					path, wantVersion, wantMarker = secondDir+string(os.PathListSeparator)+firstDir, "3.4.6", "second"
+				case "explicit executable", "explicit failure":
+					args = append(args, "--host-executable", first)
+					path = secondDir
+				case "explicit version":
+					args = append(args, "--host-version", "host-local")
+					wantVersion, wantMarker, source = "host-local", "", model.HostVersionCallerSupplied
+				case "missing":
+					path, wantMarker, wantFault = t.TempDir(), "", "no usable "+harness+" executable"
+				case "conflict":
+					args = append(args, "--host-executable", first, "--host-version", "3.4.5")
+					wantMarker, wantFault = "", "mutually exclusive"
+				case "empty conflict":
+					args = append(args, "--host-executable", "", "--host-version", "")
+					wantMarker, wantFault = "", "mutually exclusive"
+				case "empty executable":
+					args = append(args, "--host-executable", "")
+					wantMarker, wantFault = "", "supplied empty"
+				case "relative executable":
+					args = append(args, "--host-executable", harness)
+					wantMarker, wantFault = "", "complete absolute path"
+				}
+				input := raw
+				if mode == "refused" {
+					input = []byte(`{}`)
+				}
+				dbPath := filepath.Join(t.TempDir(), "pasture.db")
+				if wantFault == "" {
+					initializeLifecycleTestDatabase(t, dbPath)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				command := exec.CommandContext(ctx, binary, args...)
+				command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "CLAUDE_CODE_EXECPATH": discoveryValue("/unused-claude-hint"), "PASTURE_DB_PATH": &dbPath,
+					"PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+				command.Stdin = bytes.NewReader(input)
+				var stdout, stderr bytes.Buffer
+				command.Stdout, command.Stderr = &stdout, &stderr
+				require.NoError(t, command.Run(), stderr.String())
+				require.Equal(t, native, stdout.String())
+				for _, marker := range []string{"first", "second"} {
+					body, err := os.ReadFile(filepath.Join(markers, marker))
+					if marker == wantMarker {
+						require.NoError(t, err)
+						require.Equal(t, "x", string(body))
+					} else {
+						require.ErrorIs(t, err, os.ErrNotExist, "must not hunt another candidate")
+					}
+				}
+				if wantFault != "" {
+					require.Contains(t, stderr.String(), wantFault)
+					_, err := os.Stat(dbPath)
+					require.ErrorIs(t, err, os.ErrNotExist)
+					fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+					require.NoError(t, err)
+					record := decodeJSONObject(t, fault)
+					require.JSONEq(t, `""`, string(record["hostVersion"]))
+					require.NotContains(t, record, "hostVersionSource")
+					return
+				}
+				tracker, err := tasks.OpenTaskTracker(dbPath)
+				require.NoError(t, err)
+				defer tracker.Close()
+				rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+				require.Len(t, rows, 1)
+				occurrence := decodeOccurrencePayload(t, rows[0].Payload)
+				require.Equal(t, wantVersion, occurrence.Envelope.HostVersion)
+				require.Equal(t, source, occurrence.Envelope.HostVersionSource)
+				require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+				reader, err := tasks.NewLifecycleReader(tracker)
+				require.NoError(t, err)
+				size, err := model.NewPageSize(1)
+				require.NoError(t, err)
+				page, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: size}})
+				require.NoError(t, err)
+				require.Len(t, page.Records(), 1)
+				projected := page.Records()[0].Occurrence
+				require.Equal(t, occurrence.Envelope, projected.Envelope)
+				body, err := reader.Payload(context.Background(), projected.Payload.Digest)
+				require.NoError(t, err)
+				require.Equal(t, input, body)
+				if mode == "refused" {
+					require.Equal(t, model.CaptureUnsupportedSchema, projected.Capture)
+					require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind))
+					fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+					require.NoError(t, err)
+					var record struct {
+						HostVersion string                  `json:"hostVersion"`
+						Source      model.HostVersionSource `json:"hostVersionSource"`
+					}
+					require.NoError(t, json.Unmarshal(fault, &record))
+					require.Equal(t, wantVersion, record.HostVersion)
+					require.Equal(t, source, record.Source)
+				} else {
+					require.Empty(t, stderr.String())
+					require.Equal(t, model.CaptureValid, projected.Capture)
+					require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind), 1)
+				}
+			})
+		}
+	}
+}
+
 func TestClaudeDefaultDiscoverySelectsOneExecutable(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)

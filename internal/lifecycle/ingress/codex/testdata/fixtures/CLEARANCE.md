@@ -909,3 +909,43 @@ reader who follows the path finds the grant recorded and never a blank form.
 ## Pull request
 
 Appended by the integrator in the landing commit: the pull request URL.
+
+## Current transport addendum — 2026-09-08
+
+The capture-kit digests and acceptance above remain historical evidence. They
+are not the current transport digests. No fixture, sidecar, pairing claim or
+acceptance was changed for this update, and no new live capture was taken.
+
+The twelve generated exec-only runners now omit the fixed `--host-version`
+argument. The CLI observes the first `codex` executable on inherited PATH at
+each invocation. An executable query is installed-version observation, not
+attestation of the running session. Adapter and fixture contract versions keep
+their original meanings. Old runners that explicitly supply the fixed version
+need one corrective artifact update; the corrected runners need no rewrite for
+a compatible host update. Genuine payload or response incompatibility still
+requires adapter work. No native trust state or activation was changed.
+
+The installed-runner test in `internal/codegen/codex_transport_e2e_test.go`
+copies the embedded runner bytes once, exercises all twelve accepted payloads
+through the built CLI, overwrites only the same-path version executable, then
+exercises the twelve routes again. It checks unchanged runner hashes, exact raw
+body, contract, observed version/source, interpretation and native continuation.
+The executable doubles prove this version boundary, not a new live-host sitting.
+
+Current SHA-256 digests:
+
+```text
+cd88487919c3f6fae11e6ff2d0f7ae310988c840f1619ebbac67bc48407094c1  .codex/hooks/events/Interrupt.sh
+1b397255e5c1f9e58e252396899c813ae3c72e0fbb032160a0e54861e93017f2  .codex/hooks/events/PermissionRequest.sh
+1ef39d95d4f0bfdd40a4bf3608058c326ec2d5f58ac0de86e9e070ef3b1b1732  .codex/hooks/events/PostCompact.sh
+3fd2bfdfbe80c93aded3e668036076ce86102b58369ee7b73e3cf9799d11fbb3  .codex/hooks/events/PostToolUse.sh
+ae772079542dd49a9ab64831c592a5e9a72e232533a8c19abbcdf943277d878a  .codex/hooks/events/PreCompact.sh
+7857607a55ee44d575030c4095d44d77ac62b3b64fca0fd6a105abd227cd8f64  .codex/hooks/events/PreToolUse.sh
+f32f451b410a7183ae14039f9895160d60393148efac4be732271f321c9fce6d  .codex/hooks/events/SessionEnd.sh
+f214fe6b8dc70905f23e53f1a91bde822e159dbc79adf2083e400445b0534b48  .codex/hooks/events/SessionStart.sh
+9c7ce5d37c07b2f4ef0fe98d03b6d1a15baf70f7b07dbd9097070c8127ffa379  .codex/hooks/events/Stop.sh
+8fbf543b70d2202e398aef7b33a20dd14859e8ee7f3177b736d15bbe9c1f651b  .codex/hooks/events/SubagentStart.sh
+6ff8c6b7b9e72882b8d6415a7c9a5eddb259ee7ec6d238372bc5859f12f528fb  .codex/hooks/events/SubagentStop.sh
+70f2558023504d666452f2c06b12c21866e62973d2f42baf2f78b25a153d525b  .codex/hooks/events/UserPromptSubmit.sh
+b80d17974b8904d65510720a470cffa19736da729fdc216bd397a0e735f3a972  internal/target/codex/assets/codex-generated.json.gz
+```
