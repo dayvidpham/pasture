@@ -35,6 +35,13 @@
   where hooks were slow or a writer held the database.
 
 ### Fixed
+- OpenCode lifecycle generation now joins enabled activation rows to registered
+  events and their runtime surfaces instead of selecting two callbacks by hand.
+  The event listener forwards only enabled observations; named callbacks preserve
+  host-owned objects without writing to them. The production set is still two
+  enabled events out of 47 registered, both with response capability `None`.
+  This generator change does not clear new captures or prove host denial.
+
 - When you set `PASTURE_HOOK_FAIL_CLOSED=1` and an event continues anyway,
   `pasture hook lifecycle` now tells you the reason that is true of THAT event.
   A gate that declares the blocking exit code but has no host citation for it

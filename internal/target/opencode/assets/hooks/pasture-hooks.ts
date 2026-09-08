@@ -165,18 +165,23 @@ export async function sessionCreated(callback) {
 }
 
 export async function toolExecuteBefore(input, output) {
-  const args = output.args;
-  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.29"], "tool.execute.before", { input, output: { args } });
+  if (input === null || typeof input !== "object" || Array.isArray(input) ||
+      output === null || typeof output !== "object" || Array.isArray(output)) {
+    throw new Error("pasture hook lifecycle callback tool.execute.before requires input and output objects; check the host plugin API" + CONFIGURATION_ADVICE);
+  }
+  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", "1.18.29"], "tool.execute.before", { input, output: { args: output.args } });
   const response = parseResponse(stdout, "tool.execute.before");
   if (response?.decision === "deny") throw new Error(response.reason);
-  // Proceed is a decision, not a mutation. Preserve the host-owned args value.
-  output.args = args;
+  // Proceed is a decision, not a mutation. Never write host-owned objects.
 }
+
 
 export const PastureLifecycle = async ({ client }) => ({
   async event(callback) {
-    if (callback.event?.type !== "session.created") return;
-    await sessionCreated(callback);
+    if (callback.event?.type === "session.created") {
+      await sessionCreated(callback);
+      return;
+    }
     void client;
   },
   async "tool.execute.before"(input, output) {

@@ -17,6 +17,8 @@ import (
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
@@ -219,7 +221,7 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 	for _, required := range []string{
 		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created", "--host-version", %q]`, openCodeHostVersion()),
 		fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before", "--host-version", %q]`, openCodeHostVersion()),
-		`{ input, output: { args } }`, `record.decision === "proceed"`, `output.args = args`,
+		`{ input, output: { args: output.args } }`, `record.decision === "proceed"`,
 	} {
 		if !strings.Contains(module, required) {
 			t.Errorf("generated plugin lacks %q", required)
@@ -233,6 +235,192 @@ func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
 			t.Errorf("generated lifecycle plugin contains forbidden semantic transport %q", forbidden)
 		}
 	}
+}
+
+// Constructed rows below test generator mechanics, not authentic host payloads
+// or activation evidence. The public generator still evaluates the real corpus.
+func TestOpenCodeEnabledDispatchThroughDefaultFactory(t *testing.T) {
+	manifest := registration.OpenCode1_18_29().Entries()
+	entries, err := openCodeActivationEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	surfaces := map[string]runtime.HookSurface{}
+	contract := runtime.OpenCode1_18_29Lifecycle()
+	for _, event := range contract.Events() {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		surfaces[mapping.NativeName()] = mapping.Surface()
+	}
+	// Additional supplied registrations must not need a callback hand-list edit.
+	manifest = append(manifest, registration.Event{Kind: 250, NativeName: "mechanics.observed"}, registration.Event{Kind: 251, NativeName: "mechanics.named"})
+	entries = append(entries, activation.Entry{Event: 250, State: activation.Enabled}, activation.Entry{Event: 251, State: activation.Enabled})
+	surfaces["mechanics.observed"] = runtime.SurfaceOpenCodeCatchAllSSE
+	surfaces["mechanics.named"] = runtime.SurfaceOpenCodeNamedOutput
+	for _, reduced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reduced=%v", reduced), func(t *testing.T) {
+			selected := append([]activation.Entry(nil), entries...)
+			if reduced {
+				for i := range selected {
+					if selected[i].Event != 251 {
+						selected[i].State = activation.Withheld
+					}
+				}
+			}
+			module, err := generateOpenCodeHooksModule(manifest, selected, surfaces)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runOpenCodeDispatchModule(t, module, fmt.Sprintf(`
+const reduced = %v;
+assert.deepEqual(Object.keys(hooks).sort(), reduced ? ["mechanics.named"] : ["event", "mechanics.named", "tool.execute.before"]);
+assert.equal(hooks["chat.message"], undefined, "withheld named key");
+const input = Object.freeze({ sessionID: "constructed", tool: "task" });
+const args = Object.freeze({ nested: Object.freeze([1, null, true]) });
+const output = Object.freeze({ args, extra: "host-owned" });
+await hooks["mechanics.named"](input, output);
+assert.strictEqual(output.args, args);
+assert.deepEqual(calls[0].payload, { input, output });
+assert.equal(calls[0].argv[5], "mechanics.named");
+if (!reduced) {
+  const callback = Object.freeze({ event: Object.freeze({ type: "mechanics.observed", properties: Object.freeze({ id: "constructed" }) }) });
+  await hooks.event(callback);
+  assert.deepEqual(calls[1].payload, callback);
+  assert.equal(calls[1].argv[5], "mechanics.observed");
+  await hooks["tool.execute.before"](input, output);
+  assert.deepEqual(calls[2].payload, { input, output: { args } });
+  assert.strictEqual(output.args, args);
+  const count = calls.length;
+  for (const type of ["session.updated", "unknown.observation", "chat.message", "toString", "__proto__"]) await hooks.event({event:{type}});
+  await hooks.event({});
+  assert.equal(calls.length, count, "unknown and withheld observations must not spawn");
+}
+const count = calls.length;
+await assert.rejects(hooks["mechanics.named"](null, output), /requires input and output objects/);
+await assert.rejects(hooks["mechanics.named"](input, []), /requires input and output objects/);
+assert.equal(calls.length, count, "unsupported callback shape must not spawn");
+`, reduced))
+		})
+	}
+}
+
+func runOpenCodeDispatchModule(t *testing.T, module, assertions string) {
+	t.Helper()
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for the generated default-factory dispatch proof")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plugin.ts")
+	if err := os.WriteFile(path, []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := filepath.Join(dir, "dispatch.ts")
+	script := fmt.Sprintf(`
+import assert from "node:assert/strict";
+const {default: plugin} = await import(%q);
+assert.equal(plugin.id, "pasture-lifecycle");
+const hooks = await plugin.server({client:{}});
+const calls = [];
+const originalSpawn = Bun.spawn;
+Bun.spawn = options => {
+  const record = {argv: options.cmd.slice(1), payload: undefined};
+  calls.push(record);
+  const exited = options.stdin.text().then(text => {
+    record.payload = JSON.parse(text);
+    assert.deepEqual(record.argv, ["hook", "lifecycle", "--harness", "opencode", "--event", record.argv[5], "--host-version", %q]);
+    return 0;
+  });
+  return {stdout: new Blob(['{"decision":"proceed"}']).stream(), stderr: new Blob([]).stream(), exited, exitCode: 0, kill() {throw new Error("unexpected kill");}};
+};
+try {
+%s
+  console.log("dispatch assertions passed");
+} finally { Bun.spawn = originalSpawn; }
+`, path, openCodeHostVersion(), assertions)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bun, runner)
+	cmd.Env = append(os.Environ(), "PASTURE_DB_PATH="+filepath.Join(dir, "scratch.db"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("default factory dispatch: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "dispatch assertions passed") {
+		t.Fatalf("runner did not finish: %s", out)
+	}
+}
+
+func TestOpenCodeGeneratorRejectsUnsupportedSurface(t *testing.T) {
+	for _, surface := range []runtime.HookSurface{0, runtime.SurfaceClaudeCommandJSON, runtime.SurfaceCodexStrictCommandJSON} {
+		_, err := generateOpenCodeHooksModule([]registration.Event{{Kind: 250, NativeName: "mechanics.observed"}}, []activation.Entry{{Event: 250, State: activation.Enabled}}, map[string]runtime.HookSurface{"mechanics.observed": surface})
+		if err == nil || !strings.Contains(err.Error(), "unsupported runtime surface") {
+			t.Fatalf("surface %v: %v", surface, err)
+		}
+	}
+}
+
+func TestOpenCodeRegisteredSurfaceEmissionMechanics(t *testing.T) {
+	// This is not an activation evaluator: all rows here are constructed enabled
+	// inputs so emission covers native spellings that remain withheld in product.
+	manifest := registration.OpenCode1_18_29().Entries()
+	var entries []activation.Entry
+	surfaces := map[string]runtime.HookSurface{}
+	contract := runtime.OpenCode1_18_29Lifecycle()
+	var observations, named []string
+	for _, event := range contract.Events() {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		surfaces[mapping.NativeName()] = mapping.Surface()
+	}
+	for _, event := range manifest {
+		entries = append(entries, activation.Entry{Event: event.Kind, State: activation.Enabled})
+		switch surfaces[event.NativeName] {
+		case runtime.SurfaceOpenCodeCatchAllSSE:
+			observations = append(observations, event.NativeName)
+		case runtime.SurfaceOpenCodeNamedOutput:
+			named = append(named, event.NativeName)
+		default:
+			t.Fatalf("unsupported registered surface: %s", event.NativeName)
+		}
+	}
+	module, err := generateOpenCodeHooksModule(manifest, entries, surfaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observationJSON, err := json.Marshal(observations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	namedJSON, err := json.Marshal(named)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runOpenCodeDispatchModule(t, module, fmt.Sprintf(`
+const observations = %s, named = %s;
+assert.deepEqual(Object.keys(hooks).sort(), ["event", ...named].sort());
+for (const type of observations) {
+  const payload = {event:{type, properties:{id:"constructed"}}};
+  await hooks.event(payload);
+  assert.equal(calls.at(-1).argv[5], type);
+  assert.deepEqual(calls.at(-1).payload, payload);
+}
+for (const name of named) {
+  const input = Object.freeze({id:"constructed"});
+  const output = Object.freeze({args:Object.freeze({id:"constructed"})});
+  await hooks[name](input, output);
+  assert.equal(calls.at(-1).argv[5], name);
+  assert.deepEqual(calls.at(-1).payload, {input, output});
+}
+assert.equal(calls.length, observations.length + named.length);
+`, observationJSON, namedJSON))
 }
 
 // TestOpenCodeHooksModule_ParsesUnderBun makes Bun a required gate dependency.

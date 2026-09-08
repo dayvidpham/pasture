@@ -386,8 +386,10 @@ const openCodePluginExport = "export const PastureLifecycle ="
 const openCodeCatchAllHandler = "event"
 
 // openCodeDispatchGuard captures the native event name each catch-all dispatch
-// guard selects, e.g. `if (callback.event?.type !== "session.created") return;`.
-var openCodeDispatchGuard = regexp.MustCompile(`callback\.event\?\.type\s*!==\s*"([^"]+)"`)
+// guard selects, including the helper it calls and its terminal return. The
+// complete event member is checked below, so unguarded calls cannot hide beside
+// a legitimate branch.
+var openCodeDispatchGuard = regexp.MustCompile(`if \(callback\.event\?\.type === "([^"]+)"\) \{\s*await ([A-Za-z0-9_]+)\(callback\);\s*return;\s*\}`)
 
 // openCodeHandlerKey captures the leading property key of one object-literal
 // member: an optional `async`, then a quoted or bare key, then its parameter
@@ -452,6 +454,9 @@ func openCodeRegisteredEvents(t *testing.T, path, source string) map[string]stru
 			path, strings.TrimSpace(member), openCodePluginExport)
 		key := match[1] + match[2] + match[3]
 		if key != openCodeCatchAllHandler {
+			call := regexp.MustCompile(`^\s*async "[^"]+"\(input, output\) \{\s*await ([A-Za-z0-9_]+)\(input, output\);\s*\}\s*$`).FindStringSubmatch(member)
+			require.NotNilf(t, call, "%s: named handler %q must delegate exactly once with original host objects", path, key)
+			openCodeRequireHelperEmission(t, path, source, call[1], key)
 			add(key, "as a named-output handler")
 			continue
 		}
@@ -460,13 +465,34 @@ func openCodeRegisteredEvents(t *testing.T, path, source string) map[string]stru
 			"%s: the %q handler of %s dispatches on no event type; a catch-all handler with no guard either observes nothing or forwards every native event — fix the OpenCode plugin emitter and run `make generate`",
 			path, openCodeCatchAllHandler, openCodePluginExport)
 		for _, guard := range guards {
+			openCodeRequireHelperEmission(t, path, source, guard[2], guard[1])
 			add(guard[1], "in the catch-all dispatch")
 		}
+		remainder := openCodeDispatchGuard.ReplaceAllString(member, "")
+		require.Regexp(t, `^\s*async event\(callback\) \{\s*void client;\s*\}\s*$`, remainder,
+			"%s: event handler contains code outside its exact enabled dispatch branches", path)
 	}
 	require.NotEmptyf(t, registered,
 		"%s registers no lifecycle handler in %s; the plugin would load and observe nothing — run `make generate`",
 		path, openCodePluginExport)
 	return registered
+}
+
+// Follow each registered branch to its actual helper body. Set equality alone
+// cannot catch a correctly named key that invokes another event's helper.
+func openCodeRequireHelperEmission(t *testing.T, path, source, helper, event string) {
+	t.Helper()
+	declaration := "export async function " + helper + "("
+	require.Equal(t, 1, strings.Count(source, declaration), "%s: expected unique helper %s", path, helper)
+	start := strings.Index(source, declaration)
+	open := start + strings.Index(source[start:], "{")
+	end := matchBrace(source, open)
+	require.Greater(t, end, open, "%s: malformed helper %s", path, helper)
+	body := source[open+1 : end]
+	flags := lifecycleEventFlag.FindAllStringSubmatch(body, -1)
+	require.Len(t, flags, 1, "%s: helper %s must emit exactly one lifecycle command", path, helper)
+	require.Equal(t, event, flags[0][1], "%s: registered key reaches the wrong native command", path)
+	require.Equal(t, 1, strings.Count(body, "await invokeLifecycle("), "%s: helper %s must invoke once", path, helper)
 }
 
 // openCodePluginObjectBody returns the text between the braces of the object

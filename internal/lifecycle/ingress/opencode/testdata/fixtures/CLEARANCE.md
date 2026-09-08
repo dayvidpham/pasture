@@ -200,3 +200,28 @@ changed. The enabled callbacks remain `session.created` and
 `tool.execute.before`, and response capability remains None. This addendum
 records no new capture or host-displayed Deny acceptance. It does not extend
 the historical capture-isolation or acceptance evidence.
+
+## Current transport addendum — 2026-09-08
+
+The generated plugin and its installed payload copy now have SHA-256
+`acdfaaf3148d80b674deaac8b3458dfd58e3a5103a9fcaf9c74fd207703c5a17`.
+Their source is `internal/codegen/opencode_hooks.go`. This digest identifies
+the current transport, not the historical capture kit or captured payloads.
+
+Emission now joins activation and registration by event kind and selects the
+runtime observation or named-callback surface. The event listener forwards
+only enabled observation names. Named callbacks do not write host-owned
+objects; `tool.execute.before` retains its `{ input, output: { args } }`
+payload projection. The default `{ id, server }` loader, eight-second child
+and pipe bound, closed response parser and diagnostic forwarding remain.
+
+Constructed additional registrations in
+`internal/codegen/opencode_target_test.go` prove generator and Bun dispatch
+mechanics only. The existing two accepted payloads also pass through the
+generated default loader, built CLI and durable readback. Neither proof is a
+new live capture or evidence of host-displayed Deny.
+
+The accepted fixture bytes, sidecars and acceptance text above are unchanged.
+Production remains two enabled events out of 47 registered, both with response
+capability None. This addendum clears no additional captured row and does not
+extend the historical capture-isolation evidence.
