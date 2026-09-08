@@ -798,11 +798,11 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	require.NoError(t, err)
 
-	for _, hintState := range []string{"absent", "empty"} {
-		t.Run(hintState, func(t *testing.T) {
-			for _, testCase := range claudeProductionFixtures {
-				testCase := testCase
-				t.Run(testCase.name, func(t *testing.T) {
+	for _, testCase := range claudeProductionFixtures {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			for _, hintState := range []string{"absent", "empty"} {
+				t.Run(hintState, func(t *testing.T) {
 					dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 					initializeLifecycleTestDatabase(t, dbPath)
 					raw := readProductionClaudeFixtureAt(t, testCase.fixture, testCase.name, testCase.captureVersion, testCase.captureSource)
