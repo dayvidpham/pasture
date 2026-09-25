@@ -53,3 +53,5 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
+
+replace github.com/dayvidpham/provenance => github.com/dayvidpham/provenance v0.2.1-0.20260925135104-d29d669f1ae8

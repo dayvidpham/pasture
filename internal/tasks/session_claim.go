@@ -2,6 +2,8 @@ package tasks
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -32,14 +34,9 @@ func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTrack
 	if !start {
 		return nil
 	}
-	var session string
-	for _, binding := range bindings {
-		if binding.Kind == model.BindingSession {
-			if session != "" {
-				return sessionClaimError("more than one session identity was supplied", "pass the verified session-start bindings")
-			}
-			session = binding.Value
-		}
+	session, err := lifecycleSession(bindings)
+	if err != nil {
+		return err
 	}
 	if ctx == nil || clock == nil || strings.TrimSpace(session) == "" || strings.TrimSpace(string(claim)) != string(claim) {
 		return sessionClaimError("the context, clock, session identity, or actor claim is invalid", "pass a context, clock, verified session identity, and non-blank actor identifier")
@@ -64,6 +61,53 @@ func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTrack
 		return sessionClaimError(fmt.Sprintf("session %q on harness %q already has an actor claim; the first claim is unchanged", session, harness), "keep the original actor or start a new session to claim a different actor")
 	}
 	return nil
+}
+
+// lifecycleSession extracts the session identity from verified native
+// bindings. Zero session bindings is "" and is not an error: the event carried
+// no session identity. More than one is an error, because two session
+// identities name two sessions and the gate cannot choose between them.
+//
+// Both the claim write and the gate read go through this helper, so the two
+// paths can never disagree about which binding is the session.
+func lifecycleSession(bindings []model.NativeBinding) (string, error) {
+	var session string
+	for _, binding := range bindings {
+		if binding.Kind == model.BindingSession {
+			if session != "" {
+				return "", sessionClaimError("more than one session identity was supplied", "pass the verified session-start bindings")
+			}
+			session = binding.Value
+		}
+	}
+	return session, nil
+}
+
+// readLifecycleSessionClaim reads the actor claimed for one harness session.
+//
+// The whole read is one SELECT under the store's own SQLite busy tier, and the
+// pooled connection is released before this function returns. That release is
+// load-bearing: the ownership read that follows borrows the same pool, whose
+// default size is one connection, so a public call made while this lease was
+// still held would wait for itself.
+//
+// present is false when no claim row exists, which is an unbound session and
+// not an error. A returned error is a read fault; the caller decides its kind.
+func (t *trackerImpl) readLifecycleSessionClaim(ctx context.Context, harness ir.HarnessID, session string) (actor string, present bool, err error) {
+	bounded, cancel := context.WithTimeout(ctx, t.timeoutProfile.SQLiteBusy())
+	defer cancel()
+	var claimed string
+	scanErr := t.auditDB.QueryRowContext(bounded,
+		`SELECT actor FROM pasture_session_claim WHERE harness=? AND session=?`,
+		string(harness), session,
+	).Scan(&claimed)
+	if scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return "", false, nil
+		}
+		return "", false, scanErr
+	}
+	return claimed, true, nil
 }
 
 func sessionClaimError(why, fix string) error {
