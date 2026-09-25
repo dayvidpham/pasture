@@ -63,6 +63,8 @@ func stepDescription(fromVersion, toVersion int) string {
 		return "add deterministic deduplication keys to audit events"
 	case fromVersion == 5 && toVersion == 6:
 		return "add content-addressed lifecycle payload storage and replay-derived occurrence projections"
+	case fromVersion == 8 && toVersion == 9:
+		return "remove the retired gate assignment-index tables and triggers; session claims are kept"
 	default:
 		// Forward-compatible default: workers who add a new step will see
 		// this generic text and know to add a tailored description here.

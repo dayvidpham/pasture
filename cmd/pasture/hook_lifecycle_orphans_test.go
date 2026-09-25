@@ -479,17 +479,21 @@ func seedLegacyOrphans(t *testing.T, dbPath string, count int) {
 }
 
 // downgradePayloadBlobsToV7 gives the store the shape a build without the
-// written_at column left behind: the column and the version 8 row are removed,
-// so the schema is the version 7 schema and the next open runs the version 7
-// to 8 migration. The given bodies are inserted the way a version 7 Put wrote
-// them, with no stamp. It returns their digests.
+// written_at column left behind: the column and every version row from 8
+// upward are removed, so the schema is the version 7 schema and the next open
+// runs the version 7 to 8 migration. The bound is `>= 8` rather than `= 8`
+// because the migrator's ceiling moves: a store this build made is at the
+// current ceiling, so deleting only the 8 row would leave a higher row behind
+// and the next open would see an up-to-date file and upgrade nothing. The given
+// bodies are inserted the way a version 7 Put wrote them, with no stamp. It
+// returns their digests.
 func downgradePayloadBlobsToV7(t *testing.T, dbPath string, bodies ...[]byte) []string {
 	t.Helper()
 	db, closeStore := lifecycleStoreHandle(t, dbPath)
 	defer closeStore()
 	_, err := db.Exec(`ALTER TABLE lifecycle_payload_blobs DROP COLUMN written_at`)
 	require.NoError(t, err)
-	_, err = db.Exec(`DELETE FROM audit_schema_meta WHERE version = 8`)
+	_, err = db.Exec(`DELETE FROM audit_schema_meta WHERE version >= 8`)
 	require.NoError(t, err)
 	digests := make([]string, 0, len(bodies))
 	for _, body := range bodies {

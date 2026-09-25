@@ -509,11 +509,13 @@ func TestAnUnstampedBlobIsNeverReclaimedAtAnyAge(t *testing.T) {
 // shape a build without the written_at column left behind, holding the given
 // bodies as unstamped rows, and then opens it through the production opener so
 // the real version 7 to 8 migration runs on it. The shape is reconstructed
-// from a store this build made, by removing the column and the version row
-// the migration added; the schema the migration then meets is the version 7
-// schema. It returns the open tracker, its handle, the digests of the bodies,
-// and the migration instant the migration recorded as the applied_at of
-// version 8.
+// from a store this build made, by removing the column and every version row
+// from 8 upward; the bound is `>= 8` rather than `= 8` because the migrator's
+// ceiling moves, and deleting only the 8 row would leave a higher row behind
+// so the next open would see an up-to-date file and upgrade nothing. The
+// schema the migration then meets is the version 7 schema. It returns the open
+// tracker, its handle, the digests of the bodies, and the migration instant
+// the migration recorded as the applied_at of version 8.
 func openStoreUpgradedFromV7(t *testing.T, bodies ...[]byte) (protocol.TaskTracker, *sql.DB, []digest.Digest, time.Time) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
@@ -524,7 +526,7 @@ func openStoreUpgradedFromV7(t *testing.T, bodies ...[]byte) (protocol.TaskTrack
 	v7 := auditDB(t, bootstrap)
 	_, err = v7.Exec(`ALTER TABLE lifecycle_payload_blobs DROP COLUMN written_at`)
 	require.NoError(t, err)
-	_, err = v7.Exec(`DELETE FROM audit_schema_meta WHERE version = 8`)
+	_, err = v7.Exec(`DELETE FROM audit_schema_meta WHERE version >= 8`)
 	require.NoError(t, err)
 	refs := make([]digest.Digest, 0, len(bodies))
 	for _, body := range bodies {

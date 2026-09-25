@@ -41,6 +41,8 @@
 //   - v7 → v8: written_at stamp on lifecycle payload blobs; every row that
 //     existed before the column is stamped with the migration instant
 //     (migrate_v7_v8.go).
+//   - v8 → v9: the retired assignment-index triggers and tables are dropped;
+//     session claims are kept (migrate_v8_v9.go).
 //
 // The ceiling is MaxKnownSchemaVersion below, not a number in this comment,
 // and the steps this binary applies are the dispatch table migrationSteps().
@@ -86,13 +88,14 @@ const busyRetryInitialDelay = 50 * time.Millisecond
 const busyRetryMaxDelay = 2 * time.Second
 
 // MaxKnownSchemaVersion is the highest schema version this binary can
-// produce. Bumped by S2 (→3, landed) and S4 (→4, landed).
+// produce. Bumped by S2 (→3, landed), S4 (→4, landed) and the v8 → v9
+// assignment-index removal (migrate_v8_v9.go).
 //
 // Layer Integration Point owned by S1: any caller that needs to know "what
 // version does my binary support?" reads this constant. The §11 Scenario 5
 // newer-schema rejection error reports this value as the "supported
 // version" — bumping it here automatically updates the assertion.
-const MaxKnownSchemaVersion = 8
+const MaxKnownSchemaVersion = 9
 
 // migrationStep applies a single forward migration. Each step receives an
 // open transaction (already holding the write lock via BEGIN IMMEDIATE)
@@ -129,6 +132,7 @@ func migrationSteps() []migrationStep {
 		{fromVersion: 5, toVersion: 6, apply: migrateV5toV6Step},
 		{fromVersion: 6, toVersion: 7, apply: migrateV6toV7Step},
 		{fromVersion: 7, toVersion: 8, apply: migrateV7toV8Step},
+		{fromVersion: 8, toVersion: 9, apply: migrateV8toV9Step},
 	}
 }
 
