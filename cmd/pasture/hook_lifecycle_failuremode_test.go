@@ -489,7 +489,7 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 // are. If this test becomes too slow, the answer is to run it less often, not
 // to measure something else.
 //
-// The child is race-instrumented, as is the rebuild-index operator proof family.
+// The child is race-instrumented, as is the read-side production proof family.
 // Ordinary unrelated built-binary proofs retain the plain shared child. Here
 // the thing under proof is a live process contending
 // with a second opener for the real write lock while its deadline runs, and
@@ -597,40 +597,40 @@ func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testin
 }
 
 // TestRaceChildrenServeOnlyDeclaredProofFamilies pins the deliberate choice of
-// race-instrumented children for the held-lock and rebuild-index proof families.
+// a race-instrumented child for the held-lock proof family.
 //
 // The arrangement has three parts, and a drift in any one of them would leave
 // the package green while the proofs quietly changed what they measure:
 //
-//   - The held-lock deadline proof and newRebuildCLI helper run the race child,
-//     never the plain child. Their functional assertions alone do not prove
-//     that a detector ran in the child process.
+//   - The held-lock deadline proof runs the race child, never the plain child.
+//     Its functional assertions alone do not prove that a detector ran in the
+//     child process.
 //   - raceLifecycleBinary is built with -race and lifecycleBinary is not. This
 //     is read from the BUILD SETTINGS recorded in each binary, not from the
 //     helper's source: a build whose flags drifted would carry different
 //     settings whatever its source said.
-//   - Only these two callers and this build-settings guard use the race child.
-//     Its extra cost is accepted for both proof families, not silently imposed
-//     on unrelated CLI tests. A new caller requires a deliberate inventory change.
+//   - Only this caller and this build-settings guard use the race child. Its
+//     extra cost is accepted for the proof family that needs it, not silently
+//     imposed on unrelated CLI tests. A new caller requires a deliberate
+//     inventory change.
 //
 // WHAT IT VISITS: every function declared in this package's test files,
 // for the two identifiers it asks about; and the build settings of the two
 // shared children.
 // WHAT IT DOES NOT READ: whether either child is up to date with the source,
-// or whether either proof family's functional assertions hold; those tests do
-// that. MUTATION: switch newRebuildCLI to lifecycleBinary; this guard must fail.
+// or whether the proof family's functional assertions hold; those tests do
+// that. MUTATION: point the held-lock proof at lifecycleBinary; this guard
+// must fail.
 func TestRaceChildrenServeOnlyDeclaredProofFamilies(t *testing.T) {
 	t.Parallel()
 
 	const heldLockProof = "TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked"
-	const rebuildHelper = "newRebuildCLI"
 	const thisPin = "TestRaceChildrenServeOnlyDeclaredProofFamilies"
 
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err, "the package directory must be readable to find the tests it declares")
 	callers := map[string][]string{}
 	heldLockFound := false
-	rebuildFound := false
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
 			continue
@@ -658,15 +658,11 @@ func TestRaceChildrenServeOnlyDeclaredProofFamilies(t *testing.T) {
 			if function.Name.Name == heldLockProof {
 				heldLockFound = true
 			}
-			if function.Name.Name == rebuildHelper {
-				rebuildFound = true
-			}
 		}
 	}
 	require.True(t, heldLockFound,
 		"the held-lock proof %s is not declared in this package; if it was renamed, rename it here too, "+
 			"or this pin holds nothing", heldLockProof)
-	require.True(t, rebuildFound, "the rebuild-index helper %s must exist; otherwise this pin holds nothing", rebuildHelper)
 	require.NotEmpty(t, callers["lifecycleBinary"],
 		"no test calls lifecycleBinary; the built-binary proofs must run the plain shared child, and an "+
 			"empty population here means the walk found nothing and every assertion below is vacuous")
@@ -676,21 +672,17 @@ func TestRaceChildrenServeOnlyDeclaredProofFamilies(t *testing.T) {
 			"detector riding in the live process, and on the plain child that sentence is false")
 	assert.NotContains(t, callers["lifecycleBinary"], heldLockProof,
 		"the held-lock deadline proof must not also run the plain child")
-	assert.Contains(t, callers["raceLifecycleBinary"], rebuildHelper,
-		"the rebuild-index helper must keep its race-instrumented child")
-	assert.NotContains(t, callers["lifecycleBinary"], rebuildHelper,
-		"the rebuild-index helper must not also run the plain child")
 
 	sort.Strings(callers["raceLifecycleBinary"])
-	wantCallers := []string{heldLockProof, rebuildHelper, thisPin}
+	wantCallers := []string{heldLockProof, thisPin}
 	sort.Strings(wantCallers)
 	assert.Equal(t, wantCallers, callers["raceLifecycleBinary"],
-		"only the held-lock proof, rebuild-index helper and this build-settings guard may request the race child")
+		"only the held-lock proof and this build-settings guard may request the race child")
 
 	raceSettings := buildSettingsOf(t, raceLifecycleBinary(t))
 	plainSettings := buildSettingsOf(t, lifecycleBinary(t))
 	assert.Equal(t, "true", raceSettings["-race"],
-		"the race child must record -race=true so both declared proof families run a detector")
+		"the race child must record -race=true so the declared proof family runs a detector")
 	assert.NotEqual(t, "true", plainSettings["-race"],
 		"the ordinary plain child must not acquire the extra cost of race instrumentation")
 }
@@ -5883,7 +5875,6 @@ var guardSweepOwned = []string{
 var guardSweepForeign = map[string]string{
 	"bundle_export_test.go":                      "not changed by this slice",
 	"epoch_test.go":                              "not changed by this slice",
-	"gate_rebuild_index_test.go":                 "operator assignment-index command and generation tests, outside the lifecycle transport sweep",
 	"hook_lifecycle_context_production_test.go":  "not changed by this slice",
 	"hook_lifecycle_gate_test.go":                "not changed by this slice",
 	"hook_lifecycle_lineage_production_test.go":  "not changed by this slice",

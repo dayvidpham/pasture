@@ -84,12 +84,6 @@ func TestFreshStoreHasNoRetiredAssignmentIndexRelations(t *testing.T) {
 	require.NoError(t, impl.auditDB.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version))
 	require.Equal(t, 9, version, "run this assertion against a store the v8 to v9 step has already processed")
 
-	t.Skip("BLOCKED ON THE CLEANUP SLICE: the retired relations are still created on every open by " +
-		"ensurePastureTables (internal/tasks/open_unified.go) and by ensureAssignmentRecoverySchema " +
-		"(internal/tasks/assignment_recovery.go). Both are owned by the cleanup slice and neither is in " +
-		"this slice's file set. Delete this Skip when that DDL is gone; the six tables, the two triggers " +
-		"and the index are then never created and the loop below is the whole assertion.")
-
 	for _, name := range retiredAssignmentIndexRelations {
 		var count int
 		require.NoError(t, impl.auditDB.QueryRow(

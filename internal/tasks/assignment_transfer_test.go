@@ -1,11 +1,14 @@
 package tasks
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
@@ -187,6 +190,58 @@ func TestTransferTaskAssignmentRejectsStaleAssignmentWithoutWrite(t *testing.T) 
 		t.Fatalf("stale transfer error = %v, want errors.Is(..., ErrStaleEpisode)", err)
 	}
 	assertTaskAssignmentTransferAbsent(t, fixture.tracker, request)
+}
+
+// TestTransferAuthorityErrorDescribesTheTransfer holds the transfer's authority
+// refusal to its six parts and to the two facts an operator acts on: the
+// transfer IS committed, and the SAME transfer retried writes the fact once. The
+// text names no retired command and no retired machinery, because an operator
+// cannot act on either.
+//
+// RED when: a part is dropped, the task is unnamed, the impact no longer says
+// the transfer is committed, or the fix names a command that no longer exists.
+func TestTransferAuthorityErrorDescribesTheTransfer(t *testing.T) {
+	t.Parallel()
+	task := deterministicTask("transfer-authority-error", "task")
+	_, err := transferAssignmentAuthority(nil, 0, 0, task)
+	if err == nil {
+		t.Fatalf("a transfer with no anchor was accepted; there is nothing to scan from")
+	}
+	var structured *pasterrors.StructuredError
+	if !errors.As(err, &structured) {
+		t.Fatalf("error type = %T (%v), want the structured storage refusal", err, err)
+	}
+	if structured.Category != pasterrors.CategoryStorage {
+		t.Fatalf("category = %s, want %s: a failed write of a durable fact is storage, not a policy denial",
+			structured.Category, pasterrors.CategoryStorage)
+	}
+	var report bytes.Buffer
+	structured.Report(&report)
+	rendered := report.String()
+	if rendered == "" {
+		t.Fatalf("the structured refusal rendered an empty report")
+	}
+	if !strings.Contains(structured.What, task.String()) {
+		t.Errorf("What does not name the task the transfer gave away: %q", structured.What)
+	}
+	if !strings.Contains(structured.Why, "no anchor") {
+		t.Errorf("Why does not say what was wrong: %q", structured.Why)
+	}
+	if !strings.Contains(structured.Where, "internal/tasks/assignment_authority.go") ||
+		!strings.Contains(structured.Where, "tasks.transferAssignmentAuthority") {
+		t.Errorf("Where does not resolve to the function that refused: %q", structured.Where)
+	}
+	if !strings.Contains(structured.Impact, "transfer is committed") {
+		t.Errorf("Impact does not tell the operator the transfer itself survived: %q", structured.Impact)
+	}
+	if !strings.Contains(structured.Fix, "same transfer again") {
+		t.Errorf("Fix does not tell the operator what to do: %q", structured.Fix)
+	}
+	for _, retired := range []string{"rebuild-index", "index", "certif", "generation"} {
+		if strings.Contains(strings.ToLower(rendered), retired) {
+			t.Errorf("the refusal names retired machinery an operator can no longer act on: %q in\n%s", retired, rendered)
+		}
+	}
 }
 
 func assertTaskAssignmentTransferError(t *testing.T, err error, want protocol.TaskAssignmentTransferErrorKind) {

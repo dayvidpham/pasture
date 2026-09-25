@@ -376,10 +376,6 @@ func (s *epochAssignmentService) allocateReplacementComposed(ctx context.Context
 		return CommandResult{}, fmt.Errorf("replacement mutation %d operation %q failed in its fused governed-allocation transaction; no partial allocation, state, review, graph, audit, or DBOS output committed: %w", mutation, meta.OperationID, err)
 	}
 
-	// The index is written after the commit, from this command's own closure.
-	if err := s.indexComposedEpisode(ctx, result, candidate, assignment, role, resolution.occupant); err != nil {
-		return CommandResult{}, err
-	}
 	children := result.Closure().Children()
 	if len(children) != 1 || children[0].TaskID != candidate || children[0].AssignmentID != assignment || children[0].Occupant != resolution.occupant {
 		return CommandResult{}, assignmentErr("allocateReplacementComposed", "the composed result did not contain the exact replacement candidate, assignment, and occupant", "replacement commands return only their caller-stable governed child closure", "repair the composed receipt before retrying")
