@@ -1,6 +1,6 @@
 // Package gatepolicy evaluates assignment policy without reading or writing a
-// store. Callers must obtain authority from a complete gateauthority.Snapshot;
-// a failed snapshot belongs on the fault path, not in a policy input.
+// store. Callers must obtain authority from a gateauthority.Snapshot; a failed
+// read belongs on the fault path, not in a policy input.
 package gatepolicy
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// Input contains policy facts, not index completeness or host payload bytes.
+// Input contains policy facts, not host payload bytes.
 // Event identifies the occurrence; the caller supplies its classified action
 // and runtime properties. Decide does not reclassify or mutate those facts.
 type Input struct {
@@ -30,13 +30,12 @@ type RefusalKind uint8
 
 const (
 	RefusalUnset RefusalKind = iota
-	RefusalAuthorityTruncated
 	RefusalPhaseUnknown
 	RefusalPolicyUnlisted
 )
 
 func (k RefusalKind) IsValid() bool {
-	return k >= RefusalAuthorityTruncated && k <= RefusalPolicyUnlisted
+	return k >= RefusalPhaseUnknown && k <= RefusalPolicyUnlisted
 }
 
 // Refusal is an immutable fault value. Its zero value is invalid.
@@ -46,7 +45,7 @@ type Refusal struct {
 
 func NewRefusal(kind RefusalKind) (Refusal, error) {
 	if !kind.IsValid() {
-		return Refusal{}, fmt.Errorf("gatepolicy.NewRefusal: unknown refusal kind %d during construction; no fault value was retained; supply a supported RefusalKind", kind)
+		return Refusal{}, fmt.Errorf("What: gatepolicy.NewRefusal received unknown refusal kind %d. Why: the requested refusal kind is not supported. Where: gatepolicy.NewRefusal. When: constructing a refusal value. Impact: no fault value was retained. Fix: supply a supported RefusalKind", kind)
 	}
 	return Refusal{kind: kind}, nil
 }
@@ -57,9 +56,6 @@ func (r Refusal) IsValid() bool     { return r.kind.IsValid() }
 func (r Refusal) Error() string {
 	var cause, fix string
 	switch r.kind {
-	case RefusalAuthorityTruncated:
-		cause = "the authority episode list was truncated"
-		fix = "reduce the actor's active assignments before evaluating again"
 	case RefusalPhaseUnknown:
 		cause = "an assignment episode has no known phase"
 		fix = "repair the task phase mapping before evaluating again"
@@ -70,8 +66,7 @@ func (r Refusal) Error() string {
 		cause = "the refusal was not constructed with a supported kind"
 		fix = "construct the fault with gatepolicy.NewRefusal"
 	}
-	return "gatepolicy.Decide: evaluation could not finish because " + cause +
-		"; no policy decision was made; route this fault through the host fault policy and " + fix
+	return "What: gatepolicy.Decide could not finish because " + cause + ". Why: the gate cannot apply its policy to these facts. Where: gatepolicy.Decide in internal/lifecycle/gatepolicy. When: before a policy decision is returned. Impact: no policy decision was made; route this fault through the host fault policy. Fix: " + fix
 }
 
 // Result holds exactly one valid decision or refusal, or neither when invalid.
@@ -138,24 +133,22 @@ func Decide(in Input) (Result, error) {
 		return decision(backend.DecisionProceed, backend.ReasonUnboundSession)
 	}
 
-	// Rules 4–7 choose a verdict or fault in priority order. A denial still
-	// passes through the capability downgrade; faults never do.
+	// Rule 4: a bound session naming an unknown actor is a denial.
 	if !in.Claim.Known {
 		return denied(in.Capability, backend.ReasonUnknownActor)
 	}
-	if in.Authority.Truncated {
-		return refusal(RefusalAuthorityTruncated)
-	}
+	// Rule 5: a known actor with no owned task is a denial.
 	if len(in.Authority.Episodes) == 0 {
 		return denied(in.Capability, backend.ReasonNoActiveAssignment)
 	}
+	// Rule 6: an unmapped phase is a fault, even when another episode is legal.
 	for _, ep := range in.Authority.Episodes {
 		if ep.Phase == gateauthority.TaskPhaseUnset {
 			return refusal(RefusalPhaseUnknown)
 		}
 	}
 
-	// Rule 8: never return early on Allow. An unlisted cell in ANY episode
+	// Rule 7: never return early on Allow. An unlisted cell in ANY episode
 	// makes the evaluation incomplete, even if another episode permits both.
 	roleAllowed := false
 	bothAllowed := false
@@ -184,7 +177,7 @@ func Decide(in Input) (Result, error) {
 }
 
 func invalidRuntime(field string, value uint8) error {
-	return fmt.Errorf("gatepolicy.Decide: %s value %d is unset or unsupported during input validation; no policy decision was made; supply the classified event's valid runtime properties and route this error through the host fault policy", field, value)
+	return fmt.Errorf("What: gatepolicy.Decide received %s value %d that is unset or unsupported. Why: runtime policy facts must be valid before the ordered rules can run. Where: gatepolicy.Decide input validation. When: before policy rules run. Impact: no policy decision was made; route this error through the host fault policy. Fix: supply the classified event's valid runtime properties", field, value)
 }
 
 func decision(kind backend.DecisionKind, reason backend.DecisionReason) (Result, error) {
@@ -204,7 +197,7 @@ func refusal(kind RefusalKind) (Result, error) {
 }
 
 func denied(capability runtime.ResponseCapability, reason backend.DecisionReason) (Result, error) {
-	// Rules 9–10: record-only denial proceeds without changing host bytes.
+	// Rules 8–9: record-only denial proceeds without changing host bytes.
 	if capability == runtime.CapabilityNone {
 		return decision(backend.DecisionProceed, backend.ReasonUnenforcedDeny)
 	}

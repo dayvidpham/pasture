@@ -59,7 +59,7 @@ func assertRefusal(t *testing.T, in gatepolicy.Input, kind gatepolicy.RefusalKin
 	}
 }
 
-func TestDecideOrderedRules(t *testing.T) {
+func TestGatePolicyDecisionOrder(t *testing.T) {
 	t.Parallel()
 	allow := episode(gateauthority.RoleOwnerResponsibility, gateauthority.PhaseWorkerSlices)
 	cases := []struct {
@@ -70,59 +70,48 @@ func TestDecideOrderedRules(t *testing.T) {
 		fault  gatepolicy.RefusalKind
 	}{
 		{
-			name: "observation_before_stop_unbound_and_truncation",
+			name: "observation_before_all_later_rules",
 			change: func(in *gatepolicy.Input) {
 				in.Semantic = runtime.SemanticObservation
 				in.StopLoop = runtime.StopLoopConsultWhenInactive
 				in.Claim.Bound = false
-				in.Authority.Truncated = true
+				in.Claim.Known = false
+				in.Authority.Episodes = nil
+				in.Action = gateauthority.ActionUnset
 			},
 			kind: backend.DecisionProceed, reason: backend.ReasonLegal,
 		},
 		{
-			name: "stop_before_unbound_and_truncation",
+			name: "stop_before_unbound_unknown_and_policy",
 			change: func(in *gatepolicy.Input) {
 				in.StopLoop = runtime.StopLoopConsultWhenInactive
 				in.Claim.Bound = false
-				in.Authority.Truncated = true
+				in.Claim.Known = false
+				in.Authority.Episodes = nil
+				in.Action = gateauthority.ActionUnset
 			},
 			kind: backend.DecisionProceed, reason: backend.ReasonStopLoopGuard,
 		},
 		{
-			name: "unbound_before_unknown_and_truncation",
+			name: "unbound_before_unknown_empty_and_policy",
 			change: func(in *gatepolicy.Input) {
 				in.Claim.Bound = false
 				in.Claim.Known = false
-				in.Authority.Truncated = true
+				in.Authority.Episodes = nil
+				in.Action = gateauthority.ActionUnset
 			},
 			kind: backend.DecisionProceed, reason: backend.ReasonUnboundSession,
 		},
 		{
-			name: "unknown_before_truncation",
+			name: "unknown_before_empty_and_phase",
 			change: func(in *gatepolicy.Input) {
 				in.Claim.Known = false
-				in.Authority.Truncated = true
+				in.Authority.Episodes = nil
 			},
 			kind: backend.DecisionDeny, reason: backend.ReasonUnknownActor,
 		},
 		{
-			name: "truncation_before_no_episode",
-			change: func(in *gatepolicy.Input) {
-				in.Authority.Truncated = true
-				in.Authority.Episodes = nil
-			},
-			fault: gatepolicy.RefusalAuthorityTruncated,
-		},
-		{
-			name: "truncation_before_unknown_phase",
-			change: func(in *gatepolicy.Input) {
-				in.Authority.Truncated = true
-				in.Authority.Episodes[0].Phase = gateauthority.TaskPhaseUnset
-			},
-			fault: gatepolicy.RefusalAuthorityTruncated,
-		},
-		{
-			name: "no_episode_before_unlisted_action",
+			name: "empty_before_unlisted_action",
 			change: func(in *gatepolicy.Input) {
 				in.Authority.Episodes = nil
 				in.Action = gateauthority.ActionUnset
@@ -130,34 +119,58 @@ func TestDecideOrderedRules(t *testing.T) {
 			kind: backend.DecisionDeny, reason: backend.ReasonNoActiveAssignment,
 		},
 		{
-			name: "phase_unset_before_unlisted_cell_and_allow",
+			name: "phase_unknown_before_unlisted_cell",
 			change: func(in *gatepolicy.Input) {
 				in.Authority.Episodes = []gateauthority.Episode{
 					episode(gateauthority.RoleUnset, gateauthority.PhaseWorkerSlices),
-					allow,
 					episode(gateauthority.RoleOwnerResponsibility, gateauthority.TaskPhaseUnset),
 				}
 			},
 			fault: gatepolicy.RefusalPhaseUnknown,
 		},
 		{
-			name: "role_deny",
+			name: "unlisted_cell_before_allow",
+			change: func(in *gatepolicy.Input) {
+				in.Authority.Episodes = []gateauthority.Episode{
+					episode(gateauthority.RoleUnset, gateauthority.PhaseWorkerSlices),
+					allow,
+				}
+			},
+			fault: gatepolicy.RefusalPolicyUnlisted,
+		},
+		{
+			name: "role_forbids_action",
 			change: func(in *gatepolicy.Input) {
 				in.Authority.Episodes[0].Role = gateauthority.RoleAxisReviewer
 			},
 			kind: backend.DecisionDeny, reason: backend.ReasonRoleForbidsAction,
 		},
 		{
-			name: "phase_deny",
+			name: "phase_forbids_action",
 			change: func(in *gatepolicy.Input) {
 				in.Authority.Episodes[0].Phase = gateauthority.PhasePlanUAT
 			},
 			kind: backend.DecisionDeny, reason: backend.ReasonPhaseForbidsAction,
 		},
 		{
-			name:   "allow",
+			name:   "one_episode_allows_role_and_phase",
 			change: func(in *gatepolicy.Input) {},
 			kind:   backend.DecisionProceed, reason: backend.ReasonLegal,
+		},
+		{
+			name: "record_only_deny_after_policy",
+			change: func(in *gatepolicy.Input) {
+				in.Capability = runtime.CapabilityNone
+				in.Authority.Episodes[0].Phase = gateauthority.PhasePlanUAT
+			},
+			kind: backend.DecisionProceed, reason: backend.ReasonUnenforcedDeny,
+		},
+		{
+			name: "normal_deny_after_policy",
+			change: func(in *gatepolicy.Input) {
+				in.Authority.Episodes[0].Role = gateauthority.RoleAxisReviewer
+			},
+			kind: backend.DecisionDeny, reason: backend.ReasonRoleForbidsAction,
 		},
 	}
 	for _, tc := range cases {
@@ -285,7 +298,7 @@ func TestInvalidCapabilityNeverBecomesEnforcementOrRecordOnly(t *testing.T) {
 		if capability.IsValid() {
 			continue
 		}
-		for _, scenario := range []string{"observation", "stop", "unbound", "unknown", "no-episode", "legal", "truncated", "phase-unset", "unlisted"} {
+		for _, scenario := range []string{"observation", "stop", "unbound", "unknown", "no-episode", "legal", "phase-unset", "unlisted"} {
 			in := policyInput()
 			in.Capability = capability
 			switch scenario {
@@ -299,8 +312,6 @@ func TestInvalidCapabilityNeverBecomesEnforcementOrRecordOnly(t *testing.T) {
 				in.Claim.Known = false
 			case "legal":
 				in.Authority.Episodes = []gateauthority.Episode{episode(gateauthority.RoleOwnerResponsibility, gateauthority.PhaseWorkerSlices)}
-			case "truncated":
-				in.Authority.Truncated = true
 			case "phase-unset":
 				in.Authority.Episodes = []gateauthority.Episode{episode(gateauthority.RoleOwnerResponsibility, gateauthority.TaskPhaseUnset)}
 			case "unlisted":
@@ -383,7 +394,7 @@ func TestResultOwnsItsUnion(t *testing.T) {
 	if got, ok := decided.Refusal(); ok || got != nil {
 		t.Fatal("Decided exposes a refusal")
 	}
-	for kind := gatepolicy.RefusalAuthorityTruncated; kind <= gatepolicy.RefusalPolicyUnlisted; kind++ {
+	for _, kind := range []gatepolicy.RefusalKind{gatepolicy.RefusalPhaseUnknown, gatepolicy.RefusalPolicyUnlisted} {
 		r, err := gatepolicy.NewRefusal(kind)
 		if err != nil || !r.IsValid() {
 			t.Fatalf("NewRefusal(%d): %v", kind, err)
@@ -405,6 +416,9 @@ func TestResultOwnsItsUnion(t *testing.T) {
 		if !strings.Contains(again.Error(), "no policy decision") || !strings.Contains(again.Error(), "gatepolicy.Decide") {
 			t.Fatalf("fault diagnostic misrepresents policy: %s", again.Error())
 		}
+	}
+	if gatepolicy.RefusalPhaseUnknown != 1 || gatepolicy.RefusalPolicyUnlisted != 2 {
+		t.Fatalf("refusal kinds are phase=%d and policy=%d; want the retired arm to leave phase=1 and policy=2", gatepolicy.RefusalPhaseUnknown, gatepolicy.RefusalPolicyUnlisted)
 	}
 	for _, kind := range []gatepolicy.RefusalKind{gatepolicy.RefusalUnset, 255} {
 		if r, err := gatepolicy.NewRefusal(kind); err == nil || r.IsValid() {
@@ -438,7 +452,7 @@ func TestInputHasOnlyPolicyFacts(t *testing.T) {
 	}
 	// The imported values must not hide a completeness fact inside Input.
 	for typ, names := range map[reflect.Type][]string{
-		reflect.TypeOf(gateauthority.ActorAuthority{}): {"Actor", "Episodes", "Truncated"},
+		reflect.TypeOf(gateauthority.ActorAuthority{}): {"Actor", "Episodes"},
 		reflect.TypeOf(gateauthority.Episode{}):        {"Assignment", "Task", "Role", "Phase"},
 		reflect.TypeOf(gateauthority.SessionClaim{}):   {"Bound", "Actor", "Session", "Known"},
 	} {
