@@ -160,17 +160,14 @@ func (s *epochAssignmentService) exactCandidateParentAuthority(ctx context.Conte
 		return assignmentResolution{}, refuse("the proposed authority is missing, mismatched or not an exhausted exact start")
 	}
 	starts := identity.Rows
-	after := resolution.authority
 	// Transfer parents need their historical predecessor proof, not a guessed
-	// owner role. This command-only path has a finite history cap and no index
-	// dependency. Ordinary/composed parents keep the direct point lookup.
-	const maxParentProofPages = 16
+	// owner role. This command-only path has a finite history cap and reads the
+	// journal directly. Ordinary/composed parents keep the direct point lookup.
 	if starts[0].PredecessorAssignmentID != nil {
 		birth, err := s.taskBirthJournalID(ctx, resolution.task)
 		if err != nil {
 			return assignmentResolution{}, err
 		}
-		after = birth
 		starts = nil
 		cursor := birth
 		for pageNumber := 0; ; pageNumber++ {
@@ -183,7 +180,7 @@ func (s *epochAssignmentService) exactCandidateParentAuthority(ctx context.Conte
 			page, err := api.QueryAssignmentStarts(provenance.AssignmentStartQuery{
 				TaskIDs: []provenance.TaskID{resolution.task},
 				Page: provenance.AssignmentStartPageRequest{
-					Limit: 64, SnapshotPinned: true, SnapshotMaxJournalID: resolution.authority, AfterJournalID: cursor,
+					Limit: maxParentProofPageRows, SnapshotPinned: true, SnapshotMaxJournalID: resolution.authority, AfterJournalID: cursor,
 				},
 			})
 			if err != nil {
@@ -199,84 +196,7 @@ func (s *epochAssignmentService) exactCandidateParentAuthority(ctx context.Conte
 			cursor = page.Next.AfterJournalID
 		}
 	}
-	var material []provenance.TaskEventRow
-	var snapshot provenance.JournalID
-	for pageNumber := 0; ; pageNumber++ {
-		if pageNumber == maxParentProofPages {
-			return assignmentResolution{}, refuse("parent material history exceeds the bounded command proof budget")
-		}
-		if err := ctx.Err(); err != nil {
-			return assignmentResolution{}, err
-		}
-		page, err := journal.QueryTaskEvents(provenance.JournalQueryV1{
-			OrderBy: provenance.OrderByJournalID, TaskIDs: []provenance.TaskID{resolution.task},
-			EventKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()}, Limit: 64,
-			AfterJournalID: after, SnapshotMaxJournalID: snapshot,
-		})
-		if err != nil {
-			return assignmentResolution{}, err
-		}
-		snapshot = page.SnapshotMaxJournalID
-		material = append(material, page.Events...)
-		if page.Next == nil {
-			break
-		}
-		if page.Next.AfterJournalID <= after {
-			return assignmentResolution{}, refuse("the parent material cursor made no progress")
-		}
-		after = page.Next.AfterJournalID
-	}
-	decoded, err := decodeRecoveryMaterials(material, snapshot)
-	if err != nil {
-		return assignmentResolution{}, err
-	}
-	var operations []provenance.OperationID
-	seen := map[provenance.OperationID]bool{}
-	for _, start := range starts {
-		fact, present := decoded[recoveryMaterialKey{start.TaskID, start.AssignmentID}]
-		if start.PredecessorAssignmentID != nil || (present && *fact.Row.ProducedByOperationJournalID == start.ProducingOperationJournalID) {
-			continue
-		}
-		operation := provenance.GovernedAllocationSupplementOperationID(start.ProducingOperationID)
-		if !seen[operation] {
-			seen[operation] = true
-			operations = append(operations, operation)
-		}
-	}
-	if len(operations) > provenance.MaxFactFilterValues {
-		return assignmentResolution{}, refuse("parent supplement population exceeds the public filter bound")
-	}
-	var evidence []provenance.EvidenceRow
-	if len(operations) > 0 {
-		query := provenance.EvidenceQuery{
-			Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}, OperationIDs: operations},
-			Kinds:  []provenance.EvidenceKind{assignmentCommandEvidenceKind, reviewRoundAuthorityEvidenceKind},
-			Page:   provenance.FactPageRequest{Limit: 64, SnapshotMaxJournalID: snapshot},
-		}
-		for pageNumber := 0; ; pageNumber++ {
-			if pageNumber == maxParentProofPages {
-				return assignmentResolution{}, refuse("parent evidence exceeds the bounded command proof budget")
-			}
-			if err := ctx.Err(); err != nil {
-				return assignmentResolution{}, err
-			}
-			page, err := journal.Facts().QueryEvidence(query)
-			if err != nil {
-				return assignmentResolution{}, err
-			}
-			evidence = append(evidence, page.Rows...)
-			if page.Next == nil {
-				break
-			}
-			if page.Next.AfterJournalID <= query.Page.AfterJournalID {
-				return assignmentResolution{}, refuse("the parent evidence cursor made no progress")
-			}
-			query.Page.AfterJournalID = page.Next.AfterJournalID
-		}
-	}
-	proof, err := authenticateRecoveryRows(ctx, journal, provenance.AssignmentStartPage{
-		Rows: starts, SnapshotPinned: true, SnapshotMaxJournalID: snapshot,
-	}, material, evidence, map[provenance.AssignmentID]startedEpisode{}, snapshot)
+	proof, err := authenticateAssignmentStarts(ctx, journal, starts, 0)
 	if err != nil {
 		return assignmentResolution{}, err
 	}
@@ -331,12 +251,6 @@ func (s *epochAssignmentService) allocateCandidateComposed(ctx context.Context, 
 	children := result.Closure().Children()
 	if len(children) != 1 || children[0].TaskID != candidate || children[0].AssignmentID != assignment || children[0].Occupant != resolution.occupant {
 		return CommandResult{}, assignmentErr("allocateCandidateComposed", "the composed result did not contain the exact requested candidate, assignment, and occupant", "candidate commands return only their caller-stable governed child closure", "repair the composed receipt before retrying")
-	}
-	// The started-episode index is written HERE, after the commit, from the
-	// closure this command just received. The authority id does not exist before
-	// the commit, so this cannot move inside it.
-	if err := s.indexComposedEpisode(ctx, result, candidate, assignment, role, resolution.occupant); err != nil {
-		return CommandResult{}, err
 	}
 
 	needed := map[provenance.ResultSlotID]bool{assignmentCommandResultSlot: false, reviewActivityResultSlot: false, candidateCreatedEventSlot: false, candidateAssignmentEventSlot: false}
@@ -415,9 +329,6 @@ func (s *epochAssignmentService) createSliceComposed(ctx context.Context, in Cre
 	if activity == (provenance.ActivityID{}) {
 		return SliceResult{}, assignmentErr("createSliceComposed", "the composed result omitted the activity binding", "CreateSlice results must map the canonical activity slot", "repair the composed receipt before retrying")
 	}
-	if err := s.indexComposedEpisode(ctx, result, slice, childAssignment, role, resolution.occupant); err != nil {
-		return SliceResult{}, err
-	}
 
 	closure := result.Closure()
 	children := closure.Children()
@@ -435,75 +346,16 @@ func commandRecordRequest(encoded []byte) []byte {
 	return record.Request
 }
 
-// indexComposedEpisode records the episode a composed allocation just started.
-//
-// It is the ONE call every composed assignment command makes into the index, so
-// the choke point has one entry from this side. The authority id is read from
-// the closure the command already holds; nothing is scanned and nothing is
-// re-read from the journal.
-func (s *epochAssignmentService) indexComposedEpisode(
-	ctx context.Context,
-	result provenance.GovernedAllocationComposedResult,
-	task provenance.TaskID,
-	assignment provenance.AssignmentID,
-	role AssignmentRole,
-	occupant provenance.ActorID,
-) error {
-	authority, err := composedAssignmentAuthority(result.Closure(), task, assignment)
-	if err != nil {
-		return err
-	}
-	return recordAssignmentStart(ctx, s.tracker.auditDB, startedEpisode{
-		Assignment: assignment,
-		Actor:      occupant,
-		Task:       task,
-		Role:       role,
-		Authority:  authority,
-	})
-}
-
 // declaredEpisode is one child of a composed allocation together with the slot
 // its DEFINITION says the occupant holds.
 //
 // The slot travels WITH the child from the place that defines the allocation,
 // because the journal's own child specification has no room for it and because
-// the alternative — deciding it where the index is written — would put the
+// the alternative — deciding it where the start fact is written — would put the
 // policy in the last place a reader looks for it.
 type declaredEpisode struct {
 	Task       provenance.TaskID
 	Assignment provenance.AssignmentID
 	Occupant   provenance.ActorID
 	Role       AssignmentRole
-}
-
-// indexComposedBatch records every episode a composed BATCH allocation started.
-//
-// A batch allocates many children in one commit, and each one is an episode. It
-// reads each child's authority from the same closure and writes one record per
-// child, so a command that creates several holders is not half recorded.
-func (s *epochAssignmentService) indexComposedBatch(
-	ctx context.Context,
-	result provenance.GovernedAllocationComposedResult,
-	declared []declaredEpisode,
-) error {
-	if len(declared) == 0 {
-		return indexError("indexComposedBatch", "the committed batch declared no episode to record", "a batch allocation always creates at least one child, and each child is an episode, so an empty list means the caller lost them")
-	}
-	closure := result.Closure()
-	for _, child := range declared {
-		authority, err := composedAssignmentAuthority(closure, child.Task, child.Assignment)
-		if err != nil {
-			return err
-		}
-		if err := recordAssignmentStart(ctx, s.tracker.auditDB, startedEpisode{
-			Assignment: child.Assignment,
-			Actor:      child.Occupant,
-			Task:       child.Task,
-			Role:       child.Role,
-			Authority:  authority,
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
 }

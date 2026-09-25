@@ -71,26 +71,25 @@ func (t *trackerImpl) TransferTaskAssignment(ctx context.Context, request protoc
 		return protocol.TransferTaskAssignmentResult{}, taskAssignmentTransferError(protocol.TaskAssignmentTransferReplayConflict, provenance.ErrOperationConflict)
 	}
 
-	// A transfer starts an episode, so the gate must learn about it, and the
-	// history must be able to show it later. Neither is free here, because a
-	// transfer is not shaped like the other assignment commands: it binds no
-	// result slot and writes no event of its own, so the id of the authority it
-	// just started is in neither its result nor any material fact.
+	// A transfer starts an episode, so the fact that describes it must be
+	// written, and the history must be able to show the new holder later.
+	// Neither is free here, because a transfer is not shaped like the other
+	// assignment commands: it binds no result slot and writes no event of its
+	// own, so the id of the authority it just started is in neither its result
+	// nor any material fact.
 	//
-	// Two things therefore happen after the transfer commits, both still inside
-	// the write lock this method holds:
-	//   1. the authority id is recovered from the transfer's own rows and the
-	//      started-episode record is written, so the next gate sees the new
-	//      holder;
-	//   2. pasture's own assignment-start fact is written for the new episode,
-	//      as A SECOND OPERATION, carrying that id, so a later rebuild of the
-	//      record can find this episode at all.
-	// Step 2 is a second operation and not part of the transfer, because the
+	// So one thing happens after the transfer commits, still inside the write
+	// lock this method holds: the authority id is recovered from the transfer's
+	// own rows, and pasture's assignment-start fact for the new episode is
+	// written as A SECOND OPERATION carrying that id. A reader — a gate or a
+	// later transfer of the same task — needs the material fact to learn who now
+	// holds the task; the start row alone carries no slot and no occupant.
+	//
+	// The fact is a second operation and not part of the transfer, because the
 	// transfer is one atomic operation owned by the journal and pasture cannot
-	// add an effect to it. If the process stops between the two, the record
-	// leads the history by this one transfer, and the next transfer of the same
-	// task, or a rebuild after one, closes the gap.
-	if err := t.recordTransferredEpisode(ctx, request, operationID); err != nil {
+	// add an effect to it. Its operation id is derived from the transfer's own
+	// id, so a retried or replayed transfer writes it once and not twice.
+	if err := t.writeTransferredStartFact(ctx, request, operationID); err != nil {
 		return protocol.TransferTaskAssignmentResult{}, err
 	}
 
@@ -333,14 +332,14 @@ func transferMaterialFactOperationID(transfer provenance.OperationID) provenance
 	return provenance.OperationID(string(transfer) + ".assignment-start")
 }
 
-// recordTransferredEpisode writes the started-episode record and pasture's
-// material assignment-start fact for the episode a transfer just started.
+// writeTransferredStartFact writes pasture's material assignment-start fact for
+// the episode a transfer just started.
 //
 // It runs after the transfer commits and INSIDE the write lock the caller
 // holds. The lock is what makes the authority recovery sound: no other pasture
 // writer can commit between the transfer and the journal maximum read here, so
 // that maximum is the transfer operation's own last row.
-func (t *trackerImpl) recordTransferredEpisode(
+func (t *trackerImpl) writeTransferredStartFact(
 	ctx context.Context,
 	request protocol.TransferTaskAssignmentRequest,
 	operationID provenance.OperationID,
@@ -355,16 +354,6 @@ func (t *trackerImpl) recordTransferredEpisode(
 	}
 	authority, err := transferAssignmentAuthority(t.prov.Journal(), committed.AnchorJournalID, page.SnapshotMaxJournalID, request.TaskID)
 	if err != nil {
-		return err
-	}
-
-	if err := recordAssignmentStart(ctx, t.auditDB, startedEpisode{
-		Assignment: request.NextAssignmentID,
-		Actor:      request.NextOccupant,
-		Task:       request.TaskID,
-		Role:       RoleOwnerResponsibility,
-		Authority:  authority,
-	}); err != nil {
 		return err
 	}
 
