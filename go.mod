@@ -3,7 +3,7 @@ module github.com/dayvidpham/pasture
 go 1.26.0
 
 require (
-	github.com/dayvidpham/provenance v0.2.0
+	github.com/dayvidpham/provenance v0.3.0
 	github.com/dbos-inc/dbos-transact-golang v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/opencontainers/go-digest v1.0.0
@@ -53,5 +53,3 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
-
-replace github.com/dayvidpham/provenance => github.com/dayvidpham/provenance v0.2.1-0.20260926101833-0fdb7a4a0a68
