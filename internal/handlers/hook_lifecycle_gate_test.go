@@ -66,11 +66,10 @@ const (
 // about is a question only the caller can get wrong, and a gate that looked up a
 // different session still returns a decision.
 type gateFakeReader struct {
-	opened  []gateOpened
-	snap    gateauthority.Snapshot
-	fault   error
-	reads   int
-	refused bool
+	opened []gateOpened
+	snap   gateauthority.Snapshot
+	fault  error
+	reads  int
 }
 
 type gateOpened struct {
@@ -89,7 +88,6 @@ func (f *gateFakeReader) gateFactory(_ protocol.TaskTracker, harness ir.HarnessI
 func (f *gateFakeReader) Snapshot(context.Context) (gateauthority.Snapshot, error) {
 	f.reads++
 	if f.fault != nil {
-		f.refused = true
 		return nil, f.fault
 	}
 	return f.snap, nil
@@ -443,7 +441,6 @@ func TestObservationNeverConsultsTheReader(t *testing.T) {
 	require.NoError(t, err, "an observation is answered by the middle end and needs no reader")
 	require.Empty(t, reader.opened, "the reader factory must not be called for an observation")
 	require.Zero(t, reader.reads, "no snapshot may be taken for an observation")
-	require.False(t, reader.refused)
 	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{receipt.CurrentConsultationEvidenceKind()}),
 		0, "an observation commits no consultation, because no gate was consulted")
 }
@@ -782,14 +779,6 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 				"every fault row must open the reader exactly once, for the session the capture carried")
 			require.Equal(t, 1, reader.reads,
 				"the gate takes exactly one snapshot per invocation; a fault row that read zero or twice did not exercise the seam")
-			// THE reader.refused FLAG IS DELIBERATELY NOT ASSERTED. On a row
-			// that reached here it is fully derived: reads == 1 and the snapshot
-			// type-asserts only when Snapshot returned one, and Snapshot sets
-			// refused only on the path that returns no snapshot. Either polarity
-			// would restate that derivation rather than constrain production, so
-			// the flag is left as the fake's own bookkeeping. The facts that DO
-			// constrain production are pinned above (opened, reads) and below
-			// (closed, where a snapshot exists).
 			if snapshot, tookSnapshot := reader.snap.(*gateFakeSnapshot); tookSnapshot {
 				// A SNAPSHOT WAS TAKEN, SO ITS READ LEASE MUST BE RELEASED on the
 				// fault return. Production closes it with one deferred Close; a
