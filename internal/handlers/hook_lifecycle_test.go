@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,57 +42,10 @@ func (b failedAfterCommit) AfterCommit(context.Context, handlers.CommitBoundary)
 	return b.cause
 }
 
-// claimSessionForGateProof writes the session claim the lifecycle gate reads, so
-// a subject in this file can reach a REAL denial without supplying a verdict
-// anywhere. The actor is REGISTERED and owns no task, which is the state a real
-// deployment is in before a slice is assigned, and the policy answers it as
-// Deny(NoActiveAssignment).
-//
-// IT WRITES THROUGH THE SAME FUNCTION A SESSION-START EVENT CALLS, because that
-// function is the only writer of the claim table and a test that wrote the row by
-// any other means would be proving a store shape the product never produces.
-func claimSessionForGateProof(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
-	t.Helper()
-	tracker, err := tasks.OpenTaskTracker(dbPath)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, tracker.Close()) }()
-	agent, err := tracker.RegisterHumanAgent("lifecycle-gate-proof", "gate-owner", "gate-owner@example.invalid")
-	require.NoError(t, err)
-	kind := model.ContractEventKind(registration.EventSessionStart)
-	switch harness {
-	case ir.HarnessCodex:
-		kind = registration.EventCodexSessionStart
-	case ir.HarnessOpenCode:
-		kind = registration.EventOpenCodeSessionCreated
-	}
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(
-		context.Background(), tracker, harness, kind,
-		[]model.NativeBinding{{Kind: model.BindingSession, Value: session}},
-		tasks.ActorClaim(agent.ID.String()), fixedLifecycleClock{},
-	))
-}
-
-// captureSessionID reads the session identity out of a committed capture, so the
-// claim a subject writes is for the session the gate is actually asked about.
-func captureSessionID(t *testing.T, raw []byte, members ...string) string {
-	t.Helper()
-	var payload any
-	require.NoError(t, json.Unmarshal(raw, &payload))
-	for _, member := range members {
-		current := payload
-		for _, part := range strings.Split(member, ".") {
-			object, isObject := current.(map[string]any)
-			require.True(t, isObject, "the capture must carry %q as an object member", member)
-			current = object[part]
-		}
-		session, isString := current.(string)
-		require.True(t, isString, "the capture must carry %q as a string session identity", member)
-		require.NotEmpty(t, session)
-		return session
-	}
-	t.Fatal("a session member is required")
-	return ""
-}
+// The gate-proof claim seeder and the capture session reader live in the internal
+// test file hook_lifecycle_gate_test.go, exported as handlers.ClaimGateSession
+// and handlers.GateSessionIdentity. They have one home so the claim this file
+// seeds cannot drift from the claim the gate subjects are proven against.
 
 func TestNativePostCommitFailurePreservesBothOutcomeAndError(t *testing.T) {
 	t.Parallel()
@@ -105,7 +57,7 @@ func TestNativePostCommitFailurePreservesBothOutcomeAndError(t *testing.T) {
 	require.NoError(t, bootstrap.Close())
 	raw, err := os.ReadFile("../lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_261.json")
 	require.NoError(t, err)
-	claimSessionForGateProof(t, dbPath, ir.HarnessClaudeCode, captureSessionID(t, raw, "session_id"))
+	handlers.ClaimGateSession(t, dbPath, ir.HarnessClaudeCode, handlers.GateSessionIdentity(t, raw, "session_id"))
 	cause := errors.New("post-commit observer failed")
 
 	outcome, err := handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
@@ -184,7 +136,7 @@ func TestNativeUnenforcedDecisionAgreesWithDurableConsultation(t *testing.T) {
 				// The denial is now PRODUCED: a bound session whose registered
 				// actor owns nothing is Deny(NoActiveAssignment), and a row with
 				// no response capability carries it as Proceed/UnenforcedDeny.
-				claimSessionForGateProof(t, dbPath, route.harness, captureSessionID(t, raw, route.sessionMembers...))
+				handlers.ClaimGateSession(t, dbPath, route.harness, handlers.GateSessionIdentity(t, raw, route.sessionMembers...))
 				operation := "test.unenforced-decision"
 				outcome, err := handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
 					DBPath: dbPath, Harness: route.harness, Event: route.mapping.NativeName(), HostVersion: route.manifest.Version,
