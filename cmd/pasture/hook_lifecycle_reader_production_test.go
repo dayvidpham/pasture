@@ -792,3 +792,36 @@ func TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage(t *tes
 		require.Contains(t, err.Error(), "exceeds maximum 1048576")
 	})
 }
+
+// TestReaderGateInvocationCostIsMeasuredWithoutACeiling records the measured
+// elapsed of a real gate invocation on each built transport. It makes NO
+// wall-clock assertion: the design reports measured elapsed only, because a
+// ceiling would turn a loaded runner into a false defect.
+//
+// The invocation is the aggregate the built path pays: the session-claim read,
+// the single ownership transaction, and the receipt append (the session-start
+// claim write is NOT on this path; it happens once, when the host emits its own
+// session-start event). Per-class Work is recorded by the store's ownership read
+// as result bytes, task rows, material rows and evidence rows; the classes are
+// separated in the handoff report, not here.
+//
+// WHAT IT VISITS: the three pinned gate events and their transports.
+// WHAT IT DOES NOT READ: a wall-clock ceiling, or the per-class split of the
+// aggregate it logs.
+func TestReaderGateInvocationCostIsMeasuredWithoutACeiling(t *testing.T) {
+	binary := lifecycleBinary(t)
+	for _, harness := range readerHarnessCases(t) {
+		t.Run(harness.label, func(t *testing.T) {
+			dbPath := readerFreshStore(t)
+			raw := readerFixture(t, harness.fixture)
+			seedBoundActorOwningAMappedTask(t, dbPath, harness.harness, raw)
+			const samples = 5
+			for sample := 0; sample < samples; sample++ {
+				started := time.Now()
+				run := harness.run(t, binary, dbPath, raw, false)
+				require.Equal(t, 0, run.ExitCode, run.Stderr)
+				t.Logf("cost: %s gate invocation sample=%d elapsed=%s", harness.label, sample, time.Since(started))
+			}
+		})
+	}
+}
