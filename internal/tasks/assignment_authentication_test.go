@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1722,63 +1723,204 @@ func assertCurrentReworkReaderRefusals(
 // authenticationRefusalSite is one raise site of the production authentication
 // file: Enclosing is the function the call is written in, Function is the name
 // that call reports as its location, and Step is what it reports it lost.
+//
+// A Driver site is a startPageRefusal instead of an authenticationFault. It
+// reports no step, and Problem is the message it interpolates into its own What;
+// the function it names in its Where is a FIXED part of the template, so the
+// rendered subject below checks that template against Enclosing rather than
+// taking the name from the site.
 type authenticationRefusalSite struct {
 	Enclosing string
 	Function  string
 	Step      string
+	Problem   string
+	Driver    bool
+}
+
+// driverRefusalBinding is a local name that reaches startPageRefusal, and which
+// of the call's arguments carries the message the refusal states.
+type driverRefusalBinding struct {
+	problemArgument int
 }
 
 // authenticationRefusalSites returns every site the production authentication
-// file calls authenticationFault from, read from the source rather than from a
-// list kept beside it. Both arguments must be literals: this test renders every
-// refusal it finds, and a computed value would be exactly the case it could not
-// render.
+// file raises an operator-visible refusal from — BOTH constructors,
+// authenticationFault and startPageRefusal — read from the source rather than
+// from a list kept beside it. Both arguments must be literals: the subjects
+// below render every refusal found, and a computed value would be exactly the
+// case they could not render.
+//
+// The driver refuses through a LOCAL name (`refuse := startPageRefusal`), so
+// resolving the name is part of finding the site, not a detail of the walk. A
+// name is resolved when it is bound to the constructor, to another resolved
+// name, or to a wrapper literal that forwards one of its parameters straight to
+// the constructor. Collecting only one of the two constructors is the defect
+// this shape exists to prevent: an uncollected constructor is an operator-visible
+// refusal no subject renders, so retired vocabulary planted in it passes the
+// whole package.
+//
+// WHAT THE WALK DOES NOT REACH, stated rather than left implied: a site reached
+// through an indirection that is none of those three — a constructor returned
+// from another function, or held in a struct field. The vocabulary rule does not
+// depend on this walk, because
+// TestAssignmentAuthenticationFileCarriesNoRetiredVocabularyInAnyLiteral reads
+// every string literal in the file; what such a site would miss is the RENDERING
+// of its own message, which is a check of the template rather than of the text
+// the template carries.
 func authenticationRefusalSites(t *testing.T) []authenticationRefusalSite {
 	t.Helper()
 	fileSet := token.NewFileSet()
 	parsed, err := parser.ParseFile(fileSet, "assignment_authentication.go", nil, 0)
 	require.NoError(t, err, "the production authentication file must parse")
 	var sites []authenticationRefusalSite
-	literalAt := func(expr ast.Expr, argument int) string {
+	literalAt := func(expr ast.Expr, constructor string, argument int) string {
 		literal, isLiteral := expr.(*ast.BasicLit)
 		if !isLiteral {
 			t.Errorf(
-				"authenticationFault argument %d at %s is computed; every function and step must be a literal so this test can render every refusal",
-				argument, fileSet.Position(expr.Pos()),
+				"%s argument %d at %s is computed; every function, step and problem must be a literal so this test can render every refusal",
+				constructor, argument, fileSet.Position(expr.Pos()),
 			)
 			return ""
 		}
 		return strings.Trim(literal.Value, `"`)
+	}
+	// forwardedProblem reports which parameter of a wrapper literal carries the
+	// problem: the wrapper must be a single return of the constructor, and the
+	// argument it passes must be one of the wrapper's own parameters.
+	forwardedProblem := func(literal *ast.FuncLit, resolved map[string]driverRefusalBinding) (int, token.Pos, bool) {
+		if literal.Body == nil || literal.Type.Params == nil {
+			return 0, token.NoPos, false
+		}
+		var returned *ast.CallExpr
+		for _, statement := range literal.Body.List {
+			returnStatement, isReturn := statement.(*ast.ReturnStmt)
+			if !isReturn || len(returnStatement.Results) != 1 {
+				return 0, token.NoPos, false
+			}
+			returned, _ = returnStatement.Results[0].(*ast.CallExpr)
+			if returned == nil {
+				return 0, token.NoPos, false
+			}
+		}
+		if returned.Fun == nil || len(returned.Args) == 0 {
+			return 0, token.NoPos, false
+		}
+		callee, isName := returned.Fun.(*ast.Ident)
+		if !isName {
+			return 0, token.NoPos, false
+		}
+		if _, forwards := resolved[callee.Name]; !forwards {
+			return 0, token.NoPos, false
+		}
+		parameter, isName := returned.Args[0].(*ast.Ident)
+		if !isName {
+			return 0, token.NoPos, false
+		}
+		for index, declared := range literal.Type.Params.List {
+			for _, name := range declared.Names {
+				if name.Name == parameter.Name {
+					// The wrapper's own call to the constructor forwards a
+					// parameter and raises nothing: it is the plumbing of an
+					// indirection, not a site, so it is recorded to be skipped.
+					return index, returned.Pos(), true
+				}
+			}
+		}
+		return 0, token.NoPos, false
 	}
 	for _, declaration := range parsed.Decls {
 		function, isFunction := declaration.(*ast.FuncDecl)
 		if !isFunction || function.Body == nil {
 			continue
 		}
+		// One pass is enough, and the language is why: a name cannot be read
+		// before it is bound, so source order IS declaration order and a name
+		// bound to a name is always resolved by the time the second is visited.
+		driverNames := map[string]driverRefusalBinding{"startPageRefusal": {problemArgument: 0}}
+		forwarding := map[token.Pos]bool{}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			assignment, isAssignment := node.(*ast.AssignStmt)
+			if !isAssignment {
+				return true
+			}
+			for index, right := range assignment.Rhs {
+				if index >= len(assignment.Lhs) {
+					continue
+				}
+				left, isLeft := assignment.Lhs[index].(*ast.Ident)
+				if !isLeft {
+					continue
+				}
+				switch bound := right.(type) {
+				case *ast.Ident:
+					if resolved, forwards := driverNames[bound.Name]; forwards {
+						driverNames[left.Name] = resolved
+					}
+				case *ast.FuncLit:
+					if argument, position, forwards := forwardedProblem(bound, driverNames); forwards {
+						driverNames[left.Name] = driverRefusalBinding{problemArgument: argument}
+						forwarding[position] = true
+					}
+				}
+			}
+			return true
+		})
 		ast.Inspect(function.Body, func(node ast.Node) bool {
 			call, isCall := node.(*ast.CallExpr)
 			if !isCall {
 				return true
 			}
 			callee, isName := call.Fun.(*ast.Ident)
-			if !isName || callee.Name != "authenticationFault" || len(call.Args) < 2 {
+			if !isName || len(call.Args) == 0 || forwarding[call.Pos()] {
+				return true
+			}
+			if binding, isDriver := driverNames[callee.Name]; isDriver {
+				problem := binding.problemArgument
+				require.Less(t, problem, len(call.Args),
+					"a driver refusal is called at %s with no problem to state", fileSet.Position(call.Pos()))
+				sites = append(sites, authenticationRefusalSite{
+					Enclosing: function.Name.Name,
+					Problem:   literalAt(call.Args[problem], "startPageRefusal", problem),
+					Driver:    true,
+				})
+				return true
+			}
+			if callee.Name != "authenticationFault" || len(call.Args) < 2 {
 				return true
 			}
 			sites = append(sites, authenticationRefusalSite{
 				Enclosing: function.Name.Name,
-				Function:  literalAt(call.Args[0], 0),
-				Step:      literalAt(call.Args[1], 1),
+				Function:  literalAt(call.Args[0], "authenticationFault", 0),
+				Step:      literalAt(call.Args[1], "authenticationFault", 1),
 			})
 			return true
 		})
 	}
 	sort.Slice(sites, func(i, j int) bool {
+		if sites[i].Enclosing != sites[j].Enclosing {
+			return sites[i].Enclosing < sites[j].Enclosing
+		}
 		if sites[i].Function != sites[j].Function {
 			return sites[i].Function < sites[j].Function
 		}
-		return sites[i].Step < sites[j].Step
+		if sites[i].Step != sites[j].Step {
+			return sites[i].Step < sites[j].Step
+		}
+		return sites[i].Problem < sites[j].Problem
 	})
 	return sites
+}
+
+// authenticationRefusalSitesOf returns only the sites of one kind, so each
+// subject states the constructor it is about instead of filtering inline.
+func authenticationRefusalSitesOf(sites []authenticationRefusalSite, driver bool) []authenticationRefusalSite {
+	var chosen []authenticationRefusalSite
+	for _, site := range sites {
+		if site.Driver == driver {
+			chosen = append(chosen, site)
+		}
+	}
+	return chosen
 }
 
 // retiredRefusalVocabulary is what an operator must never be told about: the
@@ -1857,22 +1999,32 @@ func realAuthenticationCauses(t *testing.T) map[string]error {
 	return causes
 }
 
-// TestAssignmentAuthenticationFaultNamesNoRetiredMachinery renders every refusal
-// the authentication file can produce — at every raise site, and with EVERY
-// cause the decoders really return — and holds each rendering to two rules: it
-// names no retired machinery (no rebuild command, no "certif" stem, no
-// generation, no index, no "recovery"), and it carries all six parts.
+// TestAssignmentAuthenticationFaultNamesNoRetiredMachinery renders every
+// authenticationFault refusal the authentication file can produce — at every one
+// of ITS raise sites, and with EVERY cause the decoders really return — and
+// holds each rendering to two rules: it names no retired machinery (no rebuild
+// command, no "certif" stem, no generation, no index, no "recovery"), and it
+// carries all six parts.
+//
+// THE CLAIM IS SCOPED TO THIS CONSTRUCTOR, and two sibling subjects close the
+// rest of the file rather than this one pretending to:
+// TestAssignmentDriverRefusalNamesNoRetiredMachineryAtEverySite renders every
+// startPageRefusal site, and
+// TestAssignmentAuthenticationFileCarriesNoRetiredVocabularyInAnyLiteral reads
+// EVERY string literal the file holds, which is the only check that covers a
+// cause text or a template no raise site renders.
 //
 // The causes are the decoders' own, not a synthetic string, so the forbidden
 // word pin and the six-part pin both reach the text an operator actually reads.
 // A wrapper that renders cleanly around "example cause" and wraps a real cause
 // badly is the failure this shape catches.
 //
-// RED when: a raise site or a decode cause is added that the rendering guard
-// rejects, or a raise site names a function it is not written in.
+// RED when: an authenticationFault raise site or a decode cause is added that
+// the rendering guard rejects, or such a site names a function it is not written
+// in.
 func TestAssignmentAuthenticationFaultNamesNoRetiredMachinery(t *testing.T) {
 	t.Parallel()
-	sites := authenticationRefusalSites(t)
+	sites := authenticationRefusalSitesOf(authenticationRefusalSites(t), false)
 	require.NotEmpty(t, sites, "the production file must raise at least one authentication refusal, or nothing is proved")
 	causes := realAuthenticationCauses(t)
 	require.NotEmpty(t, causes, "the decoders must return at least one cause, or nothing is proved")
@@ -1899,6 +2051,132 @@ func TestAssignmentAuthenticationFaultNamesNoRetiredMachinery(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// TestAssignmentDriverRefusalNamesNoRetiredMachineryAtEverySite renders EVERY
+// startPageRefusal the walk finds — the constructor by name, a local alias of
+// it, or a local wrapper that forwards a parameter to it — not the one subject
+// that happens to reach one of them. The driver's refusals are seven separate
+// operator messages today, and each is rendered here from its own site, so
+// retired vocabulary in any of them is red in this package rather than green in
+// all of it.
+//
+// The Where of a driver refusal is a FIXED part of the template rather than a
+// per-site name, so the property is checked against the site: the template must
+// name exactly one function, and it must be the function the site is written
+// in. That is the C11 shape generalised over every driver site, and it is why a
+// driver refusal added to a second function is a named failure instead of a
+// refusal that quietly names the wrong one.
+//
+// The vocabulary rule does not rest on this walk: a site reached through an
+// indirection the walk cannot resolve would not be rendered here, and
+// TestAssignmentAuthenticationFileCarriesNoRetiredVocabularyInAnyLiteral is the
+// check that covers it anyway.
+//
+// RED when: a resolvable startPageRefusal site names retired machinery or drops
+// a part, or the template's Where stops naming the function its sites are
+// written in.
+func TestAssignmentDriverRefusalNamesNoRetiredMachineryAtEverySite(t *testing.T) {
+	t.Parallel()
+	sites := authenticationRefusalSitesOf(authenticationRefusalSites(t), true)
+	require.NotEmpty(t, sites, "the production file must raise at least one driver refusal, or nothing is proved")
+	for _, site := range sites {
+		t.Run(site.Enclosing+"/"+site.Problem, func(t *testing.T) {
+			require.NotEmpty(t, site.Problem, "every driver raise site must carry the message it refuses with")
+			rendered := startPageRefusal(site.Problem)
+			var structured *pasterrors.StructuredError
+			require.ErrorAs(t, rendered, &structured, "a driver refusal is a structured refusal, as it was before the extraction")
+			require.Contains(t, structured.What, site.Problem,
+				"the refusal must state the problem the site found")
+			require.Contains(t, structured.Where, "internal/tasks/assignment_authentication.go, tasks."+site.Enclosing,
+				"the Where of a driver refusal names the function on the stack, so this site must be written in the function the template names")
+			require.Equal(t, 1, strings.Count(structured.Where, "tasks."),
+				"the Where must name exactly one function: a caller is not the code that refused, and a second name would make the refusal untrue")
+			for _, part := range []string{structured.What, structured.Why, structured.Where, structured.Impact, structured.Fix} {
+				require.NotEmpty(t, part, "every part of the refusal must reach the reader")
+			}
+			var report bytes.Buffer
+			structured.Report(&report)
+			for _, forbidden := range retiredRefusalVocabulary {
+				require.NotContains(t, strings.ToLower(report.String()), forbidden,
+					"the refusal names retired machinery an operator can no longer act on")
+			}
+		})
+	}
+}
+
+// authenticationFileLiteral is one string literal the production authentication
+// file holds, with the place it is written at.
+type authenticationFileLiteral struct {
+	Position string
+	Value    string
+}
+
+// authenticationFileLiterals returns EVERY string literal in the production
+// authentication file, read from the parsed file so that comments and
+// identifiers are excluded and a literal is never missed because a pattern did
+// not match its shape. A cause text is operator-visible too — every
+// authenticationFault interpolates its cause into the refusal — so this is the
+// reading that has no unrendered hole in it: a cause the decoders refuse on only
+// for an input no subject builds is still checked where it is written.
+func authenticationFileLiterals(t *testing.T) []authenticationFileLiteral {
+	t.Helper()
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, "assignment_authentication.go", nil, 0)
+	require.NoError(t, err, "the production authentication file must parse")
+	var literals []authenticationFileLiteral
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		literal, isLiteral := node.(*ast.BasicLit)
+		if !isLiteral || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			t.Errorf("the string literal at %s cannot be unquoted (%v), so this test cannot read the text an operator is shown",
+				fileSet.Position(literal.Pos()), err)
+			return true
+		}
+		literals = append(literals, authenticationFileLiteral{
+			Position: fileSet.Position(literal.Pos()).String(),
+			Value:    value,
+		})
+		return true
+	})
+	return literals
+}
+
+// TestAssignmentAuthenticationFileCarriesNoRetiredVocabularyInAnyLiteral holds
+// every string literal the production authentication file writes to the same
+// rule the two rendering subjects hold their text to, and it needs no list of
+// sites to do it.
+//
+// The rendering subjects prove the WRAPPERS: the fixed template text, and the
+// nine causes the decoders really return. What they cannot reach is a cause
+// text whose arm no subject happens to drive, and a template that is never
+// rendered because the site that would render it was removed. Reading the
+// literals closes both without needing to reach the arm, which is the point:
+// a cause that is unreachable today is still a sentence an operator would be
+// shown the day it became reachable.
+//
+// The floor is the anti-vacuity check. A walk that collected nothing would
+// assert nothing at all and pass, which is the failure this subject exists to
+// make impossible; the file carries far more literals than the floor, so a walk
+// that silently stopped early is red rather than green.
+//
+// RED when: any string literal in the production file names retired machinery.
+func TestAssignmentAuthenticationFileCarriesNoRetiredVocabularyInAnyLiteral(t *testing.T) {
+	t.Parallel()
+	literals := authenticationFileLiterals(t)
+	const minimumLiterals = 100
+	require.GreaterOrEqual(t, len(literals), minimumLiterals,
+		"the file carries well over %d string literals, so collecting %d means the walk stopped early and proved nothing",
+		minimumLiterals, len(literals))
+	for _, literal := range literals {
+		for _, forbidden := range retiredRefusalVocabulary {
+			require.NotContains(t, strings.ToLower(literal.Value), forbidden,
+				"the string literal at %s names retired machinery an operator can no longer act on; every literal in this file reaches a refusal, a query or an event", literal.Position)
+		}
 	}
 }
 
