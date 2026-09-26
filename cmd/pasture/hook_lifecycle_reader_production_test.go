@@ -540,12 +540,15 @@ func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 				require.NotNil(t, payload, "an evaluated gate commits a consultation")
 				committed := readerConsultationDecisionOf(t, payload)
 				// The committed decision is written by waist.Decision.MarshalJSON,
-				// which serializes only a constructor-validated kind/reason pair,
-				// and each reason string names exactly one kind. So this reason
-				// equality already pins the kind: were the committed kind to
-				// differ, its reason would differ too and this assertion would
-				// already have failed. A separate kind equality is entailed by
-				// this one and is not restated here.
+				// which serializes only a constructor-validated kind/reason pair.
+				// In the waist a refusal reason is admissible with BOTH Deny and
+				// RequireHuman (waist/decision.go), so a reason does not name
+				// exactly one kind in general. It does on the reachable paths
+				// here: no production path emits RequireHuman for this branch,
+				// the normalizer downgrades any the row cannot express, and the
+				// encoders reject it. A refusal reason therefore reaches the
+				// committed record only as Deny, so this reason equality already
+				// pins the kind and a separate kind equality is not restated.
 				assert.Equal(t, normalized.Reason().String(), committed.Reason)
 
 				if cell == "allow" {
