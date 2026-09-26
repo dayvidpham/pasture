@@ -11,7 +11,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
-	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
@@ -78,7 +77,6 @@ func ParseRawSchemaVersion(value string) (RawSchemaVersion, error) {
 // the raw surface can never be reduced accidentally by callers of the native
 // entrypoint.
 type HookLifecycleRawInput struct {
-	Decision    *backend.Decision
 	Settlement  *receipt.CommitSettlement
 	DBPath      string
 	Harness     ir.HarnessID
@@ -232,7 +230,7 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 	// material a real commit would persist, minus any I/O. No database file
 	// is created, opened, or written (M1 §8), and no receipt is issued.
 	if in.DryRun {
-		preview, previewErr := rawDryRunPreview(dispatch, event, in.HostVersion, in.SchemaVersion, capture.delivery, in.Decision)
+		preview, previewErr := rawDryRunPreview(dispatch, event, in.HostVersion, in.SchemaVersion, capture.delivery)
 		if previewErr != nil {
 			return nil, previewErr
 		}
@@ -256,7 +254,18 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 		in.Settlement = receipt.NewCommitSettlement()
 	}
 	service.Settlement = in.Settlement
-	_, err = deliveryCommit(ctx, service, dispatch, event, capture.delivery, in.Decision)
+	// THE GATE RUNS HERE, AND IT RUNS ON THE REAL READER. The raw surface is a
+	// second copy of the committing path, so the one thing it may not do is
+	// evaluate the same payload by a weaker rule: tasks.NewGateReader and the
+	// shared evaluateGate are the native path's own, and the verdict this call
+	// takes is the one the receipt commits. A fault raised here is a fault on
+	// the same terms as the native one — nothing was written, and the command
+	// decides what the host is told.
+	decision, err := evaluateGate(ctx, tracker, tasks.NewGateReader, dispatch, event, capture.delivery.Bindings, in.Harness)
+	if err != nil {
+		return nil, err
+	}
+	_, err = deliveryCommit(ctx, service, dispatch, event, capture.delivery, decision)
 	if err != nil {
 		if outcome, committed := in.Settlement.CommittedOutcome(); committed {
 			return &RawLifecycleResult{outcome: outcome, committed: true}, nil
@@ -304,12 +313,21 @@ func (r *RawLifecycleResult) Outcome() (hostexit.Outcome, bool) {
 // exact pure L1→L2 derivation tail the committing path runs (deliveryVerify),
 // so the preview is byte-faithful to the commit's binding material and its
 // canonical continuation — minus any durable write.
-func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, hostVersion string, schema RawSchemaVersion, delivery receipt.Delivery, decisions ...*backend.Decision) ([]byte, error) {
+//
+// IT PASSES NO DECISION, AND THAT IS THE WHOLE DIFFERENCE FROM THE COMMIT. A
+// preview reads nothing: opening no store is the property the dry run exists to
+// prove, and a session claim is in the store. So the preview shows the
+// UNEVALUATED default for a gate — the middle end's own Proceed — while a real
+// commit consults the reader and records whatever the policy decided, which on
+// an unclaimed session is a proceed under the reason that says the session was
+// unbound. The help text for the command states this, so an operator reading a
+// preview is not left to infer it from a digest.
+func rawDryRunPreview(dispatch lifecycleDispatch, event registration.Event, hostVersion string, schema RawSchemaVersion, delivery receipt.Delivery) ([]byte, error) {
 	_, derivation, err := deliveryVerify(dispatch, event, delivery)
 	if err != nil {
 		return nil, err
 	}
-	prepared, err := prepareDelivery(dispatch, event, derivation, decisions...)
+	prepared, err := prepareDelivery(dispatch, event, derivation, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s dry-run continuation could not be rendered (encode failed): %w", dispatch.name, err)
 	}

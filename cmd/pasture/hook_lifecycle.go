@@ -18,7 +18,6 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
-	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/nativeresponse"
@@ -175,9 +174,8 @@ func lifecycleOutcome(
 	barrier handlers.CommitBarrier,
 	budget timeouts.Profile,
 	deadline lifecycleDeadline,
-	decisions ...backend.Decision,
 ) (outcome hostexit.Outcome) {
-	return lifecycleOutcomeWithCompletion(cmd, args, barrier, budget, deadline, nil, decisions...)
+	return lifecycleOutcomeWithCompletion(cmd, args, barrier, budget, deadline, nil)
 }
 
 // lifecycleOutcomeWithCompletion is the shared execution core. An optional,
@@ -191,7 +189,6 @@ func lifecycleOutcomeWithCompletion(
 	budget timeouts.Profile,
 	deadline lifecycleDeadline,
 	finished func(),
-	decisions ...backend.Decision,
 ) (outcome hostexit.Outcome) {
 	var settlement *receipt.CommitSettlement
 	var workerStarted bool
@@ -329,14 +326,6 @@ func lifecycleOutcomeWithCompletion(
 	tier := budget.HookInvocation()
 	ctx, cancel := deadline(cmd.Context(), tier)
 	defer cancel()
-	var decision *backend.Decision
-	if len(decisions) > 1 {
-		return lifecycleFault(cmd, coords, failure, policy, continuation,
-			hostexit.FaultStageNotRecorded, fmt.Errorf("multiple lifecycle decisions supplied; no invocation started; provide one evaluated verdict"))
-	}
-	if len(decisions) == 1 {
-		decision = &decisions[0]
-	}
 	// Resolve before starting the worker. Capture, admission, the deadline arm
 	// and panic recovery all read this one observed coordinate, never a value
 	// concurrently updated by the work goroutine.
@@ -401,7 +390,6 @@ func lifecycleOutcomeWithCompletion(
 			Clock:             lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 			Barrier:    barrier,
 			ActorClaim: tasks.ActorClaim(env.ActorClaim),
-			Decision:   decision,
 			Settlement: settlement,
 		})
 		completed <- lifecycleWork{outcome: committed, err: err}

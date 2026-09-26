@@ -48,11 +48,19 @@ func (rawOutcomeOperation) NewOperationID() (string, error) {
 	return "pasture.raw.outcome-proof", nil
 }
 
-func TestRawPreviewAndCommitPreserveFullSuppliedOutcome(t *testing.T) {
+// TestRawPreviewShowsTheUnevaluatedDefaultAndTheCommitRunsTheGate holds the one
+// difference between the raw preview and the raw commit: a preview opens no
+// store, so it cannot read a claim and cannot evaluate the gate, while the
+// commit consults the reader and records what the policy decided.
+//
+// The preview half therefore shows the UNEVALUATED default — the middle end's own
+// Proceed — and the commit half records the real reason. Asserting that
+// difference is the point: a preview that claimed to predict the committed
+// consultation would be making a promise it cannot keep, and an operator
+// comparing the two digests would be reading a defect as a fact.
+func TestRawPreviewShowsTheUnevaluatedDefaultAndTheCommitRunsTheGate(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("../lifecycle/ingress/claude/testdata/fixtures/pre_tool_use_2_1_261.json")
-	require.NoError(t, err)
-	decision, err := backend.NewDecision(backend.DecisionRequireHuman, backend.ReasonRoleForbidsAction)
 	require.NoError(t, err)
 	previewDB := filepath.Join(t.TempDir(), "unopened", "pasture.db")
 	input := HookLifecycleRawInput{
@@ -65,7 +73,6 @@ func TestRawPreviewAndCommitPreserveFullSuppliedOutcome(t *testing.T) {
 		Input:         bytes.NewReader(raw),
 		Clock:         rawOutcomeClock{},
 		Operations:    rawOutcomeOperation{},
-		Decision:      &decision,
 	}
 
 	preview, err := HookLifecycleRaw(context.Background(), input)
@@ -81,18 +88,18 @@ func TestRawPreviewAndCommitPreserveFullSuppliedOutcome(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(preview.Preview(), &document))
 	require.True(t, document.DryRun)
-	require.Equal(t, 2, document.ExitStatus)
+	require.Equal(t, 0, document.ExitStatus, "the unevaluated default is a proceed, because no gate was consulted")
 	require.Empty(t, document.Continuation)
-	require.Equal(t, decision.Reason().Message(), document.Stderr)
+	require.Empty(t, document.Stderr, "a proceed carries no refusal message")
 	_, err = os.Stat(previewDB)
 	require.ErrorIs(t, err, os.ErrNotExist)
 	previewBytes := preview.Preview()
 	previewBytes[0] = 'X'
 	require.Equal(t, byte('{'), preview.Preview()[0], "preview bytes must be owned")
 
-	// This is a real receipt/encoding proof with a supplied constructor-valid
-	// verdict, not a Reader-derived role denial. RequireHuman normalizes to
-	// Deny because the evidenced Claude event has no supported Ask channel.
+	// The real commit runs the real Reader over a real store, and the receipt
+	// names the reason the policy gave. This is a production-path proof at the
+	// handler layer: no verdict is supplied anywhere in this subject.
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -109,7 +116,7 @@ func TestRawPreviewAndCommitPreserveFullSuppliedOutcome(t *testing.T) {
 	require.Nil(t, result.Preview())
 	outcome, committed := result.Outcome()
 	require.True(t, committed)
-	require.Equal(t, hostexit.ExitBlock, outcome.Exit)
+	require.Equal(t, hostexit.ExitContinue, outcome.Exit, "an unclaimed session fails open")
 	require.Empty(t, outcome.Stdout)
 	require.Equal(t, document.Stderr, outcome.Stderr)
 	tracker, err = tasks.OpenTaskTracker(dbPath)
@@ -126,8 +133,10 @@ func TestRawPreviewAndCommitPreserveFullSuppliedOutcome(t *testing.T) {
 		Decision backend.Decision `json:"decision"`
 	}
 	require.NoError(t, json.Unmarshal(page.Rows[0].Payload, &stored))
-	require.Equal(t, backend.DecisionDeny, stored.Decision.Kind())
-	require.Equal(t, backend.ReasonRoleForbidsAction, stored.Decision.Reason())
+	require.Equal(t, backend.DecisionProceed, stored.Decision.Kind())
+	require.Equal(t, backend.ReasonUnboundSession, stored.Decision.Reason(),
+		"the committed consultation must name UNBOUND while the store-free preview names the default: the two are "+
+			"meant to differ, and the raw help text says so")
 }
 
 func TestRawHostVersionSourcePreviewCommitAndLegacy(t *testing.T) {
