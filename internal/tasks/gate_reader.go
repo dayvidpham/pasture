@@ -134,6 +134,13 @@ func (e *GateReadError) Unwrap() error { return e.Cause }
 // GateReadIntegrityError is a read fault caused by store contents that a
 // supported writer cannot produce. Stage carries the Provenance read stage, so
 // the operator's line names which part of the result was damaged.
+//
+// A ZERO Stage means the store read named none: the fault is a subtype fault
+// that reached this boundary without the typed carrier that carries the stage,
+// and the reader reports it as unreported rather than naming one of the three
+// stages on the store's behalf. The field holds no Provenance stage in that case
+// rather than a made-up one, so a programmatic reader sees "none" and an
+// operator reads "unreported".
 type GateReadIntegrityError struct {
 	Stage provenance.ActorOwnershipStage
 	Cause error
@@ -147,8 +154,19 @@ func (e *GateReadIntegrityError) Error() string {
 			"When: during the lifecycle invocation that consulted the gate, before any decision was taken. "+
 			"Impact: the invocation reported a fault, so no episode was reported and no decision was taken; under the default policy the action continued unjudged, and on an evidenced blocking host with PASTURE_HOOK_FAIL_CLOSED=1 the host refused the action instead. "+
 			"Fix: run Journal.VerifyIntegrity and Journal.ReplayProjections on this store to find the damaged rows; both only read; then restore the database file from a known-good copy.",
-		e.Stage, e.Cause,
+		reportedStage(e.Stage), e.Cause,
 	)
+}
+
+// reportedStage renders the stage the operator is told, and says so honestly
+// when the store read named none. A subtype fault can reach the reader without
+// the typed carrier, so "unreported" is a reachable answer and naming one of the
+// three stages there would point the operator at damage the read never located.
+func reportedStage(stage provenance.ActorOwnershipStage) string {
+	if stage == "" {
+		return "unreported"
+	}
+	return string(stage)
 }
 
 // Unwrap keeps the Provenance limit, projection-mismatch and subtype causes
@@ -383,6 +401,16 @@ func (r *gateReader) sealUnbound() *gateSnapshotValue {
 // journal row that violates its class table. Everything else — a dead context,
 // refused SQL, an unavailable store — is a read fault. The split is by cause,
 // not by message, so a wrapped store error stays a read fault.
+//
+// The STAGE an integrity fault reports is the store's answer, not a Pasture
+// guess. Two of the three Provenance fault types carry it: the byte bound in
+// ActorOwnershipLimitError.Stage, and the subtype fault in
+// ActorOwnershipIntegrityError.Stage, which Provenance sets at every one of its
+// thirteen raise sites to the stage of the function the site is written in —
+// seven owned-tasks, three materials, three evidence. The third type,
+// OwnerProjectionMismatchError, carries no stage field, and its own text and
+// both of its raise sites pin it to the owned-tasks stage, so that is stated
+// here rather than read from the fault.
 func ownershipReadFault(err error, harness ir.HarnessID, session string) error {
 	var limit *provenance.ActorOwnershipLimitError
 	if errors.As(err, &limit) {
@@ -393,9 +421,23 @@ func ownershipReadFault(err error, harness ir.HarnessID, session string) error {
 		return &GateReadIntegrityError{Stage: provenance.ActorOwnershipStageOwnedTasks, Cause: err}
 	}
 	if errors.Is(err, provenance.ErrSubtypeIntegrity) {
-		// A subtype violation is found while the owned-task rows are read, so
-		// the stage is the one that carries the result rows themselves.
-		return &GateReadIntegrityError{Stage: provenance.ActorOwnershipStageOwnedTasks, Cause: err}
+		// A subtype fault carries its own stage, in
+		// ActorOwnershipIntegrityError.Stage. It is asked for here, not assumed:
+		// the read refuses rows at three stages and a hardcoded stage would send
+		// the operator to the owned-task rows for damage the materials or
+		// evidence rows rejected.
+		var subtype *provenance.ActorOwnershipIntegrityError
+		if errors.As(err, &subtype) {
+			return &GateReadIntegrityError{Stage: subtype.Stage, Cause: err}
+		}
+		// REACHABLE, so it is not papered over: the sentinel is exported and any
+		// error matching it without the typed carrier lands here — a Provenance
+		// that has not adopted the carrier, or a subtype fault raised outside
+		// the ownership read and wrapped into it. Nothing here can name the
+		// stage, so the fault is reported with the zero stage and the operator
+		// reads "unreported". Naming owned-tasks for the same reason this arm
+		// used to is what the comment above refuses to do.
+		return &GateReadIntegrityError{Cause: err}
 	}
 	return &GateReadError{Stage: GateReadStageOwnership, Harness: harness, Session: session, Cause: err}
 }
@@ -548,9 +590,26 @@ func (s *gateSnapshotValue) ResolveSession(harness ir.HarnessID, session string)
 // so a non-owner role the actor holds on somebody else's task is invisible here
 // and cannot grant anything. A caller that needs the full relationship must ask
 // the store, not this snapshot.
+//
+// An UNBOUND snapshot refuses every actor, the zero actor included. It claimed
+// no actor, so it has none to answer about, and this accessor's contract is
+// "the claimed actor; any other call is a scope fault" — with no claim there is
+// no "the", and the permissive alternative would hand back an
+// ActorAuthority{Actor: ""} that reads as an answer about an actor when it is an
+// absence of one. A caller that is asking at all on this path is already the
+// fault: the policy's unbound rule answers an unbound claim before any rule
+// reads authority, so a caller that asks is one that skipped the check the
+// policy requires of it, and this is where that is caught rather than answered.
+// Nothing is lost by refusing: the unbound answer is SessionClaim{Bound: false},
+// which this snapshot already returns.
 func (s *gateSnapshotValue) Authority(actor provenance.ActorID) (gateauthority.ActorAuthority, error) {
 	if s.isClosed() {
 		return gateauthority.ActorAuthority{}, &GateSnapshotClosedError{}
+	}
+	if !s.claim.Bound {
+		return gateauthority.ActorAuthority{}, &GateReaderScopeError{
+			Operation: fmt.Sprintf("read the authority of %q through a snapshot of session %q on harness %q, which claimed no actor", actor, s.session, s.harness),
+		}
 	}
 	if actor != s.actor {
 		return gateauthority.ActorAuthority{}, &GateReaderScopeError{
