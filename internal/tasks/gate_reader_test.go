@@ -1616,8 +1616,41 @@ func gateDecisionKind(t *testing.T, result gatepolicy.Result) backend.DecisionKi
 }
 
 // TestGateReaderNewestOwnerWinsWithTwoActiveEpisodes proves two active owner
-// episodes on one task are a complete answer, not a fault. The writer's newest
-// active episode is the one that survives into the reader's answer.
+// episodes on one task are a complete answer, not a fault, and that "the newest
+// one wins" is a claim about BOTH actors and not only about the winner.
+//
+// The store is given two active owner episodes on one task, one per actor. Only
+// the actor holding the newest of them is an owner the gate can see, so the
+// subject reads both sides of that:
+//
+//   - the NEWER actor's answer is that one episode, and
+//   - the OLDER actor's answer is EMPTY, even though its own episode is still
+//     active and unended in the store.
+//
+// The older half is the half that carries the narrowing. The ownership read is
+// scoped by the task's owner column, which the writer moves to the newest active
+// owner-responsibility episode, so an actor whose owner episode has been
+// superseded is invisible to the gate. That actor DOES hold an active episode;
+// the gate answers as though it held none, and it must: the gate grants on what
+// the actor currently owns, so a superseded episode grants nothing. This is a
+// real loss of visibility rather than a rounding of an already-complete answer,
+// and it is why the answer is asserted instead of described.
+//
+// The two halves are each other's anti-vacuity check. They are read from the
+// same store, through the same public API, with nothing written between them, so
+// exactly one of the two actors may be non-empty: a store that handed the older
+// actor the winner's episode fails here, and a store that answered the newer
+// actor with nothing fails the first assertion. Neither half can be satisfied by
+// the reader having stopped reading, because the other half still sees an
+// episode.
+//
+// The older actor's claim is KNOWN, so its empty answer is a complete fact about
+// a registered actor and not the unknown-actor answer, which is a different
+// policy reason.
+//
+// RED when: the older actor's read is a fault rather than a complete empty
+// answer, its authority is non-empty, or the policy grants the older actor
+// anything at all.
 func TestGateReaderNewestOwnerWinsWithTwoActiveEpisodes(t *testing.T) {
 	t.Parallel()
 	store, _ := openGateStore(t)
@@ -1627,6 +1660,7 @@ func TestGateReaderNewestOwnerWinsWithTwoActiveEpisodes(t *testing.T) {
 	seedAssignmentEpisode(t, store, task, "owner-a", RoleOwnerResponsibility, first, "owner-a-start")
 	seedAssignmentEpisode(t, store, task, "owner-b", RoleOwnerResponsibility, second, "owner-b-start")
 	gateClaim(t, store, second, "newest-session")
+	gateClaim(t, store, first, "oldest-session")
 	snapshot := gateSnapshot(t, store, "newest-session")
 	authority, err := snapshot.Authority(second)
 	require.NoError(t, err)
@@ -1636,6 +1670,25 @@ func TestGateReaderNewestOwnerWinsWithTwoActiveEpisodes(t *testing.T) {
 		Role:       gateauthority.RoleOwnerResponsibility,
 		Phase:      gateauthority.PhaseUnscoped,
 	}}, authority.Episodes, "the writer's newest active episode is the one the reader reports")
+
+	// The older actor is asked from its OWN session, because a snapshot answers
+	// for the one session and the one actor it was opened with. Nothing was
+	// written between the two reads, so the difference in the two answers is
+	// the difference between the two actors and not the difference in time.
+	oldest := gateSnapshot(t, store, "oldest-session")
+	oldestClaim, err := oldest.ResolveSession(gateHarness, "oldest-session")
+	require.NoError(t, err)
+	require.True(t, oldestClaim.Bound)
+	require.Equal(t, first, oldestClaim.Actor)
+	require.True(t, oldestClaim.Known, "the superseded owner is a registered actor, so its empty answer must be a complete fact and not the unknown-actor answer")
+	oldestAuthority, err := oldest.Authority(first)
+	require.NoError(t, err, "an actor that owns nothing the gate can see is a complete answer, never a fault")
+	require.Equal(t, first, oldestAuthority.Actor)
+	require.Empty(t, oldestAuthority.Episodes, "an owner episode a newer one superseded is not an assignment the gate will act on; the older actor holds an active episode and the gate still answers with none")
+
+	result, err := gatepolicy.Decide(gatePolicyInput(oldestClaim, oldestAuthority))
+	require.NoError(t, err)
+	require.Equal(t, backend.ReasonNoActiveAssignment, gatePolicyReason(t, result), "the superseded owner is denied, and for the one reason that fits its answer")
 }
 
 // ─── faults from the ownership read ───────────────────────────────────────────
