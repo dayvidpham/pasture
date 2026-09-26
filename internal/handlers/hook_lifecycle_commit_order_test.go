@@ -44,7 +44,10 @@ func TestDeliveryCommitActivatesMetamodelBeforeBindFailure(t *testing.T) {
 		return waist.L1{}, nil, wantErr
 	}
 
-	_, err = deliveryCommit(context.Background(), service, dispatch, event, receipt.Delivery{Contract: manifest.Contract, Event: event.Kind})
+	// nil is the value an OBSERVATION commits with: the first registered Claude
+	// event is SessionStart, the middle end answers it on its own, and the
+	// commit tail refuses a nil decision only for a gate.
+	_, err = deliveryCommit(context.Background(), service, dispatch, event, receipt.Delivery{Contract: manifest.Contract, Event: event.Kind}, nil)
 	require.ErrorIs(t, err, wantErr)
 	_, journaled, err := receipt.ResolveActiveMetamodel(tracker.Journal())
 	require.NoError(t, err)

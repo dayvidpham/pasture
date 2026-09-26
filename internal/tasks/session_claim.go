@@ -83,6 +83,17 @@ func lifecycleSession(bindings []model.NativeBinding) (string, error) {
 	return session, nil
 }
 
+// LifecycleSession is the exported face of the helper above, and it exists for
+// the one caller that cannot reach an unexported name in this package: the
+// lifecycle gate, which asks the SAME question of the SAME bindings before it
+// reads a claim. Two loops over the bindings could disagree about which one is
+// the session — one reading a verified binding as an identity and the other
+// skipping it — and the gate would then look up a session nobody ever claimed,
+// which reads as an unbound session and proceeds. So the answer has one home.
+func LifecycleSession(bindings []model.NativeBinding) (string, error) {
+	return lifecycleSession(bindings)
+}
+
 // readLifecycleSessionClaim reads the actor claimed for one harness session.
 //
 // The whole read is one SELECT under the store's own SQLite busy tier, and the
