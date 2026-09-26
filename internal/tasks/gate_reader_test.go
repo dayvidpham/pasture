@@ -623,6 +623,10 @@ func TestGateReaderBoundPathMakesOneClaimReadAndOnePublicCall(t *testing.T) {
 // TestGateReaderUnboundSessionMakesNoProvenanceCall proves both unbound paths.
 // A session with no claim row and an invocation that carried no session at all
 // are both unbound, and neither may reach the ownership read.
+//
+// It also pins the scope answer an unbound snapshot gives: it claimed no actor,
+// so Authority refuses every actor, the zero actor included, rather than
+// answering about the empty one.
 func TestGateReaderUnboundSessionMakesNoProvenanceCall(t *testing.T) {
 	t.Parallel()
 	store, path := openGateStore(t)
@@ -637,8 +641,10 @@ func TestGateReaderUnboundSessionMakesNoProvenanceCall(t *testing.T) {
 	require.False(t, claim.Known)
 	require.Equal(t, "unclaimed-session", claim.Session)
 	authority, err := snapshot.Authority(provenance.ActorID{})
-	require.NoError(t, err)
-	require.Empty(t, authority.Episodes)
+	var scope *GateReaderScopeError
+	require.ErrorAs(t, err, &scope, "an unbound snapshot claimed no actor, so every actor is out of its scope")
+	require.Contains(t, scope.Operation, "claimed no actor")
+	require.Empty(t, authority.Episodes, "a refused authority is the empty value, never a granted one")
 	require.Equal(t, 1, counts.count(gateClaimReadToken), "a session with no claim row costs one claim read")
 
 	before := counts.count(gateClaimReadToken)
@@ -647,6 +653,8 @@ func TestGateReaderUnboundSessionMakesNoProvenanceCall(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, emptyClaim.Bound)
 	require.Equal(t, "", emptyClaim.Session)
+	_, err = empty.Authority(provenance.ActorID{})
+	require.ErrorAs(t, err, &scope, "the no-session arm is unbound too, so it refuses the same way")
 	require.Equal(t, before, counts.count(gateClaimReadToken), "an invocation with no session must issue no SQL at all")
 
 	ownership, other := journal.counts()
@@ -1736,6 +1744,15 @@ func TestGateReaderErrorCausesRemainInTheChain(t *testing.T) {
 		ObservedBytes: provenance.MaxActorOwnershipResultBytes + 1,
 	}
 	mismatch := &provenance.OwnerProjectionMismatchError{}
+	// The stage on this carrier is EVIDENCE on purpose. The owned-tasks stage is
+	// what a reader that hardcoded the stage would report, and materials is what
+	// the byte-limit row above already uses, so neither of those two guesses can
+	// satisfy this row: only reading the carrier's own Stage can.
+	subtype := &provenance.ActorOwnershipIntegrityError{
+		Stage:   provenance.ActorOwnershipStageEvidence,
+		Problem: "stored evidence row 2 has invalid JSON",
+		Fix:     "restore the canonical evidence payload from the same committed backup",
+	}
 	cases := []struct {
 		name  string
 		cause error
@@ -1769,12 +1786,36 @@ func TestGateReaderErrorCausesRemainInTheChain(t *testing.T) {
 			},
 		},
 		{
+			// THE REGRESSION PIN for the stage the store read reports. A reader
+			// that hardcodes ActorOwnershipStageOwnedTasks for every subtype fault
+			// reports the wrong rows for two of the three stages Provenance can
+			// raise one at, and this row is the only assertion in either
+			// repository that sees it: the error is still an integrity error and
+			// still unwraps to the sentinel under that defect, so every other
+			// assertion on this fault passes.
 			name:  "subtype",
+			cause: fmt.Errorf("wrapped: %w", subtype),
+			check: func(t *testing.T, err error) {
+				var integrity *GateReadIntegrityError
+				require.ErrorAs(t, err, &integrity)
+				require.Equal(t, provenance.ActorOwnershipStageEvidence, integrity.Stage,
+					"the reported stage must be the one the store read named, not a fixed one")
+				require.ErrorIs(t, err, provenance.ErrSubtypeIntegrity)
+				require.Contains(t, err.Error(), "gate ownership read (stage evidence)")
+			},
+		},
+		{
+			// The untyped fallback. Reachable whenever the sentinel is matched
+			// without the carrier, so the reader must say the stage is unreported
+			// rather than name one it was never given.
+			name:  "subtype-without-a-stage",
 			cause: fmt.Errorf("wrapped: %w", provenance.ErrSubtypeIntegrity),
 			check: func(t *testing.T, err error) {
 				var integrity *GateReadIntegrityError
 				require.ErrorAs(t, err, &integrity)
+				require.Empty(t, integrity.Stage, "no stage was named, so the field must carry none")
 				require.ErrorIs(t, err, provenance.ErrSubtypeIntegrity)
+				require.Contains(t, err.Error(), "gate ownership read (stage unreported)")
 			},
 		},
 		{
