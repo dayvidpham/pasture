@@ -54,4 +54,4 @@ require (
 	zombiezen.com/go/sqlite v1.4.2 // indirect
 )
 
-replace github.com/dayvidpham/provenance => github.com/dayvidpham/provenance v0.2.1-0.20260926051504-8cbc447edb80
+replace github.com/dayvidpham/provenance => github.com/dayvidpham/provenance v0.2.1-0.20260926062417-b523af226f04
