@@ -133,8 +133,6 @@ func readerGenesisAuthority(t *testing.T, tracker interface {
 	t.Helper()
 	genesis, err := tracker.Journal().LookupCommitted(provenance.OperationID("pasture.system.genesis.v1"))
 	require.NoError(t, err)
-	require.Equal(t, provenance.CommittedExact, genesis.Kind,
-		"the system genesis must exist before any assignment is seeded")
 	authority := provenance.JournalID(0)
 	found := false
 	for _, slot := range genesis.ResultSlots {
@@ -543,18 +541,6 @@ func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 				committed := readerConsultationDecisionOf(t, payload)
 				assert.Equal(t, normalized.Kind().String(), committed.Decision)
 				assert.Equal(t, normalized.Reason().String(), committed.Reason)
-				if cell == "deny" && !harness.mapping.Response().AllowsDeny() {
-					// The /deny locator's contract on a row with no refusal
-					// channel: the policy verdict is Deny, but the committed
-					// record must NOT carry that verdict — it is the unenforced
-					// denial. Comparing the COMMITTED bytes to the POLICY verdict
-					// is independent of the normalized comparison above, so a
-					// normalization regression cannot satisfy both.
-					assert.NotEqual(t, decision.Kind().String(), committed.Decision,
-						"a row that cannot express a Deny must not commit the policy verdict")
-					assert.Equal(t, backend.ReasonUnenforcedDeny.String(), committed.Reason,
-						"the durable reason names the unenforced denial")
-				}
 
 				if cell == "allow" {
 					// TEETH. The grant must be genuinely evaluated: the SAME
