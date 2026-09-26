@@ -10,6 +10,7 @@ package tasks
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
@@ -372,19 +373,9 @@ func gateEpisode(t *testing.T, store *trackerImpl, actor provenance.ActorID, ses
 // asked to write a malformed record.
 func gateRawEpisode(t *testing.T, store *trackerImpl, task provenance.TaskID, assignment provenance.AssignmentID, occupant provenance.ActorID, operation provenance.OperationID, payloads ...string) {
 	t.Helper()
-	_, authority, found, err := readSystemIdentity(store.auditDB)
-	require.NoError(t, err)
-	require.True(t, found)
-	effects := []provenance.Effect{{
-		Sort:         provenance.EffectAssignmentStart,
-		ResultSlot:   "authority",
-		TaskID:       task,
-		AssignmentID: assignment,
-		SlotID:       provenance.SlotOwnerResponsibility,
-		Occupant:     occupant,
-	}}
+	extra := make([]provenance.Effect, 0, len(payloads))
 	for index, payload := range payloads {
-		effects = append(effects, provenance.Effect{
+		extra = append(extra, provenance.Effect{
 			Sort:       provenance.EffectTaskEvent,
 			ResultSlot: provenance.ResultSlotID(fmt.Sprintf("gate-material-%d", index)),
 			TaskID:     task,
@@ -392,6 +383,46 @@ func gateRawEpisode(t *testing.T, store *trackerImpl, task provenance.TaskID, as
 			Payload:    []byte(payload),
 		})
 	}
+	gateRawStart(t, store, task, assignment, occupant, operation, extra...)
+}
+
+// gateCommandEvidenceEpisode starts one episode under one operation and writes
+// the caller's command-evidence payload in the SAME operation, which is what the
+// ownership read joins on: evidence reaches an episode through the operation
+// that started it. The evidence carries no material, so the episode's role can
+// only come from the record the caller plants.
+func gateCommandEvidenceEpisode(t *testing.T, store *trackerImpl, task provenance.TaskID, assignment provenance.AssignmentID, occupant provenance.ActorID, operation provenance.OperationID, record string) {
+	t.Helper()
+	payload := []byte(record)
+	digest := sha256.Sum256(payload)
+	gateRawStart(t, store, task, assignment, occupant, operation, provenance.Effect{
+		Sort:          provenance.EffectEvidence,
+		ResultSlot:    assignmentCommandResultSlot,
+		TaskID:        task,
+		EvidenceKind:  assignmentCommandEvidenceKind,
+		ContentDigest: digest[:],
+		Payload:       payload,
+	})
+}
+
+// gateRawStart applies one operation that starts one owner-slot assignment
+// episode and appends whatever extra effects the caller supplies. Every raw
+// fixture in this file goes through here, so they all share one shape: an
+// assignment start under the system authority, produced by the operation the
+// ownership read names as the episode's producer.
+func gateRawStart(t *testing.T, store *trackerImpl, task provenance.TaskID, assignment provenance.AssignmentID, occupant provenance.ActorID, operation provenance.OperationID, extra ...provenance.Effect) {
+	t.Helper()
+	_, authority, found, err := readSystemIdentity(store.auditDB)
+	require.NoError(t, err)
+	require.True(t, found)
+	effects := append([]provenance.Effect{{
+		Sort:         provenance.EffectAssignmentStart,
+		ResultSlot:   "authority",
+		TaskID:       task,
+		AssignmentID: assignment,
+		SlotID:       provenance.SlotOwnerResponsibility,
+		Occupant:     occupant,
+	}}, extra...)
 	_, err = store.Journal().Apply(provenance.OperationInput{
 		OperationID:        operation,
 		ActorID:            occupant,
@@ -400,6 +431,19 @@ func gateRawEpisode(t *testing.T, store *trackerImpl, task provenance.TaskID, as
 		Effects:            effects,
 	})
 	require.NoError(t, err)
+}
+
+// gateCommandRecord builds one command-evidence payload in the exact shape a
+// Pasture assignment command writes: the closed record, canonically encoded. The
+// reader decodes command evidence strictly and re-checks that the stored bytes
+// are canonical, so a hand-written JSON literal would fail at the DECODE arm and
+// every refusal below it would go untested. Encoding the production struct is
+// what makes each subject reach the arm it names.
+func gateCommandRecord(t *testing.T, record assignmentCommandRecord) string {
+	t.Helper()
+	encoded, err := canonicalJSON(record)
+	require.NoError(t, err)
+	return string(encoded)
 }
 
 // gateMaterialPayload builds one assignment-start material payload with a role
@@ -506,9 +550,13 @@ func gatePolicyReason(t *testing.T, result gatepolicy.Result) backend.DecisionRe
 // read, and leaves the claim connection behind before the public call so that
 // call is not waiting on a lease the reader still holds.
 //
-// MUTATION: add a second claim read, reach any other journal read, or hold the
-// claim connection across the public call, and the counted statements, the
-// forbidden-read counter, or the interleaving write turn this RED.
+// MUTATION: add a second claim read, or reach any other journal read, and the
+// counted statements or the forbidden-read counter turn this RED. Hold the claim
+// connection across the public call — a dedicated lease on the store's own pool
+// that Snapshot releases only after QueryActorOwnership returns — and the
+// InUse reading at the interleave point turns this RED, because the pool-of-one
+// starvation subject cannot see it (it swaps in a second pool, so the two
+// subsystems never compete there; the release is observed here instead).
 func TestGateReaderBoundPathMakesOneClaimReadAndOnePublicCall(t *testing.T) {
 	t.Parallel()
 	store, path := openGateStore(t)
@@ -530,6 +578,14 @@ func TestGateReaderBoundPathMakesOneClaimReadAndOnePublicCall(t *testing.T) {
 
 	journal := &gateCountingJournal{Journal: store.Journal()}
 	journal.beforeOwnership = func() error {
+		// The boundary this subject exists for. The claim read is complete and
+		// its connection is back in the pool, so the public call below is about to
+		// compete for the same pool of one with nothing held. A reader that kept
+		// the claim lease would show InUse=1 here and would make the public call
+		// queue behind its own lease; the write that follows commits only because
+		// the lease is free, and this is the assertion that says so.
+		require.Zero(t, store.auditDB.Stats().InUse,
+			"the claim lease must be released before the public ownership call; a connection still checked out here is the reader waiting on itself")
 		bounded, cancel := context.WithTimeout(t.Context(), timeouts.TestProfile().SQLiteBusy())
 		defer cancel()
 		_, err := writer.ExecContext(bounded, `INSERT INTO gate_bound_interleave (note) VALUES ('between')`)
@@ -673,7 +729,11 @@ func TestGateReaderClaimReadFaultsWhenThePoolStaysBusy(t *testing.T) {
 	require.Equal(t, gateHarness, read.Harness)
 	require.Equal(t, "busy-session", read.Session)
 	require.NotNil(t, read.Cause)
-	for _, phrase := range []string{"gate claim read", "failed open", "Fix:"} {
+	// The Impact clause names BOTH policies, because the host's own setting
+	// decides whether a fault continues the action or refuses it. A clause that
+	// asserted "failed open" here would describe a configuration the operator
+	// never chose.
+	for _, phrase := range []string{"gate claim read", "under the default policy the action continued unjudged", "PASTURE_HOOK_FAIL_CLOSED=1", "Fix:"} {
 		require.Contains(t, err.Error(), phrase)
 	}
 }
@@ -778,38 +838,74 @@ func TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt(t *testing.T) {
 // TestGateReaderAfterClaimReadHookIsTestOnly holds the claim hook to test files.
 // Without this pin production could arm a hook whose only purpose is to stop a
 // snapshot at a boundary, and no subject would notice.
+//
+// The pin covers every way a field can be armed, not one: an assignment whose
+// left-hand side is a selector ending in the field name, whatever that selector
+// is applied to, and a composite literal that names the field as a key. The
+// second is why an AssignStmt-only walk is not enough —
+// `&gateReader{afterClaimRead: hook}` is a key in a literal, not an assignment,
+// and it arms the hook just as well.
+//
+// RED when: any non-test file names the field in any of those positions.
 func TestGateReaderAfterClaimReadHookIsTestOnly(t *testing.T) {
 	t.Parallel()
 	files, err := filepath.Glob("*.go")
 	require.NoError(t, err)
-	assignments := 0
+	arms := 0
+	report := func(path, shape string) {
+		arms++
+		t.Errorf("%s arms afterClaimRead in non-test code with %s; the hook exists for in-process interleave proofs only", path, shape)
+	}
+	// namesHook reports whether an expression reaches the field: a selector
+	// ending in the field name, whatever it is selected from, or a literal key
+	// spelled with it. Both are the two shapes a field is written through.
+	namesHook := func(expr ast.Expr) bool {
+		switch typed := expr.(type) {
+		case *ast.SelectorExpr:
+			return typed.Sel != nil && typed.Sel.Name == "afterClaimRead"
+		case *ast.KeyValueExpr:
+			if ident, ok := typed.Key.(*ast.Ident); ok {
+				return ident.Name == "afterClaimRead"
+			}
+		}
+		return false
+	}
 	for _, path := range files {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
 		}
 		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-		require.NoError(t, err)
+		require.NoError(t, err, "%s must parse; the pin reads every non-test file in the package", path)
 		ast.Inspect(file, func(node ast.Node) bool {
-			assign, ok := node.(*ast.AssignStmt)
-			if !ok || len(assign.Lhs) != 1 {
-				return true
+			switch typed := node.(type) {
+			case *ast.AssignStmt:
+				for _, lhs := range typed.Lhs {
+					if namesHook(lhs) {
+						report(path, "an assignment")
+					}
+				}
+			case *ast.KeyValueExpr:
+				if namesHook(typed) {
+					report(path, "a composite literal key")
+				}
 			}
-			selector, ok := assign.Lhs[0].(*ast.SelectorExpr)
-			if !ok || selector.Sel.Name != "afterClaimRead" {
-				return true
-			}
-			assignments++
-			t.Errorf("%s assigns afterClaimRead in non-test code; the hook exists for in-process interleave proofs only", path)
 			return true
 		})
 	}
-	require.Zero(t, assignments, "no non-test file may arm the claim hook")
+	require.Zero(t, arms, "no non-test file may arm the claim hook")
 }
 
-// TestGateReaderCompletesOnAPoolOfOne is the starvation proof. The Pasture handle
-// pools one connection and Provenance borrows the same pool, so a reader that
-// held its claim lease across the public call would wait for itself. The subject
-// completes, and the bound is a deadline rather than a sleep.
+// TestGateReaderCompletesOnAPoolOfOne is the starvation regression. The Pasture
+// handle pools one connection and Provenance borrows the same pool, so a reader
+// that held its claim lease across the public call would queue behind itself.
+// The subject completes, and the bound is a deadline rather than a sleep.
+//
+// It is a REGRESSION and not the proof of the release. The counting pool this
+// subject installs is a second *sql.DB on the same file, so the two subsystems
+// stop competing for the same connection here and a held lease would not starve
+// the public call. The release itself is observed where the lease would show, in
+// TestGateReaderBoundPathMakesOneClaimReadAndOnePublicCall, and the pool the
+// public read really borrows is proved by the subject below.
 func TestGateReaderCompletesOnAPoolOfOne(t *testing.T) {
 	t.Parallel()
 	store, path := openGateStore(t)
@@ -828,6 +924,100 @@ func TestGateReaderCompletesOnAPoolOfOne(t *testing.T) {
 	require.NoError(t, err, "a snapshot on a pool of one must complete; holding the claim lease would deadlock it")
 	t.Cleanup(func() { require.NoError(t, snapshot.Close()) })
 	require.Equal(t, 1, counts.count(gateClaimReadToken))
+}
+
+// TestGateReaderPublicCallBorrowsTheStoresOwnConnection is the hazard the claim
+// read's release exists for, shown on the pool the production topology actually
+// shares. Nothing is substituted: this store is the unified one, Provenance
+// borrowed its audit handle (open_unified.go), and the connection the subject
+// takes is the same connection the claim read borrows.
+//
+// The subject takes the store's single connection and issues the public
+// ownership read the Reader issues. The read queues for that connection — the
+// pool records the wait and no second connection appears — and it is still
+// queued when the caller cancels, because the borrowed handle's liveness
+// precheck pings with a background context and so is not bounded by the
+// caller's. Only releasing the connection ends it. That is the hazard: a reader
+// holding the claim lease across this call would be waiting for the connection
+// it is itself holding, and nothing in its own context would end that wait.
+//
+// RED when: the public read stops borrowing this store's pool, because then a
+// held claim lease would not be a self-wait at all and the release would be
+// unexplained tidiness rather than a requirement.
+func TestGateReaderPublicCallBorrowsTheStoresOwnConnection(t *testing.T) {
+	t.Parallel()
+	store, _ := openGateStore(t)
+	actor := feasibilityActor(t, store, "gate-lease-hazard")
+	task := createHumanTestTask(t, store, "lease-hazard")
+	seedAssignmentEpisode(t, store, task, "lease-hazard-owner", RoleOwnerResponsibility, actor, "lease-hazard-owner-start")
+	gateClaim(t, store, actor, "lease-hazard-session")
+
+	api, ok := store.Journal().(provenance.ActorOwnershipQueryAPI)
+	require.True(t, ok, "the unified store's journal must offer the public ownership read")
+	query := provenance.ActorOwnershipQuery{
+		Actor:         actor,
+		MaterialKinds: []provenance.EventKind{FamilyAssignmentStarted.EventKind()},
+		EvidenceKinds: []provenance.EvidenceKind{assignmentCommandEvidenceKind},
+	}
+
+	// Baseline first: the identical read answers when the pool is free, so what
+	// follows is attributable to the hold and to nothing else.
+	freed, err := api.QueryActorOwnership(t.Context(), query)
+	require.NoError(t, err, "the public read must answer while the pool is free")
+	require.Len(t, freed.Tasks, 1)
+
+	require.Equal(t, 1, store.auditDB.Stats().MaxOpenConnections, "the hazard needs a pool of one")
+	held, err := store.auditDB.Conn(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, store.auditDB.Stats().InUse, "the store's only connection must be the one held")
+
+	bounded, cancel := context.WithCancel(t.Context())
+	type answer struct {
+		ownership provenance.ActorOwnershipSnapshot
+		err       error
+	}
+	answered := make(chan answer, 1)
+	go func() {
+		ownership, readErr := api.QueryActorOwnership(bounded, query)
+		answered <- answer{ownership, readErr}
+	}()
+
+	// A condition on the pool's own counters, never a sleep: WaitCount rises
+	// only once the read's connection request has actually queued behind the
+	// held one, and the tick is a poll cadence rather than part of the claim.
+	require.Eventually(t, func() bool { return store.auditDB.Stats().WaitCount > 0 },
+		timeouts.TestProfile().WorkflowResult(), time.Millisecond,
+		"the public read must queue for the connection the store is still holding")
+	require.Equal(t, 1, store.auditDB.Stats().InUse, "a second connection must not appear while one is held")
+
+	// The wait is not bounded by the caller's context: cancelling here must not
+	// release the read, because the liveness precheck pings with a background
+	// context of its own.
+	cancel()
+	select {
+	case <-answered:
+		t.Fatal("the queued read finished while the only connection was still held")
+	default:
+	}
+
+	require.NoError(t, held.Close())
+	var result answer
+	select {
+	case result = <-answered:
+	case <-time.After(timeouts.TestProfile().WorkflowResult()):
+		t.Fatal("the queued read did not settle after the held connection was released")
+	}
+	// A precheck that had honoured the cancellation would have reported the
+	// borrowed handle as unavailable; this read got its connection and failed on
+	// its own context, which is what proves the precheck waited past it.
+	var unavailable *provenance.StoreUnavailableError
+	require.NotErrorAs(t, result.err, &unavailable,
+		"the liveness precheck pinged with a background context, so the wait outlived the caller's cancellation")
+	require.ErrorIs(t, result.err, context.Canceled)
+
+	recovered, err := api.QueryActorOwnership(t.Context(), query)
+	require.NoError(t, err, "the read is sound; only the held connection stood between it and its answer")
+	require.Len(t, recovered.Tasks, 1)
 }
 
 // TestGateReaderReadsUnderAHeldWriter proves a read is not a write in disguise.
@@ -917,6 +1107,66 @@ func TestGateReaderUnmappedPhaseReachesPolicyAsUnset(t *testing.T) {
 	refusal, refused := result.Refusal()
 	require.True(t, refused, "an unset phase is a refusal, not a denial: %+v", result)
 	require.Equal(t, gatepolicy.RefusalPhaseUnknown, refusal.Kind())
+}
+
+// TestGateReaderTransferPredecessorGrantsOwnerRoleIsTheAcceptedResidual pins the
+// one inference in the reader that is accepted rather than prevented.
+//
+// A transfer successor names its predecessor and the reader reads the role from
+// that naming alone, so a successor of a REVIEWER episode is reported as the
+// owner role. Pasture's own transfer command only ever moves an owner episode,
+// so a supported writer cannot produce this row. A transfer written through
+// Provenance's RAW API by a writer that is not that command can, and the
+// successor then holds the owner role here.
+//
+// That residual is ACCEPTED, not prevented: the landed write path refuses the
+// raw move, and the correction belongs there. This subject exists so the
+// acceptance is pinned rather than implied — if a later change tightens this
+// inference, the tightening is a decision to be taken deliberately, and this
+// subject is where it shows up.
+//
+// The row carries the predecessor naming AND a material row that names this
+// very episode as a reviewer. The material is what the reader would read if it
+// did not trust the predecessor, and the assertion is that it does not read it.
+// A reader that fell through to the material would report the reviewer role and
+// go red on the assertion below, with the accepted answer spelled out.
+//
+// RED when: the reader stops granting the owner role to a transfer successor
+// (the tightening the acceptance is waiting for) or starts reading the
+// successor's own material instead of its predecessor's naming.
+func TestGateReaderTransferPredecessorGrantsOwnerRoleIsTheAcceptedResidual(t *testing.T) {
+	t.Parallel()
+	actor, err := provenance.ParseActorID("gate-residual--0193f1c0-0000-7000-8000-0000000000f7")
+	require.NoError(t, err)
+	task, err := provenance.ParseTaskID("task-residual--0193f1c0-0000-7000-8000-0000000000f8")
+	require.NoError(t, err)
+	predecessor := provenance.AssignmentID("residual-reviewer-episode")
+	payload, err := canonicalJSON(assignmentStartPayload{
+		Assignment: "residual-successor",
+		Role:       RoleAxisReviewer.String(),
+		Occupant:   actor.String(),
+	})
+	require.NoError(t, err)
+
+	episode, err := ownedTaskEpisode(actor, provenance.OwnedTaskRow{
+		AssignmentID:            "residual-successor",
+		TaskID:                  task,
+		PredecessorAssignmentID: &predecessor,
+		Phase:                   provenance.PhaseCodeReview,
+		Materials: []provenance.OwnedMaterialRow{{
+			EventKind: FamilyAssignmentStarted.EventKind(),
+			Payload:   payload,
+		}},
+	})
+	require.NoError(t, err,
+		"a transfer successor's role is read from its predecessor naming, which names a reviewer episode here")
+	require.Equal(t, "residual-successor", string(episode.Assignment))
+	require.Equal(t, gateauthority.RoleOwnerResponsibility, episode.Role,
+		"the ACCEPTED answer: a transfer successor inherits the owner role from its predecessor's naming, "+
+			"even when that predecessor is a reviewer episode, because a supported transfer command can only "+
+			"move an owner episode. A reviewer role here is the tightening the accepted residual is waiting "+
+			"for; it is not a fix, and the raw-transfer path that can produce this row is refused on the "+
+			"write side")
 }
 
 // TestGateReaderUnmappedPhaseInTheStoreIsAnIntegrityFault records what the real
@@ -1079,9 +1329,9 @@ func TestGateReaderMapsOwnedTasksPerWriter(t *testing.T) {
 // one shape whose role lives only in command evidence: a composed allocation
 // that wrote the command and its children but no assignment-start material.
 //
-// The three subtests are the three ways that evidence can fail to answer, and
-// each is a fault. A role the gate cannot source is never read as the owner role
-// by default, and never becomes a policy answer.
+// The subtests are the ways that evidence can fail to answer, and each is a
+// fault. A role the gate cannot source is never read as the owner role by
+// default, and never becomes a policy answer.
 func TestGateReaderLegacyStartReviewWithoutMaterialUsesCommandEvidence(t *testing.T) {
 	t.Parallel()
 	t.Run("legacy-review-absent", func(t *testing.T) {
@@ -1111,20 +1361,66 @@ func TestGateReaderLegacyStartReviewWithoutMaterialUsesCommandEvidence(t *testin
 		require.Equal(t, action, episode.Assignment, "the review axis is the episode whose material is absent")
 		require.Equal(t, gateauthority.RoleAxisReviewer, episode.Role, "a started review's child role is axis reviewer")
 	})
-	t.Run("non-review-absent", func(t *testing.T) {
+	t.Run("command-absent", func(t *testing.T) {
 		t.Parallel()
 		store, _ := openGateStore(t)
-		actor := feasibilityActor(t, store, "gate-non-review")
-		task := createHumanTestTask(t, store, "non-review")
+		actor := feasibilityActor(t, store, "gate-no-command")
+		task := createHumanTestTask(t, store, "no-command")
 		// An owner start whose producing operation wrote neither material nor
 		// command evidence. Only a foreign writer produces this shape, which is
 		// why the reader refuses it instead of assuming the owner role.
-		gateRawEpisode(t, store, task, "non-review-owner", actor, "non-review-start")
-		gateClaim(t, store, actor, "non-review-session")
-		reader, err := NewGateReader(store, gateHarness, "non-review-session")
+		gateRawEpisode(t, store, task, "no-command-owner", actor, "no-command-start")
+		gateClaim(t, store, actor, "no-command-session")
+		reader, err := NewGateReader(store, gateHarness, "no-command-session")
 		require.NoError(t, err)
 		_, err = reader.Snapshot(t.Context())
-		requireRoleSourceFault(t, err, "no assignment-start material")
+		requireRoleSourceFault(t, err, "no assignment-start material", "0 of its command records name a role")
+	})
+	t.Run("command-is-not-a-review", func(t *testing.T) {
+		t.Parallel()
+		store, _ := openGateStore(t)
+		actor := feasibilityActor(t, store, "gate-not-a-review")
+		task := createHumanTestTask(t, store, "not-a-review")
+		// The evidence IS there and it IS readable, and it is a real command
+		// record written by the same closed type a Pasture command writes. What
+		// it is not is a review. The reader refuses it here rather than reading
+		// the role off a command that never started a review, so this is the arm
+		// a role guess would remove.
+		gateCommandEvidenceEpisode(t, store, task, "not-a-review-owner", actor, "not-a-review-start",
+			gateCommandRecord(t, assignmentCommandRecord{
+				Mutation:  MutationSetSliceCandidate,
+				Payload:   []byte(`{}`),
+				Request:   []byte(`{}`),
+				Authority: 1,
+				Task:      task,
+			}))
+		gateClaim(t, store, actor, "not-a-review-session")
+		reader, err := NewGateReader(store, gateHarness, "not-a-review-session")
+		require.NoError(t, err)
+		_, err = reader.Snapshot(t.Context())
+		requireRoleSourceFault(t, err, "did not start a review")
+	})
+	t.Run("command-is-an-unreadable-review", func(t *testing.T) {
+		t.Parallel()
+		store, _ := openGateStore(t)
+		actor := feasibilityActor(t, store, "gate-unreadable-review")
+		task := createHumanTestTask(t, store, "unreadable-review")
+		// A start-review record whose nested payload is not a review command. The
+		// outer record decodes, so this is the arm AFTER the decode: the binding
+		// check refused what the command claims to be.
+		gateCommandEvidenceEpisode(t, store, task, "unreadable-review-owner", actor, "unreadable-review-start",
+			gateCommandRecord(t, assignmentCommandRecord{
+				Mutation:  MutationStartReview,
+				Payload:   []byte(`{"kind":"","subject":{}}`),
+				Request:   []byte(`{}`),
+				Authority: 1,
+				Task:      task,
+			}))
+		gateClaim(t, store, actor, "unreadable-review-session")
+		reader, err := NewGateReader(store, gateHarness, "unreadable-review-session")
+		require.NoError(t, err)
+		_, err = reader.Snapshot(t.Context())
+		requireRoleSourceFault(t, err, "could not be read as a review command")
 	})
 	t.Run("present-malformed", func(t *testing.T) {
 		t.Parallel()
@@ -1151,6 +1447,57 @@ func requireRoleSourceFault(t *testing.T, err error, phrases ...string) {
 	require.NotEmpty(t, fault.Reason)
 	for _, phrase := range append(phrases, "Fix:") {
 		require.Contains(t, err.Error(), phrase)
+	}
+}
+
+// TestGateReaderCommandEvidenceRoleVocabularyIsMirrored is the guard on the one
+// legacyReviewRole arm no store can reach today.
+//
+// The role on the command-evidence path is not read from the record. It is
+// computed by the closed command binding, which returns one of a fixed set of
+// child roles, and the reader then bridges that role into the gate's own
+// vocabulary. The bridge refuses a token it does not know, and while the two
+// vocabularies name the same roles that refusal is unreachable: every role the
+// binding can return is a role the gate knows.
+//
+// This subject pins the precondition, so the arm stays a stated contract rather
+// than an untested guess. If a role is added to ONE vocabulary and not the
+// other, the bridge's refusal becomes reachable and a reader that had replaced
+// it with a guess would hand the gate an owner role on a fact it does not
+// understand — and this subject goes red on the divergence instead.
+//
+// RED when: the task vocabulary and the gate vocabulary stop naming the same
+// roles, in either direction.
+func TestGateReaderCommandEvidenceRoleVocabularyIsMirrored(t *testing.T) {
+	t.Parallel()
+	// Every role the task store declares valid, found by probing the closed
+	// enum rather than by a hand-kept list, so a new arm is seen here.
+	store := map[string]gateauthority.AssignmentRole{}
+	for arm := 0; arm <= 255; arm++ {
+		role := AssignmentRole(arm)
+		if !role.valid() {
+			continue
+		}
+		token := role.String()
+		require.NotEqual(t, fmt.Sprintf("AssignmentRole(%d)", arm), token,
+			"the task role %d has no canonical token, so the bridge could never name it", arm)
+		require.NotContains(t, store, token, "two task roles must not share one token")
+		store[token] = gateauthority.RoleUnset
+	}
+	bridged := map[string]gateauthority.AssignmentRole{}
+	for _, role := range gateauthority.AssignmentRoles() {
+		bridged[role.String()] = role
+	}
+	require.Equal(t, len(store), len(bridged),
+		"the task vocabulary declares %d role tokens and the gate vocabulary %d; a role in one and not the other makes the reader's unknown-token refusal reachable",
+		len(store), len(bridged))
+	for token := range store {
+		role, ok := gateauthority.RoleFromToken(token)
+		require.True(t, ok, "the task store writes the role token %q and the gate cannot read it", token)
+		require.Equal(t, bridged[token], role, "the token %q must bridge to one gate role", token)
+	}
+	for token := range bridged {
+		require.Contains(t, store, token, "the gate knows the role token %q and no task role writes it", token)
 	}
 }
 
@@ -1302,7 +1649,7 @@ func TestGateReaderCapabilityMissing(t *testing.T) {
 	var capability *GateReaderCapabilityError
 	require.ErrorAs(t, err, &capability)
 	require.Equal(t, "provenance.ActorOwnershipQueryAPI", capability.Missing)
-	for _, phrase := range []string{"ActorOwnershipQueryAPI", "Fix:", "failed open"} {
+	for _, phrase := range []string{"ActorOwnershipQueryAPI", "Fix:", "upgrade pasture to a build", "PASTURE_HOOK_FAIL_CLOSED=1"} {
 		require.Contains(t, err.Error(), phrase)
 	}
 }
@@ -1326,6 +1673,50 @@ func TestGateReaderCancellationSurfacesTheContextError(t *testing.T) {
 	require.ErrorAs(t, err, &read)
 	require.Equal(t, GateReadStageOwnership, read.Stage)
 	require.ErrorIs(t, err, context.Canceled, "the context cause must stay in the chain")
+}
+
+// TestGateReaderFaultStringsNameBothPolicies is the pin on the operator text of
+// every read fault. A read fault is not a denial, and what the host then does
+// with it is the OPERATOR'S setting, not the reader's: under the default policy
+// the action continues unjudged, and on an evidenced blocking host with
+// PASTURE_HOOK_FAIL_CLOSED=1 the host refuses it. A fault string that says
+// "failed open" claims a configuration the operator never chose, so the retired
+// phrasing is refused here by name and the setting is named instead.
+//
+// The six parts are checked on each of the five faults, because a fault that
+// loses one of them is a fault an operator cannot act on.
+//
+// RED when: any of the five drops a part, or asserts a single outcome for a
+// policy the operator controls.
+func TestGateReaderFaultStringsNameBothPolicies(t *testing.T) {
+	t.Parallel()
+	faults := map[string]error{
+		"read":       &GateReadError{Stage: GateReadStageClaim, Harness: gateHarness, Session: "s", Cause: context.Canceled},
+		"integrity":  &GateReadIntegrityError{Stage: provenance.ActorOwnershipStageOwnedTasks, Cause: provenance.ErrSubtypeIntegrity},
+		"claim":      &GateClaimMalformedError{Harness: gateHarness, Session: "s", Cause: context.Canceled},
+		"capability": &GateReaderCapabilityError{Missing: "provenance.ActorOwnershipQueryAPI"},
+		"role":       &GateRoleSourceError{Assignment: "a", Reason: "r"},
+	}
+	// The house shape for these strings is a leading What sentence and the five
+	// labelled parts after it, so the What is checked as the opening clause
+	// rather than as a label none of them carries.
+	parts := []string{"Why:", "Where:", "When:", "Impact:", "Fix:"}
+	for name, fault := range faults {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			text := fault.Error()
+			require.True(t, strings.HasPrefix(text, "Pasture "), "the %s fault must open with what it is, got %q", name, text)
+			for _, part := range parts {
+				require.Contains(t, text, part, "the %s fault must carry its %s part", name, part)
+			}
+			require.Contains(t, text, "PASTURE_HOOK_FAIL_CLOSED=1",
+				"a read fault's outcome is the operator's setting, so the string must name it")
+			require.Contains(t, text, "under the default policy",
+				"the default policy is the outcome most operators see, so the string must say what it is")
+			require.NotContains(t, text, "failed open",
+				"\"failed open\" asserts a configuration the operator did not choose and is not the reader's to claim")
+		})
+	}
 }
 
 var errGateStoreUnavailable = errors.New("gate test store is unavailable")

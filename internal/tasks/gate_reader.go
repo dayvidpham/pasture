@@ -16,7 +16,13 @@
 // The claim connection is RELEASED before the Provenance call, because both
 // subsystems borrow the same *sql.DB (open_unified.go, the Provenance open) and
 // the default pool is one connection. A public call issued while Pasture still
-// held its claim lease would wait for itself forever.
+// held its claim lease would queue behind the connection the reader itself
+// holds, and the borrowed handle's liveness precheck pings with a background
+// context, so nothing in the caller's context ends that wait.
+//
+// The release is a MECHANISM, not a guarantee, and the two-store read it belongs
+// to has a semantic cost that is stated at the read itself in Snapshot: two
+// reads, two snapshots, one decision.
 package tasks
 
 import (
@@ -60,6 +66,13 @@ type gateReader struct {
 	// no non-test file assigns it. It exists because the unbound path makes no
 	// journal call, so a wrapping journal cannot observe that boundary; a test
 	// needs one deterministic place to place a concurrent claim INSERT.
+	//
+	// It fires on BOTH unbound arms, and that is deliberate rather than a
+	// leftover: the two arms are the same fact (this invocation has no claim to
+	// read) reached two ways — an event that carried no session identity, and a
+	// session with no claim row. A test proving the seam wants the claim read to
+	// be over and its connection released, and that is true of either arm, so one
+	// hook serves both rather than leaving the no-session arm unobservable.
 	afterClaimRead func()
 }
 
@@ -108,7 +121,7 @@ func (e *GateReadError) Error() string {
 			"Why: the gate reads the session claim and the actor's active ownership before it decides, and this read did not complete. "+
 			"Where: internal/tasks/gate_reader.go, in Snapshot, at the %s step. "+
 			"When: during the lifecycle invocation that consulted the gate, before any decision was taken. "+
-			"Impact: the invocation reported a fault and failed open under the default policy; nothing was decided and nothing was written. "+
+			"Impact: the invocation reported a fault, so the gate decided nothing and nothing was written; under the default policy the action continued unjudged, and on an evidenced blocking host with PASTURE_HOOK_FAIL_CLOSED=1 the host refused the action instead. "+
 			"Fix: retry the invocation once the store is reachable; if the read keeps failing, release other writers on the database file, then run `pasture migrate` to confirm the file is at the expected schema version.",
 		e.Stage, e.Session, e.Harness, e.Cause, e.Stage,
 	)
@@ -132,8 +145,8 @@ func (e *GateReadIntegrityError) Error() string {
 			"Why: the store holds ownership facts that disagree with each other, or a result larger than the reader's byte bound; a supported writer cannot produce either. "+
 			"Where: internal/tasks/gate_reader.go, in Snapshot, at the Provenance active-ownership read. "+
 			"When: during the lifecycle invocation that consulted the gate, before any decision was taken. "+
-			"Impact: the invocation reported a fault and failed open under the default policy; no episode was reported, so no decision was taken. "+
-			"Fix: run the store's own read-only integrity and projection checks to find the damaged rows, then restore the database file from a known-good copy.",
+			"Impact: the invocation reported a fault, so no episode was reported and no decision was taken; under the default policy the action continued unjudged, and on an evidenced blocking host with PASTURE_HOOK_FAIL_CLOSED=1 the host refused the action instead. "+
+			"Fix: run Journal.VerifyIntegrity and Journal.ReplayProjections on this store to find the damaged rows; both only read; then restore the database file from a known-good copy.",
 		e.Stage, e.Cause,
 	)
 }
@@ -158,7 +171,7 @@ func (e *GateClaimMalformedError) Error() string {
 			"Why: the stored claim row carries an actor value that is not a canonical actor identifier, so the session cannot be attributed to any actor. "+
 			"Where: internal/tasks/session_claim.go, reading pasture_session_claim for the gate claim read. "+
 			"When: during the lifecycle invocation that consulted the gate, before any decision was taken. "+
-			"Impact: the invocation reported a fault and failed open under the default policy; no decision was taken and nothing was written. "+
+			"Impact: the invocation reported a fault, so the session could not be attributed and nothing was written; under the default policy the action continued unjudged, and on an evidenced blocking host with PASTURE_HOOK_FAIL_CLOSED=1 the host refused the action instead. "+
 			"Fix: inspect the row with `SELECT harness, session, actor FROM pasture_session_claim`, then start a new session so the host writes a fresh claim.",
 		e.Session, e.Harness, e.Cause,
 	)
@@ -181,8 +194,8 @@ func (e *GateReaderCapabilityError) Error() string {
 			"Why: the gate reads active ownership through one public store capability, and a store without it has no supported way to answer. "+
 			"Where: internal/tasks/gate_reader.go, in Snapshot, at the active-ownership read. "+
 			"When: during the lifecycle invocation that consulted the gate, before any decision was taken. "+
-			"Impact: the invocation reported a fault and failed open under the default policy; no decision was taken. "+
-			"Fix: upgrade the database's task-store dependency to a build that offers the active-ownership read, then retry the invocation.",
+			"Impact: the invocation reported a fault, so no decision was taken; under the default policy the action continued unjudged, and on an evidenced blocking host with PASTURE_HOOK_FAIL_CLOSED=1 the host refused the action instead. "+
+			"Fix: upgrade pasture to a build that includes the active-ownership read, then retry the invocation.",
 		e.Missing,
 	)
 }
@@ -202,7 +215,7 @@ func (e *GateRoleSourceError) Error() string {
 			"Why: the episode is active, but its role is written by no assignment-start record and no accepted command record the reader can read. "+
 			"Where: internal/tasks/gate_reader.go, in Snapshot, while mapping an owned task into an episode. "+
 			"When: during the lifecycle invocation that consulted the gate, before any decision was taken. "+
-			"Impact: the invocation reported a fault and failed open under the default policy; no decision was taken. "+
+			"Impact: the invocation reported a fault, so no decision was taken; under the default policy the action continued unjudged, and on an evidenced blocking host with PASTURE_HOOK_FAIL_CLOSED=1 the host refused the action instead. "+
 			"Fix: read the assignment's own start fact and command evidence in the store, correct the missing or malformed record, then retry the invocation.",
 		e.Assignment, e.Task, e.Reason,
 	)
@@ -216,7 +229,7 @@ type GateReaderScopeError struct {
 
 func (e *GateReaderScopeError) Error() string {
 	return fmt.Sprintf(
-		"Pasture refused to %s through a gate reader. "+
+		"Pasture refused to %s. "+
 			"Why: one gate reader answers for exactly the session and the actor it was opened with; any other question would read facts this snapshot does not hold. "+
 			"Where: internal/tasks/gate_reader.go, in Snapshot and in the sealed snapshot's accessors. "+
 			"When: at the call site that asked the question. "+
@@ -295,6 +308,17 @@ func (r *gateReader) Snapshot(ctx context.Context) (gateauthority.Snapshot, erro
 	if err != nil {
 		return nil, &GateClaimMalformedError{Harness: r.harness, Session: r.session, Cause: err}
 	}
+	// TWO STORES, TWO SNAPSHOTS, ONE DECISION. The claim read above saw
+	// pasture_session_claim as of its own instant, and the ownership read below
+	// sees Provenance's facts as of a later one, with no shared fence between the
+	// two reads and no transaction spanning them. A claim or a transfer committed
+	// in that window is invisible to this snapshot, so the gate can answer from a
+	// pair of facts that never coexisted: a session whose actor has since lost
+	// the assignment it is being asked about, or an assignment gained after the
+	// claim was read. That is the accepted cost of two owners, it is why the
+	// snapshot is a whole answer and not a transaction, and it is the reason the
+	// claim connection is released before the public call rather than held across
+	// it: holding it would trade this window for a deadlock, not for a fence.
 	api, ok := r.tracker.Journal().(provenance.ActorOwnershipQueryAPI)
 	if !ok {
 		return nil, &GateReaderCapabilityError{Missing: "provenance.ActorOwnershipQueryAPI"}
@@ -388,10 +412,24 @@ func ownershipReadFault(err error, harness ir.HarnessID, session string) error {
 // producing operation wrote carries the role. Failing that too, a legacy
 // assignment whose material is absent still names its role in the command
 // evidence its producing operation wrote.
+//
+// RESIDUAL (stated, not hidden), and it lives HERE because this is where the
+// privilege is granted: the first step trusts the predecessor naming, so a
+// transfer written through Provenance's RAW API by a writer that is not this
+// build's transfer command can move a REVIEWER episode, and this function then
+// hands the successor the owner role. The landed write path refuses that move;
+// the correction belongs to the write path, not to this read, and until it lands
+// the residual is accepted rather than prevented. A maintainer tightening this
+// function must know the premise is that every predecessor naming came from the
+// transfer command; that premise is foreign-writer-dependent, not a property of
+// the store. See the acceptance test beside it.
 func ownedTaskEpisode(actor provenance.ActorID, row provenance.OwnedTaskRow) (gateauthority.Episode, error) {
 	// ok is deliberately dropped: an unmapped phase is the policy's unset phase
-	// and its rule 6 fault, which is one decision away from here and belongs to
-	// the policy rather than to this read.
+	// and its rule 6 fault, which belongs to the policy rather than to this read.
+	// The arm is unreachable while the ownership read validates phase first and
+	// refuses an out-of-range value as a subtype fault, so it is kept as the
+	// translation boundary for a second read contract that hands phases through
+	// unchecked, not as a branch that is nearly live.
 	phase, _ := gateauthority.PhaseFromProvenance(row.Phase)
 	role := gateauthority.RoleOwnerResponsibility
 	if row.PredecessorAssignmentID == nil {

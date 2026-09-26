@@ -87,9 +87,14 @@ func lifecycleSession(bindings []model.NativeBinding) (string, error) {
 //
 // The whole read is one SELECT under the store's own SQLite busy tier, and the
 // pooled connection is released before this function returns. That release is
-// load-bearing: the ownership read that follows borrows the same pool, whose
-// default size is one connection, so a public call made while this lease was
-// still held would wait for itself.
+// load-bearing, and the reason is the pool, not the claim: the ownership read
+// that follows borrows the SAME *sql.DB through Provenance's borrowed open
+// (open_unified.go), and that pool's default size is one connection, so a public
+// call issued while this lease was still held would queue behind the very
+// connection the reader is holding. The hazard is a self-wait at the POOL, and it
+// is not even bounded by the caller's context: the borrowed handle's liveness
+// precheck pings with a background context of its own, so only releasing the
+// lease ends the wait (TestGateReaderPublicCallBorrowsTheStoresOwnConnection).
 //
 // present is false when no claim row exists, which is an unbound session and
 // not an error. A returned error is a read fault; the caller decides its kind.
