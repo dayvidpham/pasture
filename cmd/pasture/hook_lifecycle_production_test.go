@@ -323,7 +323,7 @@ func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, upda
 		if valid && payload.Event == registration.EventOpenCodeToolExecuteBefore {
 			require.Equal(t, row.ProducingOperationID, consultations[updateIndex].ProducingOperationID)
 			require.Equal(t, row.ProducingOperationJournalID, consultations[updateIndex].ProducingOperationJournalID)
-			assertProceedConsultation(t, consultations[updateIndex].Payload)
+			assertUnboundProceedConsultation(t, consultations[updateIndex].Payload)
 		}
 	}
 	faultPath := filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile)
@@ -482,7 +482,8 @@ console.log(JSON.stringify({argsUnchanged: true}));
 	require.NotZero(t, gateInterpreted.JournalID)
 	require.Equal(t, gateInterpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID)
 	require.Less(t, gateInterpreted.JournalID, consultation.JournalID, "one durable gate operation must order interpreted before consultation evidence")
-	require.Contains(t, string(consultation.Payload), `"decision":{"decision":"proceed","reason":"legal"}`)
+	require.Contains(t, string(consultation.Payload), `"decision":{"decision":"proceed","reason":"unbound-session"}`,
+		"a transport gate with no session-start claim records the unbound-session reason")
 
 	// Claude is deliberately non-live regression evidence here. Compare only the
 	// shared gate semantic, blocking mode, and canonical Proceed decision.
@@ -765,6 +766,11 @@ func TestEvaluatedClaudeProceedHasEmptyStdoutAndTypedConsultationV2(t *testing.T
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 	raw := readProductionClaudeFixture(t, "pre_tool_use_2_1_261.json", "PreToolUse")
+	// PRESERVE. This subject is the durable policy reason of an EVALUATED
+	// Proceed, so it must keep evaluating: seed the claim and the owning
+	// assignment, and the reason stays "legal" from a real evaluation rather
+	// than the unbound-session default a transport subject carries.
+	seedBoundActorOwningAMappedTask(t, dbPath, ir.HarnessClaudeCode, raw)
 	command := exec.Command(
 		binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle",
 		"--harness", "claude-code", "--event", "PreToolUse", "--host-version", "2.1.261",
@@ -862,7 +868,7 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 						require.Equal(t, interpreted[0].ProducingOperationID, consultations[0].ProducingOperationID)
 						require.Equal(t, interpreted[0].ProducingOperationJournalID, consultations[0].ProducingOperationJournalID)
 						require.Less(t, interpreted[0].JournalID, consultations[0].JournalID)
-						assertProceedConsultation(t, consultations[0].Payload)
+						assertUnboundProceedConsultation(t, consultations[0].Payload)
 					}
 					require.NoError(t, tracker.Close())
 
@@ -1604,11 +1610,19 @@ func decodeInterpretedPayload(t *testing.T, raw []byte) interpretedEvidencePaylo
 	return payload
 }
 
-func assertProceedConsultation(t *testing.T, raw []byte) {
+// assertUnboundProceedConsultation pins the durable reason of a Proceed that the
+// gate read from an UNCLAIMED session. This is a transport subject: it drives a
+// real host event with no session-start claim, so the policy's rule for an
+// unbound session is the truth it records. The reason is deliberately NOT
+// "legal": "legal" was the middle-end default for a policy evaluation that
+// never ran, and an unclaimed session has no session identity for the gate to
+// evaluate. A transport subject that needs the evaluated-Proceed reason seeds
+// a real claim and an owning assignment instead, and asserts "legal" there.
+func assertUnboundProceedConsultation(t *testing.T, raw []byte) {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
 	require.ElementsMatch(t, []string{"legalized", "decision", "interpreted"}, mapKeys(members))
-	require.JSONEq(t, `{"decision":"proceed","reason":"legal"}`, string(members["decision"]))
+	require.JSONEq(t, `{"decision":"proceed","reason":"unbound-session"}`, string(members["decision"]))
 	interpreted := decodeJSONObject(t, members["interpreted"])
 	require.ElementsMatch(t, []string{"result_slot", "content_digest"}, mapKeys(interpreted))
 	require.JSONEq(t, `"interpreted"`, string(interpreted["result_slot"]))
@@ -1875,7 +1889,8 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 				consultation := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)[0]
 				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID, "one durable operation groups interpreted and consultation evidence")
 				require.Less(t, interpreted.JournalID, consultation.JournalID, "interpreted evidence precedes consultation evidence")
-				require.Contains(t, string(consultation.Payload), `"decision":{"decision":"proceed","reason":"legal"}`)
+				require.Contains(t, string(consultation.Payload), `"decision":{"decision":"proceed","reason":"unbound-session"}`,
+					"a transport gate with no session-start claim records the unbound-session reason")
 			} else {
 				require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind), "an observation produces no consultation evidence")
 			}
