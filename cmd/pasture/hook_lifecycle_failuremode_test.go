@@ -1258,26 +1258,12 @@ func abandonAfterTheCommitWithHooks(t *testing.T, cmd *cobra.Command, hooks life
 // by any other means would be proving a store shape the product never produces.
 // The claim is written for the SESSION THE CAPTURE CARRIES, read out of the
 // capture, so the gate looks up the session that was actually claimed.
+//
+// ONE IMPLEMENTATION: seedReaderClaim performs the write, so there is no second
+// copy of the claim-writing sequence to drift from it.
 func seedBoundActorWithoutAssignment(t *testing.T, dbPath string, harness ir.HarnessID, raw []byte) {
 	t.Helper()
-	session := captureSessionIDOf(t, raw, harness)
-	tracker, err := tasks.OpenTaskTracker(dbPath)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, tracker.Close()) }()
-	agent, err := tracker.RegisterHumanAgent("lifecycle-gate-proof", "gate-owner", "gate-owner@example.invalid")
-	require.NoError(t, err)
-	kind := registration.EventSessionStart
-	switch harness {
-	case ir.HarnessCodex:
-		kind = registration.EventCodexSessionStart
-	case ir.HarnessOpenCode:
-		kind = registration.EventOpenCodeSessionCreated
-	}
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(
-		context.Background(), tracker, harness, kind,
-		[]model.NativeBinding{{Kind: model.BindingSession, Value: session}},
-		tasks.ActorClaim(agent.ID.String()), lifecycleCLIClock{},
-	))
+	seedReaderClaim(t, dbPath, harness, captureSessionIDOf(t, raw, harness))
 }
 
 // captureSessionIDOf reads the session identity out of a committed capture. The
