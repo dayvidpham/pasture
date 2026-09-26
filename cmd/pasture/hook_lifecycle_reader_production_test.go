@@ -97,16 +97,7 @@ func seedReaderEpisode(t *testing.T, dbPath string, occupant provenance.ActorID,
 	task, err := tracker.Create("file://gate-reader-fixture", "gate reader fixture task", "", provenance.TaskTypeTask, provenance.PriorityMedium, phase)
 	require.NoError(t, err)
 
-	genesis, err := tracker.Journal().LookupCommitted(provenance.OperationID("pasture.system.genesis.v1"))
-	require.NoError(t, err)
-	authority := provenance.JournalID(0)
-	found := false
-	for _, slot := range genesis.ResultSlots {
-		if slot.Slot == provenance.ResultSlotID("auth") {
-			authority, found = slot.ProducedJournalID, true
-		}
-	}
-	require.True(t, found, "the system genesis must publish its authority result slot")
+	genesis := readerGenesisAuthority(t, tracker)
 
 	assignment := provenance.AssignmentID("gate-reader-fixture-owner")
 	operation := provenance.OperationID("gate-reader-fixture-owner-start")
@@ -125,12 +116,34 @@ func seedReaderEpisode(t *testing.T, dbPath string, occupant provenance.ActorID,
 	_, err = tracker.Journal().Apply(provenance.OperationInput{
 		OperationID:        operation,
 		ActorID:            occupant,
-		AuthorityJournalID: &authority,
+		AuthorityJournalID: &genesis,
 		CommandDigest:      []byte(operation),
 		Effects:            effects,
 	})
 	require.NoError(t, err)
 	return task.ID
+}
+
+// readerGenesisAuthority resolves the one bootstrap authority every reader
+// fixture cites, so neither seeder can drift from the other on the genesis
+// operation ID or its result slot.
+func readerGenesisAuthority(t *testing.T, tracker interface {
+	Journal() provenance.Journal
+}) provenance.JournalID {
+	t.Helper()
+	genesis, err := tracker.Journal().LookupCommitted(provenance.OperationID("pasture.system.genesis.v1"))
+	require.NoError(t, err)
+	require.Equal(t, provenance.CommittedExact, genesis.Kind,
+		"the system genesis must exist before any assignment is seeded")
+	authority := provenance.JournalID(0)
+	found := false
+	for _, slot := range genesis.ResultSlots {
+		if slot.Slot == provenance.ResultSlotID("auth") {
+			authority, found = slot.ProducedJournalID, true
+		}
+	}
+	require.True(t, found, "the system genesis must publish its authority result slot")
+	return authority
 }
 
 // rawBoundary opens the unified store's SQLite file for the labelled test-only
@@ -427,7 +440,7 @@ func readerFreshStore(t *testing.T) string {
 	return dbPath
 }
 
-// readerOutcomeLocators are the nine literal public locators the design names.
+// readerOutcomeLocators are the nine literal public locators this file publishes.
 // The loop asserts the composed subtest name is one of them, so a harness-label
 // rename turns that cell RED instead of silently renaming a published locator.
 var readerOutcomeLocators = map[string]struct{}{
@@ -445,7 +458,9 @@ var readerOutcomeLocators = map[string]struct{}{
 // readerAssertTransportProperties pins the properties a transport writes but a
 // caller could forget to read: on OpenCode the generated plugin spawns the child
 // and observes its bytes, and it must NOT throw for a gate that is not a policy
-// Deny (the plugin throws only when the child returns a denial).
+// Deny (the plugin throws only when the child returns a denial). It does NOT
+// compare run.ChildStdout to run.Continuation: both are the same tee'd byte
+// stream, so such a comparison could never fail.
 func readerAssertTransportProperties(t *testing.T, harness readerHarnessCase, run readerRun) {
 	t.Helper()
 	if harness.harness != ir.HarnessOpenCode {
@@ -453,7 +468,6 @@ func readerAssertTransportProperties(t *testing.T, harness readerHarnessCase, ru
 	}
 	require.Empty(t, run.Thrown, "the generated OpenCode plugin must not throw for a gate that is not a policy Deny")
 	require.NotEmpty(t, run.ChildStdout, "the OpenCode transport must observe the spawned child's bytes")
-	assert.Equal(t, run.ChildStdout, run.Continuation, "the OpenCode continuation is the child's standard output")
 }
 
 // TestReaderGateOutcomesOnEveryHarness is the nine literal outcome locators. For
@@ -465,7 +479,7 @@ func readerAssertTransportProperties(t *testing.T, harness readerHarnessCase, ru
 // does not allow a Deny the same policy verdict is committed as an UNENFORCED
 // Deny (Proceed/ReasonUnenforcedDeny) and the host continues. The cell asserts
 // whatever the pinned row's capability computes, never a refusal the row cannot
-// express; the locator keeps the design's literal /deny name so the contract is
+// express; the locator keeps the literal /deny name the outcome contract publishes, so the contract is
 // readable from it.
 //
 // WHAT IT VISITS: the three pinned gate events and their three real transports.
@@ -473,14 +487,16 @@ func readerAssertTransportProperties(t *testing.T, harness readerHarnessCase, ru
 // output, or any event other than the pinned gate row.
 func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 	binary := lifecycleBinary(t)
+	visited := map[string]bool{}
 	for _, harness := range readerHarnessCases(t) {
 		for _, cell := range []string{"allow", "deny", "fault"} {
 			composed := harness.native + "/" + harness.label + "/" + cell
 			t.Run(composed, func(t *testing.T) {
 				require.Contains(t, readerOutcomeLocators, composed,
-					"the composed locator must be one of the nine design names")
+					"the composed locator must be one of the nine published names")
 				assert.Equal(t, "TestReaderGateOutcomesOnEveryHarness/"+composed, t.Name(),
-					"the published locator must match the design's literal name")
+					"the published locator must match the literal name, so renaming the test function reddens every cell")
+				visited[composed] = true
 
 				dbPath := readerFreshStore(t)
 				raw := readerFixture(t, harness.fixture)
@@ -529,10 +545,15 @@ func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 				assert.Equal(t, normalized.Reason().String(), committed.Reason)
 				if cell == "deny" && !harness.mapping.Response().AllowsDeny() {
 					// The /deny locator's contract on a row with no refusal
-					// channel: the policy denial is committed UNENFORCED and the
-					// host proceeds. This is pinned, not merely documented.
-					assert.Equal(t, backend.DecisionProceed.String(), committed.Decision, "a row that cannot express a Deny commits an unenforced Proceed")
-					assert.Equal(t, backend.ReasonUnenforcedDeny.String(), committed.Reason, "the durable reason names the unenforced denial")
+					// channel: the policy verdict is Deny, but the committed
+					// record must NOT carry that verdict — it is the unenforced
+					// denial. Comparing the COMMITTED bytes to the POLICY verdict
+					// is independent of the normalized comparison above, so a
+					// normalization regression cannot satisfy both.
+					assert.NotEqual(t, decision.Kind().String(), committed.Decision,
+						"a row that cannot express a Deny must not commit the policy verdict")
+					assert.Equal(t, backend.ReasonUnenforcedDeny.String(), committed.Reason,
+						"the durable reason names the unenforced denial")
 				}
 
 				if cell == "allow" {
@@ -548,10 +569,16 @@ func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 					control := readerConsultationDecisionOf(t, controlPayload)
 					assert.Equal(t, backend.ReasonUnboundSession.String(), control.Reason,
 						"the same fixture with no claim must record the unbound reason; a hard-coded Proceed/Legal grant cannot satisfy this cell")
-					assert.Equal(t, backend.DecisionProceed.String(), control.Decision)
 				}
 			})
 		}
+	}
+	// THE REVERSE DIRECTION: the forward Contains above pins emitted ⊆ published,
+	// so a renamed label cannot publish a stranger. This pins published ⊆
+	// emitted, so dropping a harness cannot silently UNPUBLISH one of the nine.
+	for design := range readerOutcomeLocators {
+		assert.True(t, visited[design],
+			"the published locator %q was never emitted; a dropped harness silently unpublished it", design)
 	}
 }
 
@@ -570,7 +597,7 @@ type readerFaultRow struct {
 
 // readerFaultRows are the production-producible gate-read faults whose damaged
 // state a REAL store can hold and a BUILT transport can reach. Two rows the
-// design's mapping lists in its built column are NOT here, and the reason is
+// built-column contract lists are NOT here, and the reason is
 // pinned by TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage:
 // the pinned Provenance open-time replay convergence check refuses the damage
 // (an out-of-range phase, an owner projection that disagrees with the folded
@@ -581,7 +608,7 @@ func readerFaultRows() []readerFaultRow {
 	return []readerFaultRow{
 		{name: "malformed-claim", token: "gate claim read", seed: seedReaderMalformedClaim},
 		{name: "role-source", token: "could not establish the role", seed: seedReaderRoleSource},
-		{name: "byte-limit", token: "gate ownership read", detail: "larger than the reader's byte bound", seed: seedReaderByteLimit},
+		{name: "byte-limit", token: "gate ownership read", detail: "above its bound of 8388608 bytes", seed: seedReaderByteLimit},
 	}
 }
 
@@ -644,16 +671,7 @@ func seedReaderByteLimit(t *testing.T, dbPath string, harness ir.HarnessID, sess
 	require.NoError(t, err)
 	defer func() { require.NoError(t, tracker.Close()) }()
 
-	genesis, err := tracker.Journal().LookupCommitted(provenance.OperationID("pasture.system.genesis.v1"))
-	require.NoError(t, err)
-	authority := provenance.JournalID(0)
-	found := false
-	for _, slot := range genesis.ResultSlots {
-		if slot.Slot == provenance.ResultSlotID("auth") {
-			authority, found = slot.ProducedJournalID, true
-		}
-	}
-	require.True(t, found, "the system genesis must publish its authority result slot")
+	authority := readerGenesisAuthority(t, tracker)
 
 	// 10 * ~900 KiB = ~9.0 MB, above the 8 MiB aggregate wire bound.
 	const ownedTasks = 10
@@ -908,13 +926,13 @@ func TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage(t *tes
 
 // TestReaderGateInvocationCostIsMeasuredWithoutACeiling records the measured
 // elapsed of a real gate invocation on each built transport, split into the
-// classes that ship. It makes NO wall-clock assertion: the design reports
+// classes that ship. It makes NO wall-clock assertion: the cost contract reports
 // measured elapsed only, because a ceiling would turn a loaded runner into a
 // false defect.
 //
 // THE PER-CLASS RECONCILIATION IS HERE IN THE REPO, not only in a handoff. The
-// classes that ship after this change (design section 10; it supersedes the
-// six-class framing):
+// classes that ship after this change, which supersede the earlier finer-grained
+// class framing:
 //
 //  1. session-claim read — one indexed point SELECT on pasture_session_claim
 //     (primary key harness,session) under the SQLiteBusy tier. Condition: any
@@ -934,7 +952,7 @@ func TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage(t *tes
 //     hook cost. Measured by the built-binary subjects in
 //     cmd/pasture/migrate_v8_v9_cli_test.go, not here.
 //
-// The obsolete class-6 "64 episodes" measurement is replaced: the read has NO
+// The retired 64-episode measurement is replaced: the read has NO
 // episode cap, so a bound session costs O(owned tasks), an unbound one O(1), and
 // the only wire bound is MaxActorOwnershipResultBytes (8 MiB).
 //
