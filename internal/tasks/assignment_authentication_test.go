@@ -1769,9 +1769,26 @@ type driverRefusalBinding struct {
 // the template carries.
 func authenticationRefusalSites(t *testing.T) []authenticationRefusalSite {
 	t.Helper()
+	return authenticationRefusalSitesIn(t, nil)
+}
+
+// authenticationRefusalSitesIn is the same walk over a SUPPLIED source rather
+// than the production file, so a shape the production file happens not to carry
+// today is still walked instead of only described. An absent source reads the
+// production file, which is what every subject above means; only the regression
+// case below supplies one, and it supplies a shape production does not have.
+func authenticationRefusalSitesIn(t *testing.T, source []byte) []authenticationRefusalSite {
+	t.Helper()
 	fileSet := token.NewFileSet()
-	parsed, err := parser.ParseFile(fileSet, "assignment_authentication.go", nil, 0)
-	require.NoError(t, err, "the production authentication file must parse")
+	// parser.ParseFile READS the named file when its source argument is nil, and
+	// a nil []byte boxed into that argument would instead parse as an empty
+	// file, so the source only becomes an interface when there is one.
+	var fromMemory any
+	if len(source) > 0 {
+		fromMemory = source
+	}
+	parsed, err := parser.ParseFile(fileSet, "assignment_authentication.go", fromMemory, 0)
+	require.NoError(t, err, "the walked source must parse")
 	var sites []authenticationRefusalSite
 	literalAt := func(expr ast.Expr, constructor string, argument int) string {
 		literal, isLiteral := expr.(*ast.BasicLit)
@@ -1801,6 +1818,12 @@ func authenticationRefusalSites(t *testing.T) []authenticationRefusalSite {
 			if returned == nil {
 				return 0, token.NoPos, false
 			}
+		}
+		if returned == nil {
+			// A literal with an EMPTY body ran no statement, so there is no
+			// forwarding return to read: it is not a wrapper, and saying so
+			// must not take the whole package's test binary down.
+			return 0, token.NoPos, false
 		}
 		if returned.Fun == nil || len(returned.Args) == 0 {
 			return 0, token.NoPos, false
@@ -2104,6 +2127,44 @@ func TestAssignmentDriverRefusalNamesNoRetiredMachineryAtEverySite(t *testing.T)
 			}
 		})
 	}
+}
+
+// TestTheRefusalSiteWalkReadsAFuncLiteralWithNoStatements walks a source that
+// carries a function literal with an EMPTY body — `quiet := func() {}`, the
+// shape a maintainer writes when they add a small local helper — beside a real
+// wrapper and the one site that raises through it, and holds two things.
+//
+// THE WALK MUST SURVIVE IT. A literal with no statements runs none of the
+// wrapper resolution's loop, so a reader that dereferences the call it never
+// found takes the whole package's test binary down with it: every concurrently
+// running test in this package loses its result to a SIGSEGV rather than one of
+// them reporting a named failure. THE WALK MUST ALSO STILL FIND THE SITE.
+// "Does not crash" is not a resolution, and a reader that refused the whole file
+// on seeing an empty body would pass this subject by collecting nothing.
+//
+// A literal with no statements is not a forwarding wrapper, so it is not a site
+// and it binds no name: the answer is the zero value and false, the same answer
+// every other non-wrapper shape in the walk already gives.
+//
+// RED when: the walk panics on a function literal whose body holds no statement,
+// or it stops collecting the sites written beside one.
+func TestTheRefusalSiteWalkReadsAFuncLiteralWithNoStatements(t *testing.T) {
+	t.Parallel()
+	source := []byte(`package tasks
+
+func driver() error {
+	quiet := func() {}
+	_ = quiet
+	refuse := startPageRefusal
+	wrap := func(problem string) error { return refuse(problem) }
+	return wrap("the authenticated start page is empty")
+}
+`)
+	sites := authenticationRefusalSitesOf(authenticationRefusalSitesIn(t, source), true)
+	require.Len(t, sites, 1, "an empty-bodied literal raises nothing, so the only site is the one the problem literal reaches")
+	require.Equal(t, "driver", sites[0].Enclosing, "the site must name the function it is written in")
+	require.Equal(t, "the authenticated start page is empty", sites[0].Problem,
+		"the wrapper's own call is its plumbing, so it is skipped rather than collected")
 }
 
 // authenticationFileLiteral is one string literal the production authentication
