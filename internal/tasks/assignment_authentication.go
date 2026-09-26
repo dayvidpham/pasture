@@ -25,6 +25,8 @@ import (
 	"io"
 
 	"github.com/dayvidpham/provenance"
+
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
 
 // maxParentProofPages bounds the command proof read. It is the ONLY bound on
@@ -42,8 +44,14 @@ const (
 // denial. It is raised when a command could not authenticate the assignment it
 // acts under.
 type AssignmentAuthenticationError struct {
-	Step  string
-	Cause error
+	// Function is the function in this file that raised the refusal. The Where
+	// clause of the message names it, so every raise site supplies the function
+	// it is written in as a literal and never the name of a caller: a caller is
+	// not on the stack of the check, and a second caller would make one name
+	// untrue for the other.
+	Function string
+	Step     string
+	Cause    error
 }
 
 // Error names what could not be authenticated, why the check exists, where it
@@ -53,24 +61,42 @@ func (e *AssignmentAuthenticationError) Error() string {
 	return fmt.Sprintf(
 		"Pasture could not authenticate the assignment this command acts under (step %s): %v. "+
 			"Why: the command checks the assignment's start, material and command evidence in the journal before it writes, and this check failed. "+
-			"Where: internal/tasks/assignment_authentication.go, authenticateRecoveryRows. "+
+			"Where: internal/tasks/assignment_authentication.go, %s. "+
 			"When: before the command wrote anything. "+
 			"Impact: the command was refused and nothing was written; this is not a policy denial. "+
 			"Fix: check that the assignment id, task and actor on the command are the ones the parent assignment was started with, then retry; "+
 			"if the check fails again on unchanged input, run Journal.VerifyIntegrity on the store.",
-		e.Step, e.Cause)
+		e.Step, e.Cause, e.Function)
 }
 
 func (e *AssignmentAuthenticationError) Unwrap() error { return e.Cause }
 
-func authenticationFault(step string, err error) error {
-	return &AssignmentAuthenticationError{Step: step, Cause: err}
+func authenticationFault(function, step string, cause error) error {
+	return &AssignmentAuthenticationError{Function: function, Step: step, Cause: cause}
 }
 
-// normalizeRecoveryJSON invokes the public pure preparation API only. No Apply,
+// startPageRefusal is the shape a driver-level refusal takes: the start page
+// the driver was handed cannot be authenticated at all, which is a different
+// fact from a check that ran and failed. The Where names the driver that raised
+// it, never a caller: a caller is not the code that refused, and a second caller
+// would make one hardcoded name untrue for the other. The Why and the Fix are the
+// driver's own, because they are what an operator can act on regardless of who
+// called.
+func startPageRefusal(problem string) error {
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryValidation,
+		What:     "Pasture rejected an assignment-controlled epoch operation: " + problem + ".",
+		Why:      "A command parent must match an exact public assignment start and authenticated material, not a neighboring journal row.",
+		Where:    "Authenticating a command's parent assignment (internal/tasks/assignment_authentication.go, tasks.authenticateAssignmentStarts).",
+		Impact:   "The command did not reach Provenance Apply; no task, evidence, event, activity, or projection was written.",
+		Fix:      "Supply the exact active assignment; repair inconsistent history or request an explicitly reviewed larger command proof budget.",
+	}
+}
+
+// normalizeAuthenticationJSON invokes the public pure preparation API only. No Apply,
 // tracker, journal, SQL or receipt is involved; field/mutation size limits and
 // duplicate-key rejection are exactly those of the stored Provenance payload.
-func normalizeRecoveryJSON(data []byte) ([]byte, error) {
+func normalizeAuthenticationJSON(data []byte) ([]byte, error) {
 	prepared, err := provenance.Canonicalize(provenance.OperationInput{Effects: []provenance.Effect{{
 		Sort: provenance.EffectEvidence, EvidenceKind: assignmentCommandEvidenceKind, ContentDigest: []byte{1}, Payload: data,
 	}}})
@@ -84,13 +110,13 @@ func normalizeRecoveryJSON(data []byte) ([]byte, error) {
 	return effects[0].Payload, nil
 }
 
-func decodeRecoveryJSON(data []byte, value any) error {
-	normalized, err := normalizeRecoveryJSON(data)
+func decodeAuthenticationJSON(data []byte, value any) error {
+	normalized, err := normalizeAuthenticationJSON(data)
 	if err != nil {
 		return err
 	}
 	if !bytes.Equal(normalized, data) {
-		return fmt.Errorf("stored recovery JSON is not Provenance-normalized")
+		return fmt.Errorf("stored evidence JSON is not Provenance-normalized")
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
@@ -99,36 +125,36 @@ func decodeRecoveryJSON(data []byte, value any) error {
 	}
 	var extra any
 	if err := d.Decode(&extra); !errors.Is(err, io.EOF) {
-		return fmt.Errorf("trailing JSON after recovery payload")
+		return fmt.Errorf("trailing JSON after the stored evidence payload")
 	}
 	encoded, err := canonicalJSON(value)
 	if err != nil {
 		return err
 	}
-	typedNormalized, err := normalizeRecoveryJSON(encoded)
+	typedNormalized, err := normalizeAuthenticationJSON(encoded)
 	if err != nil {
 		return err
 	}
 	if !bytes.Equal(typedNormalized, data) {
-		return fmt.Errorf("recovery payload omits required fields or uses unsupported null/number forms")
+		return fmt.Errorf("stored evidence payload omits required fields or uses unsupported null/number forms")
 	}
 	return nil
 }
 
-type recoveryMember struct {
+type proofMember struct {
 	Assignment provenance.AssignmentID
 	Task       provenance.TaskID
 	Actor      provenance.ActorID
 	Producer   provenance.OperationID
 }
 
-// commandRecoveryBinding validates closed nested command types without running
+// commandEvidenceBinding validates closed nested command types without running
 // service replay, mutable eligibility, or receipt reconstruction. Repository
 // arrays remain in caller order; only membership validation uses maps.
 // A nil operation reconstructs closed producer bytes for digest authentication.
 // The row-authentication caller supplies its public operation to additionally
 // bind deterministic replacement/member identities. Neither stage reads a store.
-func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenance.OperationID) (AssignmentRole, []recoveryMember, error) {
+func commandEvidenceBinding(record *assignmentCommandRecord, operation *provenance.OperationID) (AssignmentRole, []proofMember, error) {
 	var typed any
 	var parent provenance.TaskID
 	var assignment provenance.AssignmentID
@@ -167,7 +193,7 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 			Plan       provenance.TaskID       `json:"plan"`
 			Assignment provenance.AssignmentID `json:"assignment"`
 		}{}
-		if err := decodeRecoveryJSON(record.Payload, &p); err != nil {
+		if err := decodeAuthenticationJSON(record.Payload, &p); err != nil {
 			return 0, nil, err
 		}
 		typed = p
@@ -184,7 +210,7 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 			Commit     provenance.GitOID       `json:"commit"`
 			Assignment provenance.AssignmentID `json:"assignment"`
 		}{}
-		if err := decodeRecoveryJSON(record.Payload, &p); err != nil {
+		if err := decodeAuthenticationJSON(record.Payload, &p); err != nil {
 			return 0, nil, err
 		}
 		validation = validateRepositoryID(p.Repository)
@@ -207,7 +233,7 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 			ReplacementValue SliceCandidateReplacement `json:"replacement_value"`
 			Rework           ReworkSubmission          `json:"rework"`
 		}{}
-		if err := decodeRecoveryJSON(record.Payload, &p); err != nil {
+		if err := decodeAuthenticationJSON(record.Payload, &p); err != nil {
 			return 0, nil, err
 		}
 		handle = "slice-candidate-replacement"
@@ -236,7 +262,7 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 			Repositories []RepositoryCandidate   `json:"repositories"`
 			Assignment   provenance.AssignmentID `json:"assignment"`
 		}{}
-		if err := decodeRecoveryJSON(record.Payload, &p); err != nil {
+		if err := decodeAuthenticationJSON(record.Payload, &p); err != nil {
 			return 0, nil, err
 		}
 		validation = validRepositories(p.Repositories)
@@ -255,7 +281,7 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 			ReplacementValue IntegrationCandidateReplacement `json:"replacement_value"`
 			Rework           ReworkSubmission                `json:"rework"`
 		}{}
-		if err := decodeRecoveryJSON(record.Payload, &p); err != nil {
+		if err := decodeAuthenticationJSON(record.Payload, &p); err != nil {
 			return 0, nil, err
 		}
 		handle = "integration-candidate-replacement"
@@ -284,7 +310,7 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 			Subject ReviewSubjectRef `json:"subject"`
 			Kind    SubjectKind      `json:"kind"`
 		}{}
-		if err := decodeRecoveryJSON(record.Payload, &p); err != nil {
+		if err := decodeAuthenticationJSON(record.Payload, &p); err != nil {
 			return 0, nil, err
 		}
 		typed = p
@@ -324,10 +350,10 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 		Epoch    EpochRootID       `json:"epoch"`
 		Payload  json.RawMessage   `json:"payload"`
 	}
-	if err := decodeRecoveryJSON(record.Request, &requestEnvelope); err != nil {
+	if err := decodeAuthenticationJSON(record.Request, &requestEnvelope); err != nil {
 		return 0, nil, err
 	}
-	normalizedRequest, err := normalizeRecoveryJSON(request)
+	normalizedRequest, err := normalizeAuthenticationJSON(request)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -343,7 +369,7 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 		return childRole, nil, nil
 	}
 	if record.Mutation != MutationStartReview {
-		return childRole, []recoveryMember{
+		return childRole, []proofMember{
 			{
 				Assignment: provenance.AssignmentID(string(*operation) + suffix),
 				Task:       deterministicTask(*operation, handle),
@@ -360,11 +386,11 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 	if err != nil {
 		return 0, nil, err
 	}
-	var members []recoveryMember
+	var members []proofMember
 	for _, task := range plan.Tasks {
 		members = append(
 			members,
-			recoveryMember{
+			proofMember{
 				Assignment: provenance.AssignmentID(string(*operation) + "-" + task.Handle),
 				Task:       deterministicTask(*operation, task.Handle),
 				Actor:      record.Occupant,
@@ -375,12 +401,12 @@ func commandRecoveryBinding(record *assignmentCommandRecord, operation *provenan
 	return childRole, members, nil
 }
 
-func decodeRecoveryCommand(row provenance.EvidenceRow) (assignmentCommandRecord, error) {
+func decodeCommandEvidence(row provenance.EvidenceRow) (assignmentCommandRecord, error) {
 	var record assignmentCommandRecord
-	if err := decodeRecoveryJSON(row.Payload, &record); err != nil {
+	if err := decodeAuthenticationJSON(row.Payload, &record); err != nil {
 		return record, err
 	}
-	if _, _, err := commandRecoveryBinding(&record, nil); err != nil {
+	if _, _, err := commandEvidenceBinding(&record, nil); err != nil {
 		return record, err
 	}
 	producerBytes, err := canonicalJSON(record)
@@ -391,7 +417,7 @@ func decodeRecoveryCommand(row provenance.EvidenceRow) (assignmentCommandRecord,
 	if !bytes.Equal(digest[:], row.ContentDigest) {
 		return record, fmt.Errorf("command evidence content digest mismatch")
 	}
-	normalized, err := normalizeRecoveryJSON(producerBytes)
+	normalized, err := normalizeAuthenticationJSON(producerBytes)
 	if err != nil {
 		return record, err
 	}
@@ -403,39 +429,39 @@ func decodeRecoveryCommand(row provenance.EvidenceRow) (assignmentCommandRecord,
 	}
 	// Return the stored closed record so later binding decodes normalized nested
 	// values again; producer-order RawMessages are not mistaken for stored bytes.
-	if err := decodeRecoveryJSON(row.Payload, &record); err != nil {
+	if err := decodeAuthenticationJSON(row.Payload, &record); err != nil {
 		return record, err
 	}
 	return record, nil
 }
 
-// assignmentRecoveryProof is what one authenticated page established: the
+// assignmentProof is what one authenticated page established: the
 // episodes it proved, and the review members its commands declared. Rows are in
 // journal order, so a transfer successor always follows the predecessor it names.
-type assignmentRecoveryProof struct {
+type assignmentProof struct {
 	Rows    []startedEpisode
-	Members []recoveryMember
+	Members []proofMember
 }
 
-type recoveryMaterialKey struct {
+type materialKey struct {
 	Task       provenance.TaskID
 	Assignment provenance.AssignmentID
 }
-type recoveryMaterial struct {
+type materialFact struct {
 	Row     provenance.TaskEventRow
 	Payload assignmentStartPayload
 	Actor   provenance.ActorID
 	Role    AssignmentRole
 }
-type recoveryEvidenceKey struct {
+type evidenceKey struct {
 	Operation provenance.OperationID
 	Kind      provenance.EvidenceKind
 }
 
-func decodeRecoveryMaterials(rows []provenance.TaskEventRow, snapshot provenance.JournalID) (map[recoveryMaterialKey]recoveryMaterial, error) {
-	result := map[recoveryMaterialKey]recoveryMaterial{}
+func decodeAssignmentMaterials(rows []provenance.TaskEventRow, snapshot provenance.JournalID) (map[materialKey]materialFact, error) {
+	result := map[materialKey]materialFact{}
 	for _, row := range rows {
-		if _, err := normalizeRecoveryJSON(row.Payload); err != nil {
+		if _, err := normalizeAuthenticationJSON(row.Payload); err != nil {
 			return nil, err
 		}
 		payload, err := decodeAssignmentStart(row.Payload)
@@ -465,33 +491,33 @@ func decodeRecoveryMaterials(rows []provenance.TaskEventRow, snapshot provenance
 		if !role.valid() {
 			return nil, fmt.Errorf("assignment material %d has unknown role", row.JournalID)
 		}
-		key := recoveryMaterialKey{row.TaskID, provenance.AssignmentID(payload.Assignment)}
+		key := materialKey{row.TaskID, provenance.AssignmentID(payload.Assignment)}
 		if _, duplicate := result[key]; duplicate {
 			return nil, fmt.Errorf("duplicate assignment material for %s/%s", row.TaskID, payload.Assignment)
 		}
-		result[key] = recoveryMaterial{row, payload, actor, role}
+		result[key] = materialFact{row, payload, actor, role}
 	}
 	return result, nil
 }
 
-func validateRecoveryEvidence(rows []provenance.EvidenceRow, snapshot provenance.JournalID) (map[recoveryEvidenceKey]provenance.EvidenceRow, error) {
-	result := map[recoveryEvidenceKey]provenance.EvidenceRow{}
+func validateAssignmentEvidence(rows []provenance.EvidenceRow, snapshot provenance.JournalID) (map[evidenceKey]provenance.EvidenceRow, error) {
+	result := map[evidenceKey]provenance.EvidenceRow{}
 	for _, row := range rows {
 		if row.ProducingOperationID == "" || row.ProducingOperationJournalID <= 0 || row.ProducingOperationJournalID > snapshot || row.EffectiveActorID == (provenance.ActorID{}) || row.TaskID == nil {
-			return nil, fmt.Errorf("invalid recovery evidence identity or producer")
+			return nil, fmt.Errorf("invalid command evidence identity or producer")
 		}
-		key := recoveryEvidenceKey{row.ProducingOperationID, row.EvidenceKind}
+		key := evidenceKey{row.ProducingOperationID, row.EvidenceKind}
 		if _, duplicate := result[key]; duplicate {
 			return nil, fmt.Errorf("duplicate evidence for %s/%s", row.ProducingOperationID, row.EvidenceKind)
 		}
 		switch row.EvidenceKind {
 		case assignmentCommandEvidenceKind:
-			if _, err := decodeRecoveryCommand(row); err != nil {
+			if _, err := decodeCommandEvidence(row); err != nil {
 				return nil, err
 			}
 		case reviewRoundAuthorityEvidenceKind:
 			var value reviewRoundAuthority
-			if err := decodeRecoveryJSON(row.Payload, &value); err != nil {
+			if err := decodeAuthenticationJSON(row.Payload, &value); err != nil {
 				return nil, err
 			}
 			if err := validateReviewRoundAuthority(value, *row.TaskID); err != nil {
@@ -506,33 +532,37 @@ func validateRecoveryEvidence(rows []provenance.EvidenceRow, snapshot provenance
 				return nil, fmt.Errorf("review evidence digest mismatch")
 			}
 		default:
-			return nil, fmt.Errorf("unexpected recovery evidence kind")
+			return nil, fmt.Errorf("unexpected command evidence kind")
 		}
 		result[key] = row
 	}
 	return result, nil
 }
 
-func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, page provenance.AssignmentStartPage, materials []provenance.TaskEventRow, evidence []provenance.EvidenceRow, predecessors map[provenance.AssignmentID]startedEpisode, authenticatedThrough provenance.JournalID) (assignmentRecoveryProof, error) {
-	var proof assignmentRecoveryProof
-	material, err := decodeRecoveryMaterials(materials, page.SnapshotMaxJournalID)
+// authenticateStartRows authenticates ONE already-read page of starts. The caller
+// has paged the material and the evidence; this function decides whether the
+// page is a valid authority chain and names the episodes and review members it
+// proved. It reads no page of its own, so the page bounds live with the caller.
+func authenticateStartRows(ctx context.Context, journal provenance.Journal, page provenance.AssignmentStartPage, materials []provenance.TaskEventRow, evidence []provenance.EvidenceRow, predecessors map[provenance.AssignmentID]startedEpisode, authenticatedThrough provenance.JournalID) (assignmentProof, error) {
+	var proof assignmentProof
+	material, err := decodeAssignmentMaterials(materials, page.SnapshotMaxJournalID)
 	if err != nil {
-		return proof, authenticationFault("material decoding", err)
+		return proof, authenticationFault("authenticateStartRows", "material decoding", err)
 	}
-	evidences, err := validateRecoveryEvidence(evidence, page.SnapshotMaxJournalID)
+	evidences, err := validateAssignmentEvidence(evidence, page.SnapshotMaxJournalID)
 	if err != nil {
-		return proof, authenticationFault("evidence decoding", err)
+		return proof, authenticationFault("authenticateStartRows", "evidence decoding", err)
 	}
 	for _, row := range page.Rows {
 		if err := ctx.Err(); err != nil {
-			return proof, authenticationFault("proof cancellation", err)
+			return proof, authenticationFault("authenticateStartRows", "proof cancellation", err)
 		}
 		if row.AuthorityJournalID <= 0 || row.AuthorityJournalID > page.SnapshotMaxJournalID || row.ProducingOperationJournalID <= 0 || row.ProducingOperationJournalID > page.SnapshotMaxJournalID || row.AssignmentID == "" || row.TaskID == (provenance.TaskID{}) || row.Occupant == (provenance.ActorID{}) || row.SlotID != provenance.SlotOwnerResponsibility {
-			return proof, authenticationFault("assignment row", fmt.Errorf("unusable assignment start"))
+			return proof, authenticationFault("authenticateStartRows", "assignment row", fmt.Errorf("unusable assignment start"))
 		}
-		m, present := material[recoveryMaterialKey{row.TaskID, row.AssignmentID}]
+		m, present := material[materialKey{row.TaskID, row.AssignmentID}]
 		if present && (m.Actor != row.Occupant || (m.Payload.AuthorityJournalID != 0 && provenance.JournalID(m.Payload.AuthorityJournalID) != row.AuthorityJournalID)) {
-			return proof, authenticationFault("material binding", fmt.Errorf("occupant or authority mismatch for %s", row.AssignmentID))
+			return proof, authenticationFault("authenticateStartRows", "material binding", fmt.Errorf("occupant or authority mismatch for %s", row.AssignmentID))
 		}
 		var role AssignmentRole
 		switch {
@@ -542,11 +572,11 @@ func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, p
 			// size is the only bound on how many that is.
 			previous, ok := predecessors[*row.PredecessorAssignmentID]
 			if row.ParentAssignmentID != nil || !ok || previous.Task != row.TaskID || previous.Role != RoleOwnerResponsibility || previous.Authority > authenticatedThrough || (present && m.Role != RoleOwnerResponsibility) {
-				return proof, authenticationFault("transfer predecessor", fmt.Errorf("no authenticated owner predecessor for %s", row.AssignmentID))
+				return proof, authenticationFault("authenticateStartRows", "transfer predecessor", fmt.Errorf("no authenticated owner predecessor for %s", row.AssignmentID))
 			}
 			governs, err := journal.AuthorityGovernsTaskAt(previous.Authority, row.TaskID, row.ProducingOperationJournalID)
 			if err != nil || !governs {
-				return proof, authenticationFault(
+				return proof, authenticationFault("authenticateStartRows",
 					"transfer predecessor governance",
 					fmt.Errorf("predecessor does not govern at producer boundary: %v", err),
 				)
@@ -556,21 +586,21 @@ func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, p
 			role = m.Role // The producer actor need not be the assigned occupant.
 		default:
 			supplement := provenance.GovernedAllocationSupplementOperationID(row.ProducingOperationID)
-			e, ok := evidences[recoveryEvidenceKey{supplement, assignmentCommandEvidenceKind}]
+			e, ok := evidences[evidenceKey{supplement, assignmentCommandEvidenceKind}]
 			if !ok {
-				return proof, authenticationFault("composed producer bridge", fmt.Errorf("missing exact command evidence for %s", row.AssignmentID))
+				return proof, authenticationFault("authenticateStartRows", "composed producer bridge", fmt.Errorf("missing exact command evidence for %s", row.AssignmentID))
 			}
-			record, err := decodeRecoveryCommand(e)
+			record, err := decodeCommandEvidence(e)
 			if err != nil {
-				return proof, authenticationFault("command decoding", err)
+				return proof, authenticationFault("authenticateStartRows", "command decoding", err)
 			}
 			if row.ParentAssignmentID == nil || *row.ParentAssignmentID != record.Assignment || record.Occupant != row.Occupant || record.Authority > row.ProducingOperationJournalID || (present && (m.Row.ActorID != record.Occupant || *m.Row.ProducedByOperationJournalID != e.ProducingOperationJournalID)) {
-				return proof, authenticationFault("composed command binding", fmt.Errorf("parent, actor, authority or material producer mismatch"))
+				return proof, authenticationFault("authenticateStartRows", "composed command binding", fmt.Errorf("parent, actor, authority or material producer mismatch"))
 			}
-			var members []recoveryMember
-			role, members, err = commandRecoveryBinding(&record, &row.ProducingOperationID)
+			var members []proofMember
+			role, members, err = commandEvidenceBinding(&record, &row.ProducingOperationID)
 			if err != nil {
-				return proof, authenticationFault("composed mutation binding", err)
+				return proof, authenticationFault("authenticateStartRows", "composed mutation binding", err)
 			}
 			matched := false
 			for _, member := range members {
@@ -579,16 +609,16 @@ func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, p
 				}
 			}
 			if !matched || (present && m.Role != role) {
-				return proof, authenticationFault("composed child binding", fmt.Errorf("assignment is not a declared child in its declared role"))
+				return proof, authenticationFault("authenticateStartRows", "composed child binding", fmt.Errorf("assignment is not a declared child in its declared role"))
 			}
 			if record.Mutation != MutationStartReview {
 				if !present {
-					return proof, authenticationFault("ordinary composed material", fmt.Errorf("missing material for non-review assignment"))
+					return proof, authenticationFault("authenticateStartRows", "ordinary composed material", fmt.Errorf("missing material for non-review assignment"))
 				}
 			} else {
-				review, ok := evidences[recoveryEvidenceKey{supplement, reviewRoundAuthorityEvidenceKind}]
+				review, ok := evidences[evidenceKey{supplement, reviewRoundAuthorityEvidenceKind}]
 				if !ok || review.ProducingOperationJournalID != e.ProducingOperationJournalID || review.EffectiveActorID != record.Occupant {
-					return proof, authenticationFault("review producer bridge", fmt.Errorf("missing or mismatched started review evidence"))
+					return proof, authenticationFault("authenticateStartRows", "review producer bridge", fmt.Errorf("missing or mismatched started review evidence"))
 				}
 				var value reviewRoundAuthority
 				_ = json.Unmarshal(review.Payload, &value)
@@ -598,16 +628,16 @@ func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, p
 				}
 				_ = json.Unmarshal(record.Payload, &payload)
 				if value.State != reviewRoundStarted || value.Operation != row.ProducingOperationID || value.Epoch != record.Epoch || value.Subject.String() != payload.Subject.SnapshotID || value.Kind != payload.Kind || string(value.Round) != deterministicTask(row.ProducingOperationID, "review-round").String() {
-					return proof, authenticationFault("review shape", fmt.Errorf("review evidence does not bind the command and deterministic round"))
+					return proof, authenticationFault("authenticateStartRows", "review shape", fmt.Errorf("review evidence does not bind the command and deterministic round"))
 				}
 				for _, axis := range value.Graph {
 					if axis.Task != deterministicTask(row.ProducingOperationID, "axis-"+axis.Axis.String()) {
-						return proof, authenticationFault("review graph", fmt.Errorf("axis task is not deterministic"))
+						return proof, authenticationFault("authenticateStartRows", "review graph", fmt.Errorf("axis task is not deterministic"))
 					}
 					if value.Kind == SubjectImplementation {
 						for _, group := range axis.Groups {
 							if group.Task != deterministicTask(row.ProducingOperationID, "axis-"+axis.Axis.String()+".group-"+group.Severity.String()) {
-								return proof, authenticationFault("review graph", fmt.Errorf("severity task is not deterministic"))
+								return proof, authenticationFault("authenticateStartRows", "review graph", fmt.Errorf("severity task is not deterministic"))
 							}
 						}
 					}
@@ -640,6 +670,21 @@ func authenticateRecoveryRows(ctx context.Context, journal provenance.Journal, p
 // above that start's own authority, and reading from the earliest authority
 // finds all of them without reading anything older.
 //
+// THIS RE-SEEDS, and it is not a verbatim extraction of the two paths it
+// replaced. Before the extraction the transfer path began its material read at
+// the task's BIRTH journal id, which is at or below every start's own authority
+// and therefore also found everything above. The single seed here is
+// min(starts[].AuthorityJournalID), so the transfer path now reads from the
+// minimum authority over the page instead of from the task's creation. That is
+// safe for the same reason the minimum authority is: a material fact describing
+// a start is written by the operation that produced that start, hence above
+// that start's own authority, so every start in the page still has its material
+// above the seed. It is also NARROWER than the birth seed on the transfer path,
+// and strictly so for the better: the birth seed also pulled in material for the
+// task's non-owner-slot episodes, and an unrelated duplicate or invalid row
+// among those would refuse a command for a row nothing in the page could use. A
+// test pins the seeded bound so the choice is stated rather than incidental.
+//
 // snapshot is the journal ceiling for the read. Zero means "pin on the first
 // page", which is what a caller that has not read a pinned maximum wants; a
 // positive value pins every page there.
@@ -648,13 +693,9 @@ func authenticateAssignmentStarts(
 	journal provenance.Journal,
 	starts []provenance.AssignmentStartRow,
 	snapshot provenance.JournalID,
-) (assignmentRecoveryProof, error) {
-	var proof assignmentRecoveryProof
-	refuse := func(problem string) error {
-		return assignmentErr("exactCandidateParentAuthority", problem,
-			"a command parent must match an exact public assignment start and authenticated material, not a neighboring journal row",
-			"supply the exact active assignment; repair inconsistent history or request an explicitly reviewed larger command proof budget")
-	}
+) (assignmentProof, error) {
+	var proof assignmentProof
+	refuse := startPageRefusal
 	if len(starts) == 0 {
 		return proof, refuse("the authenticated start page is empty")
 	}
@@ -698,14 +739,17 @@ func authenticateAssignmentStarts(
 		}
 		after = page.Next.AfterJournalID
 	}
-	decoded, err := decodeRecoveryMaterials(material, through)
+	// The same decode, the same wrap as authenticateStartRows: an operator who
+	// meets a decode refusal on the write path gets the six parts here too, not a
+	// bare one-liner from whichever site happened to call the decoder.
+	decoded, err := decodeAssignmentMaterials(material, through)
 	if err != nil {
-		return proof, err
+		return proof, authenticationFault("authenticateAssignmentStarts", "parent material decoding", err)
 	}
 	var operations []provenance.OperationID
 	seen := map[provenance.OperationID]bool{}
 	for _, start := range starts {
-		fact, present := decoded[recoveryMaterialKey{start.TaskID, start.AssignmentID}]
+		fact, present := decoded[materialKey{start.TaskID, start.AssignmentID}]
 		if start.PredecessorAssignmentID != nil || (present && *fact.Row.ProducedByOperationJournalID == start.ProducingOperationJournalID) {
 			continue
 		}
@@ -746,7 +790,7 @@ func authenticateAssignmentStarts(
 			query.Page.AfterJournalID = page.Next.AfterJournalID
 		}
 	}
-	return authenticateRecoveryRows(ctx, journal, provenance.AssignmentStartPage{
+	return authenticateStartRows(ctx, journal, provenance.AssignmentStartPage{
 		Rows: starts, SnapshotPinned: true, SnapshotMaxJournalID: through,
 	}, material, evidence, map[provenance.AssignmentID]startedEpisode{}, through)
 }

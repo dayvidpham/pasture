@@ -496,14 +496,14 @@ func legacyReviewRole(actor provenance.ActorID, row provenance.OwnedTaskRow) (ga
 		return 0, roleSourceFault(row, fmt.Sprintf("it has no assignment-start material and %d of its command records name a role; want exactly one", len(commands)))
 	}
 	var record assignmentCommandRecord
-	if err := decodeRecoveryJSON(commands[0].Payload, &record); err != nil {
+	if err := decodeAuthenticationJSON(commands[0].Payload, &record); err != nil {
 		return 0, roleSourceFault(row, "the command record that names its role could not be read: "+err.Error())
 	}
 	if record.Mutation != MutationStartReview {
 		return 0, roleSourceFault(row, "it has no assignment-start material and the command record that produced it did not start a review")
 	}
 	operation := row.ProducingOperationID
-	commandRole, members, err := commandRecoveryBinding(&record, &operation)
+	commandRole, members, err := commandEvidenceBinding(&record, &operation)
 	if err != nil {
 		return 0, roleSourceFault(row, "the command record that started the review could not be read as a review command: "+err.Error())
 	}

@@ -687,7 +687,7 @@ func (s *epochAssignmentService) reviewParentForFindingSubmission(
 	if len(commandPage.Rows) != 1 || commandPage.Next != nil {
 		return assignmentResolution{}, provenance.Condition{}, refuse("the review has no unique bounded command-parent evidence")
 	}
-	command, err := decodeRecoveryCommand(commandPage.Rows[0])
+	command, err := decodeCommandEvidence(commandPage.Rows[0])
 	if err != nil {
 		return assignmentResolution{}, provenance.Condition{}, err
 	}
