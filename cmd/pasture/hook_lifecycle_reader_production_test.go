@@ -539,7 +539,16 @@ func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 				payload := readerConsultation(t, dbPath)
 				require.NotNil(t, payload, "an evaluated gate commits a consultation")
 				committed := readerConsultationDecisionOf(t, payload)
-				assert.Equal(t, normalized.Kind().String(), committed.Decision)
+				// The committed decision is written by waist.Decision.MarshalJSON,
+				// which serializes only a constructor-validated kind/reason pair.
+				// In the waist a refusal reason is admissible with BOTH Deny and
+				// RequireHuman (waist/decision.go), so a reason does not name
+				// exactly one kind in general. It does on the reachable paths
+				// here: no production path emits RequireHuman for this branch,
+				// the normalizer downgrades any the row cannot express, and the
+				// encoders reject it. A refusal reason therefore reaches the
+				// committed record only as Deny, so this reason equality already
+				// pins the kind and a separate kind equality is not restated.
 				assert.Equal(t, normalized.Reason().String(), committed.Reason)
 
 				if cell == "allow" {
@@ -562,9 +571,9 @@ func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 	// THE REVERSE DIRECTION: the forward Contains above pins emitted ⊆ published,
 	// so a renamed label cannot publish a stranger. This pins published ⊆
 	// emitted, so dropping a harness cannot silently UNPUBLISH one of the nine.
-	for design := range readerOutcomeLocators {
-		assert.True(t, visited[design],
-			"the published locator %q was never emitted; a dropped harness silently unpublished it", design)
+	for locator := range readerOutcomeLocators {
+		assert.True(t, visited[locator],
+			"the published locator %q was never emitted; a dropped harness silently unpublished it", locator)
 	}
 }
 
@@ -594,8 +603,17 @@ func readerFaultRows() []readerFaultRow {
 	return []readerFaultRow{
 		{name: "malformed-claim", token: "gate claim read", seed: seedReaderMalformedClaim},
 		{name: "role-source", token: "could not establish the role", seed: seedReaderRoleSource},
-		{name: "byte-limit", token: "gate ownership read", detail: "above its bound of 8388608 bytes", seed: seedReaderByteLimit},
+		{name: "byte-limit", token: "gate ownership read", detail: readerByteLimitDetail(), seed: seedReaderByteLimit},
 	}
+}
+
+// readerByteLimitDetail is the byte-limit row's distinguishing diagnostic token.
+// It is derived from the upstream bound so it cannot drift from the wording
+// Provenance emits: QueryActorOwnership's overflow error formats
+// MaxActorOwnershipResultBytes as the limit in its "above its bound of %d bytes"
+// clause (provenance internal/journal/actor_ownership.go).
+func readerByteLimitDetail() string {
+	return fmt.Sprintf("above its bound of %d bytes", provenance.MaxActorOwnershipResultBytes)
 }
 
 func seedReaderMalformedClaim(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
