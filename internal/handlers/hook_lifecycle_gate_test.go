@@ -140,17 +140,34 @@ func gateFixture(t *testing.T, path string) []byte {
 	return raw
 }
 
-// gateSessionOf reads the session identity out of a committed capture, so a
-// claim is written for the session the gate will actually be asked about instead
-// of for a string a reader has to keep in step with the fixture by hand.
-func gateSessionOf(t *testing.T, raw []byte, member string) string {
+// GateSessionIdentity reads the session identity out of a committed capture, so
+// a claim is written for the session the gate will actually be asked about
+// instead of for a string a reader has to keep in step with the fixture by hand.
+//
+// IT IS EXPORTED BECAUSE IT IS THE ONE READER, AND THE CLAIM SEEDER BESIDE IT IS
+// THE ONE SEEDER. This file is an internal test file of package handlers, so the
+// black-box tests in hook_lifecycle_test.go reach both through the package they
+// already import: a second copy in that other package could drift from this one,
+// and the session identity is exactly the fact the gate must not look up wrong.
+// Members may be dotted paths ("input.sessionID"); the first is returned.
+func GateSessionIdentity(t *testing.T, raw []byte, members ...string) string {
 	t.Helper()
-	var payload map[string]json.RawMessage
+	var payload any
 	require.NoError(t, json.Unmarshal(raw, &payload))
-	var session string
-	require.NoError(t, json.Unmarshal(payload[member], &session))
-	require.NotEmpty(t, session, "the capture must carry its own session identity")
-	return session
+	for _, member := range members {
+		current := payload
+		for _, part := range strings.Split(member, ".") {
+			object, isObject := current.(map[string]any)
+			require.True(t, isObject, "the capture must carry %q as an object member", member)
+			current = object[part]
+		}
+		session, isString := current.(string)
+		require.True(t, isString, "the capture must carry %q as a string session identity", member)
+		require.NotEmpty(t, session, "the capture must carry its own session identity")
+		return session
+	}
+	t.Fatal("a session member is required")
+	return ""
 }
 
 // gateStore opens a store the lifecycle handler accepts, with the persisted
@@ -447,9 +464,9 @@ func TestTheGateConsultsTheReaderWithTheBoundSession(t *testing.T) {
 	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker, reader.gateFactory)
 
 	require.NoError(t, err)
-	require.Equal(t, []gateOpened{{harness: ir.HarnessClaudeCode, session: gateSessionOf(t, raw, "session_id")}}, reader.opened,
+	require.Equal(t, []gateOpened{{harness: ir.HarnessClaudeCode, session: GateSessionIdentity(t, raw, "session_id")}}, reader.opened,
 		"the gate must be opened for the session the capture carried, on the harness the command was invoked for")
-	require.Equal(t, []string{string(ir.HarnessClaudeCode) + "/" + gateSessionOf(t, raw, "session_id")}, snapshot.resolved,
+	require.Equal(t, []string{string(ir.HarnessClaudeCode) + "/" + GateSessionIdentity(t, raw, "session_id")}, snapshot.resolved,
 		"the snapshot must be asked about the same session it was opened for, on the same harness")
 	require.Equal(t, []provenance.ActorID{gateActor(t, actor)}, snapshot.askedAbout,
 		"the authority must be read for the actor the claim named and for no other")
@@ -486,7 +503,7 @@ func TestTheGateDeniesABoundActorWithNoAssignment(t *testing.T) {
 func TestAnUnboundSessionProceedsWithoutAReaderFault(t *testing.T) {
 	t.Parallel()
 	raw := gateFixture(t, gateClaudeGateFixture)
-	snapshot := &gateFakeSnapshot{claim: gateauthority.SessionClaim{Bound: false, Session: gateSessionOf(t, raw, "session_id")}}
+	snapshot := &gateFakeSnapshot{claim: gateauthority.SessionClaim{Bound: false, Session: GateSessionIdentity(t, raw, "session_id")}}
 	reader := &gateFakeReader{snap: snapshot}
 	dbPath := gateStore(t)
 
@@ -519,10 +536,18 @@ func TestAnUnboundSessionProceedsWithoutAReaderFault(t *testing.T) {
 // and would commit a receipt claiming the action was evaluated. So every row
 // asserts an ERROR and an absent receipt; the mutation at the deciding site turns
 // this subject red.
+//
+// THE GUARD DOES NOT TRUST ITS OWN ERROR. Each row also pins what the fake reader
+// OBSERVED — opened once for the capture's session, asked for exactly one
+// snapshot, and (where a snapshot was taken) its lease released. Those assertions
+// are what make a fault row detectable for one reason at a time: an error with no
+// read, a read that never took a snapshot, or a snapshot never closed each fail
+// by name, so a nil error can never be mistaken for a scheduled miss and a
+// swallowed fault can never pass silently.
 func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 	t.Parallel()
 	raw := gateFixture(t, gateClaudeGateFixture)
-	session := gateSessionOf(t, raw, "session_id")
+	session := GateSessionIdentity(t, raw, "session_id")
 	for _, row := range []struct {
 		name  string
 		build func() *gateFakeReader
@@ -723,11 +748,19 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 			},
 		},
 	} {
+		// THE ROWS RUN SERIALLY WITHIN THE SUBJECT, ON PURPOSE. Twelve parallel
+		// subtests each open their own store and drive their own reader; under a
+		// loaded runner that fan-out is what makes a single row's failure
+		// ambiguous between "the handler swallowed a fault" and "the runner was
+		// starved". The guard this subject carries is a runtime mutation detector
+		// for the fault direction, so it must fail for exactly one reason and say
+		// which. The package keeps its parallelism: the subject itself still runs
+		// in parallel with its siblings.
 		t.Run(row.name, func(t *testing.T) {
-			t.Parallel()
+			reader := row.build()
 			dbPath := gateStore(t)
 
-			_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker, row.build().gateFactory)
+			_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker, reader.gateFactory)
 
 			require.Error(t, err, "a read or evaluation fault is an error; it is never a decision the host may act on")
 			require.ErrorIs(t, err, ErrLifecycleBeforeDurableWrite,
@@ -735,6 +768,31 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 					"and it may say that on this sentinel's evidence alone")
 			row.check(t, err)
 			gateRequireNoReceipt(t, dbPath)
+
+			// THE ERROR IS NOT TAKEN ON FAITH. Every row must show that the gate
+			// was actually evaluated: the reader opened exactly once for the
+			// capture's session, and it was asked for exactly one snapshot. A row
+			// that returned an error without consulting the reader would prove
+			// nothing about the seam this subject exists to guard, and a nil error
+			// with no read would be indistinguishable from a swallowed fault.
+			require.Equal(t, []gateOpened{{harness: ir.HarnessClaudeCode, session: session}}, reader.opened,
+				"every fault row must open the reader exactly once, for the session the capture carried")
+			require.Equal(t, 1, reader.reads,
+				"the gate takes exactly one snapshot per invocation; a fault row that read zero or twice did not exercise the seam")
+			snapshot, tookSnapshot := reader.snap.(*gateFakeSnapshot)
+			if tookSnapshot {
+				// A SNAPSHOT WAS TAKEN, SO ITS READ LEASE MUST BE RELEASED on the
+				// fault return. Production closes it with one deferred Close; a
+				// handler that closed only on the success path would leak the
+				// lease on exactly the faults this subject drives, and no other
+				// subject would name it.
+				require.False(t, reader.refused, "the reader raised no fault of its own, so the fault came from an accessor after the snapshot opened")
+				require.Equal(t, 1, snapshot.closed,
+					"a snapshot that was taken holds a read lease, so it must be closed on the fault return")
+			} else {
+				require.True(t, reader.refused,
+					"no snapshot was taken, so the fault must be the reader's own refusal to snapshot")
+			}
 		})
 	}
 }
@@ -814,12 +872,12 @@ func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
 func TestBothCommittingSurfacesRunTheSameGate(t *testing.T) {
 	t.Parallel()
 	raw := gateFixture(t, gateClaudeGateFixture)
-	session := gateSessionOf(t, raw, "session_id")
+	session := GateSessionIdentity(t, raw, "session_id")
 
 	t.Run("native", func(t *testing.T) {
 		t.Parallel()
 		dbPath := gateStore(t)
-		claimGateSession(t, dbPath, ir.HarnessClaudeCode, session)
+		ClaimGateSession(t, dbPath, ir.HarnessClaudeCode, session)
 
 		outcome, err := HookLifecycleNative(t.Context(), gateInput(t, dbPath, "PreToolUse", raw))
 
@@ -836,7 +894,7 @@ func TestBothCommittingSurfacesRunTheSameGate(t *testing.T) {
 	t.Run("raw", func(t *testing.T) {
 		t.Parallel()
 		dbPath := gateStore(t)
-		claimGateSession(t, dbPath, ir.HarnessClaudeCode, session)
+		ClaimGateSession(t, dbPath, ir.HarnessClaudeCode, session)
 
 		result, err := HookLifecycleRaw(t.Context(), HookLifecycleRawInput{
 			DBPath:        dbPath,
@@ -874,10 +932,16 @@ func TestBothCommittingSurfacesRunTheSameGate(t *testing.T) {
 	})
 }
 
-// claimGateSession writes the claim the gate will read, through the same writer
+// ClaimGateSession writes the claim the gate will read, through the same writer
 // the session-start event uses. The actor is REGISTERED and owns nothing, which
 // is the state a real deployment reaches before a slice is assigned to it.
-func claimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
+//
+// IT IS THE ONE SEEDER OF A GATE-PROOF CLAIM. It is exported for the same reason
+// GateSessionIdentity is: the black-box subjects in hook_lifecycle_test.go drive
+// the exported entry points and need the same real claim, and a second copy of
+// this writer's invocation could seed a different claim shape than the gate is
+// proven against.
+func ClaimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
 	t.Helper()
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
