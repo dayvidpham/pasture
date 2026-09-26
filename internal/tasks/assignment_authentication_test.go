@@ -23,7 +23,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	stderrors "errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -37,6 +36,7 @@ import (
 	"github.com/dayvidpham/provenance"
 	"github.com/stretchr/testify/require"
 
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -106,10 +106,10 @@ func feasibilityActor(t *testing.T, tracker *trackerImpl, handle string) provena
 	return actor.ID
 }
 
-// seedRecoveryAssignmentWithParent commits ONE assignment episode plus the
+// seedAssignmentStartWithParent commits ONE assignment episode plus the
 // material fact that describes it, in a single journal Apply, citing an optional
 // parent assignment. It is the fixture for an episode a command did not create.
-func seedRecoveryAssignmentWithParent(
+func seedAssignmentStartWithParent(
 	t *testing.T,
 	store *trackerImpl,
 	task provenance.TaskID,
@@ -151,17 +151,17 @@ func seedRecoveryAssignmentWithParent(
 	require.NoError(t, err)
 }
 
-// legacyRecoveryReviewRunner removes only the child material effects added by
+// legacyReviewWriterRunner removes only the child material effects added by
 // the newer StartReview writer, then delegates to the real composed allocator.
 // It models the historical producer footprint without SQL edits to Provenance
 // history. keepMaterial is how many child material effects survive, so 0 models a
 // writer that emitted none and 1 models one that emitted only the first.
-type legacyRecoveryReviewRunner struct {
+type legacyReviewWriterRunner struct {
 	composedAllocationRunner
 	keepMaterial int
 }
 
-func (r legacyRecoveryReviewRunner) RunAllocateComposedBatch(ctx context.Context, workflow string, authority provenance.JournalID, request provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error) {
+func (r legacyReviewWriterRunner) RunAllocateComposedBatch(ctx context.Context, workflow string, authority provenance.JournalID, request provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error) {
 	var effects []provenance.Effect
 	kept := 0
 	for _, effect := range request.SupplementalEffects {
@@ -177,24 +177,24 @@ func (r legacyRecoveryReviewRunner) RunAllocateComposedBatch(ctx context.Context
 	return r.composedAllocationRunner.RunAllocateComposedBatch(ctx, workflow, authority, request)
 }
 
-type recoveryAlteredComposedRunner struct {
+type alteredComposedRunner struct {
 	composedAllocationRunner
 	alter func(*provenance.GovernedAllocationComposedRequest)
 }
 
-type recoveryAlteredBatchRunner struct {
+type alteredBatchRunner struct {
 	composedAllocationRunner
 	alter func(*provenance.GovernedAllocationComposedRequest)
 }
 
-func (r recoveryAlteredBatchRunner) RunAllocateComposedBatch(ctx context.Context, workflow string, authority provenance.JournalID, request provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error) {
+func (r alteredBatchRunner) RunAllocateComposedBatch(ctx context.Context, workflow string, authority provenance.JournalID, request provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error) {
 	if r.alter != nil {
 		r.alter(&request)
 	}
 	return r.composedAllocationRunner.RunAllocateComposedBatch(ctx, workflow, authority, request)
 }
 
-func (r recoveryAlteredComposedRunner) RunAllocateComposed(ctx context.Context, workflow string, authority provenance.JournalID, request provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error) {
+func (r alteredComposedRunner) RunAllocateComposed(ctx context.Context, workflow string, authority provenance.JournalID, request provenance.GovernedAllocationComposedRequest) (provenance.GovernedAllocationComposedResult, error) {
 	if r.alter != nil {
 		r.alter(&request)
 	}
@@ -281,7 +281,7 @@ func everyAssignmentStart(t *testing.T, store *trackerImpl) []provenance.Assignm
 //
 // MUTATION: make authenticateAssignmentStarts return a zero proof and a nil
 // error; every counting assertion in the re-homed subjects goes RED.
-func authenticateWholeStore(t *testing.T, store *trackerImpl) (map[provenance.TaskID]assignmentRecoveryProof, error) {
+func authenticateWholeStore(t *testing.T, store *trackerImpl) (map[provenance.TaskID]assignmentProof, error) {
 	t.Helper()
 	byTask := map[provenance.TaskID][]provenance.AssignmentStartRow{}
 	var order []provenance.TaskID
@@ -291,7 +291,7 @@ func authenticateWholeStore(t *testing.T, store *trackerImpl) (map[provenance.Ta
 		}
 		byTask[row.TaskID] = append(byTask[row.TaskID], row)
 	}
-	proofs := map[provenance.TaskID]assignmentRecoveryProof{}
+	proofs := map[provenance.TaskID]assignmentProof{}
 	for _, task := range order {
 		proof, err := authenticateAssignmentStarts(t.Context(), store.Journal(), byTask[task], 0)
 		if err != nil {
@@ -304,7 +304,7 @@ func authenticateWholeStore(t *testing.T, store *trackerImpl) (map[provenance.Ta
 
 // requireWholeStoreAuthenticates is the success form: every start the store
 // holds authenticates, and the returned proofs are the ones to count in.
-func requireWholeStoreAuthenticates(t *testing.T, store *trackerImpl) map[provenance.TaskID]assignmentRecoveryProof {
+func requireWholeStoreAuthenticates(t *testing.T, store *trackerImpl) map[provenance.TaskID]assignmentProof {
 	t.Helper()
 	proofs, err := authenticateWholeStore(t, store)
 	require.NoError(t, err, "every assignment start this store holds must authenticate")
@@ -313,7 +313,7 @@ func requireWholeStoreAuthenticates(t *testing.T, store *trackerImpl) map[proven
 
 // countAuthenticatedAssignments counts the authenticated episodes whose
 // assignment id carries the given prefix, across every task.
-func countAuthenticatedAssignments(proofs map[provenance.TaskID]assignmentRecoveryProof, prefix string) int {
+func countAuthenticatedAssignments(proofs map[provenance.TaskID]assignmentProof, prefix string) int {
 	total := 0
 	for _, proof := range proofs {
 		for _, row := range proof.Rows {
@@ -327,7 +327,7 @@ func countAuthenticatedAssignments(proofs map[provenance.TaskID]assignmentRecove
 
 // findAuthenticatedEpisode returns the one authenticated episode with this
 // assignment id, or nil.
-func findAuthenticatedEpisode(proofs map[provenance.TaskID]assignmentRecoveryProof, assignment provenance.AssignmentID) *startedEpisode {
+func findAuthenticatedEpisode(proofs map[provenance.TaskID]assignmentProof, assignment provenance.AssignmentID) *startedEpisode {
 	for _, proof := range proofs {
 		for _, row := range proof.Rows {
 			if row.Assignment == assignment {
@@ -374,7 +374,7 @@ func TestAssignmentAuthenticationEvidenceUsesProducerAndStoredRepresentations(t 
 	}
 	original, err := canonicalJSON(record)
 	require.NoError(t, err)
-	normalized, err := normalizeRecoveryJSON(original)
+	normalized, err := normalizeAuthenticationJSON(original)
 	require.NoError(t, err)
 	digest := sha256.Sum256(original)
 	row := provenance.EvidenceRow{
@@ -391,7 +391,7 @@ func TestAssignmentAuthenticationEvidenceUsesProducerAndStoredRepresentations(t 
 	require.True(t, bytes.Contains(normalized, []byte("\\u003c")),
 		"the stored form escapes the angle bracket, which is what makes it different from the producer's bytes")
 
-	_, err = decodeRecoveryCommand(row)
+	_, err = decodeCommandEvidence(row)
 	require.NoError(t, err)
 
 	var outer assignmentCommandRecord
@@ -408,7 +408,7 @@ func TestAssignmentAuthenticationEvidenceUsesProducerAndStoredRepresentations(t 
 		bad := row
 		bad.Payload = payload
 		bad.ContentDigest = hash
-		_, err := decodeRecoveryCommand(bad)
+		_, err := decodeCommandEvidence(bad)
 		require.Error(t, err)
 	}
 	t.Run("outer-only-digest", func(t *testing.T) {
@@ -427,7 +427,7 @@ func TestAssignmentAuthenticationEvidenceUsesProducerAndStoredRepresentations(t 
 		reject(t, []byte(strings.Replace(string(normalized), `"plan":`, `"plan":null,"plan":`, 1)), digest[:])
 	})
 	t.Run("unknown-nested-member", func(t *testing.T) {
-		bad, err := normalizeRecoveryJSON([]byte(strings.Replace(string(normalized), `"payload":{`, `"payload":{"unknown":true,`, 1)))
+		bad, err := normalizeAuthenticationJSON([]byte(strings.Replace(string(normalized), `"payload":{`, `"payload":{"unknown":true,`, 1)))
 		require.NoError(t, err)
 		reject(t, bad, digest[:])
 	})
@@ -455,14 +455,14 @@ func TestAssignmentAuthenticationEvidenceUsesProducerAndStoredRepresentations(t 
 		badRecord.Request = []byte(`{"mutation":5,"epoch":"wrong","payload":{}}`)
 		badOriginal, err := canonicalJSON(badRecord)
 		require.NoError(t, err)
-		bad, err := normalizeRecoveryJSON(badOriginal)
+		bad, err := normalizeAuthenticationJSON(badOriginal)
 		require.NoError(t, err)
 		badDigest := sha256.Sum256(badOriginal)
 		reject(t, bad, badDigest[:])
 	})
 }
 
-// TestRecoveryMaterialDecoderRejectsCorruptedPublicRows takes a material row the
+// TestAssignmentMaterialDecoderRejectsCorruptedPublicRows takes a material row the
 // journal itself produced and feeds the decoder metadata that a sound public
 // Apply cannot author. These are decoder mutations of a real returned row, not
 // fabricated rows: the store is real, and only the row handed to the decoder
@@ -470,13 +470,13 @@ func TestAssignmentAuthenticationEvidenceUsesProducerAndStoredRepresentations(t 
 //
 // RED when: a material row with no producer, a producer above the snapshot, or a
 // present authority of zero is accepted.
-func TestRecoveryMaterialDecoderRejectsCorruptedPublicRows(t *testing.T) {
+func TestAssignmentMaterialDecoderRejectsCorruptedPublicRows(t *testing.T) {
 	t.Parallel()
 	store := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
 	defer store.Close()
 	actor := feasibilityActor(t, store, "material-defense")
 	task := createHumanTestTask(t, store, "task")
-	seedRecoveryAssignmentWithParent(t, store, task, "material-defense", RoleOwnerResponsibility, actor, "material-defense-start", "")
+	seedAssignmentStartWithParent(t, store, task, "material-defense", RoleOwnerResponsibility, actor, "material-defense-start", "")
 	page, err := store.Journal().QueryTaskEvents(provenance.JournalQueryV1{
 		OrderBy:    provenance.OrderByJournalID,
 		TaskIDs:    []provenance.TaskID{task},
@@ -485,19 +485,19 @@ func TestRecoveryMaterialDecoderRejectsCorruptedPublicRows(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, page.Events, 1)
-	_, err = decodeRecoveryMaterials(page.Events, page.SnapshotMaxJournalID)
+	_, err = decodeAssignmentMaterials(page.Events, page.SnapshotMaxJournalID)
 	require.NoError(t, err)
 	t.Run("nil-producer", func(t *testing.T) {
 		row := page.Events[0]
 		row.ProducedByOperationJournalID = nil
-		_, err := decodeRecoveryMaterials([]provenance.TaskEventRow{row}, page.SnapshotMaxJournalID)
+		_, err := decodeAssignmentMaterials([]provenance.TaskEventRow{row}, page.SnapshotMaxJournalID)
 		require.Error(t, err)
 	})
 	t.Run("future-producer", func(t *testing.T) {
 		row := page.Events[0]
 		future := page.SnapshotMaxJournalID + 1
 		row.ProducedByOperationJournalID = &future
-		_, err := decodeRecoveryMaterials([]provenance.TaskEventRow{row}, page.SnapshotMaxJournalID)
+		_, err := decodeAssignmentMaterials([]provenance.TaskEventRow{row}, page.SnapshotMaxJournalID)
 		require.Error(t, err)
 	})
 	t.Run("explicit-zero-authority", func(t *testing.T) {
@@ -507,7 +507,7 @@ func TestRecoveryMaterialDecoderRejectsCorruptedPublicRows(t *testing.T) {
 		fields["authorityJournalId"] = json.RawMessage(`0`)
 		row.Payload, err = json.Marshal(fields)
 		require.NoError(t, err)
-		_, err := decodeRecoveryMaterials([]provenance.TaskEventRow{row}, page.SnapshotMaxJournalID)
+		_, err := decodeAssignmentMaterials([]provenance.TaskEventRow{row}, page.SnapshotMaxJournalID)
 		require.Error(t, err)
 	})
 }
@@ -628,7 +628,7 @@ func TestCurrentReworkRefusesLegacyCandidateSubmissionAlone(t *testing.T) {
 	require.Len(t, page.Rows, 1, "refusal must not delete or migrate the legacy evidence")
 }
 
-// TestCurrentReworkSliceRealProducerRecovery drives the REAL replacement writer
+// TestCurrentReworkSliceRealProducerStart drives the REAL replacement writer
 // after a real finished review, then authenticates every start the store holds,
 // including the replacement's own. The replacement is reached by the actual
 // caller that governs the old candidate, not by synthesized evidence shaped
@@ -636,7 +636,7 @@ func TestCurrentReworkRefusesLegacyCandidateSubmissionAlone(t *testing.T) {
 //
 // RED when: the replacement's start does not authenticate, or its task or role
 // differs from the replacement the command returned.
-func TestCurrentReworkSliceRealProducerRecovery(t *testing.T) {
+func TestCurrentReworkSliceRealProducerStart(t *testing.T) {
 	t.Parallel()
 	store := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
 	defer store.Close()
@@ -679,9 +679,9 @@ func TestCurrentReworkSliceRealProducerRecovery(t *testing.T) {
 		Subject: ReviewSubjectRef{Kind: ReviewSubjectImplementationCandidate, SnapshotID: candidate.String()},
 	})
 	require.NoError(t, err)
-	seedRecoveryAssignmentWithParent(t, store, candidate, "slice-rework-reviewer",
+	seedAssignmentStartWithParent(t, store, candidate, "slice-rework-reviewer",
 		RoleGoverningSupervisor, actor, "slice-rework-reviewer-start", "slice-rework-create-slice-owner")
-	rework := finishRecoveryReviewWithDeferredFinding(t, store, service, EpochRootID(epoch.String()), started,
+	rework := finishReviewWithDeferredFinding(t, store, service, EpochRootID(epoch.String()), started,
 		"slice-rework-reviewer", actor, "slice-rework-finish")
 
 	// Prove the actual replacement caller governs the old candidate before
@@ -762,7 +762,7 @@ func TestNonemptyReviewDoesNotInferCrossActorDelegation(t *testing.T) {
 	require.NoError(t, err)
 	axis := canonicalReviewAxes()[0]
 	axisTask := deterministicTask(started.OperationID, "axis-"+axis.String())
-	seedRecoveryAssignmentWithParent(t, store, axisTask, "other-axis-reviewer", RoleAxisReviewer,
+	seedAssignmentStartWithParent(t, store, axisTask, "other-axis-reviewer", RoleAxisReviewer,
 		otherActor, "other-axis-reviewer-start", "delegation-plan")
 	finding := createHumanTestTask(t, store, "finding")
 	input := SubmitReviewInput{
@@ -820,7 +820,7 @@ func TestAssignmentAuthenticationRejectsUnrelatedGenuineSupplementMaterial(t *te
 	plan := createHumanTestTask(t, store, "plan")
 	seedAssignmentEpisode(t, store, plan, "supplement-parent", RoleGoverningSupervisor, actor, "supplement-parent-start")
 	delegate := store.allocationRunner
-	store.allocationRunner = recoveryAlteredComposedRunner{delegate, func(request *provenance.GovernedAllocationComposedRequest) {
+	store.allocationRunner = alteredComposedRunner{delegate, func(request *provenance.GovernedAllocationComposedRequest) {
 		var effects []provenance.Effect
 		for _, effect := range request.SupplementalEffects {
 			if effect.Sort == provenance.EffectTaskEvent && effect.EventKind == FamilyAssignmentStarted.EventKind() {
@@ -842,7 +842,7 @@ func TestAssignmentAuthenticationRejectsUnrelatedGenuineSupplementMaterial(t *te
 		},
 	)
 	require.NoError(t, err)
-	store.allocationRunner = recoveryAlteredComposedRunner{delegate, func(request *provenance.GovernedAllocationComposedRequest) {
+	store.allocationRunner = alteredComposedRunner{delegate, func(request *provenance.GovernedAllocationComposedRequest) {
 		material, err := MapMaterialEvent(AssignmentStartedEvent{
 			Task:       victim.Slice,
 			Assignment: "victim-slice-owner",
@@ -907,7 +907,7 @@ func TestAssignmentAuthenticationRejectsGenuineComposedCommandBindingAttacks(t *
 			plan := createHumanTestTask(t, store, "plan")
 			otherTask := createHumanTestTask(t, store, "other-task")
 			seedAssignmentEpisode(t, store, plan, "command-parent", RoleGoverningSupervisor, actor, "command-parent-start")
-			store.allocationRunner = recoveryAlteredComposedRunner{store.allocationRunner, func(request *provenance.GovernedAllocationComposedRequest) {
+			store.allocationRunner = alteredComposedRunner{store.allocationRunner, func(request *provenance.GovernedAllocationComposedRequest) {
 				for i := range request.SupplementalEffects {
 					effect := &request.SupplementalEffects[i]
 					if effect.Sort != provenance.EffectEvidence || effect.EvidenceKind != assignmentCommandEvidenceKind {
@@ -1002,7 +1002,7 @@ func TestAssignmentAuthenticationRequiresExactStartedReviewEvidence(t *testing.T
 				actor,
 				"review-evidence-parent-start",
 			)
-			store.allocationRunner = recoveryAlteredBatchRunner{store.allocationRunner, func(request *provenance.GovernedAllocationComposedRequest) {
+			store.allocationRunner = alteredBatchRunner{store.allocationRunner, func(request *provenance.GovernedAllocationComposedRequest) {
 				var effects []provenance.Effect
 				for _, effect := range request.SupplementalEffects {
 					if effect.Sort == provenance.EffectEvidence && effect.EvidenceKind == reviewRoundAuthorityEvidenceKind {
@@ -1110,7 +1110,7 @@ func TestAssignmentAuthenticationRejectsDuplicateIntegrationCommandMembers(t *te
 				},
 			)
 			require.NoError(t, err)
-			store.allocationRunner = recoveryAlteredComposedRunner{store.allocationRunner, func(request *provenance.GovernedAllocationComposedRequest) {
+			store.allocationRunner = alteredComposedRunner{store.allocationRunner, func(request *provenance.GovernedAllocationComposedRequest) {
 				for i := range request.SupplementalEffects {
 					effect := &request.SupplementalEffects[i]
 					if effect.Sort != provenance.EffectEvidence || effect.EvidenceKind != assignmentCommandEvidenceKind {
@@ -1170,7 +1170,7 @@ func TestAssignmentAuthenticationRejectsDuplicateIntegrationCommandMembers(t *te
 // thirteen declared members are not all present.
 func TestAssignmentAuthenticationRealComposedCommandsAndSplitReview(t *testing.T) {
 	t.Parallel()
-	runComposedRecoveryCommands(t, false)
+	runComposedStartCommands(t, false)
 }
 
 // TestLegacyImplementationReviewRecoversThirteenMembers is the same shape with a
@@ -1180,15 +1180,15 @@ func TestAssignmentAuthenticationRealComposedCommandsAndSplitReview(t *testing.T
 // RED when: a child with no material fact fails to authenticate.
 func TestLegacyImplementationReviewRecoversThirteenMembers(t *testing.T) {
 	t.Parallel()
-	runComposedRecoveryCommands(t, true)
+	runComposedStartCommands(t, true)
 }
 
-func runComposedRecoveryCommands(t *testing.T, legacyReview bool) {
+func runComposedStartCommands(t *testing.T, legacyReview bool) {
 	t.Helper()
 	store := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
 	defer store.Close()
 	bindTestGovernedAllocation(t, store)
-	actor := feasibilityActor(t, store, "composed-recovery")
+	actor := feasibilityActor(t, store, "composed-start")
 	epoch := createHumanTestTask(t, store, "epoch")
 	plan := createHumanTestTask(t, store, "plan")
 	seedAssignmentEpisode(t, store, plan, "supervisor", RoleGoverningSupervisor, actor, "supervisor-start")
@@ -1269,10 +1269,10 @@ func runComposedRecoveryCommands(t *testing.T, legacyReview bool) {
 		actor,
 		"native-integration-governor-end",
 	)
-	seedRecoveryAssignmentWithParent(t, store, integrationTask, "integration-review-owner",
+	seedAssignmentStartWithParent(t, store, integrationTask, "integration-review-owner",
 		RoleOwnerResponsibility, actor, "integration-review-owner-start", "supervisor")
 	if legacyReview {
-		store.allocationRunner = legacyRecoveryReviewRunner{composedAllocationRunner: store.allocationRunner}
+		store.allocationRunner = legacyReviewWriterRunner{composedAllocationRunner: store.allocationRunner}
 	}
 	started, err := service.StartReview(
 		t.Context(),
@@ -1285,7 +1285,7 @@ func runComposedRecoveryCommands(t *testing.T, legacyReview bool) {
 	require.NoError(t, err)
 	// FinalizeReview has an explicit subject-scoped governing assignment. Adding
 	// it after StartReview avoids ambiguity without altering the native 13 graph.
-	seedRecoveryAssignmentWithParent(t, store, integrationTask, "integration-finalizer",
+	seedAssignmentStartWithParent(t, store, integrationTask, "integration-finalizer",
 		RoleGoverningSupervisor, actor, "integration-finalizer-start", "supervisor")
 	proofs := requireWholeStoreAuthenticates(t, store)
 	require.Equal(t, 13, countAuthenticatedAssignments(proofs, "recover-review-"),
@@ -1296,7 +1296,7 @@ func runComposedRecoveryCommands(t *testing.T, legacyReview bool) {
 
 	// Exercise both actual replacement writers after a real finalized review,
 	// rather than synthesizing command evidence shaped like a replacement.
-	rework := finishRecoveryReviewWithDeferredFinding(
+	rework := finishReviewWithDeferredFinding(
 		t,
 		store,
 		service,
@@ -1374,7 +1374,7 @@ func TestAssignmentAuthenticationPlanReviewCurrentAndLegacyBadPresent(t *testing
 			defer store.Close()
 			bindTestGovernedAllocation(t, store)
 			if legacy {
-				store.allocationRunner = legacyRecoveryReviewRunner{composedAllocationRunner: store.allocationRunner}
+				store.allocationRunner = legacyReviewWriterRunner{composedAllocationRunner: store.allocationRunner}
 			}
 			actor := feasibilityActor(t, store, "plan-review")
 			epoch := createHumanTestTask(t, store, "epoch")
@@ -1438,7 +1438,7 @@ func TestPartialReviewMaterialRecoversAllFourDeclaredMembers(t *testing.T) {
 	store := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
 	defer store.Close()
 	bindTestGovernedAllocation(t, store)
-	store.allocationRunner = legacyRecoveryReviewRunner{composedAllocationRunner: store.allocationRunner, keepMaterial: 1}
+	store.allocationRunner = legacyReviewWriterRunner{composedAllocationRunner: store.allocationRunner, keepMaterial: 1}
 	actor := feasibilityActor(t, store, "partial-review")
 	epoch := createHumanTestTask(t, store, "epoch")
 	plan := createHumanTestTask(t, store, "plan")
@@ -1462,10 +1462,10 @@ func TestPartialReviewMaterialRecoversAllFourDeclaredMembers(t *testing.T) {
 	}
 }
 
-// finishRecoveryReviewWithDeferredFinding submits every canonical axis, proves
+// finishReviewWithDeferredFinding submits every canonical axis, proves
 // each submission's producer contract, and finalizes the round, returning the
 // rework submission a caller may then act on.
-func finishRecoveryReviewWithDeferredFinding(
+func finishReviewWithDeferredFinding(
 	t *testing.T,
 	store *trackerImpl,
 	service EpochService,
@@ -1719,68 +1719,285 @@ func assertCurrentReworkReaderRefusals(
 
 // ─── the refusals ───────────────────────────────────────────────────────────
 
-// authenticationFaultSteps returns every step literal the production
-// authentication file passes to authenticationFault, read from the source
-// rather than from a list kept beside it.
-func authenticationFaultSteps(t *testing.T) []string {
+// authenticationRefusalSite is one raise site of the production authentication
+// file: Enclosing is the function the call is written in, Function is the name
+// that call reports as its location, and Step is what it reports it lost.
+type authenticationRefusalSite struct {
+	Enclosing string
+	Function  string
+	Step      string
+}
+
+// authenticationRefusalSites returns every site the production authentication
+// file calls authenticationFault from, read from the source rather than from a
+// list kept beside it. Both arguments must be literals: this test renders every
+// refusal it finds, and a computed value would be exactly the case it could not
+// render.
+func authenticationRefusalSites(t *testing.T) []authenticationRefusalSite {
 	t.Helper()
 	fileSet := token.NewFileSet()
 	parsed, err := parser.ParseFile(fileSet, "assignment_authentication.go", nil, 0)
 	require.NoError(t, err, "the production authentication file must parse")
-	var steps []string
-	ast.Inspect(parsed, func(node ast.Node) bool {
-		call, isCall := node.(*ast.CallExpr)
-		if !isCall {
-			return true
-		}
-		callee, isName := call.Fun.(*ast.Ident)
-		if !isName || callee.Name != "authenticationFault" || len(call.Args) == 0 {
-			return true
-		}
-		literal, isLiteral := call.Args[0].(*ast.BasicLit)
+	var sites []authenticationRefusalSite
+	literalAt := func(expr ast.Expr, argument int) string {
+		literal, isLiteral := expr.(*ast.BasicLit)
 		if !isLiteral {
 			t.Errorf(
-				"authenticationFault is called with a computed step at %s; every step must be a literal so this test can render every refusal",
-				fileSet.Position(call.Pos()),
+				"authenticationFault argument %d at %s is computed; every function and step must be a literal so this test can render every refusal",
+				argument, fileSet.Position(expr.Pos()),
 			)
-			return true
+			return ""
 		}
-		steps = append(steps, strings.Trim(literal.Value, `"`))
-		return true
+		return strings.Trim(literal.Value, `"`)
+	}
+	for _, declaration := range parsed.Decls {
+		function, isFunction := declaration.(*ast.FuncDecl)
+		if !isFunction || function.Body == nil {
+			continue
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			call, isCall := node.(*ast.CallExpr)
+			if !isCall {
+				return true
+			}
+			callee, isName := call.Fun.(*ast.Ident)
+			if !isName || callee.Name != "authenticationFault" || len(call.Args) < 2 {
+				return true
+			}
+			sites = append(sites, authenticationRefusalSite{
+				Enclosing: function.Name.Name,
+				Function:  literalAt(call.Args[0], 0),
+				Step:      literalAt(call.Args[1], 1),
+			})
+			return true
+		})
+	}
+	sort.Slice(sites, func(i, j int) bool {
+		if sites[i].Function != sites[j].Function {
+			return sites[i].Function < sites[j].Function
+		}
+		return sites[i].Step < sites[j].Step
 	})
-	sort.Strings(steps)
-	return steps
+	return sites
+}
+
+// retiredRefusalVocabulary is what an operator must never be told about: the
+// retired rebuild command, the retired certificate stem, the retired generation
+// vocabulary, the retired index, and the retired RECOVERY mechanism, whose name
+// now belongs only to the three tables the v8 to v9 step drops.
+var retiredRefusalVocabulary = []string{"rebuild-index", "certif", "generation", "index", "recovery"}
+
+// decodedPayload is one assignment-start material row a sound public write
+// produces, used to reach the decoders' own causes without a store.
+func decodedPayloadMaterialRow(operation provenance.OperationID) provenance.TaskEventRow {
+	task := deterministicTask(operation, "material")
+	actor := provenance.ActorID{Namespace: task.Namespace, UUID: task.UUID}
+	producer := provenance.JournalID(5)
+	return provenance.TaskEventRow{
+		Row:    provenance.Row{JournalID: 42, ActorID: actor, ProducedByOperationJournalID: &producer},
+		TaskID: task,
+		Payload: []byte(`{"assignment":"material","role":"owner-responsibility","occupant":"` +
+			actor.String() + `"}`),
+	}
+}
+
+// realAuthenticationCauses returns the errors the production decoders actually
+// return, one per arm an operator can meet. They are produced BY the decoders
+// rather than written beside them, so the guard below renders the text a
+// command actually refuses with instead of a synthetic cause. Every entry is
+// required to be non-nil: an arm that stopped refusing would otherwise leave a
+// hole in the guard with nothing to report it.
+func realAuthenticationCauses(t *testing.T) map[string]error {
+	t.Helper()
+	row := decodedPayloadMaterialRow("cause-table")
+	noProducer := row
+	noProducer.ProducedByOperationJournalID = nil
+	unknownRole := row
+	unknownRole.Payload = []byte(`{"assignment":"material","role":"not-a-role","occupant":"` + row.ActorID.String() + `"}`)
+	badOccupant := row
+	badOccupant.Payload = []byte(`{"assignment":"material","role":"owner-responsibility","occupant":"not-an-actor"}`)
+
+	task := row.TaskID
+	evidence := provenance.EvidenceRow{
+		EvidenceKind:                "pasture.some.other.kind",
+		ProducingOperationID:        "cause-table",
+		ProducingOperationJournalID: 5,
+		EffectiveActorID:            row.ActorID,
+		TaskID:                      &task,
+		Payload:                     []byte(`{}`),
+	}
+	noOperation := evidence
+	noOperation.ProducingOperationJournalID = 0
+
+	causes := map[string]error{}
+	add := func(name string, err error) {
+		t.Helper()
+		require.Error(t, err, "cause %q stopped being refused, so the guard below would render nothing for it", name)
+		causes[name] = err
+	}
+	_, err := decodeAssignmentMaterials([]provenance.TaskEventRow{row}, 100)
+	require.NoError(t, err, "the fixture row itself must decode, or the arms below prove nothing")
+	_, err = decodeAssignmentMaterials([]provenance.TaskEventRow{noProducer}, 100)
+	add("material-producer", err)
+	_, err = decodeAssignmentMaterials([]provenance.TaskEventRow{row, row}, 100)
+	add("material-duplicate", err)
+	_, err = decodeAssignmentMaterials([]provenance.TaskEventRow{unknownRole}, 100)
+	add("material-role", err)
+	_, err = decodeAssignmentMaterials([]provenance.TaskEventRow{badOccupant}, 100)
+	add("material-occupant", err)
+	_, err = validateAssignmentEvidence([]provenance.EvidenceRow{evidence}, 100)
+	add("evidence-kind", err)
+	_, err = validateAssignmentEvidence([]provenance.EvidenceRow{noOperation}, 100)
+	add("evidence-identity", err)
+	var decoded map[string]any
+	err = decodeAuthenticationJSON([]byte(`{"b":1,"a":2}`), &decoded)
+	add("stored-not-normalized", err)
+	err = decodeAuthenticationJSON([]byte(`{"a":7e0}`), &decoded)
+	add("stored-unsupported-number", err)
+	return causes
 }
 
 // TestAssignmentAuthenticationFaultNamesNoRetiredMachinery renders every refusal
-// the authentication file can produce and holds it to three rules: it names no
-// retired machinery (no rebuild command, no "certif" stem, no generation, no
-// index), it carries all six parts, and the transfer-predecessor cause says
-// "no authenticated owner predecessor" rather than the retired word.
+// the authentication file can produce — at every raise site, and with EVERY
+// cause the decoders really return — and holds each rendering to two rules: it
+// names no retired machinery (no rebuild command, no "certif" stem, no
+// generation, no index, no "recovery"), and it carries all six parts.
 //
-// RED when: a step literal is added that the rendering guard rejects, or the
-// predecessor cause reverts to the retired wording.
+// The causes are the decoders' own, not a synthetic string, so the forbidden
+// word pin and the six-part pin both reach the text an operator actually reads.
+// A wrapper that renders cleanly around "example cause" and wraps a real cause
+// badly is the failure this shape catches.
+//
+// RED when: a raise site or a decode cause is added that the rendering guard
+// rejects, or a raise site names a function it is not written in.
 func TestAssignmentAuthenticationFaultNamesNoRetiredMachinery(t *testing.T) {
 	t.Parallel()
-	steps := authenticationFaultSteps(t)
-	require.NotEmpty(t, steps, "the production file must raise at least one authentication refusal, or nothing is proved")
-	for _, step := range steps {
-		t.Run(step, func(t *testing.T) {
-			rendered := (&AssignmentAuthenticationError{Step: step, Cause: stderrors.New("example cause")}).Error()
-			for _, forbidden := range []string{"rebuild-index", "certif", "generation", "index"} {
-				require.NotContains(t, strings.ToLower(rendered), forbidden,
-					"the refusal names retired machinery an operator can no longer act on")
+	sites := authenticationRefusalSites(t)
+	require.NotEmpty(t, sites, "the production file must raise at least one authentication refusal, or nothing is proved")
+	causes := realAuthenticationCauses(t)
+	require.NotEmpty(t, causes, "the decoders must return at least one cause, or nothing is proved")
+	for _, site := range sites {
+		t.Run(site.Function+"/"+site.Step, func(t *testing.T) {
+			require.NotEmpty(t, site.Function, "every raise site must name the function it is written in")
+			require.Equal(t, site.Enclosing, site.Function,
+				"the Where of a refusal must name the function that is actually on the stack, not its caller")
+			for causeName, cause := range causes {
+				t.Run(causeName, func(t *testing.T) {
+					rendered := (&AssignmentAuthenticationError{
+						Function: site.Function, Step: site.Step, Cause: cause,
+					}).Error()
+					for _, forbidden := range retiredRefusalVocabulary {
+						require.NotContains(t, strings.ToLower(rendered), forbidden,
+							"the refusal names retired machinery an operator can no longer act on")
+					}
+					for _, part := range []string{"Why:", "Where:", "When:", "Impact:", "Fix:"} {
+						require.Contains(t, rendered, part, "every part of the refusal must reach the reader")
+					}
+					require.Contains(t, rendered, "step "+site.Step)
+					require.Contains(t, rendered, "internal/tasks/assignment_authentication.go, "+site.Function)
+					require.Contains(t, rendered, "nothing was written")
+				})
 			}
-			for _, part := range []string{"Why:", "Where:", "When:", "Impact:", "Fix:"} {
-				require.Contains(t, rendered, part, "every part of the refusal must reach the reader")
-			}
-			require.Contains(t, rendered, "step "+step)
-			require.Contains(t, rendered, "nothing was written")
 		})
 	}
+}
 
-	// The predecessor cause is reached by REAL production code: a start row that
-	// cites a predecessor the authenticated page does not contain.
+// TestDriverRefusalNamesThisFunctionNotItsCaller pins the C11 shape: the
+// driver's own refusals name the function on the stack, so a second caller
+// cannot leave the Where naming a function that never refused.
+//
+// RED when: startPageRefusal names a caller again, or the Where drops the file
+// and function that raised it.
+func TestDriverRefusalNamesThisFunctionNotItsCaller(t *testing.T) {
+	t.Parallel()
+	_, err := authenticateAssignmentStarts(t.Context(), nil, nil, 0)
+	require.Error(t, err, "an empty start page is refused by the driver's own guard, with no store read")
+	var structured *pasterrors.StructuredError
+	require.ErrorAs(t, err, &structured, "a driver refusal is a structured refusal, as it was before the extraction")
+	require.Contains(t, structured.Where, "internal/tasks/assignment_authentication.go")
+	require.Contains(t, structured.Where, "authenticateAssignmentStarts")
+	require.NotContains(t, structured.Where, "exactCandidateParentAuthority",
+		"the Where must not name the caller: a caller is not the code that refused, and a second caller would make the name untrue")
+	for _, part := range []string{structured.What, structured.Why, structured.Where, structured.Impact, structured.Fix} {
+		require.NotEmpty(t, part, "every part of the refusal must reach the reader")
+	}
+	var report bytes.Buffer
+	structured.Report(&report)
+	for _, forbidden := range retiredRefusalVocabulary {
+		require.NotContains(t, strings.ToLower(report.String()), forbidden,
+			"the refusal names retired machinery an operator can no longer act on")
+	}
+}
+
+// TestWritePathDecodeRefusalCarriesAllSixParts pins the C5 shape: the PRODUCTION
+// decode site wraps, exactly as the sibling one does. A material row the decoder
+// refuses reaches the operator with What, Why, Where, When, Impact and Fix —
+// not a bare one-liner from whichever site happened to call the decoder.
+//
+// RED when: the driver's decode return goes back to a bare error, or its Where
+// names a function that is not on the stack.
+func TestWritePathDecodeRefusalCarriesAllSixParts(t *testing.T) {
+	t.Parallel()
+	store := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
+	defer store.Close()
+	actor := feasibilityActor(t, store, "write-decode-cause")
+	task := createHumanTestTask(t, store, "write-decode-task")
+	seedAssignmentStartWithParent(t, store, task, "write-decode", RoleOwnerResponsibility, actor, "write-decode-start", "")
+	starts := everyAssignmentStart(t, store)
+	require.NotEmpty(t, starts, "the seeded episode must be a start this store holds")
+
+	// The read boundary hands the decoder one material row whose producer the
+	// decoder cannot accept. The store is real; only the row returned to the
+	// production driver differs.
+	corrupted := &decodeCorruptingJournal{
+		Journal: store.Journal(),
+		change:  func(rows []provenance.TaskEventRow) { rows[0].ProducedByOperationJournalID = nil },
+	}
+	_, err := authenticateAssignmentStarts(t.Context(), corrupted, starts, 0)
+	require.Error(t, err, "a material row with no producer cannot authenticate")
+	var fault *AssignmentAuthenticationError
+	require.ErrorAs(t, err, &fault,
+		"the production decode site must wrap the decoder's cause, so the refusal names all six parts rather than repeating a bare one-liner")
+	require.Equal(t, "authenticateAssignmentStarts", fault.Function)
+	require.Equal(t, "parent material decoding", fault.Step)
+	require.ErrorContains(t, fault, "invalid identity or producer")
+	rendered := fault.Error()
+	for _, part := range []string{"Why:", "Where:", "When:", "Impact:", "Fix:"} {
+		require.Contains(t, rendered, part, "every part of the refusal must reach the reader")
+	}
+	require.Contains(t, rendered, "internal/tasks/assignment_authentication.go, authenticateAssignmentStarts")
+	for _, forbidden := range retiredRefusalVocabulary {
+		require.NotContains(t, strings.ToLower(rendered), forbidden,
+			"the refusal names retired machinery an operator can no longer act on")
+	}
+}
+
+// decodeCorruptingJournal corrupts the material rows the production driver reads
+// and delegates every other call. It is a read-boundary substitution: the store
+// is real and holds the rows, and only the row handed to the driver differs.
+type decodeCorruptingJournal struct {
+	provenance.Journal
+	change func([]provenance.TaskEventRow)
+}
+
+func (j *decodeCorruptingJournal) QueryTaskEvents(query provenance.JournalQueryV1) (provenance.JournalTaskEventPageV1, error) {
+	page, err := j.Journal.QueryTaskEvents(query)
+	if err != nil || j.change == nil || len(page.Events) == 0 {
+		return page, err
+	}
+	page.Events = append([]provenance.TaskEventRow(nil), page.Events...)
+	j.change(page.Events)
+	return page, nil
+}
+
+// TestTransferPredecessorCauseReachesTheOperator drives REAL production code to
+// the transfer-predecessor refusal — a start row that cites a predecessor the
+// authenticated page does not contain — and reads the text the operator sees.
+//
+// RED when: the predecessor cause reverts to the retired wording, the refusal
+// stops being the typed authentication refusal, or the step changes.
+func TestTransferPredecessorCauseReachesTheOperator(t *testing.T) {
+	t.Parallel()
 	store := openHumanTestTracker(t, filepath.Join(t.TempDir(), "pasture.db"))
 	defer store.Close()
 	bindTestGovernedAllocation(t, store)
@@ -1810,10 +2027,15 @@ func TestAssignmentAuthenticationFaultNamesNoRetiredMachinery(t *testing.T) {
 	_, err = authenticateAssignmentStarts(t.Context(), store.Journal(), mutated, 0)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "no authenticated owner predecessor")
-	require.NotContains(t, strings.ToLower(err.Error()), "certif")
 	var fault *AssignmentAuthenticationError
 	require.ErrorAs(t, err, &fault, "the refusal must be the typed authentication refusal")
 	require.Equal(t, "transfer predecessor", fault.Step)
+	require.Equal(t, "authenticateStartRows", fault.Function,
+		"this refusal is raised inside the page authenticator, so the Where must name that function")
+	for _, forbidden := range retiredRefusalVocabulary {
+		require.NotContains(t, strings.ToLower(err.Error()), forbidden,
+			"the refusal names retired machinery an operator can no longer act on")
+	}
 }
 
 // retiredTransferCountNames are the four names the per-predecessor budget used.
@@ -1944,6 +2166,105 @@ func TestParentTransferAuthenticationHasNo64PredicateLimit(t *testing.T) {
 	require.Equal(t, provenance.AssignmentID(fmt.Sprintf("chain-%d", predecessors)), last.Assignment)
 }
 
+// materialReadProbe records the cursor every material page read starts from, and
+// delegates. It is a test observer on the PUBLIC journal read, so the bound it
+// reports is a bound production code actually asked for.
+type materialReadProbe struct {
+	provenance.Journal
+	cursors []provenance.JournalID
+}
+
+func (j *materialReadProbe) QueryTaskEvents(query provenance.JournalQueryV1) (provenance.JournalTaskEventPageV1, error) {
+	if len(query.EventKinds) == 1 && query.EventKinds[0] == FamilyAssignmentStarted.EventKind() {
+		j.cursors = append(j.cursors, query.AfterJournalID)
+	}
+	return j.Journal.QueryTaskEvents(query)
+}
+
+// TestAssignmentStartMaterialReadSeedsAtTheMinimumAuthority pins the seed the
+// production driver chooses for its material read, on the TRANSFER path, which
+// is the path that used to seed at the task's birth journal id instead.
+//
+// The bound is min(starts[].AuthorityJournalID), and this states it two ways
+// that would both fail if the seed moved: the observed cursor EQUALS the
+// minimum authority over the page, and it is STRICTLY ABOVE the task's birth
+// journal id, which is the cursor the pre-extraction transfer path used. The
+// whole chain still authenticates, so the narrower seed is shown to lose
+// nothing: a material fact describing a start is written above that start's own
+// authority, so every start's material is above the minimum.
+//
+// RED when: the seed reverts to the birth journal id, or moves off the minimum
+// authority over the page.
+func TestAssignmentStartMaterialReadSeedsAtTheMinimumAuthority(t *testing.T) {
+	t.Parallel()
+	const transfers = 3
+	fixture := newTaskAssignmentTransferFixture(t)
+	fixture.seedOwnerAssignment(t, "seeded-0")
+	for i := 1; i <= transfers; i++ {
+		request := protocol.TransferTaskAssignmentRequest{
+			TaskID:           fixture.task,
+			Slot:             provenance.SlotOwnerResponsibility,
+			NextAssignmentID: provenance.AssignmentID(fmt.Sprintf("seeded-%d", i)),
+			ActorID:          fixture.actorA,
+			NextOccupant:     fixture.actorB,
+		}
+		_, err := fixture.tracker.TransferTaskAssignment(t.Context(), request)
+		require.NoError(t, err, "transfer %d of the predecessor chain", i)
+	}
+	starts := everyAssignmentStart(t, fixture.tracker)
+	require.Len(t, starts, transfers+1)
+
+	// The page the production caller hands the driver on a transfer parent is the
+	// whole task history, and its earliest row is a transfer successor, so this is
+	// the transfer path and not the ordinary point lookup.
+	require.NotNil(t, starts[len(starts)-1].PredecessorAssignmentID,
+		"the newest start must be a transfer successor, or this is not the transfer path")
+	minimum := starts[0].AuthorityJournalID
+	for _, row := range starts {
+		if row.AuthorityJournalID < minimum {
+			minimum = row.AuthorityJournalID
+		}
+	}
+
+	probe := &materialReadProbe{Journal: fixture.tracker.Journal()}
+	proof, err := authenticateAssignmentStarts(t.Context(), probe, starts, 0)
+	require.NoError(t, err, "every start must still authenticate under the seeded bound")
+	require.Len(t, proof.Rows, len(starts), "the narrower seed must not drop a start the page holds")
+	require.NotEmpty(t, probe.cursors, "the driver must read material, or nothing is proved")
+	require.Equal(t, minimum, probe.cursors[0],
+		"the first material read begins at the minimum authority over the page, which is what the function documents it re-seeds to")
+
+	// The bound is a MINIMUM over the page, not the first row. A page presented
+	// with its earliest row last therefore still seeds at the same bound, which
+	// is what makes the assertion above a statement about the seed rather than
+	// about journal order. Only the cursor is read here: what the driver decides
+	// about an out-of-order page afterwards is a different question, and this
+	// subject is about where the read starts.
+	reversed := make([]provenance.AssignmentStartRow, 0, len(starts))
+	for i := len(starts) - 1; i >= 0; i-- {
+		reversed = append(reversed, starts[i])
+	}
+	require.Equal(t, minimum, reversed[len(reversed)-1].AuthorityJournalID,
+		"the fixture must present its earliest authority last, or this proves nothing about a minimum")
+	reverseProbe := &materialReadProbe{Journal: fixture.tracker.Journal()}
+	_, _ = authenticateAssignmentStarts(t.Context(), reverseProbe, reversed, 0)
+	require.NotEmpty(t, reverseProbe.cursors, "the driver must still read material for a reversed page")
+	require.Equal(t, minimum, reverseProbe.cursors[0],
+		"the seeded bound is the minimum authority over the page, so the page's first row cannot move it")
+
+	// And the seed really is the re-seed: the birth cursor the transfer path used
+	// before the extraction is strictly lower, so the two are distinguishable here
+	// and the assertion above could not pass by accident on either value.
+	service, err := fixture.tracker.NewEpochService(EpochServiceOptions{})
+	require.NoError(t, err)
+	reader, ok := service.(*epochService).EpochAssignmentService.(*epochAssignmentService)
+	require.True(t, ok, "the production service must be the epoch assignment service")
+	birth, err := reader.taskBirthJournalID(t.Context(), fixture.task)
+	require.NoError(t, err)
+	require.Less(t, birth, minimum,
+		"the task's birth journal id is below every start's authority, so this fixture can tell the re-seeded bound from the retired one")
+}
+
 // ─── writer emission ────────────────────────────────────────────────────────
 
 // TestEveryNonTransferAssignmentStartWriterMaterialIsReadableByOwnershipQuery
@@ -2014,9 +2335,9 @@ func TestEveryNonTransferAssignmentStartWriterMaterialIsReadableByOwnershipQuery
 		Subject: ReviewSubjectRef{Kind: ReviewSubjectImplementationCandidate, SnapshotID: memberTask.String()},
 	})
 	require.NoError(t, err)
-	seedRecoveryAssignmentWithParent(t, store, memberTask, "writer-finalizer",
+	seedAssignmentStartWithParent(t, store, memberTask, "writer-finalizer",
 		RoleGoverningSupervisor, actor, "writer-finalizer-start", "writer-slice-slice-owner")
-	rework := finishRecoveryReviewWithDeferredFinding(t, store, service, EpochRootID(epoch.String()), started,
+	rework := finishReviewWithDeferredFinding(t, store, service, EpochRootID(epoch.String()), started,
 		"writer-finalizer", actor, "writer-finish")
 	replacement, err := service.ReworkSlice(t.Context(), ReworkSliceInput{
 		Meta:       CommandMeta{OperationID: "writer-replacement"},
