@@ -54,6 +54,17 @@ var retiredAssignmentIndexTables = []string{
 // ATOMICITY: runStep holds one BEGIN IMMEDIATE transaction and commits only on
 // a nil return, so a failure part-way through the drops leaves the file whole
 // at version 8 — no relation is left half removed.
+//
+// WHERE THE OPERATOR READS BOTH HALVES. The plan this step prints is
+// stepDescription(8, 9) in plan.go, which carries the cost in one clause
+// because this migrator also runs on every open, so a dry run is the only
+// surface on which the consequence can be read before it happens. The refusal
+// that follows the upgrade reaches the operator through a different door — an
+// older build meeting a version-9 file, including its own `pasture migrate` —
+// and lives at internal/audit/migrate.go in newerSchemaError. That message
+// names no way back either, for the same reason: the floor only moves up. Its
+// exact wording is pinned in internal/audit/migrate_test.go; this comment is
+// not a second copy of it.
 func migrateV8toV9Step(tx *sql.Tx, now int64) error {
 	if err := dropRetiredAssignmentIndex(tx); err != nil {
 		return err

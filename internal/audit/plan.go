@@ -51,6 +51,14 @@ type MigrationStepSummary struct {
 // When workers land a new vN→vN+1 migration, append the corresponding entry
 // here AND register the step in migrationSteps() — the dry-run will then
 // surface it automatically without any extra wiring.
+//
+// A step that RAISES THE FLOOR says so in its description as well as naming
+// its contents, because this text is the only place an operator can read the
+// consequence before it happens: OpenTaskTracker runs the migrator at every
+// open, so the upgrade a description describes is usually applied by the first
+// command of the new build, without a dry run. A description that only lists
+// what goes and what stays answers "what does this do to me" with less than
+// the whole cost.
 func stepDescription(fromVersion, toVersion int) string {
 	switch {
 	case fromVersion == 1 && toVersion == 2:
@@ -64,7 +72,11 @@ func stepDescription(fromVersion, toVersion int) string {
 	case fromVersion == 5 && toVersion == 6:
 		return "add content-addressed lifecycle payload storage and replay-derived occurrence projections"
 	case fromVersion == 8 && toVersion == 9:
-		return "remove the retired gate assignment-index tables and triggers; session claims are kept"
+		// The consequence clause is the one the migrator cannot print anywhere
+		// else; the refusal it names is internal/audit/migrate.go in
+		// newerSchemaError, which is what an older build meets afterwards.
+		return "remove the retired gate assignment-index tables and triggers; session claims are kept; " +
+			"an older pasture binary will then refuse this database for every command until it is upgraded"
 	default:
 		// Forward-compatible default: workers who add a new step will see
 		// this generic text and know to add a tailored description here.

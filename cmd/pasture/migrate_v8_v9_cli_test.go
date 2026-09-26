@@ -135,8 +135,9 @@ func TestCLI_Migrate_UpgradesAVersionEightFile_AndIsANoopAfterward(t *testing.T)
 }
 
 // TestCLI_Migrate_DryRun_LeavesTheFileUntouched is the built binary's dry run.
-// It must print the version 8 → version 9 plan, name both halves of what the
-// step does, and change the file's bytes not at all.
+// It must print the version 8 → version 9 plan, say what the step removes, what
+// it keeps and what the new floor costs an older binary, and change the file's
+// bytes not at all.
 func TestCLI_Migrate_DryRun_LeavesTheFileUntouched(t *testing.T) {
 	t.Parallel()
 	dbPath := makeVersionEightStore(t)
@@ -149,8 +150,8 @@ func TestCLI_Migrate_DryRun_LeavesTheFileUntouched(t *testing.T) {
 	if out.exitCode != 0 {
 		t.Fatalf("migrate --dry-run exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
 	}
-	if !strings.Contains(out.stdout, "v8->v9: remove the retired gate assignment-index tables and triggers; session claims are kept") {
-		t.Errorf("dry run must print the version 8 to 9 step and its description; stdout=%q", out.stdout)
+	if !strings.Contains(out.stdout, "v8->v9: remove the retired gate assignment-index tables and triggers; session claims are kept; an older pasture binary will then refuse this database for every command until it is upgraded") {
+		t.Errorf("dry run must print the version 8 to 9 step, what it removes, what it keeps, and what the new floor costs; stdout=%q", out.stdout)
 	}
 	after, err := os.ReadFile(dbPath)
 	if err != nil {

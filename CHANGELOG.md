@@ -108,6 +108,21 @@
   six native behaviours into two, so a generated OpenCode manifest labelled a
   plugin throw as a Claude exit-2 block. OpenCode rows now carry their real
   behaviour. No Claude Code or Codex value changes.
+- The audit database floor moves to version 9. The step removes the six
+  bookkeeping tables, their index, and the two triggers behind the retired gate
+  assignment index — an index of started assignments, a build watermark, and
+  some rebuild scratch space — and keeps every session claim. No task,
+  assignment, audit event, or session claim is read, copied, or rewritten, so
+  there is nothing to rebuild afterwards. The cost is that version 9 is a floor
+  that only moves up: once your file has been upgraded, ANY older `pasture`
+  binary refuses the whole database for EVERY command — tasks, epochs, hooks,
+  the daemon, and `pasture migrate` itself — and says the file was written by a
+  newer pasture than that build supports. The upgrade runs automatically the
+  first time a build with this release opens the file, so nothing asks you
+  first; `pasture migrate --dry-run` prints the step and this consequence
+  before it is applied. The upgrade is not reversible: there is no shim and no
+  compatibility mode, and the way back is a newer binary, never a
+  hand-downgraded file.
 
 ## [0.0.8] - 2026-08-29
 
