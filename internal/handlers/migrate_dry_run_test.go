@@ -77,9 +77,10 @@ func sha256Of(t *testing.T, path string) string {
 
 // TestMigrateDryRunLeavesAVersionEightFileUnchanged is the dry-run proof for
 // the v8 → v9 step. `pasture migrate --dry-run` on a version-8 file must list
-// the step, name what it removes and what it keeps, and leave the file's
-// bytes exactly as they were: the whole point of a dry run is that the file
-// the operator is being shown is not the file that changed.
+// the step, say what it removes, what it keeps and what the new floor costs an
+// older binary, and leave the file's bytes exactly as they were: the whole
+// point of a dry run is that the file the operator is being shown is not the
+// file that changed.
 func TestMigrateDryRunLeavesAVersionEightFileUnchanged(t *testing.T) {
 	t.Parallel()
 	dbPath := makeVersionEightFile(t)
@@ -94,6 +95,9 @@ func TestMigrateDryRunLeavesAVersionEightFileUnchanged(t *testing.T) {
 	require.Contains(t, printed, "v8->v9", "the plan must list the step:\n%s", printed)
 	require.Contains(t, printed, "remove the retired gate assignment-index tables and triggers; session claims are kept",
 		"the plan must say what the step removes and what it keeps:\n%s", printed)
+	require.Contains(t, printed, "an older pasture binary will then refuse this database for every command until it is upgraded",
+		"the plan must name the consequence of the new floor, because the migrator runs on every open "+
+			"and the operator is not shown this output before the upgrade happens:\n%s", printed)
 	require.Contains(t, printed, "(v8 -> v9)", "the plan must span v8 to v9:\n%s", printed)
 	require.Contains(t, printed, "Dry run:", "the output must be marked as a dry run:\n%s", printed)
 

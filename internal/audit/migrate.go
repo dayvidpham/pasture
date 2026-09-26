@@ -509,6 +509,15 @@ func readVersionInTx(ctx context.Context, tx *sql.Tx) (int, error) {
 // reports a schema version higher than MaxKnownSchemaVersion. The exact
 // field values are asserted by §11 Scenario 5; do not change wording
 // without updating that test.
+//
+// The Fix has ONE remedy and says why the obvious second one is not available.
+// An earlier wording offered "pin back to the older pasture that wrote this
+// database originally" as a second option beside "do not downgrade the file".
+// That advice cannot work: the file is already at dbVersion, so a build that
+// predates it refuses the file for exactly the reason this build does — and
+// `pasture migrate` under such a build lands in this same error, so the second
+// option offered no escape the first did not. A floor that only moves up is
+// stated as a floor, and the reader is sent to a newer binary.
 func newerSchemaError(dbVersion, maxKnownVersion int) error {
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryStorage,
@@ -527,10 +536,11 @@ func newerSchemaError(dbVersion, maxKnownVersion int) error {
 		Fix: fmt.Sprintf(
 			"1. Upgrade pasture to a version that supports audit-database version %d:\n"+
 				"     # install or switch to a newer pasture release\n"+
-				"2. Or, if you need to keep using this build for now, pin back to the older pasture\n"+
-				"   that wrote this database originally.\n"+
+				"2. There is no way to keep using this build against this file: a build that predates\n"+
+				"   audit-database version %d refuses the whole file for every command, and the\n"+
+				"   upgrade is not reversible.\n"+
 				"3. Do NOT downgrade the database file itself — there's no safe way to undo an upgrade.",
-			dbVersion,
+			dbVersion, dbVersion,
 		),
 	}
 }

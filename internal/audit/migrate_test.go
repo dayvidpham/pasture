@@ -304,9 +304,27 @@ func TestMigrate_NewerSchema_RejectedWithStructuredError(t *testing.T) {
 		t.Errorf("Impact = %q, want %q", se.Impact, wantImpact)
 	}
 
-	wantFixSubstring := "Upgrade pasture to a version that supports audit-database version 99"
-	if !strings.Contains(se.Fix, wantFixSubstring) {
-		t.Errorf("Fix = %q, want substring %q", se.Fix, wantFixSubstring)
+	// The Fix is pinned BY EQUALITY, not by a substring. It used to be pinned
+	// by the substring "Upgrade pasture to a version that supports
+	// audit-database version 99", and a substring cannot see a second step
+	// that offers advice which cannot work — the version-8 to version-9
+	// upgrade made "pin back to the older pasture that wrote this database
+	// originally" impossible, because such a build refuses the upgraded file
+	// for exactly the reason this build does, and `pasture migrate` under it
+	// returns this same error. Equality is what makes that a red test.
+	wantFix := "1. Upgrade pasture to a version that supports audit-database version 99:\n" +
+		"     # install or switch to a newer pasture release\n" +
+		"2. There is no way to keep using this build against this file: a build that predates\n" +
+		"   audit-database version 99 refuses the whole file for every command, and the\n" +
+		"   upgrade is not reversible.\n" +
+		"3. Do NOT downgrade the database file itself — there's no safe way to undo an upgrade."
+	if se.Fix != wantFix {
+		t.Errorf("Fix = %q, want %q", se.Fix, wantFix)
+	}
+	// A second, contradictory remedy is the specific regression the equality
+	// above exists to catch, so it is named as its own failure.
+	if strings.Contains(se.Fix, "pin back to the older pasture") {
+		t.Errorf("Fix = %q still offers to pin back to an older build, which refuses this file for the same reason", se.Fix)
 	}
 
 	// Exit code mapping (Scenario 5 explicitly asserts ExitCode(err) == 5).

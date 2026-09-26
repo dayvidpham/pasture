@@ -467,8 +467,10 @@ func TestMigrateV8ToV9RefusesADatabaseNewerThanItKnows(t *testing.T) {
 
 // TestPlanMigrationsListsTheV8ToV9Step pins the dry-run wording for the new
 // step. PlanMigrations(8) must offer exactly one step, and its description
-// must say both halves of the promise: the retired tables and triggers go,
-// session claims stay.
+// must say all three halves of the promise: the retired tables and triggers go,
+// session claims stay, and the floor moves far enough that an older binary
+// refuses the whole file. The last clause is the one the migrator cannot warn
+// about anywhere else, because it runs on every open.
 func TestPlanMigrationsListsTheV8ToV9Step(t *testing.T) {
 	t.Parallel()
 	plan := PlanMigrations(8)
@@ -478,7 +480,8 @@ func TestPlanMigrationsListsTheV8ToV9Step(t *testing.T) {
 	if plan[0].FromVersion != 8 || plan[0].ToVersion != 9 {
 		t.Errorf("step is v%d->v%d, want v8->v9", plan[0].FromVersion, plan[0].ToVersion)
 	}
-	const want = "remove the retired gate assignment-index tables and triggers; session claims are kept"
+	const want = "remove the retired gate assignment-index tables and triggers; session claims are kept; " +
+		"an older pasture binary will then refuse this database for every command until it is upgraded"
 	if plan[0].Description != want {
 		t.Errorf("Description=%q want %q", plan[0].Description, want)
 	}
