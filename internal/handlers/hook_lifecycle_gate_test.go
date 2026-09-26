@@ -484,13 +484,16 @@ func TestTheGateDeniesABoundActorWithNoAssignment(t *testing.T) {
 	t.Parallel()
 	const actor = "lifecycle-gate-deny--0193f1c0-0000-7000-8000-0000000000b2"
 	raw := gateFixture(t, gateClaudeGateFixture)
-	reader := &gateFakeReader{snap: gateBoundSnapshot(t, actor)}
+	snapshot := gateBoundSnapshot(t, actor)
+	reader := &gateFakeReader{snap: snapshot}
 	dbPath := gateStore(t)
 
 	response, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker, reader.gateFactory)
 
 	require.NoError(t, err, "a denial is a decision, not a fault")
 	require.True(t, response.IsValid(), "a denial reaches the host as a response")
+	require.Equal(t, 1, snapshot.closed,
+		"the snapshot holds a read lease, so it must be released on the denying path too")
 	committed := gateConsultation(t, dbPath)
 	require.Equal(t, backend.DecisionDeny, committed.Kind())
 	require.Equal(t, backend.ReasonNoActiveAssignment, committed.Reason(),
@@ -779,19 +782,22 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 				"every fault row must open the reader exactly once, for the session the capture carried")
 			require.Equal(t, 1, reader.reads,
 				"the gate takes exactly one snapshot per invocation; a fault row that read zero or twice did not exercise the seam")
-			snapshot, tookSnapshot := reader.snap.(*gateFakeSnapshot)
-			if tookSnapshot {
+			// THE reader.refused FLAG IS DELIBERATELY NOT ASSERTED. On a row
+			// that reached here it is fully derived: reads == 1 and the snapshot
+			// type-asserts only when Snapshot returned one, and Snapshot sets
+			// refused only on the path that returns no snapshot. Either polarity
+			// would restate that derivation rather than constrain production, so
+			// the flag is left as the fake's own bookkeeping. The facts that DO
+			// constrain production are pinned above (opened, reads) and below
+			// (closed, where a snapshot exists).
+			if snapshot, tookSnapshot := reader.snap.(*gateFakeSnapshot); tookSnapshot {
 				// A SNAPSHOT WAS TAKEN, SO ITS READ LEASE MUST BE RELEASED on the
 				// fault return. Production closes it with one deferred Close; a
 				// handler that closed only on the success path would leak the
 				// lease on exactly the faults this subject drives, and no other
 				// subject would name it.
-				require.False(t, reader.refused, "the reader raised no fault of its own, so the fault came from an accessor after the snapshot opened")
 				require.Equal(t, 1, snapshot.closed,
 					"a snapshot that was taken holds a read lease, so it must be closed on the fault return")
-			} else {
-				require.True(t, reader.refused,
-					"no snapshot was taken, so the fault must be the reader's own refusal to snapshot")
 			}
 		})
 	}
