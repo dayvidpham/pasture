@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,7 +44,8 @@ func TestTaskAgentsHandlersNameTheExactFileWhenThePathCarriesURIDelimiters(t *te
 	require.Equal(t, 0, code)
 	require.Contains(t, listOut.String(), "pasture/automaton/check-constraints",
 		"the list must read the agent registry from the exact file")
-	require.NotContains(t, listOut.String(), "(no registered agents)")
+	require.Equal(t, tasks.WellKnownAgentCount, strings.Count(strings.TrimSpace(listOut.String()), "\n")+1,
+		"the list must read EVERY registered agent from the exact file, not only the one named above")
 
 	var showOut bytes.Buffer
 	code, err = handlers.TaskAgentsShow(&showOut, dbPath, agentId.String(), types.OutputText)

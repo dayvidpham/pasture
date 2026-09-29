@@ -1,10 +1,12 @@
 // Package dbconn centralizes how every pasture component opens a modernc
-// SQLite handle on the shared pasture.db file, and is the only place the file
-// path is spliced into a file: URI. Putting the connection-string contract in
-// one leaf package (no pasture deps beyond errors) lets the audit trail, the
-// task tracker, and the durable engine open the file with the identical
-// WAL/concurrency configuration without an import cycle, while the read-only
-// and default-mode callers get the same URI escaping.
+// SQLite handle on the shared pasture.db file, and is the only place the
+// database-open path splices a file path into a file: URI. (It is not the only
+// file: URI in the tree: internal/acceptance/snapshot.go builds one too, but it
+// does so through url.URL, which applies the same escaping itself.) Putting the
+// connection-string contract in one leaf package (no pasture deps beyond
+// errors) lets the audit trail, the task tracker, and the durable engine open
+// the file with the identical WAL/concurrency configuration without an import
+// cycle, while the read-only and default-mode callers get the same URI escaping.
 package dbconn
 
 import (
@@ -40,9 +42,30 @@ import (
 // ordinary --db or PASTURE_DB_PATH, not only from a test.
 var dsnPathEscaper = strings.NewReplacer("%", "%25", "#", "%23", "?", "%3F")
 
-// encodeDSNPath returns path with the URI delimiters escaped so the resulting
-// file: URI names exactly the file at path.
-func encodeDSNPath(path string) string { return dsnPathEscaper.Replace(path) }
+// normalizeDSNPath collapses a leading run of slashes on an absolute path to a
+// single slash. On Linux a path beginning with "//" names the same file as the
+// one-slash form, but a URI built as "file:" + "//tmp/x" parses "tmp" as the
+// URI AUTHORITY, which modernc rejects with "invalid uri authority". Collapsing
+// the LEADING run only — interior and trailing slashes are untouched, so a
+// trailing "/" still names the directory the caller wrote — makes the file:
+// URI name the exact file the caller asked for. A path that is exactly "//" (or
+// any longer all-slash run) becomes "/", the filesystem root it names.
+//
+// Normalisation runs BEFORE percent-encoding (encodeDSNPath calls this first),
+// so a literal "%" in the path is still escaped exactly once.
+func normalizeDSNPath(path string) string {
+	if !strings.HasPrefix(path, "//") {
+		return path
+	}
+	return "/" + strings.TrimLeft(path, "/")
+}
+
+// encodeDSNPath returns path with a leading run of slashes normalised to one
+// slash and the URI delimiters escaped, so the resulting file: URI names
+// exactly the file at path.
+func encodeDSNPath(path string) string {
+	return dsnPathEscaper.Replace(normalizeDSNPath(path))
+}
 
 // SharedDSN builds the connection string used for every modernc handle on the
 // unified pasture.db file. It encodes the concurrency contract as DSN params
@@ -133,9 +156,11 @@ func OpenSharedDBWithProfile(path string, profile timeouts.Profile) (*sql.DB, er
 
 // OpenDefaultDB opens a modernc *sql.DB at path with SQLite's default
 // create/journal behaviour — no mode parameter and none of the shared
-// WAL/timeout pragmas — after escaping path's URI delimiters.
+// WAL/timeout pragmas — after normalising a leading run of slashes and escaping
+// path's URI delimiters.
 //
-// It is for the version probes and the dry-run preview in internal/handlers.
+// It is for the version probes and the dry-run preview in internal/handlers,
+// and for the v3 backfill test in internal/audit.
 // Those may run against a database that does not exist yet (the first open
 // creates it, so a read-only handle would refuse a path that is merely new),
 // and a dry run must leave an existing database byte-identical, which the

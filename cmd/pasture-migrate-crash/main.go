@@ -158,6 +158,14 @@ func runCrashMigration(dbPath string) (int, error) {
 	// _txlock=immediate (so BeginTx issues "BEGIN IMMEDIATE";
 	// modernc.org/sqlite/sqlite.go:187-193 + tx.go:22-25). The same DSN is
 	// what NewSqliteAuditTrail in internal/audit/sqlite.go opens with.
+	//
+	// Routing through the shared DSN retired this binary's own PRAGMA loop and,
+	// with it, the structured "Couldn't apply SQLite setting ..." diagnostic
+	// that loop raised on a PRAGMA failure. The DSN pragmas fail at first use
+	// instead (some later query reports the driver error), which is acceptable
+	// for this TEST-ONLY binary because its fixture is a local file in a
+	// t.TempDir() on a filesystem that supports WAL. It is noted here rather
+	// than restored so the loss is deliberate, not silent.
 	db, err := dbconn.OpenSharedDB(dbPath)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
