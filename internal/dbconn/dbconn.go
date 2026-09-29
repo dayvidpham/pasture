@@ -9,12 +9,34 @@ import (
 	"database/sql"
 	"fmt"
 	"strconv"
+	"strings"
 
 	_ "modernc.org/sqlite" // pure-Go driver; CGO_ENABLED=0 compatible
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 )
+
+// dsnPathEscaper percent-encodes the three bytes that would otherwise change
+// the MEANING of the file: URI instead of naming the file the caller asked for.
+//
+// The database path is spliced verbatim into the URI, and in a URI a "#" starts
+// the fragment and a "?" starts the query. A path carrying either byte is
+// silently truncated at that byte: the caller's remaining directories and the
+// filename are lost into the fragment, and every DSN parameter after the "?"
+// stops being a parameter. The handle then reads and writes a DIFFERENT file
+// than the one named, with no error — a second process or a later run that asks
+// for the same real path lands on the same truncated file and its records
+// accumulate there. A literal "%" is escaped first so it is not mistaken for
+// the start of a percent escape.
+//
+// "#" and "?" are legal in a POSIX filename, so this is reachable from an
+// ordinary --db or PASTURE_DB_PATH, not only from a test.
+var dsnPathEscaper = strings.NewReplacer("%", "%25", "#", "%23", "?", "%3F")
+
+// encodeDSNPath returns path with the URI delimiters escaped so the resulting
+// file: URI names exactly the file at path.
+func encodeDSNPath(path string) string { return dsnPathEscaper.Replace(path) }
 
 // SharedDSN builds the connection string used for every modernc handle on the
 // unified pasture.db file. It encodes the concurrency contract as DSN params
@@ -40,7 +62,7 @@ func SharedDSNWithProfile(path string, profile timeouts.Profile) string {
 		panic(fmt.Sprintf("dbconn: invalid timeout profile: %v", err))
 	}
 	busyMillis := profile.SQLiteBusy().Milliseconds()
-	return "file:" + path +
+	return "file:" + encodeDSNPath(path) +
 		"?_pragma=journal_mode(WAL)" +
 		"&_pragma=busy_timeout(" + strconv.FormatInt(busyMillis, 10) + ")" +
 		"&_pragma=synchronous(NORMAL)" +
@@ -66,7 +88,7 @@ func ReadOnlyDSNWithProfile(path string, profile timeouts.Profile) string {
 	if err := profile.Validate(); err != nil {
 		panic(fmt.Sprintf("dbconn: invalid timeout profile: %v", err))
 	}
-	return "file:" + path +
+	return "file:" + encodeDSNPath(path) +
 		"?mode=ro" +
 		"&_pragma=busy_timeout(" + strconv.FormatInt(profile.SQLiteBusy().Milliseconds(), 10) + ")"
 }
