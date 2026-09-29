@@ -23,15 +23,13 @@
 package handlers
 
 import (
-	"database/sql"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 
-	_ "modernc.org/sqlite" // pure-Go driver; ensures sql.Open("sqlite", ...) works
-
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -98,14 +96,16 @@ func Migrate(w io.Writer, in MigrateInput, format types.OutputFormat) (int, erro
 	return runMigrateApply(w, dbPath, format)
 }
 
-// runMigrateDryRun opens the file read-only, probes the version + plan, and
-// prints the plan WITHOUT modifying the file. Scenario 15 asserts the file
-// SHA-256 is identical before and after this call.
+// runMigrateDryRun opens the file, probes the version + plan, and prints the
+// plan WITHOUT modifying the file. Scenario 15 asserts the file SHA-256 is
+// identical before and after this call.
 //
-// We open via sql.Open + read-only queries; we DO NOT call audit.Migrate or
-// NewSqliteAuditTrail (both of which would write to audit_schema_meta).
+// We open a private default-mode handle through dbconn (which also escapes any
+// URI delimiter in dbPath) and issue read-only queries; we DO NOT call
+// audit.Migrate or NewSqliteAuditTrail (both of which would write to
+// audit_schema_meta).
 func runMigrateDryRun(w io.Writer, dbPath string, format types.OutputFormat) (int, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := dbconn.OpenDefaultDB(dbPath)
 	if err != nil {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
@@ -194,7 +194,7 @@ func runMigrateDryRun(w io.Writer, dbPath string, format types.OutputFormat) (in
 // identity (modulo SQLite WAL ordering).
 func runMigrateApply(w io.Writer, dbPath string, format types.OutputFormat) (int, error) {
 	// Probe the from-version BEFORE the migration so we can render an
-	// accurate "from v<from>" in the success line. We open a read-only
+	// accurate "from v<from>" in the success line. We open a private
 	// handle, read, then close, so the audit.NewSqliteAuditTrail call below
 	// gets a fresh handle and can acquire its own write lock.
 	fromVersion, err := probeVersionReadOnly(dbPath)
@@ -257,8 +257,10 @@ func runMigrateApply(w io.Writer, dbPath string, format types.OutputFormat) (int
 // probeVersionReadOnly opens dbPath, reads audit_schema_meta.version, and
 // closes. Used to capture the from/to versions for the migrate-apply success
 // line WITHOUT bringing the audit subsystem up (which would trigger Migrate).
+// The path goes through dbconn so a URI delimiter in dbPath cannot truncate the
+// handle onto a different file.
 func probeVersionReadOnly(dbPath string) (int, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := dbconn.OpenDefaultDB(dbPath)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,

@@ -1,8 +1,10 @@
 // Package dbconn centralizes how every pasture component opens a modernc
-// SQLite handle on the shared pasture.db file. Putting the connection-string
-// contract in one leaf package (no pasture deps beyond errors) lets the audit
-// trail, the task tracker, and the durable engine all open the file with the
-// identical WAL/concurrency configuration without an import cycle.
+// SQLite handle on the shared pasture.db file, and is the only place the file
+// path is spliced into a file: URI. Putting the connection-string contract in
+// one leaf package (no pasture deps beyond errors) lets the audit trail, the
+// task tracker, and the durable engine open the file with the identical
+// WAL/concurrency configuration without an import cycle, while the read-only
+// and default-mode callers get the same URI escaping.
 package dbconn
 
 import (
@@ -27,8 +29,12 @@ import (
 // stops being a parameter. The handle then reads and writes a DIFFERENT file
 // than the one named, with no error — a second process or a later run that asks
 // for the same real path lands on the same truncated file and its records
-// accumulate there. A literal "%" is escaped first so it is not mistaken for
-// the start of a percent escape.
+// accumulate there. A literal "%" is encoded as well: the driver percent-
+// decodes the path, so a filename that already spells an escape (for example
+// "%3F") would otherwise be turned back into the delimiter it names. The order
+// of the pairs below does not matter — strings.NewReplacer makes a single
+// left-to-right pass and never re-scans its own output, so no replacement is
+// encoded twice.
 //
 // "#" and "?" are legal in a POSIX filename, so this is reachable from an
 // ordinary --db or PASTURE_DB_PATH, not only from a test.
@@ -123,6 +129,21 @@ func OpenSharedDBWithProfile(path string, profile timeouts.Profile) (*sql.DB, er
 		}
 	}
 	return db, nil
+}
+
+// OpenDefaultDB opens a modernc *sql.DB at path with SQLite's default
+// create/journal behaviour — no mode parameter and none of the shared
+// WAL/timeout pragmas — after escaping path's URI delimiters.
+//
+// It is for the version probes and the dry-run preview in internal/handlers.
+// Those may run against a database that does not exist yet (the first open
+// creates it, so a read-only handle would refuse a path that is merely new),
+// and a dry run must leave an existing database byte-identical, which the
+// shared profile's journal_mode(WAL) pragma would rewrite. Callers that want
+// the production configuration should use OpenSharedDB; callers that know the
+// file already exists and must not write it should use OpenReadOnlyDB.
+func OpenDefaultDB(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", "file:"+encodeDSNPath(path))
 }
 
 // OpenReadOnlyDB opens a modernc *sql.DB on path in read-only mode (mode=ro).

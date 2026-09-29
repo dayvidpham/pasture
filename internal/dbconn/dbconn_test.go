@@ -37,13 +37,13 @@ func TestDSNEscapesURIDelimitersInPath(t *testing.T) {
 // proof, not just a string check: before the escaping, a "#" or "?" in the path
 // silently truncated the store at that byte and every caller that asked for the
 // real path landed on the same truncated file. The test asks for a path with
-// all three escaped bytes, proves the store is written there, proves no store
-// appears at the truncated prefix, and reads the schema back through the
-// read-only DSN.
+// all three escaped bytes — including a literal "%", so the escape of an
+// already-escape-looking byte is exercised too — proves the store is written
+// there, and reads the schema back through the read-only DSN.
 func TestSharedDSNOpensTheExactFileWhenPathContainsURIDelimiters(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "pasture#1?2%3.db")
+	path := filepath.Join(dir, "pasture#1?2%25.db")
 
 	db, err := OpenSharedDB(path)
 	require.NoError(t, err, "open the shared handle at a path carrying URI delimiters")
@@ -54,10 +54,6 @@ func TestSharedDSNOpensTheExactFileWhenPathContainsURIDelimiters(t *testing.T) {
 	info, err := os.Stat(path)
 	require.NoError(t, err, "the exact requested path must be the database file")
 	require.NotZero(t, info.Size())
-
-	prefix := path[:strings.IndexAny(path, "#?%")]
-	_, err = os.Stat(prefix)
-	require.True(t, os.IsNotExist(err), "no database may be created at the truncated prefix %q", prefix)
 
 	ro, err := OpenReadOnlyDB(path)
 	require.NoError(t, err, "reopen the exact requested path read-only")

@@ -480,6 +480,53 @@ func TestACrashMidMigrationLeavesTheDatabaseWholeAndTheNextOpenFinishesTheUpgrad
 	}
 }
 
+// TestTheCrashBinaryNamesTheExactFileWhenThePathCarriesURIDelimiters proves the
+// crash binary opens the file the caller named even when the path carries a URI
+// delimiter. An unescaped DSN is truncated at the first "?", so the binary
+// would create a fresh file called "crash" beside the fixture copy and run the
+// migration there, leaving the exact input untouched and the truncated file in
+// its place.
+func TestTheCrashBinaryNamesTheExactFileWhenThePathCarriesURIDelimiters(t *testing.T) {
+	t.Parallel()
+	dst := copyFixtureToTemp(t, "crash?probe.db")
+	truncated := filepath.Join(filepath.Dir(dst), "crash")
+	binPath := crashBinaryPath(t)
+
+	cmd := exec.Command(binPath, dst) //nolint:gosec // test-only, paths are local
+	output, err := cmd.CombinedOutput()
+	t.Logf("pasture-migrate-crash output:\n%s", output)
+	if err == nil {
+		t.Fatalf("pasture-migrate-crash exited 0, want non-zero (it should always crash or fail)")
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("unexpected exec error: %v", err)
+	}
+	if code := exitErr.ExitCode(); code != 137 && code != 5 {
+		t.Fatalf("crash binary exit code = %d, want 137 or 5; output:\n%s", code, output)
+	}
+
+	if _, statErr := os.Stat(truncated); !os.IsNotExist(statErr) {
+		t.Fatalf("the crash binary created a truncated database at %q (stat err=%v); the DSN was not escaped",
+			truncated, statErr)
+	}
+
+	// The exact file was the one opened: the crash left it at v2, or at v3 if
+	// the WAL flushed the staged version row before the kill.
+	db, openErr := dbconn.OpenDefaultDB(dst)
+	if openErr != nil {
+		t.Fatalf("open the exact crashed file: %v", openErr)
+	}
+	defer db.Close()
+	var version int
+	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
+		t.Fatalf("read MAX(version) from the exact file: %v", err)
+	}
+	if version != 2 && version != 3 {
+		t.Fatalf("exact file MAX(version) = %d, want 2 or 3 (the crash binary must have run against it)", version)
+	}
+}
+
 // TestTheCrashInjectorRefusesBadInputWithExitOneAndADiagnostic proves the
 // crash binary rejects a missing argument and a missing file cleanly: exit
 // 1 and an actionable message on stderr.
