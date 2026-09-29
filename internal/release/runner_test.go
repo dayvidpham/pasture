@@ -14,6 +14,32 @@ import (
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+// TestMain makes the release tests independent of the operator's git signing
+// configuration. A global commit.gpgsign=true or tag.gpgsign=true, pointing at
+// a signing key the non-interactive test shell cannot reach, makes every
+// `git commit` and annotated `git tag` block on a pinentry with no controlling
+// terminal until the test binary times out. These GIT_CONFIG_* entries are the
+// environment equivalent of `-c commit.gpgsign=false -c tag.gpgsign=false` on
+// every invocation. Because git subprocesses inherit this environment they
+// cover BOTH the mustGit test helper here and the git commands the release
+// package runs itself (GitCommit, GitTag, and the commit/tag steps inside
+// RunRelease), so no test can hang on the operator's signing setup. Nothing on
+// disk is modified: the override lives only in this process's environment.
+func TestMain(m *testing.M) {
+	for _, kv := range [][2]string{
+		{"GIT_CONFIG_COUNT", "2"},
+		{"GIT_CONFIG_KEY_0", "commit.gpgsign"},
+		{"GIT_CONFIG_VALUE_0", "false"},
+		{"GIT_CONFIG_KEY_1", "tag.gpgsign"},
+		{"GIT_CONFIG_VALUE_1", "false"},
+	} {
+		if err := os.Setenv(kv[0], kv[1]); err != nil {
+			panic("release tests: cannot set " + kv[0] + ": " + err.Error())
+		}
+	}
+	os.Exit(m.Run())
+}
+
 // setupRepoDir creates a minimal git repo with a package.json at version.
 func setupRepoDir(t *testing.T, version string) string {
 	t.Helper()
