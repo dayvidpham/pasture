@@ -18,12 +18,15 @@ package main_test
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
+
+	"github.com/dayvidpham/pasture/internal/audit"
 )
 
 // retiredAssignmentIndexRelations is what the version 8 → version 9 step
@@ -164,6 +167,31 @@ func TestCLI_Migrate_DryRun_LeavesTheFileUntouched(t *testing.T) {
 		if got := relationCountOn(t, dbPath, name); got != 1 {
 			t.Errorf("a dry run left %d copies of %q, want 1", got, name)
 		}
+	}
+}
+
+// TestCLI_Migrate_DryRun_NamesTheExactFileForALeadingSlashRun is the built
+// binary's repro for POSIX paths that begin with "//". On Linux that spelling
+// names the same file as the one-slash form, but "file:" + "//tmp/x" parses
+// "tmp" as the URI AUTHORITY, which modernc rejects with "invalid uri
+// authority"; before the normalisation this dry run exited non-zero and created
+// nothing. The normalisation runs before percent-encoding, so the "?" and "#"
+// in the file name are still escaped exactly once.
+func TestCLI_Migrate_DryRun_NamesTheExactFileForALeadingSlashRun(t *testing.T) {
+	t.Parallel()
+	exact := filepath.Join(t.TempDir(), "slash?probe#db.db")
+	dbPath := "//" + strings.TrimPrefix(exact, "/")
+
+	out := runCLI(t, "migrate", "--dry-run", "--db", dbPath, "--format", "text")
+	if out.exitCode != 0 {
+		t.Fatalf("migrate --dry-run exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
+	}
+	if _, err := os.Stat(exact); err != nil {
+		t.Fatalf("the // path must name the exact file %q: %v", exact, err)
+	}
+	want := fmt.Sprintf("Dry run: %s (v1 -> v%d)", dbPath, audit.MaxKnownSchemaVersion)
+	if !strings.Contains(out.stdout, want) {
+		t.Errorf("dry run stdout=%q, want it to contain %q", out.stdout, want)
 	}
 }
 

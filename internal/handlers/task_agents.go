@@ -40,10 +40,9 @@ import (
 	"io"
 	"os"
 
-	_ "modernc.org/sqlite" // pure-Go driver
-
 	"github.com/dayvidpham/provenance"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -93,11 +92,12 @@ func TaskAgentsList(w io.Writer, dbPath string, format types.OutputFormat) (int,
 		return pasterrors.ExitCode(se), se
 	}
 
-	// Open a read-only private handle. We don't need OpenTaskTracker because
+	// Open a read-only private handle through dbconn (which also escapes any
+	// URI delimiter in dbPath). We don't need OpenTaskTracker because
 	// we are NOT mutating the file and we don't want to trigger Migrate
 	// here — listing should work on legacy v1/v2 databases too (it just
 	// returns an empty list on those, since the tables don't exist).
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := dbconn.OpenReadOnlyDB(dbPath)
 	if err != nil {
 		se := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
@@ -178,12 +178,15 @@ func TaskAgentsShow(w io.Writer, dbPath, agentIdStr string, format types.OutputF
 	// Resolve well-known name via a side query on the audit DB. We re-open
 	// the file rather than threading a *sql.DB through the TaskTracker
 	// surface — the read is cheap and the alternative would force an
-	// interface change we don't yet need.
+	// interface change we don't yet need. The open goes through dbconn so a
+	// URI delimiter in dbPath cannot truncate it onto a different file; a
+	// failure here (including a path the read-only open rejects) leaves the
+	// name empty rather than failing the already-successful lookup above.
 	wellKnownName := ""
 	if dbPath == "" {
 		dbPath = tasks.DefaultDBPath()
 	}
-	probe, pErr := sql.Open("sqlite", dbPath)
+	probe, pErr := dbconn.OpenReadOnlyDB(dbPath)
 	if pErr == nil {
 		defer probe.Close()
 		var nameStr sql.NullString
