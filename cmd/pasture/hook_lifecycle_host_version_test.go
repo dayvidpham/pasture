@@ -281,6 +281,91 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 	}
 }
 
+// TestOpenCodeV2BannerParsesProductPrefix pins the real v2 --version banner
+// string: the host prints its product name ahead of the release
+// (`opencode v2.0.20`), and the probe must accept that line while still
+// refusing arbitrary process output. The recorded 2.0.20 release has every
+// row withheld until its capture proofs land, so the literal banner case pins
+// resolution (the admitted version and its query source reach the diagnostic
+// and the fault record) rather than an occurrence; admitted releases pin the
+// full occurrence path.
+//
+// WHAT IT VISITS: the seven banner rows below: one resolving banner (the
+// recorded release, withheld by admission), three banners that record an
+// occurrence, one banner the grammar accepts but release parsing refuses,
+// and two banners the grammar refuses.
+// WHAT IT DOES NOT READ: the live host or its --version output; the banners
+// are constructed controls, and only the `opencode v2.0.20` string repeats an
+// observed banner.
+func TestOpenCodeV2BannerParsesProductPrefix(t *testing.T) {
+	t.Parallel()
+	binary := lifecycleBinary(t)
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal/lifecycle/ingress", "opencode", "testdata/fixtures", "session_created_1_18_29.json"))
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name           string
+		banner         string
+		wantOccurrence string
+		wantResolved   string
+		wantFault      string
+	}{
+		{name: "v2 product banner resolves to the recorded release", banner: "opencode v2.0.20", wantResolved: "2.0.20", wantFault: "withheld (reason missing-fixture)"},
+		{name: "product banner on an admitted release records the occurrence", banner: "opencode 1.19.1", wantOccurrence: "1.19.1"},
+		{name: "bare release still accepted", banner: "1.19.1", wantOccurrence: "1.19.1"},
+		{name: "product banner with suffix", banner: "opencode v2.1.0-beta.1+build.3", wantOccurrence: "2.1.0-beta.1+build.3"},
+		{name: "lone product name matches the grammar but is not a release", banner: "opencode", wantFault: "invalid release number"},
+		{name: "prose after the product name is refused", banner: "opencode has left the building", wantFault: "does not match"},
+		{name: "trailing token after the release is refused", banner: "opencode v2.0.20 extra", wantFault: "does not match"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			executable := versionExecutable(t, "printf '%s\\n' '"+tc.banner+"'")
+			dbPath := filepath.Join(t.TempDir(), "pasture.db")
+			if tc.wantOccurrence != "" {
+				initializeLifecycleTestDatabase(t, dbPath)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, binary, "hook", "lifecycle", "--harness", "opencode",
+				"--event", "session.created", "--host-executable", executable)
+			command.Env = discoveryChildEnv(map[string]*string{"PASTURE_DB_PATH": &dbPath,
+				"PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+			command.Stdin = bytes.NewReader(raw)
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			require.NoError(t, command.Run(), stderr.String())
+			require.Empty(t, stdout.String(), "session.created is an observation")
+			if tc.wantOccurrence != "" {
+				tracker, err := tasks.OpenTaskTracker(dbPath)
+				require.NoError(t, err)
+				defer tracker.Close()
+				rows := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+				require.Len(t, rows, 1)
+				occurrence := decodeOccurrencePayload(t, rows[0].Payload)
+				require.Equal(t, tc.wantOccurrence, occurrence.Envelope.HostVersion)
+				require.Equal(t, model.HostVersionExecutableQuery, occurrence.Envelope.HostVersionSource)
+				return
+			}
+			_, err := os.Stat(dbPath)
+			require.ErrorIs(t, err, os.ErrNotExist)
+			fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
+			require.NoError(t, err)
+			record := decodeJSONObject(t, fault)
+			if tc.wantResolved != "" {
+				require.Contains(t, stderr.String(), `at host version "`+tc.wantResolved+`"`, "the probe must resolve the banner before admission")
+				require.Contains(t, stderr.String(), tc.wantFault)
+				require.NotContains(t, stderr.String(), "does not match the supported product version line")
+				require.JSONEq(t, `"`+tc.wantResolved+`"`, string(record["hostVersion"]))
+				require.JSONEq(t, `"`+string(model.HostVersionExecutableQuery)+`"`, string(record["hostVersionSource"]))
+				return
+			}
+			require.Contains(t, stderr.String(), tc.wantFault)
+			require.Contains(t, stderr.String(), "no occurrence was recorded")
+			require.JSONEq(t, `""`, string(record["hostVersion"]), "arbitrary process output was not retained as a version")
+			require.NotContains(t, record, "hostVersionSource")
+		})
+	}
+}
+
 func TestClaudeDefaultDiscoverySelectsOneExecutable(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)
