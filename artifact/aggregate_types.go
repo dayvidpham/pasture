@@ -101,7 +101,7 @@ func (id *RuntimeContractID) UnmarshalJSON(data []byte) error {
 
 const (
 	claudeCodeProductionProfile = "claude-code@2.1.261"
-	openCodeProductionProfile   = "opencode@1.18.29"
+	openCodeProductionProfile   = "opencode@2.0.20"
 	codexProductionProfile      = "codex@0.153.0"
 )
 

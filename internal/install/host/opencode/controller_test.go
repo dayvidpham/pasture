@@ -714,8 +714,8 @@ func moduleRoot(t *testing.T) string {
 // transport forces: the hooks asset is the v2 plain definition plugin, which a
 // 1.x host cannot load, so the activation floor admits 2.0.20 and refuses
 // older hosts with their version named rather than installing a plugin that
-// never runs. The production lifecycle registry still pins 1.18.29; this
-// floor is the install surface, and the wave switch reunites them.
+// never runs. The install floor and the production lifecycle registry both
+// record 2.0.20.
 func TestInstallAdmitsOnlyV2Hosts(t *testing.T) {
 	t.Parallel()
 	controller, err := host.New(filepath.Join(t.TempDir(), "opencode"))
