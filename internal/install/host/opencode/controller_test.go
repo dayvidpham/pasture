@@ -711,7 +711,7 @@ func moduleRoot(t *testing.T) string {
 }
 
 // TestInstallAdmitsOnlyV2Hosts pins the deliberate transition the installed
-// transport forces: the hooks asset is the v2 Plugin.define plugin, which a
+// transport forces: the hooks asset is the v2 plain definition plugin, which a
 // 1.x host cannot load, so the activation floor admits 2.0.20 and refuses
 // older hosts with their version named rather than installing a plugin that
 // never runs. The production lifecycle registry still pins 1.18.29; this

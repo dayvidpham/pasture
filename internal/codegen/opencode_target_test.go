@@ -49,7 +49,6 @@ func runOpenCodeV2Mechanics(t *testing.T, helper, script string) string {
 		t.Fatal("bun is required for the generated OpenCode child-process proof")
 	}
 	dir := t.TempDir()
-	writeOpenCodePluginStub(t, dir)
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
 		t.Fatalf("generate production plugin: %v", err)
@@ -424,7 +423,6 @@ func TestOpenCodeV2SwallowingHelpersReportAndContinue(t *testing.T) {
 		t.Fatal("bun is required for the generated OpenCode failure-path proof; enter the flake dev shell")
 	}
 	dir := t.TempDir()
-	writeOpenCodePluginStub(t, dir)
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -545,7 +543,6 @@ func TestOpenCodePermissionEvaluateDenyMatrix(t *testing.T) {
 		t.Fatal("bun is required for the generated OpenCode deny proof; enter the flake dev shell")
 	}
 	dir := t.TempDir()
-	writeOpenCodePluginStub(t, dir)
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
 		t.Fatalf("generate: %v", err)
@@ -665,7 +662,6 @@ func TestOpenCodeGeneratedLifecycleCallbacks_RejectInvalidGateResponsesAndSwallo
 		t.Fatal("bun is required for the generated OpenCode failure-path proof; enter the flake dev shell")
 	}
 	dir := t.TempDir()
-	writeOpenCodePluginStub(t, dir)
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
 		t.Fatalf("generate: %v", err)

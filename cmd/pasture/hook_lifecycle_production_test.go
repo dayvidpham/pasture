@@ -149,9 +149,8 @@ func TestInstalledOpenCodePluginObservesUpdatesWithoutReinstall(t *testing.T) {
 			// helpers forward verbatim, so the bytes the CLI parses are the
 			// fixture bytes; the bus event additionally carries the v2
 			// top-level version the helper forwards as the occurrence-local
-			// flag. The host specifier resolves through a stub beside the
-			// fake home, mirroring the host's identity define.
-			writeOpenCodePluginStubFiles(t, dir)
+			// flag. The plugin performs no runtime imports, so it loads with no
+			// stub beside the fake home.
 			code := fmt.Sprintf(`
 import assert from "node:assert/strict";
 import {writeFileSync} from "node:fs";

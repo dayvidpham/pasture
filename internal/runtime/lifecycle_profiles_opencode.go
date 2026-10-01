@@ -238,7 +238,7 @@ func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
 }
 
 // OpenCode2LifecycleEvent is the closed event catalog for OpenCode 2.0.20: one
-// session-start observation plus the Plugin.define hook surface the 2.0.20
+// session-start observation plus the plain definition hook surface the 2.0.20
 // source declares. It covers sixteen hooks (twelve session hooks, two tool
 // hooks, one permission hook and one shell hook) and the session.created bus
 // event that writes the session claim. The provider-SDK hooks (aisdk sdk,

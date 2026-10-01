@@ -96,7 +96,7 @@ func New(configRoot string) (Controller, error) {
 	// The id's version is read from the OpenCode 2.0.20 runtime contract, the
 	// one root, so it follows the recorded host version instead of restating
 	// it. The floor is deliberately 2.0.20, not the older production
-	// registry: the installed hooks asset is the v2 Plugin.define transport,
+	// registry: the installed hooks asset is the v2 plain definition transport,
 	// which a 1.x host cannot load, so admitting an older host would install
 	// a plugin that never runs. A 1.x host is refused here with its version
 	// named rather than handed a broken installation.

@@ -313,3 +313,20 @@ This addendum records no new live capture, fixture acceptance or host
 capability. No 2.0.20 capture has been cleared into this directory, so every
 2.0.20 row stays withheld for missing-fixture. All historical fixture bytes,
 sidecars, pairing and acceptance records above remain unchanged.
+
+## No-runtime-import transport addendum — 2026-10-01
+
+The generated 2.0.20 plugin no longer performs any runtime import: it
+default-exports the plain definition object directly instead of calling a
+plugin-package helper, so the real host loads it with nothing to resolve. The
+registered hook set, ids and behaviour are unchanged. The committed
+`.opencode/plugins/pasture-lifecycle.ts` is now sha256
+`65d58932be728b76f1bd2b3eb812de56089469d3650f70d0c9fd86e84f388fc2`.
+Its source remains `internal/codegen/opencode_hooks.go`. This is a transport
+identity, not a new capture-kit or fixture identity. A reader who hashes the
+shipped plugin gets the digest above.
+
+This addendum records no new live capture, fixture acceptance or host
+capability. No 2.0.20 capture has been cleared into this directory, so every
+2.0.20 row stays withheld for missing-fixture. All historical fixture bytes,
+sidecars, pairing and acceptance records above remain unchanged.

@@ -431,9 +431,9 @@ var lifecycleEventFlag = regexp.MustCompile(`"--event",\s*"([^"]+)"`)
 var lifecycleCommand = regexp.MustCompile(`hook lifecycle`)
 
 // openCodePluginExport is the default export the OpenCode v2 host loads: the
-// Plugin.define object whose setup registers the location-scoped hooks. Only
+// plain definition object whose setup registers the location-scoped hooks. Only
 // hooks registered inside that setup are ever invoked by the host.
-const openCodePluginExport = "export default Plugin.define({"
+const openCodePluginExport = "export default {"
 
 // openCodeHookRegistration captures one location-scoped hook registration:
 // the plugin domain, the hook name, and the helper it invokes.
@@ -479,7 +479,7 @@ func openCodeWiredLifecycleEvents(t *testing.T, path string) map[string]struct{}
 }
 
 // openCodeRegisteredEvents parses the hook registrations of the exported
-// Plugin.define setup and reports one native coordinate per registered hook.
+// plain definition setup and reports one native coordinate per registered hook.
 // A hook registration contributes its domain.hook coordinate; the event
 // subscription contributes the bus types of its filter guards. Every other
 // handler shape must fail rather than be skipped: the parity check derives
@@ -533,7 +533,7 @@ func openCodeRequireHelperEmission(t *testing.T, path, source, helper, event str
 }
 
 // openCodePluginSetupBody returns the text between the braces of the setup
-// function of the exported Plugin.define object. It fails with an actionable
+// function of the exported plain definition object. It fails with an actionable
 // message when the export or the function is absent, so a renamed or
 // restructured export can never be read as "no handler is registered".
 func openCodePluginSetupBody(t *testing.T, path, source string) string {
