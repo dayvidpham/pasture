@@ -454,15 +454,22 @@ export async function permissionEvaluate(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "permission.evaluate"], "permission.evaluate", hookEvent);
     const response = parseResponse(stdout, "permission.evaluate");
     if (response?.decision === "deny") {
-      // ENFORCED through the host's typed permission channel. The host
-      // passes this same evaluation object through its hook trigger and
-      // returns the mutated effect and message to the permission caller, so
-      // assigning both here refuses the guarded action with the durable
-      // reason the gate recorded. The reason travels verbatim: it names the
-      // policy fact (for example which assignment rule forbids the action),
-      // and this transport neither rewrites it nor invents one. The hook's
-      // failure channel is never, so a throw would be a host-flow defect
-      // rather than a refusal: assign, never throw.
+      // ENFORCED through the host's typed permission channel, on the path
+      // where no saved or configured host rule already denied (that path
+      // returns early without firing this hook). The host passes this same
+      // evaluation object through its hook trigger and returns the mutated
+      // effect and message to the permission caller, so assigning both here
+      // refuses the guarded action with the durable reason the gate
+      // recorded. The reason travels verbatim: it names the policy fact
+      // (for example that the session actor is unknown, or that the actor
+      // holds no active assignment), and this transport neither rewrites it
+      // nor invents one. Any deny-shaped body is a policy refusal here, so
+      // the binary must never answer a fault in that shape: its encoder
+      // rejects every non-proceed response (see EncodeOpenCode in
+      // internal/lifecycle/nativeresponse), and a fault travels the fault
+      // continuation instead. The hook's failure channel is never, so a
+      // throw would be a host-flow defect rather than a refusal: assign,
+      // never throw.
       hookEvent.effect = "deny";
       hookEvent.message = response.reason;
     }

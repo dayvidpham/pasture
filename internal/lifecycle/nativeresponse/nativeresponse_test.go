@@ -512,3 +512,27 @@ func TestOnlyEffectiveFailureModeCanChooseAnExit(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, hostexit.ExitContinue, out.Exit, "declared mode explains, only effective mode chooses the exit")
 }
+
+func TestOpenCodeEncoderRejectsFaultDressedAsDeny(t *testing.T) {
+	t.Parallel()
+
+	// The v2 permission transport treats any deny-shaped body as a policy
+	// refusal, so the binary must never answer a fault in that shape. An
+	// unevaluated fault marshals to the identical body a policy refusal
+	// carries, and the generated plugin cannot tell them apart — and must
+	// never have to, because the encoder rejects every non-proceed response
+	// before any bytes exist. A future encoder change that emits deny bodies
+	// must keep rejecting faults, or this test names the exact regression: a
+	// fault dressed as a refusal.
+	mapping, err := pastureruntime.OpenCode2_0_20Lifecycle().Mapping(pastureruntime.OpenCode2EventPermissionEvaluate)
+	require.NoError(t, err)
+	fault := backend.NewEvaluationFaultResponse()
+	raw, err := fault.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, `{"decision":"deny","reason":"evaluation-fault"}`, string(raw),
+		"the fault marshals deny-shaped, which is why the encoder must reject it")
+	_, err = nativeresponse.EncodeOpenCode(mapping, fault)
+	var unsupported *nativeresponse.UnsupportedResponseError
+	require.ErrorAs(t, err, &unsupported)
+	require.Equal(t, mapping.NativeName(), unsupported.Event)
+}

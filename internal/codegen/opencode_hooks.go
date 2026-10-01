@@ -35,9 +35,10 @@ const openCodeV2ThrowingHook = "tool.execute.before"
 // through a host-effect mutation instead of a throw. The host's permission
 // assertion carries the operation under test as action plus resources: a
 // tool-sourced assertion names the tool operation (for example "edit" from
-// packages/core/src/tool/plugin/edit.ts, or the shell command name from
-// packages/core/src/tool/plugin/shell.ts) with the target paths or command
-// resources in resources[], and source { type: "tool", messageID, id }. The
+// packages/core/src/tool/plugin/edit.ts, or "shell" from
+// packages/core/src/tool/plugin/shell.ts, which carries each parsed command
+// text in resources[]) with the target paths or command resources in
+// resources[], and source { type: "tool", messageID, id }. The
 // plugin forwards that assertion verbatim to the gate and enforces the
 // returned decision only: on a Denial it assigns hookEvent.effect = "deny"
 // and hookEvent.message to the durable reason, and on any other answer it
@@ -440,15 +441,22 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
     const stdout = await invokeLifecycle(%s, %q, hookEvent);
     const response = parseResponse(stdout, %q);
     if (response?.decision === "deny") {
-      // ENFORCED through the host's typed permission channel. The host
-      // passes this same evaluation object through its hook trigger and
-      // returns the mutated effect and message to the permission caller, so
-      // assigning both here refuses the guarded action with the durable
-      // reason the gate recorded. The reason travels verbatim: it names the
-      // policy fact (for example which assignment rule forbids the action),
-      // and this transport neither rewrites it nor invents one. The hook's
-      // failure channel is never, so a throw would be a host-flow defect
-      // rather than a refusal: assign, never throw.
+      // ENFORCED through the host's typed permission channel, on the path
+      // where no saved or configured host rule already denied (that path
+      // returns early without firing this hook). The host passes this same
+      // evaluation object through its hook trigger and returns the mutated
+      // effect and message to the permission caller, so assigning both here
+      // refuses the guarded action with the durable reason the gate
+      // recorded. The reason travels verbatim: it names the policy fact
+      // (for example that the session actor is unknown, or that the actor
+      // holds no active assignment), and this transport neither rewrites it
+      // nor invents one. Any deny-shaped body is a policy refusal here, so
+      // the binary must never answer a fault in that shape: its encoder
+      // rejects every non-proceed response (see EncodeOpenCode in
+      // internal/lifecycle/nativeresponse), and a fault travels the fault
+      // continuation instead. The hook's failure channel is never, so a
+      // throw would be a host-flow defect rather than a refusal: assign,
+      // never throw.
       hookEvent.effect = "deny";
       hookEvent.message = response.reason;
     }

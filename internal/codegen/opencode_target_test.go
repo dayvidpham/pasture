@@ -536,7 +536,9 @@ console.log(JSON.stringify({ swallowed: true }));
 // answer matrix and pins the host-object semantics of each arm. A Denial
 // assigns effect deny and the durable reason verbatim, replacing any draft
 // the host carried; a proceed, the empty-body unevaluated belt, and an
-// invocation fault all leave the evaluation exactly as the host set it.
+// invocation fault all leave the evaluation exactly as the host set it; and
+// a Denial against an unwritable object reports inside the guarded region
+// instead of escaping as a throw.
 func TestOpenCodePermissionEvaluateDenyMatrix(t *testing.T) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {
@@ -618,9 +620,20 @@ console.error = (...values) => logged.push(values.join(" "));
   assert.equal("message" in evaluation, false);
 }
 
+// An unwritable host evaluation must not escape as a throw: the deny
+// assignment lives inside the guarded region, so a frozen object reports and
+// continues with its effect untouched. A mutant that moves the assignment
+// outside the try turns this arm into a rejection.
+{
+  const evaluation = Object.freeze({ sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" });
+  await permissionEvaluate(evaluation);
+  assert.equal(evaluation.effect, "allow");
+  assert.equal("message" in evaluation, false);
+}
+
 console.error = originalError;
 const faults = logged.filter((line) => line.includes("gate consultation failed for permission.evaluate"));
-assert.equal(faults.length, 1, "only the nonzero invocation faults, got " + JSON.stringify(logged));
+assert.equal(faults.length, 2, "the nonzero invocation and the frozen deny fault, got " + JSON.stringify(logged));
 console.log(JSON.stringify({ denied: true }));
 `, "file://"+modulePath)
 	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {

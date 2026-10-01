@@ -262,14 +262,16 @@ both with response capability None.
 
 ## Permission-enforcement transport addendum — 2026-10-01
 
-The generated 2.0.20 plugin now enforces a pasture Denial through the host's
-typed permission channel: on a `{"decision":"deny","reason":<text>}` answer
+The generated 2.0.20 plugin is wired to refuse a pasture Denial through the
+host's typed permission channel (the effect/message mutation that evaluateInput
+in packages/core/src/permission.ts returns to its caller): on a
+`{"decision":"deny","reason":<text>}` answer
 the `permission.evaluate` helper assigns the host evaluation's `effect` to
 `"deny"` and its `message` to the durable reason verbatim, and on any other
 answer it leaves the host evaluation untouched. Every other helper keeps its
 report-and-continue discipline. The committed
 `.opencode/plugins/pasture-lifecycle.ts` is now sha256
-`31fa8a92045458201356098662ef7210a0f16c02c3c74c6b4fddf9d2cd1ceed2`.
+`d6debd1110bdf3e1c28eed27b38af7ffac7275165080bce6d932dd30bbdb7cca`.
 Their source remains `internal/codegen/opencode_hooks.go`. This is a transport
 identity, not a new capture-kit or fixture identity. A reader who hashes the
 shipped plugin gets the digest above.
@@ -280,7 +282,7 @@ capability. No 2.0.20 capture has been cleared into this directory, so every
 derives response capability None: the shipped binary keeps downgrading
 evaluated denials to proceed with the unenforced reason until the committed
 2.0.20 capture sitting (with inventory, substitution, secret scan and
-clearance) supplies the response-channel evidence. The enforcement above
+clearance) supplies the response-channel evidence. The wired refusal above
 fires only where the gate answers deny, which that evidence has not yet
 enabled. All historical fixture bytes, sidecars, pairing and acceptance
 records above remain unchanged.
