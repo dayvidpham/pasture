@@ -740,7 +740,11 @@ var enabledFloor = map[string][]string{
 		"PostToolUse", "PreCompact", "PostCompact", "SubagentStart",
 		"SubagentStop", "Stop", "SessionEnd", "Interrupt",
 	},
-	"opencode": {"session.created", "tool.execute.before"},
+	"opencode": {
+		"session.prompt", "session.context", "session.title", "session.model.request",
+		"session.http.request", "session.http.response", "tool.execute.before",
+		"tool.execute.after", "permission.evaluate",
+	},
 }
 
 // derivedEnabledEvents reads the enabled set of every harness from the
@@ -761,7 +765,7 @@ func derivedEnabledEvents(t *testing.T) map[string]map[string]struct{} {
 	}{
 		{"claude-code", activation.ClaudeCode2_1_261, registration.ClaudeCode2_1_261()},
 		{"codex", activation.Codex0_153_0, registration.Codex0_153_0()},
-		{"opencode", activation.OpenCode1_18_29, registration.OpenCode1_18_29()},
+		{"opencode", activation.OpenCode2_0_20, registration.OpenCode2_0_20()},
 	}
 
 	derived := make(map[string]map[string]struct{}, len(sources))
@@ -811,22 +815,12 @@ func openCode2ExpectedRows(t *testing.T) map[string][2]string {
 	return rows
 }
 
-// testOpenCodeTransitionalReport holds the OpenCode side of the enabled floor
-// while the production registry still serves 1.18.29. The v1 derivation still
-// enables its two proved rows (that evidence must not be dropped), the policy
-// list still names them, and the committed report is the v2 surface whose
-// every row matches the 2.0.20 activation derivation: proved rows enabled,
-// the rest withheld with their reason. When the registry moves to 2.0.20,
-// this transitional arm goes away with the v1 floor.
-func testOpenCodeTransitionalReport(t *testing.T, root, report string, floor map[string]struct{}) {
+// testOpenCodeReportRows holds every row of the committed OpenCode report to
+// the production 2.0.20 activation derivation, withheld rows included: the
+// enabled floor below only covers enabled rows, so this check keeps a withheld
+// row's reason from going stale as well.
+func testOpenCodeReportRows(t *testing.T, report string) {
 	t.Helper()
-	require.Equal(t, map[string]struct{}{"session.created": {}, "tool.execute.before": {}}, floor,
-		"the v1 OpenCode derivation must keep its two proved rows until the v2 proofs replace them")
-	policy := make(map[string]struct{}, len(enabledFloor["opencode"]))
-	for _, event := range enabledFloor["opencode"] {
-		policy[event] = struct{}{}
-	}
-	require.Equal(t, floor, policy, "the opencode policy floor must equal the v1 derivation")
 	var committed activationReportFile
 	readGeneratedJSON(t, report, &committed)
 	require.Len(t, committed.Events, 17, "the committed OpenCode report must list the whole 2.0.20 surface")
@@ -874,8 +868,7 @@ func TestEnabledEventsNeverDropBelowTheFloor(t *testing.T) {
 			floor := derived[harness]
 			require.NotEmpty(t, floor, "the derived %s floor is empty, so this guard would hold nothing", harness)
 			if harness == "opencode" {
-				testOpenCodeTransitionalReport(t, root, report, floor)
-				return
+				testOpenCodeReportRows(t, report)
 			}
 			enabled := enabledEventsFromActivationReport(t, report)
 			require.NotEmpty(t, enabled, "the committed %s activation report enables no event", harness)
