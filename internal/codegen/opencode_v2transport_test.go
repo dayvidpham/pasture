@@ -356,14 +356,39 @@ func TestOpenCodeHooksModulePreservesV2HookBoundary(t *testing.T) {
 			t.Errorf("generated lifecycle plugin contains forbidden v1 transport %q", forbidden)
 		}
 	}
-	// The permission hook consults the gate but never mutates the host
-	// evaluation: wiring the enforceable effect="deny" mutation is a later
-	// transport change, and a helper that assigned it here would claim a
-	// channel this slice does not prove.
-	for _, forbidden := range []string{"event.effect =", "event.effect=", "effect: \"deny\"", "effect: 'deny'"} {
+	// The enforceable deny lives in exactly one helper. The permission hook
+	// assigns the host evaluation's effect and message on a pasture Denial;
+	// every other helper must not: their hooks carry no typed refusal
+	// channel, so an assignment there would claim enforcement the host does
+	// not honour. The pin counts the exact emitted assignment shapes and
+	// locates them inside the permission helper, so a second mutation or a
+	// moved one turns red instead of passing vacuously.
+	for _, forbidden := range []string{`effect="deny"`, `effect:"deny"`, `effect: "deny"`, `effect: 'deny'`, `.message=response.reason`, `.message =response.reason`} {
 		if strings.Contains(module, forbidden) {
-			t.Errorf("generated permission hook performs the unenforced effect mutation %q", forbidden)
+			t.Errorf("generated plugin contains an off-shape effect mutation %q", forbidden)
 		}
+	}
+	if got := strings.Count(module, `.effect = "deny"`); got != 1 {
+		t.Errorf("generated plugin assigns effect deny %d times, want exactly the one permission enforcement", got)
+	}
+	if got := strings.Count(module, `.message = response.reason`); got != 1 {
+		t.Errorf("generated plugin assigns the deny message %d times, want exactly the one permission enforcement", got)
+	}
+	permissionHelper := "export async function permissionEvaluate(hookEvent) {"
+	start := strings.Index(module, permissionHelper)
+	if start < 0 {
+		t.Fatalf("generated plugin has no permissionEvaluate helper")
+	}
+	rest := module[start:]
+	body := rest
+	if end := strings.Index(rest, "\nexport async function "); end >= 0 {
+		body = rest[:end]
+	}
+	if !strings.Contains(body, `hookEvent.effect = "deny"`) || !strings.Contains(body, `hookEvent.message = response.reason`) {
+		t.Error("the permission enforcement mutation is not inside the permissionEvaluate helper")
+	}
+	if strings.Contains(body, "does not enforce") {
+		t.Error("the permission helper still carries the unenforced-denial wording beside its enforcement")
 	}
 }
 
@@ -484,7 +509,10 @@ assert.deepEqual(byEvent("tool.execute.before").payload, { tool: "task", session
 // args-only projection and no input/output shape validation.
 await hooks["session.prompt"]({ sessionID: "constructed", messageID: "m", prompt: { text: "hello" }, delivery: "steer" });
 assert.deepEqual(byEvent("session.prompt").payload, { sessionID: "constructed", messageID: "m", prompt: { text: "hello" }, delivery: "steer" });
-// The permission hook consults but never mutates the host evaluation.
+// A proceed leaves the host evaluation untouched: the permission mutation
+// fires on a Denial only, and the deny matrix is pinned by the dedicated
+// permission-deny proof. The frozen object below would throw on assignment,
+// so reaching these assertions also proves the proceed path assigns nothing.
 const evaluation = Object.freeze({ sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow" });
 await hooks["permission.evaluate"](evaluation);
 assert.deepEqual(byEvent("permission.evaluate").payload, evaluation);
@@ -716,15 +744,22 @@ func TestOpenCodeRegisteredSurfaceEmissionMechanics(t *testing.T) {
 const observations = %s, named = %s;
 assert.deepEqual(Object.keys(hooks).sort(), named.sort());
 assert.equal(subscribed.length, 1, "observations ride one bus subscription");
-for (const name of named) {
+// The permission hook enforces a Denial by mutating its host evaluation, so
+// it is excluded from the frozen-object loop below: freezing its event would
+// throw on the deny assignment. Its non-denial still assigns nothing (proved
+// by the frozen proceed in the setup test) and its deny mutation is pinned by
+// the dedicated permission-deny proof.
+const immutable = named.filter((name) => name !== "permission.evaluate");
+assert.equal(named.length - immutable.length, 1, "exactly the permission row enforces through mutation");
+for (const name of immutable) {
   const hookEvent = Object.freeze({ sessionID: "constructed", id: "constructed", marker: name });
   const before = JSON.stringify(hookEvent);
   await hooks[name](hookEvent);
   assert.equal(calls.at(-1).argv[5], name);
   assert.deepEqual(calls.at(-1).payload, hookEvent);
-  assert.equal(JSON.stringify(hookEvent), before, "a gate consultation never mutates its host event");
+  assert.equal(JSON.stringify(hookEvent), before, "a non-enforcing consultation never mutates its host event");
 }
-assert.equal(calls.length, named.length);
+assert.equal(calls.length, immutable.length);
 `, observationJSON, namedJSON))
 }
 

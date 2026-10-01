@@ -410,10 +410,14 @@ func TestOpenCodeGeneratedPluginCleansUpReadFailure(t *testing.T) {
 }
 
 // TestOpenCodeV2SwallowingHelpersReportAndContinue proves the v2 throw
-// discipline for every gate helper but tool.execute.before: an invocation
-// fault and even a deny response are reported on the console and continued,
-// never thrown, because those hooks' failure channel is never. The host
-// evaluation object is never mutated, so the enforceable deny stays unwired.
+// discipline for every gate helper but tool.execute.before and the v2
+// enforcement discipline for the permission hook: an invocation fault is
+// reported on the console and continued, never thrown, because those hooks'
+// failure channel is never. The four non-permission helpers below also log
+// an unenforced denial and continue without touching their host event,
+// because their hooks carry no typed refusal channel. The permission helper
+// instead enforces a Denial by assigning the host evaluation's effect and
+// message, and leaves every other answer untouched.
 func TestOpenCodeV2SwallowingHelpersReportAndContinue(t *testing.T) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {
@@ -468,15 +472,29 @@ for (const helper of [sessionPrompt, sessionContext, toolExecuteAfter, shellCrea
   }
 }
 
-// The permission evaluation survives every fault class with its effect and
-// message members exactly as the host set them.
-for (const mode of ["malformed", "extra", "wrong-decision", "nonzero", "deny"]) {
+// A non-denial leaves the permission evaluation exactly as the host set
+// it: effect stays allow and no message member appears.
+for (const mode of ["malformed", "extra", "wrong-decision", "nonzero"]) {
   const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: mode };
   const check = frozen(evaluation);
   await permissionEvaluate(evaluation);
   check();
   if (evaluation.effect !== "allow" || "message" in evaluation) {
     throw new Error(mode + " mutated the host evaluation");
+  }
+}
+
+// A pasture Denial is enforced through the host's typed channel: effect
+// becomes deny and message carries the durable reason verbatim. The fake
+// binary's reason is asserted exactly so a rewrite turns red.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" };
+  await permissionEvaluate(evaluation);
+  if (evaluation.effect !== "deny") {
+    throw new Error("a pasture denial left the host effect at " + JSON.stringify(evaluation.effect));
+  }
+  if (evaluation.message !== "role cannot write") {
+    throw new Error("a pasture denial carried message " + JSON.stringify(evaluation.message));
   }
 }
 
@@ -488,7 +506,7 @@ const gateFaults = logged.filter((line) => line.includes("gate consultation fail
 const unenforced = logged.filter((line) => line.includes("does not enforce"));
 const observations = logged.filter((line) => line.includes("observation failed for session.created"));
 if (gateFaults.length !== 20) throw new Error("expected 20 gate fault reports, got " + gateFaults.length + ": " + JSON.stringify(logged));
-if (unenforced.length !== 5) throw new Error("expected 5 unenforced-denial reports (4 helpers plus permission), got " + unenforced.length);
+if (unenforced.length !== 4) throw new Error("expected 4 unenforced-denial reports (the permission denial is enforced, not logged), got " + unenforced.length);
 if (observations.length !== 1) throw new Error("expected 1 observation report, got " + observations.length);
 console.log(JSON.stringify({ swallowed: true }));
 `, "file://"+modulePath)
@@ -509,6 +527,132 @@ console.log(JSON.stringify({ swallowed: true }));
 	}
 	if strings.TrimSpace(string(output)) != `{"swallowed":true}` {
 		t.Fatalf("Bun swallow-path proof output = %q, want all report-and-continue assertions", output)
+	}
+}
+
+// TestOpenCodePermissionEvaluateDenyMatrix is the Bun-driven deny proof for
+// the enforceable permission channel: it drives the generated
+// permissionEvaluate helper through a stub gate binary across the full
+// answer matrix and pins the host-object semantics of each arm. A Denial
+// assigns effect deny and the durable reason verbatim, replacing any draft
+// the host carried; a proceed, the empty-body unevaluated belt, and an
+// invocation fault all leave the evaluation exactly as the host set it; and
+// a Denial against an unwritable object reports inside the guarded region
+// instead of escaping as a throw.
+func TestOpenCodePermissionEvaluateDenyMatrix(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode deny proof; enter the flake dev shell")
+	}
+	dir := t.TempDir()
+	writeOpenCodePluginStub(t, dir)
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	modulePath := filepath.Join(dir, "plugin.ts")
+	if err := os.WriteFile(modulePath, []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	fake := `#!/bin/sh
+payload=$(cat)
+case "$payload" in
+  *'"__mode":"deny"'*) printf '%s' '{"decision":"deny","reason":"role cannot write"}' ;;
+  *'"__mode":"empty"'*) printf '%s' '' ;;
+  *'"__mode":"nonzero"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+  *) printf '%s' '{"decision":"proceed"}' ;;
+esac
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
+	}
+	runner := filepath.Join(dir, "deny-matrix.ts")
+	script := fmt.Sprintf(`
+import { permissionEvaluate } from %q;
+import assert from "node:assert/strict";
+
+const logged = [];
+const originalError = console.error;
+console.error = (...values) => logged.push(values.join(" "));
+
+// A Denial assigns the typed channel members with the durable reason verbatim.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" };
+  await permissionEvaluate(evaluation);
+  assert.equal(evaluation.effect, "deny");
+  assert.equal(evaluation.message, "role cannot write");
+}
+
+// A Denial replaces the host's own draft: the gate verdict, not the
+// incoming effect or message, decides.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "ask", message: "host draft", __mode: "deny" };
+  await permissionEvaluate(evaluation);
+  assert.equal(evaluation.effect, "deny");
+  assert.equal(evaluation.message, "role cannot write");
+}
+
+// A proceed assigns nothing: the object round-trips deep-equal.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "proceed" };
+  const before = JSON.stringify(evaluation);
+  await permissionEvaluate(evaluation);
+  assert.equal(JSON.stringify(evaluation), before);
+  assert.equal("message" in evaluation, false);
+}
+
+// The empty-body unevaluated belt assigns nothing and reports on the console.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "empty" };
+  const before = JSON.stringify(evaluation);
+  await permissionEvaluate(evaluation);
+  assert.equal(JSON.stringify(evaluation), before);
+  assert.equal("message" in evaluation, false);
+}
+
+// An invocation fault assigns nothing and reports on the console.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "nonzero" };
+  const before = JSON.stringify(evaluation);
+  await permissionEvaluate(evaluation);
+  assert.equal(JSON.stringify(evaluation), before);
+  assert.equal("message" in evaluation, false);
+}
+
+// An unwritable host evaluation must not escape as a throw: the deny
+// assignment lives inside the guarded region, so a frozen object reports and
+// continues with its effect untouched. A mutant that moves the assignment
+// outside the try turns this arm into a rejection.
+{
+  const evaluation = Object.freeze({ sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" });
+  await permissionEvaluate(evaluation);
+  assert.equal(evaluation.effect, "allow");
+  assert.equal("message" in evaluation, false);
+}
+
+console.error = originalError;
+const faults = logged.filter((line) => line.includes("gate consultation failed for permission.evaluate"));
+assert.equal(faults.length, 2, "the nonzero invocation and the frozen deny fault, got " + JSON.stringify(logged));
+console.log(JSON.stringify({ denied: true }));
+`, "file://"+modulePath)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun deny-matrix runner: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
+	output, err := proof.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Bun deny-matrix proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
+	}
+	if err != nil {
+		t.Fatalf("execute generated OpenCode permission deny matrix under Bun: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"denied":true}` {
+		t.Fatalf("Bun deny-matrix proof output = %q, want the full mutation matrix", output)
 	}
 }
 

@@ -162,9 +162,10 @@ export async function sessionPrompt(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.prompt"], "session.prompt", hookEvent);
     const response = parseResponse(stdout, "session.prompt");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.prompt that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -182,9 +183,10 @@ export async function sessionContext(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.context"], "session.context", hookEvent);
     const response = parseResponse(stdout, "session.context");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.context that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -202,9 +204,10 @@ export async function sessionCompaction(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.compaction"], "session.compaction", hookEvent);
     const response = parseResponse(stdout, "session.compaction");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.compaction that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -222,9 +225,10 @@ export async function sessionGenerate(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.generate"], "session.generate", hookEvent);
     const response = parseResponse(stdout, "session.generate");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.generate that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -242,9 +246,10 @@ export async function sessionTitle(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.title"], "session.title", hookEvent);
     const response = parseResponse(stdout, "session.title");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.title that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -262,9 +267,10 @@ export async function sessionModelRequest(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.model.request"], "session.model.request", hookEvent);
     const response = parseResponse(stdout, "session.model.request");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.model.request that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -282,9 +288,10 @@ export async function sessionHttpRequest(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.http.request"], "session.http.request", hookEvent);
     const response = parseResponse(stdout, "session.http.request");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.http.request that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -302,9 +309,10 @@ export async function sessionHttpResponse(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.http.response"], "session.http.response", hookEvent);
     const response = parseResponse(stdout, "session.http.response");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.http.response that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -322,9 +330,10 @@ export async function sessionExperimentalWsHandshake(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.handshake"], "session.experimental.ws.handshake", hookEvent);
     const response = parseResponse(stdout, "session.experimental.ws.handshake");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.experimental.ws.handshake that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -342,9 +351,10 @@ export async function sessionExperimentalWsSend(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.send"], "session.experimental.ws.send", hookEvent);
     const response = parseResponse(stdout, "session.experimental.ws.send");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.experimental.ws.send that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -362,9 +372,10 @@ export async function sessionExperimentalWsReceive(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.receive"], "session.experimental.ws.receive", hookEvent);
     const response = parseResponse(stdout, "session.experimental.ws.receive");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.experimental.ws.receive that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -382,9 +393,10 @@ export async function sessionRetry(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.retry"], "session.retry", hookEvent);
     const response = parseResponse(stdout, "session.retry");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for session.retry that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -403,8 +415,9 @@ export async function toolExecuteBefore(hookEvent) {
   // A deny response is a future capable-binary path, not the enforceable
   // deny: every 2.0.20 row derives CapabilityNone, so the shipped binary
   // downgrades denials to proceed with the unenforced reason before this
-  // plugin ever sees one. The enforceable channel is a host-effect mutation
-  // the permission hook does not perform. Throwing here stops the call
+  // plugin ever sees one. The permission hook enforces through its own
+  // typed channel instead, assigning the evaluation's effect and message.
+  // Throwing here stops the call
   // because the host types this hook's failure channel — only tool
   // execute.before may fail — and the promise adapter runs the callback
   // inside Effect.promise (packages/plugin/src/promise/adapter.ts at the
@@ -420,9 +433,10 @@ export async function toolExecuteAfter(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.after"], "tool.execute.after", hookEvent);
     const response = parseResponse(stdout, "tool.execute.after");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for tool.execute.after that this transport does not enforce; the host continues. Reason: " + response.reason);
@@ -440,17 +454,30 @@ export async function permissionEvaluate(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "permission.evaluate"], "permission.evaluate", hookEvent);
     const response = parseResponse(stdout, "permission.evaluate");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
-      // reason the binary recorded and continue without touching host
-      // objects; the receipt names the unenforced denial.
-      console.error("Pasture returned a denial for permission.evaluate that this transport does not enforce; the host continues. Reason: " + response.reason);
+      // ENFORCED through the host's typed permission channel, on the path
+      // where no saved or configured host rule already denied (that path
+      // returns early without firing this hook). The host passes this same
+      // evaluation object through its hook trigger and returns the mutated
+      // effect and message to the permission caller, so assigning both here
+      // refuses the guarded action with the durable reason the gate
+      // recorded. The reason travels verbatim: it names the policy fact
+      // (for example that the session actor is unknown, or that the actor
+      // holds no active assignment), and this transport neither rewrites it
+      // nor invents one. Any deny-shaped body is a policy refusal here, so
+      // the binary must never answer a fault in that shape: its encoder
+      // rejects every non-proceed response (see EncodeOpenCode in
+      // internal/lifecycle/nativeresponse), and a fault travels the fault
+      // continuation instead. The hook's failure channel is never, so a
+      // throw would be a host-flow defect rather than a refusal: assign,
+      // never throw.
+      hookEvent.effect = "deny";
+      hookEvent.message = response.reason;
     }
     // Proceed (and the empty-body unevaluated belt) is a decision, not a
     // mutation. Never write host-owned objects.
   } catch (error) {
-    // No failure channel exists on this hook: report and continue.
+    // No failure channel exists on this hook: report and continue without
+    // touching the host evaluation.
     console.error("Pasture lifecycle gate consultation failed for permission.evaluate: " + error);
   }
 }
@@ -460,9 +487,10 @@ export async function shellCreateBefore(hookEvent) {
     const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "shell.create.before"], "shell.create.before", hookEvent);
     const response = parseResponse(stdout, "shell.create.before");
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for shell.create.before that this transport does not enforce; the host continues. Reason: " + response.reason);
