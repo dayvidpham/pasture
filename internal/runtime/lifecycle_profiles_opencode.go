@@ -284,7 +284,9 @@ func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
 // and exit for that denial are established by the committed OpenCode 2.0.20
 // capture sitting named above. Every row below therefore carries no
 // response-channel evidence and derives CapabilityNone, exactly like the v1
-// rows, until that capture lands.
+// rows, until that capture lands. The named builder carries that evidence
+// as data, so supplying the citation later upgrades the row with no
+// derivation change.
 type OpenCode2LifecycleEvent uint8
 
 const (
@@ -354,9 +356,21 @@ func OpenCode2LifecycleEvents() []OpenCode2LifecycleEvent {
 var (
 	openCode2SessionIdentity = nativeIdentity(IdentitySession, "sessionID", true)
 	openCode2CallIdentity    = nativeIdentity(IdentityToolCall, "id", true)
+	// openCode2Unevidenced is the response-channel evidence every 2.0.20
+	// named row carries until its capture lands. Passing it keeps the row
+	// at CapabilityNone through the shared derivation; supplying a
+	// citation upgrades that one row to CapabilityDeny with no derivation
+	// change, so the eventual flip is data. A row may carry a non-None
+	// capability only while its citation exists.
+	openCode2Unevidenced FailureEvidence
 )
 
-func openCode2NamedMapping(event OpenCode2LifecycleEvent, eventIdentities ...NativeIdentityField) LifecycleEventMapping {
+// openCode2NamedMapping builds one blocking gate consultation with its
+// response-channel evidence carried as data. The evidence is the whole
+// capability decision: the shared derivation grants a deny channel only to
+// a pre-action gate that cites one, so a caller upgrades a row by
+// supplying its citation, never by editing this builder.
+func openCode2NamedMapping(event OpenCode2LifecycleEvent, evidence FailureEvidence, eventIdentities ...NativeIdentityField) LifecycleEventMapping {
 	return LifecycleEventMapping{
 		nativeName:      event.NativeName(),
 		semantic:        SemanticGateConsultation,
@@ -367,6 +381,7 @@ func openCode2NamedMapping(event OpenCode2LifecycleEvent, eventIdentities ...Nat
 		order:           OrderSequentialLoad,
 		reconciliation:  ReconcileSequentialMutation,
 		failure:         FailureThrowFailFast,
+		evidence:        evidence,
 		preAction:       event != OpenCode2EventToolExecuteAfter,
 		declaredFailure: FailureThrowFailFast,
 		stopLoop:        StopLoopNotApplicable,
@@ -394,22 +409,22 @@ func openCode2LifecycleMappings() map[OpenCode2LifecycleEvent]LifecycleEventMapp
 	observe := openCode2ObservationMapping
 	return map[OpenCode2LifecycleEvent]LifecycleEventMapping{
 		OpenCode2EventSessionCreated:                 observe(OpenCode2EventSessionCreated, openCode2SessionIdentity),
-		OpenCode2EventSessionPrompt:                  named(OpenCode2EventSessionPrompt, openCode2SessionIdentity),
-		OpenCode2EventSessionContext:                 named(OpenCode2EventSessionContext, openCode2SessionIdentity),
-		OpenCode2EventSessionCompaction:              named(OpenCode2EventSessionCompaction, openCode2SessionIdentity),
-		OpenCode2EventSessionGenerate:                named(OpenCode2EventSessionGenerate, openCode2SessionIdentity),
-		OpenCode2EventSessionTitle:                   named(OpenCode2EventSessionTitle, openCode2SessionIdentity),
-		OpenCode2EventSessionModelRequest:            named(OpenCode2EventSessionModelRequest, openCode2SessionIdentity),
-		OpenCode2EventSessionHTTPRequest:             named(OpenCode2EventSessionHTTPRequest, openCode2SessionIdentity),
-		OpenCode2EventSessionHTTPResponse:            named(OpenCode2EventSessionHTTPResponse, openCode2SessionIdentity),
-		OpenCode2EventSessionExperimentalWSHandshake: named(OpenCode2EventSessionExperimentalWSHandshake, openCode2SessionIdentity),
-		OpenCode2EventSessionExperimentalWSSend:      named(OpenCode2EventSessionExperimentalWSSend, openCode2SessionIdentity),
-		OpenCode2EventSessionExperimentalWSReceive:   named(OpenCode2EventSessionExperimentalWSReceive, openCode2SessionIdentity),
-		OpenCode2EventSessionRetry:                   named(OpenCode2EventSessionRetry, openCode2SessionIdentity),
-		OpenCode2EventToolExecuteBefore:              named(OpenCode2EventToolExecuteBefore, openCode2SessionIdentity, openCode2CallIdentity),
-		OpenCode2EventToolExecuteAfter:               named(OpenCode2EventToolExecuteAfter, openCode2SessionIdentity, openCode2CallIdentity),
-		OpenCode2EventPermissionEvaluate:             named(OpenCode2EventPermissionEvaluate, openCode2SessionIdentity),
-		OpenCode2EventShellCreateBefore:              named(OpenCode2EventShellCreateBefore),
+		OpenCode2EventSessionPrompt:                  named(OpenCode2EventSessionPrompt, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionContext:                 named(OpenCode2EventSessionContext, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionCompaction:              named(OpenCode2EventSessionCompaction, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionGenerate:                named(OpenCode2EventSessionGenerate, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionTitle:                   named(OpenCode2EventSessionTitle, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionModelRequest:            named(OpenCode2EventSessionModelRequest, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionHTTPRequest:             named(OpenCode2EventSessionHTTPRequest, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionHTTPResponse:            named(OpenCode2EventSessionHTTPResponse, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionExperimentalWSHandshake: named(OpenCode2EventSessionExperimentalWSHandshake, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionExperimentalWSSend:      named(OpenCode2EventSessionExperimentalWSSend, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionExperimentalWSReceive:   named(OpenCode2EventSessionExperimentalWSReceive, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventSessionRetry:                   named(OpenCode2EventSessionRetry, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventToolExecuteBefore:              named(OpenCode2EventToolExecuteBefore, openCode2Unevidenced, openCode2SessionIdentity, openCode2CallIdentity),
+		OpenCode2EventToolExecuteAfter:               named(OpenCode2EventToolExecuteAfter, openCode2Unevidenced, openCode2SessionIdentity, openCode2CallIdentity),
+		OpenCode2EventPermissionEvaluate:             named(OpenCode2EventPermissionEvaluate, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventShellCreateBefore:              named(OpenCode2EventShellCreateBefore, openCode2Unevidenced),
 	}
 }
 
