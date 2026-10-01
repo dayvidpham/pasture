@@ -1,0 +1,11 @@
+{
+  "origin": "authentic-capture",
+  "harness": "opencode",
+  "harnessVersion": "2.0.20",
+  "captureSource": "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
+  "rawFileDigest": "sha256:f0d8e7ac5bafed0dcfa624aa5e7f7bc12134776d4d4b50f9f80936e7b73d380f",
+  "capturedAt": "2026-10-01T10:49:00Z",
+  "event": "session.http.response",
+  "redaction": "none",
+  "clearance": "internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md"
+}
