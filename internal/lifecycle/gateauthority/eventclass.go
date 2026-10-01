@@ -38,6 +38,7 @@ func harnessManifests() []registration.Manifest {
 		registration.ClaudeCode2_1_261(),
 		registration.Codex0_153_0(),
 		registration.OpenCode1_18_29(),
+		registration.OpenCode2_0_20(),
 	}
 }
 
@@ -156,6 +157,34 @@ var eventClasses = map[ir.HarnessID]map[string]ActionClass{
 		"command.execute.before": ActionToolUse,
 		"tool.execute.before":    ActionToolUse,
 		"tool.execute.after":     ActionPostHoc,
+
+		// OpenCode 2.0.20 hook coordinates. The three names this surface
+		// shares with the 1.18.29 catalogue keep their classes above; the
+		// fourteen below are new in 2.0.20. Every class here is provisional:
+		// the committed 2.0.20 capture sitting re-derives the per-row class
+		// from measured payloads, and no 2.0.20 row is enabled until then.
+		// All but two are ActionObservation, the class for a host shaping or
+		// reporting its own request pipeline rather than asking about a
+		// deniable action; the prompt interception is the user's own
+		// submission and the permission evaluation is the host's permission
+		// assertion, matching UserPromptSubmit and permission.ask.
+		// Observation, prompt-submit, compact, permission and post-hoc are all
+		// never-denied classes, so even a misclassified provisional row can
+		// only proceed, never block, once proofs enable it.
+		"session.prompt":                    ActionPromptSubmit,
+		"session.context":                   ActionObservation,
+		"session.compaction":                ActionCompact,
+		"session.generate":                  ActionObservation,
+		"session.title":                     ActionObservation,
+		"session.model.request":             ActionObservation,
+		"session.http.request":              ActionObservation,
+		"session.http.response":             ActionObservation,
+		"session.experimental.ws.handshake": ActionObservation,
+		"session.experimental.ws.send":      ActionObservation,
+		"session.experimental.ws.receive":   ActionObservation,
+		"session.retry":                     ActionObservation,
+		"permission.evaluate":               ActionPermission,
+		"shell.create.before":               ActionObservation,
 	}, //nolint:gofmt // alignment is gofmt's
 }
 
@@ -183,7 +212,15 @@ func checkEventClassesAreTotal() error {
 	registered := map[ir.HarnessID]map[string]bool{}
 	events := 0
 	for _, manifest := range manifests {
-		names := map[string]bool{}
+		// One harness may register several contract versions (OpenCode
+		// serves 1.18.29 and 2.0.20), so names merge per harness: a later
+		// manifest must not hide an earlier one's names from the unknown
+		// check below.
+		names, ok := registered[manifest.Harness]
+		if !ok {
+			names = map[string]bool{}
+			registered[manifest.Harness] = names
+		}
 		for _, event := range manifest.Entries() {
 			events++
 			names[event.NativeName] = true
@@ -192,7 +229,6 @@ func checkEventClassesAreTotal() error {
 				unclassified = append(unclassified, fmt.Sprintf("%s %s", manifest.Harness, event.NativeName))
 			}
 		}
-		registered[manifest.Harness] = names
 	}
 	if events == 0 {
 		return fmt.Errorf("the harness manifests registered no event at all, so the class check walked nothing")
@@ -334,10 +370,29 @@ func buildDeniedCellReachability() []CellReachability {
 	var entries []CellReachability
 
 	add := func(entry CellReachability) {
+		// One harness may register several contract versions (OpenCode
+		// serves 1.18.29 and 2.0.20): the column states one reachability
+		// per harness, so versions merge here with their reaching events
+		// unioned. A coordinate both versions share answers once.
+		union := map[ir.HarnessID][]string{}
+		present := map[ir.HarnessID]map[string]bool{}
+		var order []ir.HarnessID
 		for _, manifest := range manifests {
+			if present[manifest.Harness] == nil {
+				order = append(order, manifest.Harness)
+				present[manifest.Harness] = map[string]bool{}
+			}
+			for _, name := range reachingEvents(manifest, entry.Action) {
+				if !present[manifest.Harness][name] {
+					present[manifest.Harness][name] = true
+					union[manifest.Harness] = append(union[manifest.Harness], name)
+				}
+			}
+		}
+		for _, harness := range order {
 			entry.Harnesses = append(entry.Harnesses, HarnessReach{
-				Harness: manifest.Harness,
-				Events:  reachingEvents(manifest, entry.Action),
+				Harness: harness,
+				Events:  union[harness],
 			})
 		}
 		for _, reach := range entry.Harnesses {

@@ -98,6 +98,22 @@ func TestProductionProfilesAndInstallerCellsUseArtifactIdentityAuthority(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
+		if harness == artifact.HarnessOpenCode {
+			// Transitional pin while the OpenCode v2 transport lands ahead
+			// of the registry switch: the generated target descriptor
+			// already describes the 2.0.20 transport, while the production
+			// registry and the pinned runtime contracts stay on 1.18.29
+			// until the transport, captures and proofs have all landed and
+			// the wave switch flips them together. Both sides are pinned
+			// here so neither can drift silently in the meantime.
+			if descriptorID.String() != "opencode/opencode@2.0.20" {
+				t.Fatalf("%s descriptor=%s, want the 2.0.20 transport contract while the registry transition is pending", harness, descriptorID)
+			}
+			if registered.String() != "opencode/opencode@1.18.29" || contracts[harness] != registered {
+				t.Fatalf("%s runtime=%s registry=%s, want both pinned on 1.18.29 until the wave switch", harness, contracts[harness], registered)
+			}
+			continue
+		}
 		if descriptorID != registered || contracts[harness] != registered {
 			t.Fatalf("%s descriptor=%s runtime=%s registry=%s", harness, descriptorID, contracts[harness], registered)
 		}
