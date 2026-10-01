@@ -558,6 +558,15 @@ var openCode2EnabledFixtures = []struct {
 	{registration.EventOpenCode2PermissionEvaluate, "permission.evaluate", "opencode_permission_evaluate_2_0_20.2.json"},
 }
 
+// citedCapturePath returns the repository-relative path a capture citation
+// names: the text before any trailing parenthetical annotation, trimmed.
+func citedCapturePath(citation string) string {
+	if index := strings.Index(citation, " ("); index >= 0 {
+		citation = citation[:index]
+	}
+	return strings.TrimSpace(citation)
+}
+
 // TestEnabledOpenCode2HandlersToDurableReadBack is the production proof for
 // every enabled OpenCode 2.0.20 coordinate. Bun loads the shipped generated
 // transport (.opencode/plugins/pasture-lifecycle.ts), runs its setup against
@@ -583,6 +592,36 @@ func TestEnabledOpenCode2HandlersToDurableReadBack(t *testing.T) {
 	transport := filepath.Join(root, ".opencode", "plugins", "pasture-lifecycle.ts")
 	_, err = os.Stat(transport)
 	require.NoError(t, err, "the shipped OpenCode transport is missing; run make generate")
+
+	// Bind this proof to the activation data it is cited by, before any call
+	// is driven. The fixture table above is the independent expectation: a
+	// capture citation that names another file, an enabled set that drifts,
+	// or a table row that drives the wrong capture all fail here.
+	entries, err := activation.OpenCode2_0_20()
+	require.NoError(t, err)
+	byEvent := make(map[model.ContractEventKind]activation.Entry, len(entries))
+	var enabledKinds []model.ContractEventKind
+	for _, entry := range entries {
+		byEvent[entry.Event] = entry
+		if entry.State == activation.Enabled {
+			enabledKinds = append(enabledKinds, entry.Event)
+		}
+	}
+	wantKinds := make([]model.ContractEventKind, 0, len(openCode2EnabledFixtures))
+	for _, row := range openCode2EnabledFixtures {
+		wantKinds = append(wantKinds, row.event)
+	}
+	require.Equal(t, wantKinds, enabledKinds, "the 2.0.20 enabled set must be exactly the nine coordinates this proof drives")
+	for _, row := range openCode2EnabledFixtures {
+		entry := byEvent[row.event]
+		require.Equal(t, activation.Enabled, entry.State, "%s must be enabled", row.native)
+		require.NotZero(t, entry.CaptureProof, "%s has no capture proof", row.native)
+		require.NotZero(t, entry.ProductionProof, "%s has no production proof", row.native)
+		require.Equal(t, filepath.Join(fixtureDir, row.fixture), filepath.Join(root, citedCapturePath(entry.CaptureProof.Name())),
+			"%s: the activation capture citation %q does not name the fixture this proof drives", row.native, entry.CaptureProof.Name())
+		require.Equal(t, "cmd/pasture/hook_lifecycle_production_test.go:"+t.Name()+"/"+row.native, entry.ProductionProof.Name(),
+			"%s: the activation production citation does not name this proof and subtest", row.native)
+	}
 
 	var calls strings.Builder
 	for _, row := range openCode2EnabledFixtures {
