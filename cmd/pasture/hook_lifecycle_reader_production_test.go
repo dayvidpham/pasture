@@ -580,40 +580,37 @@ func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 // ─── the per-row store faults ────────────────────────────────────────────────
 
 // readerFaultRow names one production-producible gate-read fault, the diagnostic
-// token its stderr line must carry, an optional token that distinguishes the row
-// from its siblings at the same stage, and the real store fixture that produces
+// token its stderr line must carry, and the real store fixture that produces
 // it.
 type readerFaultRow struct {
-	name   string
-	token  string
-	detail string
-	seed   func(t *testing.T, dbPath string, harness ir.HarnessID, session string)
+	name  string
+	token string
+	seed  func(t *testing.T, dbPath string, harness ir.HarnessID, session string)
 }
 
 // readerFaultRows are the production-producible gate-read faults whose damaged
-// state a REAL store can hold and a BUILT transport can reach. Two rows the
+// state a REAL store can hold and a BUILT transport can reach within the fixed
+// 5s hook-invocation budget. Two rows the
 // built-column contract lists are NOT here, and the reason is
 // pinned by TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage:
 // the pinned Provenance open-time replay convergence check refuses the damage
 // (an out-of-range phase, an owner projection that disagrees with the folded
-// journal) before any gate read runs. byte-limit IS here: ten legal ~900 KiB
-// materials cross the reader's AGGREGATE wire bound on a store the product's own
-// writer produced.
+// journal) before any gate read runs. The byte-limit row is NOT here either,
+// for a different, honest reason recorded beside that subject: the byte-limit
+// fault is produced by the READER (a store/reader property, not a transport
+// property), and at the built layer the mandatory 8+ MiB read plus store open
+// cannot be made deterministic inside the fixed 5s hook-invocation budget on a
+// loaded runner; it is therefore pinned at the handler layer where the budget
+// is injectable, by TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite.
+// What the built column gives up by that removal: NO built subject exercises
+// an ownership-read fault anymore. The byte-limit row was the only row
+// carrying "gate ownership read", the only built GateReadIntegrityError, and
+// the only built fail-closed cell for one.
 func readerFaultRows() []readerFaultRow {
 	return []readerFaultRow{
 		{name: "malformed-claim", token: "gate claim read", seed: seedReaderMalformedClaim},
 		{name: "role-source", token: "could not establish the role", seed: seedReaderRoleSource},
-		{name: "byte-limit", token: "gate ownership read", detail: readerByteLimitDetail(), seed: seedReaderByteLimit},
 	}
-}
-
-// readerByteLimitDetail is the byte-limit row's distinguishing diagnostic token.
-// It is derived from the upstream bound so it cannot drift from the wording
-// Provenance emits: QueryActorOwnership's overflow error formats
-// MaxActorOwnershipResultBytes as the limit in its "above its bound of %d bytes"
-// clause (provenance internal/journal/actor_ownership.go).
-func readerByteLimitDetail() string {
-	return fmt.Sprintf("above its bound of %d bytes", provenance.MaxActorOwnershipResultBytes)
 }
 
 func seedReaderMalformedClaim(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
@@ -661,56 +658,6 @@ func seedReaderProjectionMismatch(t *testing.T, dbPath string, harness ir.Harnes
 	require.NoError(t, err)
 }
 
-// seedReaderByteLimit stores TEN owned tasks, each carrying one legal ~900 KiB
-// assignment-start material produced by its own operation. Every material is
-// under the 1 MiB canonical-field cap and every operation is under the 8 MiB
-// canonical-mutation cap, so a SUPPORTED writer genuinely writes this store. The
-// reader's bound is on the AGGREGATE result (MaxActorOwnershipResultBytes =
-// 8<<20), and ten such materials cross it, so the gate read faults at its byte
-// bound on a store the product itself produced.
-func seedReaderByteLimit(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
-	t.Helper()
-	actor := seedReaderClaim(t, dbPath, harness, session)
-	tracker, err := tasks.OpenTaskTracker(dbPath)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, tracker.Close()) }()
-
-	authority := readerGenesisAuthority(t, tracker)
-
-	// 10 * ~900 KiB = ~9.0 MB, above the 8 MiB aggregate wire bound.
-	const ownedTasks = 10
-	pad := strings.Repeat("x", 900*1024)
-	for index := 0; index < ownedTasks; index++ {
-		task, err := tracker.Create("file://gate-reader-byte-limit", "gate reader byte-limit task", "",
-			provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
-		require.NoError(t, err)
-		assignment := provenance.AssignmentID(fmt.Sprintf("gate-reader-byte-limit-owner-%02d", index))
-		operation := provenance.OperationID(fmt.Sprintf("gate-reader-byte-limit-start-%02d", index))
-		// A LEGAL assignment-start material: the decoder accepts every field
-		// (assignment matches the episode, the role is a known token, the
-		// occupant is a non-empty string), and the oversized occupant string is
-		// the padding that pushes the aggregate past the wire bound. If the
-		// bound did not fire, this material would decode and the gate would
-		// proceed, which is exactly what the bound prevents.
-		payload := `{"assignment":"` + string(assignment) + `","role":"owner-responsibility","occupant":"` +
-			actor.String() + pad + `"}`
-		effects := []provenance.Effect{
-			{Sort: provenance.EffectAssignmentStart, ResultSlot: "authority", TaskID: task.ID,
-				AssignmentID: assignment, SlotID: provenance.SlotOwnerResponsibility, Occupant: actor},
-			{Sort: provenance.EffectTaskEvent, ResultSlot: "material", TaskID: task.ID,
-				EventKind: tasks.FamilyAssignmentStarted.EventKind(), Payload: []byte(payload)},
-		}
-		_, err = tracker.Journal().Apply(provenance.OperationInput{
-			OperationID:        operation,
-			ActorID:            actor,
-			AuthorityJournalID: &authority,
-			CommandDigest:      []byte(operation),
-			Effects:            effects,
-		})
-		require.NoError(t, err)
-	}
-}
-
 // TestReaderGateFaultRowsReachTheHostFaultPath drives every BUILT row in the
 // fault mapping through each harness's real transport and asserts the fail-open
 // host settlement: exact continuation bytes, one stage-naming diagnostic, one
@@ -719,7 +666,9 @@ func seedReaderByteLimit(t *testing.T, dbPath string, harness ir.HarnessID, sess
 // WHAT IT VISITS: every row readerFaultRows declares, plus the held-writer
 // deadline row, on each pinned harness.
 // WHAT IT DOES NOT READ: the rows pinned handler-only by
-// TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage, or
+// TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage, the
+// byte-limit aggregate bound pinned at the handler layer by
+// TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite, or
 // whether a transport stays current with regenerated output.
 func TestReaderGateFaultRowsReachTheHostFaultPath(t *testing.T) {
 	binary := lifecycleBinary(t)
@@ -737,16 +686,10 @@ func TestReaderGateFaultRowsReachTheHostFaultPath(t *testing.T) {
 				assert.Equal(t, string(continuation.Bytes()), run.Continuation)
 				assert.Equal(t, 0, run.ExitCode, "a fail-open fault never refuses the host")
 				assert.Contains(t, run.Stderr, row.token, "the one diagnostic must name this row's stage")
-				if row.detail != "" {
-					assert.Contains(t, run.Stderr, row.detail, "the diagnostic must name what distinguishes this row")
-				}
 				records := readFaultRecords(t, run.FaultDir)
 				require.Len(t, records, 1, "a fault writes exactly one record line")
 				assert.Equal(t, "fault", records[0]["outcomeClass"])
 				assert.Contains(t, fmt.Sprint(records[0]["cause"]), row.token, "the durable record must agree with the host-facing diagnostic")
-				if row.detail != "" {
-					assert.Contains(t, fmt.Sprint(records[0]["cause"]), row.detail, "the durable record must agree on the row's distinguishing token")
-				}
 				assert.Empty(t, readerConsultation(t, dbPath), "a fault commits no consultation")
 			})
 		}
@@ -790,9 +733,6 @@ func TestReaderGateFaultRowsFailClosedOnlyWhereEvidenced(t *testing.T) {
 				assert.Equal(t, wantContinuation, run.Continuation)
 				assert.Equal(t, wantExit, run.ExitCode)
 				assert.Contains(t, run.Stderr, row.token)
-				if row.detail != "" {
-					assert.Contains(t, run.Stderr, row.detail)
-				}
 				records := readFaultRecords(t, run.FaultDir)
 				require.Len(t, records, 1)
 				assert.Empty(t, readerConsultation(t, dbPath), "a fault commits no consultation")
@@ -894,14 +834,24 @@ func runReaderDeadlineRow(t *testing.T, binary string, harness readerHarnessCase
 // wrapping API that can return the typed cause. This subject keeps the built
 // column honest instead of publishing locators that cannot resolve.
 //
-// byte-limit is NOT here: a store carrying ten legal ~900 KiB assignment
-// materials crosses the reader's AGGREGATE 8 MiB wire bound and is produced by
-// the product's own writer, so it has a real built subject.
+// byte-limit is NOT here, for a different reason that is NOT about damage the
+// store refuses. The byte-limit fault is produced by the READER (a store/reader
+// property, not a transport property): ten legal ~900 KiB assignment materials
+// cross the reader's AGGREGATE 8 MiB wire bound on a store the product's own
+// writer produces. At the built layer the mandatory 8+ MiB read plus store open
+// cannot be made deterministic inside the fixed 5s hook-invocation budget on a
+// loaded runner; it is therefore pinned at the handler layer where the budget
+// is injectable, by TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite.
+// What the built column gives up by that removal: NO built subject exercises
+// an ownership-read fault anymore. The byte-limit row was the only row
+// carrying "gate ownership read", the only built GateReadIntegrityError, and
+// the only built fail-closed cell for one.
 //
 // WHAT IT VISITS: the two integrity rows whose damaged state cannot persist in a
 // store that opens.
-// WHAT IT DOES NOT READ: the gate reader's own error mapping; the handler
-// subjects cover that, and this subject asserts only that the store refuses the
+// WHAT IT DOES NOT READ: the gate reader's own error mapping, or the byte-limit
+// aggregate bound; the handler
+// subjects cover those, and this subject asserts only that the store refuses the
 // damaged state first.
 func TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage(t *testing.T) {
 	t.Run("unmapped-phase", func(t *testing.T) {

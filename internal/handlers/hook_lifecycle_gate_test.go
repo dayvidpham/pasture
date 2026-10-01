@@ -936,7 +936,7 @@ func TestBothCommittingSurfacesRunTheSameGate(t *testing.T) {
 // the exported entry points and need the same real claim, and a second copy of
 // this writer's invocation could seed a different claim shape than the gate is
 // proven against.
-func ClaimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
+func ClaimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session string) provenance.ActorID {
 	t.Helper()
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -948,6 +948,7 @@ func ClaimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session
 		[]model.NativeBinding{{Kind: model.BindingSession, Value: session}},
 		tasks.ActorClaim(agent.ID.String()), gateClock{},
 	))
+	return agent.ID
 }
 
 func sessionStartEventKind(harness ir.HarnessID) model.ContractEventKind {
@@ -959,4 +960,144 @@ func sessionStartEventKind(harness ir.HarnessID) model.ContractEventKind {
 	default:
 		return registration.EventSessionStart
 	}
+}
+
+// ─── the aggregate byte bound, over a real store ─────────────────────────────
+
+// gateByteLimitGenesisAuthority resolves the one bootstrap authority every
+// gate fixture cites, so neither seeder can drift from the other on the
+// genesis operation ID or its result slot.
+func gateByteLimitGenesisAuthority(t *testing.T, tracker interface {
+	Journal() provenance.Journal
+}) provenance.JournalID {
+	t.Helper()
+	genesis, err := tracker.Journal().LookupCommitted(provenance.OperationID("pasture.system.genesis.v1"))
+	require.NoError(t, err)
+	authority := provenance.JournalID(0)
+	found := false
+	for _, slot := range genesis.ResultSlots {
+		if slot.Slot == provenance.ResultSlotID("auth") {
+			authority, found = slot.ProducedJournalID, true
+		}
+	}
+	require.True(t, found, "the system genesis must publish its authority result slot")
+	return authority
+}
+
+// gateSeedByteLimit stores TEN owned tasks, each carrying one legal ~900 KiB
+// assignment-start material produced by its own operation. Every material is
+// under the 1 MiB canonical-field cap and every operation is under the 8 MiB
+// canonical-mutation cap, so a SUPPORTED writer genuinely writes this store.
+// The reader's bound is on the AGGREGATE result (MaxActorOwnershipResultBytes =
+// 8<<20), and ten such materials cross it, so the gate read faults at its byte
+// bound on a store the product itself produced.
+func gateSeedByteLimit(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
+	t.Helper()
+	actor := ClaimGateSession(t, dbPath, harness, session)
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, tracker.Close()) }()
+
+	authority := gateByteLimitGenesisAuthority(t, tracker)
+
+	// 10 * ~900 KiB = ~9.0 MB, above the 8 MiB aggregate wire bound.
+	const ownedTasks = 10
+	pad := strings.Repeat("x", 900*1024)
+	for index := 0; index < ownedTasks; index++ {
+		task, err := tracker.Create("file://gate-reader-byte-limit", "gate reader byte-limit task", "",
+			provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+		require.NoError(t, err)
+		assignment := provenance.AssignmentID(fmt.Sprintf("gate-reader-byte-limit-owner-%02d", index))
+		operation := provenance.OperationID(fmt.Sprintf("gate-reader-byte-limit-start-%02d", index))
+		// A LEGAL assignment-start material: the decoder accepts every field
+		// (assignment matches the episode, the role is a known token, the
+		// occupant is a non-empty string), and the oversized occupant string is
+		// the padding that pushes the aggregate past the wire bound. If the
+		// bound did not fire, this material would decode and the gate would
+		// proceed, which is exactly what the bound prevents.
+		payload := `{"assignment":"` + string(assignment) + `","role":"owner-responsibility","occupant":"` +
+			actor.String() + pad + `"}`
+		effects := []provenance.Effect{
+			{Sort: provenance.EffectAssignmentStart, ResultSlot: "authority", TaskID: task.ID,
+				AssignmentID: assignment, SlotID: provenance.SlotOwnerResponsibility, Occupant: actor},
+			{Sort: provenance.EffectTaskEvent, ResultSlot: "material", TaskID: task.ID,
+				EventKind: tasks.FamilyAssignmentStarted.EventKind(), Payload: []byte(payload)},
+		}
+		_, err = tracker.Journal().Apply(provenance.OperationInput{
+			OperationID:        operation,
+			ActorID:            actor,
+			AuthorityJournalID: &authority,
+			CommandDigest:      []byte(operation),
+			Effects:            effects,
+		})
+		require.NoError(t, err)
+	}
+}
+
+// TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite pins the aggregate
+// byte bound with a REAL 8+ MiB read through the production reader, at the
+// handler layer where the test controls the deadline.
+//
+// WHY HERE AND NOT ON THE BUILT TRANSPORT. The bound is a READER property, not
+// a transport property: the gate's ownership read scans rows and accumulates
+// ~8 MiB before it refuses, plus the store open and journal replay around it.
+// On the built path that work runs inside the fixed 5s hook-invocation budget
+// the CLI deliberately offers no flag or env for, so on a loaded runner the
+// hook abandons the work before the read faults and the proof fails without
+// proving anything. Here the invocation runs through HookLifecycleNative with
+// a caller-supplied context the test bounds generously, so no 5s production
+// tier applies and the fault the store returns is the verdict asserted.
+//
+// WHAT IT ASSERTS: the typed GateReadIntegrityError at stage materials with
+// the upstream limit cause reachable, the pre-write sentinel, and that no
+// occurrence, interpretation or consultation was written. A fault is never a
+// decision the host may act on.
+//
+// MUTATION-RED: shrinking the seed below the 8 MiB aggregate, or reverting the
+// bound check so the read succeeds, lets the gate proceed and this subject
+// fails on its require.Error. A hard-coded fault without the store read would
+// fail the production-wiring pin beside it, which names tasks.NewGateReader.
+func TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite(t *testing.T) {
+	// NOT PARALLEL, ON PURPOSE. The read copies ~8 MiB before it refuses; a
+	// fan-out of such reads is what makes a single row's failure ambiguous
+	// between "the bound did not fire" and "the runner was starved". The
+	// other subjects still run in parallel with each other; this one only
+	// delays the fan-out.
+	raw := gateFixture(t, gateClaudeGateFixture)
+	session := GateSessionIdentity(t, raw, "session_id")
+	dbPath := gateStore(t)
+	gateSeedByteLimit(t, dbPath, ir.HarnessClaudeCode, session)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	// NOTE: 25s sits BELOW the 30s WorkflowResult writer window the receipt
+	// service enforces, so a gate that proceeded would still commit; it sits
+	// far ABOVE the 5s production hook-invocation tier. On a loaded CI runner
+	// the built subtest carrying this seed took 16.1s of seed, transport and
+	// deadline wait before the hook abandoned it at 5s. The test therefore
+	// controls the budget the built path fixes.
+	_, err := HookLifecycleNative(ctx, gateInput(t, dbPath, "PreToolUse", raw))
+
+	require.Error(t, err, "the aggregate byte bound is a fault; it is never a decision the host may act on")
+	require.ErrorIs(t, err, ErrLifecycleBeforeDurableWrite,
+		"the fault was raised before any write was attempted, so the command may say no occurrence exists")
+	var integrity *tasks.GateReadIntegrityError
+	require.ErrorAs(t, err, &integrity)
+	require.Equal(t, provenance.ActorOwnershipStageMaterials, integrity.Stage,
+		"the stage is the STORE's answer about which rows overflowed, and it must survive the wrap")
+	var limit *provenance.ActorOwnershipLimitError
+	require.ErrorAs(t, err, &limit,
+		"the upstream limit cause must stay reachable through the Pasture wrap")
+	require.ErrorIs(t, err, provenance.ErrActorOwnershipLimit)
+	require.EqualValues(t, provenance.MaxActorOwnershipResultBytes, limit.LimitBytes,
+		"the bound refused at must be the aggregate wire bound, not a smaller per-row cap")
+	require.Greater(t, limit.Work.MaterialRows, 0,
+		"rows were copied before the overflowing one, so the ACCUMULATION crossed the bound")
+	require.Less(t, limit.Work.ResultBytes, limit.LimitBytes,
+		"the accumulated bytes below the bound name the aggregate arm, not a single over-large row")
+	require.Contains(t, err.Error(), "gate ownership read (stage materials)")
+	require.Contains(t, err.Error(),
+		fmt.Sprintf("above its bound of %d bytes", provenance.MaxActorOwnershipResultBytes),
+		"the diagnostic must name the bound Provenance enforces, so the row cannot drift from its wording")
+	gateRequireNoReceipt(t, dbPath)
 }
