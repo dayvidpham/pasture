@@ -270,10 +270,8 @@ func runReaderCodex(t *testing.T, binary, dbPath string, raw []byte, failClosed 
 // runReaderOpenCode drives Bun executing the generated plugin. The plugin spawns
 // the built binary and forwards its diagnostic; the runner observes the child's
 // bytes by teeing the real spawn, never by replacing it. The module is copied
-// beside a stub of the host-provided specifier (the host maps it to its
-// bundled SDK at load time; the stub mirrors its identity define), because
-// the committed artifact carries that import and Bun resolves it from the
-// importing file upward. The v2 helper forwards the whole fixture object;
+// alone with no stub beside it, because the committed artifact performs no
+// runtime imports. The v2 helper forwards the whole fixture object;
 // the stubbed 1.19.0 host version routes the 1.18.29 row, whose struct
 // decoder ignores the members the retired args-only projection used to drop.
 func runReaderOpenCode(t *testing.T, binary, dbPath string, raw []byte, failClosed bool) readerRun {
@@ -287,7 +285,6 @@ func runReaderOpenCode(t *testing.T, binary, dbPath string, raw []byte, failClos
 	require.NoError(t, err)
 	modulePath := filepath.Join(dir, "pasture-hooks.ts")
 	require.NoError(t, os.WriteFile(modulePath, module, 0o600))
-	writeOpenCodePluginStubFiles(t, dir)
 	moduleURL := (&url.URL{Scheme: "file", Path: modulePath}).String()
 	fixturePath := filepath.Join(dir, "fixture.json")
 	require.NoError(t, os.WriteFile(fixturePath, raw, 0o600))

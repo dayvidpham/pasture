@@ -183,7 +183,7 @@ func TestGeneratedManifestsCarryRuntimeFailureModesVerbatim(t *testing.T) {
 		}
 	}
 
-	// The v2 OpenCode contract models sixteen Plugin.define hooks plus the
+	// The v2 OpenCode contract models sixteen plain definition hooks plus the
 	// session.created bus observation: sixteen awaited named callbacks stay
 	// throw-fail-fast and the one catch-all observation stays observe-only.
 	openCode2 := string(renderProviderManifest(
