@@ -15,13 +15,13 @@ import (
 	"go/token"
 	"io/fs"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/dayvidpham/provenance"
 
-	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gateauthority"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
@@ -300,48 +300,16 @@ func TestGateAuthorityDoesNotImportTheTaskStore(t *testing.T) {
 	}
 }
 
-// ─── index completeness ──────────────────────────────────────────────────────
+// ─── contract boundary ───────────────────────────────────────────────────────
 
-// TestRequireCompleteRefusesAnIncompleteSnapshot proves the typed completeness
-// fact is turned into a refusal in ONE place, so no caller can build an
-// authority on a partial index by forgetting to look. The refusing Reader
-// itself is proven where it is implemented.
+// TestActorAuthorityHasNoEpisodeLimitField pins the read-side authority value
+// to the complete episode list. The compiler also covers every composite literal
+// in the tree; this reflection check makes the removed field's absence an
+// explicit contract assertion.
 //
-// RED when: RequireComplete accepts an incomplete snapshot or a nil one.
-func TestRequireCompleteRefusesAnIncompleteSnapshot(t *testing.T) {
-	if err := gateauthority.RequireComplete(stubSnapshot{complete: true}); err != nil {
-		t.Fatalf("RequireComplete refused a complete snapshot: %v", err)
-	}
-
-	err := gateauthority.RequireComplete(stubSnapshot{complete: false})
-	if err == nil {
-		t.Fatalf("RequireComplete accepted a snapshot whose index is not complete; want a refusal, because an authority built on a partial index can miss an assignment that exists")
-	}
-	for _, phrase := range []string{
-		"was not up to date",
-		"Nothing is denied on an incomplete record",
-		"pasture gate rebuild-index",
-	} {
-		if !strings.Contains(err.Error(), phrase) {
-			t.Errorf("the incomplete-index refusal does not carry the phrase %q; the reader must be told that nothing was denied and what to run:\n%s", phrase, err.Error())
-		}
-	}
-
-	if err := gateauthority.RequireComplete(nil); err == nil {
-		t.Fatalf("RequireComplete accepted a nil snapshot; want a refusal, because a caller that lost its snapshot must not be told the index is fine")
+// RED when: a partial-episode marker is added back to ActorAuthority.
+func TestActorAuthorityHasNoEpisodeLimitField(t *testing.T) {
+	if _, ok := reflect.TypeOf(gateauthority.ActorAuthority{}).FieldByName("Trunc" + "ated"); ok {
+		t.Fatal("ActorAuthority exposes the retired partial-list marker; want the complete episode list without one")
 	}
 }
-
-// stubSnapshot is a stand-in for the Reader's snapshot, which lives in the task
-// store. Only Complete is exercised here; the other methods exist to satisfy
-// the contract.
-type stubSnapshot struct{ complete bool }
-
-func (s stubSnapshot) Complete() bool { return s.complete }
-func (s stubSnapshot) ResolveSession(ir.HarnessID, string) (gateauthority.SessionClaim, error) {
-	return gateauthority.SessionClaim{}, nil
-}
-func (s stubSnapshot) Authority(provenance.ActorID) (gateauthority.ActorAuthority, error) {
-	return gateauthority.ActorAuthority{}, nil
-}
-func (s stubSnapshot) Close() error { return nil }

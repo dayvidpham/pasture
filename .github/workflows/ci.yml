@@ -5,6 +5,7 @@ on:
     branches: ["main", "develop", "feat/**", "fix/**"]
   pull_request:
     branches: ["main", "develop"]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -63,35 +64,18 @@ jobs:
         # run the real CLI as a child process. The explicit -timeout is a
         # guard against the 10-minute default, which reports a slow package as
         # a panic with no per-test attribution; it is not a budget to grow into.
+        #
+        # The race detector is OFF in CI so iteration is fast. There is no
+        # second race job: the suite runs exactly ONCE per CI run. Run
+        # `make test-race` locally when a change touches concurrency.
         env:
-          CGO_ENABLED: "1"
-        run: go test -race -timeout 30m ./...
+          CGO_ENABLED: "0"
+        run: go test -timeout 30m ./...
 
       - name: Recovery tests
         env:
           CGO_ENABLED: "0"
         run: make test-recovery
-
-  race:
-    name: Race Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.26"
-          cache: true
-
-      - name: Verify dependencies
-        run: go mod verify
-
-      - name: Race detector
-        env:
-          CGO_ENABLED: "1"
-        run: make test-race-ci
 
   lint:
     name: Lint

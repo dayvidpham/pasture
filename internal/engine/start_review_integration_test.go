@@ -4,19 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/dayvidpham/provenance"
 
 	"github.com/dayvidpham/pasture/internal/engine"
-	pasterrors "github.com/dayvidpham/pasture/internal/errors"
-	"github.com/dayvidpham/pasture/internal/lifecycle/gateauthority"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -71,18 +67,10 @@ func TestEngineNewLaunchAcceptsDirectActivitySink(t *testing.T) {
 // host-bound Provenance capability.
 func TestEngineStartReviewUsesAttachedProvenanceAdapter(t *testing.T) {
 	t.Parallel()
-	runEngineStartReview(t, false)
+	runEngineStartReview(t)
 }
 
-// A trigger refuses the first post-commit index insert for each operation. The
-// real composed transaction must still contain every child and its start fact.
-// RED: omit the start effects or put them after the failed index write.
-func TestEngineStartReviewFactsSurviveIndexFailure(t *testing.T) {
-	t.Parallel()
-	runEngineStartReview(t, true)
-}
-
-func runEngineStartReview(t *testing.T, failIndex bool) {
+func runEngineStartReview(t *testing.T) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	tracker, err := tasks.OpenTaskTracker(dbPath)
@@ -153,11 +141,11 @@ func runEngineStartReview(t *testing.T, failIndex bool) {
 	}
 	planBefore := captureStartReviewFootprint(t, e.DB(), planOperation, tasks.ReviewStartResult{}, reviewClosure{})
 	assertStartReviewFootprintEmpty(t, planOperation, planBefore)
-	startedPlan, err := startReviewWithIndexProbe(t, tracker, e.DB(), service, ctx, planInput, supervisor.ID, 4, failIndex)
+	startedPlan, err := startReview(t, tracker, e.DB(), service, ctx, planInput, supervisor.ID, 4)
 	if err != nil {
 		t.Fatalf("StartReview plan operation %q through engine-owned adapter: %v; impact: a valid direct governing-supervisor plan cannot enter the review lifecycle; fix: preserve the fused plan binding plus four-child batch on the Engine.Launch path", planOperation, err)
 	}
-	if startedPlan.Replayed && !failIndex {
+	if startedPlan.Replayed {
 		t.Fatalf("first plan StartReview operation %q returned Replayed=true; impact: the production path treated a fresh request as an existing receipt; fix: isolate the operation identity and inspect the attached Provenance store", planOperation)
 	}
 	assertOperationAuthority(t, e.DB(), planOperation, assignmentAuthority)
@@ -168,7 +156,7 @@ func runEngineStartReview(t *testing.T, failIndex bool) {
 	}
 	assertReviewOperationDurability(t, planOperation, planAfter)
 	assertStartReviewReplay(t, e.DB(), service, ctx, planInput, startedPlan, planClosure, planAfter)
-	assertReviewStartPopulation(t, tracker, e.DB(), planOperation, planClosure, supervisor.ID, !failIndex)
+	assertReviewStartPopulation(t, tracker, e.DB(), planOperation, planClosure, supervisor.ID)
 
 	// Build the normal implementation lineage through production service methods.
 	// The assignment episode below is only the authority fixture required by
@@ -231,11 +219,11 @@ func runEngineStartReview(t *testing.T, failIndex bool) {
 	}
 	implementationBefore := captureStartReviewFootprint(t, e.DB(), implementationOperation, tasks.ReviewStartResult{}, reviewClosure{})
 	assertStartReviewFootprintEmpty(t, implementationOperation, implementationBefore)
-	startedImplementation, err := startReviewWithIndexProbe(t, tracker, e.DB(), service, ctx, implementationInput, supervisor.ID, 13, failIndex)
+	startedImplementation, err := startReview(t, tracker, e.DB(), service, ctx, implementationInput, supervisor.ID, 13)
 	if err != nil {
 		t.Fatalf("StartReview implementation operation %q through engine-owned adapter with ancestor authority: %v; impact: a valid candidate descendant cannot start its thirteen-child review; fix: preserve the typed ancestor reference scope and direct governing assignment", implementationOperation, err)
 	}
-	if startedImplementation.Replayed && !failIndex {
+	if startedImplementation.Replayed {
 		t.Fatalf("first implementation StartReview operation %q returned Replayed=true; impact: a fresh candidate review reused an existing receipt; fix: isolate the operation identity and inspect the attached Provenance store", implementationOperation)
 	}
 	assertOperationAuthority(t, e.DB(), implementationOperation, assignmentAuthority)
@@ -246,51 +234,28 @@ func runEngineStartReview(t *testing.T, failIndex bool) {
 	}
 	assertReviewOperationDurability(t, implementationOperation, implementationAfter)
 	assertStartReviewReplay(t, e.DB(), service, ctx, implementationInput, startedImplementation, implementationClosure, implementationAfter)
-	assertReviewStartPopulation(t, tracker, e.DB(), implementationOperation, implementationClosure, supervisor.ID, !failIndex)
+	assertReviewStartPopulation(t, tracker, e.DB(), implementationOperation, implementationClosure, supervisor.ID)
 }
 
-func startReviewWithIndexProbe(t *testing.T, tracker protocol.TaskTracker, db *sql.DB, service tasks.EpochService, ctx context.Context, input tasks.StartReviewInput, occupant provenance.ActorID, children int, failIndex bool) (tasks.ReviewStartResult, error) {
+// startReview runs the production StartReview command and, on success, checks
+// the committed closure and every child's start fact against it. Every child a
+// review creates is a started episode, and the composed transaction is the only
+// place that fact can come from, so an absent or unrelated one is a defect the
+// replay below would conceal.
+func startReview(t *testing.T, tracker protocol.TaskTracker, db *sql.DB, service tasks.EpochService, ctx context.Context, input tasks.StartReviewInput, occupant provenance.ActorID, children int) (tasks.ReviewStartResult, error) {
 	t.Helper()
-	if failIndex {
-		// Scope the fault to this operation, not to setup assignments or the
-		// allocator. The first matching insert fails before any index row lands.
-		prefix := strings.ReplaceAll(string(input.Meta.OperationID)+"-", "'", "''")
-		_, err := db.Exec(`CREATE TRIGGER refuse_review_index BEFORE INSERT ON pasture_actor_assignment
-			WHEN substr(NEW.assignment_id, 1, ` + fmt.Sprint(len(string(input.Meta.OperationID))+1) + `) = '` + prefix + `'
-			BEGIN SELECT RAISE(ABORT, 'review index insert refused'); END`)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
 	result, err := service.StartReview(ctx, input)
-	if failIndex {
-		var storage *pasterrors.StructuredError
-		if !errors.As(err, &storage) || storage.Category != pasterrors.CategoryStorage || !strings.Contains(storage.Why, "review index insert refused") {
-			t.Fatalf("StartReview %q must return the post-commit index failure, got %v", input.Meta.OperationID, err)
-		}
+	if err == nil {
 		closure := readReviewClosure(t, db, input.Meta.OperationID)
 		if len(closure.childIDs) != children {
 			t.Fatalf("committed child count = %d, want %d", len(closure.childIDs), children)
 		}
 		for i, child := range closure.childIDs {
 			if countRows(t, db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, child) != 1 || countRows(t, db, `SELECT COUNT(*) FROM journal_authority_assignment_episodes WHERE task_id = ? AND assignment_id = ?`, child, closure.assignments[i]) != 1 {
-				t.Fatalf("child %q lost its atomic task or authority after the index failure", child)
+				t.Fatalf("child %q lost its atomic task or authority in the composed commit", child)
 			}
 		}
-		assertReviewStartPopulation(t, tracker, db, input.Meta.OperationID, closure, occupant, false)
-		if _, err := db.Exec(`DROP TRIGGER refuse_review_index`); err != nil {
-			t.Fatal(err)
-		}
-		// Read the same durable facts after the failure is removed, before replay.
-		assertReviewStartPopulation(t, tracker, db, input.Meta.OperationID, closure, occupant, false)
-		result, err = service.StartReview(ctx, input)
-		if err == nil && !result.Replayed {
-			t.Fatal("retry after the index failure must return the committed command")
-		}
-	}
-	if err == nil {
-		closure := readReviewClosure(t, db, input.Meta.OperationID)
-		assertReviewStartPopulation(t, tracker, db, input.Meta.OperationID, closure, occupant, !failIndex)
+		assertReviewStartPopulation(t, tracker, db, input.Meta.OperationID, closure, occupant)
 	}
 	return result, err
 }
@@ -298,7 +263,7 @@ func startReviewWithIndexProbe(t *testing.T, tracker protocol.TaskTracker, db *s
 // The expected set comes from the real allocation closure. RED: omit a mapped
 // start effect, change its role or occupant, or duplicate an effect on replay.
 // This checks new operations only; it makes no claim about older journal data.
-func assertReviewStartPopulation(t *testing.T, tracker protocol.TaskTracker, db *sql.DB, operation provenance.OperationID, closure reviewClosure, occupant provenance.ActorID, indexed bool) {
+func assertReviewStartPopulation(t *testing.T, tracker protocol.TaskTracker, db *sql.DB, operation provenance.OperationID, closure reviewClosure, occupant provenance.ActorID) {
 	t.Helper()
 	if len(closure.childIDs) == 0 || len(closure.childIDs) != len(closure.assignments) {
 		t.Fatal("the population oracle must contain matched child and assignment identities")
@@ -312,15 +277,8 @@ func assertReviewStartPopulation(t *testing.T, tracker protocol.TaskTracker, db 
 		}
 		ids = append(ids, id)
 		expected[child] = closure.assignments[i]
-		want := 0
-		if indexed {
-			want = 1
-		}
-		if got := countRows(t, db, `SELECT COUNT(*) FROM pasture_actor_assignment WHERE assignment_id = ?`, closure.assignments[i]); got != want {
-			t.Fatalf("child %q index rows = %d, want %d", child, got, want)
-		}
 	}
-	page, err := tracker.Journal().QueryTaskEvents(provenance.JournalQueryV1{OrderBy: provenance.OrderByJournalID, TaskIDs: ids, EventKinds: []provenance.EventKind{tasks.FamilyAssignmentStarted.EventKind()}, Limit: gateauthority.CatchUpPageSize})
+	page, err := tracker.Journal().QueryTaskEvents(provenance.JournalQueryV1{OrderBy: provenance.OrderByJournalID, TaskIDs: ids, EventKinds: []provenance.EventKind{tasks.FamilyAssignmentStarted.EventKind()}, Limit: provenance.MaxFactPageSize})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +317,7 @@ func assertReviewStartPopulation(t *testing.T, tracker protocol.TaskTracker, db 
 			t.Fatalf("child %q start fact was not written by its atomic composed supplement", row.TaskID)
 		}
 	}
-	t.Logf("StartReview %s: children=%d facts=%d indexed=%t exact occupant=%s", operation, len(expected), len(page.Events), indexed, occupant)
+	t.Logf("StartReview %s: children=%d facts=%d exact occupant=%s", operation, len(expected), len(page.Events), occupant)
 }
 
 type reviewClosure struct {

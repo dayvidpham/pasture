@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
@@ -56,7 +57,7 @@ type lifecycleTestInvocation struct {
 
 func startLifecycleTestInvocation(t *testing.T, cmd *cobra.Command, args []string,
 	barrier handlers.CommitBarrier, budget timeouts.Profile, deadline lifecycleDeadline,
-	release func(), hooks lifecycleTestHooks, decisions ...backend.Decision,
+	release func(), hooks lifecycleTestHooks,
 ) *lifecycleTestInvocation {
 	t.Helper()
 	cancelSignal, cancel := context.WithCancel(context.Background())
@@ -87,7 +88,7 @@ func startLifecycleTestInvocation(t *testing.T, cmd *cobra.Command, args []strin
 				hooks.finished()
 			}
 			close(invocation.backgroundDone)
-		}, decisions...)
+		})
 	}()
 	return invocation
 }
@@ -114,10 +115,9 @@ func (i *lifecycleTestInvocation) Join() {
 
 func lifecycleTestOutcome(t *testing.T, cmd *cobra.Command, args []string,
 	barrier handlers.CommitBarrier, budget timeouts.Profile, deadline lifecycleDeadline,
-	decisions ...backend.Decision,
 ) hostexit.Outcome {
 	t.Helper()
-	i := startLifecycleTestInvocation(t, cmd, args, barrier, budget, deadline, nil, lifecycleTestHooks{}, decisions...)
+	i := startLifecycleTestInvocation(t, cmd, args, barrier, budget, deadline, nil, lifecycleTestHooks{})
 	defer i.Join()
 	select {
 	case outcome := <-i.outcomes:
@@ -187,11 +187,13 @@ func TestLifecycleTestInvocationJoinsHeldWorkerBeforeHelperReturn(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			database := filepath.Join(t.TempDir(), "pasture.db")
 			initializeLifecycleTestDatabase(t, database)
-			cmd := lifecycleTestCommand(t, "claude-code", "PreToolUse", "2.1.261", database)
 			raw := claudeFixture(t, "pre_tool_use_2_1_261.json")
+			// The post-commit cell needs a COMMITTED refusal to survive the
+			// expiry, and the gate reads that refusal from the store: a bound
+			// session whose registered actor owns no assignment.
+			seedBoundActorWithoutAssignment(t, database, ir.HarnessClaudeCode, raw)
+			cmd := lifecycleTestCommand(t, "claude-code", "PreToolUse", "2.1.261", database)
 			cmd.SetIn(bytes.NewReader(raw))
-			decision, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonNoActiveAssignment)
-			require.NoError(t, err)
 
 			var observed atomic.Bool
 			tailReached := make(chan bool, 1)
@@ -236,19 +238,20 @@ func TestLifecycleTestInvocationJoinsHeldWorkerBeforeHelperReturn(t *testing.T) 
 			}()
 
 			var outcome hostexit.Outcome
+			var invocationErr error
 			func() {
 				defer close(helperReturned)
 				if postCommit {
-					outcome, err = abandonAfterTheCommitWithHooks(t, cmd, hooks, decision)
+					outcome, invocationErr = abandonAfterTheCommitWithHooks(t, cmd, hooks)
 				} else {
-					outcome, err = expireBeforeCommitWithHooks(t, cmd, raw, hooks, decision)
+					outcome, invocationErr = expireBeforeCommitWithHooks(t, cmd, raw, hooks)
 				}
 			}()
 			require.NoError(t, <-controller)
-			require.NoError(t, err)
+			require.NoError(t, invocationErr)
 			if postCommit {
 				require.Equal(t, hostexit.ExitBlock, outcome.Exit)
-				require.Equal(t, decision.Reason().Message(), outcome.Stderr)
+				require.Equal(t, backend.ReasonNoActiveAssignment.Message(), outcome.Stderr)
 			} else {
 				require.Equal(t, hostexit.ExitContinue, outcome.Exit)
 				require.Contains(t, outcome.Stderr, "hook-invocation deadline")

@@ -270,28 +270,11 @@ type SessionClaim struct {
 }
 
 // ActorAuthority is every started episode one actor holds at the snapshot
-// instant. Truncated is true when the actor holds more episodes than
-// MaxEpisodes, so a decision taken on a partial list says so.
+// instant.
 type ActorAuthority struct {
-	Actor     provenance.ActorID
-	Episodes  []Episode
-	Truncated bool
+	Actor    provenance.ActorID
+	Episodes []Episode
 }
-
-// MaxEpisodes caps the episodes one gate reads for one actor. It bounds the
-// per-gate cost: the governance predicate and the phase read both run once per
-// episode.
-const MaxEpisodes = 64
-
-// CatchUpPageSize is the number of assignment-start facts one gate reads above
-// the index watermark before it decides.
-//
-// It is pasture's own constant, NOT the journal module's fact-page bound. That
-// bound governs the journal's decision and evidence page API; the task-event
-// query this catch-up uses accepts any positive page size and rejects only a
-// negative one. So the number here is chosen by what a gate can afford inside
-// its own budget, and it moves when that budget moves.
-const CatchUpPageSize = 64
 
 // ─── Reader and Snapshot ─────────────────────────────────────────────────────
 
@@ -300,42 +283,9 @@ type Reader interface {
 	Snapshot(ctx context.Context) (Snapshot, error)
 }
 
-// Snapshot is one consistent view. Complete reports whether the started-episode
-// index covered the whole journal at the snapshot instant; see RequireComplete
-// for what a caller must do when it does not.
+// Snapshot is one consistent view of the gate facts.
 type Snapshot interface {
-	Complete() bool
 	ResolveSession(harness ir.HarnessID, session string) (SessionClaim, error)
 	Authority(actor provenance.ActorID) (ActorAuthority, error)
 	Close() error
-}
-
-// IncompleteIndexError says a snapshot was asked for an authority while its
-// started-episode index did not cover the whole journal.
-type IncompleteIndexError struct{}
-
-func (IncompleteIndexError) Error() string {
-	return "The gate could not decide, because its record of who holds which task was not up to date.\n" +
-		"Why: the gate reads a table of started assignments that trails the task history, and at this\n" +
-		"instant the table had not caught up, so an answer built on it could have missed an assignment\n" +
-		"that exists.\n" +
-		"Where: taking the gate snapshot (internal/lifecycle/gateauthority in gateauthority.RequireComplete).\n" +
-		"When: after the bounded catch-up read and before any authority was returned.\n" +
-		"Impact: this one action is not judged. Nothing is denied on an incomplete record, and the\n" +
-		"session continues.\n" +
-		"Fix: run \"pasture gate rebuild-index\" once to bring the table level with the task history; a\n" +
-		"gate that meets this repeatedly is reading a table that no rebuild has covered."
-}
-
-// RequireComplete refuses a snapshot whose index is not complete. It is the ONE
-// place that turns the typed completeness fact into a refusal, so no caller can
-// build an authority on a partial index by forgetting to look.
-//
-// A nil snapshot is refused for the same reason: a caller that lost its
-// snapshot must not be told the index is fine.
-func RequireComplete(snapshot Snapshot) error {
-	if snapshot == nil || !snapshot.Complete() {
-		return IncompleteIndexError{}
-	}
-	return nil
 }

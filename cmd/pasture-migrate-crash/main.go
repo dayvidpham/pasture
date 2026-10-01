@@ -48,8 +48,8 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
-	"github.com/dayvidpham/pasture/internal/timeouts"
 	_ "modernc.org/sqlite" // pure-Go driver; CGO_ENABLED=0 compatible
 )
 
@@ -151,11 +151,22 @@ func main() {
 func runCrashMigration(dbPath string) (int, error) {
 	ctx := context.Background()
 
-	// Open with _txlock=immediate so BeginTx issues "BEGIN IMMEDIATE"
-	// (modernc.org/sqlite/sqlite.go:187-193 + tx.go:22-25). The
-	// connection-string syntax matches NewSqliteAuditTrail in
-	// internal/audit/sqlite.go.
-	db, err := sql.Open("sqlite", dbPath+"?_txlock=immediate")
+	// Open through dbconn. It escapes any URI delimiter in dbPath so the
+	// handle names exactly the file the caller named, and its DSN already
+	// encodes the production contract: journal_mode(WAL), the profile's
+	// busy_timeout, synchronous(NORMAL), foreign_keys(ON) and
+	// _txlock=immediate (so BeginTx issues "BEGIN IMMEDIATE";
+	// modernc.org/sqlite/sqlite.go:187-193 + tx.go:22-25). The same DSN is
+	// what NewSqliteAuditTrail in internal/audit/sqlite.go opens with.
+	//
+	// Routing through the shared DSN retired this binary's own PRAGMA loop and,
+	// with it, the structured "Couldn't apply SQLite setting ..." diagnostic
+	// that loop raised on a PRAGMA failure. The DSN pragmas fail at first use
+	// instead (some later query reports the driver error), which is acceptable
+	// for this TEST-ONLY binary because its fixture is a local file in a
+	// t.TempDir() on a filesystem that supports WAL. It is noted here rather
+	// than restored so the loss is deliberate, not silent.
+	db, err := dbconn.OpenSharedDB(dbPath)
 	if err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -169,29 +180,6 @@ func runCrashMigration(dbPath string) (int, error) {
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
-
-	// Apply the same pragmas NewSqliteAuditTrail applies so the file is in
-	// WAL mode with the same busy_timeout production uses. The value is read
-	// from the production timeout profile, never written as a literal here:
-	// a literal is how this helper silently stopped matching production when
-	// the retry window moved from 5 s to the profile value. This is what
-	// makes the concurrent-migrator race in Scenario 12 work; for Scenario 11
-	// it is harmless but kept for behavioural parity with production.
-	busyPragma := fmt.Sprintf(`PRAGMA busy_timeout=%d`, timeouts.ProductionProfile().SQLiteBusy().Milliseconds())
-	for _, p := range []string{`PRAGMA journal_mode=WAL`, busyPragma} {
-		if _, err := db.Exec(p); err != nil {
-			return 0, &pasterrors.StructuredError{
-				Category: pasterrors.CategoryStorage,
-				What:     fmt.Sprintf("Couldn't apply SQLite setting %q to %q.", p, dbPath),
-				Why:      fmt.Sprintf("SQLite reported: %s", err),
-				Impact:   "The crash test can't run with the same SQLite settings the daemon uses, so its result wouldn't be representative.",
-				Fix: "1. Confirm the file is writable by the current user.\n" +
-					"2. Confirm the file lives on a filesystem that supports SQLite's\n" +
-					"   write-ahead log (most local filesystems do; some networked\n" +
-					"   filesystems don't).",
-			}
-		}
-	}
 
 	// Run v1→v2 first (if needed) using the production Migrate path. This
 	// matches the legacy_audit_v1.db starting point: the migrator runs

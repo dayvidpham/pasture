@@ -60,9 +60,12 @@ func TestMigrateV7ToV8StampsEveryPreExistingBlobWithTheMigrationInstant(t *testi
 		t.Fatal(err)
 	}
 	after := time.Now().UTC().UnixNano()
+	// The chain runs to the current ceiling, so a version-7 store lands above
+	// 8 once later steps exist. What this test owns is that the v7→v8 step
+	// ran and recorded 8; every later step is another test's subject.
 	version, _ := readVersion(db)
-	if version != 8 {
-		t.Fatalf("version=%d want=8", version)
+	if version < 8 {
+		t.Fatalf("version=%d want at least 8", version)
 	}
 	var appliedAt int64
 	if err := db.QueryRow(`SELECT applied_at FROM audit_schema_meta WHERE version=8`).Scan(&appliedAt); err != nil {
@@ -107,18 +110,25 @@ func TestMigrateV7ToV8StampsEveryPreExistingBlobWithTheMigrationInstant(t *testi
 }
 
 // TestMigrateV7ToV8IsIdempotentOnAVersion8Database: a second Migrate on the
-// upgraded store changes nothing and adds no column.
+// upgraded store changes nothing and adds no column. The recorded version is
+// compared across the two calls rather than pinned to a literal, because the
+// chain's ceiling moves as later steps land and the property under test is
+// that the second call is a no-op.
 func TestMigrateV7ToV8IsIdempotentOnAVersion8Database(t *testing.T) {
 	db := openV7WithOneReferencedAndOneOrphanBlob(t)
 	if err := Migrate(db); err != nil {
 		t.Fatal(err)
 	}
+	first, _ := readVersion(db)
+	if first < 8 {
+		t.Fatalf("version=%d want at least 8", first)
+	}
 	if err := Migrate(db); err != nil {
 		t.Fatalf("second migrate: %v", err)
 	}
 	version, _ := readVersion(db)
-	if version != 8 {
-		t.Fatalf("version=%d want=8", version)
+	if version != first {
+		t.Fatalf("version moved from %d to %d on a second migrate; an up-to-date store must not change", first, version)
 	}
 	var columns int
 	rows, err := db.Query(`PRAGMA table_info(lifecycle_payload_blobs)`)

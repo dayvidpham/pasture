@@ -13,7 +13,7 @@ import (
 func TestNonemptyReviewRejectsRevokedActionWithActiveSibling(t *testing.T) {
 	t.Parallel()
 	store, service, input, action := newReviewAuthorityFixture(t)
-	seedRecoveryAssignmentWithParent(t, store, action.task, "alternate-axis", RoleAxisReviewer,
+	seedAssignmentStartWithParent(t, store, action.task, "alternate-axis", RoleAxisReviewer,
 		action.occupant, "alternate-axis-start", "review-plan")
 	alternate, err := service.resolveAssignment(t.Context(), action.task, "alternate-axis", RoleAxisReviewer)
 	require.NoError(t, err)
@@ -185,7 +185,7 @@ func TestReviewActionConditionBindsExactPublicStart(t *testing.T) {
 
 	otherActor := feasibilityActor(t, store, "other-reviewer")
 	alternateAssignment := provenance.AssignmentID("alternate-axis")
-	seedRecoveryAssignmentWithParent(t, store, action.task, alternateAssignment, RoleAxisReviewer,
+	seedAssignmentStartWithParent(t, store, action.task, alternateAssignment, RoleAxisReviewer,
 		action.occupant, "alternate-axis-start", parent.id)
 	for _, test := range []struct {
 		name  string

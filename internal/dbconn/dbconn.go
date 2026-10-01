@@ -1,20 +1,71 @@
 // Package dbconn centralizes how every pasture component opens a modernc
-// SQLite handle on the shared pasture.db file. Putting the connection-string
-// contract in one leaf package (no pasture deps beyond errors) lets the audit
-// trail, the task tracker, and the durable engine all open the file with the
-// identical WAL/concurrency configuration without an import cycle.
+// SQLite handle on the shared pasture.db file, and is the only place the
+// database-open path splices a file path into a file: URI. (It is not the only
+// file: URI in the tree: internal/acceptance/snapshot.go builds one too, but it
+// does so through url.URL, which applies the same escaping itself.) Putting the
+// connection-string contract in one leaf package (no pasture deps beyond
+// errors) lets the audit trail, the task tracker, and the durable engine open
+// the file with the identical WAL/concurrency configuration without an import
+// cycle, while the read-only and default-mode callers get the same URI escaping.
 package dbconn
 
 import (
 	"database/sql"
 	"fmt"
 	"strconv"
+	"strings"
 
 	_ "modernc.org/sqlite" // pure-Go driver; CGO_ENABLED=0 compatible
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 )
+
+// dsnPathEscaper percent-encodes the three bytes that would otherwise change
+// the MEANING of the file: URI instead of naming the file the caller asked for.
+//
+// The database path is spliced verbatim into the URI, and in a URI a "#" starts
+// the fragment and a "?" starts the query. A path carrying either byte is
+// silently truncated at that byte: the caller's remaining directories and the
+// filename are lost into the fragment, and every DSN parameter after the "?"
+// stops being a parameter. The handle then reads and writes a DIFFERENT file
+// than the one named, with no error — a second process or a later run that asks
+// for the same real path lands on the same truncated file and its records
+// accumulate there. A literal "%" is encoded as well: the driver percent-
+// decodes the path, so a filename that already spells an escape (for example
+// "%3F") would otherwise be turned back into the delimiter it names. The order
+// of the pairs below does not matter — strings.NewReplacer makes a single
+// left-to-right pass and never re-scans its own output, so no replacement is
+// encoded twice.
+//
+// "#" and "?" are legal in a POSIX filename, so this is reachable from an
+// ordinary --db or PASTURE_DB_PATH, not only from a test.
+var dsnPathEscaper = strings.NewReplacer("%", "%25", "#", "%23", "?", "%3F")
+
+// normalizeDSNPath collapses a leading run of slashes on an absolute path to a
+// single slash. On Linux a path beginning with "//" names the same file as the
+// one-slash form, but a URI built as "file:" + "//tmp/x" parses "tmp" as the
+// URI AUTHORITY, which modernc rejects with "invalid uri authority". Collapsing
+// the LEADING run only — interior and trailing slashes are untouched, so a
+// trailing "/" still names the directory the caller wrote — makes the file:
+// URI name the exact file the caller asked for. A path that is exactly "//" (or
+// any longer all-slash run) becomes "/", the filesystem root it names.
+//
+// Normalisation runs BEFORE percent-encoding (encodeDSNPath calls this first),
+// so a literal "%" in the path is still escaped exactly once.
+func normalizeDSNPath(path string) string {
+	if !strings.HasPrefix(path, "//") {
+		return path
+	}
+	return "/" + strings.TrimLeft(path, "/")
+}
+
+// encodeDSNPath returns path with a leading run of slashes normalised to one
+// slash and the URI delimiters escaped, so the resulting file: URI names
+// exactly the file at path.
+func encodeDSNPath(path string) string {
+	return dsnPathEscaper.Replace(normalizeDSNPath(path))
+}
 
 // SharedDSN builds the connection string used for every modernc handle on the
 // unified pasture.db file. It encodes the concurrency contract as DSN params
@@ -40,7 +91,7 @@ func SharedDSNWithProfile(path string, profile timeouts.Profile) string {
 		panic(fmt.Sprintf("dbconn: invalid timeout profile: %v", err))
 	}
 	busyMillis := profile.SQLiteBusy().Milliseconds()
-	return "file:" + path +
+	return "file:" + encodeDSNPath(path) +
 		"?_pragma=journal_mode(WAL)" +
 		"&_pragma=busy_timeout(" + strconv.FormatInt(busyMillis, 10) + ")" +
 		"&_pragma=synchronous(NORMAL)" +
@@ -66,7 +117,7 @@ func ReadOnlyDSNWithProfile(path string, profile timeouts.Profile) string {
 	if err := profile.Validate(); err != nil {
 		panic(fmt.Sprintf("dbconn: invalid timeout profile: %v", err))
 	}
-	return "file:" + path +
+	return "file:" + encodeDSNPath(path) +
 		"?mode=ro" +
 		"&_pragma=busy_timeout(" + strconv.FormatInt(profile.SQLiteBusy().Milliseconds(), 10) + ")"
 }
@@ -101,6 +152,23 @@ func OpenSharedDBWithProfile(path string, profile timeouts.Profile) (*sql.DB, er
 		}
 	}
 	return db, nil
+}
+
+// OpenDefaultDB opens a modernc *sql.DB at path with SQLite's default
+// create/journal behaviour — no mode parameter and none of the shared
+// WAL/timeout pragmas — after normalising a leading run of slashes and escaping
+// path's URI delimiters.
+//
+// It is for the version probes and the dry-run preview in internal/handlers,
+// and for the v3 backfill test in internal/audit.
+// Those may run against a database that does not exist yet (the first open
+// creates it, so a read-only handle would refuse a path that is merely new),
+// and a dry run must leave an existing database byte-identical, which the
+// shared profile's journal_mode(WAL) pragma would rewrite. Callers that want
+// the production configuration should use OpenSharedDB; callers that know the
+// file already exists and must not write it should use OpenReadOnlyDB.
+func OpenDefaultDB(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", "file:"+encodeDSNPath(path))
 }
 
 // OpenReadOnlyDB opens a modernc *sql.DB on path in read-only mode (mode=ro).

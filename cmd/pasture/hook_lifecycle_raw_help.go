@@ -29,4 +29,10 @@ activation posture, same L1→L2 derivation tail), but no database is opened and
 no receipt is written. The preview names the origin, wire schema identity,
 harness/event co-ordinates, effects, and the canonical host continuation.
 Because dry-run performs no I/O, a later real ingestion can still fail while
-opening or writing the store.`
+opening or writing the store.
+
+The dry-run preview does not evaluate the gate. A gate's verdict is read from
+the store — the session claim and the actor's active assignments — and a
+preview opens no store, so it shows the unevaluated default. A real ingestion
+of the same payload consults the gate and records the reason it decided, so a
+preview's consultation reason is not a prediction of the committed one.`

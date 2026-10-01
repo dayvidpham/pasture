@@ -450,9 +450,9 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 		children = append(children, provenance.GovernedChildSpec{TaskID: ids[task.Handle], AssignmentID: childAssignment, Occupant: resolution.occupant, Title: title, Description: title, Type: provenance.TaskTypeTask, Priority: provenance.PriorityMedium, Phase: provenance.PhaseReview})
 		declared = append(declared, declaredEpisode{Task: ids[task.Handle], Assignment: childAssignment, Occupant: resolution.occupant, Role: role})
 	}
-	// The same declarations feed the durable facts and the post-commit index.
-	// If the index write fails, the composed transaction still records every
-	// child assignment for a bounded catch-up reader.
+	// The same declarations feed the durable facts and the batch's own child
+	// bindings, so the closure this commit returns is the whole population of
+	// started episodes; there is no second population to reconcile afterwards.
 	for _, episode := range declared {
 		started, err := MapMaterialEvent(AssignmentStartedEvent{Task: episode.Task, Assignment: episode.Assignment, Role: episode.Role, Occupant: episode.Occupant})
 		if err != nil {
@@ -487,12 +487,10 @@ func (s *epochAssignmentService) allocateReviewBatch(ctx context.Context, in Sta
 			return CommandResult{}, assignmentErr("allocateReviewBatch", fmt.Sprintf("the composed result child %d did not match the requested review binding", i), "StartReview preserves exact child order and identity", "repair the composed batch receipt before retrying")
 		}
 	}
-	// Every child of this batch is a started episode, so every child is
-	// recorded. The slot comes from the definition of the batch, not from here.
-	if err := s.indexComposedBatch(ctx, result, declared); err != nil {
-		return CommandResult{}, err
-	}
-
+	// Every child of this batch is a started episode, and every one of them
+	// carries its start fact in the same composed transaction, so the closure
+	// above is the whole population. The slot comes from the definition of the
+	// batch, not from here.
 	return CommandResult{OperationID: in.Meta.OperationID, Replayed: result.Replayed(), Epoch: in.Epoch, ActivityID: activityID, EventIDs: result.SupplementalEmittedEvents()}, nil
 }
 
@@ -636,7 +634,7 @@ func (s *epochAssignmentService) SubmitReview(ctx context.Context, in SubmitRevi
 // mutate both the axis and its sibling finding groups. This is not cross-actor
 // delegation: the action occupant must also occupy the recorded review parent.
 // The command's action payload stays axis-bound; only its actual operation
-// authority/task record changes. No mutable recovery index is read here.
+// authority/task record changes. No mutable Pasture-side state is read here.
 // The returned condition binds that exact action start inside the submission's
 // Apply transaction; parent reachability alone cannot authorize a revoked axis.
 func (s *epochAssignmentService) reviewParentForFindingSubmission(
@@ -689,7 +687,7 @@ func (s *epochAssignmentService) reviewParentForFindingSubmission(
 	if len(commandPage.Rows) != 1 || commandPage.Next != nil {
 		return assignmentResolution{}, provenance.Condition{}, refuse("the review has no unique bounded command-parent evidence")
 	}
-	command, err := decodeRecoveryCommand(commandPage.Rows[0])
+	command, err := decodeCommandEvidence(commandPage.Rows[0])
 	if err != nil {
 		return assignmentResolution{}, provenance.Condition{}, err
 	}
@@ -743,7 +741,7 @@ func (s *epochAssignmentService) reviewParentForFindingSubmission(
 		ids = append(ids, assignment)
 	}
 	// Native axis starts expose the allocation anchor. A later same-parent axis
-	// assignment uses a bounded historical search instead, never index authority.
+	// assignment uses a bounded historical search instead, never a guessed one.
 	after := command.Authority
 	if axisStart.ProducingOperationID == operation {
 		after = axisStart.ProducingOperationJournalID

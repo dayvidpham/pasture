@@ -489,7 +489,7 @@ func TestLifecycleFaultRecordIsBestEffort(t *testing.T) {
 // are. If this test becomes too slow, the answer is to run it less often, not
 // to measure something else.
 //
-// The child is race-instrumented, as is the rebuild-index operator proof family.
+// The child is race-instrumented, as is the read-side production proof family.
 // Ordinary unrelated built-binary proofs retain the plain shared child. Here
 // the thing under proof is a live process contending
 // with a second opener for the real write lock while its deadline runs, and
@@ -597,40 +597,40 @@ func TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked(t *testin
 }
 
 // TestRaceChildrenServeOnlyDeclaredProofFamilies pins the deliberate choice of
-// race-instrumented children for the held-lock and rebuild-index proof families.
+// a race-instrumented child for the held-lock proof family.
 //
 // The arrangement has three parts, and a drift in any one of them would leave
 // the package green while the proofs quietly changed what they measure:
 //
-//   - The held-lock deadline proof and newRebuildCLI helper run the race child,
-//     never the plain child. Their functional assertions alone do not prove
-//     that a detector ran in the child process.
+//   - The held-lock deadline proof runs the race child, never the plain child.
+//     Its functional assertions alone do not prove that a detector ran in the
+//     child process.
 //   - raceLifecycleBinary is built with -race and lifecycleBinary is not. This
 //     is read from the BUILD SETTINGS recorded in each binary, not from the
 //     helper's source: a build whose flags drifted would carry different
 //     settings whatever its source said.
-//   - Only these two callers and this build-settings guard use the race child.
-//     Its extra cost is accepted for both proof families, not silently imposed
-//     on unrelated CLI tests. A new caller requires a deliberate inventory change.
+//   - Only this caller and this build-settings guard use the race child. Its
+//     extra cost is accepted for the proof family that needs it, not silently
+//     imposed on unrelated CLI tests. A new caller requires a deliberate
+//     inventory change.
 //
 // WHAT IT VISITS: every function declared in this package's test files,
 // for the two identifiers it asks about; and the build settings of the two
 // shared children.
 // WHAT IT DOES NOT READ: whether either child is up to date with the source,
-// or whether either proof family's functional assertions hold; those tests do
-// that. MUTATION: switch newRebuildCLI to lifecycleBinary; this guard must fail.
+// or whether the proof family's functional assertions hold; those tests do
+// that. MUTATION: point the held-lock proof at lifecycleBinary; this guard
+// must fail.
 func TestRaceChildrenServeOnlyDeclaredProofFamilies(t *testing.T) {
 	t.Parallel()
 
 	const heldLockProof = "TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked"
-	const rebuildHelper = "newRebuildCLI"
 	const thisPin = "TestRaceChildrenServeOnlyDeclaredProofFamilies"
 
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err, "the package directory must be readable to find the tests it declares")
 	callers := map[string][]string{}
 	heldLockFound := false
-	rebuildFound := false
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
 			continue
@@ -658,15 +658,11 @@ func TestRaceChildrenServeOnlyDeclaredProofFamilies(t *testing.T) {
 			if function.Name.Name == heldLockProof {
 				heldLockFound = true
 			}
-			if function.Name.Name == rebuildHelper {
-				rebuildFound = true
-			}
 		}
 	}
 	require.True(t, heldLockFound,
 		"the held-lock proof %s is not declared in this package; if it was renamed, rename it here too, "+
 			"or this pin holds nothing", heldLockProof)
-	require.True(t, rebuildFound, "the rebuild-index helper %s must exist; otherwise this pin holds nothing", rebuildHelper)
 	require.NotEmpty(t, callers["lifecycleBinary"],
 		"no test calls lifecycleBinary; the built-binary proofs must run the plain shared child, and an "+
 			"empty population here means the walk found nothing and every assertion below is vacuous")
@@ -676,21 +672,17 @@ func TestRaceChildrenServeOnlyDeclaredProofFamilies(t *testing.T) {
 			"detector riding in the live process, and on the plain child that sentence is false")
 	assert.NotContains(t, callers["lifecycleBinary"], heldLockProof,
 		"the held-lock deadline proof must not also run the plain child")
-	assert.Contains(t, callers["raceLifecycleBinary"], rebuildHelper,
-		"the rebuild-index helper must keep its race-instrumented child")
-	assert.NotContains(t, callers["lifecycleBinary"], rebuildHelper,
-		"the rebuild-index helper must not also run the plain child")
 
 	sort.Strings(callers["raceLifecycleBinary"])
-	wantCallers := []string{heldLockProof, rebuildHelper, thisPin}
+	wantCallers := []string{heldLockProof, thisPin}
 	sort.Strings(wantCallers)
 	assert.Equal(t, wantCallers, callers["raceLifecycleBinary"],
-		"only the held-lock proof, rebuild-index helper and this build-settings guard may request the race child")
+		"only the held-lock proof and this build-settings guard may request the race child")
 
 	raceSettings := buildSettingsOf(t, raceLifecycleBinary(t))
 	plainSettings := buildSettingsOf(t, lifecycleBinary(t))
 	assert.Equal(t, "true", raceSettings["-race"],
-		"the race child must record -race=true so both declared proof families run a detector")
+		"the race child must record -race=true so the declared proof family runs a detector")
 	assert.NotEqual(t, "true", plainSettings["-race"],
 		"the ordinary plain child must not acquire the extra cost of race instrumentation")
 }
@@ -1220,19 +1212,19 @@ const preCommitStallCeiling = 30 * time.Second
 // and the proof failed with "finished without reaching the commit boundary".
 // That failure is what this shape makes impossible. The tier is the production
 // one, and it is printed and never started.
-func abandonAfterTheCommit(t *testing.T, cmd *cobra.Command, decisions ...backend.Decision) hostexit.Outcome {
+func abandonAfterTheCommit(t *testing.T, cmd *cobra.Command) hostexit.Outcome {
 	t.Helper()
-	outcome, err := abandonAfterTheCommitWithHooks(t, cmd, lifecycleTestHooks{}, decisions...)
+	outcome, err := abandonAfterTheCommitWithHooks(t, cmd, lifecycleTestHooks{})
 	require.NoError(t, err)
 	return outcome
 }
 
-func abandonAfterTheCommitWithHooks(t *testing.T, cmd *cobra.Command, hooks lifecycleTestHooks, decisions ...backend.Decision) (hostexit.Outcome, error) {
+func abandonAfterTheCommitWithHooks(t *testing.T, cmd *cobra.Command, hooks lifecycleTestHooks) (hostexit.Outcome, error) {
 	t.Helper()
 	barrier := &blockingBarrier{reached: make(chan struct{}), release: make(chan struct{})}
 	deadline := newTrippedDeadline(t)
 	release := sync.OnceFunc(func() { close(barrier.release) })
-	i := startLifecycleTestInvocation(t, cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive, release, hooks, decisions...)
+	i := startLifecycleTestInvocation(t, cmd, nil, barrier, timeouts.ProductionProfile(), deadline.derive, release, hooks)
 	defer i.Join()
 	if err := waitLifecycleHold(barrier.reached, i, hooks, "post-commit"); err != nil {
 		return hostexit.Outcome{}, err
@@ -1254,26 +1246,72 @@ func abandonAfterTheCommitWithHooks(t *testing.T, cmd *cobra.Command, hooks life
 	}
 }
 
+// seedBoundActorWithoutAssignment writes the session claim the lifecycle gate
+// reads, so a subject in this file can reach a REAL denial without supplying a
+// verdict anywhere. The actor is REGISTERED and owns no task, which is the state
+// a real deployment is in before a slice is assigned, and the policy answers it
+// as Deny(NoActiveAssignment) — which on the evidenced Claude PreToolUse row is a
+// refusal the host can act on.
+//
+// IT WRITES THROUGH THE SAME FUNCTION A SESSION-START EVENT CALLS, because that
+// function is the only writer of the claim table and a fixture that wrote the row
+// by any other means would be proving a store shape the product never produces.
+// The claim is written for the SESSION THE CAPTURE CARRIES, read out of the
+// capture, so the gate looks up the session that was actually claimed.
+//
+// ONE IMPLEMENTATION: seedReaderClaim performs the write, so there is no second
+// copy of the claim-writing sequence to drift from it.
+func seedBoundActorWithoutAssignment(t *testing.T, dbPath string, harness ir.HarnessID, raw []byte) {
+	t.Helper()
+	seedReaderClaim(t, dbPath, harness, captureSessionIDOf(t, raw, harness))
+}
+
+// captureSessionIDOf reads the session identity out of a committed capture. The
+// member path is per harness because the three host contracts spell the field
+// differently, and a fixture that hard-coded one spelling would silently claim the
+// wrong session on the other two.
+func captureSessionIDOf(t *testing.T, raw []byte, harness ir.HarnessID) string {
+	t.Helper()
+	var payload any
+	require.NoError(t, json.Unmarshal(raw, &payload))
+	member := "session_id"
+	switch harness {
+	case ir.HarnessOpenCode:
+		member = "input.sessionID"
+	}
+	for _, part := range strings.Split(member, ".") {
+		object, isObject := payload.(map[string]any)
+		require.True(t, isObject, "the %s capture must carry %q", harness, member)
+		payload = object[part]
+	}
+	session, isString := payload.(string)
+	require.True(t, isString, "the %s capture must carry %q as a string", harness, member)
+	require.NotEmpty(t, session)
+	return session
+}
+
 // Once the real receipt has committed, expiry cannot replace its Deny. This
 // is the command/host half of the proof; receipt's real-journal test holds the
 // earlier COMMIT-to-Apply-return gap before publication is possible.
 func TestCommittedDenySurvivesExpiryAfterTheDurableCommit(t *testing.T) {
-	// Serial: lifecycleTestCommand sets shared command state. This supplies a
-	// validated decision input, not a fake Reader or proof of authority policy.
+	// Serial: lifecycleTestCommand sets shared command state. The denial is now
+	// READ FROM THE STORE by a bound session that owns no assignment; no verdict
+	// is supplied to the command.
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
+	raw := claudeFixture(t, "pre_tool_use_2_1_261.json")
+	seedBoundActorWithoutAssignment(t, dbPath, ir.HarnessClaudeCode, raw)
 
 	cmd := lifecycleTestCommand(t, "claude-code", "PreToolUse", "2.1.261", dbPath)
-	cmd.SetIn(bytes.NewReader(claudeFixture(t, "pre_tool_use_2_1_261.json")))
-	decision, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonNoActiveAssignment)
-	require.NoError(t, err)
+	cmd.SetIn(bytes.NewReader(raw))
 
-	outcome := abandonAfterTheCommit(t, cmd, decision)
+	outcome := abandonAfterTheCommit(t, cmd)
 
 	require.Equal(t, hostexit.ExitBlock, outcome.Exit, "expiry must not replace a committed Deny with Continue")
 	require.Empty(t, outcome.Stdout)
-	require.Equal(t, decision.Reason().Message(), outcome.Stderr)
+	require.Equal(t, backend.ReasonNoActiveAssignment.Message(), outcome.Stderr,
+		"the refusal the host reads is the one the policy decided from the store")
 	_, statErr := os.Stat(filepath.Join(dir, lifecycleFaultRecordFile))
 	require.ErrorIs(t, statErr, os.ErrNotExist, "a committed decision is not an evaluation fault")
 
@@ -1313,20 +1351,20 @@ func (r *preCommitReader) Read(buffer []byte) (int, error) {
 	return r.Reader.Read(buffer)
 }
 
-func expireBeforeCommit(t *testing.T, cmd *cobra.Command, raw []byte, decisions ...backend.Decision) hostexit.Outcome {
+func expireBeforeCommit(t *testing.T, cmd *cobra.Command, raw []byte) hostexit.Outcome {
 	t.Helper()
-	outcome, err := expireBeforeCommitWithHooks(t, cmd, raw, lifecycleTestHooks{}, decisions...)
+	outcome, err := expireBeforeCommitWithHooks(t, cmd, raw, lifecycleTestHooks{})
 	require.NoError(t, err)
 	return outcome
 }
 
-func expireBeforeCommitWithHooks(t *testing.T, cmd *cobra.Command, raw []byte, hooks lifecycleTestHooks, decisions ...backend.Decision) (hostexit.Outcome, error) {
+func expireBeforeCommitWithHooks(t *testing.T, cmd *cobra.Command, raw []byte, hooks lifecycleTestHooks) (hostexit.Outcome, error) {
 	t.Helper()
 	input := &preCommitReader{Reader: bytes.NewReader(raw), reached: make(chan struct{}), release: make(chan struct{})}
 	cmd.SetIn(input)
 	deadline := newTrippedDeadline(t)
 	release := sync.OnceFunc(func() { close(input.release) })
-	i := startLifecycleTestInvocation(t, cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), deadline.derive, release, hooks, decisions...)
+	i := startLifecycleTestInvocation(t, cmd, nil, handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), deadline.derive, release, hooks)
 	defer i.Join()
 	if err := waitLifecycleHold(input.reached, i, hooks, "pre-commit input"); err != nil {
 		return hostexit.Outcome{}, err
@@ -1348,21 +1386,29 @@ func expireBeforeCommitWithHooks(t *testing.T, cmd *cobra.Command, raw []byte, h
 	}
 }
 
-func TestExpiryBeforeCommitDoesNotEmitTheSuppliedDeny(t *testing.T) {
-	// Serial: shared command state; no Reader or authority policy is injected.
+// TestExpiryBeforeCommitDoesNotEmitTheEvaluatedDeny drives the SAME evaluated
+// denial as its post-commit sibling and expires the invocation BEFORE the commit
+// is entered, so the host must not be handed a decision the store never
+// committed. The subject is the fail-open default: the action continues, one
+// diagnostic names the deadline, and no consultation exists.
+func TestExpiryBeforeCommitDoesNotEmitTheEvaluatedDeny(t *testing.T) {
+	// Serial: shared command state. The denial is READ FROM THE STORE by a bound
+	// session that owns no assignment; no verdict is supplied to the command.
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
+	raw := claudeFixture(t, "pre_tool_use_2_1_261.json")
+	seedBoundActorWithoutAssignment(t, dbPath, ir.HarnessClaudeCode, raw)
 	cmd := lifecycleTestCommand(t, "claude-code", "PreToolUse", "2.1.261", dbPath)
-	decision, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonNoActiveAssignment)
-	require.NoError(t, err)
 
-	outcome := expireBeforeCommit(t, cmd, claudeFixture(t, "pre_tool_use_2_1_261.json"), decision)
+	outcome := expireBeforeCommit(t, cmd, raw)
 
 	require.Equal(t, hostexit.ExitContinue, outcome.Exit)
 	require.Empty(t, outcome.Stdout)
 	require.Contains(t, outcome.Stderr, "hook-invocation deadline")
-	require.NotContains(t, outcome.Stderr, decision.Reason().Message())
+	require.NotContains(t, outcome.Stderr, backend.ReasonNoActiveAssignment.Message(),
+		"an expiry before the commit must not emit the decision the gate would have reached: the host would be "+
+			"acting on evidence that was never written")
 	records := readFaultRecords(t, dir)
 	require.Len(t, records, 1)
 	require.Equal(t, "fault", records[0]["outcomeClass"])
@@ -1475,14 +1521,17 @@ func TestTheProductionPathWiresThePassThroughBarrierAndTheProductionTier(t *test
 			delegation, ok := returned.Results[0].(*ast.CallExpr)
 			require.True(t, ok)
 			require.Equal(t, "lifecycleOutcomeWithCompletion", sourceOf(delegation.Fun))
-			require.Len(t, delegation.Args, 7)
+			require.Len(t, delegation.Args, 6)
 			got := make([]string, 0, len(delegation.Args))
 			for _, argument := range delegation.Args {
 				got = append(got, sourceOf(argument))
 			}
-			assert.Equal(t, []string{"cmd", "args", "barrier", "budget", "deadline", "nil", "decisions"}, got,
-				"production forwards unchanged inputs with no completion observer or pre-fence join")
-			assert.True(t, delegation.Ellipsis.IsValid(), "all supplied decisions must be forwarded, not reinterpreted")
+			assert.Equal(t, []string{"cmd", "args", "barrier", "budget", "deadline", "nil"}, got,
+				"production forwards unchanged inputs with no completion observer or pre-fence join. There is no "+
+					"decision argument: the verdict is read from the store by the handler, so a command that could "+
+					"pass one would be a second way to decide a gate")
+			assert.False(t, delegation.Ellipsis.IsValid(),
+				"the variadic decision seam is retired, and a forwarded ellipsis is exactly its shape")
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
 			call, isCall := node.(*ast.CallExpr)
@@ -4356,11 +4405,13 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 		// ends were found by enumerating from the source, which is what the
 		// reason had claimed to do. The current routes are below.
 		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
-			"returned an error and committed nothing. Five routes pass it directly — the environment refusal and " +
+			"returned an error and committed nothing. Four routes pass it directly — the environment refusal and " +
 			"the argument refusal, neither of which opens a store, and the flag-parse refusal inside " +
-			"SetFlagErrorFunc, which runs before the command body, plus the multiple-decision input refusal " +
-			"and the host-version resolution refusal before the work goroutine starts — and it is also the default of the computed " +
-			"stage below",
+			"SetFlagErrorFunc, which runs before the command body, plus the host-version resolution refusal " +
+			"before the work goroutine starts — and it is also the default of the computed " +
+			"stage below. The multiple-decision input refusal that used to be listed here is RETIRED: the " +
+			"command no longer accepts a verdict, so there is no input that could be refused for carrying one, " +
+			"and the gate's own refusals arrive through the handler-error route below",
 		"hostexit.FaultStageRecordUnknown": "expiry returned no published host Outcome after fence settlement; " +
 			"pre-fence work or a record-only refused capture can still have written non-decision evidence, " +
 			"so the fault route does not make an unproved empty-journal claim",
@@ -4451,11 +4502,12 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	for _, count := range found {
 		total += count
 	}
-	assert.Equal(t, 5, found["hostexit.FaultStageNotRecorded"],
-		"exactly five routes refuse directly before durable work; each must preserve the no-write stage")
-	assert.Equal(t, 8, total,
-		"this command has eight fault routes: the panic recovery, the environment refusal, the argument "+
-			"refusal, the multiple-decision input refusal, the host-version resolution refusal, the deadline fault, the handler error, and the flag-parse refusal inside "+
+	assert.Equal(t, 4, found["hostexit.FaultStageNotRecorded"],
+		"exactly four routes refuse directly before durable work; each must preserve the no-write stage")
+	assert.Equal(t, 7, total,
+		"this command has seven fault routes: the panic recovery, the environment refusal, the argument "+
+			"refusal, the host-version resolution refusal, the deadline fault, the handler error (which now carries "+
+			"the gate's own read faults), and the flag-parse refusal inside "+
 			"SetFlagErrorFunc. A route added or removed without updating the judged reasons above leaves "+
 			"the prose describing a command that does not exist, which has happened once already")
 }
@@ -5874,6 +5926,7 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
 	"hook_lifecycle_raw_test.go",
+	"hook_lifecycle_reader_production_test.go",
 	"hook_lifecycle_worker_lifetime_test.go",
 	"hook_lifecycle_writers_test.go",
 }
@@ -5883,7 +5936,6 @@ var guardSweepOwned = []string{
 var guardSweepForeign = map[string]string{
 	"bundle_export_test.go":                      "not changed by this slice",
 	"epoch_test.go":                              "not changed by this slice",
-	"gate_rebuild_index_test.go":                 "operator assignment-index command and generation tests, outside the lifecycle transport sweep",
 	"hook_lifecycle_context_production_test.go":  "not changed by this slice",
 	"hook_lifecycle_gate_test.go":                "not changed by this slice",
 	"hook_lifecycle_lineage_production_test.go":  "not changed by this slice",
@@ -5894,6 +5946,7 @@ var guardSweepForeign = map[string]string{
 	"install_verbs_test.go":                      "not changed by this slice",
 	"integration_test.go":                        "not changed by this slice",
 	"main_test.go":                               "not changed by this slice",
+	"migrate_v8_v9_cli_test.go":                  "audit schema v8 to v9 migration proof on the built binary, outside the lifecycle transport sweep",
 	"queue_test.go":                              "not changed by this slice",
 	"version_test.go":                            "not changed by this slice",
 }

@@ -17,6 +17,8 @@ import (
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gateauthority"
+	"github.com/dayvidpham/pasture/internal/lifecycle/gatepolicy"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
@@ -38,10 +40,6 @@ import (
 const hookLifecycleWhere = "Receiving a native lifecycle event (internal/handlers/hook_lifecycle.go in handlers.HookLifecycle)."
 
 type HookLifecycleInput struct {
-	// Decision is an optional evaluated verdict supplied by a policy caller.
-	// Nil retains the current middle-end Proceed default. This is not a Reader
-	// implementation: callers must supply real authority evaluation separately.
-	Decision *backend.Decision
 	// Settlement is shared with the command's timeout choice. Native callers
 	// that omit it get a fresh fence, never a post-Apply committed flag.
 	Settlement  *receipt.CommitSettlement
@@ -80,6 +78,20 @@ type HookLifecycleInput struct {
 
 type lifecycleStoreOpener func(string) (protocol.TaskTracker, error)
 
+// lifecycleReaderFactory opens the read side of the gate for ONE invocation: the
+// store the hook opened, the harness it was invoked for, and the session the
+// payload carried.
+//
+// It is a parameter because the gate read is the one collaborator whose SUPPLY
+// has to be pinned. Production passes tasks.NewGateReader at both committing
+// entry points (HookLifecycleResponse and HookLifecycleRaw), and an in-process
+// proof passes a factory over a fake reader so it can drive an allow, a denial,
+// an unbound session and each read fault without a store. The type lives HERE
+// rather than in the authority package because it names a constructor of that
+// package's interface over a Pasture store: a caller that satisfies it already
+// imports both, and the authority package must stay free of the store.
+type lifecycleReaderFactory func(protocol.TaskTracker, ir.HarnessID, string) (gateauthority.Reader, error)
+
 // HookLifecycle preserves the accepted no-response Claude caller contract.
 func HookLifecycle(ctx context.Context, in HookLifecycleInput) error {
 	_, err := HookLifecycleResponse(ctx, in)
@@ -88,8 +100,15 @@ func HookLifecycle(ctx context.Context, in HookLifecycleInput) error {
 
 // HookLifecycleResponse records the lifecycle receipt before returning an
 // optional response to the native host.
+//
+// IT WIRES THE REAL DEPENDENCIES, AND THE PIN IS BY NAME. tasks.OpenTaskTracker
+// is the store the receipt and the gate read share, and tasks.NewGateReader is
+// the only reader this build has; an in-process proof injects its own pair one
+// layer down, at hookLifecycle, so the production pairing is stated here where
+// a reader can see it and is checked by an AST scan rather than by a value a
+// table can compare.
 func HookLifecycleResponse(ctx context.Context, in HookLifecycleInput) (backend.HostResponse, error) {
-	return hookLifecycle(ctx, in, tasks.OpenTaskTracker)
+	return hookLifecycle(ctx, in, tasks.OpenTaskTracker, tasks.NewGateReader)
 }
 
 type lifecycleCapture struct {
@@ -225,7 +244,7 @@ func mappingLookup[E comparable](contract pastureruntime.LifecycleContract[E]) f
 	}
 }
 
-func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener) (response backend.HostResponse, err error) {
+func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener, readers lifecycleReaderFactory) (response backend.HostResponse, err error) {
 	// durablePossible RECORDS THE ONE FACT A CALLER CANNOT OTHERWISE LEARN:
 	// whether this invocation ever ATTEMPTED A WRITE, and so whether a row can
 	// exist for it.
@@ -262,8 +281,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		}
 	}()
 
-	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil || open == nil {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, and store opener are required.", "Nothing was read or recorded.", "Invoke this path through the production lifecycle command.", nil)
+	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil || open == nil || readers == nil {
+		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, store opener, and gate reader factory are required.", "Nothing was read or recorded.", "Invoke this path through the production lifecycle command.", nil)
 	}
 	dispatch, err := dispatchLifecycle(in.Harness)
 	if err != nil {
@@ -410,12 +429,29 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		return backend.HostResponse{}, fmt.Errorf("%w: %w",
 			ErrLifecycleDeliveryRefused, unbindableCaptureError(dispatch, event, in, capture))
 	}
+	// THE GATE IS EVALUATED HERE, BEFORE THE MARKER AND BEFORE ANY WRITE.
+	//
+	// The placement is the whole guarantee. A verdict is only worth committing
+	// if it was taken from the store the receipt is about to join, and a fault
+	// raised after the marker would claim "no occurrence exists" for an
+	// invocation whose row is already in the journal. evaluateGate reads, never
+	// writes, so the marker below still stands at the first write attempt and
+	// every refusal this call raises is honestly not-recorded: the command maps
+	// that sentinel to its fail-open continuation, its one stderr diagnostic and
+	// its best-effort fault record, and a fault NEVER becomes a policy denial.
+	//
+	// An observation is answered by the middle end and never reaches the reader,
+	// so this call is the only place a lifecycle invocation consults the gate.
+	decision, err := evaluateGate(ctx, tracker, readers, dispatch, event, capture.delivery.Bindings, in.Harness)
+	if err != nil {
+		return backend.HostResponse{}, err
+	}
 	// Valid captures converge on the shared delivery commit tail with the raw
 	// surface, so the verification sequence cannot drift between
 	// the two handlers.
 	// A WRITE IS ATTEMPTED HERE. See durablePossible.
 	durablePossible = true
-	committed, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery, in.Decision)
+	committed, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery, decision)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
@@ -426,12 +462,147 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	return response, nil
 }
 
+// evaluateGate answers the host's question for one invocation, and it answers
+// it from the store or it answers nothing at all.
+//
+// The order is the order the decision is defined in, and every step is a
+// refusal rather than a default:
+//
+//  1. THE EVENT'S SEMANTIC DECIDES WHETHER THERE IS A QUESTION. An observation
+//     is the host reporting that something happened, so it answers nil with no
+//     error and no reader: the middle end's own answer is the whole answer, and
+//     reading a store to produce it would be a read whose result nothing used.
+//  2. The action class is looked up for the harness and the native name. The
+//     table is total over every registered event and it refuses at process
+//     start, so a refusal here means the event reached the gate from outside
+//     every manifest this build holds.
+//  3. THE SESSION IDENTITY COMES FROM THE SAME HELPER THE CLAIM WRITE USES, so
+//     the gate can never look up a different session than the one a session
+//     start event claimed. Two session identities are a fault rather than a
+//     choice.
+//  4. One snapshot answers both the claim and the authority. The authority is
+//     read ONLY for a bound claim, because an unbound snapshot refuses every
+//     actor including the zero one: it claimed nobody, so it has no actor to
+//     answer about.
+//  5. The policy runs on those facts. A refusal, an invalid runtime fact, and
+//     every read fault all return the error, and NO WRITE HAS HAPPENED on any of
+//     them, so the caller can say the invocation recorded nothing.
+//
+// A denial is NOT an error. It is a valid decision, it is committed, and it
+// reaches the host as that harness's refusal — or, on a row with no refusal
+// channel, as a proceed whose receipt names the unenforced denial.
+func evaluateGate(
+	ctx context.Context,
+	tracker protocol.TaskTracker,
+	readers lifecycleReaderFactory,
+	dispatch lifecycleDispatch,
+	event registration.Event,
+	bindings []model.NativeBinding,
+	harness ir.HarnessID,
+) (*backend.Decision, error) {
+	mapping, err := dispatch.mapping(event.NativeName)
+	if err != nil {
+		return nil, err
+	}
+	if mapping.Semantic() == pastureruntime.SemanticObservation {
+		return nil, nil
+	}
+	action, ok := gateauthority.ClassForEvent(harness, event.NativeName)
+	if !ok {
+		return nil, lifecycleError(pasterrors.CategoryValidation,
+			fmt.Sprintf("The %s event %q carries no action class, so the gate cannot be evaluated for it.", dispatch.name, event.NativeName),
+			"The class table is the one source of what class of action a host event is about, and it refuses at process start for any registered event it does not cover.",
+			"Nothing was read, no gate was consulted and no receipt was written, so the event had no part in the host's answer.",
+			"Report the event name: it is not one of the registered native events this build dispatches on.",
+			nil)
+	}
+	session, err := tasks.LifecycleSession(bindings)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := readers(tracker, harness, session)
+	if err != nil {
+		return nil, err
+	}
+	snap, err := reader.Snapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// The snapshot holds a read lease the store has to reclaim, so it is closed
+	// on EVERY return from here. Its error cannot change the verdict — the
+	// decision has already been taken from what it read — and reporting it
+	// would replace a real fault with a diagnostic about a lease, so it is
+	// discarded here on purpose rather than silently.
+	defer func() { _ = snap.Close() }()
+	claim, err := snap.ResolveSession(harness, session)
+	if err != nil {
+		return nil, err
+	}
+	var authority gateauthority.ActorAuthority
+	if claim.Bound {
+		authority, err = snap.Authority(claim.Actor)
+		if err != nil {
+			return nil, err
+		}
+	}
+	result, err := gatepolicy.Decide(gatepolicy.Input{
+		Event:      event.Kind,
+		Action:     action,
+		Semantic:   mapping.Semantic(),
+		StopLoop:   mapping.StopLoop(),
+		Capability: mapping.Response(),
+		Claim:      claim,
+		Authority:  authority,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if refusal, refused := result.Refusal(); refused {
+		return nil, refusal
+	}
+	decided, evaluated := result.Decision()
+	if !evaluated {
+		return nil, lifecycleError(pasterrors.CategoryStorage,
+			fmt.Sprintf("The %s gate for event %q produced neither a decision nor a refusal.", dispatch.name, event.NativeName),
+			"The policy returns exactly one of the two, so an empty result means the result was built by neither constructor.",
+			"Nothing was read past the snapshot and no receipt was written, so the host was told the event was not evaluated.",
+			"Report the empty policy result; do not retry the invocation, because the same facts produce the same empty result.",
+			nil)
+	}
+	return &decided, nil
+}
+
 // deliveryCommit is the ONE verification-and-commit sequence shared by the
 // native and raw lifecycle surfaces — all flow into the same pipeline: deliveryWarrant (intent → legalize) → EnsureActiveMetamodel →
 // deliveryDerive (typed bind → NewEvent → Derive) → Receive. The ordering is
 // compatibility-sensitive: metamodel activation precedes derivation exactly
 // as it did before dry-run existed.
-func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery, decisions ...*backend.Decision) (backend.HostResponse, error) {
+//
+// decision is the evaluated verdict, and it is NIL FOR EXACTLY ONE THING: an
+// observation, which the middle end answers on its own. A gate event that
+// arrives without one is refused HERE, before the metamodel is journalled and
+// before the receipt is written, because a gate that commits the default Proceed
+// has claimed a policy evaluation that never ran.
+func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery, decision *backend.Decision) (backend.HostResponse, error) {
+	if decision == nil {
+		mapping, err := dispatch.mapping(event.NativeName)
+		if err != nil {
+			return backend.HostResponse{}, err
+		}
+		if mapping.Semantic() != pastureruntime.SemanticObservation {
+			// IT WRAPS ITS OWN SENTINEL, FOR THE SAME REASON THE WARRANT
+			// REFUSAL BELOW DOES. The refusal is raised here, inside a function
+			// the caller's marker already stands behind, and no write has been
+			// attempted when it is: the metamodel journal and the receipt are
+			// both below it. Without the sentinel this refusal would fall to the
+			// command's weakest claim and tell an operator their occurrence "may
+			// or may not exist" when the invocation is one that wrote nothing.
+			return backend.HostResponse{}, fmt.Errorf(
+				"%w: lifecycle delivery: the %s gate event %q reached the commit without an evaluated decision; "+
+					"no receipt committed; the verdict is taken from the store by evaluateGate and is not optional on a gate",
+				ErrLifecycleBeforeDurableWrite, dispatch.name, event.NativeName)
+		}
+	}
 	// THIS REFUSAL IS BEFORE ANY WRITE, AND IT IS PAST THE CALLER'S MARKER.
 	//
 	// The marker stands at the call to this function, because the metamodel
@@ -462,7 +633,7 @@ func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifec
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	prepared, err := prepareDelivery(dispatch, event, derivation, decisions...)
+	prepared, err := prepareDelivery(dispatch, event, derivation, decision)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
@@ -481,36 +652,38 @@ type preparedDelivery struct {
 
 // prepareDelivery is shared by commit and preview. It performs no I/O and
 // never describes the encoded candidate as already committed.
-func prepareDelivery(dispatch lifecycleDispatch, event registration.Event, derivation middleend.Derivation, decisions ...*backend.Decision) (preparedDelivery, error) {
+//
+// decision is the evaluated verdict, or nil for an observation. A non-nil
+// decision on an observation is refused rather than dropped, because a caller
+// that evaluated something the host never asked about has misread the event,
+// and silently ignoring the verdict would hide that.
+func prepareDelivery(dispatch lifecycleDispatch, event registration.Event, derivation middleend.Derivation, decision *backend.Decision) (preparedDelivery, error) {
 	mapping, err := dispatch.mapping(event.NativeName)
 	if err != nil {
 		return preparedDelivery{}, err
 	}
 	response := derivation.Response()
 	effects := derivation.Effects()
-	if len(decisions) > 1 {
-		return preparedDelivery{}, fmt.Errorf("lifecycle delivery: more than one decision was supplied; no receipt committed; provide one evaluated verdict")
-	}
-	if len(decisions) == 1 && decisions[0] != nil && !response.IsValid() {
+	if decision != nil && !response.IsValid() {
 		return preparedDelivery{}, fmt.Errorf("lifecycle delivery: event %q is not an evaluated gate; no receipt committed; do not supply policy decisions for observations", event.NativeName)
 	}
 	if response.IsValid() {
-		decision, ok := response.Value()
+		derived, ok := response.Value()
 		if !ok {
 			return preparedDelivery{}, fmt.Errorf("lifecycle delivery: an evaluation fault cannot become a consultation; use the fault path")
 		}
-		if len(decisions) == 1 && decisions[0] != nil {
-			decision = *decisions[0]
+		if decision != nil {
+			derived = *decision
 		}
-		decision, err = nativeresponse.NormalizeDecision(mapping, decision)
+		normalized, err := nativeresponse.NormalizeDecision(mapping, derived)
 		if err != nil {
 			return preparedDelivery{}, err
 		}
-		response, err = backend.NewHostResponse(decision)
+		response, err = backend.NewHostResponse(normalized)
 		if err != nil {
 			return preparedDelivery{}, err
 		}
-		effects, err = receipt.ReplaceConsultationDecision(effects, decision)
+		effects, err = receipt.ReplaceConsultationDecision(effects, normalized)
 		if err != nil {
 			return preparedDelivery{}, err
 		}

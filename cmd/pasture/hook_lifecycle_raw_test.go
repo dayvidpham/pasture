@@ -611,6 +611,23 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 				require.Equal(t, "evidence", effect.Sort)
 				require.Equal(t, wantSlots[index], effect.ResultSlot)
 				require.Equal(t, string(row.EvidenceKind), effect.EvidenceKind)
+				if effect.ResultSlot == "consultation" {
+					// THE PREVIEW AND THE COMMIT DELIBERATELY DIVERGE HERE, and
+					// only here. The store-free preview never evaluated a gate,
+					// so it reports the unevaluated default; the real commit read
+					// the session's (absent) claim and records unbound-session.
+					// Asserting equality would demand the preview manufacture an
+					// evaluation it cannot perform.
+					previewDecision := decodeJSONObject(t, decodeJSONObject(t, effect.Payload)["decision"])
+					committedDecision := decodeJSONObject(t, decodeJSONObject(t, row.Payload)["decision"])
+					require.JSONEq(t, `"proceed"`, string(previewDecision["decision"]))
+					require.JSONEq(t, `"proceed"`, string(committedDecision["decision"]))
+					require.JSONEq(t, `"legal"`, string(previewDecision["reason"]), "a store-free preview keeps the unevaluated default reason")
+					require.JSONEq(t, `"unbound-session"`, string(committedDecision["reason"]), "a real commit with no session claim records the unbound-session reason")
+					require.NotEqual(t, hex.EncodeToString(row.ContentDigest), effect.ContentDigest,
+						"the consultation payloads differ on the reason, so their content digests must differ")
+					continue
+				}
 				require.Equal(t, hex.EncodeToString(row.ContentDigest), effect.ContentDigest)
 				require.JSONEq(t, string(row.Payload), string(effect.Payload), "preview effect payload must match committed evidence")
 			}

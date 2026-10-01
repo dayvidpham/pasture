@@ -454,13 +454,34 @@ diagnostic on standard error and a best-effort line in the fault record, and
 the user's action proceeds. `PASTURE_HOOK_FAIL_CLOSED=1` opts a fault into
 blocking on the hosts that read an exit code as a refusal. A policy DENIAL is
 the opposite case and FAILS CLOSED: it reaches the host as that harness's
-refusal, never as a fault, and never as a fault dressed as a refusal. Today
-every gate consultation answers proceed; the denial arms arrive with the gate
-decision work. A row may block by exit code only where its `FailureEvidence`
+refusal, never as a fault, and never as a fault dressed as a refusal. A row may
+block by exit code only where its `FailureEvidence`
 cites the host documentation or the committed capture that shows the host
 honours the exit code; an uncited blocking row runs as report-and-continue. A
 Claude Code proceed is exit 0 with EMPTY standard output, because on that host
 any byte on standard output is read as a decision.
+
+**A GATE IS EVALUATED FROM THE STORE, SO A GATE NEEDS A CLAIMED SESSION.** The
+verdict on an evaluated gate is read at the moment the event fires: the session
+claim says which actor the session belongs to, and the active-assignment read
+says what that actor currently owns. Both come from the store, and a claim is
+written only when BOTH of the following hold — the environment supplies
+`PASTURE_ACTOR_ID` (`cmd/pasture/hook_environment.go`) and the harness's own
+session-start event fires (`internal/tasks/session_claim.go`, which is the only
+writer of `pasture_session_claim`). Without both, every gate records a PROCEED
+whose reason says the session was UNBOUND, and no gate can deny anything; that
+is the fail-open default rather than a fault, and the receipt names the reason
+so the difference between "allowed" and "never asked" stays readable after the
+fact. A host that delivers a gate before its own session-start event is in that
+same state by construction, for the same reason.
+
+**A DENIAL IS REACHABLE ONLY WHERE THE HOST'S ROW CARRIES A RESPONSE
+CHANNEL.** The durable reason is recorded on every evaluated gate, whatever the
+host can do about it, but a host row that cannot express a refusal is answered
+with its proceed bytes and the receipt carries the UNENFORCED denial as its
+reason. That channel is cited for Claude Code only, so a Deny is representable
+there and nowhere else today: the Codex and OpenCode rows proceed with the
+reason recorded.
 
 ### Schema migration (`pasture migrate`)
 
@@ -521,7 +542,7 @@ Existing `pasture task` verbs (`create`, `show`, `update`, `close`, `list`,
 | `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
 | `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
 | `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `github.com/dayvidpham/provenance` | v0.2.0 | Task, edge and receipt store; built on the same DBOS version |
+| `github.com/dayvidpham/provenance` | v0.3.0 | Task, edge and receipt store; built on the same DBOS version |
 | `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
 | `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
