@@ -11,15 +11,17 @@
     },
     {
       "event": "session.prompt",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_prompt_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.prompt",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "session.context",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_context_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.context",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
@@ -39,29 +41,33 @@
     },
     {
       "event": "session.title",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_title_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.title",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "session.model.request",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_model_request_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.model.request",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "session.http.request",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_http_request_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.http.request",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "session.http.response",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_http_response_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.http.response",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
@@ -95,29 +101,33 @@
     },
     {
       "event": "tool.execute.before",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_tool_execute_before_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/tool.execute.before",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "tool.execute.after",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_tool_execute_after_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/tool.execute.after",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "permission.evaluate",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_permission_evaluate_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/permission.evaluate",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "shell.create.before",
       "state": "withheld",
-      "reason": "missing-fixture",
+      "reason": "unclearable-payload",
+      "clearance": "internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md",
       "responseCapability": "none",
       "failureEvidence": "unset"
     }

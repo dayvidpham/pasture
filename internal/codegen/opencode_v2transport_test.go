@@ -14,6 +14,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
@@ -97,18 +98,39 @@ func TestOpenCodeTargetManifestPublishesExhaustiveProofGatedActivation(t *testin
 	if len(manifest.Activation) != 17 {
 		t.Fatalf("activation entries = %d, want the exhaustive 17-event 2.0.20 classification", len(manifest.Activation))
 	}
-	// No 2.0.20 row carries proofs yet: the capture sitting and the
-	// production-path proofs have not landed, so every row is withheld for
-	// missing-fixture. An enabled row here would claim evidence that does not
-	// exist.
+	// Every published row matches the 2.0.20 activation derivation: an
+	// enabled row carries both proofs, a withheld row carries its reason and
+	// no proof. An enabled row without proofs would claim evidence that does
+	// not exist.
+	names := make(map[model.ContractEventKind]string)
+	for _, event := range registration.OpenCode2_0_20().Entries() {
+		names[event.Kind] = event.NativeName
+	}
+	derived, err := activation.OpenCode2_0_20()
+	if err != nil {
+		t.Fatalf("activation.OpenCode2_0_20: %v", err)
+	}
+	expected := make(map[string][2]string, len(derived))
+	for _, entry := range derived {
+		reason := ""
+		if entry.State == activation.Withheld {
+			reason = entry.Reason.String()
+		}
+		expected[names[entry.Event]] = [2]string{entry.State.String(), reason}
+	}
 	for _, entry := range manifest.Activation {
-		if entry.State != "withheld" {
-			t.Fatalf("activation entry %q is %q, want withheld until its capture and production proofs land", entry.Event, entry.State)
+		want, ok := expected[entry.Event]
+		if !ok {
+			t.Fatalf("activation entry %q is not a registered 2.0.20 row", entry.Event)
 		}
-		if entry.Reason != "missing-fixture" {
-			t.Fatalf("activation entry %q reason = %q, want missing-fixture", entry.Event, entry.Reason)
+		if entry.State != want[0] || entry.Reason != want[1] {
+			t.Fatalf("activation entry %q is %q/%q, want %q/%q", entry.Event, entry.State, entry.Reason, want[0], want[1])
 		}
-		if entry.CaptureProof != "" || entry.ProductionProof != "" {
+		proved := entry.CaptureProof != "" && entry.ProductionProof != ""
+		if entry.State == "enabled" && !proved {
+			t.Fatalf("enabled activation entry lacks a proof: %#v", entry)
+		}
+		if entry.State == "withheld" && (entry.CaptureProof != "" || entry.ProductionProof != "") {
 			t.Fatalf("withheld activation entry carries proofs: %#v", entry)
 		}
 	}

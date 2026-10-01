@@ -787,12 +787,37 @@ func derivedEnabledEvents(t *testing.T) map[string]map[string]struct{} {
 	return derived
 }
 
+// openCode2ExpectedRows derives the 2.0.20 activation state and withheld
+// reason of every registered row, keyed by native name, from the activation
+// manifest: the source that refuses an enabled row without both proofs.
+func openCode2ExpectedRows(t *testing.T) map[string][2]string {
+	t.Helper()
+	names := make(map[model.ContractEventKind]string)
+	for _, event := range registration.OpenCode2_0_20().Entries() {
+		names[event.Kind] = event.NativeName
+	}
+	entries, err := activation.OpenCode2_0_20()
+	require.NoError(t, err)
+	rows := make(map[string][2]string, len(entries))
+	for _, entry := range entries {
+		name, ok := names[entry.Event]
+		require.True(t, ok, "the 2.0.20 activation manifest names kind %d, which its registration does not declare", entry.Event)
+		reason := ""
+		if entry.State == activation.Withheld {
+			reason = entry.Reason.String()
+		}
+		rows[name] = [2]string{entry.State.String(), reason}
+	}
+	return rows
+}
+
 // testOpenCodeTransitionalReport holds the OpenCode side of the enabled floor
-// while the 2.0.20 rows await proofs. The v1 derivation still enables its two
-// proved rows (that evidence must not be dropped), the policy list still names
-// them, and the committed report is the v2 surface with every row withheld
-// for missing-fixture. When rows gain proofs, their enablement flows through
-// the same derivation and this transitional arm goes away with the v1 floor.
+// while the production registry still serves 1.18.29. The v1 derivation still
+// enables its two proved rows (that evidence must not be dropped), the policy
+// list still names them, and the committed report is the v2 surface whose
+// every row matches the 2.0.20 activation derivation: proved rows enabled,
+// the rest withheld with their reason. When the registry moves to 2.0.20,
+// this transitional arm goes away with the v1 floor.
 func testOpenCodeTransitionalReport(t *testing.T, root, report string, floor map[string]struct{}) {
 	t.Helper()
 	require.Equal(t, map[string]struct{}{"session.created": {}, "tool.execute.before": {}}, floor,
@@ -805,15 +830,20 @@ func testOpenCodeTransitionalReport(t *testing.T, root, report string, floor map
 	var committed activationReportFile
 	readGeneratedJSON(t, report, &committed)
 	require.Len(t, committed.Events, 17, "the committed OpenCode report must list the whole 2.0.20 surface")
-	seen := map[string]bool{}
+	expected := openCode2ExpectedRows(t)
+	enabled := 0
 	for _, entry := range committed.Events {
-		seen[entry.Event] = true
-		require.Equal(t, "withheld", entry.State, "2.0.20 row %q must stay withheld until its proofs land", entry.Event)
-		require.Equal(t, "missing-fixture", entry.Reason, "2.0.20 row %q must name its missing evidence", entry.Event)
+		want, ok := expected[entry.Event]
+		require.True(t, ok, "the committed report lists %q, which the 2.0.20 registration does not declare", entry.Event)
+		require.Equal(t, want[0], entry.State, "2.0.20 row %q state is stale; run `make generate`", entry.Event)
+		require.Equal(t, want[1], entry.Reason, "2.0.20 row %q reason is stale; run `make generate`", entry.Event)
+		if entry.State == "enabled" {
+			enabled++
+		}
+		delete(expected, entry.Event)
 	}
-	for _, event := range registration.OpenCode2_0_20().Entries() {
-		require.True(t, seen[event.NativeName], "the committed report omits registered 2.0.20 row %q", event.NativeName)
-	}
+	require.Empty(t, expected, "the committed report omits registered 2.0.20 rows")
+	require.NotZero(t, enabled, "the committed 2.0.20 report enables no row, so this guard would hold nothing")
 }
 
 // TestEnabledEventsNeverDropBelowTheFloor holds the enabled set of every
