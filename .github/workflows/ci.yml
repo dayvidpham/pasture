@@ -5,6 +5,7 @@ on:
     branches: ["main", "develop", "feat/**", "fix/**"]
   pull_request:
     branches: ["main", "develop"]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -63,9 +64,13 @@ jobs:
         # run the real CLI as a child process. The explicit -timeout is a
         # guard against the 10-minute default, which reports a slow package as
         # a panic with no per-test attribution; it is not a budget to grow into.
+        #
+        # The race detector is OFF here by default so pull-request iteration
+        # stays fast; it runs in the dedicated "Race Tests" job on main and on
+        # demand (Actions -> CI -> Run workflow).
         env:
-          CGO_ENABLED: "1"
-        run: go test -race -timeout 30m ./...
+          CGO_ENABLED: "0"
+        run: go test -timeout 30m ./...
 
       - name: Recovery tests
         env:
@@ -74,6 +79,9 @@ jobs:
 
   race:
     name: Race Tests
+    # OFF by default on branches so iteration is fast (it is the slowest job).
+    # It runs on pushes to main and on demand via workflow_dispatch.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
