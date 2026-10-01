@@ -65,9 +65,9 @@ jobs:
         # guard against the 10-minute default, which reports a slow package as
         # a panic with no per-test attribution; it is not a budget to grow into.
         #
-        # The race detector is OFF here by default so pull-request iteration
-        # stays fast; it runs in the dedicated "Race Tests" job on main and on
-        # demand (Actions -> CI -> Run workflow).
+        # The race detector is OFF in CI so iteration is fast. There is no
+        # second race job: the suite runs exactly ONCE per CI run. Run
+        # `make test-race` locally when a change touches concurrency.
         env:
           CGO_ENABLED: "0"
         run: go test -timeout 30m ./...
@@ -76,30 +76,6 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: make test-recovery
-
-  race:
-    name: Race Tests
-    # OFF by default on branches so iteration is fast (it is the slowest job).
-    # It runs on pushes to main and on demand via workflow_dispatch.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.26"
-          cache: true
-
-      - name: Verify dependencies
-        run: go mod verify
-
-      - name: Race detector
-        env:
-          CGO_ENABLED: "1"
-        run: make test-race-ci
 
   lint:
     name: Lint
