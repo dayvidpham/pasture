@@ -286,3 +286,25 @@ clearance) supplies the response-channel evidence. The wired refusal above
 fires only where the gate answers deny, which that evidence has not yet
 enabled. All historical fixture bytes, sidecars, pairing and acceptance
 records above remain unchanged.
+
+## Host-version carriage transport addendum — 2026-10-01
+
+The generated 2.0.20 plugin now carries the running host's own release on
+every lifecycle invocation: setup captures `ctx.app.version` once and each
+spawn appends it as `--host-version` unless that invocation already names its
+own (the `session.created` observation keeps its occurrence-local bus-data
+version where present). When the context reports no usable version nothing is
+sent and the binary resolves the version itself, so no version is ever
+invented. The binary's version probe accepts the real v2 banner alongside the
+bare release (`opencode v2.0.20` as well as `2.0.20`); anything else is still
+refused. The committed `.opencode/plugins/pasture-lifecycle.ts` is now sha256
+`22ff011405b13ba07a44fc1c867f82f73134db61b97c6a21b35583405049cc1f`.
+Its sources remain `internal/codegen/opencode_hooks.go` and
+`cmd/pasture/hook_lifecycle_host_version.go`. This is a transport identity,
+not a new capture-kit or fixture identity. A reader who hashes the shipped
+plugin gets the digest above.
+
+This addendum records no new live capture, fixture acceptance or host
+capability. No 2.0.20 capture has been cleared into this directory, so every
+2.0.20 row stays withheld for missing-fixture. All historical fixture bytes,
+sidecars, pairing and acceptance records above remain unchanged.

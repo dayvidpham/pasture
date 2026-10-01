@@ -587,22 +587,98 @@ const created = calls.filter((call) => call.argv[5] === "session.created");
 assert.equal(created.length, 12, "every bus script entry spawns; only the last carries a flat decoy version the helper must ignore");
 for (const call of created) {
   const version = call.payload.data?.version;
+  // A usable bus version rides occurrence-local; anything else falls back to
+  // the setup-observed host version, so every observation still names the
+  // host that sent it without inventing one.
   const expected = [...base, "session.created"];
   if (usable(version)) expected.push("--host-version", version);
-  assert.deepEqual(call.argv, expected, "creation occurrence selects original usable metadata only");
+  else expected.push("--host-version", "2.0.20");
+  assert.deepEqual(call.argv, expected, "creation occurrence selects original usable metadata first, then the setup-observed host version");
 }
 const decoy = created[created.length - 1];
 assert.equal(decoy.payload.version, "2.0.20", "the flat decoy version rides top-level");
-assert.deepEqual(decoy.argv, [...base, "session.created"], "a top-level version beside data must not become a flag");
+assert.deepEqual(decoy.argv, [...base, "session.created", "--host-version", "2.0.20"], "a top-level version beside data must not become a flag; the setup-observed version rides instead");
 const hookEvent = Object.freeze({ tool: "task", sessionID: "constructed", agent: "agent", messageID: "m", id: "call", input: Object.freeze({ path: "unchanged" }) });
 const before = JSON.stringify(hookEvent);
 await hooks["tool.execute.before"](hookEvent);
-assert.deepEqual(calls.at(-1).argv, [...base, "tool.execute.before"], "hook callbacks never carry a version flag; the binary resolves its own host version");
+assert.deepEqual(calls.at(-1).argv, [...base, "tool.execute.before", "--host-version", "2.0.20"], "hook callbacks carry the setup-observed host version instead of depending on the version probe");
 assert.deepEqual(calls.at(-1).payload, hookEvent);
 assert.equal(JSON.stringify(hookEvent), before, "the hook event is forwarded without mutation");
 await hooks["session.context"](Object.freeze({ sessionID: "constructed" }));
-assert.deepEqual(calls.at(-1).argv, [...base, "session.context"], "session hooks never carry a version flag either");
+assert.deepEqual(calls.at(-1).argv, [...base, "session.context", "--host-version", "2.0.20"], "session hooks carry the setup-observed host version too");
 `)
+}
+
+// TestOpenCodeHookVersionAbsentWithoutHostReport proves the setup-observed
+// version is never invented: a setup whose context carries no usable
+// ctx.app.version sends no --host-version flag, leaving the binary to resolve
+// the version itself, and a later setup with a version still captures it.
+func TestOpenCodeHookVersionAbsentWithoutHostReport(t *testing.T) {
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("Bun is required for the generated OpenCode v2 absent-version proof")
+	}
+	dir := t.TempDir()
+	writeOpenCodePluginStub(t, dir)
+	path := filepath.Join(dir, "plugin.ts")
+	if err := os.WriteFile(path, []byte(module), 0o600); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+	runner := filepath.Join(dir, "absent-version.ts")
+	script := fmt.Sprintf(`
+import assert from "node:assert/strict";
+const {default: plugin} = await import(%q);
+const hooks = {};
+const baseCtx = (app) => ({
+  ...(app === undefined ? {} : { app }),
+  session: { hook: async (name, cb) => { hooks["session." + name] = cb; return { dispose: async () => {} }; } },
+  tool: { hook: async (name, cb) => { hooks["tool." + name] = cb; return { dispose: async () => {} }; } },
+  permission: { hook: async (name, cb) => { hooks["permission." + name] = cb; return { dispose: async () => {} }; } },
+  shell: { hook: async (name, cb) => { hooks["shell." + name] = cb; return { dispose: async () => {} }; } },
+  event: { subscribe: (options) => (async function* () {})() },
+});
+const calls = [];
+const originalSpawn = Bun.spawn;
+Bun.spawn = options => {
+  const record = {argv: options.cmd.slice(1)};
+  calls.push(record);
+  return {stdout: new Blob(['{"decision":"proceed"}']).stream(), stderr: new Blob([]).stream(), exited: Promise.resolve(0), exitCode: 0, kill() {throw new Error("unexpected kill");}};
+};
+try {
+  const payload = { tool: "task", sessionID: "constructed" };
+  let cleanup = await plugin.setup(baseCtx(undefined));
+  await hooks["tool.execute.before"](payload);
+  assert.equal(calls.at(-1).argv.includes("--host-version"), false, "a setup with no app must not invent a version flag");
+  await cleanup();
+  cleanup = await plugin.setup(baseCtx({ name: "opencode", version: "  " }));
+  await hooks["tool.execute.before"](payload);
+  assert.equal(calls.at(-1).argv.includes("--host-version"), false, "a setup with a blank version must not send it");
+  await cleanup();
+  cleanup = await plugin.setup(baseCtx({ name: "opencode", version: "2.0.20" }));
+  await hooks["tool.execute.before"](payload);
+  assert.deepEqual(calls.at(-1).argv.slice(6), ["--host-version", "2.0.20"], "a setup with a usable version carries it");
+  await cleanup();
+  console.log("absent-version assertions passed");
+} finally { Bun.spawn = originalSpawn; }
+`, path)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write runner: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bun, runner)
+	cmd.Env = append(os.Environ(), "PASTURE_DB_PATH="+filepath.Join(dir, "scratch.db"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("absent-version proof: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "absent-version assertions passed") {
+		t.Fatalf("runner did not finish: %s", out)
+	}
 }
 
 // runOpenCodeV2SetupModule drives one generated v2 plugin through its real
@@ -633,6 +709,7 @@ const hooks = {};
 const registrations = [];
 const subscribed = [];
 const ctx = {
+  app: { name: "opencode", version: "2.0.20" },
   session: { hook: async (name, cb) => { hooks["session." + name] = cb; const r = { dispose: async () => {} }; registrations.push(r); return r; } },
   tool: { hook: async (name, cb) => { hooks["tool." + name] = cb; const r = { dispose: async () => {} }; registrations.push(r); return r; } },
   permission: { hook: async (name, cb) => { hooks["permission." + name] = cb; const r = { dispose: async () => {} }; registrations.push(r); return r; } },

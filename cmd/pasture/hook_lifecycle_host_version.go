@@ -23,12 +23,16 @@ const hostVersionOutputLimit = 4096
 var claudeVersionOutput = regexp.MustCompile(`\A([0-9]+\.[0-9]+\.[0-9]+) \(Claude Code\)(?:\r?\n)?\z`)
 
 // Codex's clap banner uses its package name (codex-rs/cli at
-// 41e22fee981a63b3698df7ed36bad393cda24715). OpenCode prints InstallationVersion
-// alone (packages/opencode/src/index.ts at
-// 16747470f976aca3d362ad730bcd3fe82ecc2c9a). ParseHostVersion validates the
-// captured release, including suffix/build metadata, without an equality gate.
+// 41e22fee981a63b3698df7ed36bad393cda24715). OpenCode's measured v2 banner
+// carries its product name ahead of the release (`opencode v2.0.20`, one line
+// with a trailing newline), while earlier hosts printed the release alone, so
+// the product prefix is optional. ParseHostVersion validates the captured
+// release, including suffix/build metadata, without an equality gate.
+// Anything else — a second token, a second line, surrounding text — still
+// misses the grammar, and a lone token that is not a release still fails
+// parsing, so arbitrary process output is never retained as a version.
 var codexVersionOutput = regexp.MustCompile(`\Acodex-cli ([^\r\n ]+)(?:\r?\n)?\z`)
-var openCodeVersionOutput = regexp.MustCompile(`\A([^\r\n ]+)(?:\r?\n)?\z`)
+var openCodeVersionOutput = regexp.MustCompile(`\A(?:opencode )?([^\r\n ]+)(?:\r?\n)?\z`)
 
 func lifecycleVersionQuerySupported(harness ir.HarnessID) bool {
 	return harness == ir.HarnessClaudeCode || harness == ir.HarnessCodex || harness == ir.HarnessOpenCode

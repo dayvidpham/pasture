@@ -235,10 +235,25 @@ async function drain(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<s
   }
 }
 
+// The running host reports its own release on the setup context as
+// ctx.app.version (packages/plugin/src/app.ts: App.version, exposed on the
+// promise Context at packages/plugin/src/promise/plugin.ts). setup captures
+// it once below; every helper runs outside setup's scope, so the captured
+// flags wait here. Empty means absent: no version is ever invented, and an
+// absent version leaves each command unflagged for the binary to resolve.
+// setup assigns on every run, so a setup without a usable version clears a
+// previous capture instead of reusing it.
+let pastureHostVersionArgs = [];
+
 async function invokeLifecycle(command, event, value) {
   const binary = process.env.%s ?? "pasture";
+  // Carry the setup-observed host version unless this invocation already
+  // names its own (the session.created observation does, from its bus data).
+  // A later host stays admissible: the binary admits its recorded baseline
+  // and every later release, so forwarding the running release never narrows it.
+  const effective = command.includes("--host-version") || pastureHostVersionArgs.length === 0 ? command : [...command, ...pastureHostVersionArgs];
   const child = Bun.spawn({
-    cmd: [binary, ...command],
+    cmd: [binary, ...effective],
     stdin: new Blob([JSON.stringify(value)]),
     stdout: "pipe",
     stderr: "pipe",
@@ -543,7 +558,17 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 
 `, helper, commandFor(event.NativeName), versionSelection, event.NativeName, "Pasture lifecycle observation failed for "+event.NativeName+": ")
 	}
-	fmt.Fprintf(&setup, "    const registrations = [];\n")
+	fmt.Fprintf(&setup, `    // The v2 plugin context carries the running host's own release as
+    // ctx.app.version (packages/plugin/src/app.ts: App.version, exposed on
+    // the promise Context at packages/plugin/src/promise/plugin.ts). Capture
+    // it once and carry it on every lifecycle invocation, so no hook depends
+    // on spawning the host for --version. The value is the host's
+    // self-report, never an invented default: when it is absent or blank the
+    // capture is cleared and the binary resolves the version itself.
+    const observedVersion = ctx?.app?.version;
+    pastureHostVersionArgs = typeof observedVersion === "string" && observedVersion.trim() !== "" ? ["--host-version", observedVersion] : [];
+    const registrations = [];
+`)
 	for _, event := range manifest {
 		hook, isHook := hookByKind[event.Kind]
 		if !isHook {
