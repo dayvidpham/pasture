@@ -1,6 +1,7 @@
 package activation_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -59,18 +60,105 @@ func TestOpenCodeActivationTargetEventsAreDefensive(t *testing.T) {
 	require.Equal(t, registration.EventOpenCodeSessionCreated, activation.OpenCode1_18_29TargetEvents()[0])
 }
 
-func TestOpenCodeV2ActivationWithholdsEveryRowForMissingFixture(t *testing.T) {
+// openCode2Enabled is the enabled 2.0.20 set in registration order: the nine
+// coordinates whose authentic capture was cleared in
+// internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md.
+var openCode2Enabled = []model.ContractEventKind{
+	registration.EventOpenCode2SessionPrompt,
+	registration.EventOpenCode2SessionContext,
+	registration.EventOpenCode2SessionTitle,
+	registration.EventOpenCode2SessionModelRequest,
+	registration.EventOpenCode2SessionHttpRequest,
+	registration.EventOpenCode2SessionHttpResponse,
+	registration.EventOpenCode2ToolExecuteBefore,
+	registration.EventOpenCode2ToolExecuteAfter,
+	registration.EventOpenCode2PermissionEvaluate,
+}
+
+// openCode2MissingFixture is the withheld missing-fixture remainder: the seven
+// coordinates that did not fire in the 2.0.20 capture sitting.
+var openCode2MissingFixture = []model.ContractEventKind{
+	registration.EventOpenCode2SessionCreated,
+	registration.EventOpenCode2SessionCompaction,
+	registration.EventOpenCode2SessionGenerate,
+	registration.EventOpenCode2SessionExperimentalWsHandshake,
+	registration.EventOpenCode2SessionExperimentalWsSend,
+	registration.EventOpenCode2SessionExperimentalWsReceive,
+	registration.EventOpenCode2SessionRetry,
+}
+
+const openCodeClearance = "internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md"
+
+// TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason pins
+// the 2.0.20 posture: nine enabled rows each carry both proofs, the shell
+// create row is withheld by the recorded unclearable-payload decision, and
+// the seven non-fired rows stay withheld missing-fixture.
+func TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)
 	require.Len(t, entries, 17)
+	var enabled, missing []model.ContractEventKind
+	var unclearable []model.ContractEventKind
 	for _, entry := range entries {
 		require.True(t, entry.IsValid())
-		require.Equal(t, activation.Withheld, entry.State)
-		require.Equal(t, activation.WithheldMissingFixture, entry.Reason)
-		require.Zero(t, entry.CaptureProof)
-		require.Zero(t, entry.ProductionProof)
+		switch {
+		case entry.State == activation.Enabled:
+			enabled = append(enabled, entry.Event)
+			require.NotZero(t, entry.CaptureProof)
+			require.NotZero(t, entry.ProductionProof)
+			require.NotEmpty(t, entry.CaptureProof.Name())
+			require.NotEmpty(t, entry.ProductionProof.Name())
+			require.Empty(t, entry.Clearance)
+		case entry.Reason == activation.WithheldMissingFixture:
+			missing = append(missing, entry.Event)
+			require.Zero(t, entry.CaptureProof)
+			require.Zero(t, entry.ProductionProof)
+			require.Empty(t, entry.Clearance)
+		case entry.Reason == activation.WithheldUnclearablePayload:
+			unclearable = append(unclearable, entry.Event)
+			require.Zero(t, entry.CaptureProof)
+			require.Zero(t, entry.ProductionProof)
+			require.Equal(t, openCodeClearance, entry.Clearance)
+		default:
+			t.Fatalf("event %d carries unexpected state %v reason %v", entry.Event, entry.State, entry.Reason)
+		}
 	}
+	require.Equal(t, openCode2Enabled, enabled)
+	require.Equal(t, openCode2MissingFixture, missing)
+	require.Equal(t, []model.ContractEventKind{registration.EventOpenCode2ShellCreateBefore}, unclearable)
+}
+
+// TestOpenCodeV2EnabledProofsCiteCommittedFixturesAndProductionTest pins each
+// enabled row to the exact committed fixture basename its capture proof
+// names and to the built-binary production proof arm for that coordinate.
+func TestOpenCodeV2EnabledProofsCiteCommittedFixturesAndProductionTest(t *testing.T) {
+	t.Parallel()
+	want := map[model.ContractEventKind][2]string{
+		registration.EventOpenCode2SessionPrompt:       {"opencode_session_prompt_2_0_20.1.json", "session.prompt"},
+		registration.EventOpenCode2SessionContext:      {"opencode_session_context_2_0_20.1.json", "session.context"},
+		registration.EventOpenCode2SessionTitle:        {"opencode_session_title_2_0_20.1.json", "session.title"},
+		registration.EventOpenCode2SessionModelRequest: {"opencode_session_model_request_2_0_20.2.json", "session.model.request"},
+		registration.EventOpenCode2SessionHttpRequest:  {"opencode_session_http_request_2_0_20.2.json", "session.http.request"},
+		registration.EventOpenCode2SessionHttpResponse: {"opencode_session_http_response_2_0_20.1.json", "session.http.response"},
+		registration.EventOpenCode2ToolExecuteBefore:   {"opencode_tool_execute_before_2_0_20.1.json", "tool.execute.before"},
+		registration.EventOpenCode2ToolExecuteAfter:    {"opencode_tool_execute_after_2_0_20.1.json", "tool.execute.after"},
+		registration.EventOpenCode2PermissionEvaluate:  {"opencode_permission_evaluate_2_0_20.2.json", "permission.evaluate"},
+	}
+	entries, err := activation.OpenCode2_0_20()
+	require.NoError(t, err)
+	seen := 0
+	for _, entry := range entries {
+		expected, ok := want[entry.Event]
+		if !ok {
+			continue
+		}
+		seen++
+		require.Equal(t, activation.Enabled, entry.State)
+		require.True(t, strings.HasPrefix(entry.CaptureProof.Name(), "internal/lifecycle/ingress/opencode/testdata/fixtures/"+expected[0]+" "), "capture proof %q", entry.CaptureProof.Name())
+		require.Equal(t, "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/"+expected[1], entry.ProductionProof.Name())
+	}
+	require.Equal(t, len(want), seen)
 }
 
 func TestOpenCodeV2ActivationTargetEventsAreDefensive(t *testing.T) {
@@ -82,9 +170,8 @@ func TestOpenCodeV2ActivationTargetEventsAreDefensive(t *testing.T) {
 }
 
 // TestOpenCodeV2ActivationIsExhaustiveInRegistrationOrder pins the v2 report
-// shape without needing any fixture: seventeen entries, one per generated
-// 2.0.20 event, in registration order, each a valid withheld row with no
-// proofs. A second derivation is fresh, so no caller can mutate the static
+// shape: seventeen entries, one per generated 2.0.20 event, in registration
+// order, each a valid row. A second derivation is fresh, so no caller can mutate the static
 // table through a returned slice.
 func TestOpenCodeV2ActivationIsExhaustiveInRegistrationOrder(t *testing.T) {
 	t.Parallel()
@@ -100,12 +187,8 @@ func TestOpenCodeV2ActivationIsExhaustiveInRegistrationOrder(t *testing.T) {
 		_, duplicate := seen[entry.Event]
 		require.False(t, duplicate, "row %d repeats event kind %d", index, entry.Event)
 		seen[entry.Event] = struct{}{}
-		require.Equal(t, activation.Withheld, entry.State)
-		require.Equal(t, activation.WithheldMissingFixture, entry.Reason)
-		require.Zero(t, entry.CaptureProof)
-		require.Zero(t, entry.ProductionProof)
-		require.Empty(t, entry.Clearance)
 	}
+	require.Equal(t, activation.Withheld, entries[0].State, "session.created did not fire and stays withheld")
 	entries[0].State = activation.Enabled
 	fresh, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)
@@ -117,8 +200,9 @@ func TestOpenCodeV2ActivationIsExhaustiveInRegistrationOrder(t *testing.T) {
 // derives CapabilityNone through the version-exact v2 runtime profile, and
 // the failure-evidence posture splits exactly on blocking mode (the bus
 // observation carries no evidence source, every hook row awaits its
-// citation). The activation entries above stay withheld for the same
-// reason: no row carries a proof. Rows resolve through
+// citation). Enabling a row by its proofs claims no capability: the
+// cleared permission evaluate capture answered allow, so it cites no deny
+// evidence and the row keeps CapabilityNone. Rows resolve through
 // OpenCode2_0_20Lifecycle by native name, never through the version-blind
 // failure lookup that serves the command-line fault policy, so the three
 // coordinates both versions share assert their v2 rows.
@@ -162,8 +246,8 @@ func TestOpenCodeV2PerRowCapabilityDerivesNoneWhileFixturesAreAbsent(t *testing.
 // to opencode_<snake>_2_0_20.1.json in
 // internal/lifecycle/ingress/opencode/testdata/fixtures/, exercised through
 // the production CaptureStem namer rather than a re-implemented spelling.
-// The permission evaluate coordinate maps to exactly
-// opencode_permission_evaluate_2_0_20.1.json.
+// The rule fixes the stem; the committed sequence number follows the
+// smallest-authentic-file policy, so the permission evaluate fixture is .2.
 func TestOpenCodeV2ExpectedFixtureNamesFollowTheCaptureRule(t *testing.T) {
 	t.Parallel()
 	manifest := registration.OpenCode2_0_20().Entries()
@@ -177,30 +261,44 @@ func TestOpenCodeV2ExpectedFixtureNamesFollowTheCaptureRule(t *testing.T) {
 		require.False(t, duplicate, "two coordinates map to one expected fixture %q", basename)
 		seen[basename] = struct{}{}
 		if event.NativeName == "permission.evaluate" {
-			require.Equal(t, "opencode_permission_evaluate_2_0_20.1.json", basename)
+			require.Equal(t, "opencode_permission_evaluate_2_0_20", stem)
 		}
 	}
 	require.Len(t, seen, 17, "every coordinate needs its own expected fixture")
 }
 
-// TestOpenCodeV2DeclaresNoProofsYet pins the withheld posture from the proof
-// side: no declared capture or production proof is bound to a 2.0.20 event,
-// so no withheld row can be enabled by referencing an existing proof. When
-// the capture lands, enabling a row declares its proofs first; that flip is
-// data, and this test names the exact growth to expect.
-func TestOpenCodeV2DeclaresNoProofsYet(t *testing.T) {
+// TestOpenCodeV2ProofsBindOnlyTheEnabledSet pins the proof side: every
+// declared proof bound to a 2.0.20 event belongs to the enabled set, and each
+// enabled event has exactly one capture and one production proof.
+func TestOpenCodeV2ProofsBindOnlyTheEnabledSet(t *testing.T) {
 	t.Parallel()
+	enabled := make(map[model.ContractEventKind]struct{}, len(openCode2Enabled))
+	for _, kind := range openCode2Enabled {
+		enabled[kind] = struct{}{}
+	}
 	v2Kinds := make(map[model.ContractEventKind]struct{}, 17)
 	for _, kind := range activation.OpenCode2_0_20TargetEvents() {
 		v2Kinds[kind] = struct{}{}
 	}
 	require.Len(t, v2Kinds, 17)
+	captures := map[model.ContractEventKind]int{}
 	for _, arm := range activation.CaptureProofArms() {
-		_, bound := v2Kinds[arm.Event]
-		require.False(t, bound, "capture proof %q is already bound to a 2.0.20 event", arm.Arm)
+		if _, v2 := v2Kinds[arm.Event]; v2 {
+			_, ok := enabled[arm.Event]
+			require.True(t, ok, "capture proof %q binds a withheld 2.0.20 event", arm.Arm)
+			captures[arm.Event]++
+		}
 	}
+	productions := map[model.ContractEventKind]int{}
 	for _, arm := range activation.ProductionProofArms() {
-		_, bound := v2Kinds[arm.Event]
-		require.False(t, bound, "production proof %q is already bound to a 2.0.20 event", arm.Arm)
+		if _, v2 := v2Kinds[arm.Event]; v2 {
+			_, ok := enabled[arm.Event]
+			require.True(t, ok, "production proof %q binds a withheld 2.0.20 event", arm.Arm)
+			productions[arm.Event]++
+		}
+	}
+	for _, kind := range openCode2Enabled {
+		require.Equal(t, 1, captures[kind])
+		require.Equal(t, 1, productions[kind])
 	}
 }

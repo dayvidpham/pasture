@@ -540,6 +540,162 @@ func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
 	require.NotEqual(t, runtime.ClaudeCode2_1_261().ID(), runtime.OpenCode1_18_29().ID())
 }
 
+// openCode2EnabledFixtures pairs each enabled OpenCode 2.0.20 coordinate with
+// the committed capture its activation row cites, in registration order.
+var openCode2EnabledFixtures = []struct {
+	event   model.ContractEventKind
+	native  string
+	fixture string
+}{
+	{registration.EventOpenCode2SessionPrompt, "session.prompt", "opencode_session_prompt_2_0_20.1.json"},
+	{registration.EventOpenCode2SessionContext, "session.context", "opencode_session_context_2_0_20.1.json"},
+	{registration.EventOpenCode2SessionTitle, "session.title", "opencode_session_title_2_0_20.1.json"},
+	{registration.EventOpenCode2SessionModelRequest, "session.model.request", "opencode_session_model_request_2_0_20.2.json"},
+	{registration.EventOpenCode2SessionHttpRequest, "session.http.request", "opencode_session_http_request_2_0_20.2.json"},
+	{registration.EventOpenCode2SessionHttpResponse, "session.http.response", "opencode_session_http_response_2_0_20.1.json"},
+	{registration.EventOpenCode2ToolExecuteBefore, "tool.execute.before", "opencode_tool_execute_before_2_0_20.1.json"},
+	{registration.EventOpenCode2ToolExecuteAfter, "tool.execute.after", "opencode_tool_execute_after_2_0_20.1.json"},
+	{registration.EventOpenCode2PermissionEvaluate, "permission.evaluate", "opencode_permission_evaluate_2_0_20.2.json"},
+}
+
+// citedCapturePath returns the repository-relative path a capture citation
+// names: the text before any trailing parenthetical annotation, trimmed.
+func citedCapturePath(citation string) string {
+	if index := strings.Index(citation, " ("); index >= 0 {
+		citation = citation[:index]
+	}
+	return strings.TrimSpace(citation)
+}
+
+// TestEnabledOpenCode2HandlersToDurableReadBack is the production proof for
+// every enabled OpenCode 2.0.20 coordinate. Bun loads the shipped generated
+// transport (.opencode/plugins/pasture-lifecycle.ts), runs its setup against
+// a host context that reports version 2.0.20, and calls each registered hook
+// callback with the authentic committed capture bytes. The transport spawns
+// the built binary for real; nothing is stubbed between the callback and the
+// durable store. Each coordinate must then read back as exactly one durable
+// occurrence under the 2.0.20 contract, interpreted by the 2.0.20 runtime
+// profile, with a host version the transport carried from setup.
+func TestEnabledOpenCode2HandlersToDurableReadBack(t *testing.T) {
+	t.Parallel()
+	bun, err := exec.LookPath("bun")
+	require.NoError(t, err, "Bun is required to drive the generated OpenCode 2.0.20 transport the way the host does; enter the flake dev shell or install the flake-locked Bun package")
+
+	dir := t.TempDir()
+	binary := lifecycleBinary(t)
+	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	require.NoError(t, err)
+	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
+	transport := filepath.Join(root, ".opencode", "plugins", "pasture-lifecycle.ts")
+	_, err = os.Stat(transport)
+	require.NoError(t, err, "the shipped OpenCode transport is missing; run make generate")
+
+	// Bind this proof to the activation data it is cited by, before any call
+	// is driven. The fixture table above is the independent expectation: a
+	// capture citation that names another file, an enabled set that drifts,
+	// or a table row that drives the wrong capture all fail here.
+	entries, err := activation.OpenCode2_0_20()
+	require.NoError(t, err)
+	byEvent := make(map[model.ContractEventKind]activation.Entry, len(entries))
+	var enabledKinds []model.ContractEventKind
+	for _, entry := range entries {
+		byEvent[entry.Event] = entry
+		if entry.State == activation.Enabled {
+			enabledKinds = append(enabledKinds, entry.Event)
+		}
+	}
+	wantKinds := make([]model.ContractEventKind, 0, len(openCode2EnabledFixtures))
+	for _, row := range openCode2EnabledFixtures {
+		wantKinds = append(wantKinds, row.event)
+	}
+	require.Equal(t, wantKinds, enabledKinds, "the 2.0.20 enabled set must be exactly the nine coordinates this proof drives")
+	for _, row := range openCode2EnabledFixtures {
+		entry := byEvent[row.event]
+		require.Equal(t, activation.Enabled, entry.State, "%s must be enabled", row.native)
+		require.NotZero(t, entry.CaptureProof, "%s has no capture proof", row.native)
+		require.NotZero(t, entry.ProductionProof, "%s has no production proof", row.native)
+		require.Equal(t, filepath.Join(fixtureDir, row.fixture), filepath.Join(root, citedCapturePath(entry.CaptureProof.Name())),
+			"%s: the activation capture citation %q does not name the fixture this proof drives", row.native, entry.CaptureProof.Name())
+		require.Equal(t, "cmd/pasture/hook_lifecycle_production_test.go:"+t.Name()+"/"+row.native, entry.ProductionProof.Name(),
+			"%s: the activation production citation does not name this proof and subtest", row.native)
+	}
+
+	var calls strings.Builder
+	for _, row := range openCode2EnabledFixtures {
+		raw, err := os.ReadFile(filepath.Join(fixtureDir, row.fixture))
+		require.NoError(t, err)
+		require.True(t, json.Valid(raw), "fixture %s is not JSON", row.fixture)
+		fmt.Fprintf(&calls, "await invoke(%q, %s);\n", row.native, raw)
+	}
+	runner := filepath.Join(dir, "drive.ts")
+	script := fmt.Sprintf(`
+const {default: plugin} = await import(%q);
+const hooks = {};
+const register = (prefix) => ({ hook: async (name, cb) => { hooks[prefix + "." + name] = cb; return { dispose: async () => {} }; } });
+const ctx = {
+  app: { name: "opencode", version: "2.0.20" },
+  session: register("session"), tool: register("tool"), permission: register("permission"), shell: register("shell"),
+  event: { subscribe: () => (async function* () {})() },
+};
+const failures = [];
+const originalError = console.error;
+console.error = (...args) => { failures.push(args.join(" ")); };
+async function invoke(name, payload) {
+  const cb = hooks[name];
+  if (typeof cb !== "function") throw new Error("the transport registered no callback for " + name);
+  const before = failures.length;
+  try { await cb(payload); } catch (error) { failures.push(name + " threw: " + error); }
+  if (failures.length !== before) throw new Error(name + " did not proceed cleanly: " + failures.slice(before).join("; "));
+}
+try {
+  const cleanup = await plugin.setup(ctx);
+%s
+  await cleanup();
+} finally { console.error = originalError; }
+console.log("opencode 2.0.20 production drive passed");
+`, transport, calls.String())
+	require.NoError(t, os.WriteFile(runner, []byte(script), 0o600))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, bun, runner)
+	command.Env = discoveryChildEnv(map[string]*string{"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath,
+		"PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
+	out, err := command.CombinedOutput()
+	require.NoError(t, err, string(out))
+	require.Contains(t, string(out), "opencode 2.0.20 production drive passed")
+
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer tracker.Close()
+	require.NoError(t, tasks.RebuildLifecycleOccurrences(context.Background(), tracker))
+	reader, err := tasks.NewLifecycleReader(tracker)
+	require.NoError(t, err)
+	pageSize, err := model.NewPageSize(uint16(len(openCode2EnabledFixtures) + 1))
+	require.NoError(t, err)
+	page, err := reader.Records(context.Background(), model.OccurrenceQuery{Page: model.PageRequest{Size: pageSize}})
+	require.NoError(t, err)
+	require.Len(t, page.Records(), len(openCode2EnabledFixtures))
+
+	byKind := make(map[model.ContractEventKind]int, len(openCode2EnabledFixtures))
+	for _, record := range page.Records() {
+		byKind[record.Occurrence.Kind]++
+		require.Equal(t, registration.OpenCode2_0_20().Contract, record.Occurrence.RuntimeContract)
+		require.Equal(t, "2.0.20", record.Occurrence.Envelope.HostVersion)
+		require.Equal(t, model.HostVersionCallerSupplied, record.Occurrence.Envelope.HostVersionSource)
+		require.Len(t, record.Interpreted(), 1)
+		require.Equal(t, runtime.OpenCode2_0_20().ID(), record.Interpreted()[0].Contract())
+	}
+	for _, row := range openCode2EnabledFixtures {
+		t.Run(row.native, func(t *testing.T) {
+			require.Equal(t, 1, byKind[row.event], "coordinate %s must read back as exactly one durable occurrence", row.native)
+		})
+	}
+}
+
 // The two contract ids every durable record must carry, read from the
 // registration manifest and the runtime contract so a moved host version
 // moves every expectation in this file with it.

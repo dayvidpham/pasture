@@ -5,24 +5,60 @@ package activation
 
 // OpenCode capture proofs, ordinals 200-299.
 const (
-	CaptureProofOpenCodeSessionCreated    CaptureProof = 200
-	CaptureProofOpenCodeToolExecuteBefore CaptureProof = 201
+	CaptureProofOpenCodeSessionCreated       CaptureProof = 200
+	CaptureProofOpenCodeToolExecuteBefore    CaptureProof = 201
+	CaptureProofOpenCode2SessionPrompt       CaptureProof = 202
+	CaptureProofOpenCode2SessionContext      CaptureProof = 203
+	CaptureProofOpenCode2SessionTitle        CaptureProof = 204
+	CaptureProofOpenCode2SessionModelRequest CaptureProof = 205
+	CaptureProofOpenCode2SessionHttpRequest  CaptureProof = 206
+	CaptureProofOpenCode2SessionHttpResponse CaptureProof = 207
+	CaptureProofOpenCode2ToolExecuteBefore   CaptureProof = 208
+	CaptureProofOpenCode2ToolExecuteAfter    CaptureProof = 209
+	CaptureProofOpenCode2PermissionEvaluate  CaptureProof = 210
 )
 
 // openCodeGeneratedCaptureProofs lists the generated capture proof arms of opencode_targets.go by name, in ordinal order.
 var openCodeGeneratedCaptureProofs = []namedCaptureProof{
 	{name: "OpenCodeSessionCreated", proof: CaptureProofOpenCodeSessionCreated},
 	{name: "OpenCodeToolExecuteBefore", proof: CaptureProofOpenCodeToolExecuteBefore},
+	{name: "OpenCode2SessionPrompt", proof: CaptureProofOpenCode2SessionPrompt},
+	{name: "OpenCode2SessionContext", proof: CaptureProofOpenCode2SessionContext},
+	{name: "OpenCode2SessionTitle", proof: CaptureProofOpenCode2SessionTitle},
+	{name: "OpenCode2SessionModelRequest", proof: CaptureProofOpenCode2SessionModelRequest},
+	{name: "OpenCode2SessionHttpRequest", proof: CaptureProofOpenCode2SessionHttpRequest},
+	{name: "OpenCode2SessionHttpResponse", proof: CaptureProofOpenCode2SessionHttpResponse},
+	{name: "OpenCode2ToolExecuteBefore", proof: CaptureProofOpenCode2ToolExecuteBefore},
+	{name: "OpenCode2ToolExecuteAfter", proof: CaptureProofOpenCode2ToolExecuteAfter},
+	{name: "OpenCode2PermissionEvaluate", proof: CaptureProofOpenCode2PermissionEvaluate},
 }
 
 // OpenCode production proofs, ordinals 200-299.
 const (
-	ProductionProofOpenCodeSessionCreated    ProductionProof = 200
-	ProductionProofOpenCodeToolExecuteBefore ProductionProof = 201
+	ProductionProofOpenCodeSessionCreated       ProductionProof = 200
+	ProductionProofOpenCodeToolExecuteBefore    ProductionProof = 201
+	ProductionProofOpenCode2SessionPrompt       ProductionProof = 202
+	ProductionProofOpenCode2SessionContext      ProductionProof = 203
+	ProductionProofOpenCode2SessionTitle        ProductionProof = 204
+	ProductionProofOpenCode2SessionModelRequest ProductionProof = 205
+	ProductionProofOpenCode2SessionHttpRequest  ProductionProof = 206
+	ProductionProofOpenCode2SessionHttpResponse ProductionProof = 207
+	ProductionProofOpenCode2ToolExecuteBefore   ProductionProof = 208
+	ProductionProofOpenCode2ToolExecuteAfter    ProductionProof = 209
+	ProductionProofOpenCode2PermissionEvaluate  ProductionProof = 210
 )
 
 // openCodeGeneratedProductionProofs lists the generated production proof arms of opencode_targets.go by name, in ordinal order.
 var openCodeGeneratedProductionProofs = []namedProductionProof{
 	{name: "OpenCodeSessionCreated", proof: ProductionProofOpenCodeSessionCreated},
 	{name: "OpenCodeToolExecuteBefore", proof: ProductionProofOpenCodeToolExecuteBefore},
+	{name: "OpenCode2SessionPrompt", proof: ProductionProofOpenCode2SessionPrompt},
+	{name: "OpenCode2SessionContext", proof: ProductionProofOpenCode2SessionContext},
+	{name: "OpenCode2SessionTitle", proof: ProductionProofOpenCode2SessionTitle},
+	{name: "OpenCode2SessionModelRequest", proof: ProductionProofOpenCode2SessionModelRequest},
+	{name: "OpenCode2SessionHttpRequest", proof: ProductionProofOpenCode2SessionHttpRequest},
+	{name: "OpenCode2SessionHttpResponse", proof: ProductionProofOpenCode2SessionHttpResponse},
+	{name: "OpenCode2ToolExecuteBefore", proof: ProductionProofOpenCode2ToolExecuteBefore},
+	{name: "OpenCode2ToolExecuteAfter", proof: ProductionProofOpenCode2ToolExecuteAfter},
+	{name: "OpenCode2PermissionEvaluate", proof: ProductionProofOpenCode2PermissionEvaluate},
 }
