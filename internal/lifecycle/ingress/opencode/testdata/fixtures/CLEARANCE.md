@@ -97,8 +97,8 @@ on the user's machine, run at the user's direction by the team's supervisor
 `opencode run --standalone` once, in a throwaway project directory outside
 every repository (`--standalone` was required so the plugin's child process
 inherits the capture environment; the background service would not). Nothing
-captured reaches any remote before the user's acceptance for this batch, which
-is still owed (see below).
+captured reaches any remote before the user's acceptance for this batch; that
+acceptance was recorded on 2026-10-01 (see User acceptance below).
 
 Build kit: one `pasture` binary, sha256
 `3f74c750c0c7d7f77abf0f20f62877b45b95856a4e7ead7c2b3ebb005e15df24`,
@@ -1061,7 +1061,7 @@ rules above. The corpus test refuses the first two by shape.
 - `session_created_1_18_29.json` — session.created — sha256:71c8de3aadd8019b7e4123076625a0be6e3faaadd56a23c2a79c28a58f7ab591 (654 bytes)
 - `tool_execute_before_1_18_29.json` — tool.execute.before — sha256:4ac8bef2356d19aa2972e61d1f6e50fe1bf3a3ebf187382f6591a5630d548053 (150 bytes)
 
-### Second batch — OpenCode 2.0.20, nine fixtures (acceptance owed)
+### Second batch — OpenCode 2.0.20, nine fixtures — accepted 2026-10-01
 
 These nine fixtures are cleared authentic captures of the ten coordinates
 that fired. Committing them activates nothing: no 2.0.20 row of the activation
@@ -1111,16 +1111,19 @@ file is the clearance authority a fixture's provenance names by path: a fixture
 may name this file only after this section holds the acceptance, so that a
 reader who follows the path finds the grant recorded and never a blank form.
 
-### Second batch — OpenCode 2.0.20, acceptance owed
+### Second batch — OpenCode 2.0.20 — accepted 2026-10-01
 
-The nine 2.0.20 fixtures above are cleared and committed locally but NOT yet
-accepted. No verbatim user acceptance for this batch appears in this file yet;
-that line is owed by the user and is added only after they give it. Nothing
-in this batch reaches any remote before that line is written: no push has
-happened, and this worker has no push path. Every 2.0.20 row stays withheld
-(missing-fixture for the seven that did not fire, missing-acceptance for the
-nine cleared here, unclearable for the shell dump) and every OpenCode response
-capability stays none until that acceptance lands and a later change enables
+Accepted by the user on 2026-10-01, for the nine cleared fixtures above, after
+the clearance evidence was presented (fixture list, rules applied, secret-scan
+result, sizes not chosen, and the withheld coordinates). The user was asked
+for their acceptance wording, verbatim, and answered, verbatim:
+
+```
+ACCEPT
+```
+
+The seven coordinates that did not fire and the unclearable shell dump stay
+withheld; this acceptance enables no row by itself, and a later change enables
 a row from recorded proof.
 
 ## Pull request
