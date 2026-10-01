@@ -31,6 +31,30 @@ const OpenCodeHooksModulePath = ".opencode/plugins/pasture-lifecycle.ts"
 // until the host types a channel for it.
 const openCodeV2ThrowingHook = "tool.execute.before"
 
+// openCodeV2DenyHook is the one 2.0.20 hook that enforces a pasture Denial
+// through a host-effect mutation instead of a throw. The host's permission
+// assertion carries the operation under test as action plus resources: a
+// tool-sourced assertion names the tool operation (for example "edit" from
+// packages/core/src/tool/plugin/edit.ts, or the shell command name from
+// packages/core/src/tool/plugin/shell.ts) with the target paths or command
+// resources in resources[], and source { type: "tool", messageID, id }. The
+// plugin forwards that assertion verbatim to the gate and enforces the
+// returned decision only: on a Denial it assigns hookEvent.effect = "deny"
+// and hookEvent.message to the durable reason, and on any other answer it
+// leaves the host evaluation untouched. The assignment reaches the caller
+// because the host passes this same object through
+// hooks.trigger("permission", "evaluate", ...) and returns
+// { effect: event.effect, message: event.message, rules } from evaluateInput
+// (packages/core/src/permission.ts at the 2.0.20 tag); the evaluation type
+// declares effect and message mutable while sessionID stays readonly
+// (packages/plugin/src/promise/permission.ts at the 2.0.20 tag). The hook's
+// failure channel is never (the promise Hooks type defaults it), so a throw
+// here would be a host-flow defect rather than a refusal: the callback never
+// throws, it only assigns. Where a saved or configured host rule already
+// denied, evaluateInput returns early without firing the hook, so this
+// mutation runs only on the not-already-denied path.
+const openCodeV2DenyHook = "permission.evaluate"
+
 // deriveOpenCodeNativeToolNames returns, sorted and de-duplicated, exactly the
 // native tool names the OpenCode runtime contract declares — and
 // nothing else. It resolves every core orchestration operation against the
@@ -410,6 +434,36 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 		if _, isHook := hookByKind[event.Kind]; !isHook {
 			continue
 		}
+		if event.NativeName == openCodeV2DenyHook {
+			fmt.Fprintf(&helpers, `export async function %s(hookEvent) {
+  try {
+    const stdout = await invokeLifecycle(%s, %q, hookEvent);
+    const response = parseResponse(stdout, %q);
+    if (response?.decision === "deny") {
+      // ENFORCED through the host's typed permission channel. The host
+      // passes this same evaluation object through its hook trigger and
+      // returns the mutated effect and message to the permission caller, so
+      // assigning both here refuses the guarded action with the durable
+      // reason the gate recorded. The reason travels verbatim: it names the
+      // policy fact (for example which assignment rule forbids the action),
+      // and this transport neither rewrites it nor invents one. The hook's
+      // failure channel is never, so a throw would be a host-flow defect
+      // rather than a refusal: assign, never throw.
+      hookEvent.effect = "deny";
+      hookEvent.message = response.reason;
+    }
+    // Proceed (and the empty-body unevaluated belt) is a decision, not a
+    // mutation. Never write host-owned objects.
+  } catch (error) {
+    // No failure channel exists on this hook: report and continue without
+    // touching the host evaluation.
+    console.error("Pasture lifecycle gate consultation failed for %s: " + error);
+  }
+}
+
+`, helper, commandFor(event.NativeName), event.NativeName, event.NativeName, event.NativeName)
+			continue
+		}
 		if event.NativeName == openCodeV2ThrowingHook {
 			fmt.Fprintf(&helpers, `export async function %s(hookEvent) {
   const stdout = await invokeLifecycle(%s, %q, hookEvent);
@@ -417,8 +471,9 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
   // A deny response is a future capable-binary path, not the enforceable
   // deny: every 2.0.20 row derives CapabilityNone, so the shipped binary
   // downgrades denials to proceed with the unenforced reason before this
-  // plugin ever sees one. The enforceable channel is a host-effect mutation
-  // the permission hook does not perform. Throwing here stops the call
+  // plugin ever sees one. The permission hook enforces through its own
+  // typed channel instead, assigning the evaluation's effect and message.
+  // Throwing here stops the call
   // because the host types this hook's failure channel — only tool
   // execute.before may fail — and the promise adapter runs the callback
   // inside Effect.promise (packages/plugin/src/promise/adapter.ts at the
@@ -437,9 +492,10 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
     const stdout = await invokeLifecycle(%s, %q, hookEvent);
     const response = parseResponse(stdout, %q);
     if (response?.decision === "deny") {
-      // UNENFORCED: this hook's failure channel is never, so a throw would
-      // be a host-flow defect rather than a refusal, and the host-effect
-      // mutation that enforces a denial is a later transport change. Log the
+      // UNENFORCED on this hook: its failure channel is never, so a throw
+      // would be a host-flow defect rather than a refusal, and the
+      // host-effect mutation that enforces a denial belongs to the
+      // permission hook, not this one. Log the
       // reason the binary recorded and continue without touching host
       // objects; the receipt names the unenforced denial.
       console.error("Pasture returned a denial for %s that this transport does not enforce; the host continues. Reason: " + response.reason);
