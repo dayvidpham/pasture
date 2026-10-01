@@ -320,3 +320,62 @@ func Codex0_153_0() RuntimeContract {
 func PinnedContracts() []RuntimeContract {
 	return []RuntimeContract{ClaudeCode2_1_261(), OpenCode1_18_29(), Codex0_153_0()}
 }
+
+// OpenCode2_0_20 is the runtime contract for OpenCode at host version 2.0.20.
+// It classifies the same core operation surface as the 1.18.29 contract: the
+// v2 plugin API replaces hook registration while the native skill, task and
+// question tools keep their names, so the operation lowerings are unchanged.
+// The contract identity is version-bounded to 2.0.20 with a floor at that
+// release. It is constructed explicitly rather than through the production
+// registry because that registry still records the 1.18.29 profile; the
+// registry switches to this contract when the v2 transport, captures and
+// activation proofs land.
+func OpenCode2_0_20() RuntimeContract {
+	table := map[ir.OperationKind]operationLowering{
+		ir.OperationInvokeSkill: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("skill", []string{"name", "arguments"}, "the skill's result", "runs in the invoking agent's context"),
+		},
+		ir.OperationDelegateAssignment: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("task", []string{"description", "prompt"}, "the spawned task's result on completion", "child receives the delegated assignment context"),
+		},
+		ir.OperationContinueAssignment: {
+			class:    effects.RuntimeClassSemanticInstruction,
+			semantic: mustSemantic("this contract binds no native follow-up call: reconstruct the assignment as a fresh task with its complete retained role, evidence, decisions, and outstanding work"),
+		},
+		ir.OperationSendAssignmentMessage: {
+			class:    effects.RuntimeClassSemanticInstruction,
+			semantic: mustSemantic("this contract binds no native persistent-message call: carry the message content into the next task prompt for the target assignment"),
+		},
+		ir.OperationCollectAssignmentResults: {
+			class:    effects.RuntimeClassSemanticInstruction,
+			semantic: mustSemantic("this contract binds no native wait call: collect each task result inline as tasks return"),
+		},
+		ir.OperationStopAssignment: {
+			class:  effects.RuntimeClassUnsupported,
+			reason: "this contract binds no native close or stop call; stopping a running task has no modeled native semantics and must not be lowered to a fabricated close call",
+		},
+		ir.OperationRequestUserDecision: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("question", []string{"prompt", "options"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
+		},
+	}
+	host, err := ParseHostVersion("2.0.20")
+	if err != nil {
+		panic(err)
+	}
+	constraint, err := NewVersionFloor(host)
+	if err != nil {
+		panic(err)
+	}
+	id, err := ir.NewRuntimeContractID(ir.HarnessOpenCode, "opencode@2.0.20")
+	if err != nil {
+		panic(err)
+	}
+	contract, err := NewRuntimeContract(id, ir.HarnessOpenCode, constraint, buildCoreBindings(table))
+	if err != nil {
+		panic(err)
+	}
+	return contract
+}

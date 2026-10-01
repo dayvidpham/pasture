@@ -96,6 +96,22 @@ const (
 	EventCodexStop
 	EventCodexSessionEnd
 	EventCodexInterrupt
+	EventOpenCode2SessionPrompt
+	EventOpenCode2SessionContext
+	EventOpenCode2SessionCompaction
+	EventOpenCode2SessionGenerate
+	EventOpenCode2SessionTitle
+	EventOpenCode2SessionModelRequest
+	EventOpenCode2SessionHttpRequest
+	EventOpenCode2SessionHttpResponse
+	EventOpenCode2SessionExperimentalWsHandshake
+	EventOpenCode2SessionExperimentalWsSend
+	EventOpenCode2SessionExperimentalWsReceive
+	EventOpenCode2SessionRetry
+	EventOpenCode2ToolExecuteBefore
+	EventOpenCode2ToolExecuteAfter
+	EventOpenCode2PermissionEvaluate
+	EventOpenCode2ShellCreateBefore
 )
 
 const (
@@ -158,4 +174,6 @@ const (
 	FieldCodexToolUseID
 	FieldFileEvent
 	FieldCodexAgentID
+	FieldOpenCode2SessionID
+	FieldOpenCode2CallID
 )

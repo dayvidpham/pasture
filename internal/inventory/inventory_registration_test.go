@@ -8,16 +8,17 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
-// registrationManifests is the pinned lifecycle-event truth: the three
-// generated registration manifests. The inventory lifecycle-event rows are
-// emitted by hostcontractgen in the SAME contract walk that renders these
-// manifests, so agreement here is a belt-and-suspenders check on top of the
+// registrationManifests is the pinned lifecycle-event truth: the generated
+// registration manifests. The inventory lifecycle-event rows are emitted by
+// hostcontractgen in the SAME contract walk that renders these manifests, so
+// agreement here is a belt-and-suspenders check on top of the
 // by-construction emission — any divergence means a generated projection
 // drifted from the pinned contract.
 func registrationManifests() []registration.Manifest {
 	return []registration.Manifest{
 		registration.ClaudeCode2_1_261(),
 		registration.OpenCode1_18_29(),
+		registration.OpenCode2_0_20(),
 		registration.Codex0_153_0(),
 	}
 }
@@ -46,17 +47,24 @@ func TestLifecycleEventRowsAgreeWithRegistration(t *testing.T) {
 	}
 
 	// Every registration event must have its row (exhaustiveness / CI-reject).
+	// Expected keys are a SET: two manifests for one harness may declare one
+	// coordinate each (the v1 and v2 OpenCode contracts share the tool execute
+	// coordinates with version-specific payloads), and the inventory row for
+	// that coordinate is emitted once.
+	want := make(map[inventory.Key]bool)
 	for _, m := range registrationManifests() {
 		for _, e := range m.Entries() {
-			k := inventory.Key{Harness: m.Harness, Kind: inventory.KindLifecycleEvent, ID: e.NativeName}
-			if !have[k] {
-				t.Errorf(
-					"missing lifecycle-event row: harness=%q native=%q — registration authored it but the inventory table has no matching row; "+
-						"regenerate lifecycle_events.gen.go (make generate) so the same-walk emission covers every registration event",
-					m.Harness, e.NativeName)
-			}
-			delete(have, k)
+			want[inventory.Key{Harness: m.Harness, Kind: inventory.KindLifecycleEvent, ID: e.NativeName}] = true
 		}
+	}
+	for k := range want {
+		if !have[k] {
+			t.Errorf(
+				"missing lifecycle-event row: harness=%q native=%q — registration authored it but the inventory table has no matching row; "+
+					"regenerate lifecycle_events.gen.go (make generate) so the same-walk emission covers every registration event",
+				k.Harness, k.ID)
+		}
+		delete(have, k)
 	}
 
 	// No lifecycle-event row may exist without a backing registration event.

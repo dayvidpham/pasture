@@ -40,6 +40,7 @@ func TestInventoryLifecycleRowsAgreeWithPinnedContracts(t *testing.T) {
 	pinned := []harnessContract{
 		{ir.HarnessClaudeCode, hostcontract.ClaudeCode2_1_261()},
 		{ir.HarnessOpenCode, hostcontract.OpenCode1_18_29()},
+		{ir.HarnessOpenCode, hostcontract.OpenCode2_0_20()},
 		{ir.HarnessCodex, hostcontract.Codex0_153_0()},
 	}
 	var derived []string
@@ -48,6 +49,20 @@ func TestInventoryLifecycleRowsAgreeWithPinnedContracts(t *testing.T) {
 			derived = append(derived, lifecycleRowKey(hc.harness, ev.Name))
 		}
 	}
+	// Two OpenCode contracts share two tool coordinates with version-specific
+	// payloads; the inventory capability is the coordinate itself, emitted
+	// once. Deduplicate here exactly as the generator walk does so the
+	// re-derivation agrees with the committed table.
+	seen := map[string]bool{}
+	unique := derived[:0]
+	for _, key := range derived {
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		unique = append(unique, key)
+	}
+	derived = unique
 
 	// Collect the committed inventory table's lifecycle-event rows.
 	table, err := inventory.Table()
@@ -167,6 +182,28 @@ func TestGeneratedManifestsCarryRuntimeFailureModesVerbatim(t *testing.T) {
 				counts[arm], arm, wantCount)
 		}
 	}
+
+	// The v2 OpenCode contract models only Plugin.define hooks, every one an
+	// awaited named callback: all sixteen rows stay throw-fail-fast with no
+	// observe-only rows.
+	openCode2 := string(renderProviderManifest(
+		hostcontract.OpenCode2_0_20(), "OpenCode2_0_20", "ir.HarnessOpenCode"))
+	counts2 := map[string]int{}
+	for _, line := range strings.Split(openCode2, "\n") {
+		index := strings.Index(line, "Failure:")
+		if index < 0 {
+			continue
+		}
+		rest := line[index+len("Failure:"):]
+		end := strings.IndexAny(rest, ",}")
+		if end < 0 {
+			t.Fatalf("cannot read the failure arm out of rendered v2 row %q", line)
+		}
+		counts2[rest[:end]]++
+	}
+	if len(counts2) != 1 || counts2["pastureruntime.FailureThrowFailFast"] != 16 {
+		t.Errorf("OpenCode v2 rows use failure arms %v, want exactly sixteen throw-fail-fast rows", counts2)
+	}
 }
 
 // TestGeneratedNamesFollowTheContractVersion pins the moved-ceiling rule as a
@@ -187,6 +224,7 @@ func TestGeneratedNamesFollowTheContractVersion(t *testing.T) {
 	}{
 		{hostcontract.ClaudeCode2_1_261(), "internal/lifecycle/registration/claude_TOKEN.gen.go", "internal/lifecycle/ingress/claude/payload_TOKEN.gen.go", "func ClaudeCodeTOKEN() Manifest"},
 		{hostcontract.OpenCode1_18_29(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCodeTOKEN() Manifest"},
+		{hostcontract.OpenCode2_0_20(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCodeTOKEN() Manifest"},
 		{hostcontract.Codex0_153_0(), "internal/lifecycle/registration/codex_TOKEN.gen.go", "internal/lifecycle/ingress/codex/payload_TOKEN.gen.go", "func CodexTOKEN() Manifest"},
 	} {
 		token := versionToken(tc.contract)
