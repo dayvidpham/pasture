@@ -428,6 +428,22 @@ func openCode2LifecycleMappings() map[OpenCode2LifecycleEvent]LifecycleEventMapp
 	}
 }
 
+// OpenCode2PermissionEvaluateCited builds the v2 permission.evaluate gate
+// with the given response-channel citation, through the same derivation the
+// pinned profile uses. The pinned profile passes no citation and derives
+// none; supplying the clearance citation upgrades that one row with no
+// derivation change, so the eventual flip is data. Encoder and report proofs
+// exercise this constructor rather than a hand-built row, so the refusal
+// they rehearse is the one production will emit.
+func OpenCode2PermissionEvaluateCited(source string) (LifecycleEventMapping, error) {
+	evidenced := openCode2NamedMapping(OpenCode2EventPermissionEvaluate, FailureEvidence{Source: source}, openCode2SessionIdentity)
+	derived, err := newLifecycleContract(OpenCode2_0_20(), []int{1}, map[int]LifecycleEventMapping{1: evidenced})
+	if err != nil {
+		return LifecycleEventMapping{}, err
+	}
+	return derived.Mapping(1)
+}
+
 // OpenCode2_0_20Lifecycle returns the immutable OpenCode 2.0.20 lifecycle
 // table bound to the same exact host version and RuntimeContractID as
 // OpenCode2_0_20.
