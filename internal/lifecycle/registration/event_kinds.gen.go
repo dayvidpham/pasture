@@ -96,6 +96,7 @@ const (
 	EventCodexStop
 	EventCodexSessionEnd
 	EventCodexInterrupt
+	EventOpenCode2SessionCreated
 	EventOpenCode2SessionPrompt
 	EventOpenCode2SessionContext
 	EventOpenCode2SessionCompaction

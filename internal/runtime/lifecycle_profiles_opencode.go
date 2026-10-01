@@ -237,17 +237,17 @@ func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
 	return mustLifecycleContract(OpenCode1_18_29(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings())
 }
 
-// OpenCode2LifecycleEvent is the closed Plugin.define hook catalog for OpenCode
-// 2.0.20. It covers the hook domains the 2.0.20 source declares and the
-// generated v2 transport registers: twelve session hooks, two tool hooks, one
-// permission hook and one shell hook. The provider-SDK hooks (aisdk sdk,
+// OpenCode2LifecycleEvent is the closed event catalog for OpenCode 2.0.20: one
+// session-start observation plus the Plugin.define hook surface the 2.0.20
+// source declares. It covers sixteen hooks (twelve session hooks, two tool
+// hooks, one permission hook and one shell hook) and the session.created bus
+// event that writes the session claim. The provider-SDK hooks (aisdk sdk,
 // language) are provider wiring rather than lifecycle gates and are not
-// modeled here. The server event stream (ctx.event.subscribe) is the v1 SSE
-// observation surface under a new subscription call and carries no gate; no
-// v2 row models it until an authentic capture proves a distinct occurrence
-// shape.
+// modeled here.
 //
-// Native names are the dotted hook coordinates the host triggers: the domain
+// Native names are the dotted coordinates the host emits: the session.created
+// bus event carries the type from SessionEvent.Created in
+// packages/schema/src/session-event.ts, and each hook coordinate is the domain
 // the plugin registers through, a dot, and the hook name from the 2.0.20
 // plugin types. Session coordinates come from SessionHooks in
 // packages/plugin/src/promise/session.ts, tool coordinates from ToolHooks in
@@ -255,10 +255,22 @@ func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
 // PermissionHooks in packages/plugin/src/promise/permission.ts, and the shell
 // coordinate from ShellHooks in packages/plugin/src/promise/shell.ts (all at
 // the v2.0.20 tag). Two coordinates repeat v1 native names
-// ("tool.execute.before", "tool.execute.after"); they are distinct typed
-// events here with version-qualified symbols because their v2 payload shapes
-// differ (v2 carries tool/sessionID/agent/messageID/id/input where v1 carried
-// tool/sessionID/callID plus output args).
+// ("session.created", "tool.execute.before", "tool.execute.after" — three in
+// all); they are distinct typed events here with version-qualified symbols
+// because their v2 payload shapes differ (the v2 session.created bus payload
+// carries a top-level sessionID where v1 carried event.properties.sessionID,
+// and v2 tool hooks carry tool/sessionID/agent/messageID/id/input where v1
+// carried tool/sessionID/callID plus output args).
+//
+// Identity follows the host's declared payload fields: every 2.0.20 session
+// payload type declares a readonly sessionID, both ToolHooks declare
+// sessionID plus the call id, and PermissionEvaluation declares sessionID, so
+// every row below carries the session identity and both tool rows also carry
+// the call identity. Only ShellCreateBefore declares no session field and
+// carries none. These bindings are source-declared, not capture-proved: the
+// committed OpenCode 2.0.20 capture sitting (with inventory, substitution,
+// secret scan and clearance) upgrades them to proved coordinates when it
+// lands.
 //
 // The permission evaluate hook is the one v2 channel through which a plugin
 // mutation reaches the host decision. The 2.0.20 host computes the ruleset
@@ -266,15 +278,17 @@ func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
 // returns { effect: event.effect, message: event.message, rules } from
 // evaluateInput in packages/core/src/permission.ts, so a plugin that sets
 // event.effect to "deny" is honoured on the path where no saved or configured
-// rule already denied (that path returns early without firing the hook). The
-// live refusal bytes and exit for that denial are not recorded here; they
-// await an authentic v2.0.20 capture. Every row below therefore carries no
+// rule already denied (that path returns early without firing the hook). That
+// channel is source-cited here, not capture-measured: the live refusal bytes
+// and exit for that denial are established by the committed OpenCode 2.0.20
+// capture sitting named above. Every row below therefore carries no
 // response-channel evidence and derives CapabilityNone, exactly like the v1
 // rows, until that capture lands.
 type OpenCode2LifecycleEvent uint8
 
 const (
-	OpenCode2EventSessionPrompt OpenCode2LifecycleEvent = iota + 1
+	OpenCode2EventSessionCreated OpenCode2LifecycleEvent = iota + 1
+	OpenCode2EventSessionPrompt
 	OpenCode2EventSessionContext
 	OpenCode2EventSessionCompaction
 	OpenCode2EventSessionGenerate
@@ -294,6 +308,7 @@ const (
 )
 
 var openCode2LifecycleEventNames = [...]string{
+	"session.created",
 	"session.prompt",
 	"session.context",
 	"session.compaction",
@@ -329,7 +344,7 @@ func (e OpenCode2LifecycleEvent) String() string { return e.NativeName() }
 // by codegen. The returned slice is a fresh copy.
 func OpenCode2LifecycleEvents() []OpenCode2LifecycleEvent {
 	events := make([]OpenCode2LifecycleEvent, 0, int(openCode2LifecycleEventLimit)-1)
-	for event := OpenCode2EventSessionPrompt; event < openCode2LifecycleEventLimit; event++ {
+	for event := OpenCode2EventSessionCreated; event < openCode2LifecycleEventLimit; event++ {
 		events = append(events, event)
 	}
 	return events
@@ -357,23 +372,41 @@ func openCode2NamedMapping(event OpenCode2LifecycleEvent, eventIdentities ...Nat
 	}
 }
 
+func openCode2ObservationMapping(event OpenCode2LifecycleEvent, eventIdentities ...NativeIdentityField) LifecycleEventMapping {
+	return LifecycleEventMapping{
+		nativeName:      event.NativeName(),
+		semantic:        SemanticObservation,
+		surface:         SurfaceOpenCodeCatchAllSSE,
+		blocking:        NonBlocking,
+		identities:      append([]NativeIdentityField(nil), eventIdentities...),
+		mutation:        MutationNone,
+		order:           OrderObservationStream,
+		reconciliation:  ReconcileNone,
+		failure:         FailureObserveOnly,
+		declaredFailure: FailureObserveOnly,
+		stopLoop:        StopLoopNotApplicable,
+	}
+}
+
 func openCode2LifecycleMappings() map[OpenCode2LifecycleEvent]LifecycleEventMapping {
 	named := openCode2NamedMapping
+	observe := openCode2ObservationMapping
 	return map[OpenCode2LifecycleEvent]LifecycleEventMapping{
-		OpenCode2EventSessionPrompt:                  named(OpenCode2EventSessionPrompt),
-		OpenCode2EventSessionContext:                 named(OpenCode2EventSessionContext),
-		OpenCode2EventSessionCompaction:              named(OpenCode2EventSessionCompaction),
-		OpenCode2EventSessionGenerate:                named(OpenCode2EventSessionGenerate),
-		OpenCode2EventSessionTitle:                   named(OpenCode2EventSessionTitle),
-		OpenCode2EventSessionModelRequest:            named(OpenCode2EventSessionModelRequest),
-		OpenCode2EventSessionHTTPRequest:             named(OpenCode2EventSessionHTTPRequest),
-		OpenCode2EventSessionHTTPResponse:            named(OpenCode2EventSessionHTTPResponse),
-		OpenCode2EventSessionExperimentalWSHandshake: named(OpenCode2EventSessionExperimentalWSHandshake),
-		OpenCode2EventSessionExperimentalWSSend:      named(OpenCode2EventSessionExperimentalWSSend),
-		OpenCode2EventSessionExperimentalWSReceive:   named(OpenCode2EventSessionExperimentalWSReceive),
-		OpenCode2EventSessionRetry:                   named(OpenCode2EventSessionRetry),
+		OpenCode2EventSessionCreated:                 observe(OpenCode2EventSessionCreated, openCode2SessionIdentity),
+		OpenCode2EventSessionPrompt:                  named(OpenCode2EventSessionPrompt, openCode2SessionIdentity),
+		OpenCode2EventSessionContext:                 named(OpenCode2EventSessionContext, openCode2SessionIdentity),
+		OpenCode2EventSessionCompaction:              named(OpenCode2EventSessionCompaction, openCode2SessionIdentity),
+		OpenCode2EventSessionGenerate:                named(OpenCode2EventSessionGenerate, openCode2SessionIdentity),
+		OpenCode2EventSessionTitle:                   named(OpenCode2EventSessionTitle, openCode2SessionIdentity),
+		OpenCode2EventSessionModelRequest:            named(OpenCode2EventSessionModelRequest, openCode2SessionIdentity),
+		OpenCode2EventSessionHTTPRequest:             named(OpenCode2EventSessionHTTPRequest, openCode2SessionIdentity),
+		OpenCode2EventSessionHTTPResponse:            named(OpenCode2EventSessionHTTPResponse, openCode2SessionIdentity),
+		OpenCode2EventSessionExperimentalWSHandshake: named(OpenCode2EventSessionExperimentalWSHandshake, openCode2SessionIdentity),
+		OpenCode2EventSessionExperimentalWSSend:      named(OpenCode2EventSessionExperimentalWSSend, openCode2SessionIdentity),
+		OpenCode2EventSessionExperimentalWSReceive:   named(OpenCode2EventSessionExperimentalWSReceive, openCode2SessionIdentity),
+		OpenCode2EventSessionRetry:                   named(OpenCode2EventSessionRetry, openCode2SessionIdentity),
 		OpenCode2EventToolExecuteBefore:              named(OpenCode2EventToolExecuteBefore, openCode2SessionIdentity, openCode2CallIdentity),
-		OpenCode2EventToolExecuteAfter:               named(OpenCode2EventToolExecuteAfter),
+		OpenCode2EventToolExecuteAfter:               named(OpenCode2EventToolExecuteAfter, openCode2SessionIdentity, openCode2CallIdentity),
 		OpenCode2EventPermissionEvaluate:             named(OpenCode2EventPermissionEvaluate, openCode2SessionIdentity),
 		OpenCode2EventShellCreateBefore:              named(OpenCode2EventShellCreateBefore),
 	}

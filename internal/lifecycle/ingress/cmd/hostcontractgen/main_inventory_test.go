@@ -183,9 +183,9 @@ func TestGeneratedManifestsCarryRuntimeFailureModesVerbatim(t *testing.T) {
 		}
 	}
 
-	// The v2 OpenCode contract models only Plugin.define hooks, every one an
-	// awaited named callback: all sixteen rows stay throw-fail-fast with no
-	// observe-only rows.
+	// The v2 OpenCode contract models sixteen Plugin.define hooks plus the
+	// session.created bus observation: sixteen awaited named callbacks stay
+	// throw-fail-fast and the one catch-all observation stays observe-only.
 	openCode2 := string(renderProviderManifest(
 		hostcontract.OpenCode2_0_20(), "OpenCode2_0_20", "ir.HarnessOpenCode"))
 	counts2 := map[string]int{}
@@ -201,8 +201,17 @@ func TestGeneratedManifestsCarryRuntimeFailureModesVerbatim(t *testing.T) {
 		}
 		counts2[rest[:end]]++
 	}
-	if len(counts2) != 1 || counts2["pastureruntime.FailureThrowFailFast"] != 16 {
-		t.Errorf("OpenCode v2 rows use failure arms %v, want exactly sixteen throw-fail-fast rows", counts2)
+	want2 := map[string]int{
+		"pastureruntime.FailureThrowFailFast": 16,
+		"pastureruntime.FailureObserveOnly":   1,
+	}
+	if len(counts2) != len(want2) {
+		t.Fatalf("OpenCode v2 rows use failure arms %v, want exactly %v", counts2, want2)
+	}
+	for arm, wantCount := range want2 {
+		if counts2[arm] != wantCount {
+			t.Errorf("OpenCode v2 rows carry %d %s rows, want %d", counts2[arm], arm, wantCount)
+		}
 	}
 }
 
