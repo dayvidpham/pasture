@@ -290,9 +290,10 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 // and the fault record) rather than an occurrence; admitted releases pin the
 // full occurrence path.
 //
-// WHAT IT VISITS: the six banner rows below: one resolving banner (the
+// WHAT IT VISITS: the seven banner rows below: one resolving banner (the
 // recorded release, withheld by admission), three banners that record an
-// occurrence, and two banners the probe refuses.
+// occurrence, one banner the grammar accepts but release parsing refuses,
+// and two banners the grammar refuses.
 // WHAT IT DOES NOT READ: the live host or its --version output; the banners
 // are constructed controls, and only the `opencode v2.0.20` string repeats an
 // observed banner.
@@ -312,6 +313,7 @@ func TestOpenCodeV2BannerParsesProductPrefix(t *testing.T) {
 		{name: "product banner on an admitted release records the occurrence", banner: "opencode 1.19.1", wantOccurrence: "1.19.1"},
 		{name: "bare release still accepted", banner: "1.19.1", wantOccurrence: "1.19.1"},
 		{name: "product banner with suffix", banner: "opencode v2.1.0-beta.1+build.3", wantOccurrence: "2.1.0-beta.1+build.3"},
+		{name: "lone product name matches the grammar but is not a release", banner: "opencode", wantFault: "invalid release number"},
 		{name: "prose after the product name is refused", banner: "opencode has left the building", wantFault: "does not match"},
 		{name: "trailing token after the release is refused", banner: "opencode v2.0.20 extra", wantFault: "does not match"},
 	} {

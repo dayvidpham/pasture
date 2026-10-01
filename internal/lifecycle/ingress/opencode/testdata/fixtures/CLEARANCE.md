@@ -295,12 +295,17 @@ spawn appends it as `--host-version` unless that invocation already names its
 own (the `session.created` observation keeps its occurrence-local bus-data
 version where present). When the context reports no usable version nothing is
 sent and the binary resolves the version itself, so no version is ever
-invented. The binary's version probe accepts the real v2 banner alongside the
+invented. Only a release-shaped report is captured: a source build reports
+"local" and unconfigured metadata reports "unknown", neither of which is a
+release, so neither is forwarded and the probe resolves instead. The
+`session.created` bus version is held to the same shape. The binary's
+version probe accepts the real v2 banner alongside the
 bare release (`opencode v2.0.20` as well as `2.0.20`); anything else is still
 refused. The committed `.opencode/plugins/pasture-lifecycle.ts` is now sha256
-`22ff011405b13ba07a44fc1c867f82f73134db61b97c6a21b35583405049cc1f`.
-Its sources remain `internal/codegen/opencode_hooks.go` and
-`cmd/pasture/hook_lifecycle_host_version.go`. This is a transport identity,
+`3df44c5bafc464a76ea0177119ede4bf57a94e9e9280042ad269af6ed64450f8`.
+Its source remains `internal/codegen/opencode_hooks.go`; the probe change
+lives in `cmd/pasture/hook_lifecycle_host_version.go`. This is a transport
+identity,
 not a new capture-kit or fixture identity. A reader who hashes the shipped
 plugin gets the digest above.
 

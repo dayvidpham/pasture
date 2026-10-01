@@ -569,6 +569,8 @@ func TestOpenCodeCreationVersionIsOccurrenceLocal(t *testing.T) {
 	runOpenCodeV2SetupModule(t, module, `[
   { type: "session.created", data: { sessionID: "constructed", version: "2.0.20" } },
   { type: "session.created", data: { sessionID: "constructed", version: " local " } },
+  { type: "session.created", data: { sessionID: "constructed", version: "local" } },
+  { type: "session.created", data: { sessionID: "constructed", version: "unknown" } },
   { type: "session.created", data: { sessionID: "constructed", version: "2.1.0+build" } },
   { type: "session.created", data: { sessionID: "constructed" } },
   { type: "session.created", data: { sessionID: "constructed", version: "" } },
@@ -581,19 +583,20 @@ func TestOpenCodeCreationVersionIsOccurrenceLocal(t *testing.T) {
   { type: "session.created", sessionID: "constructed", version: "2.0.20" },
 ]`, `
 const base = ["hook", "lifecycle", "--harness", "opencode", "--event"];
-await waitForCalls(12);
-const usable = (version) => typeof version === "string" && version.trim() !== "";
+await waitForCalls(14);
+const releaseShaped = (version) => typeof version === "string" && /^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(version.trim());
 const created = calls.filter((call) => call.argv[5] === "session.created");
-assert.equal(created.length, 12, "every bus script entry spawns; only the last carries a flat decoy version the helper must ignore");
+assert.equal(created.length, 14, "every bus script entry spawns; only the last carries a flat decoy version the helper must ignore");
 for (const call of created) {
   const version = call.payload.data?.version;
-  // A usable bus version rides occurrence-local; anything else falls back to
-  // the setup-observed host version, so every observation still names the
-  // host that sent it without inventing one.
+  // A release-shaped bus version rides occurrence-local; anything else
+  // (blank, non-string, or a non-release self-report such as "local")
+  // falls back to the setup-observed host version, so no invocation
+  // forwards a value the binary cannot route.
   const expected = [...base, "session.created"];
-  if (usable(version)) expected.push("--host-version", version);
+  if (releaseShaped(version)) expected.push("--host-version", version.trim());
   else expected.push("--host-version", "2.0.20");
-  assert.deepEqual(call.argv, expected, "creation occurrence selects original usable metadata first, then the setup-observed host version");
+  assert.deepEqual(call.argv, expected, "creation occurrence selects original release-shaped metadata first, then the setup-observed host version");
 }
 const decoy = created[created.length - 1];
 assert.equal(decoy.payload.version, "2.0.20", "the flat decoy version rides top-level");
@@ -610,9 +613,10 @@ assert.deepEqual(calls.at(-1).argv, [...base, "session.context", "--host-version
 }
 
 // TestOpenCodeHookVersionAbsentWithoutHostReport proves the setup-observed
-// version is never invented: a setup whose context carries no usable
-// ctx.app.version sends no --host-version flag, leaving the binary to resolve
-// the version itself, and a later setup with a version still captures it.
+// version is never invented and never a non-release: a setup whose context
+// carries no usable ctx.app.version sends no --host-version flag, leaving the
+// binary to resolve the version itself, and a later setup with a version
+// still captures it.
 func TestOpenCodeHookVersionAbsentWithoutHostReport(t *testing.T) {
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
@@ -658,9 +662,19 @@ try {
   await hooks["tool.execute.before"](payload);
   assert.equal(calls.at(-1).argv.includes("--host-version"), false, "a setup with a blank version must not send it");
   await cleanup();
+  for (const nonRelease of ["local", "unknown", "2.0"]) {
+    cleanup = await plugin.setup(baseCtx({ name: "opencode", version: nonRelease }));
+    await hooks["tool.execute.before"](payload);
+    assert.equal(calls.at(-1).argv.includes("--host-version"), false, "a setup with non-release " + nonRelease + " must not bypass the probe");
+    await cleanup();
+  }
   cleanup = await plugin.setup(baseCtx({ name: "opencode", version: "2.0.20" }));
   await hooks["tool.execute.before"](payload);
   assert.deepEqual(calls.at(-1).argv.slice(6), ["--host-version", "2.0.20"], "a setup with a usable version carries it");
+  await cleanup();
+  cleanup = await plugin.setup(baseCtx({ name: "opencode", version: "  2.0.21  " }));
+  await hooks["tool.execute.before"](payload);
+  assert.deepEqual(calls.at(-1).argv.slice(6), ["--host-version", "2.0.21"], "a padded release is carried trimmed");
   await cleanup();
   console.log("absent-version assertions passed");
 } finally { Bun.spawn = originalSpawn; }

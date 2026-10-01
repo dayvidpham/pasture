@@ -245,12 +245,28 @@ async function drain(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<s
 // previous capture instead of reusing it.
 let pastureHostVersionArgs = [];
 
+// A host self-report is carried only when it is release-shaped: an optional
+// leading "v", a MAJOR.MINOR.PATCH triple, and optional suffix metadata. The
+// running host reports "local" for source builds and "unknown" when its
+// metadata is unconfigured, and neither is a release: forwarding one would
+// bypass the version probe with a value the binary cannot route, silently
+// selecting the oldest contract row for a newer host's payloads. This is a
+// coarse pre-filter, not the authority — the binary still parses strictly and
+// faults honestly on anything it cannot admit. Anything not release-shaped is
+// cleared so the probe resolves.
+function pastureReleaseShaped(value) {
+  return typeof value === "string" && /^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(value.trim());
+}
+
 async function invokeLifecycle(command, event, value) {
   const binary = process.env.%s ?? "pasture";
   // Carry the setup-observed host version unless this invocation already
   // names its own (the session.created observation does, from its bus data).
-  // A later host stays admissible: the binary admits its recorded baseline
-  // and every later release, so forwarding the running release never narrows it.
+  // Both sources are release-shape-gated where captured, so an unflagged
+  // command means no usable report existed and the binary resolves the
+  // version itself. A later host stays admissible: the binary admits its
+  // recorded baseline and every later release, so forwarding the running
+  // release never narrows it.
   const effective = command.includes("--host-version") || pastureHostVersionArgs.length === 0 ? command : [...command, ...pastureHostVersionArgs];
   const child = Bun.spawn({
     cmd: [binary, ...effective],
@@ -541,9 +557,11 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
     // beside sessionID there (packages/schema/src/session-event.ts for the
     // Created data shape and packages/schema/src/event.ts for the durable
     // envelope, both at the 2.0.20 tag). Do not cache it for later callbacks
-    // or change the original payload.
-    const version = busEvent?.data?.version;
-    if (typeof version === "string" && version.trim() !== "") command.push("--host-version", version);
+    // or change the original payload. A non-release bus version (a source
+    // build reports "local") is not carried: the setup-observed version is
+    // the fallback, and the probe resolves when neither is release-shaped.
+    const busVersion = typeof busEvent?.data?.version === "string" ? busEvent.data.version.trim() : "";
+    if (pastureReleaseShaped(busVersion)) command.push("--host-version", busVersion);
 `
 		}
 		fmt.Fprintf(&helpers, `export async function %s(busEvent) {
@@ -563,10 +581,12 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
     // the promise Context at packages/plugin/src/promise/plugin.ts). Capture
     // it once and carry it on every lifecycle invocation, so no hook depends
     // on spawning the host for --version. The value is the host's
-    // self-report, never an invented default: when it is absent or blank the
-    // capture is cleared and the binary resolves the version itself.
-    const observedVersion = ctx?.app?.version;
-    pastureHostVersionArgs = typeof observedVersion === "string" && observedVersion.trim() !== "" ? ["--host-version", observedVersion] : [];
+    // self-report, never an invented default: only a release-shaped report is
+    // captured (a source build reports "local", which is not a release), and
+    // otherwise the capture is cleared and the binary resolves the version
+    // itself.
+    const observedVersion = typeof ctx?.app?.version === "string" ? ctx.app.version.trim() : "";
+    pastureHostVersionArgs = pastureReleaseShaped(observedVersion) ? ["--host-version", observedVersion] : [];
     const registrations = [];
 `)
 	for _, event := range manifest {
