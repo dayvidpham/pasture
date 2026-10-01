@@ -580,14 +580,12 @@ func TestReaderGateOutcomesOnEveryHarness(t *testing.T) {
 // ─── the per-row store faults ────────────────────────────────────────────────
 
 // readerFaultRow names one production-producible gate-read fault, the diagnostic
-// token its stderr line must carry, an optional token that distinguishes the row
-// from its siblings at the same stage, and the real store fixture that produces
+// token its stderr line must carry, and the real store fixture that produces
 // it.
 type readerFaultRow struct {
-	name   string
-	token  string
-	detail string
-	seed   func(t *testing.T, dbPath string, harness ir.HarnessID, session string)
+	name  string
+	token string
+	seed  func(t *testing.T, dbPath string, harness ir.HarnessID, session string)
 }
 
 // readerFaultRows are the production-producible gate-read faults whose damaged
@@ -604,6 +602,10 @@ type readerFaultRow struct {
 // cannot be made deterministic inside the fixed 5s hook-invocation budget on a
 // loaded runner; it is therefore pinned at the handler layer where the budget
 // is injectable, by TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite.
+// What the built column gives up by that removal: NO built subject exercises
+// an ownership-read fault anymore. The byte-limit row was the only row
+// carrying "gate ownership read", the only built GateReadIntegrityError, and
+// the only built fail-closed cell for one.
 func readerFaultRows() []readerFaultRow {
 	return []readerFaultRow{
 		{name: "malformed-claim", token: "gate claim read", seed: seedReaderMalformedClaim},
@@ -684,16 +686,10 @@ func TestReaderGateFaultRowsReachTheHostFaultPath(t *testing.T) {
 				assert.Equal(t, string(continuation.Bytes()), run.Continuation)
 				assert.Equal(t, 0, run.ExitCode, "a fail-open fault never refuses the host")
 				assert.Contains(t, run.Stderr, row.token, "the one diagnostic must name this row's stage")
-				if row.detail != "" {
-					assert.Contains(t, run.Stderr, row.detail, "the diagnostic must name what distinguishes this row")
-				}
 				records := readFaultRecords(t, run.FaultDir)
 				require.Len(t, records, 1, "a fault writes exactly one record line")
 				assert.Equal(t, "fault", records[0]["outcomeClass"])
 				assert.Contains(t, fmt.Sprint(records[0]["cause"]), row.token, "the durable record must agree with the host-facing diagnostic")
-				if row.detail != "" {
-					assert.Contains(t, fmt.Sprint(records[0]["cause"]), row.detail, "the durable record must agree on the row's distinguishing token")
-				}
 				assert.Empty(t, readerConsultation(t, dbPath), "a fault commits no consultation")
 			})
 		}
@@ -737,9 +733,6 @@ func TestReaderGateFaultRowsFailClosedOnlyWhereEvidenced(t *testing.T) {
 				assert.Equal(t, wantContinuation, run.Continuation)
 				assert.Equal(t, wantExit, run.ExitCode)
 				assert.Contains(t, run.Stderr, row.token)
-				if row.detail != "" {
-					assert.Contains(t, run.Stderr, row.detail)
-				}
 				records := readFaultRecords(t, run.FaultDir)
 				require.Len(t, records, 1)
 				assert.Empty(t, readerConsultation(t, dbPath), "a fault commits no consultation")
@@ -849,6 +842,10 @@ func runReaderDeadlineRow(t *testing.T, binary string, harness readerHarnessCase
 // cannot be made deterministic inside the fixed 5s hook-invocation budget on a
 // loaded runner; it is therefore pinned at the handler layer where the budget
 // is injectable, by TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite.
+// What the built column gives up by that removal: NO built subject exercises
+// an ownership-read fault anymore. The byte-limit row was the only row
+// carrying "gate ownership read", the only built GateReadIntegrityError, and
+// the only built fail-closed cell for one.
 //
 // WHAT IT VISITS: the two integrity rows whose damaged state cannot persist in a
 // store that opens.

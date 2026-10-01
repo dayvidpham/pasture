@@ -936,7 +936,7 @@ func TestBothCommittingSurfacesRunTheSameGate(t *testing.T) {
 // the exported entry points and need the same real claim, and a second copy of
 // this writer's invocation could seed a different claim shape than the gate is
 // proven against.
-func ClaimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
+func ClaimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session string) provenance.ActorID {
 	t.Helper()
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -948,6 +948,7 @@ func ClaimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session
 		[]model.NativeBinding{{Kind: model.BindingSession, Value: session}},
 		tasks.ActorClaim(agent.ID.String()), gateClock{},
 	))
+	return agent.ID
 }
 
 func sessionStartEventKind(harness ir.HarnessID) model.ContractEventKind {
@@ -964,7 +965,7 @@ func sessionStartEventKind(harness ir.HarnessID) model.ContractEventKind {
 // ─── the aggregate byte bound, over a real store ─────────────────────────────
 
 // gateByteLimitGenesisAuthority resolves the one bootstrap authority every
-// byte-limit fixture cites, so the seeder cannot drift from production on the
+// gate fixture cites, so neither seeder can drift from the other on the
 // genesis operation ID or its result slot.
 func gateByteLimitGenesisAuthority(t *testing.T, tracker interface {
 	Journal() provenance.Journal
@@ -992,16 +993,10 @@ func gateByteLimitGenesisAuthority(t *testing.T, tracker interface {
 // bound on a store the product itself produced.
 func gateSeedByteLimit(t *testing.T, dbPath string, harness ir.HarnessID, session string) {
 	t.Helper()
+	actor := ClaimGateSession(t, dbPath, harness, session)
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
 	defer func() { require.NoError(t, tracker.Close()) }()
-	agent, err := tracker.RegisterHumanAgent("gate-byte-limit-fixture", "gate-owner", "gate-owner@example.invalid")
-	require.NoError(t, err)
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(
-		context.Background(), tracker, harness, sessionStartEventKind(harness),
-		[]model.NativeBinding{{Kind: model.BindingSession, Value: session}},
-		tasks.ActorClaim(agent.ID.String()), gateClock{},
-	))
 
 	authority := gateByteLimitGenesisAuthority(t, tracker)
 
@@ -1021,16 +1016,16 @@ func gateSeedByteLimit(t *testing.T, dbPath string, harness ir.HarnessID, sessio
 		// bound did not fire, this material would decode and the gate would
 		// proceed, which is exactly what the bound prevents.
 		payload := `{"assignment":"` + string(assignment) + `","role":"owner-responsibility","occupant":"` +
-			agent.ID.String() + pad + `"}`
+			actor.String() + pad + `"}`
 		effects := []provenance.Effect{
 			{Sort: provenance.EffectAssignmentStart, ResultSlot: "authority", TaskID: task.ID,
-				AssignmentID: assignment, SlotID: provenance.SlotOwnerResponsibility, Occupant: agent.ID},
+				AssignmentID: assignment, SlotID: provenance.SlotOwnerResponsibility, Occupant: actor},
 			{Sort: provenance.EffectTaskEvent, ResultSlot: "material", TaskID: task.ID,
 				EventKind: tasks.FamilyAssignmentStarted.EventKind(), Payload: []byte(payload)},
 		}
 		_, err = tracker.Journal().Apply(provenance.OperationInput{
 			OperationID:        operation,
-			ActorID:            agent.ID,
+			ActorID:            actor,
 			AuthorityJournalID: &authority,
 			CommandDigest:      []byte(operation),
 			Effects:            effects,
@@ -1066,8 +1061,8 @@ func TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite(t *testing.T) {
 	// NOT PARALLEL, ON PURPOSE. The read copies ~8 MiB before it refuses; a
 	// fan-out of such reads is what makes a single row's failure ambiguous
 	// between "the bound did not fire" and "the runner was starved". The
-	// package keeps its parallelism: every sibling still runs in parallel
-	// with this subject.
+	// other subjects still run in parallel with each other; this one only
+	// delays the fan-out.
 	raw := gateFixture(t, gateClaudeGateFixture)
 	session := GateSessionIdentity(t, raw, "session_id")
 	dbPath := gateStore(t)
@@ -1077,9 +1072,10 @@ func TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite(t *testing.T) {
 	defer cancel()
 	// NOTE: 25s sits BELOW the 30s WorkflowResult writer window the receipt
 	// service enforces, so a gate that proceeded would still commit; it sits
-	// far ABOVE the 5s production hook-invocation tier and the ~16s loaded-CI
-	// read that tier abandoned. The test therefore controls the budget the
-	// built path fixes.
+	// far ABOVE the 5s production hook-invocation tier. On a loaded CI runner
+	// the built subtest carrying this seed took 16.1s of seed, transport and
+	// deadline wait before the hook abandoned it at 5s. The test therefore
+	// controls the budget the built path fixes.
 	_, err := HookLifecycleNative(ctx, gateInput(t, dbPath, "PreToolUse", raw))
 
 	require.Error(t, err, "the aggregate byte bound is a fault; it is never a decision the host may act on")
@@ -1093,6 +1089,12 @@ func TestGateByteLimitOverRealStoreFaultsBeforeDurableWrite(t *testing.T) {
 	require.ErrorAs(t, err, &limit,
 		"the upstream limit cause must stay reachable through the Pasture wrap")
 	require.ErrorIs(t, err, provenance.ErrActorOwnershipLimit)
+	require.EqualValues(t, provenance.MaxActorOwnershipResultBytes, limit.LimitBytes,
+		"the bound refused at must be the aggregate wire bound, not a smaller per-row cap")
+	require.Greater(t, limit.Work.MaterialRows, 0,
+		"rows were copied before the overflowing one, so the ACCUMULATION crossed the bound")
+	require.Less(t, limit.Work.ResultBytes, limit.LimitBytes,
+		"the accumulated bytes below the bound name the aggregate arm, not a single over-large row")
 	require.Contains(t, err.Error(), "gate ownership read (stage materials)")
 	require.Contains(t, err.Error(),
 		fmt.Sprintf("above its bound of %d bytes", provenance.MaxActorOwnershipResultBytes),
