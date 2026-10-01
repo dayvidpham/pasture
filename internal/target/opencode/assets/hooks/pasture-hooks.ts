@@ -404,9 +404,12 @@ export async function toolExecuteBefore(hookEvent) {
   // deny: every 2.0.20 row derives CapabilityNone, so the shipped binary
   // downgrades denials to proceed with the unenforced reason before this
   // plugin ever sees one. The enforceable channel is a host-effect mutation
-  // the permission hook does not perform. Throwing here is correct because
-  // the host types this hook's failure channel: only tool execute.before may
-  // fail, and a Tool.Error rejects the call before it runs.
+  // the permission hook does not perform. Throwing here stops the call
+  // because the host types this hook's failure channel — only tool
+  // execute.before may fail — and the promise adapter runs the callback
+  // inside Effect.promise (packages/plugin/src/promise/adapter.ts at the
+  // 2.0.20 tag), so the stop travels the Effect defect path rather than the
+  // typed Tool.Error failure the host types for its own rejections.
   if (response?.decision === "deny") throw new Error(response.reason);
   // Proceed (and the empty-body unevaluated belt) is a decision, not a
   // mutation. Never write host-owned objects.
@@ -475,9 +478,12 @@ export async function shellCreateBefore(hookEvent) {
 export async function sessionCreated(busEvent) {
   try {
     const command = ["hook", "lifecycle", "--harness", "opencode", "--event", "session.created"];
-    // The 2.0.20 bus event carries the creating host's version at the top
-    // level. Do not cache it for later callbacks or change the original payload.
-    const version = busEvent?.version;
+    // The 2.0.20 bus event wraps its payload in data: version rides
+    // beside sessionID there (packages/schema/src/session-event.ts for the
+    // Created data shape and packages/schema/src/event.ts for the durable
+    // envelope, both at the 2.0.20 tag). Do not cache it for later callbacks
+    // or change the original payload.
+    const version = busEvent?.data?.version;
     if (typeof version === "string" && version.trim() !== "") command.push("--host-version", version);
     await invokeLifecycle(command, "session.created", busEvent);
   } catch (error) {

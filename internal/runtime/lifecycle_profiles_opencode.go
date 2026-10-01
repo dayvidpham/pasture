@@ -258,9 +258,10 @@ func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
 // ("session.created", "tool.execute.before", "tool.execute.after" — three in
 // all); they are distinct typed events here with version-qualified symbols
 // because their v2 payload shapes differ (the v2 session.created bus payload
-// carries a top-level sessionID where v1 carried event.properties.sessionID,
-// and v2 tool hooks carry tool/sessionID/agent/messageID/id/input where v1
-// carried tool/sessionID/callID plus output args).
+// carries sessionID and version inside data where v1 carried
+// event.properties.sessionID, and v2 tool hooks carry
+// tool/sessionID/agent/messageID/id/input where v1 carried
+// tool/sessionID/callID plus output args).
 //
 // Identity follows the host's declared payload fields: every 2.0.20 session
 // payload type declares a readonly sessionID, both ToolHooks declare

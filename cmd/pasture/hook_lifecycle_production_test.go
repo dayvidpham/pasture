@@ -75,31 +75,32 @@ func TestInstalledOpenCodePluginObservesUpdatesWithoutReinstall(t *testing.T) {
 			creationVersion := "1.18.29"
 			creationSource := model.HostVersionCallerSupplied
 			creationValid, toolValid := true, true
-			// The bus event carries the v2 top-level version the generated
-			// helper forwards as the occurrence-local flag, alongside the
-			// v1 nested shape the 1.18.29 row under test parses. Variants
-			// mutate the top-level version; the nested fixture shape stays
+			// The bus event carries the v2 data envelope the generated
+			// helper reads the occurrence-local flag from, alongside the v1
+			// nested shape the 1.18.29 row under test parses. Variants
+			// mutate data.version; the nested fixture shape stays
 			// byte-identical except where the variant removes an identity.
-			session["version"] = creationVersion
+			data := map[string]any{"version": creationVersion}
+			session["data"] = data
 			switch variant {
 			case "new creation version":
-				session["version"], creationVersion = "1.22.0+runtime", "1.22.0+runtime"
+				data["version"], creationVersion = "1.22.0+runtime", "1.22.0+runtime"
 			case "absent":
-				delete(session, "version")
+				delete(data, "version")
 			case "empty":
-				session["version"] = ""
+				data["version"] = ""
 			case "whitespace":
-				session["version"] = " \t\n"
+				data["version"] = " \t\n"
 			case "number":
-				session["version"] = 42
+				data["version"] = 42
 			case "null":
-				session["version"] = nil
+				data["version"] = nil
 			case "object":
-				session["version"] = map[string]any{"version": "1.18.29"}
+				data["version"] = map[string]any{"version": "1.18.29"}
 			case "array":
-				session["version"] = []any{"1.18.29"}
+				data["version"] = []any{"1.18.29"}
 			case "bool":
-				session["version"] = true
+				data["version"] = true
 			case "missing session":
 				delete(properties, "sessionID")
 				creationValid = false
@@ -110,14 +111,14 @@ func TestInstalledOpenCodePluginObservesUpdatesWithoutReinstall(t *testing.T) {
 				delete(tool["input"].(map[string]any), "callID")
 				toolValid = false
 			}
-			if value, ok := session["version"].(string); !ok || strings.TrimSpace(value) == "" {
+			if value, ok := data["version"].(string); !ok || strings.TrimSpace(value) == "" {
 				creationSource = model.HostVersionExecutableQuery
 			}
 			sessionBytes, err := json.Marshal(session)
 			require.NoError(t, err)
 			toolBytes, err := json.Marshal(tool)
 			require.NoError(t, err)
-			// The bus event always carries the v2 top-level version beside the
+			// The bus event always carries the v2 data envelope beside the
 			// v1 nested shape, so every route uses a newly serialized
 			// payload; the nested fixture content stays byte-identical
 			// except where the variant removes an identity.
@@ -150,10 +151,7 @@ func TestInstalledOpenCodePluginObservesUpdatesWithoutReinstall(t *testing.T) {
 			// top-level version the helper forwards as the occurrence-local
 			// flag. The host specifier resolves through a stub beside the
 			// fake home, mirroring the host's identity define.
-			stubDir := filepath.Join(dir, "node_modules", "@opencode", "plugin")
-			require.NoError(t, os.MkdirAll(stubDir, 0o755))
-			require.NoError(t, os.WriteFile(filepath.Join(stubDir, "package.json"), []byte(`{"name":"@opencode/plugin","type":"module","main":"index.js"}`+"\n"), 0o644))
-			require.NoError(t, os.WriteFile(filepath.Join(stubDir, "index.js"), []byte("export const Plugin = { define: (plugin) => plugin };\n"), 0o644))
+			writeOpenCodePluginStubFiles(t, dir)
 			code := fmt.Sprintf(`
 import assert from "node:assert/strict";
 import {writeFileSync} from "node:fs";

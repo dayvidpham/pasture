@@ -45,11 +45,11 @@ func TestControllerMatchesDocumentedGlobalLayout(t *testing.T) {
 		NativeWriterOrder []string `json:"native_writer_order"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &fixture))
-	// The id and the admission are read from the OpenCode runtime contract, the
-	// one root, never restated in the fixture.
-	require.Equal(t, "opencode/activation@"+runtime.OpenCode1_18_29().Versions().Min().String(), controller.Contract().ID().String())
+	// The id and the admission are read from the OpenCode 2.0.20 runtime
+	// contract, the one root, never restated in the fixture.
+	require.Equal(t, "opencode/activation@"+runtime.OpenCode2_0_20().Versions().Min().String(), controller.Contract().ID().String())
 	require.False(t, controller.Contract().HostVersions().HasUpperBound(), "installer admission is the runtime contract's floor")
-	require.Equal(t, runtime.OpenCode1_18_29().Versions().Min().String(), controller.Contract().HostVersions().Min().String())
+	require.Equal(t, runtime.OpenCode2_0_20().Versions().Min().String(), controller.Contract().HostVersions().Min().String())
 	require.Equal(t, fixture.VersionProbe[0], controller.Contract().VersionProbe().Program())
 	require.Equal(t, fixture.VersionProbe[1:], controller.Contract().VersionProbe().Args())
 	require.Equal(t, filepath.Join(root, fixture.SkillsRoot), destination(t, controller, artifact.ExtensionSkills))
@@ -707,5 +707,28 @@ func moduleRoot(t *testing.T) string {
 			return current
 		}
 		require.NotEqual(t, current, filepath.Dir(current), "go.mod not found above %s", wd)
+	}
+}
+
+// TestInstallAdmitsOnlyV2Hosts pins the deliberate transition the installed
+// transport forces: the hooks asset is the v2 Plugin.define plugin, which a
+// 1.x host cannot load, so the activation floor admits 2.0.20 and refuses
+// older hosts with their version named rather than installing a plugin that
+// never runs. The production lifecycle registry still pins 1.18.29; this
+// floor is the install surface, and the wave switch reunites them.
+func TestInstallAdmitsOnlyV2Hosts(t *testing.T) {
+	t.Parallel()
+	controller, err := host.New(filepath.Join(t.TempDir(), "opencode"))
+	require.NoError(t, err)
+	versions := controller.Contract().HostVersions()
+	for _, version := range []string{"2.0.20", "2.1.0"} {
+		host, err := runtime.ParseHostVersion(version)
+		require.NoError(t, err)
+		require.True(t, versions.Allows(host), "a %s host must clear the install floor", version)
+	}
+	for _, version := range []string{"1.18.29", "1.19.0", "1.22.0"} {
+		host, err := runtime.ParseHostVersion(version)
+		require.NoError(t, err)
+		require.False(t, versions.Allows(host), "a %s host must be refused installation, not handed the v2 plugin", version)
 	}
 }

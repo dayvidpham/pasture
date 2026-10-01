@@ -26,9 +26,9 @@ func v2Event(t *testing.T, name string) registration.Event {
 	return registration.Event{}
 }
 
-func TestParseV2SessionCreatedBindsTopLevelSession(t *testing.T) {
+func TestParseV2SessionCreatedBindsDataSession(t *testing.T) {
 	t.Parallel()
-	raw := []byte(`{"type":"session.created","sessionID":"ses_constructed","projectID":"global","version":"2.0.20"}`)
+	raw := []byte(`{"id":"evt_constructed","created":1725549600,"type":"session.created","data":{"sessionID":"ses_constructed","projectID":"global","version":"2.0.20"}}`)
 	capture := opencodeingress.ParseV2(raw, v2Event(t, "session.created"), "2.0.20", model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, capture.Disposition)
 	require.NoError(t, capture.Cause.Check(capture.Disposition))
@@ -85,8 +85,8 @@ func TestParseV2RefusesMissingIdentities(t *testing.T) {
 		name string
 		raw  string
 	}{
-		{"session.created", `{"type":"session.created"}`},
-		{"session.created", `{"type":"session.deleted","sessionID":"ses_constructed"}`},
+		{"session.created", `{"type":"session.created","data":{}}`},
+		{"session.created", `{"type":"session.deleted","data":{"sessionID":"ses_constructed"}}`},
 		{"session.prompt", `{}`},
 		{"tool.execute.before", `{"sessionID":"ses_constructed"}`},
 		{"tool.execute.after", `{"id":"call_constructed"}`},

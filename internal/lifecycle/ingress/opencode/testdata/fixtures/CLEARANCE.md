@@ -70,7 +70,7 @@ Record addendum, written on 2026-10-01, superseding the transport identity
 above but correcting no accepted capture: the OpenCode transport has been
 regenerated for the 2.0.20 plugin API. The committed
 `.opencode/plugins/pasture-lifecycle.ts` is now sha256
-`2a8c05e333a59661813c5e66789187f480ecd71b1d6a7b83d2150e629ede28f6`
+`4a42c540aad61ee466b922300c8617b3dfd90dbcbe9576a90d78cb7d81e283ae`
 (its default export is the `Plugin.define({ id, setup })` object the 2.0.20
 host's plugin loader reads, registering location-scoped hooks through the
 setup context). The two captures above ran through the retired 1.18.29 plugin

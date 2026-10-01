@@ -5929,6 +5929,7 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_reader_production_test.go",
 	"hook_lifecycle_worker_lifetime_test.go",
 	"hook_lifecycle_writers_test.go",
+	"opencode_plugin_stub_test.go",
 }
 
 // guardSweepForeign are the package's other test files, which this slice did

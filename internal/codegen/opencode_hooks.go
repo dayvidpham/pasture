@@ -20,12 +20,15 @@ const OpenCodeHooksModulePath = ".opencode/plugins/pasture-lifecycle.ts"
 
 // openCodeV2ThrowingHook is the one 2.0.20 hook whose callback may throw. The
 // host failure model types exactly one failure channel: only tool
-// execute.before may fail, and a Tool.Error rejects the call before it runs
-// (packages/core/src/plugin/hooks.ts at the 2.0.20 tag: "Only tool
-// execute.before may fail"). Every other hook's failure channel is never, so
-// a throw there is a host-flow defect rather than a refusal, and those
-// callbacks report and continue. A named row added later defaults to
-// report-and-continue here until the host types a channel for it.
+// execute.before may fail (packages/core/src/plugin/hooks.ts at the 2.0.20
+// tag: "Only tool execute.before may fail"). The promise adapter runs the
+// callback inside Effect.promise (packages/plugin/src/promise/adapter.ts at
+// the 2.0.20 tag), so a throw stops the call through the Effect defect path
+// rather than the typed Tool.Error failure the host types for its own
+// rejections. Every other hook's failure channel is never, so a throw there
+// is a host-flow defect rather than a refusal, and those callbacks report
+// and continue. A named row added later defaults to report-and-continue here
+// until the host types a channel for it.
 const openCodeV2ThrowingHook = "tool.execute.before"
 
 // deriveOpenCodeNativeToolNames returns, sorted and de-duplicated, exactly the
@@ -415,9 +418,12 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
   // deny: every 2.0.20 row derives CapabilityNone, so the shipped binary
   // downgrades denials to proceed with the unenforced reason before this
   // plugin ever sees one. The enforceable channel is a host-effect mutation
-  // the permission hook does not perform. Throwing here is correct because
-  // the host types this hook's failure channel: only tool execute.before may
-  // fail, and a Tool.Error rejects the call before it runs.
+  // the permission hook does not perform. Throwing here stops the call
+  // because the host types this hook's failure channel — only tool
+  // execute.before may fail — and the promise adapter runs the callback
+  // inside Effect.promise (packages/plugin/src/promise/adapter.ts at the
+  // 2.0.20 tag), so the stop travels the Effect defect path rather than the
+  // typed Tool.Error failure the host types for its own rejections.
   if (response?.decision === "deny") throw new Error(response.reason);
   // Proceed (and the empty-body unevaluated belt) is a decision, not a
   // mutation. Never write host-owned objects.
@@ -452,9 +458,12 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 		helper := helperByKind[event.Kind]
 		versionSelection := ""
 		if event.NativeName == "session.created" {
-			versionSelection = `    // The 2.0.20 bus event carries the creating host's version at the top
-    // level. Do not cache it for later callbacks or change the original payload.
-    const version = busEvent?.version;
+			versionSelection = `    // The 2.0.20 bus event wraps its payload in data: version rides
+    // beside sessionID there (packages/schema/src/session-event.ts for the
+    // Created data shape and packages/schema/src/event.ts for the durable
+    // envelope, both at the 2.0.20 tag). Do not cache it for later callbacks
+    // or change the original payload.
+    const version = busEvent?.data?.version;
     if (typeof version === "string" && version.trim() !== "") command.push("--host-version", version);
 `
 		}

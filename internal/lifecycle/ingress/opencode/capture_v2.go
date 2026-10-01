@@ -14,12 +14,14 @@ import (
 )
 
 // ParseV2 captures the JSON serialization of a 2.0.20 hook input or bus
-// event. The 2.0.20 plugin forwards each hook input verbatim, so every payload
-// below is a flat object: session hooks carry a top-level sessionID, both
-// tool hooks carry sessionID plus the call id, the permission evaluation
+// event. The 2.0.20 plugin forwards each hook input verbatim, so every hook
+// payload below is a flat object: session hooks carry a top-level sessionID,
+// both tool hooks carry sessionID plus the call id, the permission evaluation
 // carries sessionID, and the shell hook carries no identity at all. The
-// session.created bus event carries a top-level sessionID where the 1.18.29
-// contract carried event.properties.sessionID.
+// session.created bus event instead wraps its payload in data, following the
+// durable envelope in packages/schema/src/event.ts at the 2.0.20 tag, so its
+// sessionID and version ride at data.sessionID and data.version where the
+// 1.18.29 contract carried event.properties.sessionID.
 //
 // The shared refusals run first, through ingress.Validate, so a malformed
 // payload is refused with the same disposition on every harness and every
@@ -51,11 +53,15 @@ func ParseV2(raw []byte, event registration.Event, observedVersion string, envel
 			if result.Disposition != model.CaptureValid {
 				result.Cause = missingCallbackCauseV2(validation.Body, event.NativeName, value)
 			} else {
+				identityPrefix := ""
+				if event.NativeName == "session.created" {
+					identityPrefix = "data."
+				}
 				for _, binding := range result.Delivery.Bindings {
 					if model.ValidateBindingText("value", binding.Value) == nil {
 						continue
 					}
-					path := binding.NativeName
+					path := identityPrefix + binding.NativeName
 					cause := model.CauseUnusableIdentity
 					if len(binding.Value) > 512 {
 						cause = model.CauseOverlengthIdentity
@@ -85,7 +91,7 @@ func missingCallbackCauseV2(raw []byte, nativeName string, value callbackValueV2
 		if value.Type != nativeName {
 			return model.NewCaptureCause(model.CauseEventMismatch, "type", model.JSONString, model.CaptureUnsupportedSchema)
 		}
-		return absentCallbackValue(raw, "sessionID", true)
+		return absentCallbackValue(raw, "data.sessionID", true)
 	case "tool.execute.before", "tool.execute.after":
 		if value.SessionID == "" {
 			return absentCallbackValue(raw, "sessionID", true)
@@ -113,20 +119,25 @@ func missingCallbackCauseV2(raw []byte, nativeName string, value callbackValueV2
 // the flat identity fields every hook input declares. Session hooks declare a
 // readonly sessionID, both tool hooks declare sessionID plus the call id, and
 // the permission evaluation declares sessionID; the shell hook declares
-// neither and decodes to the zero value, which its arm ignores.
+// neither and decodes to the zero value, which its arm ignores. The bus
+// event's payload rides inside data per the durable envelope, so Data carries
+// the session.created identity while the flat fields stay zero there.
 type callbackValueV2 struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionID"`
 	ID        string `json:"id"`
+	Data      struct {
+		SessionID string `json:"sessionID"`
+	} `json:"data"`
 }
 
 func bindingsForV2(nativeName string, value callbackValueV2) (model.CaptureDisposition, []model.NativeBinding) {
 	switch nativeName {
 	case "session.created":
-		if value.Type != nativeName || value.SessionID == "" {
+		if value.Type != nativeName || value.Data.SessionID == "" {
 			return model.CaptureUnsupportedSchema, nil
 		}
-		return model.CaptureValid, []model.NativeBinding{{Kind: model.BindingSession, NativeName: "sessionID", Value: value.SessionID}}
+		return model.CaptureValid, []model.NativeBinding{{Kind: model.BindingSession, NativeName: "sessionID", Value: value.Data.SessionID}}
 	case "tool.execute.before", "tool.execute.after":
 		if value.SessionID == "" || value.ID == "" {
 			return model.CaptureUnsupportedSchema, nil

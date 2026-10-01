@@ -481,7 +481,7 @@ for (const mode of ["malformed", "extra", "wrong-decision", "nonzero", "deny"]) 
 }
 
 // An observation failure is swallowed and logged like any other fault here.
-await sessionCreated({ type: "session.created", sessionID: "constructed", __mode: "nonzero" });
+await sessionCreated({ type: "session.created", data: { sessionID: "constructed" }, __mode: "nonzero" });
 
 console.error = originalError;
 const gateFaults = logged.filter((line) => line.includes("gate consultation failed"));
@@ -576,7 +576,7 @@ const logged = [];
 const originalError = console.error;
 console.error = (...values) => logged.push(values.join(" "));
 try {
-  await sessionCreated({ type: "session.created", sessionID: "constructed", __mode: "nonzero" });
+  await sessionCreated({ type: "session.created", data: { sessionID: "constructed" }, __mode: "nonzero" });
 } finally {
   console.error = originalError;
 }
@@ -650,11 +650,11 @@ func TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs(t *testing.
 		t.Fatalf("build production pasture CLI: %v\n%s", buildErr, output)
 	}
 
-	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	moduleURL := (&url.URL{Scheme: "file", Path: copyCommittedModuleToTemp(t, dir)}).String()
 	runner := filepath.Join(dir, "production-proof.ts")
 	script := fmt.Sprintf(`
 import { sessionCreated, toolExecuteBefore } from %q;
-await sessionCreated({ type: "session.created", sessionID: "constructed-2.0.20", version: "2.0.20" });
+await sessionCreated({ type: "session.created", data: { sessionID: "constructed-2.0.20", version: "2.0.20" } });
 const hookEvent = { tool: "task", sessionID: "constructed-2.0.20", agent: "agent", messageID: "message", id: "call-2.0.20", input: { path: "unchanged" } };
 const before = JSON.stringify(hookEvent);
 await toolExecuteBefore(hookEvent);
@@ -732,7 +732,7 @@ func TestOpenCodeV2GateSurvivesRealFaultsWithoutEvaluation(t *testing.T) {
 		t.Fatalf("build production pasture CLI: %v\n%s", buildErr, output)
 	}
 
-	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	moduleURL := (&url.URL{Scheme: "file", Path: copyCommittedModuleToTemp(t, dir)}).String()
 	runner := filepath.Join(dir, "fail-open-proof.ts")
 	script := fmt.Sprintf(`
 import { sessionCreated, toolExecuteBefore } from %q;
@@ -746,7 +746,7 @@ if (JSON.stringify(hookEvent) !== before) {
 }
 // The observation carries its own occurrence-local version and reaches the
 // withheld refusal instead.
-await sessionCreated({ type: "session.created", sessionID: "constructed", version: "2.0.20" });
+await sessionCreated({ type: "session.created", data: { sessionID: "constructed", version: "2.0.20" } });
 console.log(JSON.stringify({ hostContinued: true }));
 `, moduleURL)
 	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
@@ -810,9 +810,7 @@ func TestOpenCodeGeneratedPluginContinuesOnAnEmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatal("bun is required for the generated OpenCode fail-open belt proof; enter the flake dev shell")
 	}
-	root := testModuleRoot(t)
 	dir := t.TempDir()
-	writeOpenCodePluginStub(t, dir)
 	fakeBinary := filepath.Join(dir, "fake-pasture")
 	// An OLD pasture: exit 0, a diagnostic on stderr, and NOTHING on stdout.
 	fake := `#!/bin/sh
@@ -824,7 +822,7 @@ exit 0
 		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
 	}
 
-	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
+	moduleURL := (&url.URL{Scheme: "file", Path: copyCommittedModuleToTemp(t, dir)}).String()
 	runner := filepath.Join(dir, "fail-open-belt.ts")
 	script := fmt.Sprintf(`
 import { toolExecuteBefore } from %q;

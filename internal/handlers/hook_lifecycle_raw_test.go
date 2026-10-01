@@ -36,6 +36,13 @@ func TestRawSchemaVersionConstantsPinToGeneratedRegistrations(t *testing.T) {
 		"the OpenCode wire identity must equal the contract derived from the generated 1.18.29 registration")
 	require.Equal(t, string(RawSchemaCodex0_153_0), string(rawSchemaVersionFor(ir.HarnessCodex)),
 		"the Codex wire identity must equal the contract derived from the generated 0.153.0 registration")
+	// The 2.0.20 wire identity is selected by observed host version, not by
+	// the harness default above: pin it to the generated 2.0.20 registration
+	// it decodes.
+	contract, err := ir.NewRuntimeContractID(registration.OpenCode2_0_20().Harness, registration.OpenCode2_0_20().Version)
+	require.NoError(t, err)
+	require.Equal(t, string(RawSchemaOpenCode2_0_20), contract.String(),
+		"the OpenCode 2.0.20 wire identity must equal the contract derived from the generated 2.0.20 registration")
 }
 
 type rawOutcomeClock struct{}
@@ -276,6 +283,65 @@ func TestRawUnknownHostVersionSourceRefusesBeforeIO(t *testing.T) {
 			require.Equal(t, len(raw), reader.Len(), "unknown provenance must refuse before reading input")
 			_, err = os.Stat(filepath.Dir(database))
 			require.ErrorIs(t, err, os.ErrNotExist, "unknown provenance must not open or create the store")
+		})
+	}
+}
+
+// TestRawHatchRoutesOpenCodeByObservedVersion pins the raw hatch to the same
+// version routing the native path uses: a 2.0.20 host version selects the
+// 2.0.20 registration (manifest, parser and activation) and admits the
+// 2.0.20 wire schema, while an older host stays on 1.18.29. Every leg below
+// is refused before a byte is read, so no store exists afterwards: the
+// refused reason is what distinguishes the selected row. A v2-only event
+// through the v2 row reaches the all-withheld activation; the same event on
+// the v1 row is unknown.
+func TestRawHatchRoutesOpenCodeByObservedVersion(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		hostVersion string
+		schema      RawSchemaVersion
+		event       string
+		wantReason  string
+	}{
+		{
+			name:        "2.0.20 host with 2.0.20 schema reaches the v2 activation",
+			hostVersion: "2.0.20", schema: RawSchemaOpenCode2_0_20, event: "session.prompt",
+			wantReason: "withheld (reason missing-fixture)",
+		},
+		{
+			name:        "1.18.29 host with 1.18.29 schema stays on the v1 row",
+			hostVersion: "1.18.29", schema: RawSchemaOpenCode1_18_29, event: "session.prompt",
+			wantReason: "is not in the generated OpenCode registration",
+		},
+		{
+			name:        "2.0.20 host with 1.18.29 schema is a mismatched pairing",
+			hostVersion: "2.0.20", schema: RawSchemaOpenCode1_18_29, event: "session.prompt",
+			wantReason: "does not describe",
+		},
+		{
+			name:        "1.18.29 host with 2.0.20 schema is a mismatched pairing",
+			hostVersion: "1.18.29", schema: RawSchemaOpenCode2_0_20, event: "session.created",
+			wantReason: "does not describe",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			input := HookLifecycleRawInput{
+				DBPath:        filepath.Join(t.TempDir(), "unopened", "pasture.db"),
+				Harness:       ir.HarnessOpenCode,
+				Event:         tc.event,
+				HostVersion:   tc.hostVersion,
+				SchemaVersion: tc.schema,
+				Input:         bytes.NewReader([]byte(`{}`)),
+				Clock:         rawOutcomeClock{},
+				Operations:    rawOutcomeOperation{},
+			}
+			_, err := HookLifecycleRaw(context.Background(), input)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantReason)
+			_, statErr := os.Stat(input.DBPath)
+			require.ErrorIs(t, statErr, os.ErrNotExist, "a refused raw invocation opens no store")
 		})
 	}
 }
