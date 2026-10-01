@@ -212,3 +212,20 @@ func TestSessionClaimCommandWiringAndSingleCall(t *testing.T) {
 	require.Equal(t, 1, inputs, "one production command input must be checked")
 	require.Equal(t, 1, calls, "one claim API call per native receipt path")
 }
+
+// RED: drop the v2 session-created arm from the claim writer. A v2 gate would
+// then seal UNBOUND and no v2 policy denial could consult a gate.
+func TestSessionClaimV2SessionCreatedWritesClaim(t *testing.T) {
+	t.Parallel()
+	tracker, db, _ := claimStore(t)
+	bindings := []model.NativeBinding{{Kind: model.BindingSession, NativeName: "sessionID", Value: "v2-session"}}
+	require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessOpenCode, registration.EventOpenCode2SessionCreated, bindings, "v2-actor", claimClock{}))
+	var count int
+	var actor string
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ? AND session = ?`, string(ir.HarnessOpenCode), "v2-session").Scan(&count, &actor))
+	require.Equal(t, 1, count, "the v2 session-created coordinate must write the session claim")
+	require.Equal(t, "v2-actor", actor)
+	require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessOpenCode, registration.EventOpenCode2SessionPrompt, bindings, "other", claimClock{}))
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pasture_session_claim`).Scan(&count))
+	require.Equal(t, 1, count, "a non-start v2 coordinate must not write a claim")
+}
