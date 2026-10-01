@@ -269,15 +269,26 @@ func runReaderCodex(t *testing.T, binary, dbPath string, raw []byte, failClosed 
 
 // runReaderOpenCode drives Bun executing the generated plugin. The plugin spawns
 // the built binary and forwards its diagnostic; the runner observes the child's
-// bytes by teeing the real spawn, never by replacing it.
+// bytes by teeing the real spawn, never by replacing it. The module is copied
+// beside a stub of the host-provided specifier (the host maps it to its
+// bundled SDK at load time; the stub mirrors its identity define), because
+// the committed artifact carries that import and Bun resolves it from the
+// importing file upward. The v2 helper forwards the whole fixture object;
+// the stubbed 1.19.0 host version routes the 1.18.29 row, whose struct
+// decoder ignores the members the retired args-only projection used to drop.
 func runReaderOpenCode(t *testing.T, binary, dbPath string, raw []byte, failClosed bool) readerRun {
 	t.Helper()
 	bun, err := exec.LookPath("bun")
 	require.NoError(t, err, "Bun is required for the generated OpenCode production proof; enter the flake dev shell")
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	require.NoError(t, err)
-	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(codegen.OpenCodeHooksModulePath))}).String()
 	dir := t.TempDir()
+	module, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(codegen.OpenCodeHooksModulePath)))
+	require.NoError(t, err)
+	modulePath := filepath.Join(dir, "pasture-hooks.ts")
+	require.NoError(t, os.WriteFile(modulePath, module, 0o600))
+	writeOpenCodePluginStubFiles(t, dir)
+	moduleURL := (&url.URL{Scheme: "file", Path: modulePath}).String()
 	fixturePath := filepath.Join(dir, "fixture.json")
 	require.NoError(t, os.WriteFile(fixturePath, raw, 0o600))
 	runner := filepath.Join(dir, "reader-runner.ts")
@@ -315,13 +326,13 @@ func runReaderOpenCode(t *testing.T, binary, dbPath string, raw []byte, failClos
 	return run
 }
 
-// openCodeRunnerScript imports the generated plugin, tees the real child spawn
-// (never replacing it), invokes the gate callback, and reports the observed
-// bytes plus any thrown refusal as one JSON object.
+// openCodeRunnerScript imports the generated plugin's throwing gate helper,
+// tees the real child spawn (never replacing it), invokes the callback with
+// the whole fixture object, and reports the observed bytes plus any thrown
+// refusal as one JSON object.
 const openCodeRunnerScript = `
-import plugin from %q;
+import { toolExecuteBefore } from %q;
 const fixture = await Bun.file(%q).json();
-const input = fixture.input, output = fixture.output;
 const realSpawn = Bun.spawn;
 const calls = [];
 Bun.spawn = options => {
@@ -333,8 +344,7 @@ Bun.spawn = options => {
 };
 let thrown = null;
 try {
-  const hooks = await plugin.server({client: {}}, {});
-  await hooks["tool.execute.before"](input, output);
+  await toolExecuteBefore(fixture);
 } catch (error) {
   thrown = String(error && error.message ? error.message : error);
 }

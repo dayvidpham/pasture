@@ -1839,13 +1839,13 @@ func TestAFaultThatCannotBeClassifiedNamesEveryInputThatWasNotUsable(t *testing.
 	assert.Contains(t, text, "one input of the fault was not usable: (1) ",
 		"the lead-in must agree with the count, because \"these inputs\" in front of a one-item "+
 			"list is wrong on the commonest case")
-	assert.Contains(t, text, "stops the tool call on its GATE rows",
+	assert.Contains(t, text, "stops the tool call on the one generated OpenCode row that throws",
 		"this arm leaves with exit 1, and the generated OpenCode plugin throws on any non-zero "+
 			"exit, so a message that claimed only \"the host is not blocked\" was false there; "+
-			"the stopping is true of the GATE callbacks only, so the claim must say which rows")
-	assert.Contains(t, text, "observation rows catch the same failure and only log it",
-		"the generated observation callback CATCHES the throw and logs, so a claim that every "+
-			"row is stopped would be false of every observation row this build ships")
+			"only tool.execute.before lets the throw reach the host, so the claim must name it")
+	assert.Contains(t, text, "every other generated row catches the same failure and only logs it",
+		"every generated row but the throwing one CATCHES the failure and logs, so a claim "+
+			"that every row is stopped would be false of all the rest")
 }
 
 // TestBothExitOneArmsCarryTheSameNarrowedClaim holds the sweep shut, and holds
@@ -1910,9 +1910,9 @@ func TestBothExitOneArmsCarryTheSameNarrowedClaim(t *testing.T) {
 		assert.Contains(t, arm.text, "the hook still leaves with exit 1",
 			"%s must say which exit the operator is looking at, or the consequence below it "+
 				"has nothing to attach to", arm.name)
-		assert.Contains(t, arm.text, "stops the tool call on its GATE rows",
-			"%s must name the rows the throw actually stops, because the generated observation "+
-				"callback catches it and only logs", arm.name)
+		assert.Contains(t, arm.text, "stops the tool call on the one generated OpenCode row that throws",
+			"%s must name the row the throw actually stops, because every other generated row "+
+				"catches it and only logs", arm.name)
 
 		assert.Equal(t, hostexit.ExitNonBlockingError, arm.exit,
 			"%s must NAME its exit status, and it must be the one its message describes; the "+
@@ -5929,6 +5929,7 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_reader_production_test.go",
 	"hook_lifecycle_worker_lifetime_test.go",
 	"hook_lifecycle_writers_test.go",
+	"opencode_plugin_stub_test.go",
 }
 
 // guardSweepForeign are the package's other test files, which this slice did

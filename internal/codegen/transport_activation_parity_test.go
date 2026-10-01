@@ -57,9 +57,23 @@ func TestTransportWiresOnlyActivatedEvents(t *testing.T) {
 
 	t.Run("opencode", func(t *testing.T) {
 		t.Parallel()
-		enabled := enabledEventsFromActivationReport(t, filepath.Join(root, ".opencode", "pasture-opencode-activation.json"))
 		wired := openCodeWiredLifecycleEvents(t, filepath.Join(root, ".opencode", "plugins", "pasture-lifecycle.ts"))
-		requireSameEvents(t, ".opencode/plugins/pasture-lifecycle.ts", enabled, wired)
+		// Transitional completeness while the 2.0.20 rows await proofs:
+		// the v2 transport wires the whole registered surface (the capture
+		// sitting that proves a row needs the plugin to forward that row's
+		// hook), and the report enables nothing yet. Admission stays
+		// server-side — the handler refuses unadmitted rows before reading
+		// a byte — and the fail-open continuation bytes make those rows
+		// safe. Enabled stays a subset of wired, so enabling a row later
+		// can never strand it without transport.
+		registered := openCodeV2RegisteredSurface(t)
+		requireSameEvents(t, ".opencode/plugins/pasture-lifecycle.ts", registered, wired)
+		enabled := openCodeEnabledEventsAllowingEmpty(t, filepath.Join(root, ".opencode", "pasture-opencode-activation.json"))
+		for event := range enabled {
+			if _, ok := wired[event]; !ok {
+				t.Errorf(".opencode/plugins/pasture-lifecycle.ts does not wire %q, which the activation manifest enables", event)
+			}
+		}
 	})
 }
 
@@ -207,7 +221,7 @@ func registeredBlockingModes(t *testing.T, harness ir.HarnessID) map[string]regi
 	case ir.HarnessCodex:
 		manifest = registration.Codex0_153_0()
 	case ir.HarnessOpenCode:
-		manifest = registration.OpenCode1_18_29()
+		manifest = registration.OpenCode2_0_20()
 	default:
 		t.Fatalf("harness %q has no registration manifest in this test", harness)
 	}
@@ -240,16 +254,26 @@ func TestOpenCodeReportAgreesWithTheTargetManifestActivationArray(t *testing.T) 
 // TestAWithheldEventIsNeverWired is the negative half of parity, stated on
 // its own: every withheld row of every report is absent from that harness's
 // transport.
+//
+// OpenCode is excluded while its 2.0.20 rows await proofs: the v2 transport
+// wires the whole surface by design (the capture sitting that proves a row
+// needs the plugin to forward that row's hook), so all seventeen withheld
+// rows are wired and the admission authority sits server-side. The opencode
+// completeness arm of TestTransportWiresOnlyActivatedEvents holds the other
+// direction (enabled stays a subset of wired). Claude and Codex keep the
+// strict reading: their transports wire exactly the enabled set.
 func TestAWithheldEventIsNeverWired(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
 	wiredByHarness := map[ir.HarnessID]map[string]struct{}{
 		ir.HarnessClaudeCode: claudeWiredLifecycleEvents(t, filepath.Join(root, "hooks", "hooks.json")),
 		ir.HarnessCodex:      codexWiredLifecycleEvents(t, filepath.Join(root, ".codex", "hooks.json")),
-		ir.HarnessOpenCode:   openCodeWiredLifecycleEvents(t, filepath.Join(root, ".opencode", "plugins", "pasture-lifecycle.ts")),
 	}
 	withheld := 0
 	for _, harness := range registeredLifecycleHarnesses(t) {
+		if harness == ir.HarnessOpenCode {
+			continue
+		}
 		var report activationReportFile
 		readGeneratedJSON(t, filepath.Join(root, activationReportPaths[harness]), &report)
 		wired, ok := wiredByHarness[harness]
@@ -367,6 +391,36 @@ func codexEventRunnerNames(t *testing.T, dir string) map[string]struct{} {
 	return runners
 }
 
+// openCodeV2RegisteredSurface returns the native coordinates the 2.0.20
+// registration manifest declares: the whole surface the v2 transport must
+// wire while rows await their proofs.
+func openCodeV2RegisteredSurface(t *testing.T) map[string]struct{} {
+	t.Helper()
+	registered := make(map[string]struct{})
+	for _, event := range registration.OpenCode2_0_20().Entries() {
+		registered[event.NativeName] = struct{}{}
+	}
+	require.NotEmpty(t, registered, "the 2.0.20 manifest declares no event, so the completeness check covers nothing")
+	return registered
+}
+
+// openCodeEnabledEventsAllowingEmpty reads the enabled set of the OpenCode
+// activation report without the non-empty floor the other harnesses carry:
+// while the 2.0.20 rows await proofs the report honestly enables nothing,
+// and an empty enabled set is the assertion, not a gap in it.
+func openCodeEnabledEventsAllowingEmpty(t *testing.T, path string) map[string]struct{} {
+	t.Helper()
+	var report activationReportFile
+	readGeneratedJSON(t, path, &report)
+	enabled := make(map[string]struct{})
+	for _, entry := range report.Events {
+		if entry.State == "enabled" {
+			enabled[entry.Event] = struct{}{}
+		}
+	}
+	return enabled
+}
+
 // lifecycleEventFlag captures the native event name a generated OpenCode
 // handler passes to `pasture hook lifecycle`. It is applied ONLY to
 // comment-stripped source, so prose can never contribute an event name.
@@ -376,26 +430,18 @@ var lifecycleEventFlag = regexp.MustCompile(`"--event",\s*"([^"]+)"`)
 // lifecycle handler, in either the Claude or the Codex spelling.
 var lifecycleCommand = regexp.MustCompile(`hook lifecycle`)
 
-// openCodePluginExport is the exported plugin factory the OpenCode host loads.
-// Only the handlers inside its returned object are registered with the host.
-const openCodePluginExport = "export const PastureLifecycle ="
+// openCodePluginExport is the default export the OpenCode v2 host loads: the
+// Plugin.define object whose setup registers the location-scoped hooks. Only
+// hooks registered inside that setup are ever invoked by the host.
+const openCodePluginExport = "export default Plugin.define({"
 
-// openCodeCatchAllHandler is the single OpenCode handler that receives the whole
-// server-sent observation stream. It is not one native event: it dispatches on
-// the event type, so its registered event set comes from its dispatch guards.
-const openCodeCatchAllHandler = "event"
+// openCodeHookRegistration captures one location-scoped hook registration:
+// the plugin domain, the hook name, and the helper it invokes.
+var openCodeHookRegistration = regexp.MustCompile(`registrations\.push\(await ctx\.([A-Za-z0-9_]+)\.hook\("([^"]+)", ([A-Za-z0-9_]+)\)`)
 
-// openCodeDispatchGuard captures the native event name each catch-all dispatch
-// guard selects, including the helper it calls and its terminal return. The
-// complete event member is checked below, so unguarded calls cannot hide beside
-// a legitimate branch.
-var openCodeDispatchGuard = regexp.MustCompile(`if \(callback\.event\?\.type === "([^"]+)"\) \{\s*await ([A-Za-z0-9_]+)\(callback\);\s*return;\s*\}`)
-
-// openCodeHandlerKey captures the leading property key of one object-literal
-// member: an optional `async`, then a quoted or bare key, then its parameter
-// list. A named-output handler's key IS the native event name; the catch-all
-// handler's key is openCodeCatchAllHandler.
-var openCodeHandlerKey = regexp.MustCompile(`^\s*(?:async\s+)?(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][A-Za-z0-9_$]*))\s*\(`)
+// openCodeBusGuard captures one bus-event filter of the event subscription:
+// the bus type it selects and the helper it calls.
+var openCodeBusGuard = regexp.MustCompile(`busEvent\.type === "([^"]+)"\) \{\s*await ([A-Za-z0-9_]+)\(busEvent\);\s*\}`)
 
 // openCodeWiredLifecycleEvents returns the events the generated OpenCode plugin
 // actually REGISTERS with the host.
@@ -432,13 +478,16 @@ func openCodeWiredLifecycleEvents(t *testing.T, path string) map[string]struct{}
 	return registered
 }
 
-// openCodeRegisteredEvents parses the object literal the exported plugin factory
-// returns and reports one native event name per registered handler. The
-// catch-all handler contributes the event names of its dispatch guards; every
-// other handler key IS a native event name.
+// openCodeRegisteredEvents parses the hook registrations of the exported
+// Plugin.define setup and reports one native coordinate per registered hook.
+// A hook registration contributes its domain.hook coordinate; the event
+// subscription contributes the bus types of its filter guards. Every other
+// handler shape must fail rather than be skipped: the parity check derives
+// the wired set from that setup's structure, so an unrecognized shape is a
+// parser-emitter skew, not an unwired event.
 func openCodeRegisteredEvents(t *testing.T, path, source string) map[string]struct{} {
 	t.Helper()
-	body := openCodePluginObjectBody(t, path, source)
+	setup := openCodePluginSetupBody(t, path, source)
 	registered := make(map[string]struct{})
 	add := func(event, origin string) {
 		_, duplicate := registered[event]
@@ -447,30 +496,18 @@ func openCodeRegisteredEvents(t *testing.T, path, source string) map[string]stru
 			path, event, origin)
 		registered[event] = struct{}{}
 	}
-	for _, member := range splitTopLevelMembers(body) {
-		match := openCodeHandlerKey.FindStringSubmatch(member)
-		require.NotNilf(t, match,
-			"%s: cannot read a handler key from the member %q of the %s object; the parity check derives the wired set from that object's structure, so an unrecognized member shape must fail rather than be skipped — update this parser together with the OpenCode plugin emitter",
-			path, strings.TrimSpace(member), openCodePluginExport)
-		key := match[1] + match[2] + match[3]
-		if key != openCodeCatchAllHandler {
-			call := regexp.MustCompile(`^\s*async "[^"]+"\(input, output\) \{\s*await ([A-Za-z0-9_]+)\(input, output\);\s*\}\s*$`).FindStringSubmatch(member)
-			require.NotNilf(t, call, "%s: named handler %q must delegate exactly once with original host objects", path, key)
-			openCodeRequireHelperEmission(t, path, source, call[1], key)
-			add(key, "as a named-output handler")
-			continue
-		}
-		guards := openCodeDispatchGuard.FindAllStringSubmatch(member, -1)
-		require.NotEmptyf(t, guards,
-			"%s: the %q handler of %s dispatches on no event type; a catch-all handler with no guard either observes nothing or forwards every native event — fix the OpenCode plugin emitter and run `make generate`",
-			path, openCodeCatchAllHandler, openCodePluginExport)
-		for _, guard := range guards {
-			openCodeRequireHelperEmission(t, path, source, guard[2], guard[1])
-			add(guard[1], "in the catch-all dispatch")
-		}
-		remainder := openCodeDispatchGuard.ReplaceAllString(member, "")
-		require.Regexp(t, `^\s*async event\(callback\) \{\s*void client;\s*\}\s*$`, remainder,
-			"%s: event handler contains code outside its exact enabled dispatch branches", path)
+	for _, match := range openCodeHookRegistration.FindAllStringSubmatch(setup, -1) {
+		coordinate := match[1] + "." + match[2]
+		openCodeRequireHelperEmission(t, path, source, match[3], coordinate)
+		add(coordinate, "as a location-scoped hook")
+	}
+	// The bus subscription is identified by its subscribe call; without it no
+	// observation can arrive.
+	require.Contains(t, setup, "ctx.event.subscribe({ signal: controller.signal })",
+		"%s: the setup opens no bus subscription; session.created would never arrive — fix the OpenCode plugin emitter and run `make generate`", path)
+	for _, guard := range openCodeBusGuard.FindAllStringSubmatch(setup, -1) {
+		openCodeRequireHelperEmission(t, path, source, guard[2], guard[1])
+		add(guard[1], "in the bus subscription filter")
 	}
 	require.NotEmptyf(t, registered,
 		"%s registers no lifecycle handler in %s; the plugin would load and observe nothing — run `make generate`",
@@ -495,24 +532,24 @@ func openCodeRequireHelperEmission(t *testing.T, path, source, helper, event str
 	require.Equal(t, 1, strings.Count(body, "await invokeLifecycle("), "%s: helper %s must invoke once", path, helper)
 }
 
-// openCodePluginObjectBody returns the text between the braces of the object
-// literal the exported plugin factory returns. It fails with an actionable
-// message when the export or the literal is absent, so a renamed or restructured
-// export can never be read as "no handler is registered".
-func openCodePluginObjectBody(t *testing.T, path, source string) string {
+// openCodePluginSetupBody returns the text between the braces of the setup
+// function of the exported Plugin.define object. It fails with an actionable
+// message when the export or the function is absent, so a renamed or
+// restructured export can never be read as "no handler is registered".
+func openCodePluginSetupBody(t *testing.T, path, source string) string {
 	t.Helper()
 	start := strings.Index(source, openCodePluginExport)
 	require.GreaterOrEqualf(t, start, 0,
 		"%s does not export %s; the OpenCode host loads that export, so a plugin without it registers no handler at all — run `make generate`",
 		path, openCodePluginExport)
-	arrow := strings.Index(source[start:], "=> ({")
+	arrow := strings.Index(source[start:], "setup: async (ctx) => {")
 	require.GreaterOrEqualf(t, arrow, 0,
-		"%s: %s is not an arrow factory returning an object literal; this parity check reads the registered handler set from that literal — update this parser together with the OpenCode plugin emitter",
+		"%s: %s carries no async setup function registering the location-scoped hooks; this parity check reads the registered handler set from that setup — update this parser together with the OpenCode plugin emitter",
 		path, openCodePluginExport)
-	open := start + arrow + len("=> (")
+	open := start + arrow + len("setup: async (ctx) => {") - 1
 	end := matchBrace(source, open)
 	require.GreaterOrEqualf(t, end, 0,
-		"%s: the object literal returned by %s has no matching closing brace; the committed artifact is malformed — run `make generate`",
+		"%s: the setup function body of %s has no matching closing brace; the committed artifact is malformed — run `make generate`",
 		path, openCodePluginExport)
 	return source[open+1 : end]
 }
@@ -750,6 +787,35 @@ func derivedEnabledEvents(t *testing.T) map[string]map[string]struct{} {
 	return derived
 }
 
+// testOpenCodeTransitionalReport holds the OpenCode side of the enabled floor
+// while the 2.0.20 rows await proofs. The v1 derivation still enables its two
+// proved rows (that evidence must not be dropped), the policy list still names
+// them, and the committed report is the v2 surface with every row withheld
+// for missing-fixture. When rows gain proofs, their enablement flows through
+// the same derivation and this transitional arm goes away with the v1 floor.
+func testOpenCodeTransitionalReport(t *testing.T, root, report string, floor map[string]struct{}) {
+	t.Helper()
+	require.Equal(t, map[string]struct{}{"session.created": {}, "tool.execute.before": {}}, floor,
+		"the v1 OpenCode derivation must keep its two proved rows until the v2 proofs replace them")
+	policy := make(map[string]struct{}, len(enabledFloor["opencode"]))
+	for _, event := range enabledFloor["opencode"] {
+		policy[event] = struct{}{}
+	}
+	require.Equal(t, floor, policy, "the opencode policy floor must equal the v1 derivation")
+	var committed activationReportFile
+	readGeneratedJSON(t, report, &committed)
+	require.Len(t, committed.Events, 17, "the committed OpenCode report must list the whole 2.0.20 surface")
+	seen := map[string]bool{}
+	for _, entry := range committed.Events {
+		seen[entry.Event] = true
+		require.Equal(t, "withheld", entry.State, "2.0.20 row %q must stay withheld until its proofs land", entry.Event)
+		require.Equal(t, "missing-fixture", entry.Reason, "2.0.20 row %q must name its missing evidence", entry.Event)
+	}
+	for _, event := range registration.OpenCode2_0_20().Entries() {
+		require.True(t, seen[event.NativeName], "the committed report omits registered 2.0.20 row %q", event.NativeName)
+	}
+}
+
 // TestEnabledEventsNeverDropBelowTheFloor holds the enabled set of every
 // harness at three places at once: the activation manifests (the source that
 // refuses an entry without its proofs), the COMMITTED activation reports (the
@@ -777,6 +843,10 @@ func TestEnabledEventsNeverDropBelowTheFloor(t *testing.T) {
 			t.Parallel()
 			floor := derived[harness]
 			require.NotEmpty(t, floor, "the derived %s floor is empty, so this guard would hold nothing", harness)
+			if harness == "opencode" {
+				testOpenCodeTransitionalReport(t, root, report, floor)
+				return
+			}
 			enabled := enabledEventsFromActivationReport(t, report)
 			require.NotEmpty(t, enabled, "the committed %s activation report enables no event", harness)
 			for event := range floor {

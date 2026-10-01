@@ -39,6 +39,9 @@ const (
 	// RawSchemaOpenCode1_18_29 is the wire identity of the OpenCode 1.18.29
 	// payload schema pinned in this build.
 	RawSchemaOpenCode1_18_29 RawSchemaVersion = "opencode/1.18.29"
+	// RawSchemaOpenCode2_0_20 is the wire identity of the OpenCode 2.0.20
+	// payload schema pinned in this build.
+	RawSchemaOpenCode2_0_20 RawSchemaVersion = "opencode/2.0.20"
 	// RawSchemaCodex0_153_0 is the wire identity of the Codex 0.153.0 payload
 	// schema pinned in this build.
 	RawSchemaCodex0_153_0 RawSchemaVersion = "codex/0.153.0"
@@ -48,7 +51,7 @@ const (
 // build.
 func (v RawSchemaVersion) IsValid() bool {
 	switch v {
-	case RawSchemaClaudeCode2_1_261, RawSchemaOpenCode1_18_29, RawSchemaCodex0_153_0:
+	case RawSchemaClaudeCode2_1_261, RawSchemaOpenCode1_18_29, RawSchemaOpenCode2_0_20, RawSchemaCodex0_153_0:
 		return true
 	default:
 		return false
@@ -65,8 +68,8 @@ func (v RawSchemaVersion) String() string { return string(v) }
 func ParseRawSchemaVersion(value string) (RawSchemaVersion, error) {
 	candidate := RawSchemaVersion(strings.TrimSpace(value))
 	if !candidate.IsValid() {
-		return "", fmt.Errorf("wire schema %q is not known to this build of pasture; supply one of %q, %q, or %q",
-			value, RawSchemaClaudeCode2_1_261, RawSchemaOpenCode1_18_29, RawSchemaCodex0_153_0)
+		return "", fmt.Errorf("wire schema %q is not known to this build of pasture; supply one of %q, %q, %q, or %q",
+			value, RawSchemaClaudeCode2_1_261, RawSchemaOpenCode1_18_29, RawSchemaOpenCode2_0_20, RawSchemaCodex0_153_0)
 	}
 	return candidate, nil
 }
@@ -99,11 +102,23 @@ type HookLifecycleRawInput struct {
 	Activations []activation.Entry
 }
 
-// rawSchemaVersionFor returns the wire schema identity pinned to the given
-// harness by this build's generated registration. The identity is derived, not
-// hand-maintained: it is ir.NewRuntimeContractID(harness, version) rendered
-// canonically, so a build can never advertise a schema identity its own
-// registrations do not decode.
+// rawSchemaVersionForDispatch derives the accepted wire schema identity from
+// the selected registry row's own manifest, so the raw hatch admits exactly
+// the registration its dispatch decodes. A build can never advertise a schema
+// identity its own selected registration does not decode.
+func rawSchemaVersionForDispatch(dispatch lifecycleDispatch) RawSchemaVersion {
+	contract, err := ir.NewRuntimeContractID(dispatch.manifest.Harness, dispatch.manifest.Version)
+	if err != nil {
+		return ""
+	}
+	return RawSchemaVersion(contract.String())
+}
+
+// rawSchemaVersionFor returns the default wire schema identity pinned to the
+// given harness by this build's generated registration: the 1.18.29 identity
+// for OpenCode. The raw hatch itself selects by observed host version through
+// the dispatch row (rawSchemaVersionForDispatch above); this default remains
+// for callers that have no version yet.
 func rawSchemaVersionFor(harness ir.HarnessID) RawSchemaVersion {
 	var version string
 	switch harness {
@@ -172,12 +187,12 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 			in.SchemaVersion = parsed
 		}
 	}
-	dispatch, err := dispatchLifecycle(in.Harness)
+	dispatch, err := dispatchLifecycleFor(in.Harness, in.HostVersion)
 	if err != nil {
 		return nil, err
 	}
-	if in.SchemaVersion != rawSchemaVersionFor(in.Harness) {
-		return nil, rawLifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Wire schema %q does not describe the %s registration pinned to this build (%q).", in.SchemaVersion, dispatch.name, rawSchemaVersionFor(in.Harness)), "The wire identities are pinned one-to-one to each harness registration; a mismatched pairing cannot be decoded.", "The input was not read and no database was opened.", "Pass the wire schema that names the harness's own registration.", nil)
+	if want := rawSchemaVersionForDispatch(dispatch); in.SchemaVersion != want {
+		return nil, rawLifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Wire schema %q does not describe the %s registration selected for host version %q in this build (%q).", in.SchemaVersion, dispatch.name, in.HostVersion, want), "The wire identities are pinned one-to-one to each harness registration; a mismatched pairing cannot be decoded.", "The input was not read and no database was opened.", "Pass the wire schema that names the selected registration: the 2.0.20 schema for a 2.0.20-or-later OpenCode host, the 1.18.29 schema below it.", nil)
 	}
 	// The activation catalog is a fallible generated proof; resolve it here at
 	// dispatch time (the same point the native flow resolves it), preserving

@@ -132,8 +132,14 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 	binary := lifecycleBinary(t)
 	for _, harness := range []string{"codex", "opencode"} {
 		event, fixture, prefix, native := "SessionStart", "session_start_0_153_0.json", "codex-cli ", `{}`
+		// The stubbed versions must select the row under test: the opencode
+		// leg pins 1.x so the 1.18.29 row serves the v1 fixture, because a
+		// 2.x observation would route to the 2.0.20 row whose payload shape
+		// differs. Version routing itself is pinned beside the handler.
+		firstVersion, secondVersion := "3.4.5", "3.4.6"
 		if harness == "opencode" {
 			event, fixture, prefix, native = "session.created", "session_created_1_18_29.json", "", ""
+			firstVersion, secondVersion = "1.19.0", "1.19.1"
 		}
 		raw, err := os.ReadFile(filepath.Join("..", "..", "internal/lifecycle/ingress", harness, "testdata/fixtures", fixture))
 		require.NoError(t, err)
@@ -146,7 +152,7 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 					require.NoError(t, os.Symlink(versionExecutable(t, "printf x >> '"+filepath.Join(markers, marker)+"'; "+body), p))
 					return p
 				}
-				firstBody := "printf '%s\\n' '" + prefix + "3.4.5'"
+				firstBody := "printf '%s\\n' '" + prefix + firstVersion + "'"
 				wantFault := ""
 				switch mode {
 				case "malformed":
@@ -157,13 +163,13 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 					firstBody, wantFault = "printf '%4097s' x", "4096-byte"
 				}
 				first := write(firstDir, "first", firstBody)
-				write(secondDir, "second", "printf '%s\\n' '"+prefix+"3.4.6'")
+				write(secondDir, "second", "printf '%s\\n' '"+prefix+secondVersion+"'")
 				path := firstDir + string(os.PathListSeparator) + secondDir
 				args := []string{"hook", "lifecycle", "--harness", harness, "--event", event}
-				wantVersion, wantMarker, source := "3.4.5", "first", model.HostVersionExecutableQuery
+				wantVersion, wantMarker, source := firstVersion, "first", model.HostVersionExecutableQuery
 				switch mode {
 				case "reverse":
-					path, wantVersion, wantMarker = secondDir+string(os.PathListSeparator)+firstDir, "3.4.6", "second"
+					path, wantVersion, wantMarker = secondDir+string(os.PathListSeparator)+firstDir, secondVersion, "second"
 				case "explicit executable", "explicit failure":
 					args = append(args, "--host-executable", first)
 					path = secondDir

@@ -669,13 +669,16 @@ func lifecycleFault(
 //
 // It also says what THIS exit means on a throwing host. This arm is the one
 // fault path that leaves with exit 1, and the pasture-generated OpenCode plugin
-// reads any non-zero exit as a broken installation and throws. Nothing catches
-// that throw on a GATE callback, so the user's tool call is stopped there. An
-// OBSERVATION callback CATCHES it and only logs, so nothing is stopped on those
-// rows. A message that said only "the host is not blocked" was true of
-// pasture's intent and false of what a user on a gate row would see; a message
-// that said every row is stopped would be false of the observation rows, so the
-// sentence names the gate callbacks.
+// reads any non-zero exit as a broken installation and throws. Exactly one
+// generated row lets that throw reach the host — tool.execute.before, the one
+// hook whose failure channel the host types — so the user's tool call is
+// stopped there. Every other generated row CATCHES it and only logs: the
+// observations, and every gate whose failure channel is never, where a throw
+// would be a host-flow defect rather than a refusal. So nothing is stopped on
+// those rows. A message that said only "the host is not blocked" was true of
+// pasture's intent and false of what a user on the throwing row would see; a
+// message that said every row is stopped would be false of all the rest, so
+// the sentence names the throwing row.
 func unclassifiableFaultDiagnostic(coords lifecycleCoordinates, unusable []string, cause error) string {
 	return fmt.Sprintf(
 		"pasture hook lifecycle could not classify a fault on event %q of harness %q, "+
@@ -683,9 +686,9 @@ func unclassifiableFaultDiagnostic(coords lifecycleCoordinates, unusable []strin
 			"This happened in lifecycleFault (cmd/pasture/hook_lifecycle.go) after the event "+
 			"coordinates were read; pasture did not ask the host to block, and this event was "+
 			"not evaluated; the hook still leaves with exit 1, and a host that reads any "+
-			"non-zero exit as a broken pasture installation stops the tool call on its GATE "+
-			"rows — the generated OpenCode plugin does, while its observation rows catch the "+
-			"same failure and only log it; "+
+			"non-zero exit as a broken pasture installation stops the tool call on the one "+
+			"generated OpenCode row that throws — tool.execute.before does, while every other "+
+			"generated row catches the same failure and only logs it; "+
 			"report this with the cause below, which is: %v",
 		coords.Event, coords.Harness, unusableInputSentence(unusable), cause)
 }
@@ -1076,8 +1079,9 @@ func noExitDecisionDiagnostic() string {
 		"this happened in emitLifecycleOutcome (cmd/pasture/hook_lifecycle.go) after the hook ran; " +
 		"pasture did not ask the host to block, and the event may not have been recorded; " +
 		"the hook still leaves with exit 1, and a host that reads any non-zero exit as a broken " +
-		"pasture installation stops the tool call on its GATE rows — the generated OpenCode " +
-		"plugin does, while its observation rows catch the same failure and only log it; " +
+		"pasture installation stops the tool call on the one generated OpenCode row that throws " +
+		"— tool.execute.before does, while every other generated row catches the same failure " +
+		"and only logs it; " +
 		"report this, and retry the hook input"
 }
 

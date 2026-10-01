@@ -44,3 +44,41 @@ func OpenCode1_18_29TargetEvents() []model.ContractEventKind {
 func OpenCode1_18_29() ([]Entry, error) {
 	return deriveManifest("activation.OpenCode1_18_29", registration.OpenCode1_18_29().Entries(), openCodeTargetEventDeclarations[:])
 }
+
+// openCode2TargetEventDeclarations is the static typed target declaration for
+// OpenCode at the 2.0.20 contract. Every row is a bare target with no proofs,
+// so each derives withheld for missing-fixture: the 2.0.20 capture sitting
+// (with inventory, substitution, secret scan and clearance) and the
+// production-path proofs have not landed yet. Rows gain proofs, never lose
+// their target place, as that evidence arrives.
+var openCode2TargetEventDeclarations = [...]targetEventDeclaration{
+	{event: registration.EventOpenCode2SessionCreated},
+	{event: registration.EventOpenCode2SessionPrompt},
+	{event: registration.EventOpenCode2SessionContext},
+	{event: registration.EventOpenCode2SessionCompaction},
+	{event: registration.EventOpenCode2SessionGenerate},
+	{event: registration.EventOpenCode2SessionTitle},
+	{event: registration.EventOpenCode2SessionModelRequest},
+	{event: registration.EventOpenCode2SessionHttpRequest},
+	{event: registration.EventOpenCode2SessionHttpResponse},
+	{event: registration.EventOpenCode2SessionExperimentalWsHandshake},
+	{event: registration.EventOpenCode2SessionExperimentalWsSend},
+	{event: registration.EventOpenCode2SessionExperimentalWsReceive},
+	{event: registration.EventOpenCode2SessionRetry},
+	{event: registration.EventOpenCode2ToolExecuteBefore},
+	{event: registration.EventOpenCode2ToolExecuteAfter},
+	{event: registration.EventOpenCode2PermissionEvaluate},
+	{event: registration.EventOpenCode2ShellCreateBefore},
+}
+
+// OpenCode2_0_20TargetEvents returns a defensive copy of the 2.0.20 target set.
+func OpenCode2_0_20TargetEvents() []model.ContractEventKind {
+	return targetEvents(openCode2TargetEventDeclarations[:])
+}
+
+// OpenCode2_0_20 derives a fresh exhaustive activation manifest from the
+// generated 2.0.20 host manifest and the static target declaration. Until rows
+// carry capture and production proofs every entry is withheld.
+func OpenCode2_0_20() ([]Entry, error) {
+	return deriveManifest("activation.OpenCode2_0_20", registration.OpenCode2_0_20().Entries(), openCode2TargetEventDeclarations[:])
+}

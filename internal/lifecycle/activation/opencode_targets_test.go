@@ -55,3 +55,25 @@ func TestOpenCodeActivationTargetEventsAreDefensive(t *testing.T) {
 	targets[0] = 0
 	require.Equal(t, registration.EventOpenCodeSessionCreated, activation.OpenCode1_18_29TargetEvents()[0])
 }
+
+func TestOpenCodeV2ActivationWithholdsEveryRowForMissingFixture(t *testing.T) {
+	t.Parallel()
+	entries, err := activation.OpenCode2_0_20()
+	require.NoError(t, err)
+	require.Len(t, entries, 17)
+	for _, entry := range entries {
+		require.True(t, entry.IsValid())
+		require.Equal(t, activation.Withheld, entry.State)
+		require.Equal(t, activation.WithheldMissingFixture, entry.Reason)
+		require.Zero(t, entry.CaptureProof)
+		require.Zero(t, entry.ProductionProof)
+	}
+}
+
+func TestOpenCodeV2ActivationTargetEventsAreDefensive(t *testing.T) {
+	t.Parallel()
+	targets := activation.OpenCode2_0_20TargetEvents()
+	require.Len(t, targets, 17)
+	targets[0] = 0
+	require.Equal(t, registration.EventOpenCode2SessionCreated, activation.OpenCode2_0_20TargetEvents()[0])
+}

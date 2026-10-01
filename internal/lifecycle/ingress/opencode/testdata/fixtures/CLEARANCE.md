@@ -66,6 +66,18 @@ discarded. Observed and recorded elsewhere, not a clearance matter: the hook's
 standard error was drawn inside the host's terminal screen; the capture was
 unaffected.
 
+Record addendum, written on 2026-10-01, superseding the transport identity
+above but correcting no accepted capture: the OpenCode transport has been
+regenerated for the 2.0.20 plugin API. The committed
+`.opencode/plugins/pasture-lifecycle.ts` is now sha256
+`4a42c540aad61ee466b922300c8617b3dfd90dbcbe9576a90d78cb7d81e283ae`
+(its default export is the `Plugin.define({ id, setup })` object the 2.0.20
+host's plugin loader reads, registering location-scoped hooks through the
+setup context). The two captures above ran through the retired 1.18.29 plugin
+shape and remain valid for the 1.18.29 contract rows only; they are not
+2.0.20 captures, and no 2.0.20 capture has been cleared into this directory.
+A reader who hashes the shipped plugin gets the digest above.
+
 ## Inventory
 
 ```

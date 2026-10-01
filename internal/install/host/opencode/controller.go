@@ -93,9 +93,14 @@ func New(configRoot string) (Controller, error) {
 	if err != nil {
 		return Controller{}, fmt.Errorf("opencode.New: assemble exhaustive direct-file cells: %w", err)
 	}
-	// The id's version is read from the OpenCode runtime contract, the one
-	// root, so it follows the recorded host version instead of restating it.
-	id, err := activation.NewActivationContractID("opencode/activation@" + runtime.OpenCode1_18_29().Versions().Min().String())
+	// The id's version is read from the OpenCode 2.0.20 runtime contract, the
+	// one root, so it follows the recorded host version instead of restating
+	// it. The floor is deliberately 2.0.20, not the older production
+	// registry: the installed hooks asset is the v2 Plugin.define transport,
+	// which a 1.x host cannot load, so admitting an older host would install
+	// a plugin that never runs. A 1.x host is refused here with its version
+	// named rather than handed a broken installation.
+	id, err := activation.NewActivationContractID("opencode/activation@" + runtime.OpenCode2_0_20().Versions().Min().String())
 	if err != nil {
 		return Controller{}, err
 	}
@@ -103,7 +108,7 @@ func New(configRoot string) (Controller, error) {
 	if err != nil {
 		return Controller{}, err
 	}
-	contract, err := activation.NewActivationContract(id, descriptor.RuntimeContractID().Harness(), runtime.OpenCode1_18_29().Versions(), probe, exhaustive)
+	contract, err := activation.NewActivationContract(id, descriptor.RuntimeContractID().Harness(), runtime.OpenCode2_0_20().Versions(), probe, exhaustive)
 	if err != nil {
 		return Controller{}, fmt.Errorf("opencode.New: construct activation contract: %w", err)
 	}

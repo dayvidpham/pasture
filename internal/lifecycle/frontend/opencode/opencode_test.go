@@ -71,3 +71,43 @@ func TestEventMappingsCoverEveryRegisteredOpenCodeEvent(t *testing.T) {
 	t.Parallel()
 	testutil.AssertEventMappingsCoverRegistration(t, registration.OpenCode1_18_29(), runtime.OpenCode1_18_29Lifecycle(), opencode.Bind)
 }
+
+// TestV2EventMappingsCoverEveryRegisteredEvent holds the OpenCode 2.0.20
+// frontend mapping total over the generated registration and each pair correct
+// by native name. A mapped event is not an enabled one: admission is decided by
+// the activation table before any payload is read (internal/handlers).
+func TestV2EventMappingsCoverEveryRegisteredEvent(t *testing.T) {
+	t.Parallel()
+	testutil.AssertEventMappingsCoverRegistration(t, registration.OpenCode2_0_20(), runtime.OpenCode2_0_20Lifecycle(), opencode.BindV2)
+}
+
+// TestBindV2ProducesVerifiedL2 drives constructed 2.0.20 bindings through the
+// frontend engine. The payloads are constructed admission shapes, not
+// authentic captures; the v2 capture sitting supplies those.
+func TestBindV2ProducesVerifiedL2(t *testing.T) {
+	t.Parallel()
+	tool, toolIdentities, err := opencode.BindV2(registration.EventOpenCode2ToolExecuteBefore, []model.NativeBinding{
+		{Kind: model.BindingSession, NativeName: "sessionID", Value: "ses_constructed"},
+		{Kind: model.BindingToolCall, NativeName: "id", Value: "call_constructed"},
+	})
+	require.NoError(t, err)
+	require.True(t, tool.IsValid())
+	toolEvent, err := tool.NewEvent(toolIdentities)
+	require.NoError(t, err)
+	require.True(t, toolEvent.IsValid())
+	require.Equal(t, runtime.SemanticGateConsultation, toolEvent.Semantics().Semantic())
+
+	created, createdIdentities, err := opencode.BindV2(registration.EventOpenCode2SessionCreated, []model.NativeBinding{
+		{Kind: model.BindingSession, NativeName: "sessionID", Value: "ses_constructed"},
+	})
+	require.NoError(t, err)
+	createdEvent, err := created.NewEvent(createdIdentities)
+	require.NoError(t, err)
+	require.Equal(t, runtime.SemanticObservation, createdEvent.Semantics().Semantic())
+
+	shell, shellIdentities, err := opencode.BindV2(registration.EventOpenCode2ShellCreateBefore, nil)
+	require.NoError(t, err)
+	shellEvent, err := shell.NewEvent(shellIdentities)
+	require.NoError(t, err)
+	require.True(t, shellEvent.IsValid())
+}
