@@ -51,24 +51,37 @@ func OpenCode1_18_29() ([]Entry, error) {
 // (with inventory, substitution, secret scan and clearance) and the
 // production-path proofs have not landed yet. Rows gain proofs, never lose
 // their target place, as that evidence arrives.
+//
+// Each row names the fixture it expects, one per coordinate, under the
+// capture naming rule <harness>_<snake_event>_<host_version>.<n>.json in
+// internal/lifecycle/ingress/opencode/testdata/fixtures/: the snake event
+// spells the dotted native coordinate with underscores, the host version
+// spells 2.0.20 with underscores, and <n> is the capture sequence starting
+// at 1. The permission evaluate row expects
+// opencode_permission_evaluate_2_0_20.1.json. The trailing comment on each
+// row records that expected basename; no fixture is committed yet, so every
+// row stays withheld and every response capability stays none until the
+// capture and its clearance land, at which point enabling a row is a data
+// change (declaring its proofs and binding them here) with no derivation
+// change.
 var openCode2TargetEventDeclarations = [...]targetEventDeclaration{
-	{event: registration.EventOpenCode2SessionCreated},
-	{event: registration.EventOpenCode2SessionPrompt},
-	{event: registration.EventOpenCode2SessionContext},
-	{event: registration.EventOpenCode2SessionCompaction},
-	{event: registration.EventOpenCode2SessionGenerate},
-	{event: registration.EventOpenCode2SessionTitle},
-	{event: registration.EventOpenCode2SessionModelRequest},
-	{event: registration.EventOpenCode2SessionHttpRequest},
-	{event: registration.EventOpenCode2SessionHttpResponse},
-	{event: registration.EventOpenCode2SessionExperimentalWsHandshake},
-	{event: registration.EventOpenCode2SessionExperimentalWsSend},
-	{event: registration.EventOpenCode2SessionExperimentalWsReceive},
-	{event: registration.EventOpenCode2SessionRetry},
-	{event: registration.EventOpenCode2ToolExecuteBefore},
-	{event: registration.EventOpenCode2ToolExecuteAfter},
-	{event: registration.EventOpenCode2PermissionEvaluate},
-	{event: registration.EventOpenCode2ShellCreateBefore},
+	{event: registration.EventOpenCode2SessionCreated},                 // expects opencode_session_created_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionPrompt},                  // expects opencode_session_prompt_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionContext},                 // expects opencode_session_context_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionCompaction},              // expects opencode_session_compaction_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionGenerate},                // expects opencode_session_generate_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionTitle},                   // expects opencode_session_title_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionModelRequest},            // expects opencode_session_model_request_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionHttpRequest},             // expects opencode_session_http_request_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionHttpResponse},            // expects opencode_session_http_response_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionExperimentalWsHandshake}, // expects opencode_session_experimental_ws_handshake_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionExperimentalWsSend},      // expects opencode_session_experimental_ws_send_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionExperimentalWsReceive},   // expects opencode_session_experimental_ws_receive_2_0_20.1.json
+	{event: registration.EventOpenCode2SessionRetry},                   // expects opencode_session_retry_2_0_20.1.json
+	{event: registration.EventOpenCode2ToolExecuteBefore},              // expects opencode_tool_execute_before_2_0_20.1.json
+	{event: registration.EventOpenCode2ToolExecuteAfter},               // expects opencode_tool_execute_after_2_0_20.1.json
+	{event: registration.EventOpenCode2PermissionEvaluate},             // expects opencode_permission_evaluate_2_0_20.1.json
+	{event: registration.EventOpenCode2ShellCreateBefore},              // expects opencode_shell_create_before_2_0_20.1.json
 }
 
 // OpenCode2_0_20TargetEvents returns a defensive copy of the 2.0.20 target set.

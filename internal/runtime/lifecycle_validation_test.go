@@ -339,6 +339,77 @@ func TestBlocksByExitCodeCoversOnlyTheTwoExitCodeArms(t *testing.T) {
 	}
 }
 
+// TestOpenCode2ResponseCapabilityFlipsOnEvidenceDataOnly pins the v2
+// capability posture without needing any fixture: all seventeen pinned rows
+// derive CapabilityNone, and the same named builder derives CapabilityDeny
+// for the permission evaluate coordinate once it carries a citation. The
+// flip is therefore data (supplying the evidence value), and it stays
+// honest: a row without a citation, an observation, and the post-hoc tool
+// row all derive none even when cited.
+func TestOpenCode2ResponseCapabilityFlipsOnEvidenceDataOnly(t *testing.T) {
+	t.Parallel()
+
+	contract := OpenCode2_0_20Lifecycle()
+	events := contract.Events()
+	if len(events) != 17 {
+		t.Fatalf("v2 lifecycle events = %d, want the exhaustive 17-coordinate surface", len(events))
+	}
+	for _, event := range events {
+		mapping, err := contract.Mapping(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !mapping.IsValid() {
+			t.Fatalf("v2 row %q is not a valid lifecycle mapping", mapping.NativeName())
+		}
+		if mapping.Response() != CapabilityNone {
+			t.Fatalf("v2 row %q derives %q, want none until its citation lands", mapping.NativeName(), mapping.Response())
+		}
+	}
+
+	const citation = "packages/core/src/permission.ts"
+	evidenced := openCode2NamedMapping(OpenCode2EventPermissionEvaluate, FailureEvidence{Source: citation}, openCode2SessionIdentity)
+	derived, err := newLifecycleContract(OpenCode2_0_20(), []int{1}, map[int]LifecycleEventMapping{1: evidenced})
+	if err != nil {
+		t.Fatalf("evidenced permission evaluate mapping was refused: %v", err)
+	}
+	got, err := derived.Mapping(1)
+	if err != nil || !got.IsValid() || got.Response() != CapabilityDeny {
+		t.Fatalf("evidenced permission evaluate response = %q, valid=%t, error=%v; want deny", got.Response(), got.IsValid(), err)
+	}
+
+	unevidenced := openCode2NamedMapping(OpenCode2EventPermissionEvaluate, openCode2Unevidenced, openCode2SessionIdentity)
+	derived, err = newLifecycleContract(OpenCode2_0_20(), []int{1}, map[int]LifecycleEventMapping{1: unevidenced})
+	if err != nil {
+		t.Fatalf("unevidenced permission evaluate mapping was refused: %v", err)
+	}
+	got, err = derived.Mapping(1)
+	if err != nil || got.Response() != CapabilityNone {
+		t.Fatalf("unevidenced permission evaluate response = %q, error=%v; want none", got.Response(), err)
+	}
+
+	observed := openCode2ObservationMapping(OpenCode2EventSessionCreated, openCode2SessionIdentity)
+	observed.evidence = FailureEvidence{Source: citation}
+	derived, err = newLifecycleContract(OpenCode2_0_20(), []int{1}, map[int]LifecycleEventMapping{1: observed})
+	if err != nil {
+		t.Fatalf("evidenced observation mapping was refused: %v", err)
+	}
+	got, err = derived.Mapping(1)
+	if err != nil || got.Response() != CapabilityNone {
+		t.Fatalf("evidenced observation response = %q, error=%v; want none", got.Response(), err)
+	}
+
+	postHoc := openCode2NamedMapping(OpenCode2EventToolExecuteAfter, FailureEvidence{Source: citation}, openCode2SessionIdentity, openCode2CallIdentity)
+	derived, err = newLifecycleContract(OpenCode2_0_20(), []int{1}, map[int]LifecycleEventMapping{1: postHoc})
+	if err != nil {
+		t.Fatalf("evidenced post-hoc tool mapping was refused: %v", err)
+	}
+	got, err = derived.Mapping(1)
+	if err != nil || got.Response() != CapabilityNone {
+		t.Fatalf("evidenced post-hoc tool response = %q, error=%v; want none", got.Response(), err)
+	}
+}
+
 // TestPinnedProfilesCiteEvidenceForEveryBlockingExitCode pins the exact set of
 // rows that keep a blocking exit code in the shipped profiles. Every other gate
 // row runs as report-and-continue until its harness supplies a citation, so

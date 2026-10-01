@@ -237,21 +237,41 @@ func EncodeCodex(mapping pastureruntime.LifecycleEventMapping, response backend.
 	return hostexit.ForDecision(append([]byte(nil), codexProceedContinuation...), hostexit.ExitContinue, ""), nil
 }
 
-// EncodeOpenCode preserves the plugin's current accept-Proceed protocol. A
-// typed refusal is unsupported until the plugin accepts it with reason-only
-// text and real transport evidence proves the host reaction.
+// EncodeOpenCode emits the canonical proceed body for an unenforced gate and
+// the typed refusal for an evidenced named-surface row. A policy Deny on a
+// row whose Response().AllowsDeny() is emitted as the canonical
+// {decision:deny,reason} body at exit 0, which the generated permission hook
+// enforces through the host effect mutation
+// (internal/codegen/opencode_hooks.go). The capability alone does not enable
+// the channel: this encoder is its required companion, and an evaluation
+// fault is never dressed as a refusal — it carries no policy verdict, so it
+// is rejected even where a denial would be emitted.
 func EncodeOpenCode(mapping pastureruntime.LifecycleEventMapping, response backend.HostResponse) (hostexit.Outcome, error) {
 	kind, err := nativeDecision(mapping, response, pastureruntime.SurfaceOpenCodeNamedOutput, pastureruntime.SurfaceOpenCodeCatchAllSSE)
 	if err != nil {
 		return hostexit.Outcome{}, err
 	}
-	if kind != backend.DecisionProceed {
+	switch kind {
+	case backend.DecisionProceed:
+		if mapping.Semantic() == pastureruntime.SemanticObservation {
+			return hostexit.ForDecision(nil, hostexit.ExitContinue, ""), nil
+		}
+		return hostexit.ForDecision(append([]byte(nil), canonicalProceedContinuation...), hostexit.ExitContinue, ""), nil
+	case backend.DecisionDeny:
+		if response.IsEvaluationFault() {
+			return hostexit.Outcome{}, unsupported(mapping, kind)
+		}
+		if !mapping.Response().AllowsDeny() {
+			return hostexit.Outcome{}, unsupported(mapping, kind)
+		}
+		encoded, err := response.MarshalJSON()
+		if err != nil {
+			return hostexit.Outcome{}, fmt.Errorf("nativeresponse.EncodeOpenCode: marshal evidenced deny response for event %q: %w", mapping.NativeName(), err)
+		}
+		return hostexit.ForDecision(encoded, hostexit.ExitContinue, ""), nil
+	default:
 		return hostexit.Outcome{}, unsupported(mapping, kind)
 	}
-	if mapping.Semantic() == pastureruntime.SemanticObservation {
-		return hostexit.ForDecision(nil, hostexit.ExitContinue, ""), nil
-	}
-	return hostexit.ForDecision(append([]byte(nil), canonicalProceedContinuation...), hostexit.ExitContinue, ""), nil
 }
 
 // # The fault continuation: what "fail open" costs in bytes

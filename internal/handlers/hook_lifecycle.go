@@ -235,9 +235,14 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 // both contracts use the same hook surfaces. No 2.0.20 row is enabled until
 // its capture and production proofs land, so this row currently refuses every
 // event as withheld before reading a byte — the transport exists and the
-// admission does not yet. The enforceable-deny channel stays unwired here: all
-// 2.0.20 rows derive CapabilityNone, so evaluated denials downgrade to proceed
-// with the unenforced reason, exactly as on the 1.18.29 row.
+// admission does not yet. The enforceable-deny channel is wired in the shared
+// encoder (EncodeOpenCode in internal/lifecycle/nativeresponse emits the
+// typed refusal for an evidenced named row and never dresses a fault as
+// one), so the missing capability citation is the only thing keeping denials
+// unwired: all 2.0.20 rows derive CapabilityNone, so evaluated denials
+// downgrade to proceed with the unenforced reason, exactly as on the 1.18.29
+// row. Supplying a row's citation flips that row to emitted refusals with no
+// encoder change.
 var openCodeV2Dispatch = lifecycleDispatch{
 	name:        "OpenCode",
 	manifest:    registration.OpenCode2_0_20(),
