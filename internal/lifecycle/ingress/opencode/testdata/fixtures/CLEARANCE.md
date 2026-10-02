@@ -1132,9 +1132,9 @@ Appended by the integrator in the landing commit: the pull request URL.
 
 ### Second batch — OpenCode 2.0.20
 
-No pull request for the second batch. Nothing captured reaches a remote
-before the user's acceptance above, so no PR URL is recorded here. The
-integrator appends the URL in the landing commit after the acceptance lands.
+Landing pull request: https://github.com/dayvidpham/pasture/pull/156 — opened
+after the acceptance above was recorded; the accepted captures first reach a
+remote through it.
 
 ## Current source revision transport — 2026-09-07
 
