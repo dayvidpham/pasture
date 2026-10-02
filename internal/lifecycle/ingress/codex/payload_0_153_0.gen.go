@@ -6,7 +6,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
-var fieldNames = map[model.NativeFieldID]string{
+var fieldNames0_153_0 = map[model.NativeFieldID]string{
 	registration.FieldCodexSessionID: "session_id",
 	registration.FieldCodexTurnID:    "turn_id",
 	registration.FieldCodexToolUseID: "tool_use_id",

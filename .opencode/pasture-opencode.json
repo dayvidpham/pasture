@@ -1,8 +1,8 @@
 {
   "$schema": "https://pasture.dev/opencode-target.json",
   "target": "opencode",
-  "runtime_contract": "opencode/opencode@1.18.29",
-  "host_version": "1.18.29",
+  "runtime_contract": "opencode/opencode@2.0.20",
+  "host_version": "2.0.20",
   "native_tools": [
     "question",
     "skill",
@@ -22,241 +22,98 @@
   ],
   "activation": [
     {
-      "event": "command.executed",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "file.edited",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "file.watcher.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "installation.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "installation.update-available",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "lsp.client.diagnostics",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "lsp.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "message.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "message.removed",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "message.part.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "message.part.removed",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "permission.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "permission.replied",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "server.connected",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "server.instance.disposed",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
       "event": "session.created",
+      "state": "withheld",
+      "reason": "missing-fixture"
+    },
+    {
+      "event": "session.prompt",
       "state": "enabled",
-      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/session_created_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)",
-      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/session.created"
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_prompt_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.prompt"
     },
     {
-      "event": "session.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "event": "session.context",
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_context_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.context"
     },
     {
-      "event": "session.deleted",
+      "event": "session.compaction",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "missing-fixture"
     },
     {
-      "event": "session.compacted",
+      "event": "session.generate",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "missing-fixture"
     },
     {
-      "event": "session.diff",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "event": "session.title",
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_title_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.title"
     },
     {
-      "event": "session.error",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "event": "session.model.request",
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_model_request_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.model.request"
     },
     {
-      "event": "session.idle",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "event": "session.http.request",
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_http_request_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.http.request"
     },
     {
-      "event": "session.status",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "event": "session.http.response",
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_http_response_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.http.response"
     },
     {
-      "event": "todo.updated",
+      "event": "session.experimental.ws.handshake",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "missing-fixture"
     },
     {
-      "event": "tui.prompt.append",
+      "event": "session.experimental.ws.send",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "missing-fixture"
     },
     {
-      "event": "tui.command.execute",
+      "event": "session.experimental.ws.receive",
       "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "missing-fixture"
     },
     {
-      "event": "tui.toast.show",
+      "event": "session.retry",
       "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "pty.created",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "pty.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "pty.exited",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "pty.deleted",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "vcs.branch.updated",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "chat.message",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "chat.params",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "chat.headers",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "permission.ask",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "command.execute.before",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "missing-fixture"
     },
     {
       "event": "tool.execute.before",
       "state": "enabled",
-      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/tool_execute_before_1_18_29.json (OpenCode 1.18.29 authentic callback-object capture)",
-      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCodeHandlersToDurableReadBack/tool.execute.before"
-    },
-    {
-      "event": "shell.env",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_tool_execute_before_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/tool.execute.before"
     },
     {
       "event": "tool.execute.after",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_tool_execute_after_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/tool.execute.after"
     },
     {
-      "event": "experimental.chat.messages.transform",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "event": "permission.evaluate",
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_permission_evaluate_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/permission.evaluate"
     },
     {
-      "event": "experimental.chat.system.transform",
+      "event": "shell.create.before",
       "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "experimental.provider.small_model",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "experimental.session.compacting",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "experimental.compaction.autocontinue",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "experimental.text.complete",
-      "state": "withheld",
-      "reason": "outside-target-set"
-    },
-    {
-      "event": "tool.definition",
-      "state": "withheld",
-      "reason": "outside-target-set"
+      "reason": "unclearable-payload"
     }
   ]
 }

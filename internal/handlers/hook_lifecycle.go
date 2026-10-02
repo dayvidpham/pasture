@@ -229,6 +229,56 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 	},
 }
 
+// openCodeV2Dispatch is the OpenCode 2.0.20 registry row. It mirrors the 1.18.29
+// row above with the 2.0.20 manifest, activation, ingress parser, frontend
+// binder and lifecycle mapping; the native-response encoder is shared because
+// both contracts use the same hook surfaces. No 2.0.20 row is enabled until
+// its capture and production proofs land, so this row currently refuses every
+// event as withheld before reading a byte — the transport exists and the
+// admission does not yet. The enforceable-deny channel is wired in the shared
+// encoder (EncodeOpenCode in internal/lifecycle/nativeresponse emits the
+// typed refusal for an evidenced named row and never dresses a fault as
+// one), so the missing capability citation is the only thing keeping denials
+// unwired: all 2.0.20 rows derive CapabilityNone, so evaluated denials
+// downgrade to proceed with the unenforced reason, exactly as on the 1.18.29
+// row. Supplying a row's citation flips that row to emitted refusals with no
+// encoder change.
+var openCodeV2Dispatch = lifecycleDispatch{
+	name:        "OpenCode",
+	manifest:    registration.OpenCode2_0_20(),
+	activations: activation.OpenCode2_0_20,
+	parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+		capture := opencodeingress.ParseV2(raw, event, version, model.OccurrenceEnvelopeRef{})
+		return lifecycleCapture{disposition: capture.Disposition, cause: capture.Cause, delivery: capture.Delivery}
+	},
+	rawParse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
+		capture := opencodeingress.ParseV2(raw, event, version, model.OccurrenceEnvelopeRef{})
+		return withRawOrigin(lifecycleCapture{disposition: capture.Disposition, cause: capture.Cause, delivery: capture.Delivery})
+	},
+	bind:    opencodefrontend.BindV2,
+	encode:  nativeresponse.EncodeOpenCode,
+	mapping: mappingLookup(pastureruntime.OpenCode2_0_20Lifecycle()),
+	// The 2.0.20 parser decodes into a struct, so an undeclared member is
+	// IGNORED and a field name matches case-insensitively. Both schema
+	// flags stay false, and the refusal text says only what holds here.
+	refusesUndeclaredMembers: false,
+	matchesFieldNamesExactly: false,
+}
+
+// openCodeV2FloorReached reports whether the observed host version selects the
+// OpenCode 2.0.20 contract row. Selection reads the 2.0.20 runtime contract's
+// own admission: a version its floor allows takes the v2 row, and anything
+// else — an older host, or a version that never parses — stays on the 1.18.29
+// row the tree served before. An empty version never reaches here with a
+// decision: the caller refuses it as missing before dispatch.
+func openCodeV2FloorReached(hostVersion string) bool {
+	version, err := pastureruntime.ParseHostVersion(strings.TrimSpace(hostVersion))
+	if err != nil {
+		return false
+	}
+	return pastureruntime.OpenCode2_0_20().Versions().Allows(version)
+}
+
 func mappingLookup[E comparable](contract pastureruntime.LifecycleContract[E]) func(string) (pastureruntime.LifecycleEventMapping, error) {
 	return func(name string) (pastureruntime.LifecycleEventMapping, error) {
 		for _, event := range contract.Events() {
@@ -284,7 +334,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil || open == nil || readers == nil {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, store opener, and gate reader factory are required.", "Nothing was read or recorded.", "Invoke this path through the production lifecycle command.", nil)
 	}
-	dispatch, err := dispatchLifecycle(in.Harness)
+	dispatch, err := dispatchLifecycleFor(in.Harness, in.HostVersion)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
@@ -762,6 +812,19 @@ func dispatchLifecycle(harness ir.HarnessID) (lifecycleDispatch, error) {
 		return lifecycleDispatch{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("Harness %q is not supported by lifecycle ingress.", harness), "Lifecycle ingress has no static provider dispatch for this harness.", "The input was not read and no database was opened.", "Use a harness present in the generated lifecycle support report.", nil)
 	}
 	return dispatch, nil
+}
+
+// dispatchLifecycleFor resolves the registry row for a harness at one observed
+// host version. OpenCode serves two contract versions on one harness, so an
+// observed 2.0.20-or-later host takes the 2.0.20 row and anything else stays on
+// the pinned 1.18.29 row; every other harness has one row and ignores the
+// version. The observed version is the CLI-resolved coordinate the caller
+// already carries, never a fresh query.
+func dispatchLifecycleFor(harness ir.HarnessID, hostVersion string) (lifecycleDispatch, error) {
+	if harness == ir.HarnessOpenCode && openCodeV2FloorReached(hostVersion) {
+		return openCodeV2Dispatch, nil
+	}
+	return dispatchLifecycle(harness)
 }
 
 // CommitBarrier is the named boundary between "the lifecycle receipt is

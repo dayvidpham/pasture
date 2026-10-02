@@ -512,3 +512,61 @@ func TestOnlyEffectiveFailureModeCanChooseAnExit(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, hostexit.ExitContinue, out.Exit, "declared mode explains, only effective mode chooses the exit")
 }
+
+func TestOpenCodeEncoderRejectsFaultDressedAsDeny(t *testing.T) {
+	t.Parallel()
+
+	// The v2 permission transport treats any deny-shaped body as a policy
+	// refusal, so the binary must never answer a fault in that shape. An
+	// unevaluated fault marshals to the identical body a policy refusal
+	// carries, and the generated plugin cannot tell them apart — and must
+	// never have to, because the encoder rejects every fault before any
+	// bytes exist. An encoder that emits deny bodies for evidenced rows must
+	// keep rejecting faults, or this test names the exact regression: a
+	// fault dressed as a refusal.
+	mapping, err := pastureruntime.OpenCode2_0_20Lifecycle().Mapping(pastureruntime.OpenCode2EventPermissionEvaluate)
+	require.NoError(t, err)
+	fault := backend.NewEvaluationFaultResponse()
+	raw, err := fault.MarshalJSON()
+	require.NoError(t, err)
+	require.Equal(t, `{"decision":"deny","reason":"evaluation-fault"}`, string(raw),
+		"the fault marshals deny-shaped, which is why the encoder must reject it")
+	_, err = nativeresponse.EncodeOpenCode(mapping, fault)
+	var unsupported *nativeresponse.UnsupportedResponseError
+	require.ErrorAs(t, err, &unsupported)
+	require.Equal(t, mapping.NativeName(), unsupported.Event)
+}
+
+// TestOpenCodeEncoderEmitsRefusalForEvidencedDenyGate pairs the cited v2
+// permission.evaluate row with a policy Deny through the production
+// normalize-then-encode path: the normalized verdict stays Deny, and the
+// encoder emits the {decision:deny,reason} body at exit 0 that the generated
+// permission hook enforces. The proceed path on the same cited row is
+// unchanged, and a fault must still never be dressed as a refusal (see
+// TestOpenCodeEncoderRejectsFaultDressedAsDeny).
+func TestOpenCodeEncoderEmitsRefusalForEvidencedDenyGate(t *testing.T) {
+	t.Parallel()
+	mapping, err := pastureruntime.OpenCode2PermissionEvaluateCited("packages/core/src/permission.ts")
+	require.NoError(t, err)
+	require.True(t, mapping.Response().AllowsDeny(), "the cited permission row must carry a deny channel")
+	decision, err := backend.NewDecision(backend.DecisionDeny, backend.ReasonNoActiveAssignment)
+	require.NoError(t, err)
+	normalized, err := nativeresponse.NormalizeDecision(mapping, decision)
+	require.NoError(t, err)
+	require.Equal(t, backend.DecisionDeny, normalized.Kind(), "a cited deny must survive normalization instead of downgrading to proceed")
+	response, err := backend.NewHostResponse(normalized)
+	require.NoError(t, err)
+	out, err := nativeresponse.EncodeOpenCode(mapping, response)
+	require.NoError(t, err)
+	require.Equal(t, hostexit.ExitContinue, out.Exit)
+	require.JSONEq(t, `{"decision":"deny","reason":"no-active-assignment"}`, string(out.Stdout))
+	require.Empty(t, out.Stderr)
+	proceed, err := backend.NewDecision(backend.DecisionProceed, backend.ReasonLegal)
+	require.NoError(t, err)
+	proceedResponse, err := backend.NewHostResponse(proceed)
+	require.NoError(t, err)
+	proceedOut, err := nativeresponse.EncodeOpenCode(mapping, proceedResponse)
+	require.NoError(t, err)
+	require.Equal(t, hostexit.ExitContinue, proceedOut.Exit)
+	require.Equal(t, `{"decision":"proceed"}`, string(proceedOut.Stdout))
+}

@@ -73,6 +73,50 @@ func TestEveryRegisteredEventCarriesAnActionClass(t *testing.T) {
 	t.Logf("classified %d registered events: %v", total, perHarness)
 }
 
+// TestEveryV2EventCarriesAnActionClass walks the OpenCode 2.0.20 manifest and
+// requires a class for each of its rows, including the fourteen coordinates
+// the 1.18.29 catalogue does not share. The shared three keep the classes the
+// 1.18.29 rows above assert; the new rows carry provisional classes that the
+// committed capture sitting re-derives, all on never-denied actions so a
+// misclassified provisional row can only proceed.
+func TestEveryV2EventCarriesAnActionClass(t *testing.T) {
+	manifest := registration.OpenCode2_0_20()
+	var unclassified []string
+	for _, event := range manifest.Entries() {
+		class, ok := gateauthority.ClassForEvent(manifest.Harness, event.NativeName)
+		if !ok || !class.IsValid() {
+			unclassified = append(unclassified, event.NativeName)
+		}
+	}
+	if len(manifest.Entries()) == 0 {
+		t.Fatal("the 2.0.20 manifest registered no event at all, so the class walk covered nothing")
+	}
+	if len(unclassified) > 0 {
+		sort.Strings(unclassified)
+		t.Fatalf("%d 2.0.20 event(s) carry no action class: %v", len(unclassified), unclassified)
+	}
+	provisional := map[string]gateauthority.ActionClass{
+		"session.prompt":      gateauthority.ActionPromptSubmit,
+		"session.compaction":  gateauthority.ActionCompact,
+		"permission.evaluate": gateauthority.ActionPermission,
+	}
+	for name, want := range provisional {
+		if class, ok := gateauthority.ClassForEvent(manifest.Harness, name); !ok || class != want {
+			t.Errorf("2.0.20 event %q reads (%s, %t); want (%s, true)", name, class, ok, want)
+		}
+	}
+	for _, name := range []string{
+		"session.context", "session.generate", "session.title",
+		"session.model.request", "session.http.request", "session.http.response",
+		"session.experimental.ws.handshake", "session.experimental.ws.send", "session.experimental.ws.receive",
+		"session.retry", "shell.create.before",
+	} {
+		if class, ok := gateauthority.ClassForEvent(manifest.Harness, name); !ok || class != gateauthority.ActionObservation {
+			t.Errorf("2.0.20 event %q reads (%s, %t); want (observation, true)", name, class, ok)
+		}
+	}
+}
+
 // TestAnUnregisteredEventNameHasNoClass proves the mapping refuses a name that
 // did not come from a manifest, rather than answering with some class.
 //

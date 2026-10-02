@@ -15,7 +15,7 @@ import (
 // baseline independent of the allocation source so a reordered source is RED.
 func TestFieldAllocationPreservesExistingIDs(t *testing.T) {
 	t.Parallel()
-	contracts := []hostcontract.Contract{hostcontract.ClaudeCode2_1_261(), hostcontract.OpenCode1_18_29(), hostcontract.Codex0_153_0()}
+	contracts := []hostcontract.Contract{hostcontract.ClaudeCode2_1_261(), hostcontract.OpenCode1_18_29(), hostcontract.OpenCode2_0_20(), hostcontract.Codex0_153_0()}
 	ids := renderedFieldIDs(t, renderKinds(contracts...))
 	baseline := []string{
 		"FieldSessionID", "FieldScratchpadDir", "FieldTranscriptPath", "FieldCWD", "FieldPermissionMode",
@@ -39,7 +39,9 @@ func TestFieldAllocationPreservesExistingIDs(t *testing.T) {
 	// addition must nevertheless allocate after every pre-existing field.
 	require.Equal(t, "FieldFileEvent", contracts[0].Fields[len(contracts[0].Fields)-1].Symbol)
 	require.Equal(t, len(baseline)+2, ids["FieldCodexAgentID"])
-	require.Len(t, ids, len(baseline)+2)
+	require.Equal(t, len(baseline)+3, ids["FieldOpenCode2SessionID"])
+	require.Equal(t, len(baseline)+4, ids["FieldOpenCode2CallID"])
+	require.Len(t, ids, len(baseline)+4)
 }
 
 func renderedFieldIDs(t *testing.T, source []byte) map[string]int {
@@ -77,7 +79,7 @@ func renderedFieldIDs(t *testing.T, source []byte) map[string]int {
 
 func TestFieldAllocationChecksContractPopulation(t *testing.T) {
 	t.Parallel()
-	contracts := []hostcontract.Contract{hostcontract.ClaudeCode2_1_261(), hostcontract.OpenCode1_18_29(), hostcontract.Codex0_153_0()}
+	contracts := []hostcontract.Contract{hostcontract.ClaudeCode2_1_261(), hostcontract.OpenCode1_18_29(), hostcontract.OpenCode2_0_20(), hostcontract.Codex0_153_0()}
 	order := hostcontract.FieldAllocationOrder()
 	allocated, err := allocatedFieldSymbols(contracts, order)
 	require.NoError(t, err)

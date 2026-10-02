@@ -57,7 +57,7 @@ func Parse(raw []byte, event registration.Event, observedVersion string, envelop
 }
 
 // bindingsFor reads only the identities declared by the generated pinned
-// catalogue. fieldNames is generated from the same source. Unknown payload
+// catalogue. fieldNames0_153_0 is generated from the same source. Unknown payload
 // members stay in the exact retained body and never become bindings.
 func bindingsFor(event registration.Event, value map[string]json.RawMessage) (model.CaptureDisposition, []model.NativeBinding) {
 	var nativeName string
@@ -69,7 +69,7 @@ func bindingsFor(event registration.Event, value map[string]json.RawMessage) (mo
 	}
 	bindings := make([]model.NativeBinding, 0, len(event.Identities))
 	for _, identity := range event.Identities {
-		name, declared := fieldNames[identity.Field]
+		name, declared := fieldNames0_153_0[identity.Field]
 		if !declared {
 			return model.CaptureUnsupportedSchema, nil
 		}

@@ -170,6 +170,7 @@ func identityStrings(fields []runtime.NativeIdentityField) []string {
 func assertLifecycleContract[E comparable](
 	t *testing.T,
 	want lifecycleContractFixture,
+	wantID string,
 	contract runtime.LifecycleContract[E],
 	events []E,
 	nativeName func(E) string,
@@ -177,12 +178,11 @@ func assertLifecycleContract[E comparable](
 	t.Helper()
 	require.True(t, contract.IsValid())
 	assert.Equal(t, want.Harness, string(contract.Harness()))
-	// The lifecycle contract's id and admission are read from the one root,
-	// never restated in the fixture: the id is the harness's production runtime
-	// contract id, and admission is a floor at the version that id records.
-	wantID, rootErr := artifact.ProductionRuntimeContract(contract.Harness())
-	require.NoError(t, rootErr)
-	assert.Equal(t, wantID.String(), contract.ID().String(), "the lifecycle contract id is the production runtime contract id")
+	// The lifecycle contract's id is never restated in the fixture: the caller
+	// passes the production runtime contract id for a production profile, or
+	// the frozen id of a historical profile; admission is a floor at the
+	// version that id records.
+	assert.Equal(t, wantID, contract.ID().String(), "the lifecycle contract id is the expected runtime contract id")
 	min := contract.Versions().Min()
 	assert.False(t, contract.Versions().HasUpperBound(), "admission is a floor")
 	assert.True(t, contract.Supports(min), "the recorded version is admitted")
@@ -276,6 +276,7 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 		assertLifecycleContract(
 			t,
 			lifecycleFixtureFor(t, fixture, "claude-code"),
+			productionContractID(t, artifact.HarnessClaudeCode),
 			runtime.ClaudeCode2_1_261Lifecycle(),
 			runtime.ClaudeLifecycleEvents(),
 			func(event runtime.ClaudeLifecycleEvent) string { return event.NativeName() },
@@ -287,6 +288,7 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 		assertLifecycleContract(
 			t,
 			lifecycleFixtureFor(t, fixture, "codex"),
+			productionContractID(t, artifact.HarnessCodex),
 			runtime.Codex0_153_0Lifecycle(),
 			runtime.CodexLifecycleEvents(),
 			func(event runtime.CodexLifecycleEvent) string { return event.NativeName() },
@@ -295,9 +297,14 @@ func TestPinnedLifecycleContractsMatchStrictFixture(t *testing.T) {
 
 	t.Run("opencode", func(t *testing.T) {
 		t.Parallel()
+		// The strict fixture records the historical 1.18.29 catalogue, whose
+		// identity is frozen; the production OpenCode profile is 2.0.20.
+		assert.Equal(t, productionContractID(t, artifact.HarnessOpenCode), runtime.OpenCode2_0_20Lifecycle().ID().String(),
+			"the production OpenCode lifecycle contract id is the production runtime contract id")
 		assertLifecycleContract(
 			t,
 			lifecycleFixtureFor(t, fixture, "opencode"),
+			"opencode/opencode@1.18.29",
 			runtime.OpenCode1_18_29Lifecycle(),
 			runtime.OpenCodeLifecycleEvents(),
 			func(event runtime.OpenCodeLifecycleEvent) string { return event.NativeName() },
@@ -588,4 +595,13 @@ func assertEveryRowDeclared[E comparable](
 		rows++
 	}
 	return rows
+}
+
+// productionContractID reads the production runtime contract id of one harness
+// from the one root.
+func productionContractID(t *testing.T, harness artifact.Harness) string {
+	t.Helper()
+	id, err := artifact.ProductionRuntimeContract(harness)
+	require.NoError(t, err)
+	return id.String()
 }

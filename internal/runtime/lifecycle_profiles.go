@@ -79,6 +79,13 @@ func ValidatePinnedLifecycleProfiles() error {
 		return err
 	}
 	if _, err := newLifecycleContract(
+		OpenCode2_0_20(), OpenCode2LifecycleEvents(), openCode2LifecycleMappings(),
+	); err != nil {
+		return err
+	}
+	// The historical OpenCode 1.18.29 profile still serves the v1 dispatch row
+	// for older hosts, so it is validated alongside the production profile.
+	if _, err := newLifecycleContract(
 		OpenCode1_18_29(), OpenCodeLifecycleEvents(), openCodeLifecycleMappings(),
 	); err != nil {
 		return err
@@ -138,6 +145,15 @@ func (p LifecycleFailurePolicy) Declared() bool { return p.Semantic.IsValid() }
 // identities, payload fields or ordering, and it returns false for a name no
 // pinned profile declares, so the caller must decide what an unknown event
 // means rather than receive a guess.
+//
+// OpenCode pins two contract versions on one harness. The lookup tries the
+// production 2.0.20 profile first and the historical 1.18.29 profile second:
+// the three coordinates both versions share declare identical failure
+// policies, so the order is unobservable there, and a 1.18.29-only coordinate
+// still resolves to its declared row instead of the observe-only fallback. Callers that need version-exact rows (the lifecycle
+// handler) resolve through their version-routed dispatch instead; this lookup
+// serves the command-line fault policy, which is fixed before the host version
+// is resolved, and the activation report, which renders one manifest at a time.
 func LookupLifecycleFailure(harness ir.HarnessID, nativeName string) (LifecycleFailurePolicy, bool) {
 	switch harness {
 	case ir.HarnessClaudeCode:
@@ -145,6 +161,9 @@ func LookupLifecycleFailure(harness ir.HarnessID, nativeName string) (LifecycleF
 	case ir.HarnessCodex:
 		return lookupLifecycleFailure(Codex0_153_0Lifecycle(), CodexLifecycleEvents(), nativeName)
 	case ir.HarnessOpenCode:
+		if policy, ok := lookupLifecycleFailure(OpenCode2_0_20Lifecycle(), OpenCode2LifecycleEvents(), nativeName); ok {
+			return policy, true
+		}
 		return lookupLifecycleFailure(OpenCode1_18_29Lifecycle(), OpenCodeLifecycleEvents(), nativeName)
 	default:
 		return LifecycleFailurePolicy{}, false

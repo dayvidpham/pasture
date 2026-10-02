@@ -16,7 +16,13 @@ func TestDescriptorPublishesIndependentGeneratedBundles(t *testing.T) {
 	t.Parallel()
 	descriptor, err := opencode.Descriptor()
 	require.NoError(t, err)
-	require.Equal(t, runtime.OpenCode1_18_29().ID(), descriptor.RuntimeContractID())
+	// The embedded production descriptor is pinned to the production
+	// authority, not to a constructor name, so it cannot drift from the
+	// production registry silently.
+	production, err := artifact.ProductionRuntimeContract(artifact.HarnessOpenCode)
+	require.NoError(t, err)
+	require.Equal(t, production, descriptor.RuntimeContractID())
+	require.Equal(t, runtime.OpenCode2_0_20().ID(), descriptor.RuntimeContractID())
 	require.True(t, descriptor.Skills().DefaultEnabled())
 	require.True(t, descriptor.Agents().DefaultEnabled())
 	require.False(t, descriptor.Hooks().DefaultEnabled())

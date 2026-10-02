@@ -192,6 +192,30 @@ func mustFloorContract(harness ir.HarnessID, core CoreRuntimeBindings) RuntimeCo
 	return contract
 }
 
+// mustFrozenFloorContract builds a historical runtime contract whose identity
+// and floor are fixed at a recorded version instead of the production root. It
+// exists for a superseded profile that stays reachable for older hosts; the
+// production profile of every harness is built by mustFloorContract.
+func mustFrozenFloorContract(harness ir.HarnessID, contractID, version string, core CoreRuntimeBindings) RuntimeContract {
+	host, err := ParseHostVersion(version)
+	if err != nil {
+		panic(err)
+	}
+	constraint, err := NewVersionFloor(host)
+	if err != nil {
+		panic(err)
+	}
+	id, err := ir.NewRuntimeContractID(harness, contractID)
+	if err != nil {
+		panic(err)
+	}
+	contract, err := NewRuntimeContract(id, harness, constraint, core)
+	if err != nil {
+		panic(err)
+	}
+	return contract
+}
+
 // ClaudeCode2_1_261 is the runtime contract for Claude Code at the recorded
 // host version, the one its id carries (artifact.ProductionRuntimeContract).
 // Admission is a floor: that version and every later release. Its native
@@ -232,10 +256,13 @@ func ClaudeCode2_1_261() RuntimeContract {
 	return mustFloorContract(ir.HarnessClaudeCode, buildCoreBindings(table))
 }
 
-// OpenCode1_18_29 is the runtime contract for OpenCode at the recorded host
-// version, the one its id carries (artifact.ProductionRuntimeContract).
-// Admission is a floor: that version and every later release. It uses only
-// OpenCode's documented skill/task/question surfaces. It never invents a
+// OpenCode1_18_29 is the historical runtime contract for OpenCode 1.18.29. It
+// is NOT the production profile: its identity (opencode@1.18.29) and its floor
+// (1.18.29) are frozen here rather than read from
+// artifact.ProductionRuntimeContract, so it stays the contract the v1 dispatch
+// row and the recorded 1.18.29 corpus evidence were proved against after the
+// production profile moved to OpenCode2_0_20. It uses only OpenCode's
+// documented skill/task/question surfaces. It never invents a
 // persistent-message, follow-up, wait, or close tool: operations with no
 // documented native surface are lowered as semantic instructions, and stopping
 // an assignment is explicitly unsupported rather than a fabricated close call.
@@ -270,7 +297,7 @@ func OpenCode1_18_29() RuntimeContract {
 			native: mustNativeCall("question", []string{"prompt", "options"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
 		},
 	}
-	return mustFloorContract(ir.HarnessOpenCode, buildCoreBindings(table))
+	return mustFrozenFloorContract(ir.HarnessOpenCode, "opencode@1.18.29", "1.18.29", buildCoreBindings(table))
 }
 
 // Codex0_153_0 is the runtime contract for Codex at the recorded host version,
@@ -318,5 +345,45 @@ func Codex0_153_0() RuntimeContract {
 // PinnedContracts returns the three runtime contracts, one per enabled harness,
 // each admitting its recorded host version and every later release.
 func PinnedContracts() []RuntimeContract {
-	return []RuntimeContract{ClaudeCode2_1_261(), OpenCode1_18_29(), Codex0_153_0()}
+	return []RuntimeContract{ClaudeCode2_1_261(), OpenCode2_0_20(), Codex0_153_0()}
+}
+
+// OpenCode2_0_20 is the production runtime contract for OpenCode, at the
+// recorded host version its id carries (artifact.ProductionRuntimeContract).
+// Admission is a floor: that version and every later release. It classifies the
+// same core operation surface as the historical 1.18.29 contract: the v2 plugin
+// API replaces hook registration while the native skill, task and question
+// tools keep their names, so the operation lowerings are unchanged.
+func OpenCode2_0_20() RuntimeContract {
+	table := map[ir.OperationKind]operationLowering{
+		ir.OperationInvokeSkill: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("skill", []string{"name", "arguments"}, "the skill's result", "runs in the invoking agent's context"),
+		},
+		ir.OperationDelegateAssignment: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("task", []string{"description", "prompt"}, "the spawned task's result on completion", "child receives the delegated assignment context"),
+		},
+		ir.OperationContinueAssignment: {
+			class:    effects.RuntimeClassSemanticInstruction,
+			semantic: mustSemantic("this contract binds no native follow-up call: reconstruct the assignment as a fresh task with its complete retained role, evidence, decisions, and outstanding work"),
+		},
+		ir.OperationSendAssignmentMessage: {
+			class:    effects.RuntimeClassSemanticInstruction,
+			semantic: mustSemantic("this contract binds no native persistent-message call: carry the message content into the next task prompt for the target assignment"),
+		},
+		ir.OperationCollectAssignmentResults: {
+			class:    effects.RuntimeClassSemanticInstruction,
+			semantic: mustSemantic("this contract binds no native wait call: collect each task result inline as tasks return"),
+		},
+		ir.OperationStopAssignment: {
+			class:  effects.RuntimeClassUnsupported,
+			reason: "this contract binds no native close or stop call; stopping a running task has no modeled native semantics and must not be lowered to a fabricated close call",
+		},
+		ir.OperationRequestUserDecision: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("question", []string{"prompt", "options"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
+		},
+	}
+	return mustFloorContract(ir.HarnessOpenCode, buildCoreBindings(table))
 }

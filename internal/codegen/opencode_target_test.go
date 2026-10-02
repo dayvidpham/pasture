@@ -3,13 +3,11 @@ package codegen
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -17,632 +15,8 @@ import (
 
 	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
-	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
-	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
-
-// expectedOpenCodeNativeTools is the exact native tool allow-list OpenCode
-// the recorded version declares: invoke-skill -> skill, delegate-assignment -> task,
-// request-user-decision -> question. Every other core operation is
-// semantic-instruction or unsupported and contributes no native tool.
-var expectedOpenCodeNativeTools = []string{"question", "skill", "task"}
-
-// foreignNativeCallNames are distinctive native call names declared by OTHER
-// harness contracts (Claude Code, Codex). None may appear in any OpenCode
-// generated artifact: their presence would mean an invented/borrowed tool name
-// survived the projection.
-var foreignNativeCallNames = []string{"Agent", "SendMessage", "TaskStop", "AskUserQuestion", "request-input"}
-
-func TestOpenCodeNativeToolNames_MatchPinnedContract(t *testing.T) {
-	got, err := deriveOpenCodeNativeToolNames()
-	if err != nil {
-		t.Fatalf("deriveOpenCodeNativeToolNames: %v", err)
-	}
-	if !reflect.DeepEqual(got, expectedOpenCodeNativeTools) {
-		t.Fatalf("derived native tools = %v, want %v", got, expectedOpenCodeNativeTools)
-	}
-
-	// Cross-check every name really is native in the pinned contract, proving the
-	// allow-list is the contract's own declared surface, not a hand-copied list.
-	contract := runtime.OpenCode1_18_29()
-	native := map[string]bool{}
-	for _, kind := range ir.AllOperationKinds() {
-		desc, ok := runtime.CoreOperationDescriptorFor(kind)
-		if !ok {
-			t.Fatalf("no descriptor for core kind %q", kind)
-		}
-		binding, err := runtime.LookupOperationBinding(contract, desc)
-		if err != nil {
-			continue // unsupported (stop assignment)
-		}
-		if call, isNative := binding.Native(); isNative {
-			native[call.CallName()] = true
-		}
-	}
-	for _, name := range got {
-		if !native[name] {
-			t.Errorf("derived tool %q is not native in the pinned contract", name)
-		}
-	}
-	if len(native) != len(got) {
-		t.Errorf("derived %d tools but contract declares %d native tools", len(got), len(native))
-	}
-}
-
-func TestGenerateOpenCodeHooksModule_Deterministic(t *testing.T) {
-	a, err := GenerateOpenCodeHooksModule()
-	if err != nil {
-		t.Fatalf("first generate: %v", err)
-	}
-	b, err := GenerateOpenCodeHooksModule()
-	if err != nil {
-		t.Fatalf("second generate: %v", err)
-	}
-	if a != b {
-		t.Fatal("hooks module generation is not byte-identical across runs")
-	}
-}
-
-func TestOpenCodeTargetManifestPublishesExhaustiveProofGatedActivation(t *testing.T) {
-	t.Parallel()
-	descriptor, err := NewOpenCodeTargetDescriptor()
-	if err != nil {
-		t.Fatalf("NewOpenCodeTargetDescriptor: %v", err)
-	}
-	raw, err := descriptor.Manifest()
-	if err != nil {
-		t.Fatalf("Manifest: %v", err)
-	}
-	var manifest openCodeTargetManifest
-	if err := json.Unmarshal([]byte(raw), &manifest); err != nil {
-		t.Fatalf("decode target manifest: %v", err)
-	}
-	if len(manifest.Activation) != 47 {
-		t.Fatalf("activation entries = %d, want exhaustive 47-event classification", len(manifest.Activation))
-	}
-	enabled := make([]string, 0, 2)
-	for _, entry := range manifest.Activation {
-		if entry.State != "enabled" {
-			if entry.Reason == "" || entry.CaptureProof != "" || entry.ProductionProof != "" {
-				t.Fatalf("withheld activation entry is not fail-closed: %#v", entry)
-			}
-			continue
-		}
-		if entry.CaptureProof == "" || entry.ProductionProof == "" {
-			t.Fatalf("enabled activation entry lacks both proofs: %#v", entry)
-		}
-		enabled = append(enabled, entry.Event)
-	}
-	want := []string{"session.created", "tool.execute.before"}
-	if !reflect.DeepEqual(enabled, want) {
-		t.Fatalf("enabled events = %v, want %v", enabled, want)
-	}
-}
-
-func TestOpenCodeHooksModule_ReferencesOnlyDeclaredTools(t *testing.T) {
-	module, err := GenerateOpenCodeHooksModule()
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	// The declared allow-list must appear verbatim as a frozen array.
-	if !strings.Contains(module, `Object.freeze(["question", "skill", "task"])`) {
-		t.Errorf("hooks module does not freeze the exact derived allow-list; got:\n%s", module)
-	}
-	for _, foreign := range foreignNativeCallNames {
-		if strings.Contains(module, foreign) {
-			t.Errorf("hooks module references foreign native call name %q — an invented/borrowed tool survived the projection", foreign)
-		}
-	}
-}
-
-func TestOpenCodeHooksModule_SelfContainedAndDiscoverable(t *testing.T) {
-	module, err := GenerateOpenCodeHooksModule()
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	// Self-contained: no sibling/npm import, no CommonJS require. A leading
-	// import would fail isolated loading with siblings absent.
-	importRE := regexp.MustCompile(`(?m)^\s*import\s`)
-	if importRE.MatchString(module) {
-		t.Error("hooks module has an import statement; it must be self-contained for isolated loading")
-	}
-	if strings.Contains(module, "require(") {
-		t.Error("hooks module uses require(); it must depend on no npm package")
-	}
-	// Discoverable: OpenCode reads the default export first and uses it when it
-	// is an object with server(); a bare function default falls back to a scan
-	// of every export that throws on the first non-function export.
-	if !strings.Contains(module, openCodePluginDefaultExport) {
-		t.Errorf("hooks module lacks the default export OpenCode's loader reads first, %q; without it the loader scans every export and throws on PASTURE_NATIVE_TOOLS", openCodePluginDefaultExport)
-	}
-}
-
-// openCodePluginDefaultExport is the one line OpenCode's plugin loader reads
-// first: a default-exported object whose server() is the plugin function.
-const openCodePluginDefaultExport = `export default { id: "pasture-lifecycle", server: PastureLifecycle };`
-
-// TestOpenCodeHooksModule_SatisfiesHostPluginLoaderRule loads the generated
-// module the way OpenCode does and applies OpenCode's own acceptance rule to
-// it: the default export is an object; it carries id, server or tui; server
-// is a function; tui is absent; a path plugin carries a non-empty string id.
-// When the default export passes that rule the loader reads nothing else, so
-// the legacy scan of every export (which throws on a non-function export) is
-// never reached. The rule is transcribed from OpenCode's loader
-// (packages/opencode/src/plugin/shared.ts readV1Plugin, readPluginId,
-// resolvePluginId; packages/opencode/src/plugin/index.ts applyPlugin,
-// getLegacyPlugins), identical at host versions 1.18.10 and 1.18.29.
-func TestOpenCodeHooksModule_SatisfiesHostPluginLoaderRule(t *testing.T) {
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("bun is required to load the generated OpenCode lifecycle plugin the way the host does; enter the flake dev shell or install the flake-locked Bun package")
-	}
-	module, err := GenerateOpenCodeHooksModule()
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	dir := t.TempDir()
-	modulePath := filepath.Join(dir, "pasture-hooks.ts")
-	if err := os.WriteFile(modulePath, []byte(module), 0o644); err != nil {
-		t.Fatalf("write module: %v", err)
-	}
-	runner := filepath.Join(dir, "loader-rule.ts")
-	script := fmt.Sprintf(`
-const mod = await import(%q);
-const value = mod.default;
-const isRecord = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
-if (!isRecord(value) || (!("id" in value) && !("server" in value) && !("tui" in value))) {
-  throw new Error("the default export is not an object with server(): OpenCode falls back to scanning every export and throws \"Plugin export is not a function\" on the first non-function export");
-}
-if (typeof value.server !== "function") throw new Error("the default export has no server() function; OpenCode refuses the plugin");
-if (value.tui !== undefined) throw new Error("the default export also carries tui(); OpenCode refuses a plugin that exports both");
-if (typeof value.id !== "string" || value.id.trim() === "") throw new Error("a path plugin must export a non-empty string id; OpenCode refuses it otherwise");
-console.log(JSON.stringify({ id: value.id, server: typeof value.server }));
-`, modulePath)
-	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
-		t.Fatalf("write loader-rule runner: %v", err)
-	}
-	out, err := exec.Command(bun, runner).CombinedOutput()
-	if err != nil {
-		t.Fatalf("the generated module does not satisfy OpenCode's plugin loader rule: %v\n%s", err, out)
-	}
-	if got := strings.TrimSpace(string(out)); got != `{"id":"pasture-lifecycle","server":"function"}` {
-		t.Fatalf("loader-rule runner reported %q", got)
-	}
-}
-
-func TestOpenCodeHooksModulePreservesNamedAndObservationBoundary(t *testing.T) {
-	t.Parallel()
-
-	module, err := GenerateOpenCodeHooksModule()
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	for _, required := range []string{
-		`["hook", "lifecycle", "--harness", "opencode", "--event", "session.created"]`,
-		`["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before"]`,
-		`{ input, output: { args: output.args } }`, `record.decision === "proceed"`,
-	} {
-		if !strings.Contains(module, required) {
-			t.Errorf("generated plugin lacks %q", required)
-		}
-	}
-	if strings.Contains(module, `"session.created": false`) || strings.Contains(module, `"tool.execute.before": false`) {
-		t.Error("generated plugin retained a duplicate hand-flipped activation boolean table")
-	}
-	for _, forbidden := range []string{"PASTURE_ADAPTER_EVENT", "PASTURE_ADAPTER_OPERATION", "PASTURE_ADAPTER_INPUT", `"__adapter"`, "invocationIdentity", "sourceValue("} {
-		if strings.Contains(module, forbidden) {
-			t.Errorf("generated lifecycle plugin contains forbidden semantic transport %q", forbidden)
-		}
-	}
-}
-
-// Constructed rows below test generator mechanics, not authentic host payloads
-// or activation evidence. The public generator still evaluates the real corpus.
-func TestOpenCodeEnabledDispatchThroughDefaultFactory(t *testing.T) {
-	manifest := registration.OpenCode1_18_29().Entries()
-	entries, err := openCodeActivationEntries()
-	if err != nil {
-		t.Fatal(err)
-	}
-	surfaces := map[string]runtime.HookSurface{}
-	contract := runtime.OpenCode1_18_29Lifecycle()
-	for _, event := range contract.Events() {
-		mapping, err := contract.Mapping(event)
-		if err != nil {
-			t.Fatal(err)
-		}
-		surfaces[mapping.NativeName()] = mapping.Surface()
-	}
-	// Additional supplied registrations must not need a callback hand-list edit.
-	manifest = append(manifest, registration.Event{Kind: 250, NativeName: "mechanics.observed"}, registration.Event{Kind: 251, NativeName: "mechanics.named"})
-	entries = append(entries, activation.Entry{Event: 250, State: activation.Enabled}, activation.Entry{Event: 251, State: activation.Enabled})
-	surfaces["mechanics.observed"] = runtime.SurfaceOpenCodeCatchAllSSE
-	surfaces["mechanics.named"] = runtime.SurfaceOpenCodeNamedOutput
-	for _, reduced := range []bool{false, true} {
-		t.Run(fmt.Sprintf("reduced=%v", reduced), func(t *testing.T) {
-			selected := append([]activation.Entry(nil), entries...)
-			if reduced {
-				for i := range selected {
-					if selected[i].Event != 251 {
-						selected[i].State = activation.Withheld
-					}
-				}
-			}
-			module, err := generateOpenCodeHooksModule(manifest, selected, surfaces)
-			if err != nil {
-				t.Fatal(err)
-			}
-			runOpenCodeDispatchModule(t, module, fmt.Sprintf(`
-const reduced = %v;
-assert.deepEqual(Object.keys(hooks).sort(), reduced ? ["mechanics.named"] : ["event", "mechanics.named", "tool.execute.before"]);
-assert.equal(hooks["chat.message"], undefined, "withheld named key");
-const input = Object.freeze({ sessionID: "constructed", tool: "task" });
-const args = Object.freeze({ nested: Object.freeze([1, null, true]) });
-const output = Object.freeze({ args, extra: "host-owned" });
-await hooks["mechanics.named"](input, output);
-assert.strictEqual(output.args, args);
-assert.deepEqual(calls[0].payload, { input, output });
-assert.equal(calls[0].argv[5], "mechanics.named");
-if (!reduced) {
-  const callback = Object.freeze({ event: Object.freeze({ type: "mechanics.observed", properties: Object.freeze({ id: "constructed" }) }) });
-  await hooks.event(callback);
-  assert.deepEqual(calls[1].payload, callback);
-  assert.equal(calls[1].argv[5], "mechanics.observed");
-  await hooks["tool.execute.before"](input, output);
-  assert.deepEqual(calls[2].payload, { input, output: { args } });
-  assert.strictEqual(output.args, args);
-  const count = calls.length;
-  for (const type of ["session.updated", "unknown.observation", "chat.message", "toString", "__proto__"]) await hooks.event({event:{type}});
-  await hooks.event({});
-  assert.equal(calls.length, count, "unknown and withheld observations must not spawn");
-}
-const count = calls.length;
-await assert.rejects(hooks["mechanics.named"](null, output), /requires input and output objects/);
-await assert.rejects(hooks["mechanics.named"](input, []), /requires input and output objects/);
-assert.equal(calls.length, count, "unsupported callback shape must not spawn");
-`, reduced))
-		})
-	}
-}
-
-// This tests command construction, not Go executable discovery or durable receipts.
-// The version controls are constructed values, not new host captures.
-func TestOpenCodeCreationVersionIsOccurrenceLocal(t *testing.T) {
-	module, err := GenerateOpenCodeHooksModule()
-	if err != nil {
-		t.Fatal(err)
-	}
-	runOpenCodeDispatchModule(t, module, `
-const base = ["hook", "lifecycle", "--harness", "opencode", "--event"];
-const input = Object.freeze({sessionID:"constructed", callID:"call", tool:"task"});
-const args = Object.freeze({nested:Object.freeze([1, null, true])});
-const output = Object.freeze({args});
-for (const version of ["1.19.0", " local ", "1.20.0+build", undefined, "", " \t\n", null, 42, false, {}, []]) {
-  const info = Object.freeze(version === undefined ? {id:"constructed"} : {id:"constructed", version});
-  const callback = Object.freeze({event:Object.freeze({type:"session.created", properties:Object.freeze({info})})});
-  const before = JSON.stringify(callback);
-  await hooks.event(callback);
-  const expected = [...base, "session.created"];
-  if (typeof version === "string" && version.trim() !== "") expected.push("--host-version", version);
-  assert.deepEqual(calls.at(-1).argv, expected, "creation occurrence selects original usable metadata only");
-  assert.deepEqual(calls.at(-1).payload, callback);
-  assert.equal(JSON.stringify(callback), before);
-  assert.strictEqual(callback.event.properties.info, info);
-  await hooks["tool.execute.before"](input, output);
-  assert.deepEqual(calls.at(-1).argv, [...base, "tool.execute.before"], "later tool must omit all version arguments, never cache creation metadata");
-  assert.deepEqual(calls.at(-1).payload, {input, output:{args}});
-  assert.strictEqual(output.args, args);
-}
-for (const event of [{type:"session.created"}, {type:"session.created", properties:{}}, {type:"session.created", properties:{info:null}}]) {
-  await hooks.event({event});
-  assert.deepEqual(calls.at(-1).argv, [...base, "session.created"]);
-}
-assert.equal(calls.length, 25, "all metadata and later-callback controls must run");
-`)
-}
-
-func runOpenCodeDispatchModule(t *testing.T, module, assertions string) {
-	t.Helper()
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("Bun is required for the generated default-factory dispatch proof")
-	}
-	dir := t.TempDir()
-	path := filepath.Join(dir, "plugin.ts")
-	if err := os.WriteFile(path, []byte(module), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	runner := filepath.Join(dir, "dispatch.ts")
-	script := fmt.Sprintf(`
-import assert from "node:assert/strict";
-const {default: plugin} = await import(%q);
-assert.equal(plugin.id, "pasture-lifecycle");
-const hooks = await plugin.server({client:{}});
-const calls = [];
-const originalSpawn = Bun.spawn;
-Bun.spawn = options => {
-  const record = {argv: options.cmd.slice(1), payload: undefined};
-  calls.push(record);
-  const exited = options.stdin.text().then(text => {
-    record.payload = JSON.parse(text);
-    const expected = ["hook", "lifecycle", "--harness", "opencode", "--event", record.argv[5]];
-    const version = record.payload.event?.properties?.info?.version;
-    if (record.argv[5] === "session.created" && typeof version === "string" && version.trim() !== "") expected.push("--host-version", version);
-    assert.deepEqual(record.argv, expected);
-    return 0;
-  });
-  return {stdout: new Blob(['{"decision":"proceed"}']).stream(), stderr: new Blob([]).stream(), exited, exitCode: 0, kill() {throw new Error("unexpected kill");}};
-};
-try {
-%s
-  console.log("dispatch assertions passed");
-} finally { Bun.spawn = originalSpawn; }
-`, path, assertions)
-	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bun, runner)
-	cmd.Env = append(os.Environ(), "PASTURE_DB_PATH="+filepath.Join(dir, "scratch.db"))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("default factory dispatch: %v\n%s", err, out)
-	}
-	if !strings.Contains(string(out), "dispatch assertions passed") {
-		t.Fatalf("runner did not finish: %s", out)
-	}
-}
-
-func TestOpenCodeGeneratorRejectsUnsupportedSurface(t *testing.T) {
-	for _, surface := range []runtime.HookSurface{0, runtime.SurfaceClaudeCommandJSON, runtime.SurfaceCodexStrictCommandJSON} {
-		_, err := generateOpenCodeHooksModule([]registration.Event{{Kind: 250, NativeName: "mechanics.observed"}}, []activation.Entry{{Event: 250, State: activation.Enabled}}, map[string]runtime.HookSurface{"mechanics.observed": surface})
-		if err == nil || !strings.Contains(err.Error(), "unsupported runtime surface") {
-			t.Fatalf("surface %v: %v", surface, err)
-		}
-	}
-}
-
-func TestOpenCodeRegisteredSurfaceEmissionMechanics(t *testing.T) {
-	// This is not an activation evaluator: all rows here are constructed enabled
-	// inputs so emission covers native spellings that remain withheld in product.
-	manifest := registration.OpenCode1_18_29().Entries()
-	var entries []activation.Entry
-	surfaces := map[string]runtime.HookSurface{}
-	contract := runtime.OpenCode1_18_29Lifecycle()
-	var observations, named []string
-	for _, event := range contract.Events() {
-		mapping, err := contract.Mapping(event)
-		if err != nil {
-			t.Fatal(err)
-		}
-		surfaces[mapping.NativeName()] = mapping.Surface()
-	}
-	for _, event := range manifest {
-		entries = append(entries, activation.Entry{Event: event.Kind, State: activation.Enabled})
-		switch surfaces[event.NativeName] {
-		case runtime.SurfaceOpenCodeCatchAllSSE:
-			observations = append(observations, event.NativeName)
-		case runtime.SurfaceOpenCodeNamedOutput:
-			named = append(named, event.NativeName)
-		default:
-			t.Fatalf("unsupported registered surface: %s", event.NativeName)
-		}
-	}
-	module, err := generateOpenCodeHooksModule(manifest, entries, surfaces)
-	if err != nil {
-		t.Fatal(err)
-	}
-	observationJSON, err := json.Marshal(observations)
-	if err != nil {
-		t.Fatal(err)
-	}
-	namedJSON, err := json.Marshal(named)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runOpenCodeDispatchModule(t, module, fmt.Sprintf(`
-const observations = %s, named = %s;
-assert.deepEqual(Object.keys(hooks).sort(), ["event", ...named].sort());
-for (const type of observations) {
-  const payload = {event:{type, properties:{id:"constructed"}}};
-  await hooks.event(payload);
-  assert.equal(calls.at(-1).argv[5], type);
-  assert.deepEqual(calls.at(-1).payload, payload);
-}
-for (const name of named) {
-  const input = Object.freeze({id:"constructed"});
-  const output = Object.freeze({args:Object.freeze({id:"constructed"})});
-  await hooks[name](input, output);
-  assert.equal(calls.at(-1).argv[5], name);
-  assert.deepEqual(calls.at(-1).payload, {input, output});
-}
-assert.equal(calls.length, observations.length + named.length);
-`, observationJSON, namedJSON))
-}
-
-// TestOpenCodeHooksModule_ParsesUnderBun makes Bun a required gate dependency.
-func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("bun is required to validate the generated OpenCode lifecycle plugin; enter the flake dev shell or install the flake-locked Bun package")
-	}
-	module, err := GenerateOpenCodeHooksModule()
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	// The module lives under a plugin/ directory alone; write only itself so the
-	// parse exercises isolated loading with no sibling present.
-	path := filepath.Join(t.TempDir(), "pasture-hooks.ts")
-	if err := os.WriteFile(path, []byte(module), 0o644); err != nil {
-		t.Fatalf("write module: %v", err)
-	}
-	out, err := exec.Command(bun, "--check", path).CombinedOutput()
-	if err != nil {
-		t.Fatalf("bun --check rejected the isolated module: %v\n%s", err, out)
-	}
-}
-
-func TestOpenCodeGeneratedLifecycleCallbacks_RunBuiltCLIWithAuthenticFixtures(t *testing.T) {
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("bun is required for the generated OpenCode production proof; enter the flake dev shell")
-	}
-	root := testModuleRoot(t)
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	build := exec.Command("go", "build", "-race", "-o", binary, "./cmd/pasture")
-	build.Dir = root
-	// The repository's standard test target keeps the outer suite CGO-free.
-	// This child build intentionally uses the race detector, which requires CGO.
-	build.Env = append(build.Environ(), "CGO_ENABLED=1")
-	if output, buildErr := build.CombinedOutput(); buildErr != nil {
-		t.Fatalf("build production pasture CLI with race instrumentation: %v\n%s", buildErr, output)
-	}
-
-	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
-	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
-	runner := filepath.Join(dir, "production-proof.ts")
-	script := fmt.Sprintf(`
-import { sessionCreated, toolExecuteBefore } from %q;
-const sessionCapture = await Bun.file(%q).json();
-const toolCapture = await Bun.file(%q).json();
-await sessionCreated(sessionCapture);
-const output = toolCapture.output;
-const before = JSON.stringify(output.args);
-await toolExecuteBefore(toolCapture.input, output);
-if (JSON.stringify(output.args) !== before) throw new Error("generated tool.execute.before callback changed output.args");
-console.log(JSON.stringify({ argsUnchanged: true }));
-`, moduleURL,
-		filepath.Join(fixtureDir, "session_created_1_18_29.json"),
-		filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
-	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
-		t.Fatalf("write Bun production-proof runner: %v", err)
-	}
-	dbPath := filepath.Join(dir, "pasture.db")
-	bootstrap := exec.Command(binary, "--db", dbPath, "--namespace", "file://opencode-production-proof", "task", "create", "initialize lifecycle identity")
-	if bootstrapOutput, bootstrapErr := bootstrap.CombinedOutput(); bootstrapErr != nil {
-		t.Fatalf("initialize real temporary Pasture store through production CLI: %v\n%s", bootstrapErr, bootstrapOutput)
-	}
-	proof := exec.Command(bun, runner)
-	versionPath := filepath.Join(dir, "bin")
-	if err := os.Mkdir(versionPath, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(versionPath, "opencode"), []byte("#!/bin/sh\nprintf '1.19.0\\n'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
-		"PATH="+versionPath, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=", "PASTURE_HOOK_FAIL_CLOSED=")
-	output, err := proof.CombinedOutput()
-	if err != nil {
-		t.Fatalf("execute generated OpenCode callbacks through built CLI: %v\n%s", err, output)
-	}
-	if strings.TrimSpace(string(output)) != `{"argsUnchanged":true}` {
-		t.Fatalf("Bun proof output = %q, want unchanged-args confirmation", output)
-	}
-
-	readback := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
-	readbackOutput, err := readback.CombinedOutput()
-	if err != nil {
-		t.Fatalf("read back generated callback receipts through production CLI: %v\n%s", err, readbackOutput)
-	}
-	for _, required := range []string{
-		fmt.Sprintf(`"registrationContract":"opencode/%s"`, openCodeHostVersion()),
-		fmt.Sprintf(`"contract":%q`, runtime.OpenCode1_18_29().ID().String()),
-		`"semantic":1`,
-		`"semantic":2`,
-	} {
-		if !strings.Contains(string(readbackOutput), required) {
-			t.Errorf("production lifecycle read-back lacks %s: %s", required, readbackOutput)
-		}
-	}
-}
-
-func TestOpenCodeGeneratedLifecycleCallbacks_RejectInvalidGateResponsesAndSwallowObservationFailure(t *testing.T) {
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("bun is required for the generated OpenCode failure-path proof; enter the flake dev shell")
-	}
-	root := testModuleRoot(t)
-	dir := t.TempDir()
-	fakeBinary := filepath.Join(dir, "fake-pasture")
-	fake := `#!/bin/sh
-payload=$(cat)
-case "$payload" in
-  *'"tool":"malformed"'*) printf '%s' 'not-json' ;;
-  *'"tool":"extra"'*) printf '%s' '{"decision":"proceed","extra":true}' ;;
-  *'"tool":"wrong-decision"'*) printf '%s' '{"decision":"block"}' ;;
-  *'"tool":"nonzero"'*|*'"type":"session.created"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
-  *) printf '%s' '{"decision":"proceed"}' ;;
-esac
-`
-	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
-		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
-	}
-
-	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
-	runner := filepath.Join(dir, "failure-proof.ts")
-	script := fmt.Sprintf(`
-import { sessionCreated, toolExecuteBefore } from %q;
-
-const cases = [
-  { mode: "malformed", diagnostic: "response is not JSON" },
-  { mode: "extra", diagnostic: 'response must be exactly {"decision":"proceed"}' },
-  { mode: "wrong-decision", diagnostic: 'response must be exactly {"decision":"proceed"}' },
-  { mode: "nonzero", diagnostic: "exited 7: synthetic lifecycle diagnostic" },
-];
-for (const testCase of cases) {
-  const output = { args: { path: "unchanged", nested: [1, true, null] } };
-  const before = JSON.stringify(output.args);
-  let diagnostic = "";
-  try {
-    await toolExecuteBefore({ tool: testCase.mode }, output);
-  } catch (error) {
-    diagnostic = String(error);
-  }
-  if (!diagnostic.includes(testCase.diagnostic)) {
-    throw new Error(testCase.mode + " did not reject actionably; got: " + diagnostic);
-  }
-  if (JSON.stringify(output.args) !== before) {
-    throw new Error(testCase.mode + " changed output.args bytes on rejection");
-  }
-}
-
-const logged = [];
-const originalError = console.error;
-console.error = (...values) => logged.push(values.join(" "));
-try {
-  await sessionCreated({ event: { type: "session.created" } });
-} finally {
-  console.error = originalError;
-}
-if (logged.length !== 1 || !logged[0].includes("observation failed for session.created") ||
-    !logged[0].includes("exited 7: synthetic lifecycle diagnostic")) {
-  throw new Error("session.created did not swallow and log its observation failure: " + JSON.stringify(logged));
-}
-console.log(JSON.stringify({ rejected: cases.length, observationLogged: true }));
-`, moduleURL)
-	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
-		t.Fatalf("write Bun failure-proof runner: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	proof := exec.CommandContext(ctx, bun, runner)
-	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
-	output, err := proof.CombinedOutput()
-	if ctx.Err() != nil {
-		t.Fatalf("Bun failure-path proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
-	}
-	if err != nil {
-		t.Fatalf("execute generated OpenCode failure paths under Bun: %v\n%s", err, output)
-	}
-	if strings.TrimSpace(string(output)) != `{"rejected":4,"observationLogged":true}` {
-		t.Fatalf("Bun failure-path proof output = %q, want all rejection and observation assertions", output)
-	}
-}
 
 func TestOpenCodeGeneratedOutputs_NoOperationalBd(t *testing.T) {
 	desc, err := NewOpenCodeTargetDescriptor()
@@ -663,9 +37,12 @@ func TestOpenCodeGeneratedOutputs_NoOperationalBd(t *testing.T) {
 
 var digestRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// runOpenCodeMechanics executes freshly generated production code. The fake
-// binary is a transport peer, not an encoder or a claim about host acceptance.
-func runOpenCodeMechanics(t *testing.T, script string) string {
+// runOpenCodeV2Mechanics executes freshly generated production code against a
+// real child process. The fake binary is a transport peer, not an encoder or
+// a claim about host acceptance. helper names the exported gate helper under
+// test; every invocation carries its child behaviour in the test-only __mode
+// member of the hook event, read by the fake child out of band.
+func runOpenCodeV2Mechanics(t *testing.T, helper, script string) string {
 	t.Helper()
 	bun, err := exec.LookPath("bun")
 	if err != nil {
@@ -685,11 +62,11 @@ func runOpenCodeMechanics(t *testing.T, script string) string {
 import { closeSync } from "node:fs";
 if (!process.env.PASTURE_DB_PATH) throw new Error("scratch database path is required");
 const value = JSON.parse(await Bun.stdin.text());
-const mode = value.input?.tool ?? "observation-stall";
+const mode = value.__mode ?? "observation-stall";
 if (mode === "reply") {
-  process.stdout.write(value.input.body);
-  process.stderr.write(value.input.diagnostic ?? "");
-  process.exitCode = value.input.exitCode ?? 0;
+  process.stdout.write(value.__body);
+  process.stderr.write(value.__diagnostic ?? "");
+  process.exitCode = value.__exitCode ?? 0;
 } else {
   // Keep the actual process alive without using a sleep to order the proof.
   Bun.serve({ port: 0, fetch() { return new Response("held"); } });
@@ -703,8 +80,8 @@ if (mode === "reply") {
 	runner := filepath.Join(dir, "proof.ts")
 	preamble := fmt.Sprintf(`
 import assert from "node:assert/strict";
-const { default: plugin } = await import(%q);
-const hooks = await plugin.server({ client: {} });
+import { %s } from %q;
+const gate = %s;
 const children = [];
 const originalSpawn = Bun.spawn;
 Bun.spawn = (options) => {
@@ -740,21 +117,19 @@ async function bounded(promise, label) {
     clearTimeout(timer);
   }
 }
-async function gate(input) {
-  const args = { path: "unchanged", nested: [1, true, null] };
-  const output = { args };
+async function event(input) {
+  const frozen = JSON.stringify(input);
   let failure;
   try {
-    await bounded(hooks["tool.execute.before"](input, output), "whole-child completion");
+    await bounded(gate(input), "whole-child completion");
   } catch (error) {
     failure = error;
   }
-  assert.strictEqual(output.args, args, "native args identity on every outcome");
-  assert.deepEqual(args, { path: "unchanged", nested: [1, true, null] }, "native args content");
+  assert.equal(JSON.stringify(input), frozen, "host event identity on every outcome");
   return failure;
 }
 try {
-`, modulePath)
+`, helper, modulePath, helper)
 	cleanup := `
   console.log("mechanics assertions passed");
 } finally {
@@ -787,9 +162,9 @@ try {
 }
 
 func TestOpenCodeGeneratedPluginClosedResponses(t *testing.T) {
-	runOpenCodeMechanics(t, `
+	runOpenCodeV2Mechanics(t, "toolExecuteBefore", `
   const reason = "  role cannot write\nretain this exact reason  ";
-  const denied = await gate({ tool: "reply", body: JSON.stringify({ decision: "deny", reason }) });
+  const denied = await event({ sessionID: "constructed", id: "call", __mode: "reply", __body: JSON.stringify({ decision: "deny", reason }) });
   assert(denied instanceof Error, "valid Deny rejects the callback");
   assert.equal(denied.message, reason, "valid Deny is reason-only, not installation advice");
   const invalid = [
@@ -804,41 +179,29 @@ func TestOpenCodeGeneratedPluginClosedResponses(t *testing.T) {
     '{"reason":"missing decision"}',
   ];
   for (const body of invalid) {
-    const failure = await gate({ tool: "reply", body });
+    const failure = await event({ sessionID: "constructed", id: "call", __mode: "reply", __body: body });
     assert(failure instanceof Error, "invalid response accepted: " + body);
     assert.match(failure.message, /pasture hook lifecycle response/, "response fault, not a policy Deny: " + body);
     assert.match(failure.message, /tool.execute.before/, "fault names event: " + body);
     assert.match(failure.message, /verify PASTURE_BIN and the generated OpenCode/, "response fault configuration advice: " + body);
   }
-  assert.equal(await gate({ tool: "reply", body: '{"decision":"proceed"}' }), undefined, "exact Proceed accepted");
-  const nonzero = await gate({ tool: "reply", body: '{"decision":"deny","reason":"not a decision at nonzero"}', diagnostic: "synthetic lifecycle diagnostic", exitCode: 7 });
+  assert.equal(await event({ sessionID: "constructed", id: "call", __mode: "reply", __body: '{"decision":"proceed"}' }), undefined, "exact Proceed accepted");
+  const nonzero = await event({ sessionID: "constructed", id: "call", __mode: "reply", __body: '{"decision":"deny","reason":"not a decision at nonzero"}', __diagnostic: "synthetic lifecycle diagnostic", __exitCode: 7 });
   assert.match(nonzero.message, /exited 7: synthetic lifecycle diagnostic; verify PASTURE_BIN and the generated OpenCode/, "nonzero remains invocation fault");
 `)
 }
 
 func TestOpenCodeGeneratedPluginBoundsWholeChildAndReaps(t *testing.T) {
-	runOpenCodeMechanics(t, `
-  const logged = [];
-  const originalError = console.error;
-  console.error = (...args) => logged.push(args.join(" "));
-  try {
-    await Promise.all([
-      ...["stdout-stall", "stderr-stall", "exit-stall"].map(async (tool) => {
+	runOpenCodeV2Mechanics(t, "toolExecuteBefore", `
+  await Promise.all([...["stdout-stall", "stderr-stall", "exit-stall"].map(async (mode) => {
         const start = performance.now();
-        const failure = await gate({ tool });
-        assert(failure instanceof Error, tool + " must fault");
-        assert.match(failure.message, /timed out after 8000 ms/, tool + " must hit the plugin timer, not the test bound");
-        assert.match(failure.message, /verify PASTURE_BIN and the generated OpenCode/, tool + " retains configuration advice");
+        const failure = await event({ sessionID: "constructed", id: "call", __mode: mode });
+        assert(failure instanceof Error, mode + " must fault");
+        assert.match(failure.message, /timed out after 8000 ms/, mode + " must hit the plugin timer, not the test bound");
+        assert.match(failure.message, /verify PASTURE_BIN and the generated OpenCode/, mode + " retains configuration advice");
         assert(performance.now() - start >= 7900, "actual 8s timer was not shortened");
-      }),
-      bounded(hooks.event({ event: { type: "session.created" } }), "observation completion"),
-    ]);
-  } finally {
-    console.error = originalError;
-  }
-  assert.equal(logged.length, 1, "observation logs once and continues");
-  assert.match(logged[0], /observation failed for session.created:.*timed out after 8000 ms/);
-  assert.equal(children.length, 4, "all stalled real children were invoked");
+      })]);
+  assert.equal(children.length, 3, "all stalled real children were invoked");
   for (const record of children) {
     assert(record.kills > 0, "stalled actual child was killed");
     assert(record.reaped, "callback waits for child reaping");
@@ -849,7 +212,7 @@ func TestOpenCodeGeneratedPluginBoundsWholeChildAndReaps(t *testing.T) {
 }
 
 func TestOpenCodeGeneratedPluginClearsTimerAfterCompletion(t *testing.T) {
-	runOpenCodeMechanics(t, `
+	runOpenCodeV2Mechanics(t, "toolExecuteBefore", `
   const originalSet = globalThis.setTimeout;
   const originalClear = globalThis.clearTimeout;
   const pending = new Map();
@@ -868,7 +231,7 @@ func TestOpenCodeGeneratedPluginClearsTimerAfterCompletion(t *testing.T) {
   };
   try {
     for (const exitCode of [0, 7]) {
-      const failure = await gate({ tool: "reply", body: '{"decision":"proceed"}', exitCode });
+      const failure = await event({ sessionID: "constructed", id: "call", __mode: "reply", __body: '{"decision":"proceed"}', __exitCode: exitCode });
       assert.equal(Boolean(failure), exitCode !== 0, "healthy/nonzero outcome before timer cleanup check");
       const record = children.at(-1);
       assert(record.reaped, "completed child is reaped");
@@ -891,14 +254,15 @@ func TestOpenCodeGeneratedPluginClearsTimerAfterCompletion(t *testing.T) {
 }
 
 func TestOpenCodeGeneratedPluginDrainsBothPipesVerbatim(t *testing.T) {
-	stderr := runOpenCodeMechanics(t, `
+	stderr := runOpenCodeV2Mechanics(t, "toolExecuteBefore", `
   // Both streams exceed ordinary pipe capacity. Sequential draining would
   // deadlock a writer that fills stderr before closing stdout.
   const diagnostic = "  diagnostic α\n".repeat(32768);
-  const failure = await gate({
-    tool: "reply",
-    body: " ".repeat(262144) + '{"decision":"proceed"}',
-    diagnostic,
+  const failure = await event({
+    sessionID: "constructed", id: "call",
+    __mode: "reply",
+    __body: " ".repeat(262144) + '{"decision":"proceed"}',
+    __diagnostic: diagnostic,
   });
   assert.equal(failure, undefined, "both large streams drain before the 8s bound");
   assert(children[0].reaped, "healthy child reaped before return");
@@ -911,7 +275,7 @@ func TestOpenCodeGeneratedPluginDrainsBothPipesVerbatim(t *testing.T) {
 }
 
 func TestOpenCodeGeneratedPluginForwardingFailureCleansListeners(t *testing.T) {
-	runOpenCodeMechanics(t, `
+	runOpenCodeV2Mechanics(t, "toolExecuteBefore", `
   const { Writable } = await import("node:stream");
   const original = Object.getOwnPropertyDescriptor(process, "stderr");
   for (const mode of ["failed-write", "closed", "close-during-write"]) {
@@ -934,7 +298,7 @@ func TestOpenCodeGeneratedPluginForwardingFailureCleansListeners(t *testing.T) {
     let listeners;
     try {
       Object.defineProperty(process, "stderr", { configurable: true, value: sink });
-      failure = await gate({ tool: "reply", body: '{"decision":"proceed"}', diagnostic: "must not disappear" });
+      failure = await event({ sessionID: "constructed", id: "call", __mode: "reply", __body: '{"decision":"proceed"}', __diagnostic: "must not disappear" });
       listeners = [sink.listenerCount("error"), sink.listenerCount("close")];
     } finally {
       Object.defineProperty(process, "stderr", original);
@@ -951,13 +315,13 @@ func TestOpenCodeGeneratedPluginForwardingFailureCleansListeners(t *testing.T) {
 }
 
 func TestOpenCodeGeneratedPluginEmptyBodyDiagnostic(t *testing.T) {
-	stderr := runOpenCodeMechanics(t, `
+	stderr := runOpenCodeV2Mechanics(t, "toolExecuteBefore", `
   const logged = [];
   const originalError = console.error;
   console.error = (...values) => logged.push(values.join(" "));
   let failure;
   try {
-    failure = await gate({ tool: "reply", body: " \n\t", diagnostic: "  old binary diagnostic α" });
+    failure = await event({ sessionID: "constructed", id: "call", __mode: "reply", __body: " \n\t", __diagnostic: "  old binary diagnostic α" });
   } finally {
     console.error = originalError;
   }
@@ -972,7 +336,7 @@ func TestOpenCodeGeneratedPluginEmptyBodyDiagnostic(t *testing.T) {
 }
 
 func TestOpenCodeGeneratedPluginBoundsPipesAfterExit(t *testing.T) {
-	runOpenCodeMechanics(t, `
+	runOpenCodeV2Mechanics(t, "toolExecuteBefore", `
   const spawn = Bun.spawn;
   const canceled = [];
   Bun.spawn = (options) => {
@@ -990,7 +354,7 @@ func TestOpenCodeGeneratedPluginBoundsPipesAfterExit(t *testing.T) {
     });
   };
   await Promise.all([0, 1].map(async () => {
-    const failure = await gate({ tool: "reply", body: '{"decision":"proceed"}' });
+    const failure = await event({ sessionID: "constructed", id: "call", __mode: "reply", __body: '{"decision":"proceed"}' });
     assert.match(failure?.message ?? "", /timed out after 8000 ms/, "drains remain bounded after actual exit");
   }));
   assert.deepEqual(canceled.sort(), ["stderr", "stdout"], "both stuck readers canceled");
@@ -1002,7 +366,7 @@ func TestOpenCodeGeneratedPluginBoundsPipesAfterExit(t *testing.T) {
 }
 
 func TestOpenCodeGeneratedPluginCleansUpReadFailure(t *testing.T) {
-	runOpenCodeMechanics(t, `
+	runOpenCodeV2Mechanics(t, "toolExecuteBefore", `
   const originalSet = globalThis.setTimeout;
   const originalClear = globalThis.clearTimeout;
   const timers = new Set();
@@ -1030,7 +394,7 @@ func TestOpenCodeGeneratedPluginCleansUpReadFailure(t *testing.T) {
     });
   };
   try {
-    const failure = await gate({ tool: "exit-stall" });
+    const failure = await event({ sessionID: "constructed", id: "call", __mode: "exit-stall" });
     assert.match(failure?.message ?? "", /synthetic read failure; verify PASTURE_BIN/, "read failure is an invocation fault");
     assert(canceled, "other pending reader canceled on rejection");
     assert(children[0].reaped, "read failure reaps actual child");
@@ -1042,6 +406,634 @@ func TestOpenCodeGeneratedPluginCleansUpReadFailure(t *testing.T) {
     globalThis.clearTimeout = originalClear;
   }
 `)
+}
+
+// TestOpenCodeV2SwallowingHelpersReportAndContinue proves the v2 throw
+// discipline for every gate helper but tool.execute.before and the v2
+// enforcement discipline for the permission hook: an invocation fault is
+// reported on the console and continued, never thrown, because those hooks'
+// failure channel is never. The four non-permission helpers below also log
+// an unenforced denial and continue without touching their host event,
+// because their hooks carry no typed refusal channel. The permission helper
+// instead enforces a Denial by assigning the host evaluation's effect and
+// message, and leaves every other answer untouched.
+func TestOpenCodeV2SwallowingHelpersReportAndContinue(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode failure-path proof; enter the flake dev shell")
+	}
+	dir := t.TempDir()
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	modulePath := filepath.Join(dir, "plugin.ts")
+	if err := os.WriteFile(modulePath, []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	fake := `#!/bin/sh
+payload=$(cat)
+case "$payload" in
+  *'"__mode":"malformed"'*) printf '%s' 'not-json' ;;
+  *'"__mode":"extra"'*) printf '%s' '{"decision":"proceed","extra":true}' ;;
+  *'"__mode":"wrong-decision"'*) printf '%s' '{"decision":"block"}' ;;
+  *'"__mode":"nonzero"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+  *'"__mode":"deny"'*) printf '%s' '{"decision":"deny","reason":"role cannot write"}' ;;
+  *) printf '%s' '{"decision":"proceed"}' ;;
+esac
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
+	}
+	runner := filepath.Join(dir, "swallow-proof.ts")
+	script := fmt.Sprintf(`
+import { sessionPrompt, sessionContext, toolExecuteAfter, permissionEvaluate, shellCreateBefore, sessionCreated } from %q;
+
+const logged = [];
+const originalError = console.error;
+console.error = (...values) => logged.push(values.join(" "));
+
+const frozen = (value) => {
+  const before = JSON.stringify(value);
+  return () => {
+    if (JSON.stringify(value) !== before) throw new Error("a consultation mutated its host event: " + before);
+  };
+};
+
+for (const helper of [sessionPrompt, sessionContext, toolExecuteAfter, shellCreateBefore]) {
+  for (const mode of ["malformed", "extra", "wrong-decision", "nonzero", "deny"]) {
+    const hookEvent = { sessionID: "constructed", id: "call", __mode: mode };
+    const check = frozen(hookEvent);
+    await helper(hookEvent);
+    check();
+  }
+}
+
+// A non-denial leaves the permission evaluation exactly as the host set
+// it: effect stays allow and no message member appears.
+for (const mode of ["malformed", "extra", "wrong-decision", "nonzero"]) {
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: mode };
+  const check = frozen(evaluation);
+  await permissionEvaluate(evaluation);
+  check();
+  if (evaluation.effect !== "allow" || "message" in evaluation) {
+    throw new Error(mode + " mutated the host evaluation");
+  }
+}
+
+// A pasture Denial is enforced through the host's typed channel: effect
+// becomes deny and message carries the durable reason verbatim. The fake
+// binary's reason is asserted exactly so a rewrite turns red.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" };
+  await permissionEvaluate(evaluation);
+  if (evaluation.effect !== "deny") {
+    throw new Error("a pasture denial left the host effect at " + JSON.stringify(evaluation.effect));
+  }
+  if (evaluation.message !== "role cannot write") {
+    throw new Error("a pasture denial carried message " + JSON.stringify(evaluation.message));
+  }
+}
+
+// An observation failure is swallowed and logged like any other fault here.
+await sessionCreated({ type: "session.created", data: { sessionID: "constructed" }, __mode: "nonzero" });
+
+console.error = originalError;
+const gateFaults = logged.filter((line) => line.includes("gate consultation failed"));
+const unenforced = logged.filter((line) => line.includes("does not enforce"));
+const observations = logged.filter((line) => line.includes("observation failed for session.created"));
+if (gateFaults.length !== 20) throw new Error("expected 20 gate fault reports, got " + gateFaults.length + ": " + JSON.stringify(logged));
+if (unenforced.length !== 4) throw new Error("expected 4 unenforced-denial reports (the permission denial is enforced, not logged), got " + unenforced.length);
+if (observations.length !== 1) throw new Error("expected 1 observation report, got " + observations.length);
+console.log(JSON.stringify({ swallowed: true }));
+`, "file://"+modulePath)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun swallow-proof runner: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
+	output, err := proof.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Bun swallow-path proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
+	}
+	if err != nil {
+		t.Fatalf("execute generated OpenCode swallow paths under Bun: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"swallowed":true}` {
+		t.Fatalf("Bun swallow-path proof output = %q, want all report-and-continue assertions", output)
+	}
+}
+
+// TestOpenCodePermissionEvaluateDenyMatrix is the Bun-driven deny proof for
+// the enforceable permission channel: it drives the generated
+// permissionEvaluate helper through a stub gate binary across the full
+// answer matrix and pins the host-object semantics of each arm. A Denial
+// assigns effect deny and the durable reason verbatim, replacing any draft
+// the host carried; a proceed, the empty-body unevaluated belt, and an
+// invocation fault all leave the evaluation exactly as the host set it; and
+// a Denial against an unwritable object reports inside the guarded region
+// instead of escaping as a throw.
+func TestOpenCodePermissionEvaluateDenyMatrix(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode deny proof; enter the flake dev shell")
+	}
+	dir := t.TempDir()
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	modulePath := filepath.Join(dir, "plugin.ts")
+	if err := os.WriteFile(modulePath, []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	fake := `#!/bin/sh
+payload=$(cat)
+case "$payload" in
+  *'"__mode":"deny"'*) printf '%s' '{"decision":"deny","reason":"role cannot write"}' ;;
+  *'"__mode":"empty"'*) printf '%s' '' ;;
+  *'"__mode":"nonzero"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+  *) printf '%s' '{"decision":"proceed"}' ;;
+esac
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
+	}
+	runner := filepath.Join(dir, "deny-matrix.ts")
+	script := fmt.Sprintf(`
+import { permissionEvaluate } from %q;
+import assert from "node:assert/strict";
+
+const logged = [];
+const originalError = console.error;
+console.error = (...values) => logged.push(values.join(" "));
+
+// A Denial assigns the typed channel members with the durable reason verbatim.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" };
+  await permissionEvaluate(evaluation);
+  assert.equal(evaluation.effect, "deny");
+  assert.equal(evaluation.message, "role cannot write");
+}
+
+// A Denial replaces the host's own draft: the gate verdict, not the
+// incoming effect or message, decides.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "ask", message: "host draft", __mode: "deny" };
+  await permissionEvaluate(evaluation);
+  assert.equal(evaluation.effect, "deny");
+  assert.equal(evaluation.message, "role cannot write");
+}
+
+// A proceed assigns nothing: the object round-trips deep-equal.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "proceed" };
+  const before = JSON.stringify(evaluation);
+  await permissionEvaluate(evaluation);
+  assert.equal(JSON.stringify(evaluation), before);
+  assert.equal("message" in evaluation, false);
+}
+
+// The empty-body unevaluated belt assigns nothing and reports on the console.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "empty" };
+  const before = JSON.stringify(evaluation);
+  await permissionEvaluate(evaluation);
+  assert.equal(JSON.stringify(evaluation), before);
+  assert.equal("message" in evaluation, false);
+}
+
+// An invocation fault assigns nothing and reports on the console.
+{
+  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "nonzero" };
+  const before = JSON.stringify(evaluation);
+  await permissionEvaluate(evaluation);
+  assert.equal(JSON.stringify(evaluation), before);
+  assert.equal("message" in evaluation, false);
+}
+
+// An unwritable host evaluation must not escape as a throw: the deny
+// assignment lives inside the guarded region, so a frozen object reports and
+// continues with its effect untouched. A mutant that moves the assignment
+// outside the try turns this arm into a rejection.
+{
+  const evaluation = Object.freeze({ sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" });
+  await permissionEvaluate(evaluation);
+  assert.equal(evaluation.effect, "allow");
+  assert.equal("message" in evaluation, false);
+}
+
+console.error = originalError;
+const faults = logged.filter((line) => line.includes("gate consultation failed for permission.evaluate"));
+assert.equal(faults.length, 2, "the nonzero invocation and the frozen deny fault, got " + JSON.stringify(logged));
+console.log(JSON.stringify({ denied: true }));
+`, "file://"+modulePath)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun deny-matrix runner: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
+	output, err := proof.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Bun deny-matrix proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
+	}
+	if err != nil {
+		t.Fatalf("execute generated OpenCode permission deny matrix under Bun: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"denied":true}` {
+		t.Fatalf("Bun deny-matrix proof output = %q, want the full mutation matrix", output)
+	}
+}
+
+// TestOpenCodeGeneratedLifecycleCallbacks_RejectInvalidGateResponsesAndSwallowObservationFailure
+// proves the throwing gate rejects every non-conforming response with an
+// actionable diagnostic while the observation swallows and logs its failure.
+func TestOpenCodeGeneratedLifecycleCallbacks_RejectInvalidGateResponsesAndSwallowObservationFailure(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode failure-path proof; enter the flake dev shell")
+	}
+	dir := t.TempDir()
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	modulePath := filepath.Join(dir, "plugin.ts")
+	if err := os.WriteFile(modulePath, []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	fake := `#!/bin/sh
+payload=$(cat)
+case "$payload" in
+  *'"__mode":"malformed"'*) printf '%s' 'not-json' ;;
+  *'"__mode":"extra"'*) printf '%s' '{"decision":"proceed","extra":true}' ;;
+  *'"__mode":"wrong-decision"'*) printf '%s' '{"decision":"block"}' ;;
+  *'"__mode":"nonzero"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+  *) printf '%s' '{"decision":"proceed"}' ;;
+esac
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
+	}
+
+	runner := filepath.Join(dir, "failure-proof.ts")
+	script := fmt.Sprintf(`
+import { sessionCreated, toolExecuteBefore } from %q;
+
+const cases = [
+  { mode: "malformed", diagnostic: "response is not JSON" },
+  { mode: "extra", diagnostic: 'response must be exactly {"decision":"proceed"}' },
+  { mode: "wrong-decision", diagnostic: 'response must be exactly {"decision":"proceed"}' },
+  { mode: "nonzero", diagnostic: "exited 7: synthetic lifecycle diagnostic" },
+];
+for (const testCase of cases) {
+  const hookEvent = { sessionID: "constructed", id: "call", __mode: testCase.mode };
+  const before = JSON.stringify(hookEvent);
+  let diagnostic = "";
+  try {
+    await toolExecuteBefore(hookEvent);
+  } catch (error) {
+    diagnostic = String(error);
+  }
+  if (!diagnostic.includes(testCase.diagnostic)) {
+    throw new Error(testCase.mode + " did not reject actionably; got: " + diagnostic);
+  }
+  if (JSON.stringify(hookEvent) !== before) {
+    throw new Error(testCase.mode + " mutated the host event on rejection");
+  }
+}
+
+const logged = [];
+const originalError = console.error;
+console.error = (...values) => logged.push(values.join(" "));
+try {
+  await sessionCreated({ type: "session.created", data: { sessionID: "constructed" }, __mode: "nonzero" });
+} finally {
+  console.error = originalError;
+}
+if (logged.length !== 1 || !logged[0].includes("observation failed for session.created") ||
+    !logged[0].includes("exited 7: synthetic lifecycle diagnostic")) {
+  throw new Error("session.created did not swallow and log its observation failure: " + JSON.stringify(logged));
+}
+console.log(JSON.stringify({ rejected: cases.length, observationLogged: true }));
+`, "file://"+modulePath)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun failure-proof runner: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
+	output, err := proof.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("Bun failure-path proof exceeded its 20s bound: %v\n%s", ctx.Err(), output)
+	}
+	if err != nil {
+		t.Fatalf("execute generated OpenCode failure paths under Bun: %v\n%s", err, output)
+	}
+	if strings.TrimSpace(string(output)) != `{"rejected":4,"observationLogged":true}` {
+		t.Fatalf("Bun failure-path proof output = %q, want all rejection and observation assertions", output)
+	}
+}
+
+// TestOpenCodeHooksModule_ParsesUnderBun makes Bun a required gate dependency.
+func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required to validate the generated OpenCode lifecycle plugin; enter the flake dev shell or install the flake-locked Bun package")
+	}
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	// The module lives under a plugin/ directory alone; write only itself so the
+	// parse exercises isolated loading with no sibling present.
+	path := filepath.Join(t.TempDir(), "pasture-hooks.ts")
+	if err := os.WriteFile(path, []byte(module), 0o644); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+	out, err := exec.Command(bun, "--check", path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("bun --check rejected the isolated module: %v\n%s", err, out)
+	}
+}
+
+// TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs drives the
+// generated v2 callbacks through the real built binary with constructed v2
+// payloads. No 2.0.20 row carries proofs yet, so the handler refuses every
+// event as withheld before reading a byte: the gate receives the host's
+// continue bytes with exit 0 and a diagnostic, the observation receives no
+// bytes at all, and no receipt exists afterwards. This pins the honest
+// pre-proofs posture: installed and forwarding, evaluating nothing.
+func TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode production proof; enter the flake dev shell")
+	}
+	root := testModuleRoot(t)
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/pasture")
+	build.Dir = root
+	build.Env = append(build.Environ(), "CGO_ENABLED=0")
+	if output, buildErr := build.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build production pasture CLI: %v\n%s", buildErr, output)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: copyCommittedModuleToTemp(t, dir)}).String()
+	runner := filepath.Join(dir, "production-proof.ts")
+	script := fmt.Sprintf(`
+import { sessionCreated, toolExecuteBefore } from %q;
+await sessionCreated({ type: "session.created", data: { sessionID: "constructed-2.0.20", version: "2.0.20" } });
+const hookEvent = { tool: "task", sessionID: "constructed-2.0.20", agent: "agent", messageID: "message", id: "call-2.0.20", input: { path: "unchanged" } };
+const before = JSON.stringify(hookEvent);
+await toolExecuteBefore(hookEvent);
+if (JSON.stringify(hookEvent) !== before) throw new Error("an unevaluated event mutated its host event");
+console.log(JSON.stringify({ forwarded: true }));
+`, moduleURL)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun production-proof runner: %v", err)
+	}
+	dbPath := filepath.Join(dir, "pasture.db")
+	versionPath := filepath.Join(dir, "bin")
+	if err := os.Mkdir(versionPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(versionPath, "opencode"), []byte("#!/bin/sh\nprintf '2.0.20\\n'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var proofOut, proofErr bytes.Buffer
+	proof := exec.Command(bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+dbPath,
+		"PATH="+versionPath+":"+os.Getenv("PATH"), "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=", "PASTURE_HOOK_FAIL_CLOSED=")
+	proof.Stdout = &proofOut
+	proof.Stderr = &proofErr
+	if err := proof.Run(); err != nil {
+		t.Fatalf("execute generated OpenCode callbacks through built CLI: %v\nstdout: %s\nstderr: %s", err, proofOut.String(), proofErr.String())
+	}
+	if strings.TrimSpace(proofOut.String()) != `{"forwarded":true}` {
+		t.Fatalf("Bun proof stdout = %q, want the forward confirmation and nothing else", proofOut.String())
+	}
+	// The gate's withheld refusal arrives as the host's continue bytes with a
+	// diagnostic; the observation's refusal arrives as no bytes with a
+	// diagnostic. Both diagnostics name the withheld reason.
+	for _, diagnostic := range []string{
+		`withheld (reason missing-fixture)`,
+		`tool.execute.before`,
+		`session.created`,
+	} {
+		if !strings.Contains(proofErr.String(), diagnostic) {
+			t.Errorf("withheld diagnostic lacks %q: %s", diagnostic, proofErr.String())
+		}
+	}
+	// Refused before a byte was read: no occurrence exists for either event.
+	readback := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
+	readbackOutput, err := readback.CombinedOutput()
+	if err != nil {
+		t.Fatalf("read back receipts through production CLI: %v\n%s", readbackOutput, err)
+	}
+	if strings.Contains(string(readbackOutput), "constructed-2.0.20") {
+		t.Fatalf("a withheld event left a receipt: %s", readbackOutput)
+	}
+}
+
+// TestOpenCodeV2GateSurvivesRealFaultsWithoutEvaluation is the fail-open
+// proof, end to end: the REAL built binary, REAL faults, and the REAL
+// generated plugin under Bun. No 2.0.20 row is admitted, so the deepest fault
+// the gate path can reach before proofs land is version resolution with no
+// host executable and no caller-supplied version; the observation leg reaches
+// its withheld refusal through its occurrence-local version. Under the
+// fail-open default the host continues in both cases, and under the
+// fail-closed opt-in it ALSO continues on this harness, because that opt-in
+// refuses through the process exit code and OpenCode's named callbacks do not
+// refuse that way. Both are asserted here so neither can regress silently.
+func TestOpenCodeV2GateSurvivesRealFaultsWithoutEvaluation(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode fail-open proof; enter the flake dev shell")
+	}
+	root := testModuleRoot(t)
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/pasture")
+	build.Dir = root
+	build.Env = append(build.Environ(), "CGO_ENABLED=0")
+	if output, buildErr := build.CombinedOutput(); buildErr != nil {
+		t.Fatalf("build production pasture CLI: %v\n%s", buildErr, output)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: copyCommittedModuleToTemp(t, dir)}).String()
+	runner := filepath.Join(dir, "fail-open-proof.ts")
+	script := fmt.Sprintf(`
+import { sessionCreated, toolExecuteBefore } from %q;
+// No host executable is on PATH and no version flag is passed: version
+// resolution fails before admission, capture or storage.
+const hookEvent = { tool: "task", sessionID: "constructed", agent: "agent", messageID: "message", id: "call", input: { path: "unchanged" } };
+const before = JSON.stringify(hookEvent);
+await toolExecuteBefore(hookEvent);
+if (JSON.stringify(hookEvent) !== before) {
+  throw new Error("a pasture fault changed the host event");
+}
+// The observation carries its own occurrence-local version and reaches the
+// withheld refusal instead.
+await sessionCreated({ type: "session.created", data: { sessionID: "constructed", version: "2.0.20" } });
+console.log(JSON.stringify({ hostContinued: true }));
+`, moduleURL)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun fail-open proof runner: %v", err)
+	}
+
+	emptyPath := filepath.Join(dir, "empty-bin")
+	if err := os.Mkdir(emptyPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []struct {
+		name string
+		env  []string
+	}{
+		{name: "the fail-open default", env: nil},
+		{name: "the fail-closed opt-in, which has no channel on this harness", env: []string{"PASTURE_HOOK_FAIL_CLOSED=1"}},
+	} {
+		policy := policy
+		t.Run(policy.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			proof := exec.CommandContext(ctx, bun, runner)
+			proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"),
+				"PATH="+emptyPath, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=", "PASTURE_HOOK_FAIL_CLOSED=")
+			proof.Env = append(proof.Env, policy.env...)
+			var proofOut, proofErr bytes.Buffer
+			proof.Stdout = &proofOut
+			proof.Stderr = &proofErr
+			err := proof.Run()
+			if ctx.Err() != nil {
+				t.Fatalf("Bun fail-open proof exceeded its 60s bound: %v\nstdout: %s\nstderr: %s", ctx.Err(), proofOut.String(), proofErr.String())
+			}
+			if err != nil {
+				t.Fatalf("a real pasture fault stopped the generated gate callback: %v\nstdout: %s\nstderr: %s", err, proofOut.String(), proofErr.String())
+			}
+			if strings.TrimSpace(proofOut.String()) != `{"hostContinued":true}` {
+				t.Fatalf("Bun fail-open stdout = %q, want the continue confirmation and nothing else", proofOut.String())
+			}
+			if !strings.Contains(proofErr.String(), "host version resolution failed") || !strings.Contains(proofErr.String(), "session.created") {
+				t.Fatalf("the fault diagnostics must carry the version fault and the withheld observation: %s", proofErr.String())
+			}
+		})
+	}
+}
+
+// TestOpenCodeGeneratedPluginContinuesOnAnEmptyBody is the GENERATOR BELT.
+//
+// The defect: a pasture fault used to exit 0 with an EMPTY standard output, and
+// the generated plugin ran JSON.parse("") on a NAMED callback, which throws. A
+// throw inside tool.execute.before is the OpenCode blocking channel, so a
+// pasture internal fault stopped the user's tool call — the exact opposite of
+// the fail-open default.
+//
+// The Go fix emits the host's proceed bytes, so a CURRENT binary no longer
+// produces an empty body. This belt covers the OTHER half: an OLD binary, or
+// any future path that returns nothing, must not abort a tool call either. The
+// plugin therefore reads "exit 0 with an empty body" as "not evaluated,
+// continue", and keeps its throw for a NON-EMPTY body it cannot accept.
+func TestOpenCodeGeneratedPluginContinuesOnAnEmptyBody(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode fail-open belt proof; enter the flake dev shell")
+	}
+	dir := t.TempDir()
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	// An OLD pasture: exit 0, a diagnostic on stderr, and NOTHING on stdout.
+	fake := `#!/bin/sh
+cat >/dev/null
+printf '%s' 'pasture could not evaluate this lifecycle hook event' >&2
+exit 0
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
+	}
+
+	moduleURL := (&url.URL{Scheme: "file", Path: copyCommittedModuleToTemp(t, dir)}).String()
+	runner := filepath.Join(dir, "fail-open-belt.ts")
+	script := fmt.Sprintf(`
+import { toolExecuteBefore } from %q;
+
+const hookEvent = { sessionID: "constructed", id: "call", __mode: "empty-body" };
+const before = JSON.stringify(hookEvent);
+const logged = [];
+const originalError = console.error;
+console.error = (...values) => logged.push(values.join(" "));
+try {
+  await toolExecuteBefore(hookEvent);
+} finally {
+  console.error = originalError;
+}
+if (JSON.stringify(hookEvent) !== before) {
+  throw new Error("an unevaluated event mutated its host event");
+}
+if (logged.length !== 1 || !logged[0].includes("did not evaluate tool.execute.before")) {
+  throw new Error("the callback did not report the unevaluated event: " + JSON.stringify(logged));
+}
+console.log(JSON.stringify({ continued: true }));
+`, moduleURL)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun fail-open belt runner: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
+	// THE STREAMS ARE READ APART, AND THIS USED TO BE CombinedOutput. The
+	// assertion below required the combined bytes to EQUAL the confirmation, so
+	// the contract it stated was "the plugin emits nothing on any stream except
+	// its own stdout confirmation" — and that contract was the defect. The
+	// plugin spawns pasture with stderr piped rather than inherited, so the
+	// child's diagnostic reaches no stream unless the plugin forwards it, while
+	// the belt line it prints tells the operator to READ that diagnostic on
+	// standard error. Combined bytes cannot tell a confirmation from a
+	// diagnostic, so this proof could not have distinguished the behaviour that
+	// is wanted from the behaviour that was there.
+	//
+	// The stdout requirement is UNCHANGED and still exact: the host-facing
+	// confirmation is the whole of it and nothing may join it there.
+	var proofOut, proofErr bytes.Buffer
+	proof.Stdout = &proofOut
+	proof.Stderr = &proofErr
+	err = proof.Run()
+	if ctx.Err() != nil {
+		t.Fatalf("Bun fail-open belt proof exceeded its 20s bound: %v\nstdout: %s\nstderr: %s",
+			ctx.Err(), proofOut.String(), proofErr.String())
+	}
+	if err != nil {
+		t.Fatalf("an empty body aborted the generated named callback: %v\nstdout: %s\nstderr: %s",
+			err, proofOut.String(), proofErr.String())
+	}
+	if strings.TrimSpace(proofOut.String()) != `{"continued":true}` {
+		t.Fatalf("Bun fail-open belt stdout = %q, want the continue confirmation and nothing else",
+			proofOut.String())
+	}
+	// THE DIAGNOSTIC THE BELT SENDS THE OPERATOR TO MUST BE ON THE STREAM IT
+	// NAMES. The fake writes it on standard error at exit 0, which is the exact
+	// shape the belt exists for; the plugin captures it through the pipe and it
+	// is gone unless invokeLifecycle puts it back on a stream. Without the
+	// forward, this proof stayed green while an operator who followed the
+	// printed instruction found nothing and could not tell a record-written
+	// fault from a record-lost one.
+	if !strings.Contains(proofErr.String(), "pasture could not evaluate this lifecycle hook event") {
+		t.Fatalf("the generated plugin must FORWARD the child's diagnostic to standard error, "+
+			"because it pipes fd 2 rather than inheriting it and the line it prints on this route "+
+			"tells the operator to read that diagnostic there; stderr = %q", proofErr.String())
+	}
 }
 
 func TestOpenCodeTargetDescriptor_BundleManifestOracle(t *testing.T) {
@@ -1152,228 +1144,11 @@ func TestOpenCodeTargetDescriptor_RuntimeContractIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("descriptor: %v", err)
 	}
-	want := runtime.OpenCode1_18_29().ID()
+	want := runtime.OpenCode2_0_20().ID()
 	if desc.RuntimeContract() != want {
 		t.Errorf("descriptor RuntimeContract = %v, want %v", desc.RuntimeContract(), want)
 	}
 	if desc.RuntimeContract().Harness() != ir.HarnessOpenCode {
 		t.Errorf("descriptor harness = %v, want opencode", desc.RuntimeContract().Harness())
-	}
-}
-
-// TestOpenCodeGeneratedPluginContinuesOnAnEmptyBody is the GENERATOR BELT.
-//
-// The defect: a pasture fault used to exit 0 with an EMPTY standard output, and
-// the generated plugin ran JSON.parse("") on a NAMED callback, which throws. A
-// throw inside tool.execute.before is the OpenCode blocking channel, so a
-// pasture internal fault stopped the user's tool call — the exact opposite of
-// the fail-open default.
-//
-// The Go fix emits the host's proceed bytes, so a CURRENT binary no longer
-// produces an empty body. This belt covers the OTHER half: an OLD binary, or
-// any future path that returns nothing, must not abort a tool call either. The
-// plugin therefore reads "exit 0 with an empty body" as "not evaluated,
-// continue", and keeps its throw for a NON-EMPTY body it cannot accept.
-func TestOpenCodeGeneratedPluginContinuesOnAnEmptyBody(t *testing.T) {
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("bun is required for the generated OpenCode fail-open belt proof; enter the flake dev shell")
-	}
-	root := testModuleRoot(t)
-	dir := t.TempDir()
-	fakeBinary := filepath.Join(dir, "fake-pasture")
-	// An OLD pasture: exit 0, a diagnostic on stderr, and NOTHING on stdout.
-	fake := `#!/bin/sh
-cat >/dev/null
-printf '%s' 'pasture could not evaluate this lifecycle hook event' >&2
-exit 0
-`
-	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
-		t.Fatalf("write bounded fake PASTURE_BIN: %v", err)
-	}
-
-	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
-	runner := filepath.Join(dir, "fail-open-belt.ts")
-	script := fmt.Sprintf(`
-import { toolExecuteBefore } from %q;
-
-const output = { args: { path: "unchanged", nested: [1, true, null] } };
-const before = JSON.stringify(output.args);
-const logged = [];
-const originalError = console.error;
-console.error = (...values) => logged.push(values.join(" "));
-try {
-  await toolExecuteBefore({ tool: "empty-body" }, output);
-} finally {
-  console.error = originalError;
-}
-if (JSON.stringify(output.args) !== before) {
-  throw new Error("an unevaluated event changed output.args");
-}
-if (logged.length !== 1 || !logged[0].includes("did not evaluate tool.execute.before")) {
-  throw new Error("the callback did not report the unevaluated event: " + JSON.stringify(logged));
-}
-console.log(JSON.stringify({ continued: true, argsUnchanged: true }));
-`, moduleURL)
-	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
-		t.Fatalf("write Bun fail-open belt runner: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	proof := exec.CommandContext(ctx, bun, runner)
-	proof.Env = append(os.Environ(), "PASTURE_BIN="+fakeBinary, "PASTURE_DB_PATH="+filepath.Join(dir, "pasture.db"))
-	// THE STREAMS ARE READ APART, AND THIS USED TO BE CombinedOutput. The
-	// assertion below required the combined bytes to EQUAL the confirmation, so
-	// the contract it stated was "the plugin emits nothing on any stream except
-	// its own stdout confirmation" — and that contract was the defect. The
-	// plugin spawns pasture with stderr piped rather than inherited, so the
-	// child's diagnostic reaches no stream unless the plugin forwards it, while
-	// the belt line it prints tells the operator to READ that diagnostic on
-	// standard error. Combined bytes cannot tell a confirmation from a
-	// diagnostic, so this proof could not have distinguished the behaviour that
-	// is wanted from the behaviour that was there.
-	//
-	// The stdout requirement is UNCHANGED and still exact: the host-facing
-	// confirmation is the whole of it and nothing may join it there.
-	var proofOut, proofErr bytes.Buffer
-	proof.Stdout = &proofOut
-	proof.Stderr = &proofErr
-	err = proof.Run()
-	if ctx.Err() != nil {
-		t.Fatalf("Bun fail-open belt proof exceeded its 20s bound: %v\nstdout: %s\nstderr: %s",
-			ctx.Err(), proofOut.String(), proofErr.String())
-	}
-	if err != nil {
-		t.Fatalf("an empty body aborted the generated named callback: %v\nstdout: %s\nstderr: %s",
-			err, proofOut.String(), proofErr.String())
-	}
-	if strings.TrimSpace(proofOut.String()) != `{"continued":true,"argsUnchanged":true}` {
-		t.Fatalf("Bun fail-open belt stdout = %q, want the continue confirmation and nothing else",
-			proofOut.String())
-	}
-	// THE DIAGNOSTIC THE BELT SENDS THE OPERATOR TO MUST BE ON THE STREAM IT
-	// NAMES. The fake writes it on standard error at exit 0, which is the exact
-	// shape the belt exists for; the plugin captures it through the pipe and it
-	// is gone unless invokeLifecycle puts it back on a stream. Without the
-	// forward, this proof stayed green while an operator who followed the
-	// printed instruction found nothing and could not tell a record-written
-	// fault from a record-lost one.
-	if !strings.Contains(proofErr.String(), "pasture could not evaluate this lifecycle hook event") {
-		t.Fatalf("the generated plugin must FORWARD the child's diagnostic to standard error, "+
-			"because it pipes fd 2 rather than inheriting it and the line it prints on this route "+
-			"tells the operator to read that diagnostic there; stderr = %q", proofErr.String())
-	}
-}
-
-// TestOpenCodeGeneratedGateSurvivesARealPastureFault is the BLOCKER proof, end
-// to end: the REAL built binary, a REAL fault, and the REAL generated plugin
-// under Bun.
-//
-// The fault is the commonest one a user meets: the pasture store cannot be
-// opened. Under the fail-open default the user's tool call must proceed with
-// its arguments untouched, and under the fail-closed opt-in it must ALSO
-// proceed on this harness, because that opt-in refuses through the process exit
-// code and OpenCode's named callbacks do not refuse that way. Both are asserted
-// here so neither can regress silently.
-func TestOpenCodeGeneratedGateSurvivesARealPastureFault(t *testing.T) {
-	bun, err := exec.LookPath("bun")
-	if err != nil {
-		t.Fatal("bun is required for the generated OpenCode fail-open proof; enter the flake dev shell")
-	}
-	root := testModuleRoot(t)
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "pasture")
-	build := exec.Command("go", "build", "-race", "-o", binary, "./cmd/pasture")
-	build.Dir = root
-	build.Env = append(build.Environ(), "CGO_ENABLED=1")
-	if output, buildErr := build.CombinedOutput(); buildErr != nil {
-		t.Fatalf("build production pasture CLI with race instrumentation: %v\n%s", buildErr, output)
-	}
-
-	// A DIRECTORY where the database file belongs. Every attempt to open the
-	// pasture store fails with a real storage error; nothing is simulated.
-	unopenable := filepath.Join(dir, "not-a-database")
-	if err := os.Mkdir(unopenable, 0o755); err != nil {
-		t.Fatalf("create the unopenable store path: %v", err)
-	}
-	// Reach the intended storage fault after a controlled successful query,
-	// never by invoking whichever OpenCode happens to be installed on the host.
-	versionPath := filepath.Join(dir, "bin")
-	if err := os.Mkdir(versionPath, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(versionPath, "opencode"), []byte("#!/bin/sh\nprintf '1.19.0\\n'\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	moduleURL := (&url.URL{Scheme: "file", Path: filepath.Join(root, filepath.FromSlash(OpenCodeHooksModulePath))}).String()
-	fixtureDir := filepath.Join(root, "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
-	runner := filepath.Join(dir, "fail-open-proof.ts")
-	script := fmt.Sprintf(`
-import { toolExecuteBefore } from %q;
-const toolCapture = await Bun.file(%q).json();
-
-const output = toolCapture.output;
-const before = JSON.stringify(output.args);
-await toolExecuteBefore(toolCapture.input, output);
-if (JSON.stringify(output.args) !== before) {
-  throw new Error("a pasture fault changed output.args");
-}
-console.log(JSON.stringify({ toolCallProceeded: true }));
-`, moduleURL, filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
-	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
-		t.Fatalf("write Bun fail-open proof runner: %v", err)
-	}
-
-	for _, policy := range []struct {
-		name string
-		env  []string
-	}{
-		{name: "the fail-open default", env: nil},
-		{name: "the fail-closed opt-in, which has no channel on this harness", env: []string{"PASTURE_HOOK_FAIL_CLOSED=1"}},
-	} {
-		policy := policy
-		t.Run(policy.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-			proof := exec.CommandContext(ctx, bun, runner)
-			proof.Env = append(os.Environ(), "PASTURE_BIN="+binary, "PASTURE_DB_PATH="+unopenable,
-				"PATH="+versionPath, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=", "PASTURE_HOOK_FAIL_CLOSED=")
-			proof.Env = append(proof.Env, policy.env...)
-			output, err := proof.CombinedOutput()
-			if ctx.Err() != nil {
-				t.Fatalf("the Bun fail-open proof exceeded its bound: %v\n%s", ctx.Err(), output)
-			}
-			if err != nil {
-				t.Fatalf("a pasture fault STOPPED the user's tool call under %s: %v\n%s", policy.name, err, output)
-			}
-			if !strings.Contains(string(output), `{"toolCallProceeded":true}`) {
-				t.Fatalf("Bun fail-open proof output = %q, want the proceed confirmation", output)
-			}
-		})
-	}
-
-	// The fault is reported and recorded as a FAULT, not as a decision. The
-	// record sits beside the database path the invocation used.
-	records, err := os.ReadFile(filepath.Join(dir, "lifecycle-faults.jsonl"))
-	if err != nil {
-		t.Fatalf("read the durable lifecycle fault record: %v", err)
-	}
-	for _, required := range []string{
-		`"outcomeClass":"fault"`,
-		`"harness":"opencode"`,
-		`"event":"tool.execute.before"`,
-		`"hostExit":"continue"`,
-		`"hostContinuation":"{\"decision\":\"proceed\"}"`,
-		`"hostVersion":"1.19.0"`,
-		`"hostVersionSource":"executable-query"`,
-	} {
-		if !strings.Contains(string(records), required) {
-			t.Errorf("the fault record lacks %s, so a reader cannot tell an unevaluated proceed from a decision: %s", required, records)
-		}
-	}
-	if strings.Contains(string(records), `"outcomeClass":"decision"`) {
-		t.Error("a fault must never be recorded as a decision")
 	}
 }

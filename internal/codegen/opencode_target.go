@@ -136,7 +136,7 @@ func NewOpenCodeTargetDescriptor() (OpenCodeTargetDescriptor, error) {
 	}
 	sort.Slice(components, func(i, j int) bool { return components[i].ID < components[j].ID })
 	return OpenCodeTargetDescriptor{
-		contract:   runtime.OpenCode1_18_29().ID(),
+		contract:   runtime.OpenCode2_0_20().ID(),
 		install:    installationCoordinates(artifact.HarnessOpenCode),
 		toolNames:  toolNames,
 		hooks:      hooks,
@@ -220,7 +220,7 @@ func (d OpenCodeTargetDescriptor) Manifest() (string, error) {
 // activation array as target data; the two are derived from the same
 // activation entries in one generation, and a test holds them equal.
 func renderOpenCodeActivationReport() (string, error) {
-	manifest := registration.OpenCode1_18_29()
+	manifest := registration.OpenCode2_0_20()
 	states, err := openCodeActivationEntries()
 	if err != nil {
 		return "", fmt.Errorf("codegen.renderOpenCodeActivationReport: %w", err)
@@ -241,7 +241,7 @@ func openCodeActivationManifest() ([]openCodeActivationManifestEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	events := registration.OpenCode1_18_29().Entries()
+	events := registration.OpenCode2_0_20().Entries()
 	out := make([]openCodeActivationManifestEntry, len(entries))
 	for index, entry := range entries {
 		out[index] = openCodeActivationManifestEntry{

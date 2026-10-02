@@ -30,7 +30,8 @@ func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTrack
 	}
 	start := (harness == ir.HarnessClaudeCode && event == registration.EventSessionStart) ||
 		(harness == ir.HarnessCodex && event == registration.EventCodexSessionStart) ||
-		(harness == ir.HarnessOpenCode && event == registration.EventOpenCodeSessionCreated)
+		(harness == ir.HarnessOpenCode && event == registration.EventOpenCodeSessionCreated) ||
+		(harness == ir.HarnessOpenCode && event == registration.EventOpenCode2SessionCreated)
 	if !start {
 		return nil
 	}
