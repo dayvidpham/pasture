@@ -60,10 +60,11 @@ func TestOpenCodeActivationTargetEventsAreDefensive(t *testing.T) {
 	require.Equal(t, registration.EventOpenCodeSessionCreated, activation.OpenCode1_18_29TargetEvents()[0])
 }
 
-// openCode2Enabled is the enabled 2.0.20 set in registration order: the nine
+// openCode2Enabled is the enabled 2.0.20 set in registration order: the ten
 // coordinates whose authentic capture was cleared in
 // internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md.
 var openCode2Enabled = []model.ContractEventKind{
+	registration.EventOpenCode2SessionCreated,
 	registration.EventOpenCode2SessionPrompt,
 	registration.EventOpenCode2SessionContext,
 	registration.EventOpenCode2SessionTitle,
@@ -75,10 +76,9 @@ var openCode2Enabled = []model.ContractEventKind{
 	registration.EventOpenCode2PermissionEvaluate,
 }
 
-// openCode2MissingFixture is the withheld missing-fixture remainder: the seven
-// coordinates that did not fire in the 2.0.20 capture sitting.
+// openCode2MissingFixture is the withheld missing-fixture remainder: the six
+// coordinates that have no cleared capture yet.
 var openCode2MissingFixture = []model.ContractEventKind{
-	registration.EventOpenCode2SessionCreated,
 	registration.EventOpenCode2SessionCompaction,
 	registration.EventOpenCode2SessionGenerate,
 	registration.EventOpenCode2SessionExperimentalWsHandshake,
@@ -90,9 +90,9 @@ var openCode2MissingFixture = []model.ContractEventKind{
 const openCodeClearance = "internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md"
 
 // TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason pins
-// the 2.0.20 posture: nine enabled rows each carry both proofs, the shell
+// the 2.0.20 posture: ten enabled rows each carry both proofs, the shell
 // create row is withheld by the recorded unclearable-payload decision, and
-// the seven non-fired rows stay withheld missing-fixture.
+// the six non-fired rows stay withheld missing-fixture.
 func TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.OpenCode2_0_20()
@@ -135,6 +135,7 @@ func TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason(t *te
 func TestOpenCodeV2EnabledProofsCiteCommittedFixturesAndProductionTest(t *testing.T) {
 	t.Parallel()
 	want := map[model.ContractEventKind][2]string{
+		registration.EventOpenCode2SessionCreated:      {"opencode_session_created_2_0_21.1.json", "session.created"},
 		registration.EventOpenCode2SessionPrompt:       {"opencode_session_prompt_2_0_20.1.json", "session.prompt"},
 		registration.EventOpenCode2SessionContext:      {"opencode_session_context_2_0_20.1.json", "session.context"},
 		registration.EventOpenCode2SessionTitle:        {"opencode_session_title_2_0_20.1.json", "session.title"},
@@ -188,11 +189,11 @@ func TestOpenCodeV2ActivationIsExhaustiveInRegistrationOrder(t *testing.T) {
 		require.False(t, duplicate, "row %d repeats event kind %d", index, entry.Event)
 		seen[entry.Event] = struct{}{}
 	}
-	require.Equal(t, activation.Withheld, entries[0].State, "session.created did not fire and stays withheld")
-	entries[0].State = activation.Enabled
+	require.Equal(t, activation.Enabled, entries[0].State, "session.created is enabled by its 2.0.21 capture")
+	entries[0].State = activation.Withheld
 	fresh, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)
-	require.Equal(t, activation.Withheld, fresh[0].State, "the manifest derivation must be fresh")
+	require.Equal(t, activation.Enabled, fresh[0].State, "the manifest derivation must be fresh")
 }
 
 // TestOpenCodeV2PerRowCapabilityDerivesNoneWhileFixturesAreAbsent pins the
@@ -241,30 +242,86 @@ func TestOpenCodeV2PerRowCapabilityDerivesNoneWhileFixturesAreAbsent(t *testing.
 	}
 }
 
+// openCode2CaptureVersion records the host version each enabled 2.0.20-contract
+// row was captured at. A fixture is captured at the recorded host version or a
+// later release the contract admits: nine rows were captured on 2.0.20, and
+// session.created, which did not fire in that sitting, was captured on 2.0.21.
+var openCode2CaptureVersion = map[string]string{
+	"session.created":       "2.0.21",
+	"session.prompt":        "2.0.20",
+	"session.context":       "2.0.20",
+	"session.title":         "2.0.20",
+	"session.model.request": "2.0.20",
+	"session.http.request":  "2.0.20",
+	"session.http.response": "2.0.20",
+	"tool.execute.before":   "2.0.20",
+	"tool.execute.after":    "2.0.20",
+	"permission.evaluate":   "2.0.20",
+}
+
 // TestOpenCodeV2ExpectedFixtureNamesFollowTheCaptureRule pins the capture
-// naming rule without needing any fixture file: each native coordinate maps
-// to opencode_<snake>_2_0_20.1.json in
-// internal/lifecycle/ingress/opencode/testdata/fixtures/, exercised through
-// the production CaptureStem namer rather than a re-implemented spelling.
-// The rule fixes the stem; the committed sequence number follows the
-// smallest-authentic-file policy, so the permission evaluate fixture is .2.
+// naming rule without needing any fixture file. The rule: a fixture is
+// captured at the recorded host version or a later release the contract
+// admits, and is named opencode_<snake>_<capture version>.<n>.json in
+// internal/lifecycle/ingress/opencode/testdata/fixtures/. Each coordinate is
+// exercised through the production CaptureStem namer at its capture-time
+// version (2.0.20 unless a later admitted capture enabled it), never a
+// re-implemented spelling. The rule fixes the stem; the committed sequence
+// number follows the smallest-authentic-file policy, so the permission
+// evaluate fixture is .2. Every enabled row's capture proof must cite its
+// capture-time stem and a version no older than the 2.0.20 contract floor.
 func TestOpenCodeV2ExpectedFixtureNamesFollowTheCaptureRule(t *testing.T) {
 	t.Parallel()
 	manifest := registration.OpenCode2_0_20().Entries()
 	require.Len(t, manifest, 17)
+	entries, err := activation.OpenCode2_0_20()
+	require.NoError(t, err)
 	seen := make(map[string]struct{}, len(manifest))
-	for _, event := range manifest {
-		stem, ok := handlers.CaptureStem(ir.HarnessOpenCode, event.NativeName, "2.0.20")
+	for index, event := range manifest {
+		version, captured := openCode2CaptureVersion[event.NativeName]
+		if !captured {
+			version = "2.0.20"
+		}
+		require.False(t, versionBelow(version, "2.0.20"), "coordinate %q capture version %s is below the 2.0.20 contract floor", event.NativeName, version)
+		stem, ok := handlers.CaptureStem(ir.HarnessOpenCode, event.NativeName, version)
 		require.True(t, ok, "coordinate %q must form a production capture stem", event.NativeName)
 		basename := stem + ".1.json"
 		_, duplicate := seen[basename]
 		require.False(t, duplicate, "two coordinates map to one expected fixture %q", basename)
 		seen[basename] = struct{}{}
-		if event.NativeName == "permission.evaluate" {
+		switch event.NativeName {
+		case "permission.evaluate":
 			require.Equal(t, "opencode_permission_evaluate_2_0_20", stem)
+		case "session.created":
+			require.Equal(t, "opencode_session_created_2_0_21", stem)
+		}
+		entry := entries[index]
+		require.Equal(t, captured, entry.State == activation.Enabled, "coordinate %q: capture-version table and activation disagree", event.NativeName)
+		if captured {
+			name := entry.CaptureProof.Name()
+			require.Contains(t, name, "/"+stem+".", "coordinate %q capture proof must cite its capture-time stem", event.NativeName)
+			require.Contains(t, name, "(OpenCode "+version+" ", "coordinate %q capture proof must state its capture version", event.NativeName)
 		}
 	}
 	require.Len(t, seen, 17, "every coordinate needs its own expected fixture")
+}
+
+// versionBelow reports whether dotted numeric version a is older than b.
+func versionBelow(a, b string) bool {
+	as, bs := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(as) && i < len(bs); i++ {
+		var x, y int
+		for _, c := range as[i] {
+			x = x*10 + int(c-'0')
+		}
+		for _, c := range bs[i] {
+			y = y*10 + int(c-'0')
+		}
+		if x != y {
+			return x < y
+		}
+	}
+	return len(as) < len(bs)
 }
 
 // TestOpenCodeV2ProofsBindOnlyTheEnabledSet pins the proof side: every

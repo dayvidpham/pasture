@@ -16,6 +16,7 @@ const (
 	CaptureProofOpenCode2ToolExecuteBefore   CaptureProof = 208
 	CaptureProofOpenCode2ToolExecuteAfter    CaptureProof = 209
 	CaptureProofOpenCode2PermissionEvaluate  CaptureProof = 210
+	CaptureProofOpenCode2SessionCreated      CaptureProof = 211
 )
 
 // openCodeGeneratedCaptureProofs lists the generated capture proof arms of opencode_targets.go by name, in ordinal order.
@@ -31,6 +32,7 @@ var openCodeGeneratedCaptureProofs = []namedCaptureProof{
 	{name: "OpenCode2ToolExecuteBefore", proof: CaptureProofOpenCode2ToolExecuteBefore},
 	{name: "OpenCode2ToolExecuteAfter", proof: CaptureProofOpenCode2ToolExecuteAfter},
 	{name: "OpenCode2PermissionEvaluate", proof: CaptureProofOpenCode2PermissionEvaluate},
+	{name: "OpenCode2SessionCreated", proof: CaptureProofOpenCode2SessionCreated},
 }
 
 // OpenCode production proofs, ordinals 200-299.
@@ -46,6 +48,7 @@ const (
 	ProductionProofOpenCode2ToolExecuteBefore   ProductionProof = 208
 	ProductionProofOpenCode2ToolExecuteAfter    ProductionProof = 209
 	ProductionProofOpenCode2PermissionEvaluate  ProductionProof = 210
+	ProductionProofOpenCode2SessionCreated      ProductionProof = 211
 )
 
 // openCodeGeneratedProductionProofs lists the generated production proof arms of opencode_targets.go by name, in ordinal order.
@@ -61,4 +64,5 @@ var openCodeGeneratedProductionProofs = []namedProductionProof{
 	{name: "OpenCode2ToolExecuteBefore", proof: ProductionProofOpenCode2ToolExecuteBefore},
 	{name: "OpenCode2ToolExecuteAfter", proof: ProductionProofOpenCode2ToolExecuteAfter},
 	{name: "OpenCode2PermissionEvaluate", proof: ProductionProofOpenCode2PermissionEvaluate},
+	{name: "OpenCode2SessionCreated", proof: ProductionProofOpenCode2SessionCreated},
 }

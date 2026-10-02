@@ -284,15 +284,12 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 // TestOpenCodeV2BannerParsesProductPrefix pins the real v2 --version banner
 // string: the host prints its product name ahead of the release
 // (`opencode v2.0.20`), and the probe must accept that line while still
-// refusing arbitrary process output. The recorded 2.0.20 release has every
-// row withheld until its capture proofs land, so the literal banner case pins
-// resolution (the admitted version and its query source reach the diagnostic
-// and the fault record) rather than an occurrence; admitted releases pin the
-// full occurrence path.
+// refusing arbitrary process output. session.created is enabled at the
+// recorded 2.0.20 contract, so the literal banner case drives the 2.0.21 bus
+// capture and pins the full occurrence path at the resolved 2.0.20 release.
 //
-// WHAT IT VISITS: the seven banner rows below: one resolving banner (the
-// recorded release, withheld by admission), three banners that record an
-// occurrence, one banner the grammar accepts but release parsing refuses,
+// WHAT IT VISITS: the seven banner rows below: four banners that record an
+// occurrence (one of them the recorded 2.0.20 release), one banner the grammar accepts but release parsing refuses,
 // and two banners the grammar refuses.
 // WHAT IT DOES NOT READ: the live host or its --version output; the banners
 // are constructed controls, and only the `opencode v2.0.20` string repeats an
@@ -300,7 +297,11 @@ func TestNativeVersionSelectionAndRefusal(t *testing.T) {
 func TestOpenCodeV2BannerParsesProductPrefix(t *testing.T) {
 	t.Parallel()
 	binary := lifecycleBinary(t)
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal/lifecycle/ingress", "opencode", "testdata/fixtures", "session_created_1_18_29.json"))
+	fixtureDir := filepath.Join("..", "..", "internal/lifecycle/ingress", "opencode", "testdata/fixtures")
+	raw, err := os.ReadFile(filepath.Join(fixtureDir, "session_created_1_18_29.json"))
+	require.NoError(t, err)
+	// The v2 row drives the v2 bus capture, whose session identity sits in data.
+	rawV2, err := os.ReadFile(filepath.Join(fixtureDir, "opencode_session_created_2_0_21.1.json"))
 	require.NoError(t, err)
 	for _, tc := range []struct {
 		name           string
@@ -308,8 +309,9 @@ func TestOpenCodeV2BannerParsesProductPrefix(t *testing.T) {
 		wantOccurrence string
 		wantResolved   string
 		wantFault      string
+		v2Payload      bool
 	}{
-		{name: "v2 product banner resolves to the recorded release", banner: "opencode v2.0.20", wantResolved: "2.0.20", wantFault: "withheld (reason missing-fixture)"},
+		{name: "v2 product banner resolves to the recorded release and records the occurrence", banner: "opencode v2.0.20", wantOccurrence: "2.0.20", v2Payload: true},
 		{name: "product banner on an admitted release records the occurrence", banner: "opencode 1.19.1", wantOccurrence: "1.19.1"},
 		{name: "bare release still accepted", banner: "1.19.1", wantOccurrence: "1.19.1"},
 		{name: "product banner with suffix", banner: "opencode v2.1.0-beta.1+build.3", wantOccurrence: "2.1.0-beta.1+build.3"},
@@ -330,6 +332,9 @@ func TestOpenCodeV2BannerParsesProductPrefix(t *testing.T) {
 			command.Env = discoveryChildEnv(map[string]*string{"PASTURE_DB_PATH": &dbPath,
 				"PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
 			command.Stdin = bytes.NewReader(raw)
+			if tc.v2Payload {
+				command.Stdin = bytes.NewReader(rawV2)
+			}
 			var stdout, stderr bytes.Buffer
 			command.Stdout, command.Stderr = &stdout, &stderr
 			require.NoError(t, command.Run(), stderr.String())

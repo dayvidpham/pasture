@@ -4,8 +4,9 @@
   "events": [
     {
       "event": "session.created",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_created_2_0_21.1.json (OpenCode 2.0.21 authentic bus capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.created",
       "responseCapability": "none",
       "failureEvidence": ""
     },
