@@ -307,7 +307,6 @@ func TestOpenCodeV2BannerParsesProductPrefix(t *testing.T) {
 		name           string
 		banner         string
 		wantOccurrence string
-		wantResolved   string
 		wantFault      string
 		v2Payload      bool
 	}{
@@ -355,14 +354,6 @@ func TestOpenCodeV2BannerParsesProductPrefix(t *testing.T) {
 			fault, err := os.ReadFile(filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile))
 			require.NoError(t, err)
 			record := decodeJSONObject(t, fault)
-			if tc.wantResolved != "" {
-				require.Contains(t, stderr.String(), `at host version "`+tc.wantResolved+`"`, "the probe must resolve the banner before admission")
-				require.Contains(t, stderr.String(), tc.wantFault)
-				require.NotContains(t, stderr.String(), "does not match the supported product version line")
-				require.JSONEq(t, `"`+tc.wantResolved+`"`, string(record["hostVersion"]))
-				require.JSONEq(t, `"`+string(model.HostVersionExecutableQuery)+`"`, string(record["hostVersionSource"]))
-				return
-			}
 			require.Contains(t, stderr.String(), tc.wantFault)
 			require.Contains(t, stderr.String(), "no occurrence was recorded")
 			require.JSONEq(t, `""`, string(record["hostVersion"]), "arbitrary process output was not retained as a version")
