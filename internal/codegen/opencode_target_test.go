@@ -770,11 +770,11 @@ func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
 
 // TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs drives the
 // generated v2 callbacks through the real built binary with constructed v2
-// payloads. No 2.0.20 row carries proofs yet, so the handler refuses every
-// event as withheld before reading a byte: the gate receives the host's
-// continue bytes with exit 0 and a diagnostic, the observation receives no
-// bytes at all, and no receipt exists afterwards. This pins the honest
-// pre-proofs posture: installed and forwarding, evaluating nothing.
+// payloads. session.retry carries no proofs, so the handler refuses it as
+// withheld before reading a byte: the host receives its continue bytes with
+// exit 0 and a diagnostic. The enabled tool.execute.before gate faults open on
+// the uninitialized store. No receipt exists afterwards: a row without proofs
+// evaluates nothing.
 func TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs(t *testing.T) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {
@@ -793,8 +793,8 @@ func TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs(t *testing.
 	moduleURL := (&url.URL{Scheme: "file", Path: copyCommittedModuleToTemp(t, dir)}).String()
 	runner := filepath.Join(dir, "production-proof.ts")
 	script := fmt.Sprintf(`
-import { sessionCreated, toolExecuteBefore } from %q;
-await sessionCreated({ type: "session.created", data: { sessionID: "constructed-2.0.20", version: "2.0.20" } });
+import { sessionRetry, toolExecuteBefore } from %q;
+await sessionRetry({ sessionID: "constructed-2.0.20" });
 const hookEvent = { tool: "task", sessionID: "constructed-2.0.20", agent: "agent", messageID: "message", id: "call-2.0.20", input: { path: "unchanged" } };
 const before = JSON.stringify(hookEvent);
 await toolExecuteBefore(hookEvent);
@@ -824,13 +824,13 @@ console.log(JSON.stringify({ forwarded: true }));
 	if strings.TrimSpace(proofOut.String()) != `{"forwarded":true}` {
 		t.Fatalf("Bun proof stdout = %q, want the forward confirmation and nothing else", proofOut.String())
 	}
-	// The gate's withheld refusal arrives as the host's continue bytes with a
-	// diagnostic; the observation's refusal arrives as no bytes with a
-	// diagnostic. Both diagnostics name the withheld reason.
+	// The withheld gate's refusal arrives as the host's continue bytes with a
+	// diagnostic naming the withheld reason; the enabled gate faults on the
+	// uninitialized store and also continues with a diagnostic.
 	for _, diagnostic := range []string{
 		`withheld (reason missing-fixture)`,
 		`tool.execute.before`,
-		`session.created`,
+		`session.retry`,
 	} {
 		if !strings.Contains(proofErr.String(), diagnostic) {
 			t.Errorf("withheld diagnostic lacks %q: %s", diagnostic, proofErr.String())

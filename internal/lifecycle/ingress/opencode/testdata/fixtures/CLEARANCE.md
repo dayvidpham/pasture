@@ -18,6 +18,17 @@ before the sitting on 2026-10-01: `opencode v2.0.20` (the binary resolves
 version: the contract records 2.0.20 for the nine fixtures below. The 1.18.29
 fixtures above are unchanged.
 
+Third batch: OpenCode 2.0.21, verified with `opencode --version` immediately
+before the sitting on 2026-10-02 (UTC; 2026-10-01 local): `opencode v2.0.21`.
+The installed host moved 2.0.20 -> 2.0.21 after the second-batch sitting and
+the user chose to capture from the installed 2.0.21 (npm registry and the
+upstream tags confirm both releases; the plugin-activation and session source
+files are unchanged between them). The capture records 2.0.21 plainly, a later
+release than the 2.0.20 the contract records. Committing it enables nothing:
+no activation row names it, and amending the recorded-version invariant to
+admit a later-release capture is a separate enablement change that follows the
+user's acceptance.
+
 ## Capture
 
 Captured in one live session on 2026-09-05, into
@@ -168,6 +179,54 @@ session.experimental.ws.handshake, session.experimental.ws.send,
 session.experimental.ws.receive. In particular session.created did not fire,
 so no session claim is written from this sitting and the v2 gate has no claim
 to consult from these bytes.
+
+### Third batch — OpenCode 2.0.21, 2026-10-02
+
+Captured in one supervised live sitting on 2026-10-02 (UTC), into
+`~/.local/share/pasture-captures/opencode-v2-sessioncreated`, with
+`PASTURE_CAPTURE_DIR` set. Paths are spelled with `~`; the fixture bytes carry
+the `/home/user` placeholder that `home-path-v1` writes. The sitting was a live
+session of the real host binary on the user's machine, driven by the team's
+supervisor agent at the user's direction (the user did not type the prompts),
+with non-interactive `opencode run` WITHOUT `--standalone`, exactly as the user
+prescribed, so the event came through the managed background service rather
+than a standalone process.
+
+Isolation: the sitting ran against an isolated managed service with its own
+XDG data/state/cache/config roots under `/tmp/opencode/capture-xdg`, private
+port 49375, credentials linked read-only, and the capture environment injected
+through the service config `env` field (the managed spawn does not pass the
+caller's `PASTURE_*` by default; the service.json env map is the designed
+channel). The user's running service (port 49374) and the user's live
+OpenCode database were never touched. The live pasture store was not touched
+(mtime unchanged). Honest note: the dry run before the sitting was piped into
+the kit binary without `PASTURE_DB_PATH`, so it appended a fault line (and the
+hung first run a tool.execute.before line) to the live
+`lifecycle-faults.jsonl` beside the user's store; the dry-run capture file was
+deleted, the fault lines remain in that log, and no fixture derives from them.
+
+Build kit: one `pasture` binary, sha256
+`b5a31993496a6f723ebf787ed58178509351a86e5ef5317f7c66af602af7036c`, built from
+`fd0f155` (origin/main). Generated plugin sha256
+`65d58932be728b76f1bd2b3eb812de56089469d3650f70d0c9fd86e84f388fc2`,
+byte-identical to the committed `.opencode/plugins/pasture-lifecycle.ts` at
+`fd0f155`, so no kit-vs-committed divergence paragraph is needed.
+
+Sequence: run 1 on a fresh service created a session while plugin activation
+was still settling; session.prompt was captured as `.1` and session.created was
+missed (the measured first-session race, tracked as a design question
+separately). Run 2 on the warm service captured session.created and
+session.prompt `.2`. The model call failed in isolation (provider unresolved;
+an auth plugin failed to load from the isolated plugin cache); session creation
+and its event precede the model call, so the captured bytes are authentic host
+bytes.
+
+- session.created: `opencode_session_created_2_0_21.1.json` — trigger: run 2 of `opencode run` against the warm isolated service — 2026-10-02T01:12:46Z — raw sha256:bb4a0361818e5177a774d3459ed970f281e8315f5097632e4310569ab1b93e44 (606 bytes) — committed sha256:7eda755b4bb9d82a44e057742f0ede1d8ff90280e607ccf900cefe9776f5cc5c (600 bytes)
+
+Captured and not used (not committed; session.prompt already has a cleared
+2.0.20 fixture, so these are recorded, not selected):
+- `opencode_session_prompt_2_0_21.1.json` — raw sha256:8f6dbf1f80be3f543b3faa8d78a5c1e14a94fabc3487e018978b51125f9927ca (156 bytes; run 1)
+- `opencode_session_prompt_2_0_21.2.json` — raw sha256:63e7069adfc2ac98f5a3758d80ac73fd24cd65cac073bba794e5f03995f5e01d (162 bytes; run 2)
 
 ## Inventory
 
@@ -951,6 +1010,49 @@ opencode_tool_execute_before_2_0_20.2.json
 20 payloads inventoried in ~/.local/share/pasture-captures/opencode-v2
 ```
 
+### Third batch — OpenCode 2.0.21
+
+Output of the inventory report (`PASTURE_INVENTORY_DIR` over the capture
+directory, all three payloads). No refused class and no unclearable reason is
+named. The chosen session.created payload carries no free text; its two path
+fields carry the home directory. The two prompt payloads flag `.prompt.text`
+as free text; they are not selected.
+
+```
+=== RUN   TestFixtureInventoryReport
+opencode_session_created_2_0_21.1.json
+  .id                                                          identifier 
+  .created                                                     number     
+  .type                                                        identifier 
+  .durable.aggregateID                                         identifier 
+  .durable.seq                                                 number     
+  .durable.version                                             number     
+  .location.directory                                          path       
+  .data.sessionID                                              identifier 
+  .data.projectID                                              identifier 
+  .data.location.directory                                     path       
+  .data.subpath                                                identifier 
+  .data.slug                                                   identifier 
+  .data.model.id                                               identifier 
+  .data.model.providerID                                       identifier 
+  .data.version                                                identifier 
+opencode_session_prompt_2_0_21.1.json
+  .sessionID                                                   identifier 
+  .messageID                                                   identifier 
+  .prompt.text                                                 free-text    FREE TEXT: substitute with free-text-v1
+  .delivery                                                    identifier 
+opencode_session_prompt_2_0_21.2.json
+  .sessionID                                                   identifier 
+  .messageID                                                   identifier 
+  .prompt.text                                                 free-text    FREE TEXT: substitute with free-text-v1
+  .delivery                                                    identifier 
+3 payloads inventoried in ~/.local/share/pasture-captures/opencode-v2-sessioncreated
+--- PASS: TestFixtureInventoryReport (0.00s)
+```
+
+The same report re-run over the committed fixture bytes names the same fifteen
+fields with the same classes and no refused class.
+
 ## Rules applied, in order
 
 Per fixture, the value-only rules applied in the order applied, as listed in
@@ -998,6 +1100,16 @@ wherever they do occur. After both rules the committed bytes carry no
 occurrence of the capturing user's name in any spelling, which the corpus
 guard asserts over every file of this directory, this record included.
 
+### Third batch — OpenCode 2.0.21
+
+- `opencode_session_created_2_0_21.1.json`: home-path-v1 (two absolute paths, `.location.directory` and `.data.location.directory`, rewritten to `/home/user/...`); free-text-v1 not applied because the inventory flagged no free text in it.
+
+The relative spelling and the directory slug occur nowhere in the payload,
+checked by search. Keys, nesting, types and nulls are unchanged: the committed
+bytes were compared field by field with the raw bytes (same paths, same value
+types). The committed bytes carry no occurrence of the capturing user's name.
+The provenance sidecar lists `home-path-v1`.
+
 ## Secret scan
 
 `TestNoCommittedTestdataCarriesASecretShape` (internal/lifecycle/ingress/secretscan_test.go)
@@ -1018,6 +1130,15 @@ these files: an Anthropic API-key shape was planted into a COPY of one of
 these new fixtures in this directory, the scan turned RED naming that copy,
 the shape and the byte offset, and the copy was then discarded and the scan
 returned to PASS.
+
+### Third batch — OpenCode 2.0.21
+
+`TestNoCommittedTestdataCarriesASecretShape` run over the whole module with
+this fixture and its sidecar in place: PASS, zero hits, 2026-10-02.
+`TestSecretScanIsRedOnEachPlantedShape`: PASS. Reach control on the same tree:
+an Anthropic API-key shape planted into a COPY of the new fixture in this
+directory turned the scan RED naming that copy, the shape and byte offset 502;
+the copy was removed and the scan returned to PASS.
 
 ## Refused classes
 
@@ -1056,6 +1177,13 @@ rules above. The corpus test refuses the first two by shape.
   fire get no fixture and stay withheld for missing-fixture, not for
   clearance reasons.
 
+### Third batch — OpenCode 2.0.21
+
+The chosen payload carries no refused class: no tool response, no
+environment dump, no free text. The two unselected prompt payloads are not
+refused; they are sizes not chosen because the coordinate already has a
+cleared fixture.
+
 ## Fixtures
 
 - `session_created_1_18_29.json` — session.created — sha256:71c8de3aadd8019b7e4123076625a0be6e3faaadd56a23c2a79c28a58f7ab591 (654 bytes)
@@ -1084,6 +1212,15 @@ Withheld in this batch: `shell.create.before` (unclearable environment dump,
 fire (session.created, session.compaction, session.generate, session.retry,
 session.experimental.ws.handshake, session.experimental.ws.send,
 session.experimental.ws.receive).
+
+### Third batch — OpenCode 2.0.21, one fixture — accepted 2026-10-02
+
+- `opencode_session_created_2_0_21.1.json` — session.created — sha256:7eda755b4bb9d82a44e057742f0ede1d8ff90280e607ccf900cefe9776f5cc5c (600 bytes)
+
+Sizes not chosen: `opencode_session_prompt_2_0_21.1.json` (156 bytes raw) and
+`opencode_session_prompt_2_0_21.2.json` (162 bytes raw). This fixture enables
+no activation row; the recorded-version invariant amendment and the row
+enablement are a separate change after the user's acceptance.
 
 ## User acceptance
 
@@ -1126,6 +1263,20 @@ The seven coordinates that did not fire and the unclearable shell dump stay
 withheld; this acceptance enables no row by itself, and a later change enables
 a row from recorded proof.
 
+### Third batch — OpenCode 2.0.21 — accepted 2026-10-02
+
+Accepted by the user on 2026-10-02, for the one cleared fixture above, after
+the clearance evidence was presented (fixture digest, rules applied, scan
+result, sizes not chosen). The user was asked for their acceptance wording,
+verbatim, and answered, verbatim:
+
+```
+ACCEPT
+```
+
+The recorded-version invariant amendment and the row enablement are a separate
+change; this acceptance itself enables no row.
+
 ## Pull request
 
 Appended by the integrator in the landing commit: the pull request URL.
@@ -1135,6 +1286,11 @@ Appended by the integrator in the landing commit: the pull request URL.
 Landing pull request: https://github.com/dayvidpham/pasture/pull/156 — opened
 after the acceptance above was recorded; the accepted captures first reach a
 remote through it.
+
+### Third batch — OpenCode 2.0.21
+
+Landing pull request: https://github.com/dayvidpham/pasture/pull/158 — opened
+after the acceptance above was recorded.
 
 ## Current source revision transport — 2026-09-07
 
