@@ -1213,7 +1213,7 @@ fire (session.created, session.compaction, session.generate, session.retry,
 session.experimental.ws.handshake, session.experimental.ws.send,
 session.experimental.ws.receive).
 
-### Third batch — OpenCode 2.0.21, one fixture — acceptance OWED
+### Third batch — OpenCode 2.0.21, one fixture — accepted 2026-10-02
 
 - `opencode_session_created_2_0_21.1.json` — session.created — sha256:7eda755b4bb9d82a44e057742f0ede1d8ff90280e607ccf900cefe9776f5cc5c (600 bytes)
 
@@ -1263,13 +1263,19 @@ The seven coordinates that did not fire and the unclearable shell dump stay
 withheld; this acceptance enables no row by itself, and a later change enables
 a row from recorded proof.
 
-### Third batch — OpenCode 2.0.21 — acceptance OWED
+### Third batch — OpenCode 2.0.21 — accepted 2026-10-02
 
-The user's verbatim acceptance for this batch is owed and not yet given.
-Nothing in this batch reaches a remote before it is recorded here.
+Accepted by the user on 2026-10-02, for the one cleared fixture above, after
+the clearance evidence was presented (fixture digest, rules applied, scan
+result, sizes not chosen). The user was asked for their acceptance wording,
+verbatim, and answered, verbatim:
 
 ```
+ACCEPT
 ```
+
+The recorded-version invariant amendment and the row enablement are a separate
+change; this acceptance itself enables no row.
 
 ## Pull request
 
