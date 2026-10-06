@@ -96,9 +96,10 @@ func TestOpenCode2NativeNamesAreSpelledAsTheHostEmitsThem(t *testing.T) {
 
 // TestOpenCode2LifecycleProfile consults the typed runtime profile the v2
 // host contract derives from: sixteen blocking gate consultations plus one
-// session-start observation, every row without response-channel evidence so
-// each derives CapabilityNone, and only the session observation and the
-// post-hoc tool row stand outside the pre-action set.
+// session-start observation. The permission.evaluate row carries its committed
+// capture citation and derives CapabilityDeny; every other row carries no
+// response-channel evidence and derives CapabilityNone. Only the session
+// observation and the post-hoc tool row stand outside the pre-action set.
 func TestOpenCode2LifecycleProfile(t *testing.T) {
 	t.Parallel()
 
@@ -111,7 +112,11 @@ func TestOpenCode2LifecycleProfile(t *testing.T) {
 		mapping, err := contract.Mapping(event)
 		require.NoError(t, err)
 		require.True(t, mapping.IsValid(), "the v2 row for %q is a valid lifecycle mapping", mapping.NativeName())
-		require.Equal(t, runtime.CapabilityNone, mapping.Response(), "the v2 row for %q carries no proved denial channel", mapping.NativeName())
+		if event == runtime.OpenCode2EventPermissionEvaluate {
+			require.Equal(t, runtime.CapabilityDeny, mapping.Response(), "the evidenced permission.evaluate row derives deny")
+		} else {
+			require.Equal(t, runtime.CapabilityNone, mapping.Response(), "the v2 row for %q carries no proved denial channel", mapping.NativeName())
+		}
 		switch event {
 		case runtime.OpenCode2EventSessionCreated:
 			require.Equal(t, runtime.SemanticObservation, mapping.Semantic())

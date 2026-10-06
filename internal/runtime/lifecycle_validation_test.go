@@ -340,8 +340,9 @@ func TestBlocksByExitCodeCoversOnlyTheTwoExitCodeArms(t *testing.T) {
 }
 
 // TestOpenCode2ResponseCapabilityFlipsOnEvidenceDataOnly pins the v2
-// capability posture without needing any fixture: all seventeen pinned rows
-// derive CapabilityNone, and the same named builder derives CapabilityDeny
+// capability posture without needing any fixture: permission.evaluate derives
+// CapabilityDeny from its committed capture citation, every other pinned row
+// derives CapabilityNone, and the same named builder derives CapabilityDeny
 // for the permission evaluate coordinate once it carries a citation. The
 // flip is therefore data (supplying the evidence value), and it stays
 // honest: a row without a citation, an observation, and the post-hoc tool
@@ -362,8 +363,12 @@ func TestOpenCode2ResponseCapabilityFlipsOnEvidenceDataOnly(t *testing.T) {
 		if !mapping.IsValid() {
 			t.Fatalf("v2 row %q is not a valid lifecycle mapping", mapping.NativeName())
 		}
-		if mapping.Response() != CapabilityNone {
-			t.Fatalf("v2 row %q derives %q, want none until its citation lands", mapping.NativeName(), mapping.Response())
+		want := CapabilityNone
+		if event == OpenCode2EventPermissionEvaluate {
+			want = CapabilityDeny
+		}
+		if mapping.Response() != want {
+			t.Fatalf("v2 row %q derives %q, want %q", mapping.NativeName(), mapping.Response(), want)
 		}
 	}
 

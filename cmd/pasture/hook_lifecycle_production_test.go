@@ -544,7 +544,9 @@ func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
 // coordinate with the committed capture its activation row cites, in
 // registration order. bus marks a coordinate the host delivers through the
 // plugin's event subscription rather than a registered hook; hostVersion is
-// the version the durable envelope must carry for that row.
+// the version the durable envelope must carry for that row. The driver reports
+// 2.0.21, the later release this contract admits, so every hook row carries
+// the setup version and the bus row carries its own data.version.
 var openCode2EnabledFixtures = []struct {
 	event       model.ContractEventKind
 	native      string
@@ -555,15 +557,21 @@ var openCode2EnabledFixtures = []struct {
 	// The bus event carries its own release in data.version (2.0.21 in the
 	// capture), which the transport forwards ahead of the setup version.
 	{registration.EventOpenCode2SessionCreated, "session.created", "opencode_session_created_2_0_21.1.json", true, "2.0.21"},
-	{registration.EventOpenCode2SessionPrompt, "session.prompt", "opencode_session_prompt_2_0_20.1.json", false, "2.0.20"},
-	{registration.EventOpenCode2SessionContext, "session.context", "opencode_session_context_2_0_20.1.json", false, "2.0.20"},
-	{registration.EventOpenCode2SessionTitle, "session.title", "opencode_session_title_2_0_20.1.json", false, "2.0.20"},
-	{registration.EventOpenCode2SessionModelRequest, "session.model.request", "opencode_session_model_request_2_0_20.2.json", false, "2.0.20"},
-	{registration.EventOpenCode2SessionHttpRequest, "session.http.request", "opencode_session_http_request_2_0_20.2.json", false, "2.0.20"},
-	{registration.EventOpenCode2SessionHttpResponse, "session.http.response", "opencode_session_http_response_2_0_20.1.json", false, "2.0.20"},
-	{registration.EventOpenCode2ToolExecuteBefore, "tool.execute.before", "opencode_tool_execute_before_2_0_20.1.json", false, "2.0.20"},
-	{registration.EventOpenCode2ToolExecuteAfter, "tool.execute.after", "opencode_tool_execute_after_2_0_20.1.json", false, "2.0.20"},
-	{registration.EventOpenCode2PermissionEvaluate, "permission.evaluate", "opencode_permission_evaluate_2_0_20.2.json", false, "2.0.20"},
+	{registration.EventOpenCode2SessionPrompt, "session.prompt", "opencode_session_prompt_2_0_20.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionContext, "session.context", "opencode_session_context_2_0_20.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionCompaction, "session.compaction", "opencode_session_compaction_2_0_21.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionGenerate, "session.generate", "opencode_session_generate_2_0_21.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionTitle, "session.title", "opencode_session_title_2_0_20.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionModelRequest, "session.model.request", "opencode_session_model_request_2_0_20.2.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionHttpRequest, "session.http.request", "opencode_session_http_request_2_0_20.2.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionHttpResponse, "session.http.response", "opencode_session_http_response_2_0_20.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionExperimentalWsHandshake, "session.experimental.ws.handshake", "opencode_session_experimental_ws_handshake_2_0_21.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionExperimentalWsSend, "session.experimental.ws.send", "opencode_session_experimental_ws_send_2_0_21.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionExperimentalWsReceive, "session.experimental.ws.receive", "opencode_session_experimental_ws_receive_2_0_21.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2SessionRetry, "session.retry", "opencode_session_retry_2_0_21.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2ToolExecuteBefore, "tool.execute.before", "opencode_tool_execute_before_2_0_20.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2ToolExecuteAfter, "tool.execute.after", "opencode_tool_execute_after_2_0_20.1.json", false, "2.0.21"},
+	{registration.EventOpenCode2PermissionEvaluate, "permission.evaluate", "opencode_permission_evaluate_2_0_20.2.json", false, "2.0.21"},
 }
 
 // citedCapturePath returns the repository-relative path a capture citation
@@ -578,8 +586,9 @@ func citedCapturePath(citation string) string {
 // TestEnabledOpenCode2HandlersToDurableReadBack is the production proof for
 // every enabled OpenCode 2.0.20-contract coordinate. Bun loads the shipped
 // generated transport (.opencode/plugins/pasture-lifecycle.ts), runs its setup
-// against a host context that reports version 2.0.20, and calls each
-// registered hook callback with the authentic committed capture bytes. A bus
+// against a host context that reports version 2.0.21, a later release the
+// 2.0.20 contract admits, and calls each registered hook callback with the
+// authentic committed capture bytes. A bus
 // coordinate (session.created) is not a hook: the driver's ctx.event.subscribe
 // stream yields its committed capture as a bus event, so it reaches the
 // transport's own subscription filter and observation path, and the driver
@@ -623,7 +632,7 @@ func TestEnabledOpenCode2HandlersToDurableReadBack(t *testing.T) {
 	for _, row := range openCode2EnabledFixtures {
 		wantKinds = append(wantKinds, row.event)
 	}
-	require.Equal(t, wantKinds, enabledKinds, "the 2.0.20 enabled set must be exactly the ten coordinates this proof drives")
+	require.Equal(t, wantKinds, enabledKinds, "the 2.0.20 enabled set must be exactly the sixteen coordinates this proof drives")
 	for _, row := range openCode2EnabledFixtures {
 		entry := byEvent[row.event]
 		require.Equal(t, activation.Enabled, entry.State, "%s must be enabled", row.native)
@@ -656,7 +665,7 @@ let busDrained;
 const drained = new Promise((resolve) => { busDrained = resolve; });
 const register = (prefix) => ({ hook: async (name, cb) => { hooks[prefix + "." + name] = cb; return { dispose: async () => {} }; } });
 const ctx = {
-  app: { name: "opencode", version: "2.0.20" },
+  app: { name: "opencode", version: "2.0.21" },
   session: register("session"), tool: register("tool"), permission: register("permission"), shell: register("shell"),
   event: { subscribe: ({ signal } = {}) => (async function* () {
     for (const busEvent of busEvents) yield busEvent;
@@ -683,7 +692,7 @@ try {
   if (failures.length !== 0) throw new Error("bus observation did not proceed cleanly: " + failures.join("; "));
   await cleanup();
 } finally { console.error = originalError; }
-console.log("opencode 2.0.20 production drive passed");
+console.log("opencode 2.0.21 production drive passed");
 `, transport, busEvents.String(), calls.String())
 	require.NoError(t, os.WriteFile(runner, []byte(script), 0o600))
 
@@ -694,7 +703,7 @@ console.log("opencode 2.0.20 production drive passed");
 		"PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil})
 	out, err := command.CombinedOutput()
 	require.NoError(t, err, string(out))
-	require.Contains(t, string(out), "opencode 2.0.20 production drive passed")
+	require.Contains(t, string(out), "opencode 2.0.21 production drive passed")
 
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)

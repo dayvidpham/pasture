@@ -41,13 +41,15 @@
     },
     {
       "event": "session.compaction",
-      "state": "withheld",
-      "reason": "missing-fixture"
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_compaction_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.compaction"
     },
     {
       "event": "session.generate",
-      "state": "withheld",
-      "reason": "missing-fixture"
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_generate_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.generate"
     },
     {
       "event": "session.title",
@@ -75,23 +77,27 @@
     },
     {
       "event": "session.experimental.ws.handshake",
-      "state": "withheld",
-      "reason": "missing-fixture"
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_handshake_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.handshake"
     },
     {
       "event": "session.experimental.ws.send",
-      "state": "withheld",
-      "reason": "missing-fixture"
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_send_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.send"
     },
     {
       "event": "session.experimental.ws.receive",
-      "state": "withheld",
-      "reason": "missing-fixture"
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_receive_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.receive"
     },
     {
       "event": "session.retry",
-      "state": "withheld",
-      "reason": "missing-fixture"
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_retry_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.retry"
     },
     {
       "event": "tool.execute.before",

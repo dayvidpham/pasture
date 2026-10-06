@@ -280,12 +280,13 @@ func OpenCode1_18_29Lifecycle() LifecycleContract[OpenCodeLifecycleEvent] {
 // evaluateInput in packages/core/src/permission.ts, so a plugin that sets
 // event.effect to "deny" is honoured on the path where no saved or configured
 // rule already denied (that path returns early without firing the hook). That
-// channel is source-cited here, not capture-measured: the live refusal bytes
-// and exit for that denial are established by the committed OpenCode 2.0.20
-// capture sitting named above. Every row below therefore carries no
-// response-channel evidence and derives CapabilityNone, exactly like the v1
-// rows, until that capture lands. The named builder carries that evidence
-// as data, so supplying the citation later upgrades the row with no
+// channel is capture-measured: the committed OpenCode 2.0.21 deny sitting
+// (named in the row's citation) shows the host surfacing pasture's deny as a
+// Permission.BlockedError with the durable reason and not running the tool.
+// Every other row below therefore carries no response-channel evidence and
+// derives CapabilityNone, exactly like the v1 rows; permission.evaluate
+// carries that citation and derives CapabilityDeny. The named builder carries
+// the evidence as data, so the flip was a supplied value and not a
 // derivation change.
 type OpenCode2LifecycleEvent uint8
 
@@ -357,12 +358,20 @@ var (
 	openCode2SessionIdentity = nativeIdentity(IdentitySession, "sessionID", true)
 	openCode2CallIdentity    = nativeIdentity(IdentityToolCall, "id", true)
 	// openCode2Unevidenced is the response-channel evidence every 2.0.20
-	// named row carries until its capture lands. Passing it keeps the row
-	// at CapabilityNone through the shared derivation; supplying a
-	// citation upgrades that one row to CapabilityDeny with no derivation
-	// change, so the eventual flip is data. A row may carry a non-None
-	// capability only while its citation exists.
+	// named row except permission.evaluate carries until its capture lands.
+	// Passing it keeps the row at CapabilityNone through the shared
+	// derivation; supplying a citation upgrades that one row to
+	// CapabilityDeny with no derivation change, so the eventual flip is data.
+	// A row may carry a non-None capability only while its citation exists.
 	openCode2Unevidenced FailureEvidence
+	// openCode2PermissionEvaluateDenyCitation is the response-channel evidence
+	// for the permission.evaluate row, taken from the committed 2.0.21 live
+	// capture. The fourth sitting's deny run drove a canned edit through a
+	// claimed session whose actor was unknown: the host honoured pasture's
+	// permission.evaluate deny, surfaced it as Permission.BlockedError with
+	// reason unknown-actor, and did not run the tool. The citation names that
+	// committed capture and its clearance record.
+	openCode2PermissionEvaluateDenyCitation = FailureEvidence{Source: "opencode 2.0.21 live capture internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_tool_execute_after_2_0_21.3.json (clearance: internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md): the host honoured pasture's permission.evaluate deny — Permission.BlockedError with reason unknown-actor, tool not run"}
 )
 
 // openCode2NamedMapping builds one blocking gate consultation with its
@@ -423,18 +432,18 @@ func openCode2LifecycleMappings() map[OpenCode2LifecycleEvent]LifecycleEventMapp
 		OpenCode2EventSessionRetry:                   named(OpenCode2EventSessionRetry, openCode2Unevidenced, openCode2SessionIdentity),
 		OpenCode2EventToolExecuteBefore:              named(OpenCode2EventToolExecuteBefore, openCode2Unevidenced, openCode2SessionIdentity, openCode2CallIdentity),
 		OpenCode2EventToolExecuteAfter:               named(OpenCode2EventToolExecuteAfter, openCode2Unevidenced, openCode2SessionIdentity, openCode2CallIdentity),
-		OpenCode2EventPermissionEvaluate:             named(OpenCode2EventPermissionEvaluate, openCode2Unevidenced, openCode2SessionIdentity),
+		OpenCode2EventPermissionEvaluate:             named(OpenCode2EventPermissionEvaluate, openCode2PermissionEvaluateDenyCitation, openCode2SessionIdentity),
 		OpenCode2EventShellCreateBefore:              named(OpenCode2EventShellCreateBefore, openCode2Unevidenced),
 	}
 }
 
 // OpenCode2PermissionEvaluateCited builds the v2 permission.evaluate gate
 // with the given response-channel citation, through the same derivation the
-// pinned profile uses. The pinned profile passes no citation and derives
-// none; supplying the clearance citation upgrades that one row with no
-// derivation change, so the eventual flip is data. Encoder and report proofs
-// exercise this constructor rather than a hand-built row, so the refusal
-// they rehearse is the one production will emit.
+// pinned profile uses. The pinned profile passes the committed capture
+// citation and derives CapabilityDeny; this constructor lets a caller rehearse
+// the same derivation with another source. Encoder and report proofs exercise
+// this constructor rather than a hand-built row, so the refusal they rehearse
+// is the one production will emit.
 func OpenCode2PermissionEvaluateCited(source string) (LifecycleEventMapping, error) {
 	evidenced := openCode2NamedMapping(OpenCode2EventPermissionEvaluate, FailureEvidence{Source: source}, openCode2SessionIdentity)
 	derived, err := newLifecycleContract(OpenCode2_0_20(), []int{1}, map[int]LifecycleEventMapping{1: evidenced})

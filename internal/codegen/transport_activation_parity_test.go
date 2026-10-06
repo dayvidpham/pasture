@@ -741,9 +741,10 @@ var enabledFloor = map[string][]string{
 		"SubagentStop", "Stop", "SessionEnd", "Interrupt",
 	},
 	"opencode": {
-		"session.created", "session.prompt", "session.context", "session.title", "session.model.request",
-		"session.http.request", "session.http.response", "tool.execute.before",
-		"tool.execute.after", "permission.evaluate",
+		"session.created", "session.prompt", "session.context", "session.compaction", "session.generate",
+		"session.title", "session.model.request", "session.http.request", "session.http.response",
+		"session.experimental.ws.handshake", "session.experimental.ws.send", "session.experimental.ws.receive",
+		"session.retry", "tool.execute.before", "tool.execute.after", "permission.evaluate",
 	},
 }
 

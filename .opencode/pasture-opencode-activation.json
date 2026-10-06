@@ -28,15 +28,17 @@
     },
     {
       "event": "session.compaction",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_compaction_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.compaction",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "session.generate",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_generate_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.generate",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
@@ -74,29 +76,33 @@
     },
     {
       "event": "session.experimental.ws.handshake",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_handshake_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.handshake",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "session.experimental.ws.send",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_send_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.send",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "session.experimental.ws.receive",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_receive_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.receive",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
     {
       "event": "session.retry",
-      "state": "withheld",
-      "reason": "missing-fixture",
+      "state": "enabled",
+      "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_retry_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)",
+      "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.retry",
       "responseCapability": "none",
       "failureEvidence": "unset"
     },
@@ -121,8 +127,8 @@
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_permission_evaluate_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/permission.evaluate",
-      "responseCapability": "none",
-      "failureEvidence": "unset"
+      "responseCapability": "deny",
+      "failureEvidence": "opencode 2.0.21 live capture internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_tool_execute_after_2_0_21.3.json (clearance: internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md): the host honoured pasture's permission.evaluate deny — Permission.BlockedError with reason unknown-actor, tool not run"
     },
     {
       "event": "shell.create.before",

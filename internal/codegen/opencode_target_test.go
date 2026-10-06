@@ -770,11 +770,11 @@ func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
 
 // TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs drives the
 // generated v2 callbacks through the real built binary with constructed v2
-// payloads. session.retry carries no proofs, so the handler refuses it as
-// withheld before reading a byte: the host receives its continue bytes with
-// exit 0 and a diagnostic. The enabled tool.execute.before gate faults open on
-// the uninitialized store. No receipt exists afterwards: a row without proofs
-// evaluates nothing.
+// payloads. shell.create.before is the only coordinate still without proofs,
+// so the handler refuses it as withheld before reading a byte: the host
+// receives its continue bytes with exit 0 and a diagnostic. The enabled
+// tool.execute.before gate faults open on the uninitialized store. No receipt
+// exists afterwards: a row without proofs evaluates nothing.
 func TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs(t *testing.T) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {
@@ -793,8 +793,8 @@ func TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs(t *testing.
 	moduleURL := (&url.URL{Scheme: "file", Path: copyCommittedModuleToTemp(t, dir)}).String()
 	runner := filepath.Join(dir, "production-proof.ts")
 	script := fmt.Sprintf(`
-import { sessionRetry, toolExecuteBefore } from %q;
-await sessionRetry({ sessionID: "constructed-2.0.20" });
+import { shellCreateBefore, toolExecuteBefore } from %q;
+await shellCreateBefore({ sessionID: "constructed-2.0.20" });
 const hookEvent = { tool: "task", sessionID: "constructed-2.0.20", agent: "agent", messageID: "message", id: "call-2.0.20", input: { path: "unchanged" } };
 const before = JSON.stringify(hookEvent);
 await toolExecuteBefore(hookEvent);
@@ -828,9 +828,9 @@ console.log(JSON.stringify({ forwarded: true }));
 	// diagnostic naming the withheld reason; the enabled gate faults on the
 	// uninitialized store and also continues with a diagnostic.
 	for _, diagnostic := range []string{
-		`withheld (reason missing-fixture)`,
+		`withheld (reason unclearable-payload)`,
 		`tool.execute.before`,
-		`session.retry`,
+		`shell.create.before`,
 	} {
 		if !strings.Contains(proofErr.String(), diagnostic) {
 			t.Errorf("withheld diagnostic lacks %q: %s", diagnostic, proofErr.String())

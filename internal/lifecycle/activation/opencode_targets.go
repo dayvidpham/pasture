@@ -28,6 +28,12 @@ var openCodeCaptureProofs = [...]captureProofDeclaration{
 	{ordinal: 209, arm: "OpenCode2ToolExecuteAfter", event: registration.EventOpenCode2ToolExecuteAfter, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_tool_execute_after_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture)"},
 	{ordinal: 210, arm: "OpenCode2PermissionEvaluate", event: registration.EventOpenCode2PermissionEvaluate, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_permission_evaluate_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)"},
 	{ordinal: 211, arm: "OpenCode2SessionCreated", event: registration.EventOpenCode2SessionCreated, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_created_2_0_21.1.json (OpenCode 2.0.21 authentic bus capture)"},
+	{ordinal: 212, arm: "OpenCode2SessionCompaction", event: registration.EventOpenCode2SessionCompaction, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_compaction_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
+	{ordinal: 213, arm: "OpenCode2SessionGenerate", event: registration.EventOpenCode2SessionGenerate, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_generate_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
+	{ordinal: 214, arm: "OpenCode2SessionExperimentalWsHandshake", event: registration.EventOpenCode2SessionExperimentalWsHandshake, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_handshake_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
+	{ordinal: 215, arm: "OpenCode2SessionExperimentalWsSend", event: registration.EventOpenCode2SessionExperimentalWsSend, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_send_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
+	{ordinal: 216, arm: "OpenCode2SessionExperimentalWsReceive", event: registration.EventOpenCode2SessionExperimentalWsReceive, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_receive_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
+	{ordinal: 217, arm: "OpenCode2SessionRetry", event: registration.EventOpenCode2SessionRetry, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_retry_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
 }
 
 // openCodeProductionProofs declares every OpenCode production proof. The arm
@@ -45,6 +51,12 @@ var openCodeProductionProofs = [...]productionProofDeclaration{
 	{ordinal: 209, arm: "OpenCode2ToolExecuteAfter", event: registration.EventOpenCode2ToolExecuteAfter, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/tool.execute.after"},
 	{ordinal: 210, arm: "OpenCode2PermissionEvaluate", event: registration.EventOpenCode2PermissionEvaluate, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/permission.evaluate"},
 	{ordinal: 211, arm: "OpenCode2SessionCreated", event: registration.EventOpenCode2SessionCreated, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.created"},
+	{ordinal: 212, arm: "OpenCode2SessionCompaction", event: registration.EventOpenCode2SessionCompaction, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.compaction"},
+	{ordinal: 213, arm: "OpenCode2SessionGenerate", event: registration.EventOpenCode2SessionGenerate, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.generate"},
+	{ordinal: 214, arm: "OpenCode2SessionExperimentalWsHandshake", event: registration.EventOpenCode2SessionExperimentalWsHandshake, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.handshake"},
+	{ordinal: 215, arm: "OpenCode2SessionExperimentalWsSend", event: registration.EventOpenCode2SessionExperimentalWsSend, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.send"},
+	{ordinal: 216, arm: "OpenCode2SessionExperimentalWsReceive", event: registration.EventOpenCode2SessionExperimentalWsReceive, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.receive"},
+	{ordinal: 217, arm: "OpenCode2SessionRetry", event: registration.EventOpenCode2SessionRetry, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.retry"},
 }
 
 // openCodeTargetEventDeclarations is the static typed target declaration for
@@ -66,36 +78,37 @@ func OpenCode1_18_29() ([]Entry, error) {
 }
 
 // openCode2TargetEventDeclarations is the static typed target declaration for
-// OpenCode at the 2.0.20 contract, recorded by the capture sitting in
+// OpenCode at the 2.0.20 contract, recorded by the capture sittings in
 // internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md.
 //
-// Ten coordinates are enabled. Nine were captured at 2.0.20; session.created
-// did not fire in that sitting and was captured later on an OpenCode 2.0.21
-// host, a later release the 2.0.20 contract admits, through the plugin's bus
-// subscription. Each enabled row binds the capture proof naming its
+// Sixteen coordinates are enabled. Nine were captured at 2.0.20;
+// session.created did not fire in that sitting and was captured later on an
+// OpenCode 2.0.21 host, a later release the 2.0.20 contract admits, through
+// the plugin's bus subscription; the six remaining coordinates did not fire in
+// that sitting either and were captured later on the same 2.0.21 host, through
+// their registered hooks. Each enabled row binds the capture proof naming its
 // committed fixture (the smallest authentic capture, so the sequence number is
 // not always 1) and the production proof that drives those bytes through the
 // built binary. The shell create row fired and was captured, but its payload
 // is an environment dump the substitution rules cannot make safe; it stays
-// withheld by the user decision recorded in that CLEARANCE.md. The six
-// remaining coordinates did not fire in the sitting and stay bare targets,
-// withheld for missing-fixture until a capture lands. Enabling a row is a data
-// change only: declare its proofs above and bind them here; the response
-// capability derivation is untouched.
+// withheld by the user decision recorded in that CLEARANCE.md, and it is the
+// only withheld coordinate. Enabling a row is a data change only: declare its
+// proofs above and bind them here; the response capability derivation is
+// untouched.
 var openCode2TargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventOpenCode2SessionCreated, captureProof: CaptureProofOpenCode2SessionCreated, productionProof: ProductionProofOpenCode2SessionCreated},
 	{event: registration.EventOpenCode2SessionPrompt, captureProof: CaptureProofOpenCode2SessionPrompt, productionProof: ProductionProofOpenCode2SessionPrompt},
 	{event: registration.EventOpenCode2SessionContext, captureProof: CaptureProofOpenCode2SessionContext, productionProof: ProductionProofOpenCode2SessionContext},
-	{event: registration.EventOpenCode2SessionCompaction}, // did not fire in the 2.0.20 capture sitting; withheld missing-fixture
-	{event: registration.EventOpenCode2SessionGenerate},   // did not fire in the 2.0.20 capture sitting; withheld missing-fixture
+	{event: registration.EventOpenCode2SessionCompaction, captureProof: CaptureProofOpenCode2SessionCompaction, productionProof: ProductionProofOpenCode2SessionCompaction},
+	{event: registration.EventOpenCode2SessionGenerate, captureProof: CaptureProofOpenCode2SessionGenerate, productionProof: ProductionProofOpenCode2SessionGenerate},
 	{event: registration.EventOpenCode2SessionTitle, captureProof: CaptureProofOpenCode2SessionTitle, productionProof: ProductionProofOpenCode2SessionTitle},
 	{event: registration.EventOpenCode2SessionModelRequest, captureProof: CaptureProofOpenCode2SessionModelRequest, productionProof: ProductionProofOpenCode2SessionModelRequest},
 	{event: registration.EventOpenCode2SessionHttpRequest, captureProof: CaptureProofOpenCode2SessionHttpRequest, productionProof: ProductionProofOpenCode2SessionHttpRequest},
 	{event: registration.EventOpenCode2SessionHttpResponse, captureProof: CaptureProofOpenCode2SessionHttpResponse, productionProof: ProductionProofOpenCode2SessionHttpResponse},
-	{event: registration.EventOpenCode2SessionExperimentalWsHandshake}, // did not fire in the 2.0.20 capture sitting; withheld missing-fixture
-	{event: registration.EventOpenCode2SessionExperimentalWsSend},      // did not fire in the 2.0.20 capture sitting; withheld missing-fixture
-	{event: registration.EventOpenCode2SessionExperimentalWsReceive},   // did not fire in the 2.0.20 capture sitting; withheld missing-fixture
-	{event: registration.EventOpenCode2SessionRetry},                   // did not fire in the 2.0.20 capture sitting; withheld missing-fixture
+	{event: registration.EventOpenCode2SessionExperimentalWsHandshake, captureProof: CaptureProofOpenCode2SessionExperimentalWsHandshake, productionProof: ProductionProofOpenCode2SessionExperimentalWsHandshake},
+	{event: registration.EventOpenCode2SessionExperimentalWsSend, captureProof: CaptureProofOpenCode2SessionExperimentalWsSend, productionProof: ProductionProofOpenCode2SessionExperimentalWsSend},
+	{event: registration.EventOpenCode2SessionExperimentalWsReceive, captureProof: CaptureProofOpenCode2SessionExperimentalWsReceive, productionProof: ProductionProofOpenCode2SessionExperimentalWsReceive},
+	{event: registration.EventOpenCode2SessionRetry, captureProof: CaptureProofOpenCode2SessionRetry, productionProof: ProductionProofOpenCode2SessionRetry},
 	{event: registration.EventOpenCode2ToolExecuteBefore, captureProof: CaptureProofOpenCode2ToolExecuteBefore, productionProof: ProductionProofOpenCode2ToolExecuteBefore},
 	{event: registration.EventOpenCode2ToolExecuteAfter, captureProof: CaptureProofOpenCode2ToolExecuteAfter, productionProof: ProductionProofOpenCode2ToolExecuteAfter},
 	{event: registration.EventOpenCode2PermissionEvaluate, captureProof: CaptureProofOpenCode2PermissionEvaluate, productionProof: ProductionProofOpenCode2PermissionEvaluate},
