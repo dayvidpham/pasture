@@ -2115,7 +2115,7 @@ Sizes not chosen: `opencode_session_prompt_2_0_21.1.json` (156 bytes raw) and
 no activation row; the recorded-version invariant amendment and the row
 enablement are a separate change after the user's acceptance.
 
-### Fourth batch — OpenCode 2.0.21 (second sitting), nine fixtures
+### Fourth batch — OpenCode 2.0.21 (second sitting), nine fixtures — accepted 2026-10-06
 
 These nine fixtures are cleared authentic captures: six for the coordinates
 that did not fire in the 2.0.20 sitting, and three constituting the deny
@@ -2190,6 +2190,22 @@ ACCEPT
 
 The recorded-version invariant amendment and the row enablement are a separate
 change; this acceptance itself enables no row.
+
+### Fourth batch — OpenCode 2.0.21 (second sitting) — accepted 2026-10-06
+
+Accepted by the user on 2026-10-06, for the nine cleared fixtures above, after
+the clearance evidence was presented (fixture list with digests, rules applied,
+secret-scan result with its reach control, sizes not chosen, the two
+disclosures — the mock/stub non-default configuration and the kit-only
+evidence flip — and the deny receipt). The user was asked for their acceptance
+wording, verbatim, and answered, verbatim:
+
+```
+Good to go.
+```
+
+The six row enablements and the deny flip are a separate change after this
+acceptance; this acceptance itself enables no row.
 
 ## Pull request
 
