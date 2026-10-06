@@ -228,6 +228,171 @@ Captured and not used (not committed; session.prompt already has a cleared
 - `opencode_session_prompt_2_0_21.1.json` — raw sha256:8f6dbf1f80be3f543b3faa8d78a5c1e14a94fabc3487e018978b51125f9927ca (156 bytes; run 1)
 - `opencode_session_prompt_2_0_21.2.json` — raw sha256:63e7069adfc2ac98f5a3758d80ac73fd24cd65cac073bba794e5f03995f5e01d (162 bytes; run 2)
 
+### Fourth batch — OpenCode 2.0.21 (second sitting), 2026-10-06
+
+Captured in one supervised live sitting on 2026-10-06 (UTC), into two
+directories outside every repository:
+`~/.local/share/pasture-captures/opencode-v2-triggers` (the six coordinates
+that did not fire in the 2.0.20 sitting) and
+`~/.local/share/pasture-captures/opencode-v2-deny` (the deny evidence), with
+`PASTURE_CAPTURE_DIR` set. Paths are spelled with `~`; the fixture bytes carry
+the `/home/user` placeholder that `home-path-v1` writes. The sitting was live
+sessions of the real host binary on the user's machine, driven by the team's
+supervisor agent at the user's direction ("Okay. Let's run it."), with
+non-interactive `opencode run`.
+
+Isolation: phase 1 ran against the isolated managed service (own XDG
+data/state/cache/config roots under `/tmp/opencode/capture-xdg`, private port
+49375), with the capture environment injected through the service config
+`env` field. The user's running service (port 49374), the user's live OpenCode
+database and the live pasture store were never touched. Phase 2 ran against a
+manually spawned `opencode serve` on port 49376 with its standard error on a
+file (see the unexpected note), over the same isolated XDG roots.
+
+Non-default configuration (disclosed): every capture was driven through local
+mock providers — a local OpenAI-compatible chat server (port 49390), a local
+OpenResponses WebSocket server (port 49391) and a canned-tool-call stub
+(port 49392). No network model was used. The mock conditions ARE the triggers:
+a tiny context window, a forced 500 on the first tool-bearing request, the
+warming loop, and the WebSocket transport. The payloads are the host's own
+bytes; the provider choice does not change them.
+
+Build kits (two, both throwaway archive copies of the released v0.0.9 tree,
+`c428236`):
+- `kit-v2-triggers`: binary sha256
+  `bb7536e6b11f21cb476a76aa3b019d7f2a3d4f40a91d4c019c8893bfaef8e96d`; zero
+  edits, `make generate` zero-drift.
+- `kit-v2-deny`: binary sha256
+  `884286d60fb726273f0b98624fe508db555596e483cd68bd7977cc2a64dc1034`; it
+  carries the KIT-ONLY one-line evidence flip for the deny capture
+  (`openCode2DenyCaptureEvidence` on the `permission.evaluate` row; the
+  generated `.opencode/pasture-opencode-activation.json` row shows
+  `responseCapability` `deny` and `failureEvidence`
+  `deny-capture-sitting-pending`). This kit-vs-committed divergence is the
+  point of the capture-first pattern and is disclosed here.
+Both kits ship the same plugin, sha256
+`65d58932be728b76f1bd2b3eb812de56089469d3650f70d0c9fd86e84f388fc2`,
+byte-identical to the committed `.opencode/plugins/pasture-lifecycle.ts`.
+
+Phase 1 (six coordinates): `opencode run --model mock/mock-model "hello"` for
+compaction (auto threshold at `limit.context=4000`); the same command with the
+mock failing the first tool-bearing request with a 500 for retry; the same
+command after adding `"warming": {"interval": "1 second", "duration":
+"2 minutes"}` to the project config for generate (the warming loop produced 23
+members); and `timeout 40 opencode run --model mock-ws/mock-ws-model "hello"`
+for the ws trio (the config provider with the built-in `openai` package and
+`settings.transport="websocket"` engaged the Responses channel; the run
+finished cleanly).
+
+Phase 2 (deny evidence): a warm-up run then the deny run
+`opencode run --model stub/canned "please edit target.txt"` against the manual
+server, with
+`PASTURE_ACTOR_ID=gate-stranger--0193f1c0-0000-7000-8000-0000000000fe` in the
+server environment. The stub returns one canned `edit` call on `target.txt`.
+The fresh server's first (warm-up) session misses session.created — the
+measured first-session race — so the deny session is the one whose claim
+exists and whose edit the gate denies with `unknown-actor`.
+
+Durable receipt readback (scratch store
+`~/.local/share/pasture-captures/scratch-deny/pasture.db`, `journal_evidence`
+journal_id 241, evidence_kind `pasture.lifecycle.consultation.v2`):
+
+```json
+{"decision":{"decision":"deny","reason":"unknown-actor"},"interpreted":{"content_digest":"sha256:4b1a4868fbfee46b94bd54ffdefd27ad6c3fe6163f3e7b4100f20bab90a7f0b6","result_slot":"interpreted"},"legalized":{"authority":"not-exercised"}}
+```
+
+The claim row is `pasture_session_claim (opencode,
+ses_eed24b2fefferh71GtAK6upzOJ,
+gate-stranger--0193f1c0-0000-7000-8000-0000000000fe)`. The negative
+observable: the project's `target.txt` still read `hello` after the deny run
+(the warm-up run's edit executed and the file was reset before the deny run).
+
+Unexpected (recorded, and the reason for the manual server): the first deny
+attempt against the warm MANAGED service aborted at `tool.execute.before` —
+the plugin's diagnostic forwarding wrote the child's standard error (the
+capture notice) to the service's standard-error socket whose peer (the
+spawning CLI) had exited, got EPIPE, threw, and the blocking hook failed
+before `permission.evaluate` was consulted. Against a manually spawned server
+whose standard error is a file, the forwarding succeeds and the deny chain
+completed. The managed-service interaction is a separate finding, not a
+capture defect.
+
+- session.compaction: `opencode_session_compaction_2_0_21.1.json` —
+  trigger: the first `opencode run` of the sitting against the tiny-window
+  model — 2026-10-06T20:05:40Z — raw
+  sha256:404651ae9f3e0b00ba3a222a723fd6d49b83eb26a7db980ad2465ea2efffc504
+  (41646 bytes) — committed
+  sha256:bdf0a487a55f9d2c0f7e55db25cdb0d2bc6455da7c135e3634cb3c5d8e81f01b
+  (41640 bytes)
+- session.retry: `opencode_session_retry_2_0_21.1.json` — trigger: the mock
+  500 on the first tool-bearing request — 2026-10-06T20:05:55Z — raw
+  sha256:3d6ffe1a3d8d4e711d87cdeaabc6e21bb30da707b5724e6065370fdfaad062d1
+  (365 bytes) — committed
+  sha256:d0315f51e0f7919304e4c62349121bb5ec1f907b379150f0f585a734270f7688
+  (365 bytes)
+- session.generate: `opencode_session_generate_2_0_21.1.json` — trigger: the
+  warming loop's first call — 2026-10-06T20:06:18Z — raw
+  sha256:f2747875d89d7c14b4f539cf8d96a7618b134807ce32237467daa3bdb9a4803e
+  (42120 bytes) — committed
+  sha256:3ad559b47192362769c6f390b72e0753fd2388a73fe74b4fe3bac937251e5536
+  (42114 bytes)
+- session.experimental.ws.handshake:
+  `opencode_session_experimental_ws_handshake_2_0_21.1.json` — trigger: the
+  websocket-transport run — 2026-10-06T20:06:05Z — raw
+  sha256:3ecda8147ab3a0a4509893057f7ba074d2ae21329748ff42391af7464f41ade6
+  (631 bytes) — committed
+  sha256:96fa3d866962e512805f16cfa57c69c82c45a0cb64de365be4cc605282c54050
+  (631 bytes)
+- session.experimental.ws.send:
+  `opencode_session_experimental_ws_send_2_0_21.1.json` — same run — raw
+  sha256:781c6ece4cfada24c85c977c8ba0846058eb5fea703138891c2538ef94141df8
+  (43708 bytes) — committed
+  sha256:51401d2c8726d5abec5316f0172b3e4b7290b9e508fccef315b4921c0777cede
+  (43702 bytes)
+- session.experimental.ws.receive:
+  `opencode_session_experimental_ws_receive_2_0_21.1.json` — same run, the
+  first inbound frame — raw
+  sha256:620a4ce22ea4f03099187b795fd4965308c56de98563e5b31026b58a7df7d847
+  (233 bytes) — committed
+  sha256:620a4ce22ea4f03099187b795fd4965308c56de98563e5b31026b58a7df7d847
+  (233 bytes; no substitution)
+- permission.evaluate: `opencode_permission_evaluate_2_0_21.3.json` —
+  trigger: the deny run's edit assertion — 2026-10-06T20:15:27Z — raw
+  sha256:42c3efd4865053d593bfc1543b07e8d33d02d0cdd9fb56633e105b18233b8abe
+  (469 bytes) — committed
+  sha256:68b0c44a7a3042f6531b20d57f240d1f5fa1e4f142982db0261e792ae2d170e6
+  (469 bytes)
+- tool.execute.after: `opencode_tool_execute_after_2_0_21.3.json` — trigger:
+  the deny run's blocked edit (the host's `Permission.BlockedError` carrying
+  the pasture reason) — raw
+  sha256:cc6f3612991ebd24e1ea09f3953e4c24a7da7555793d9da9e19355dfd92922b9
+  (1062 bytes) — committed
+  sha256:aa8c3da520e9f322cc67e284cd2966e182ab28a32bdff0d08615aa613bdeed44
+  (1050 bytes)
+- session.context: `opencode_session_context_2_0_21.8.json` — trigger: the
+  deny run's follow-up model assembly carrying the tool result
+  `{"type":"permission.rejected","message":"unknown-actor"}` — raw
+  sha256:491037900944595700c9fb292d73ea30d71137c5ebfd32f5de1d67b933c7e557
+  (42166 bytes) — committed
+  sha256:bc40bcb66d07479c06449637e6a0a44bc4d71591565b57e2323671cd27e2b702
+  (42157 bytes)
+
+Captured and not used (not committed; recorded, not selected):
+- Members of the selected events: compaction `.2`/`.3` (41646 each; same
+  size, `.1` chosen); generate `.2`–`.23` (42120 each; the warming loop);
+  ws.receive `.2` (319; larger than the chosen 233); permission.evaluate
+  `.1`/`.2` (469 each; the two executed members, `.3` is the deny session's);
+  tool.execute.after `.1`/`.2` (916 each; the two executed members, `.3` is
+  the blocked one); session.context `.1`–`.7` (41639, 42106, 41654, 42370,
+  41639, 42106, 41654; the `.8` member carries the permission.rejected tool
+  result and is the one selected).
+- The same runs also produced further payloads for coordinates that already
+  have cleared fixtures (session.created, session.prompt, session.title,
+  session.model.request, session.http.request, session.http.response,
+  session.context, tool.execute.before) and additional numbered members.
+  None is refused or unclearable; they stay in the two capture directories
+  outside the repository.
+
 ## Inventory
 
 ```
@@ -1053,6 +1218,671 @@ opencode_session_prompt_2_0_21.2.json
 The same report re-run over the committed fixture bytes names the same fifteen
 fields with the same classes and no refused class.
 
+### Fourth batch — OpenCode 2.0.21 (second sitting)
+
+Output of the inventory report (`PASTURE_INVENTORY_DIR` over each capture
+directory) for the nine selected payloads. No refused class and no
+unclearable reason is named for any of them. The same report re-run over the
+committed fixture bytes names the same field paths with the same classes,
+except that a substituted free-text field whose placeholder is 128 bytes or
+shorter and carries no whitespace re-classifies as an identifier (the
+classifier is whitespace or > FreeTextLengthLimit); the long substituted runs
+stay free-text. The chosen ws.receive payload carries no free text.
+
+```
+opencode_session_compaction_2_0_21.1.json
+  .sessionID                                                   identifier 
+  .model.id                                                    identifier 
+  .model.providerID                                            identifier 
+  .model.variant                                               identifier 
+  .system[0].type                                              identifier 
+  .system[0].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[1].type                                              identifier 
+  .system[1].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[2].type                                              identifier 
+  .system[2].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[3].type                                              identifier 
+  .system[3].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .messages[0].id                                              identifier 
+  .messages[0].role                                            identifier 
+  .messages[0].content[0].type                                 identifier 
+  .messages[0].content[0].text                                 identifier 
+  .options.maxTokens                                           number     
+  .agent                                                       identifier 
+  .tools.edit.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.type                                       identifier 
+  .tools.edit.input.properties.path.type                       identifier 
+  .tools.edit.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.oldString.type                  identifier 
+  .tools.edit.input.properties.oldString.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.newString.type                  identifier 
+  .tools.edit.input.properties.newString.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.replaceAll.type                 identifier 
+  .tools.edit.input.properties.replaceAll.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.required[0]                                identifier 
+  .tools.edit.input.required[1]                                identifier 
+  .tools.edit.input.required[2]                                identifier 
+  .tools.edit.input.additionalProperties                       bool       
+  .tools.glob.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.type                                       identifier 
+  .tools.glob.input.properties.pattern.type                    identifier 
+  .tools.glob.input.properties.pattern.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.path.type                       identifier 
+  .tools.glob.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.hidden.type                     identifier 
+  .tools.glob.input.properties.hidden.description              free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.limit.type                      identifier 
+  .tools.glob.input.properties.limit.exclusiveMinimum          number     
+  .tools.glob.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.required[0]                                identifier 
+  .tools.glob.input.additionalProperties                       bool       
+  .tools.grep.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.type                                       identifier 
+  .tools.grep.input.properties.pattern.type                    identifier 
+  .tools.grep.input.properties.pattern.minLength               number     
+  .tools.grep.input.properties.pattern.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.path.type                       identifier 
+  .tools.grep.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.include.type                    identifier 
+  .tools.grep.input.properties.include.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.literal.type                    identifier 
+  .tools.grep.input.properties.literal.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.caseSensitive.type              identifier 
+  .tools.grep.input.properties.caseSensitive.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.limit.type                      identifier 
+  .tools.grep.input.properties.limit.exclusiveMinimum          number     
+  .tools.grep.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.required[0]                                identifier 
+  .tools.grep.input.additionalProperties                       bool       
+  .tools.question.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.type                                   identifier 
+  .tools.question.input.properties.questions.type              identifier 
+  .tools.question.input.properties.questions.items.type        identifier 
+  .tools.question.input.properties.questions.items.properties.question.type identifier 
+  .tools.question.input.properties.questions.items.properties.question.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.header.type identifier 
+  .tools.question.input.properties.questions.items.properties.header.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.label.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.label.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.items.properties.description.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.description.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.items.required[0] identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.required[1] identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.additionalProperties bool       
+  .tools.question.input.properties.questions.items.properties.options.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.multiple.type identifier 
+  .tools.question.input.properties.questions.items.required[0] identifier 
+  .tools.question.input.properties.questions.items.required[1] identifier 
+  .tools.question.input.properties.questions.items.required[2] identifier 
+  .tools.question.input.properties.questions.items.additionalProperties bool       
+  .tools.question.input.properties.questions.minItems          number     
+  .tools.question.input.properties.questions.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.required[0]                            identifier 
+  .tools.question.input.additionalProperties                   bool       
+  .tools.read.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.type                                       identifier 
+  .tools.read.input.properties.path.type                       identifier 
+  .tools.read.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.properties.offset.type                     identifier 
+  .tools.read.input.properties.offset.minimum                  number     
+  .tools.read.input.properties.offset.description              free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.properties.limit.type                      identifier 
+  .tools.read.input.properties.limit.minimum                   number     
+  .tools.read.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.required[0]                                identifier 
+  .tools.read.input.additionalProperties                       bool       
+  .tools.shell.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.type                                      identifier 
+  .tools.shell.input.properties.command.type                   identifier 
+  .tools.shell.input.properties.command.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.workdir.type                   identifier 
+  .tools.shell.input.properties.workdir.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.timeout.type                   identifier 
+  .tools.shell.input.properties.timeout.minimum                number     
+  .tools.shell.input.properties.timeout.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.background.type                identifier 
+  .tools.shell.input.properties.background.description         free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.required[0]                               identifier 
+  .tools.shell.input.additionalProperties                      bool       
+  .tools.skill.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.skill.input.type                                      identifier 
+  .tools.skill.input.properties.id.type                        identifier 
+  .tools.skill.input.properties.id.description                 free-text    FREE TEXT: substitute with free-text-v1
+  .tools.skill.input.required[0]                               identifier 
+  .tools.skill.input.additionalProperties                      bool       
+  .tools.subagent.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.type                                   identifier 
+  .tools.subagent.input.properties.agent.type                  identifier 
+  .tools.subagent.input.properties.agent.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.description.type            identifier 
+  .tools.subagent.input.properties.description.description     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.prompt.type                 identifier 
+  .tools.subagent.input.properties.prompt.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.model.type                  identifier 
+  .tools.subagent.input.properties.model.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.sessionID.type              identifier 
+  .tools.subagent.input.properties.sessionID.pattern           identifier 
+  .tools.subagent.input.properties.sessionID.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.background.type             identifier 
+  .tools.subagent.input.properties.background.description      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.required[0]                            identifier 
+  .tools.subagent.input.required[1]                            identifier 
+  .tools.subagent.input.required[2]                            identifier 
+  .tools.subagent.input.additionalProperties                   bool       
+  .tools.webfetch.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.type                                   identifier 
+  .tools.webfetch.input.properties.url.type                    identifier 
+  .tools.webfetch.input.properties.url.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.properties.format.type                 identifier 
+  .tools.webfetch.input.properties.format.enum[0]              identifier 
+  .tools.webfetch.input.properties.format.enum[1]              identifier 
+  .tools.webfetch.input.properties.format.enum[2]              identifier 
+  .tools.webfetch.input.properties.format.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.properties.timeout.type                identifier 
+  .tools.webfetch.input.properties.timeout.exclusiveMinimum    number     
+  .tools.webfetch.input.properties.timeout.maximum             number     
+  .tools.webfetch.input.properties.timeout.description         free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.required[0]                            identifier 
+  .tools.webfetch.input.additionalProperties                   bool       
+  .tools.websearch.description                                 free-text    FREE TEXT: substitute with free-text-v1
+  .tools.websearch.input.type                                  identifier 
+  .tools.websearch.input.properties.query.type                 identifier 
+  .tools.websearch.input.properties.query.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.websearch.input.required[0]                           identifier 
+  .tools.websearch.input.additionalProperties                  bool       
+  .tools.write.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.type                                      identifier 
+  .tools.write.input.properties.path.type                      identifier 
+  .tools.write.input.properties.path.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.properties.content.type                   identifier 
+  .tools.write.input.properties.content.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.required[0]                               identifier 
+  .tools.write.input.required[1]                               identifier 
+  .tools.write.input.additionalProperties                      bool       
+  .tools.execute.description                                   free-text    FREE TEXT: substitute with free-text-v1
+  .tools.execute.input.type                                    identifier 
+  .tools.execute.input.properties.code.type                    identifier 
+  .tools.execute.input.required[0]                             identifier 
+  .tools.execute.input.additionalProperties                    bool       
+opencode_session_retry_2_0_21.1.json
+  .sessionID                                                   identifier 
+  .agent                                                       identifier 
+  .model.id                                                    identifier 
+  .model.providerID                                            identifier 
+  .model.variant                                               identifier 
+  .error.type                                                  identifier 
+  .error.message                                               free-text    FREE TEXT: substitute with free-text-v1
+  .error.status                                                number     
+  .error.response.body                                         free-text    FREE TEXT: substitute with free-text-v1
+  .attempt                                                     number     
+  .decision.retry                                              bool       
+  .decision.delay                                              number     
+opencode_session_generate_2_0_21.1.json
+  .sessionID                                                   identifier 
+  .model.id                                                    identifier 
+  .model.providerID                                            identifier 
+  .model.variant                                               identifier 
+  .system[0].type                                              identifier 
+  .system[0].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[1].type                                              identifier 
+  .system[1].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[2].type                                              identifier 
+  .system[2].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[3].type                                              identifier 
+  .system[3].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .messages[0].id                                              identifier 
+  .messages[0].role                                            identifier 
+  .messages[0].content[0].type                                 identifier 
+  .messages[0].content[0].text                                 free-text    FREE TEXT: substitute with free-text-v1
+  .messages[1].id                                              identifier 
+  .messages[1].role                                            identifier 
+  .messages[1].content[0].type                                 identifier 
+  .messages[1].content[0].text                                 free-text    FREE TEXT: substitute with free-text-v1
+  .messages[2].role                                            identifier 
+  .messages[2].content[0].type                                 identifier 
+  .messages[2].content[0].text                                 free-text    FREE TEXT: substitute with free-text-v1
+  .agent                                                       identifier 
+  .tools.edit.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.type                                       identifier 
+  .tools.edit.input.properties.path.type                       identifier 
+  .tools.edit.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.oldString.type                  identifier 
+  .tools.edit.input.properties.oldString.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.newString.type                  identifier 
+  .tools.edit.input.properties.newString.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.replaceAll.type                 identifier 
+  .tools.edit.input.properties.replaceAll.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.required[0]                                identifier 
+  .tools.edit.input.required[1]                                identifier 
+  .tools.edit.input.required[2]                                identifier 
+  .tools.edit.input.additionalProperties                       bool       
+  .tools.glob.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.type                                       identifier 
+  .tools.glob.input.properties.pattern.type                    identifier 
+  .tools.glob.input.properties.pattern.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.path.type                       identifier 
+  .tools.glob.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.hidden.type                     identifier 
+  .tools.glob.input.properties.hidden.description              free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.limit.type                      identifier 
+  .tools.glob.input.properties.limit.exclusiveMinimum          number     
+  .tools.glob.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.required[0]                                identifier 
+  .tools.glob.input.additionalProperties                       bool       
+  .tools.grep.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.type                                       identifier 
+  .tools.grep.input.properties.pattern.type                    identifier 
+  .tools.grep.input.properties.pattern.minLength               number     
+  .tools.grep.input.properties.pattern.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.path.type                       identifier 
+  .tools.grep.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.include.type                    identifier 
+  .tools.grep.input.properties.include.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.literal.type                    identifier 
+  .tools.grep.input.properties.literal.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.caseSensitive.type              identifier 
+  .tools.grep.input.properties.caseSensitive.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.limit.type                      identifier 
+  .tools.grep.input.properties.limit.exclusiveMinimum          number     
+  .tools.grep.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.required[0]                                identifier 
+  .tools.grep.input.additionalProperties                       bool       
+  .tools.question.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.type                                   identifier 
+  .tools.question.input.properties.questions.type              identifier 
+  .tools.question.input.properties.questions.items.type        identifier 
+  .tools.question.input.properties.questions.items.properties.question.type identifier 
+  .tools.question.input.properties.questions.items.properties.question.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.header.type identifier 
+  .tools.question.input.properties.questions.items.properties.header.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.label.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.label.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.items.properties.description.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.description.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.items.required[0] identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.required[1] identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.additionalProperties bool       
+  .tools.question.input.properties.questions.items.properties.options.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.multiple.type identifier 
+  .tools.question.input.properties.questions.items.required[0] identifier 
+  .tools.question.input.properties.questions.items.required[1] identifier 
+  .tools.question.input.properties.questions.items.required[2] identifier 
+  .tools.question.input.properties.questions.items.additionalProperties bool       
+  .tools.question.input.properties.questions.minItems          number     
+  .tools.question.input.properties.questions.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.required[0]                            identifier 
+  .tools.question.input.additionalProperties                   bool       
+  .tools.read.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.type                                       identifier 
+  .tools.read.input.properties.path.type                       identifier 
+  .tools.read.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.properties.offset.type                     identifier 
+  .tools.read.input.properties.offset.minimum                  number     
+  .tools.read.input.properties.offset.description              free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.properties.limit.type                      identifier 
+  .tools.read.input.properties.limit.minimum                   number     
+  .tools.read.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.required[0]                                identifier 
+  .tools.read.input.additionalProperties                       bool       
+  .tools.shell.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.type                                      identifier 
+  .tools.shell.input.properties.command.type                   identifier 
+  .tools.shell.input.properties.command.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.workdir.type                   identifier 
+  .tools.shell.input.properties.workdir.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.timeout.type                   identifier 
+  .tools.shell.input.properties.timeout.minimum                number     
+  .tools.shell.input.properties.timeout.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.background.type                identifier 
+  .tools.shell.input.properties.background.description         free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.required[0]                               identifier 
+  .tools.shell.input.additionalProperties                      bool       
+  .tools.skill.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.skill.input.type                                      identifier 
+  .tools.skill.input.properties.id.type                        identifier 
+  .tools.skill.input.properties.id.description                 free-text    FREE TEXT: substitute with free-text-v1
+  .tools.skill.input.required[0]                               identifier 
+  .tools.skill.input.additionalProperties                      bool       
+  .tools.subagent.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.type                                   identifier 
+  .tools.subagent.input.properties.agent.type                  identifier 
+  .tools.subagent.input.properties.agent.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.description.type            identifier 
+  .tools.subagent.input.properties.description.description     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.prompt.type                 identifier 
+  .tools.subagent.input.properties.prompt.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.model.type                  identifier 
+  .tools.subagent.input.properties.model.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.sessionID.type              identifier 
+  .tools.subagent.input.properties.sessionID.pattern           identifier 
+  .tools.subagent.input.properties.sessionID.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.background.type             identifier 
+  .tools.subagent.input.properties.background.description      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.required[0]                            identifier 
+  .tools.subagent.input.required[1]                            identifier 
+  .tools.subagent.input.required[2]                            identifier 
+  .tools.subagent.input.additionalProperties                   bool       
+  .tools.webfetch.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.type                                   identifier 
+  .tools.webfetch.input.properties.url.type                    identifier 
+  .tools.webfetch.input.properties.url.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.properties.format.type                 identifier 
+  .tools.webfetch.input.properties.format.enum[0]              identifier 
+  .tools.webfetch.input.properties.format.enum[1]              identifier 
+  .tools.webfetch.input.properties.format.enum[2]              identifier 
+  .tools.webfetch.input.properties.format.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.properties.timeout.type                identifier 
+  .tools.webfetch.input.properties.timeout.exclusiveMinimum    number     
+  .tools.webfetch.input.properties.timeout.maximum             number     
+  .tools.webfetch.input.properties.timeout.description         free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.required[0]                            identifier 
+  .tools.webfetch.input.additionalProperties                   bool       
+  .tools.websearch.description                                 free-text    FREE TEXT: substitute with free-text-v1
+  .tools.websearch.input.type                                  identifier 
+  .tools.websearch.input.properties.query.type                 identifier 
+  .tools.websearch.input.properties.query.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.websearch.input.required[0]                           identifier 
+  .tools.websearch.input.additionalProperties                  bool       
+  .tools.write.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.type                                      identifier 
+  .tools.write.input.properties.path.type                      identifier 
+  .tools.write.input.properties.path.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.properties.content.type                   identifier 
+  .tools.write.input.properties.content.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.required[0]                               identifier 
+  .tools.write.input.required[1]                               identifier 
+  .tools.write.input.additionalProperties                      bool       
+  .tools.execute.description                                   free-text    FREE TEXT: substitute with free-text-v1
+  .tools.execute.input.type                                    identifier 
+  .tools.execute.input.properties.code.type                    identifier 
+  .tools.execute.input.required[0]                             identifier 
+  .tools.execute.input.additionalProperties                    bool       
+opencode_session_experimental_ws_handshake_2_0_21.1.json
+  .sessionID                                                   identifier 
+  .agent                                                       identifier 
+  .model.id                                                    identifier 
+  .model.providerID                                            identifier 
+  .model.variant                                               identifier 
+  .kind                                                        identifier 
+  .url                                                         identifier 
+  .headers.x-opencode-session-id                               identifier 
+  .headers.x-session-affinity                                  identifier 
+  .headers.x-session-id                                        identifier 
+  .headers.user-agent                                          identifier 
+  .headers.x-opencode-project                                  identifier 
+  .headers.x-opencode-session                                  identifier 
+  .headers.x-opencode-client                                   identifier 
+  .headers.authorization                                       free-text    FREE TEXT: substitute with free-text-v1
+  .headers.openai-beta                                         identifier 
+opencode_session_experimental_ws_send_2_0_21.1.json
+  .sessionID                                                   identifier 
+  .agent                                                       identifier 
+  .model.id                                                    identifier 
+  .model.providerID                                            identifier 
+  .model.variant                                               identifier 
+  .kind                                                        identifier 
+  .frame                                                       free-text    FREE TEXT: substitute with free-text-v1
+opencode_session_experimental_ws_receive_2_0_21.1.json
+  .sessionID                                                   identifier 
+  .agent                                                       identifier 
+  .model.id                                                    identifier 
+  .model.providerID                                            identifier 
+  .model.variant                                               identifier 
+  .kind                                                        identifier 
+  .frame                                                       identifier 
+opencode_permission_evaluate_2_0_21.3.json
+  .sessionID                                                   identifier 
+  .agent                                                       identifier 
+  .action                                                      identifier 
+  .resources[0]                                                identifier 
+  .metadata.files[0].file                                      identifier 
+  .metadata.files[0].patch                                     free-text    FREE TEXT: substitute with free-text-v1
+  .metadata.files[0].status                                    identifier 
+  .metadata.files[0].additions                                 number     
+  .metadata.files[0].deletions                                 number     
+  .source.type                                                 identifier 
+  .source.messageID                                            identifier 
+  .source.id                                                   identifier 
+  .effect                                                      identifier 
+opencode_tool_execute_after_2_0_21.3.json
+  .tool                                                        identifier 
+  .sessionID                                                   identifier 
+  .agent                                                       identifier 
+  .messageID                                                   identifier 
+  .id                                                          identifier 
+  .input.path                                                  path       
+  .input.oldString                                             identifier 
+  .input.newString                                             identifier 
+  .status                                                      identifier 
+  .error._tag                                                  identifier 
+  .error.message                                               free-text    FREE TEXT: substitute with free-text-v1
+  .error.error._tag                                            identifier 
+  .error.error.rules[0].action                                 identifier 
+  .error.error.rules[0].resource                               identifier 
+  .error.error.rules[0].effect                                 identifier 
+  .error.error.rules[1].action                                 identifier 
+  .error.error.rules[1].resource                               identifier 
+  .error.error.rules[1].effect                                 identifier 
+  .error.error.rules[2].action                                 identifier 
+  .error.error.rules[2].resource                               identifier 
+  .error.error.rules[2].effect                                 identifier 
+  .error.error.rules[3].action                                 identifier 
+  .error.error.rules[3].resource                               identifier 
+  .error.error.rules[3].effect                                 identifier 
+  .error.error.rules[4].action                                 identifier 
+  .error.error.rules[4].resource                               path       
+  .error.error.rules[4].effect                                 identifier 
+  .error.error.rules[5].action                                 identifier 
+  .error.error.rules[5].resource                               path       
+  .error.error.rules[5].effect                                 identifier 
+  .error.error.rules[6].action                                 identifier 
+  .error.error.rules[6].resource                               identifier 
+  .error.error.rules[6].effect                                 identifier 
+  .error.error.rules[7].action                                 identifier 
+  .error.error.rules[7].resource                               identifier 
+  .error.error.rules[7].effect                                 identifier 
+  .error.error.permission                                      identifier 
+  .error.error.resources[0]                                    identifier 
+  .error.error.reason                                          identifier 
+opencode_session_context_2_0_21.8.json
+  .sessionID                                                   identifier 
+  .model.id                                                    identifier 
+  .model.providerID                                            identifier 
+  .model.variant                                               identifier 
+  .system[0].type                                              identifier 
+  .system[0].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[1].type                                              identifier 
+  .system[1].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[2].type                                              identifier 
+  .system[2].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .system[3].type                                              identifier 
+  .system[3].text                                              free-text    FREE TEXT: substitute with free-text-v1
+  .messages[0].id                                              identifier 
+  .messages[0].role                                            identifier 
+  .messages[0].content[0].type                                 identifier 
+  .messages[0].content[0].text                                 free-text    FREE TEXT: substitute with free-text-v1
+  .messages[1].id                                              identifier 
+  .messages[1].role                                            identifier 
+  .messages[1].content[0].type                                 identifier 
+  .messages[1].content[0].id                                   identifier 
+  .messages[1].content[0].name                                 identifier 
+  .messages[1].content[0].input.path                           path       
+  .messages[1].content[0].input.oldString                      identifier 
+  .messages[1].content[0].input.newString                      identifier 
+  .messages[1].content[0].providerExecuted                     bool       
+  .messages[2].role                                            identifier 
+  .messages[2].content[0].type                                 identifier 
+  .messages[2].content[0].id                                   identifier 
+  .messages[2].content[0].name                                 identifier 
+  .messages[2].content[0].result.type                          identifier 
+  .messages[2].content[0].result.value.error.type              identifier 
+  .messages[2].content[0].result.value.error.message           identifier 
+  .messages[2].content[0].providerExecuted                     bool       
+  .options.maxTokens                                           number     
+  .agent                                                       identifier 
+  .tools.edit.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.type                                       identifier 
+  .tools.edit.input.properties.path.type                       identifier 
+  .tools.edit.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.oldString.type                  identifier 
+  .tools.edit.input.properties.oldString.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.newString.type                  identifier 
+  .tools.edit.input.properties.newString.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.properties.replaceAll.type                 identifier 
+  .tools.edit.input.properties.replaceAll.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.edit.input.required[0]                                identifier 
+  .tools.edit.input.required[1]                                identifier 
+  .tools.edit.input.required[2]                                identifier 
+  .tools.edit.input.additionalProperties                       bool       
+  .tools.glob.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.type                                       identifier 
+  .tools.glob.input.properties.pattern.type                    identifier 
+  .tools.glob.input.properties.pattern.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.path.type                       identifier 
+  .tools.glob.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.hidden.type                     identifier 
+  .tools.glob.input.properties.hidden.description              free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.properties.limit.type                      identifier 
+  .tools.glob.input.properties.limit.exclusiveMinimum          number     
+  .tools.glob.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.glob.input.required[0]                                identifier 
+  .tools.glob.input.additionalProperties                       bool       
+  .tools.grep.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.type                                       identifier 
+  .tools.grep.input.properties.pattern.type                    identifier 
+  .tools.grep.input.properties.pattern.minLength               number     
+  .tools.grep.input.properties.pattern.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.path.type                       identifier 
+  .tools.grep.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.include.type                    identifier 
+  .tools.grep.input.properties.include.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.literal.type                    identifier 
+  .tools.grep.input.properties.literal.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.caseSensitive.type              identifier 
+  .tools.grep.input.properties.caseSensitive.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.properties.limit.type                      identifier 
+  .tools.grep.input.properties.limit.exclusiveMinimum          number     
+  .tools.grep.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.grep.input.required[0]                                identifier 
+  .tools.grep.input.additionalProperties                       bool       
+  .tools.question.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.type                                   identifier 
+  .tools.question.input.properties.questions.type              identifier 
+  .tools.question.input.properties.questions.items.type        identifier 
+  .tools.question.input.properties.questions.items.properties.question.type identifier 
+  .tools.question.input.properties.questions.items.properties.question.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.header.type identifier 
+  .tools.question.input.properties.questions.items.properties.header.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.label.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.label.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.items.properties.description.type identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.properties.description.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.options.items.required[0] identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.required[1] identifier 
+  .tools.question.input.properties.questions.items.properties.options.items.additionalProperties bool       
+  .tools.question.input.properties.questions.items.properties.options.description free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.properties.questions.items.properties.multiple.type identifier 
+  .tools.question.input.properties.questions.items.required[0] identifier 
+  .tools.question.input.properties.questions.items.required[1] identifier 
+  .tools.question.input.properties.questions.items.required[2] identifier 
+  .tools.question.input.properties.questions.items.additionalProperties bool       
+  .tools.question.input.properties.questions.minItems          number     
+  .tools.question.input.properties.questions.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.question.input.required[0]                            identifier 
+  .tools.question.input.additionalProperties                   bool       
+  .tools.read.description                                      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.type                                       identifier 
+  .tools.read.input.properties.path.type                       identifier 
+  .tools.read.input.properties.path.description                free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.properties.offset.type                     identifier 
+  .tools.read.input.properties.offset.minimum                  number     
+  .tools.read.input.properties.offset.description              free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.properties.limit.type                      identifier 
+  .tools.read.input.properties.limit.minimum                   number     
+  .tools.read.input.properties.limit.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.read.input.required[0]                                identifier 
+  .tools.read.input.additionalProperties                       bool       
+  .tools.shell.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.type                                      identifier 
+  .tools.shell.input.properties.command.type                   identifier 
+  .tools.shell.input.properties.command.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.workdir.type                   identifier 
+  .tools.shell.input.properties.workdir.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.timeout.type                   identifier 
+  .tools.shell.input.properties.timeout.minimum                number     
+  .tools.shell.input.properties.timeout.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.properties.background.type                identifier 
+  .tools.shell.input.properties.background.description         free-text    FREE TEXT: substitute with free-text-v1
+  .tools.shell.input.required[0]                               identifier 
+  .tools.shell.input.additionalProperties                      bool       
+  .tools.skill.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.skill.input.type                                      identifier 
+  .tools.skill.input.properties.id.type                        identifier 
+  .tools.skill.input.properties.id.description                 free-text    FREE TEXT: substitute with free-text-v1
+  .tools.skill.input.required[0]                               identifier 
+  .tools.skill.input.additionalProperties                      bool       
+  .tools.subagent.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.type                                   identifier 
+  .tools.subagent.input.properties.agent.type                  identifier 
+  .tools.subagent.input.properties.agent.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.description.type            identifier 
+  .tools.subagent.input.properties.description.description     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.prompt.type                 identifier 
+  .tools.subagent.input.properties.prompt.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.model.type                  identifier 
+  .tools.subagent.input.properties.model.description           free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.sessionID.type              identifier 
+  .tools.subagent.input.properties.sessionID.pattern           identifier 
+  .tools.subagent.input.properties.sessionID.description       free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.properties.background.type             identifier 
+  .tools.subagent.input.properties.background.description      free-text    FREE TEXT: substitute with free-text-v1
+  .tools.subagent.input.required[0]                            identifier 
+  .tools.subagent.input.required[1]                            identifier 
+  .tools.subagent.input.required[2]                            identifier 
+  .tools.subagent.input.additionalProperties                   bool       
+  .tools.webfetch.description                                  free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.type                                   identifier 
+  .tools.webfetch.input.properties.url.type                    identifier 
+  .tools.webfetch.input.properties.url.description             free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.properties.format.type                 identifier 
+  .tools.webfetch.input.properties.format.enum[0]              identifier 
+  .tools.webfetch.input.properties.format.enum[1]              identifier 
+  .tools.webfetch.input.properties.format.enum[2]              identifier 
+  .tools.webfetch.input.properties.format.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.properties.timeout.type                identifier 
+  .tools.webfetch.input.properties.timeout.exclusiveMinimum    number     
+  .tools.webfetch.input.properties.timeout.maximum             number     
+  .tools.webfetch.input.properties.timeout.description         free-text    FREE TEXT: substitute with free-text-v1
+  .tools.webfetch.input.required[0]                            identifier 
+  .tools.webfetch.input.additionalProperties                   bool       
+  .tools.websearch.description                                 free-text    FREE TEXT: substitute with free-text-v1
+  .tools.websearch.input.type                                  identifier 
+  .tools.websearch.input.properties.query.type                 identifier 
+  .tools.websearch.input.properties.query.description          free-text    FREE TEXT: substitute with free-text-v1
+  .tools.websearch.input.required[0]                           identifier 
+  .tools.websearch.input.additionalProperties                  bool       
+  .tools.write.description                                     free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.type                                      identifier 
+  .tools.write.input.properties.path.type                      identifier 
+  .tools.write.input.properties.path.description               free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.properties.content.type                   identifier 
+  .tools.write.input.properties.content.description            free-text    FREE TEXT: substitute with free-text-v1
+  .tools.write.input.required[0]                               identifier 
+  .tools.write.input.required[1]                               identifier 
+  .tools.write.input.additionalProperties                      bool       
+  .tools.execute.description                                   free-text    FREE TEXT: substitute with free-text-v1
+  .tools.execute.input.type                                    identifier 
+  .tools.execute.input.properties.code.type                    identifier 
+  .tools.execute.input.required[0]                             identifier 
+  .tools.execute.input.additionalProperties                    bool       
+```
+
 ## Rules applied, in order
 
 Per fixture, the value-only rules applied in the order applied, as listed in
@@ -1110,6 +1940,42 @@ bytes were compared field by field with the raw bytes (same paths, same value
 types). The committed bytes carry no occurrence of the capturing user's name.
 The provenance sidecar lists `home-path-v1`.
 
+### Fourth batch — OpenCode 2.0.21 (second sitting)
+
+- `opencode_session_compaction_2_0_21.1.json`: home-path-v1 (2 absolute
+  spellings, both inside free-text system text, rewritten to `/home/user/...`)
+  then free-text-v1 (56 fields). The relative spelling and the directory slug
+  occur nowhere in the payload, checked by search.
+- `opencode_session_retry_2_0_21.1.json`: free-text-v1 (2 fields:
+  `.error.message`, `.error.response.body`); no home path occurs, so
+  home-path-v1 was not applied.
+- `opencode_session_generate_2_0_21.1.json`: home-path-v1 (2 absolute
+  spellings) then free-text-v1 (59 fields).
+- `opencode_session_experimental_ws_handshake_2_0_21.1.json`: free-text-v1 (1
+  field: `.headers.authorization`); no home path occurs.
+- `opencode_session_experimental_ws_send_2_0_21.1.json`: home-path-v1 (2
+  absolute spellings, inside the frame) then free-text-v1 (1 field: `.frame`).
+- `opencode_session_experimental_ws_receive_2_0_21.1.json`: none — no home
+  path and no free text occur.
+- `opencode_permission_evaluate_2_0_21.3.json`: free-text-v1 (1 field:
+  `.metadata.files[0].patch`); no home path occurs.
+- `opencode_tool_execute_after_2_0_21.3.json`: home-path-v1 (4 absolute
+  spellings: `.input.path`, inside the free-text `.error.message`, and the two
+  absolute rule resources) then free-text-v1 (1 field: `.error.message`).
+- `opencode_session_context_2_0_21.8.json`: home-path-v1 (3 absolute
+  spellings: two in free-text system text, one in the tool-input path) then
+  free-text-v1 (57 fields).
+
+Checks over the committed bytes: structure, keys, nesting, types and nulls
+are unchanged — the committed bytes were compared field by field with the raw
+bytes (same paths, same value types, differences only at the substituted
+fields). The placeholder length is the raw BYTE span of the value after
+home-path-v1; the rule was validated byte-for-byte by reconstructing the
+committed 2.0.20 `session.context` fixture from its surviving raw capture and
+comparing (identical, 42837 bytes). The committed bytes carry no occurrence of
+the capturing user's name (absent from all nine). Each provenance sidecar
+lists the rules applied, in order.
+
 ## Secret scan
 
 `TestNoCommittedTestdataCarriesASecretShape` (internal/lifecycle/ingress/secretscan_test.go)
@@ -1139,6 +2005,17 @@ this fixture and its sidecar in place: PASS, zero hits, 2026-10-02.
 an Anthropic API-key shape planted into a COPY of the new fixture in this
 directory turned the scan RED naming that copy, the shape and byte offset 502;
 the copy was removed and the scan returned to PASS.
+
+### Fourth batch — OpenCode 2.0.21 (second sitting)
+
+`TestNoCommittedTestdataCarriesASecretShape`
+(internal/lifecycle/ingress/secretscan_test.go) run over the whole module with
+these nine fixtures and their sidecars in place: PASS, zero hits, 2026-10-06.
+`TestSecretScanIsRedOnEachPlantedShape`, the nine-shape non-vacuity control:
+PASS. Reach control on the same tree: an Anthropic API-key shape planted into
+a COPY of one of these fixtures in this directory turned the scan RED naming
+that copy, the shape and the byte offset 376; the copy
+was removed and the scan returned to PASS.
 
 ## Refused classes
 
@@ -1184,6 +2061,22 @@ environment dump, no free text. The two unselected prompt payloads are not
 refused; they are sizes not chosen because the coordinate already has a
 cleared fixture.
 
+### Fourth batch — OpenCode 2.0.21 (second sitting)
+
+No chosen payload carries a refused class: the inventory names no
+tool-response-over-limit and no environment dump on any of the nine, and
+`Unclearable` names no reason. The 41–42 KB compaction, generate, ws.send and
+session.context payloads are CLEARABLE: their size is many small free-text
+fields (system prompts plus the full tool description dump), no single
+tool-response value above 4096 bytes; every free-text field was substituted.
+The deny evidence is recorded in the Capture section above: the durable
+receipt (`journal_evidence` 241: decision deny, reason `unknown-actor`), the
+blocked `tool.execute.after` payload carrying the same reason, the
+`session.context` member carrying `permission.rejected`, and the negative
+observable (`target.txt` unchanged). The shell.create.before payload remains
+withheld from the earlier batch as an unclearable environment dump; the
+unselected members of this batch are sizes not chosen, not refused.
+
 ## Fixtures
 
 - `session_created_1_18_29.json` — session.created — sha256:71c8de3aadd8019b7e4123076625a0be6e3faaadd56a23c2a79c28a58f7ab591 (654 bytes)
@@ -1221,6 +2114,27 @@ Sizes not chosen: `opencode_session_prompt_2_0_21.1.json` (156 bytes raw) and
 `opencode_session_prompt_2_0_21.2.json` (162 bytes raw). This fixture enables
 no activation row; the recorded-version invariant amendment and the row
 enablement are a separate change after the user's acceptance.
+
+### Fourth batch — OpenCode 2.0.21 (second sitting), nine fixtures
+
+These nine fixtures are cleared authentic captures: six for the coordinates
+that did not fire in the 2.0.20 sitting, and three constituting the deny
+evidence (the host asked, the host acted on pasture's deny, the model was
+told). Committing them activates nothing: no activation row names them yet,
+and the deny flip and the row enablements are a separate change after this
+acceptance.
+
+- `opencode_session_compaction_2_0_21.1.json` — session.compaction — sha256:bdf0a487a55f9d2c0f7e55db25cdb0d2bc6455da7c135e3634cb3c5d8e81f01b (41640 bytes)
+- `opencode_session_retry_2_0_21.1.json` — session.retry — sha256:d0315f51e0f7919304e4c62349121bb5ec1f907b379150f0f585a734270f7688 (365 bytes)
+- `opencode_session_generate_2_0_21.1.json` — session.generate — sha256:3ad559b47192362769c6f390b72e0753fd2388a73fe74b4fe3bac937251e5536 (42114 bytes)
+- `opencode_session_experimental_ws_handshake_2_0_21.1.json` — session.experimental.ws.handshake — sha256:96fa3d866962e512805f16cfa57c69c82c45a0cb64de365be4cc605282c54050 (631 bytes)
+- `opencode_session_experimental_ws_send_2_0_21.1.json` — session.experimental.ws.send — sha256:51401d2c8726d5abec5316f0172b3e4b7290b9e508fccef315b4921c0777cede (43702 bytes)
+- `opencode_session_experimental_ws_receive_2_0_21.1.json` — session.experimental.ws.receive — sha256:620a4ce22ea4f03099187b795fd4965308c56de98563e5b31026b58a7df7d847 (233 bytes)
+- `opencode_permission_evaluate_2_0_21.3.json` — permission.evaluate — sha256:68b0c44a7a3042f6531b20d57f240d1f5fa1e4f142982db0261e792ae2d170e6 (469 bytes)
+- `opencode_tool_execute_after_2_0_21.3.json` — tool.execute.after — sha256:aa8c3da520e9f322cc67e284cd2966e182ab28a32bdff0d08615aa613bdeed44 (1050 bytes)
+- `opencode_session_context_2_0_21.8.json` — session.context — sha256:bc40bcb66d07479c06449637e6a0a44bc4d71591565b57e2323671cd27e2b702 (42157 bytes)
+
+Sizes not chosen for the selected events are recorded in the Capture section.
 
 ## User acceptance
 

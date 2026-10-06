@@ -1,0 +1,1 @@
+{"sessionID":"ses_eed2d6307ffeWwivFJkNcM8uJ2","agent":"build","model":{"id":"mock-model","providerID":"mock","variant":"default"},"error":{"type":"provider.internal","message":"xxxxxxxxxxxxxxxxxxxxx","status":500,"response":{"body":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}},"attempt":2,"decision":{"retry":true,"delay":1734}}
