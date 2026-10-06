@@ -2222,6 +2222,11 @@ remote through it.
 Landing pull request: https://github.com/dayvidpham/pasture/pull/158 — opened
 after the acceptance above was recorded.
 
+### Fourth batch — OpenCode 2.0.21 (second sitting)
+
+Landing pull request: https://github.com/dayvidpham/pasture/pull/160 — opened
+after the acceptance above was recorded.
+
 ## Current source revision transport — 2026-09-07
 
 For this source revision, the generated `.opencode/plugins/pasture-lifecycle.ts`
