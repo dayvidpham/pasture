@@ -127,8 +127,8 @@
       "state": "enabled",
       "captureProof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_permission_evaluate_2_0_20.2.json (OpenCode 2.0.20 authentic hook capture)",
       "productionProof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/permission.evaluate",
-      "responseCapability": "none",
-      "failureEvidence": "unset"
+      "responseCapability": "deny",
+      "failureEvidence": "opencode 2.0.21 live capture internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_tool_execute_after_2_0_21.3.json (clearance: internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md): the host honoured pasture's permission.evaluate deny — Permission.BlockedError with reason unknown-actor, tool not run"
     },
     {
       "event": "shell.create.before",

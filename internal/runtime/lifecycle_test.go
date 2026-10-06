@@ -24,6 +24,7 @@ func TestPinnedResponseCapabilitiesKeepUnsupportedAndPostHocRowsNonEnforcing(t *
 	checkResponseMappings(t, runtime.ClaudeCode2_1_261Lifecycle())
 	checkResponseMappings(t, runtime.Codex0_153_0Lifecycle())
 	checkResponseMappings(t, runtime.OpenCode1_18_29Lifecycle())
+	checkResponseMappings(t, runtime.OpenCode2_0_20Lifecycle())
 
 	claude, err := runtime.ClaudeCode2_1_261Lifecycle().Mapping(runtime.ClaudeEventPostToolBatch)
 	if err != nil {
@@ -70,7 +71,13 @@ func checkResponseMappings[E comparable](t *testing.T, contract runtime.Lifecycl
 			evidenced++
 		}
 		if contract.Harness() != ir.HarnessClaudeCode && m.Response() != runtime.CapabilityNone {
-			t.Fatalf("%s/%s has no proved denial channel", contract.Harness(), m.NativeName())
+			// The one non-Claude row with a proved denial channel is OpenCode's
+			// permission.evaluate, whose committed 2.0.21 deny capture is its
+			// citation. Any other non-Claude row gaining a capability must be
+			// accompanied by its own committed citation and this pin widened.
+			if contract.Harness() != ir.HarnessOpenCode || m.NativeName() != "permission.evaluate" {
+				t.Fatalf("%s/%s has no proved denial channel", contract.Harness(), m.NativeName())
+			}
 		}
 	}
 

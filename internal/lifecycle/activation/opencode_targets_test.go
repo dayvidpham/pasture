@@ -197,18 +197,20 @@ func TestOpenCodeV2ActivationIsExhaustiveInRegistrationOrder(t *testing.T) {
 	require.Equal(t, activation.Enabled, fresh[0].State, "the manifest derivation must be fresh")
 }
 
-// TestOpenCodeV2PerRowCapabilityDerivesNoneWhileFixturesAreAbsent pins the
-// per-row capability without needing any fixture: every 2.0.20 coordinate
-// derives CapabilityNone through the version-exact v2 runtime profile, and
-// the failure-evidence posture splits exactly on blocking mode (the bus
-// observation carries no evidence source, every hook row awaits its
-// citation). Enabling a row by its proofs claims no capability: the
-// cleared permission evaluate capture answered allow, so it cites no deny
-// evidence and the row keeps CapabilityNone. Rows resolve through
-// OpenCode2_0_20Lifecycle by native name, never through the version-blind
-// failure lookup that serves the command-line fault policy, so the three
-// coordinates both versions share assert their v2 rows.
-func TestOpenCodeV2PerRowCapabilityDerivesNoneWhileFixturesAreAbsent(t *testing.T) {
+// TestOpenCodeV2PerRowCapabilityDerivesFromEvidence pins the per-row
+// capability without needing any fixture: every 2.0.20 coordinate derives
+// CapabilityNone through the version-exact v2 runtime profile except
+// permission.evaluate, which derives CapabilityDeny from its committed capture
+// citation. The failure-evidence posture splits exactly on blocking mode and
+// on that one citation: the bus observation carries no evidence source, the
+// evidenced permission row carries one, and every other hook row cites none.
+// Enabling a row by its proofs alone claims no capability: the 2.0.20
+// permission evaluate capture answered allow, so only the later deny capture's
+// citation upgrades the row. Rows resolve through OpenCode2_0_20Lifecycle by
+// native name, never through the version-blind failure lookup that serves the
+// command-line fault policy, so the three coordinates both versions share
+// assert their v2 rows.
+func TestOpenCodeV2PerRowCapabilityDerivesFromEvidence(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)
@@ -232,14 +234,20 @@ func TestOpenCodeV2PerRowCapabilityDerivesNoneWhileFixturesAreAbsent(t *testing.
 		mapping, ok := byName[nativeName]
 		require.True(t, ok, "coordinate %q has no version-exact v2 runtime row", nativeName)
 		require.True(t, mapping.Response().IsValid(), "coordinate %q carries an invalid capability", nativeName)
-		require.Equal(t, runtime.CapabilityNone, mapping.Response(), "coordinate %q must derive none until its citation lands", nativeName)
-		if nativeName == "session.created" {
+		switch nativeName {
+		case "session.created":
+			require.Equal(t, runtime.CapabilityNone, mapping.Response(), "the bus observation must derive none")
 			require.Equal(t, runtime.NonBlocking, mapping.Blocking())
 			require.False(t, mapping.Evidence().IsPresent(), "the bus observation must cite no evidence")
-			continue
+		case "permission.evaluate":
+			require.Equal(t, runtime.CapabilityDeny, mapping.Response(), "the evidenced permission.evaluate row must derive deny")
+			require.Equal(t, runtime.Blocking, mapping.Blocking(), "permission.evaluate must stay a blocking gate")
+			require.True(t, mapping.Evidence().IsPresent(), "permission.evaluate must cite its committed capture evidence")
+		default:
+			require.Equal(t, runtime.CapabilityNone, mapping.Response(), "coordinate %q must derive none without a citation", nativeName)
+			require.Equal(t, runtime.Blocking, mapping.Blocking(), "hook coordinate %q must stay a blocking gate", nativeName)
+			require.False(t, mapping.Evidence().IsPresent(), "hook coordinate %q must cite no response-channel evidence yet", nativeName)
 		}
-		require.Equal(t, runtime.Blocking, mapping.Blocking(), "hook coordinate %q must stay a blocking gate", nativeName)
-		require.False(t, mapping.Evidence().IsPresent(), "hook coordinate %q must cite no response-channel evidence yet", nativeName)
 	}
 }
 
