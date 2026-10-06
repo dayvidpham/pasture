@@ -5,18 +5,24 @@ package activation
 
 // OpenCode capture proofs, ordinals 200-299.
 const (
-	CaptureProofOpenCodeSessionCreated       CaptureProof = 200
-	CaptureProofOpenCodeToolExecuteBefore    CaptureProof = 201
-	CaptureProofOpenCode2SessionPrompt       CaptureProof = 202
-	CaptureProofOpenCode2SessionContext      CaptureProof = 203
-	CaptureProofOpenCode2SessionTitle        CaptureProof = 204
-	CaptureProofOpenCode2SessionModelRequest CaptureProof = 205
-	CaptureProofOpenCode2SessionHttpRequest  CaptureProof = 206
-	CaptureProofOpenCode2SessionHttpResponse CaptureProof = 207
-	CaptureProofOpenCode2ToolExecuteBefore   CaptureProof = 208
-	CaptureProofOpenCode2ToolExecuteAfter    CaptureProof = 209
-	CaptureProofOpenCode2PermissionEvaluate  CaptureProof = 210
-	CaptureProofOpenCode2SessionCreated      CaptureProof = 211
+	CaptureProofOpenCodeSessionCreated                  CaptureProof = 200
+	CaptureProofOpenCodeToolExecuteBefore               CaptureProof = 201
+	CaptureProofOpenCode2SessionPrompt                  CaptureProof = 202
+	CaptureProofOpenCode2SessionContext                 CaptureProof = 203
+	CaptureProofOpenCode2SessionTitle                   CaptureProof = 204
+	CaptureProofOpenCode2SessionModelRequest            CaptureProof = 205
+	CaptureProofOpenCode2SessionHttpRequest             CaptureProof = 206
+	CaptureProofOpenCode2SessionHttpResponse            CaptureProof = 207
+	CaptureProofOpenCode2ToolExecuteBefore              CaptureProof = 208
+	CaptureProofOpenCode2ToolExecuteAfter               CaptureProof = 209
+	CaptureProofOpenCode2PermissionEvaluate             CaptureProof = 210
+	CaptureProofOpenCode2SessionCreated                 CaptureProof = 211
+	CaptureProofOpenCode2SessionCompaction              CaptureProof = 212
+	CaptureProofOpenCode2SessionGenerate                CaptureProof = 213
+	CaptureProofOpenCode2SessionExperimentalWsHandshake CaptureProof = 214
+	CaptureProofOpenCode2SessionExperimentalWsSend      CaptureProof = 215
+	CaptureProofOpenCode2SessionExperimentalWsReceive   CaptureProof = 216
+	CaptureProofOpenCode2SessionRetry                   CaptureProof = 217
 )
 
 // openCodeGeneratedCaptureProofs lists the generated capture proof arms of opencode_targets.go by name, in ordinal order.
@@ -33,22 +39,34 @@ var openCodeGeneratedCaptureProofs = []namedCaptureProof{
 	{name: "OpenCode2ToolExecuteAfter", proof: CaptureProofOpenCode2ToolExecuteAfter},
 	{name: "OpenCode2PermissionEvaluate", proof: CaptureProofOpenCode2PermissionEvaluate},
 	{name: "OpenCode2SessionCreated", proof: CaptureProofOpenCode2SessionCreated},
+	{name: "OpenCode2SessionCompaction", proof: CaptureProofOpenCode2SessionCompaction},
+	{name: "OpenCode2SessionGenerate", proof: CaptureProofOpenCode2SessionGenerate},
+	{name: "OpenCode2SessionExperimentalWsHandshake", proof: CaptureProofOpenCode2SessionExperimentalWsHandshake},
+	{name: "OpenCode2SessionExperimentalWsSend", proof: CaptureProofOpenCode2SessionExperimentalWsSend},
+	{name: "OpenCode2SessionExperimentalWsReceive", proof: CaptureProofOpenCode2SessionExperimentalWsReceive},
+	{name: "OpenCode2SessionRetry", proof: CaptureProofOpenCode2SessionRetry},
 }
 
 // OpenCode production proofs, ordinals 200-299.
 const (
-	ProductionProofOpenCodeSessionCreated       ProductionProof = 200
-	ProductionProofOpenCodeToolExecuteBefore    ProductionProof = 201
-	ProductionProofOpenCode2SessionPrompt       ProductionProof = 202
-	ProductionProofOpenCode2SessionContext      ProductionProof = 203
-	ProductionProofOpenCode2SessionTitle        ProductionProof = 204
-	ProductionProofOpenCode2SessionModelRequest ProductionProof = 205
-	ProductionProofOpenCode2SessionHttpRequest  ProductionProof = 206
-	ProductionProofOpenCode2SessionHttpResponse ProductionProof = 207
-	ProductionProofOpenCode2ToolExecuteBefore   ProductionProof = 208
-	ProductionProofOpenCode2ToolExecuteAfter    ProductionProof = 209
-	ProductionProofOpenCode2PermissionEvaluate  ProductionProof = 210
-	ProductionProofOpenCode2SessionCreated      ProductionProof = 211
+	ProductionProofOpenCodeSessionCreated                  ProductionProof = 200
+	ProductionProofOpenCodeToolExecuteBefore               ProductionProof = 201
+	ProductionProofOpenCode2SessionPrompt                  ProductionProof = 202
+	ProductionProofOpenCode2SessionContext                 ProductionProof = 203
+	ProductionProofOpenCode2SessionTitle                   ProductionProof = 204
+	ProductionProofOpenCode2SessionModelRequest            ProductionProof = 205
+	ProductionProofOpenCode2SessionHttpRequest             ProductionProof = 206
+	ProductionProofOpenCode2SessionHttpResponse            ProductionProof = 207
+	ProductionProofOpenCode2ToolExecuteBefore              ProductionProof = 208
+	ProductionProofOpenCode2ToolExecuteAfter               ProductionProof = 209
+	ProductionProofOpenCode2PermissionEvaluate             ProductionProof = 210
+	ProductionProofOpenCode2SessionCreated                 ProductionProof = 211
+	ProductionProofOpenCode2SessionCompaction              ProductionProof = 212
+	ProductionProofOpenCode2SessionGenerate                ProductionProof = 213
+	ProductionProofOpenCode2SessionExperimentalWsHandshake ProductionProof = 214
+	ProductionProofOpenCode2SessionExperimentalWsSend      ProductionProof = 215
+	ProductionProofOpenCode2SessionExperimentalWsReceive   ProductionProof = 216
+	ProductionProofOpenCode2SessionRetry                   ProductionProof = 217
 )
 
 // openCodeGeneratedProductionProofs lists the generated production proof arms of opencode_targets.go by name, in ordinal order.
@@ -65,4 +83,10 @@ var openCodeGeneratedProductionProofs = []namedProductionProof{
 	{name: "OpenCode2ToolExecuteAfter", proof: ProductionProofOpenCode2ToolExecuteAfter},
 	{name: "OpenCode2PermissionEvaluate", proof: ProductionProofOpenCode2PermissionEvaluate},
 	{name: "OpenCode2SessionCreated", proof: ProductionProofOpenCode2SessionCreated},
+	{name: "OpenCode2SessionCompaction", proof: ProductionProofOpenCode2SessionCompaction},
+	{name: "OpenCode2SessionGenerate", proof: ProductionProofOpenCode2SessionGenerate},
+	{name: "OpenCode2SessionExperimentalWsHandshake", proof: ProductionProofOpenCode2SessionExperimentalWsHandshake},
+	{name: "OpenCode2SessionExperimentalWsSend", proof: ProductionProofOpenCode2SessionExperimentalWsSend},
+	{name: "OpenCode2SessionExperimentalWsReceive", proof: ProductionProofOpenCode2SessionExperimentalWsReceive},
+	{name: "OpenCode2SessionRetry", proof: ProductionProofOpenCode2SessionRetry},
 }

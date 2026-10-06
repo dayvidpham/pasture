@@ -60,39 +60,34 @@ func TestOpenCodeActivationTargetEventsAreDefensive(t *testing.T) {
 	require.Equal(t, registration.EventOpenCodeSessionCreated, activation.OpenCode1_18_29TargetEvents()[0])
 }
 
-// openCode2Enabled is the enabled 2.0.20 set in registration order: the ten
-// coordinates whose authentic capture was cleared in
+// openCode2Enabled is the enabled 2.0.20 set in registration order: the
+// sixteen coordinates whose authentic captures were cleared in
 // internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md.
 var openCode2Enabled = []model.ContractEventKind{
 	registration.EventOpenCode2SessionCreated,
 	registration.EventOpenCode2SessionPrompt,
 	registration.EventOpenCode2SessionContext,
+	registration.EventOpenCode2SessionCompaction,
+	registration.EventOpenCode2SessionGenerate,
 	registration.EventOpenCode2SessionTitle,
 	registration.EventOpenCode2SessionModelRequest,
 	registration.EventOpenCode2SessionHttpRequest,
 	registration.EventOpenCode2SessionHttpResponse,
+	registration.EventOpenCode2SessionExperimentalWsHandshake,
+	registration.EventOpenCode2SessionExperimentalWsSend,
+	registration.EventOpenCode2SessionExperimentalWsReceive,
+	registration.EventOpenCode2SessionRetry,
 	registration.EventOpenCode2ToolExecuteBefore,
 	registration.EventOpenCode2ToolExecuteAfter,
 	registration.EventOpenCode2PermissionEvaluate,
 }
 
-// openCode2MissingFixture is the withheld missing-fixture remainder: the six
-// coordinates that have no cleared capture yet.
-var openCode2MissingFixture = []model.ContractEventKind{
-	registration.EventOpenCode2SessionCompaction,
-	registration.EventOpenCode2SessionGenerate,
-	registration.EventOpenCode2SessionExperimentalWsHandshake,
-	registration.EventOpenCode2SessionExperimentalWsSend,
-	registration.EventOpenCode2SessionExperimentalWsReceive,
-	registration.EventOpenCode2SessionRetry,
-}
-
 const openCodeClearance = "internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md"
 
 // TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason pins
-// the 2.0.20 posture: ten enabled rows each carry both proofs, the shell
-// create row is withheld by the recorded unclearable-payload decision, and
-// the six non-fired rows stay withheld missing-fixture.
+// the 2.0.20 posture: sixteen enabled rows each carry both proofs, the shell
+// create row is withheld by the recorded unclearable-payload decision, and no
+// row is withheld missing-fixture any more.
 func TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.OpenCode2_0_20()
@@ -125,7 +120,7 @@ func TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason(t *te
 		}
 	}
 	require.Equal(t, openCode2Enabled, enabled)
-	require.Equal(t, openCode2MissingFixture, missing)
+	require.Empty(t, missing, "every missing-fixture coordinate now has a cleared capture")
 	require.Equal(t, []model.ContractEventKind{registration.EventOpenCode2ShellCreateBefore}, unclearable)
 }
 
@@ -135,16 +130,22 @@ func TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason(t *te
 func TestOpenCodeV2EnabledProofsCiteCommittedFixturesAndProductionTest(t *testing.T) {
 	t.Parallel()
 	want := map[model.ContractEventKind][2]string{
-		registration.EventOpenCode2SessionCreated:      {"opencode_session_created_2_0_21.1.json", "session.created"},
-		registration.EventOpenCode2SessionPrompt:       {"opencode_session_prompt_2_0_20.1.json", "session.prompt"},
-		registration.EventOpenCode2SessionContext:      {"opencode_session_context_2_0_20.1.json", "session.context"},
-		registration.EventOpenCode2SessionTitle:        {"opencode_session_title_2_0_20.1.json", "session.title"},
-		registration.EventOpenCode2SessionModelRequest: {"opencode_session_model_request_2_0_20.2.json", "session.model.request"},
-		registration.EventOpenCode2SessionHttpRequest:  {"opencode_session_http_request_2_0_20.2.json", "session.http.request"},
-		registration.EventOpenCode2SessionHttpResponse: {"opencode_session_http_response_2_0_20.1.json", "session.http.response"},
-		registration.EventOpenCode2ToolExecuteBefore:   {"opencode_tool_execute_before_2_0_20.1.json", "tool.execute.before"},
-		registration.EventOpenCode2ToolExecuteAfter:    {"opencode_tool_execute_after_2_0_20.1.json", "tool.execute.after"},
-		registration.EventOpenCode2PermissionEvaluate:  {"opencode_permission_evaluate_2_0_20.2.json", "permission.evaluate"},
+		registration.EventOpenCode2SessionCreated:                 {"opencode_session_created_2_0_21.1.json", "session.created"},
+		registration.EventOpenCode2SessionPrompt:                  {"opencode_session_prompt_2_0_20.1.json", "session.prompt"},
+		registration.EventOpenCode2SessionContext:                 {"opencode_session_context_2_0_20.1.json", "session.context"},
+		registration.EventOpenCode2SessionCompaction:              {"opencode_session_compaction_2_0_21.1.json", "session.compaction"},
+		registration.EventOpenCode2SessionGenerate:                {"opencode_session_generate_2_0_21.1.json", "session.generate"},
+		registration.EventOpenCode2SessionTitle:                   {"opencode_session_title_2_0_20.1.json", "session.title"},
+		registration.EventOpenCode2SessionModelRequest:            {"opencode_session_model_request_2_0_20.2.json", "session.model.request"},
+		registration.EventOpenCode2SessionHttpRequest:             {"opencode_session_http_request_2_0_20.2.json", "session.http.request"},
+		registration.EventOpenCode2SessionHttpResponse:            {"opencode_session_http_response_2_0_20.1.json", "session.http.response"},
+		registration.EventOpenCode2SessionExperimentalWsHandshake: {"opencode_session_experimental_ws_handshake_2_0_21.1.json", "session.experimental.ws.handshake"},
+		registration.EventOpenCode2SessionExperimentalWsSend:      {"opencode_session_experimental_ws_send_2_0_21.1.json", "session.experimental.ws.send"},
+		registration.EventOpenCode2SessionExperimentalWsReceive:   {"opencode_session_experimental_ws_receive_2_0_21.1.json", "session.experimental.ws.receive"},
+		registration.EventOpenCode2SessionRetry:                   {"opencode_session_retry_2_0_21.1.json", "session.retry"},
+		registration.EventOpenCode2ToolExecuteBefore:              {"opencode_tool_execute_before_2_0_20.1.json", "tool.execute.before"},
+		registration.EventOpenCode2ToolExecuteAfter:               {"opencode_tool_execute_after_2_0_20.1.json", "tool.execute.after"},
+		registration.EventOpenCode2PermissionEvaluate:             {"opencode_permission_evaluate_2_0_20.2.json", "permission.evaluate"},
 	}
 	entries, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)
@@ -245,18 +246,25 @@ func TestOpenCodeV2PerRowCapabilityDerivesNoneWhileFixturesAreAbsent(t *testing.
 // openCode2CaptureVersion records the host version each enabled 2.0.20-contract
 // row was captured at. A fixture is captured at the recorded host version or a
 // later release the contract admits: nine rows were captured on 2.0.20, and
-// session.created, which did not fire in that sitting, was captured on 2.0.21.
+// session.created and the six coordinates that did not fire in that sitting
+// were captured on 2.0.21.
 var openCode2CaptureVersion = map[string]string{
-	"session.created":       "2.0.21",
-	"session.prompt":        "2.0.20",
-	"session.context":       "2.0.20",
-	"session.title":         "2.0.20",
-	"session.model.request": "2.0.20",
-	"session.http.request":  "2.0.20",
-	"session.http.response": "2.0.20",
-	"tool.execute.before":   "2.0.20",
-	"tool.execute.after":    "2.0.20",
-	"permission.evaluate":   "2.0.20",
+	"session.created":                   "2.0.21",
+	"session.prompt":                    "2.0.20",
+	"session.context":                   "2.0.20",
+	"session.compaction":                "2.0.21",
+	"session.generate":                  "2.0.21",
+	"session.title":                     "2.0.20",
+	"session.model.request":             "2.0.20",
+	"session.http.request":              "2.0.20",
+	"session.http.response":             "2.0.20",
+	"session.experimental.ws.handshake": "2.0.21",
+	"session.experimental.ws.send":      "2.0.21",
+	"session.experimental.ws.receive":   "2.0.21",
+	"session.retry":                     "2.0.21",
+	"tool.execute.before":               "2.0.20",
+	"tool.execute.after":                "2.0.20",
+	"permission.evaluate":               "2.0.20",
 }
 
 // TestOpenCodeV2ExpectedFixtureNamesFollowTheCaptureRule pins the capture

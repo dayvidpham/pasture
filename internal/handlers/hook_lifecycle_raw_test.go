@@ -293,9 +293,9 @@ func TestRawUnknownHostVersionSourceRefusesBeforeIO(t *testing.T) {
 // 2.0.20 wire schema, while an older host stays on 1.18.29. Every leg below
 // is refused before a byte is read, so no store exists afterwards: the
 // refused reason is what distinguishes the selected row. A v2-only event
-// that did not fire in the 2.0.20 capture sitting reaches its withheld
-// activation row through the v2 row; a v2-only event on the v1 row is
-// unknown.
+// that is still withheld (shell.create.before, by the unclearable-payload
+// decision) reaches its withheld activation row through the v2 row; a
+// v2-only event on the v1 row is unknown.
 func TestRawHatchRoutesOpenCodeByObservedVersion(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -307,8 +307,8 @@ func TestRawHatchRoutesOpenCodeByObservedVersion(t *testing.T) {
 	}{
 		{
 			name:        "2.0.20 host with 2.0.20 schema reaches the v2 activation",
-			hostVersion: "2.0.20", schema: RawSchemaOpenCode2_0_20, event: "session.compaction",
-			wantReason: "withheld (reason missing-fixture)",
+			hostVersion: "2.0.20", schema: RawSchemaOpenCode2_0_20, event: "shell.create.before",
+			wantReason: "withheld (reason unclearable-payload)",
 		},
 		{
 			name:        "1.18.29 host with 1.18.29 schema stays on the v1 row",
