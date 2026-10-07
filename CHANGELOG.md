@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.10] - 2026-10-07
+
+### Added
+- feat(opencode): derive the enforceable deny for permission.evaluate from its accepted capture
+- feat(opencode): enable the six 2.0.21 coordinates from their accepted captures
+
+### Documentation
+- docs(opencode): record the landing pull request URL for the second-sitting batch
+- docs(opencode): record the user's ACCEPT for the 2.0.21 second-sitting captures
+
+### Other
+- Merge pull request #160 from dayvidpham/pasture-i8kt1v--feat--opencode-v2-second-batch
+- test(opencode): clear the 2.0.21 second-sitting captures (acceptance owed)
+
 ## [0.0.9] - 2026-10-02
 
 ### Added
