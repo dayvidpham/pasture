@@ -310,7 +310,11 @@ async function invokeLifecycle(command, event, value) {
   // Bun.write(Bun.stderr, ...) stalled after a partial write in the generated
   // plugin's spawned-child/pipe context under Bun 1.3.13. Writable completion
   // is exercised in that same context; Bun's internal cause is not established.
-  if (stderr.trim() !== "") await forwardDiagnostic(stderr.endsWith("\n") ? stderr : stderr + "\n", event);
+  if (stderr.trim() !== "") {
+    // A successful lifecycle decision must survive a host that has closed or
+    // rejected its diagnostic stream. The child's stdout remains authoritative.
+    await forwardDiagnostic(stderr.endsWith("\n") ? stderr : stderr + "\n", event).catch(() => {});
+  }
   return stdout;
 }
 

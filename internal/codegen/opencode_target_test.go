@@ -304,9 +304,7 @@ func TestOpenCodeGeneratedPluginForwardingFailureCleansListeners(t *testing.T) {
       Object.defineProperty(process, "stderr", original);
       sink.destroy();
     }
-    assert(failure instanceof Error, mode + " must reject, not silently proceed");
-    assert.match(failure.message, /diagnostic forwarding for tool.execute.before failed/, mode + " identifies forwarding fault");
-    assert.match(failure.message, /restore the OpenCode standard-error sink and retry/, mode + " gives sink repair advice");
+    assert.equal(failure, undefined, mode + " sink failure must not discard the child's successful proceed decision");
     assert.deepEqual(listeners, [0, 0], mode + " leaves no error or close listeners");
     assert(children.at(-1).reaped, mode + " has already reaped the healthy child");
     assert.equal(children.at(-1).kills, 0, mode + " does not kill a completed child");
