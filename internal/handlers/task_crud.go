@@ -214,6 +214,7 @@ func TaskList(w io.Writer, in TaskListInput, format types.OutputFormat) (int, er
 	if err != nil {
 		return wrapTaskOpError("list", err)
 	}
+	sortTasks(ts, false)
 
 	out, fErr := formatters.FormatTasks(ts, format)
 	if fErr != nil {

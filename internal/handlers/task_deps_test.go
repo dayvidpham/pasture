@@ -23,7 +23,7 @@ func TestTaskReady_ExcludesBlocked(t *testing.T) {
 	}
 
 	var readyOut bytes.Buffer
-	if _, err := handlers.TaskReady(&readyOut, path, types.OutputJSON); err != nil {
+	if _, err := handlers.TaskReady(&readyOut, path, types.OutputJSON, ""); err != nil {
 		t.Fatalf("ready failed: %v", err)
 	}
 	ready := decodeTaskList(t, readyOut.String())
@@ -35,7 +35,7 @@ func TestTaskReady_ExcludesBlocked(t *testing.T) {
 	}
 
 	var blockedOut bytes.Buffer
-	if _, err := handlers.TaskBlocked(&blockedOut, path, types.OutputJSON); err != nil {
+	if _, err := handlers.TaskBlocked(&blockedOut, path, types.OutputJSON, ""); err != nil {
 		t.Fatalf("blocked failed: %v", err)
 	}
 	blocked := decodeTaskList(t, blockedOut.String())
@@ -104,6 +104,10 @@ func TestTaskDepTree_RootWithChildren(t *testing.T) {
 	mustAdd(root, c1)
 	mustAdd(root, c2)
 	mustAdd(c1, gc)
+	mustAdd(c2, gc)
+	if _, err := handlers.TaskClose(&bytes.Buffer{}, path, gc, "done", types.OutputText); err != nil {
+		t.Fatal(err)
+	}
 
 	var out bytes.Buffer
 	code, err := handlers.TaskDepTree(&out, path, root, types.OutputJSON)
@@ -117,10 +121,10 @@ func TestTaskDepTree_RootWithChildren(t *testing.T) {
 	if tree.Root != root {
 		t.Errorf("root: got %q, want %q", tree.Root, root)
 	}
-	if len(tree.Edges) != 3 {
-		t.Fatalf("expected 3 edges, got %d (%+v)", len(tree.Edges), tree.Edges)
+	if len(tree.Edges) != 4 {
+		t.Fatalf("expected 4 edges including both paths to the closed shared blocker, got %d (%+v)", len(tree.Edges), tree.Edges)
 	}
-	for _, want := range [][2]string{{root, c1}, {root, c2}, {c1, gc}} {
+	for _, want := range [][2]string{{root, c1}, {root, c2}, {c1, gc}, {c2, gc}} {
 		if !containsEdge(tree.Edges, want[0], want[1]) {
 			t.Errorf("missing edge %s -> %s in %+v", want[0], want[1], tree.Edges)
 		}

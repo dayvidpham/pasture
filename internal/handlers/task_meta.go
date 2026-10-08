@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	stderrors "errors"
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/dayvidpham/provenance"
 
@@ -83,14 +85,13 @@ func TaskLabelRemove(w io.Writer, dbPath, idStr, label string, format types.Outp
 type TaskCommentAddInput struct {
 	DBPath   string
 	IdStr    string
-	AuthorId string // wire-format AgentId; required for now (see hjsdt follow-up)
+	AuthorId string // wire-format registered AgentID
 	Body     string
 }
 
 // TaskCommentAdd posts a comment to a task and prints the resulting comment.
 //
-// The author must already be registered; agent registration ergonomics are
-// tracked as a follow-up to hjsdt.
+// The author must already be registered. This command never creates identities.
 func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(in.IdStr)
 	if err != nil {
@@ -125,7 +126,7 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 	}
 	authorId, err := provenance.ParseAgentID(in.AuthorId)
 	if err != nil {
-		return wrapInvalidId("task comment add (author)", in.AuthorId, err)
+		return invalidCommentAuthor(in.AuthorId, "The author ID is malformed; expected namespace--uuid.", err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(in.DBPath)
@@ -133,6 +134,21 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 		return pasterrors.ExitCode(err), err
 	}
 	defer tr.Close()
+	if _, err := tr.Agent(authorId); err != nil {
+		if stderrors.Is(err, provenance.ErrNotFound) {
+			return invalidCommentAuthor(in.AuthorId, "The author is not in the registered agent registry.", nil)
+		}
+		se := &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "Cannot verify the registered comment author.",
+			Why:      "The registry lookup failed while reading the store.",
+			Where:    "Checking the author before adding a comment (internal/handlers/task_meta.go).",
+			Impact:   "No comment or identity was written.",
+			Fix:      "Check the --db path and database access, then retry `pasture task agents list` before adding the comment.",
+			Cause:    err,
+		}
+		return pasterrors.ExitCode(se), se
+	}
 
 	c, err := tr.AddComment(id, authorId, in.Body)
 	if err != nil {
@@ -164,12 +180,51 @@ func TaskComments(w io.Writer, dbPath, idStr string, format types.OutputFormat) 
 	if err != nil {
 		return wrapTaskOpError("comments", err)
 	}
+	sortComments(cs)
 	out, fErr := formatters.FormatComments(cs, format)
 	if fErr != nil {
 		return pasterrors.ExitCode(fErr), fErr
 	}
 	fmt.Fprintln(w, out)
 	return 0, nil
+}
+
+func sortComments(cs []provenance.Comment) {
+	sort.Slice(cs, func(i, j int) bool {
+		if !cs[i].CreatedAt.Equal(cs[j].CreatedAt) {
+			return cs[i].CreatedAt.Before(cs[j].CreatedAt)
+		}
+		return cs[i].ID.String() < cs[j].ID.String()
+	})
+}
+
+func invalidCommentAuthor(id, why string, cause error) (int, error) {
+	se := &pasterrors.StructuredError{
+		Category: pasterrors.CategoryValidation,
+		What:     fmt.Sprintf("Cannot use comment author %q.", id),
+		Why:      why,
+		Where:    "Validating the author before adding a comment (internal/handlers/task_meta.go).",
+		Impact:   "No comment or identity was written.",
+		Fix:      "Run `pasture task agents list`, choose an existing registered ID, and retry `pasture task comment add ID BODY --author ID`.",
+		Cause:    cause,
+	}
+	return pasterrors.ExitCode(se), se
+}
+
+func TaskLabelList(w io.Writer, dbPath, idStr string, format types.OutputFormat) (int, error) {
+	id, err := provenance.ParseTaskID(idStr)
+	if err != nil {
+		return wrapInvalidId("task label list", idStr, err)
+	}
+	tr, err := tasks.OpenTaskTracker(dbPath)
+	if err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+	defer tr.Close()
+	if _, err := tr.Show(id); err != nil {
+		return wrapTaskOpError("label list", err)
+	}
+	return printLabels(w, tr, id, format)
 }
 
 // printLabels reads the current label set for id and writes a formatter view

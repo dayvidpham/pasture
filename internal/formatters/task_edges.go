@@ -3,6 +3,7 @@ package formatters
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/dayvidpham/provenance"
@@ -47,6 +48,7 @@ func FormatEdge(e provenance.Edge, format types.OutputFormat) (string, error) {
 // tree. Text output renders an indented tree, deduplicating shared subtrees
 // the same way DFS visits them.
 func FormatDepTree(rootId string, edges []provenance.Edge, format types.OutputFormat) (string, error) {
+	edges = normalizeDepTree(rootId, edges)
 	switch format {
 	case types.OutputJSON:
 		jt := depTreeJSON{Root: rootId, Edges: make([]edgeJSON, len(edges))}
@@ -72,7 +74,7 @@ func FormatDepTree(rootId string, edges []provenance.Edge, format types.OutputFo
 //
 // The Tracker returns edges in DFS order, but does not group them by parent
 // — we rebuild adjacency from the raw list and then print depth-first
-// ourselves. Cycles are broken on second visit (each node prints once).
+// ourselves. Repeated targets print as leaves; each node is expanded once.
 func renderDepTreeText(rootId string, edges []provenance.Edge) string {
 	if len(edges) == 0 {
 		return rootId + " (no blocked-by edges)"
@@ -86,30 +88,81 @@ func renderDepTreeText(rootId string, edges []provenance.Edge) string {
 	}
 
 	var b strings.Builder
-	visited := map[string]bool{}
-	var walk func(id string, prefix string, isLast bool, depth int)
-	walk = func(id string, prefix string, isLast bool, depth int) {
+	visited := map[string]bool{rootId: true}
+	fmt.Fprintln(&b, rootId)
+	type frame struct {
+		id, prefix string
+		next       int
+	}
+	stack := []frame{{id: rootId, prefix: "    "}}
+	for len(stack) > 0 {
+		f := &stack[len(stack)-1]
+		children := adj[f.id]
+		if f.next == len(children) {
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		id := children[f.next]
+		isLast := f.next == len(children)-1
+		f.next++
+		prefix := f.prefix
 		marker := "├── "
 		nextPrefix := prefix + "│   "
 		if isLast {
 			marker = "└── "
 			nextPrefix = prefix + "    "
 		}
-		if depth == 0 {
-			fmt.Fprintln(&b, id)
-		} else {
-			fmt.Fprintln(&b, prefix+marker+"blocked by "+id)
-		}
+		fmt.Fprintln(&b, prefix+marker+"blocked by "+id)
 		if visited[id] {
-			return
+			continue
 		}
 		visited[id] = true
 
-		children := adj[id]
-		for i, child := range children {
-			walk(child, nextPrefix, i == len(children)-1, depth+1)
+		stack = append(stack, frame{id: id, prefix: nextPrefix})
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// Normalize the finite collected graph once for both output formats.
+func normalizeDepTree(root string, edges []provenance.Edge) []provenance.Edge {
+	adj := map[string][]provenance.Edge{}
+	seen := map[struct{ source, target string }]bool{}
+	for _, e := range edges {
+		if e.Kind != provenance.EdgeBlockedBy {
+			continue
+		}
+		key := struct{ source, target string }{e.SourceID, e.TargetID}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		adj[e.SourceID] = append(adj[e.SourceID], e)
+	}
+	for _, children := range adj {
+		sort.Slice(children, func(i, j int) bool {
+			return children[i].TargetID < children[j].TargetID
+		})
+	}
+	visited := map[string]bool{root: true}
+	type frame struct {
+		id   string
+		next int
+	}
+	stack := []frame{{id: root}}
+	out := make([]provenance.Edge, 0, len(edges))
+	for len(stack) > 0 {
+		f := &stack[len(stack)-1]
+		if f.next == len(adj[f.id]) {
+			stack = stack[:len(stack)-1]
+			continue
+		}
+		e := adj[f.id][f.next]
+		f.next++
+		out = append(out, e)
+		if !visited[e.TargetID] {
+			visited[e.TargetID] = true
+			stack = append(stack, frame{id: e.TargetID})
 		}
 	}
-	walk(rootId, "", true, 0)
-	return strings.TrimRight(b.String(), "\n")
+	return out
 }

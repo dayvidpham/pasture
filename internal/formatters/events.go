@@ -212,6 +212,8 @@ func FormatContextList(contexts []protocol.Context, format types.OutputFormat) (
 // tracker (which deals in raw rows).
 type AgentEntry struct {
 	AgentId       string
+	Kind          string
+	Name          string
 	WellKnownName string // empty when no row exists in pasture_well_known_agents
 	AutomatonRole protocol.AutomatonRole
 	PastureRole   protocol.PastureRole
@@ -219,6 +221,8 @@ type AgentEntry struct {
 
 type agentEntryJSON struct {
 	AgentId       string `json:"agentId"`
+	Kind          string `json:"kind"`
+	Name          string `json:"name"`
 	WellKnownName string `json:"wellKnownName,omitempty"`
 	AutomatonRole string `json:"automatonRole"`
 	PastureRole   string `json:"pastureRole"`
@@ -227,6 +231,8 @@ type agentEntryJSON struct {
 func toAgentEntryJSON(a AgentEntry) agentEntryJSON {
 	return agentEntryJSON{
 		AgentId:       a.AgentId,
+		Kind:          a.Kind,
+		Name:          a.Name,
 		WellKnownName: a.WellKnownName,
 		AutomatonRole: string(a.AutomatonRole),
 		PastureRole:   string(a.PastureRole),
@@ -253,6 +259,8 @@ func FormatAgentEntry(a AgentEntry, format types.OutputFormat) (string, error) {
 	case types.OutputText:
 		var b strings.Builder
 		fmt.Fprintf(&b, "AgentId:        %s\n", a.AgentId)
+		fmt.Fprintf(&b, "Kind:           %s\n", a.Kind)
+		fmt.Fprintf(&b, "Name:           %s\n", a.Name)
 		if a.WellKnownName != "" {
 			fmt.Fprintf(&b, "WellKnownName:  %s\n", a.WellKnownName)
 		}
@@ -295,8 +303,8 @@ func FormatAgentEntries(entries []AgentEntry, format types.OutputFormat) (string
 			if name == "" {
 				name = "(unnamed)"
 			}
-			lines = append(lines, fmt.Sprintf("%s [%s/%s] %s",
-				e.AgentId, e.AutomatonRole, e.PastureRole, name))
+			lines = append(lines, fmt.Sprintf("%s [%s] %s [%s/%s] %s",
+				e.AgentId, e.Kind, e.Name, e.AutomatonRole, e.PastureRole, name))
 		}
 		return strings.Join(lines, "\n"), nil
 	default:

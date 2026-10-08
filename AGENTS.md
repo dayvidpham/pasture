@@ -543,19 +543,34 @@ are: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
 `Notification`, `Stop`, `SubagentStop`, `PreCompact`, `SessionEnd`. List the
 registered agents with `pasture task agents list`.
 
-### `pasture task` subcommands (added by PROPOSAL-2)
+### `pasture task` subcommands
 
 | Subcommand | Purpose |
 |---|---|
-| `pasture task events` | Query audit events with optional filters (`--epoch-id`, `--phase`, `--role`). |
+| `pasture task create` / `show` / `update` / `close` | Create, read, change, or close a task. |
+| `pasture task assignment` | Manage task assignments. |
+| `pasture task list` | List all statuses and namespaces, or intersect status, priority, type, phase, namespace, and one exact label filter. |
+| `pasture task ready` / `pasture task blocked` | List non-closed candidates, with an optional exact `--label` filter applied after readiness. |
+| `pasture task dep add` | Add a typed edge with `--target` and `--kind`, or use `--blocked-by TARGET` alone. `relation` is an alias of `dep`. |
+| `pasture task dep tree` | Follow outgoing `blocked_by` edges only, including closed blockers. Other typed tree traversal is deferred. |
+| `pasture task label add` / `remove` / `list` | Change or read the sorted label set; changes print the post-state. |
+| `pasture task comment add` | Add a comment with explicit `--author AGENT-ID`; the author must already be registered. |
+| `pasture task comments` | Read comments in chronological order. |
 | `pasture task timeline TASK-ID` | Show all events attached to a task in chronological order. |
-| `pasture task contexts EVENT-ID` | List all `context_edges` rows attached to an audit event. |
 | `pasture task agents [list\|show]` | List or inspect registered agents and their pasture-side categories. |
 
-Existing `pasture task` verbs (`create`, `show`, `update`, `close`, `list`,
-`ready`, `blocked`, `dep add`/`tree`, `label add`/`remove`, `comment add`,
-`comments`) are unchanged in shape but now route through
-`protocol.TaskTracker` rather than importing `provenance` directly (SLICE-10).
+Task operations use `protocol.TaskTracker`. Agent discovery reads the base
+registry with optional Pasture categories. It includes human, ML, and software
+agents without categories. Use `pasture task agents list` to select an author;
+comment commands never register or choose an identity for you. `events` and
+`contexts` are not CLI commands. `relation tree` is the same blocked-by-only
+command as `dep tree`.
+
+List order is created time then full ID. Ready/blocked order is numeric priority,
+created time, then full ID. Empty JSON collections are arrays. A single exact
+label is not a comma-separated filter. Only a non-closed stored `blocked_by`
+target blocks a candidate; label filters do not hide blockers. Separate reads
+do not promise a snapshot under concurrent writers.
 
 ## Dependencies (Approved)
 
@@ -1038,7 +1053,7 @@ When debugging "where am I in this workflow?", the layers map cleanly:
 | Question | Tool |
 |---|---|
 | What's the current phase / role / status? | `pasture status --epoch-id <id>` |
-| What events have I emitted so far? | `pasture task events --epoch-id <id>` |
+| What lifecycle events were recorded? | `pasture hook lifecycle list` |
 | Show the timeline for one task. | `pasture task timeline <task-id>` |
 | Inspect durable engine state directly. | SQLite tables in the shared `pasture.db` DBOS/projection/audit store |
 

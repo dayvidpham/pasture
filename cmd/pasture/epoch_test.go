@@ -43,7 +43,7 @@ func TestCLI_EpochInventoryAndRetiredAdapter(t *testing.T) {
 	if task.exitCode != 0 {
 		t.Fatalf("task help exit %d: %s", task.exitCode, task.stderr)
 	}
-	if got, want := commandNames(task.stdout), []string{"assignment", "close", "comment", "create", "relation", "show", "timeline", "update"}; !sameStrings(got, want) {
+	if got, want := commandNames(task.stdout), []string{"agents", "assignment", "blocked", "close", "comment", "comments", "create", "dep", "label", "list", "ready", "show", "timeline", "update"}; !sameStrings(got, want) {
 		t.Fatalf("task commands = %v, want %v\n%s", got, want, task.stdout)
 	}
 

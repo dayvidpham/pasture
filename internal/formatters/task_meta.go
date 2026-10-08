@@ -3,6 +3,7 @@ package formatters
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ type labelsJSON struct {
 
 // FormatLabels prints the label set for a task.
 func FormatLabels(taskId string, labels []string, format types.OutputFormat) (string, error) {
+	labels = append([]string{}, labels...)
+	sort.Strings(labels)
 	switch format {
 	case types.OutputJSON:
 		b, err := json.MarshalIndent(labelsJSON{TaskId: taskId, Labels: labels}, "", "  ")
