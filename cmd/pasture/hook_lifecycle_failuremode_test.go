@@ -3454,8 +3454,8 @@ var openCodeBeltArtefacts = []string{
 // survive, and it is driven here rather than described.
 //
 // MUTATION, AT THE DEFECT SITE: delete the forwarding line from
-// invokeLifecycle in internal/codegen/opencode_hooks.go and regenerate, or
-// delete it from a shipped artefact alone. This test turns RED on the token
+// invokeLifecycle in internal/codegen/templates/opencode-lifecycle.ts and
+// regenerate, or delete it from a shipped artefact alone. This test turns RED on the token
 // assertion for that artefact: the belt line is still printed and the host
 // still continues, and the diagnostic is nowhere.
 func TestTheOpenCodeBeltSurfacesTheDiagnosticItSendsTheOperatorTo(t *testing.T) {
@@ -4026,16 +4026,17 @@ func TestEveryDrivableFaultRecordLossIsMeasuredOnTheHostBytes(t *testing.T) {
 }
 
 // openCodeBeltSources are the three files that must agree on the console line
-// the OpenCode plugin prints when pasture returns no decision: the generator
-// that composes it, and BOTH generated artefacts. They are listed relative to
-// the repository root.
+// the OpenCode plugin prints when pasture returns no decision: the authored
+// template that contains it, and BOTH generated artefacts. They are listed
+// relative to the repository root.
 //
 // BOTH ARTEFACTS ARE READ AND NOT ONE. They are generated from the same source
 // and other guards hold them against it, but the claim here is what an OPERATOR
 // READS, and an operator reads whichever copy their installation shipped. A pin
-// on the generator alone would be a pin on the recipe and not on the meal.
+// on the authored template alone would be a pin on the recipe and not on the
+// meal.
 var openCodeBeltSources = []string{
-	"internal/codegen/opencode_hooks.go",
+	"internal/codegen/templates/opencode-lifecycle.ts",
 	".opencode/plugins/pasture-lifecycle.ts",
 	"internal/target/opencode/assets/hooks/pasture-hooks.ts",
 }
@@ -4155,7 +4156,7 @@ func TestTheOpenCodeBeltPromisesOnlyWhatTheFaultRecordDelivers(t *testing.T) {
 
 	for _, name := range openCodeBeltSources[1:] {
 		assert.Equal(t, lines[openCodeBeltSources[0]], lines[name],
-			"the generator and every generated artefact must carry the SAME operator line, byte "+
+			"the authored template and every generated artefact must carry the SAME operator line, byte "+
 				"for byte. An operator reads whichever copy their installation shipped, so a "+
 				"copy that says something else is a second promise nobody reviewed")
 	}
