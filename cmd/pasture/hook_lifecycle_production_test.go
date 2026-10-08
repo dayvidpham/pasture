@@ -572,6 +572,7 @@ var openCode2EnabledFixtures = []struct {
 	{registration.EventOpenCode2ToolExecuteBefore, "tool.execute.before", "opencode_tool_execute_before_2_0_20.1.json", false, "2.0.21"},
 	{registration.EventOpenCode2ToolExecuteAfter, "tool.execute.after", "opencode_tool_execute_after_2_0_20.1.json", false, "2.0.21"},
 	{registration.EventOpenCode2PermissionEvaluate, "permission.evaluate", "opencode_permission_evaluate_2_0_20.2.json", false, "2.0.21"},
+	{registration.EventOpenCode2ShellCreateBefore, "shell.create.before", "opencode_shell_create_before_2_0_20.1.json", false, "2.0.21"},
 }
 
 // citedCapturePath returns the repository-relative path a capture citation
@@ -632,7 +633,7 @@ func TestEnabledOpenCode2HandlersToDurableReadBack(t *testing.T) {
 	for _, row := range openCode2EnabledFixtures {
 		wantKinds = append(wantKinds, row.event)
 	}
-	require.Equal(t, wantKinds, enabledKinds, "the 2.0.20 enabled set must be exactly the sixteen coordinates this proof drives")
+	require.Equal(t, wantKinds, enabledKinds, "the 2.0.20 enabled set must be exactly the seventeen coordinates this proof drives")
 	for _, row := range openCode2EnabledFixtures {
 		entry := byEvent[row.event]
 		require.Equal(t, activation.Enabled, entry.State, "%s must be enabled", row.native)

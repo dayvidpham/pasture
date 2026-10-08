@@ -415,12 +415,14 @@ committed corpus:
    with its value class (`identifier`, `path`, `free-text`, `number`, `bool`,
    `null`), flags every free-text field, and names every refused class and
    every reason a payload is unclearable.
-3. Substitute values, never structure. Two rules exist, applied in this
+3. Substitute values, never structure. Three rules exist, applied in this
    order and listed in the fixture's provenance: `home-path-v1` rewrites
    every spelling of the capturing user's home directory to the `user`
    placeholder — the absolute `/home/<user>`, the relative `home/<user>/`,
    the directory slug a host derives from a path (`-home-<user>-`), and any
-   occurrence inside free text — and `free-text-v1` replaces each
+   occurrence inside free text; `env-dump-v1` replaces every string value of
+   an environment-dump object by a fixed placeholder, preserving the member
+   names, nesting and types; and `free-text-v1` replaces each
    free-text string by placeholder text of the same raw length. Keys,
    nesting, types and nulls are unchanged; a fixture that lost a field, a
    key, a type or a null would no longer falsify the contract. A committed
@@ -446,7 +448,13 @@ committed corpus:
 7. Refused payload classes are never committed whatever the substitution: a
    tool response above 4096 bytes (raw file contents), an environment dump,
    and any free-text field on a prompt or message event that was not
-   substituted by rule 3. The corpus test refuses the first two by shape.
+   substituted by rule 3. The corpus test refuses the first two by shape. An
+   environment dump is admitted only under a policy exemption the user
+   grants: the fixture's provenance must list `env-dump-v1`, every value under
+   the dump must be the fixed placeholder, and the unconditional authority
+   must still name the dump. Recording the rule cannot admit a dump the rule
+   did not finish, and a string of `NAME=value` lines is never admitted
+   because the rule rewrites object members, not line listings.
 
 **Gate policy.** A lifecycle hook that cannot evaluate its event FAILS OPEN by
 default: the host receives that harness's continue bytes, exit 0, one

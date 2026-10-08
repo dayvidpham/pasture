@@ -23,6 +23,7 @@ const (
 	CaptureProofOpenCode2SessionExperimentalWsSend      CaptureProof = 215
 	CaptureProofOpenCode2SessionExperimentalWsReceive   CaptureProof = 216
 	CaptureProofOpenCode2SessionRetry                   CaptureProof = 217
+	CaptureProofOpenCode2ShellCreateBefore              CaptureProof = 218
 )
 
 // openCodeGeneratedCaptureProofs lists the generated capture proof arms of opencode_targets.go by name, in ordinal order.
@@ -45,6 +46,7 @@ var openCodeGeneratedCaptureProofs = []namedCaptureProof{
 	{name: "OpenCode2SessionExperimentalWsSend", proof: CaptureProofOpenCode2SessionExperimentalWsSend},
 	{name: "OpenCode2SessionExperimentalWsReceive", proof: CaptureProofOpenCode2SessionExperimentalWsReceive},
 	{name: "OpenCode2SessionRetry", proof: CaptureProofOpenCode2SessionRetry},
+	{name: "OpenCode2ShellCreateBefore", proof: CaptureProofOpenCode2ShellCreateBefore},
 }
 
 // OpenCode production proofs, ordinals 200-299.
@@ -67,6 +69,7 @@ const (
 	ProductionProofOpenCode2SessionExperimentalWsSend      ProductionProof = 215
 	ProductionProofOpenCode2SessionExperimentalWsReceive   ProductionProof = 216
 	ProductionProofOpenCode2SessionRetry                   ProductionProof = 217
+	ProductionProofOpenCode2ShellCreateBefore              ProductionProof = 218
 )
 
 // openCodeGeneratedProductionProofs lists the generated production proof arms of opencode_targets.go by name, in ordinal order.
@@ -89,4 +92,5 @@ var openCodeGeneratedProductionProofs = []namedProductionProof{
 	{name: "OpenCode2SessionExperimentalWsSend", proof: ProductionProofOpenCode2SessionExperimentalWsSend},
 	{name: "OpenCode2SessionExperimentalWsReceive", proof: ProductionProofOpenCode2SessionExperimentalWsReceive},
 	{name: "OpenCode2SessionRetry", proof: ProductionProofOpenCode2SessionRetry},
+	{name: "OpenCode2ShellCreateBefore", proof: ProductionProofOpenCode2ShellCreateBefore},
 }

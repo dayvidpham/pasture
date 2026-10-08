@@ -61,7 +61,7 @@ func TestOpenCodeActivationTargetEventsAreDefensive(t *testing.T) {
 }
 
 // openCode2Enabled is the enabled 2.0.20 set in registration order: the
-// sixteen coordinates whose authentic captures were cleared in
+// seventeen coordinates whose authentic captures were cleared in
 // internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md.
 var openCode2Enabled = []model.ContractEventKind{
 	registration.EventOpenCode2SessionCreated,
@@ -80,14 +80,14 @@ var openCode2Enabled = []model.ContractEventKind{
 	registration.EventOpenCode2ToolExecuteBefore,
 	registration.EventOpenCode2ToolExecuteAfter,
 	registration.EventOpenCode2PermissionEvaluate,
+	registration.EventOpenCode2ShellCreateBefore,
 }
 
 const openCodeClearance = "internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md"
 
 // TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason pins
-// the 2.0.20 posture: sixteen enabled rows each carry both proofs, the shell
-// create row is withheld by the recorded unclearable-payload decision, and no
-// row is withheld missing-fixture any more.
+// the 2.0.20 posture: seventeen enabled rows each carry both proofs, and no
+// row is withheld missing-fixture or by an unclearable payload any more.
 func TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.OpenCode2_0_20()
@@ -121,7 +121,7 @@ func TestOpenCodeV2ActivationEnablesClearedRowsAndWithholdsTheRestByReason(t *te
 	}
 	require.Equal(t, openCode2Enabled, enabled)
 	require.Empty(t, missing, "every missing-fixture coordinate now has a cleared capture")
-	require.Equal(t, []model.ContractEventKind{registration.EventOpenCode2ShellCreateBefore}, unclearable)
+	require.Empty(t, unclearable, "the shell create payload is cleared under the environment-dump exemption, so no row is withheld as unclearable")
 }
 
 // TestOpenCodeV2EnabledProofsCiteCommittedFixturesAndProductionTest pins each
@@ -146,6 +146,7 @@ func TestOpenCodeV2EnabledProofsCiteCommittedFixturesAndProductionTest(t *testin
 		registration.EventOpenCode2ToolExecuteBefore:              {"opencode_tool_execute_before_2_0_20.1.json", "tool.execute.before"},
 		registration.EventOpenCode2ToolExecuteAfter:               {"opencode_tool_execute_after_2_0_20.1.json", "tool.execute.after"},
 		registration.EventOpenCode2PermissionEvaluate:             {"opencode_permission_evaluate_2_0_20.2.json", "permission.evaluate"},
+		registration.EventOpenCode2ShellCreateBefore:              {"opencode_shell_create_before_2_0_20.1.json", "shell.create.before"},
 	}
 	entries, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)
@@ -253,9 +254,10 @@ func TestOpenCodeV2PerRowCapabilityDerivesFromEvidence(t *testing.T) {
 
 // openCode2CaptureVersion records the host version each enabled 2.0.20-contract
 // row was captured at. A fixture is captured at the recorded host version or a
-// later release the contract admits: nine rows were captured on 2.0.20, and
-// session.created and the six coordinates that did not fire in that sitting
-// were captured on 2.0.21.
+// later release the contract admits: ten rows were captured on 2.0.20
+// (including shell.create.before, cleared under the environment-dump
+// exemption), and session.created and the six coordinates that did not fire in
+// that sitting were captured on 2.0.21.
 var openCode2CaptureVersion = map[string]string{
 	"session.created":                   "2.0.21",
 	"session.prompt":                    "2.0.20",
@@ -273,6 +275,7 @@ var openCode2CaptureVersion = map[string]string{
 	"tool.execute.before":               "2.0.20",
 	"tool.execute.after":                "2.0.20",
 	"permission.evaluate":               "2.0.20",
+	"shell.create.before":               "2.0.20",
 }
 
 // TestOpenCodeV2ExpectedFixtureNamesFollowTheCaptureRule pins the capture

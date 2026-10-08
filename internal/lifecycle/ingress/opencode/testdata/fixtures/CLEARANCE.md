@@ -393,6 +393,27 @@ Captured and not used (not committed; recorded, not selected):
   None is refused or unclearable; they stay in the two capture directories
   outside the repository.
 
+### Fifth batch — OpenCode 2.0.20 environment-dump exemption — accepted 2026-10-08
+
+One fixture is cleared from the 2.0.20 sitting: the `shell.create.before`
+coordinate the second batch recorded as withheld. The policy decision and the
+fixture acceptance are recorded below, and nothing in this batch reaches a
+remote except through the landing pull request that follows them.
+
+The raw capture is the same file the second batch recorded, byte for byte:
+`opencode_shell_create_before_2_0_20.1.json` (29339 bytes,
+sha256:0ea42c790b35c0b7fbb60f2136222c9de33604c666cf875a26357b0f16d21869). Its
+`.env` member is an environment dump: 174 members, 139 of them SCREAMING_CASE
+environment variable names and 35 Nix stdenv derivation attributes
+(`buildPhase`, `buildInputs`, `phases`, `__structuredAttrs`, ...). The
+name-shape refusal is keyed on those member names, and no value-only rule that
+preserves them can clear it, which is why the second batch withheld it. The
+user's decision on 2026-10-08 is the policy exemption that admits it, and it
+accepts the residual the committed fixture carries: the `.env` member-name
+set — the 139 environment variable names and the 35 Nix attribute names —
+while every value is redacted. The fixture bytes themselves are accepted; the
+acceptance is recorded in the User acceptance section below.
+
 ## Inventory
 
 ```
@@ -1883,6 +1904,15 @@ opencode_session_context_2_0_21.8.json
   .tools.execute.input.additionalProperties                    bool       
 ```
 
+### Fifth batch — OpenCode 2.0.20
+
+The raw inventory of `opencode_shell_create_before_2_0_20.1.json` is the
+listing above (second batch). After the rules below, the committed fixture
+carries the same field paths, nesting and types: `.command` is free-text
+(placeholder), `.cwd` and `.shell` are paths, `.timeout` is a number, and every
+string leaf under `.env` is the fixed placeholder `[env-dump-v1]`. The member
+names of `.env` are unchanged.
+
 ## Rules applied, in order
 
 Per fixture, the value-only rules applied in the order applied, as listed in
@@ -1976,6 +2006,26 @@ comparing (identical, 42837 bytes). The committed bytes carry no occurrence of
 the capturing user's name (absent from all nine). Each provenance sidecar
 lists the rules applied, in order.
 
+### Fifth batch — OpenCode 2.0.20
+
+`home-path-v1`, then `env-dump-v1`, then `free-text-v1`, in that order.
+
+- `home-path-v1` rewrites the one absolute `/home/<user>` spelling in `.cwd`.
+- `env-dump-v1` replaces every string leaf under the `.env` environment-dump
+  object with the fixed placeholder `[env-dump-v1]` (174 fields). Keys,
+  nesting, types and non-string values are untouched. The placeholder is a
+  fixed token, not a same-length run, so the fixture's byte length changes
+  (5686 bytes against 29339 raw) while the structure is preserved; the fixed
+  token makes the neutralization check in the refusal exemption an exact
+  comparison.
+- `free-text-v1` replaces the one free-text field, `.command`, by `x`
+  placeholder text of the same raw length.
+
+The committed bytes were compared field by field with the raw bytes: the same
+paths, the same value types, the same nesting, the same nulls, differences only
+at the substituted fields. The committed bytes carry no occurrence of the
+capturing user's name.
+
 ## Secret scan
 
 `TestNoCommittedTestdataCarriesASecretShape` (internal/lifecycle/ingress/secretscan_test.go)
@@ -2016,6 +2066,18 @@ PASS. Reach control on the same tree: an Anthropic API-key shape planted into
 a COPY of one of these fixtures in this directory turned the scan RED naming
 that copy, the shape and the byte offset 376; the copy
 was removed and the scan returned to PASS.
+
+### Fifth batch — OpenCode 2.0.20
+
+`TestNoCommittedTestdataCarriesASecretShape`
+(internal/lifecycle/ingress/secretscan_test.go) run over the whole module with
+this fixture and its sidecar in place: PASS, zero hits, 2026-10-08.
+`TestSecretScanIsRedOnEachPlantedShape`, the nine-shape non-vacuity control:
+PASS. Reach control on the same tree: an Anthropic API-key shape was planted
+into a COPY of the new fixture in this directory, the scan turned RED naming
+that copy, the shape and byte offset 167, and the copy was removed and the scan
+returned to PASS. The `env-dump-v1` placeholder carries no secret shape and no
+`NAME=value` line.
 
 ## Refused classes
 
@@ -2077,6 +2139,36 @@ observable (`target.txt` unchanged). The shell.create.before payload remains
 withheld from the earlier batch as an unclearable environment dump; the
 unselected members of this batch are sizes not chosen, not refused.
 
+### Fifth batch — OpenCode 2.0.20
+
+The `shell.create.before` payload carries an environment dump, a class refused
+whatever the substitution. The user granted a policy exemption on 2026-10-08
+("Value-redact + policy exemption") that admits a rule-marked, value-redacted
+environment dump while every unredacted dump still fails. The fixture is
+cleared under this exemption; the acceptance is recorded in the User
+acceptance section below.
+
+The mechanism, in `internal/lifecycle/ingress/inventory.go`:
+
+- `RefusedFields` remains the unconditional authority: it still names the
+  `.env` environment dump on both the raw bytes and the committed bytes.
+- `RefusedFieldsAdmittingRedaction(body, rules)` admits a
+  `RefusalEnvironmentDump` on an object path only when (a) `rules` lists
+  `env-dump-v1` AND (b) every string leaf under that path is the fixed
+  `[env-dump-v1]` placeholder. A partly neutralized dump, a dump whose
+  provenance omits the rule, a dump with a non-string member, and a
+  `NAME=value` line string all stay refused.
+- The corpus guard `TestNoCommittedFixtureCarriesARefusedClass` reads each
+  fixture's provenance rules and calls the rule-aware authority, so a fixture
+  is admitted only by its recorded rule and its verified neutralization. Its
+  non-vacuity clause requires at least one committed fixture to be an
+  environment dump admitted this way.
+
+The residual the user accepts: the committed fixture carries the `.env` member
+names (139 environment variable names plus 35 Nix attribute names). Every value
+is the placeholder. No other refused class is present; the payload carries no
+tool response above 4096 bytes.
+
 ## Fixtures
 
 - `session_created_1_18_29.json` — session.created — sha256:71c8de3aadd8019b7e4123076625a0be6e3faaadd56a23c2a79c28a58f7ab591 (654 bytes)
@@ -2135,6 +2227,15 @@ acceptance.
 - `opencode_session_context_2_0_21.8.json` — session.context — sha256:bc40bcb66d07479c06449637e6a0a44bc4d71591565b57e2323671cd27e2b702 (42157 bytes)
 
 Sizes not chosen for the selected events are recorded in the Capture section.
+
+### Fifth batch — OpenCode 2.0.20, one fixture — accepted 2026-10-08
+
+- `opencode_shell_create_before_2_0_20.1.json` — shell.create.before — sha256:5087777494c076ee091641b3cbb39ca8b5553e3d0a90bbe0ce011af356982039 (5686 bytes)
+
+This is the 2.0.20 `shell.create.before` capture, cleared under the
+environment-dump exemption above. It is the last withheld 2.0.20 coordinate;
+the row enablement lands only after this acceptance is recorded, and this
+acceptance itself enables no row.
 
 ## User acceptance
 
@@ -2207,6 +2308,39 @@ Good to go.
 The six row enablements and the deny flip are a separate change after this
 acceptance; this acceptance itself enables no row.
 
+### Fifth batch — OpenCode 2.0.20 — accepted 2026-10-08
+
+The `shell.create.before` payload was first reported as an unclearable
+environment dump. The user was asked to decide between keeping it withheld and
+investing in a safe clearing rule. Their pointer was:
+
+```
+can run the peasant-labs/redact over the env vars
+```
+
+After the investigation reported that a value-only rule cannot clear the
+name-shape refusal without a policy decision, the user decided, verbatim:
+
+```
+Value-redact + policy exemption
+```
+
+Accepted by the user on 2026-10-08, for the one cleared fixture above, after
+the clearance evidence was presented (fixture digest, rules applied, the
+secret-scan result with its reach control, the raw-vs-cleared comparison, and
+the accepted residual). The user was asked for their acceptance wording,
+verbatim, and answered, verbatim:
+
+```
+yes, let's go.
+```
+
+This accepts the policy and the residual: the committed fixture carries the
+`.env` member names (139 environment variable names plus 35 Nix attribute
+names) while every value is redacted to the fixed `[env-dump-v1]` placeholder.
+The row enablement lands only after this acceptance is recorded, and this
+acceptance itself enables no row.
+
 ## Pull request
 
 Appended by the integrator in the landing commit: the pull request URL.
@@ -2226,6 +2360,12 @@ after the acceptance above was recorded.
 
 Landing pull request: https://github.com/dayvidpham/pasture/pull/160 — opened
 after the acceptance above was recorded.
+
+### Fifth batch — OpenCode 2.0.20
+
+Landing pull request: https://github.com/dayvidpham/pasture/pull/169 — opened
+after the acceptance above was recorded; the accepted capture first reaches a
+remote through it.
 
 ## Current source revision transport — 2026-09-07
 

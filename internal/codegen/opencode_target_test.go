@@ -768,14 +768,15 @@ func TestOpenCodeHooksModule_ParsesUnderBun(t *testing.T) {
 	}
 }
 
-// TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs drives the
+// TestOpenCodeV2TransportThroughBuiltCLIFailsOpenBeforeAStore drives the
 // generated v2 callbacks through the real built binary with constructed v2
-// payloads. shell.create.before is the only coordinate still without proofs,
-// so the handler refuses it as withheld before reading a byte: the host
-// receives its continue bytes with exit 0 and a diagnostic. The enabled
-// tool.execute.before gate faults open on the uninitialized store. No receipt
-// exists afterwards: a row without proofs evaluates nothing.
-func TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs(t *testing.T) {
+// payloads. Every 2.0.20 coordinate now has proofs, so both callbacks are
+// admitted and evaluate; the store is deliberately uninitialized, so each
+// faults open: the host receives its continue bytes with exit 0 and a
+// diagnostic naming the coordinate, and neither callback mutates its host
+// event. No receipt exists afterwards: a fault before the store resolves
+// records no occurrence.
+func TestOpenCodeV2TransportThroughBuiltCLIFailsOpenBeforeAStore(t *testing.T) {
 	bun, err := exec.LookPath("bun")
 	if err != nil {
 		t.Fatal("bun is required for the generated OpenCode production proof; enter the flake dev shell")
@@ -794,11 +795,14 @@ func TestOpenCodeV2TransportThroughBuiltCLIIsUnevaluatedBeforeProofs(t *testing.
 	runner := filepath.Join(dir, "production-proof.ts")
 	script := fmt.Sprintf(`
 import { shellCreateBefore, toolExecuteBefore } from %q;
-await shellCreateBefore({ sessionID: "constructed-2.0.20" });
+const shellEvent = { sessionID: "constructed-2.0.20" };
+const shellBefore = JSON.stringify(shellEvent);
+await shellCreateBefore(shellEvent);
+if (JSON.stringify(shellEvent) !== shellBefore) throw new Error("a faulting event mutated its host event");
 const hookEvent = { tool: "task", sessionID: "constructed-2.0.20", agent: "agent", messageID: "message", id: "call-2.0.20", input: { path: "unchanged" } };
 const before = JSON.stringify(hookEvent);
 await toolExecuteBefore(hookEvent);
-if (JSON.stringify(hookEvent) !== before) throw new Error("an unevaluated event mutated its host event");
+if (JSON.stringify(hookEvent) !== before) throw new Error("a faulting event mutated its host event");
 console.log(JSON.stringify({ forwarded: true }));
 `, moduleURL)
 	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
@@ -824,26 +828,25 @@ console.log(JSON.stringify({ forwarded: true }));
 	if strings.TrimSpace(proofOut.String()) != `{"forwarded":true}` {
 		t.Fatalf("Bun proof stdout = %q, want the forward confirmation and nothing else", proofOut.String())
 	}
-	// The withheld gate's refusal arrives as the host's continue bytes with a
-	// diagnostic naming the withheld reason; the enabled gate faults on the
-	// uninitialized store and also continues with a diagnostic.
+	// Each admitted callback faults on the uninitialized store and continues
+	// with a diagnostic naming the coordinate and the fault.
 	for _, diagnostic := range []string{
-		`withheld (reason unclearable-payload)`,
+		`could not evaluate this lifecycle hook event`,
 		`tool.execute.before`,
 		`shell.create.before`,
 	} {
 		if !strings.Contains(proofErr.String(), diagnostic) {
-			t.Errorf("withheld diagnostic lacks %q: %s", diagnostic, proofErr.String())
+			t.Errorf("fail-open diagnostic lacks %q: %s", diagnostic, proofErr.String())
 		}
 	}
-	// Refused before a byte was read: no occurrence exists for either event.
+	// No occurrence exists for either event.
 	readback := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
 	readbackOutput, err := readback.CombinedOutput()
 	if err != nil {
 		t.Fatalf("read back receipts through production CLI: %v\n%s", readbackOutput, err)
 	}
 	if strings.Contains(string(readbackOutput), "constructed-2.0.20") {
-		t.Fatalf("a withheld event left a receipt: %s", readbackOutput)
+		t.Fatalf("a faulting event left a receipt: %s", readbackOutput)
 	}
 }
 

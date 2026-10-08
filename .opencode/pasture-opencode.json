@@ -119,8 +119,9 @@
     },
     {
       "event": "shell.create.before",
-      "state": "withheld",
-      "reason": "unclearable-payload"
+      "state": "enabled",
+      "capture_proof": "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_shell_create_before_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture, environment values cleared by env-dump-v1)",
+      "production_proof": "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/shell.create.before"
     }
   ]
 }

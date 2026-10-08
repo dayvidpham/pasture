@@ -745,6 +745,7 @@ var enabledFloor = map[string][]string{
 		"session.title", "session.model.request", "session.http.request", "session.http.response",
 		"session.experimental.ws.handshake", "session.experimental.ws.send", "session.experimental.ws.receive",
 		"session.retry", "tool.execute.before", "tool.execute.after", "permission.evaluate",
+		"shell.create.before",
 	},
 }
 
