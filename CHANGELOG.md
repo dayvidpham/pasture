@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.0.12] - 2026-10-08
+
+### Added
+- feat(ingress): clear shell.create.before under an environment-dump exemption
+
+### Fixed
+- fix(pasture): narrow the claim mismatch diagnostic and pin its bounds
+- fix(tasks): return typed session-claim outcome and diagnose actor mismatch
+
+### Documentation
+- docs(ingress): append the landing pull request for the fifth batch
+- docs(ingress): record the fifth batch fixture acceptance
+- docs(ingress): mark the fifth fixture batch proposed; acceptance pending
+
+### Other
+- Merge pull request #169 from dayvidpham/pasture-f714--feat--shell-env-clearing
+- Merge pull request #168 from dayvidpham/pasture-fb13--fix--claim-race-outcome
+
 ## [0.0.11] - 2026-10-08
 
 ### Fixed
