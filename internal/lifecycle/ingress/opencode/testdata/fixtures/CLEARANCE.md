@@ -2375,3 +2375,20 @@ This addendum records no new live capture, fixture acceptance or host
 capability. No 2.0.20 capture has been cleared into this directory, so every
 2.0.20 row stays withheld for missing-fixture. All historical fixture bytes,
 sidecars, pairing and acceptance records above remain unchanged.
+
+## Best-effort diagnostic transport addendum — 2026-10-07
+
+After a successful lifecycle child exit, forwarding its diagnostic to the
+host's standard-error sink is best effort. A closed sink or a rejected write
+does not discard the child's stdout decision; a nonzero child exit remains an
+invocation failure, and a writable sink receives the child's diagnostic with
+the existing terminal newline policy. This is a generated transport behavior
+change in `internal/codegen/opencode_hooks.go`; the committed
+`.opencode/plugins/pasture-lifecycle.ts` is now sha256
+`40abe30a64ef6195e84182e95ba1a3fe03e7030c1330398a79f6897c5bf823db`.
+A reader who hashes the shipped plugin gets the digest above.
+
+This addendum records no new live capture, fixture acceptance or host
+capability. It changes no capture payload, capture kit, fixture identity,
+activation state, or response capability. All historical fixture bytes,
+sidecars, pairing and acceptance records above remain unchanged.

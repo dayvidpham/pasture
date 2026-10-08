@@ -304,9 +304,7 @@ func TestOpenCodeGeneratedPluginForwardingFailureCleansListeners(t *testing.T) {
       Object.defineProperty(process, "stderr", original);
       sink.destroy();
     }
-    assert(failure instanceof Error, mode + " must reject, not silently proceed");
-    assert.match(failure.message, /diagnostic forwarding for tool.execute.before failed/, mode + " identifies forwarding fault");
-    assert.match(failure.message, /restore the OpenCode standard-error sink and retry/, mode + " gives sink repair advice");
+    assert.equal(failure, undefined, mode + " sink failure must not discard the child's successful proceed decision");
     assert.deepEqual(listeners, [0, 0], mode + " leaves no error or close listeners");
     assert(children.at(-1).reaped, mode + " has already reaped the healthy child");
     assert.equal(children.at(-1).kills, 0, mode + " does not kill a completed child");
@@ -328,7 +326,9 @@ func TestOpenCodeGeneratedPluginEmptyBodyDiagnostic(t *testing.T) {
   assert.equal(failure, undefined, "empty-body belt continues unevaluated");
   assert.equal(logged.length, 1, "empty-body belt logs once");
   assert.match(logged[0], /did not evaluate tool.execute.before/, "empty-body diagnostic names event");
-  assert.match(logged[0], /Read the pasture diagnostic on standard error first/, "empty-body diagnostic directs operator to forwarded bytes");
+  assert.match(logged[0], /Read the pasture diagnostic on standard error first/, "empty-body diagnostic still directs the operator to standard error");
+  assert.match(logged[0], /forwards it there best effort/, "empty-body diagnostic names the best-effort forwarding");
+  assert.match(logged[0], /may be missing when the host has closed that stream/, "empty-body diagnostic does not promise delivery");
 `)
 	if stderr != "  old binary diagnostic α\n" {
 		t.Fatalf("empty-body diagnostic = %q, want exact child bytes plus the existing terminal newline", stderr)
