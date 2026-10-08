@@ -55,6 +55,16 @@ type HookLifecycleInput struct {
 	Operations        receipt.OperationIDSource
 	// ActorClaim binds a session, not the receipt author. Zero means no claim.
 	ActorClaim tasks.ActorClaim
+	// Diagnostics is the best-effort standard-error sink for an ancillary
+	// condition that must NOT change the host outcome. Production wires the
+	// command's standard error; a nil sink discards the line, exactly as every
+	// other best-effort hook diagnostic is discarded when no stream is
+	// available. The session-claim mismatch line is its first producer: the
+	// receipt is committed BEFORE the claim is written, so a mismatch cannot
+	// travel in the committed host Outcome and this is the only channel left to
+	// it. The sink is written from the work goroutine, before the command emits
+	// its own outcome, so the two never interleave.
+	Diagnostics io.Writer
 	// Barrier is called ONCE, after the durable receipt has been committed and
 	// BEFORE the native continuation bytes are produced for the host. It names
 	// the commit-to-emit boundary, which is where the commit-before-stdout
@@ -505,11 +515,52 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	if err := tasks.RecordLifecycleSessionClaim(ctx, tracker, in.Harness, event.Kind, capture.delivery.Bindings, in.ActorClaim, in.Clock); err != nil {
+	claimOutcome, err := tasks.RecordLifecycleSessionClaim(ctx, tracker, in.Harness, event.Kind, capture.delivery.Bindings, in.ActorClaim, in.Clock)
+	if err != nil {
 		return backend.HostResponse{}, fmt.Errorf("%w: %w", ErrLifecycleCommittedWithoutContinuation, err)
+	}
+	if line := sessionClaimMismatchDiagnostic(in, capture.delivery.Bindings, claimOutcome); line != "" && in.Diagnostics != nil {
+		fmt.Fprintln(in.Diagnostics, line)
 	}
 	response = committed
 	return response, nil
+}
+
+// sessionClaimMismatchDiagnostic renders the ONE best-effort diagnostic line for
+// a claim this invocation attempted but did not store because the session was
+// already held by another actor. It returns "" when there is nothing to report,
+// which is every ordinary claim: a written claim, a skipped claim, and an
+// already-claimed session whose stored actor is the one this invocation
+// attempted.
+//
+// THE CHANNEL IS THE COMMAND'S STANDARD ERROR, AND THAT IS FORCED. The receipt
+// is committed before the claim is written, and the commit settlement publishes
+// an immutable host Outcome, so the mismatch cannot ride the host response
+// bytes. The claim write must also not become a journal write: the receipt
+// already exists and a second one would claim an evaluation that did not
+// happen. What is left is a diagnostic the host may forward best-effort, and
+// the plugin does forward the hook's standard error. It names BOTH actors,
+// because the whole point of reporting a lost claim is to say who holds the
+// session and who tried to take it.
+func sessionClaimMismatchDiagnostic(in HookLifecycleInput, bindings []model.NativeBinding, outcome tasks.SessionClaimOutcome) string {
+	if !outcome.Mismatch(in.ActorClaim) {
+		return ""
+	}
+	session, err := tasks.LifecycleSession(bindings)
+	if err != nil {
+		session = "unknown"
+	}
+	stored := outcome.StoredActor
+	if stored == "" {
+		stored = "unknown (the store refused the read that names the holder)"
+	}
+	return fmt.Sprintf(
+		"pasture: session claim not stored (%s) on harness %q session %q: this invocation attempted to claim actor %q, "+
+			"but the store already holds actor %q; the first claim stands and this invocation's claim was not stored; "+
+			"this happened in internal/handlers/hook_lifecycle.go after the lifecycle receipt was committed, so the event "+
+			"was recorded and the claim mismatch does not change the committed host decision; the receipt remains authored by the system actor; if this is "+
+			"unexpected, inspect pasture_session_claim for this session and check which host process exported PASTURE_ACTOR_ID",
+		outcome.State.String(), string(in.Harness), session, string(in.ActorClaim), stored)
 }
 
 // evaluateGate answers the host's question for one invocation, and it answers

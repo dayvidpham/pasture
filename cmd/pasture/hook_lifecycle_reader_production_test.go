@@ -64,11 +64,12 @@ func seedReaderClaim(t *testing.T, dbPath string, harness ir.HarnessID, session 
 	case ir.HarnessOpenCode:
 		kind = registration.EventOpenCodeSessionCreated
 	}
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(
+	_, err = tasks.RecordLifecycleSessionClaim(
 		context.Background(), tracker, harness, kind,
 		[]model.NativeBinding{{Kind: model.BindingSession, Value: session}},
 		tasks.ActorClaim(agent.ID.String()), lifecycleCLIClock{},
-	))
+	)
+	require.NoError(t, err)
 	return agent.ID
 }
 
@@ -960,10 +961,11 @@ func TestReaderGateInvocationCostIsMeasuredWithoutACeiling(t *testing.T) {
 		const samples = 25
 		started := time.Now()
 		for sample := 0; sample < samples; sample++ {
-			require.NoError(t, tasks.RecordLifecycleSessionClaim(
+			_, claimErr := tasks.RecordLifecycleSessionClaim(
 				context.Background(), tracker, ir.HarnessClaudeCode, registration.EventSessionStart,
 				[]model.NativeBinding{{Kind: model.BindingSession, Value: fmt.Sprintf("cost-session-%02d", sample)}},
-				tasks.ActorClaim(agent.ID.String()), lifecycleCLIClock{}))
+				tasks.ActorClaim(agent.ID.String()), lifecycleCLIClock{})
+			require.NoError(t, claimErr)
 		}
 		t.Logf("cost: session-start claim write (in-process, distinct sessions) mean=%s over %d samples",
 			time.Since(started)/samples, samples)

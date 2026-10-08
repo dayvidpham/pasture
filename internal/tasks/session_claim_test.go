@@ -60,12 +60,23 @@ func TestSessionClaimIsWrittenOnceAndKeepsTheFirstActor(t *testing.T) {
 	t.Parallel()
 	tracker, db, _ := claimStore(t)
 	bindings := []model.NativeBinding{{Kind: model.BindingSession, NativeName: "session_id", Value: "one"}}
-	claim := func(actor tasks.ActorClaim) error {
+	claim := func(actor tasks.ActorClaim) (tasks.SessionClaimOutcome, error) {
 		return tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessClaudeCode, registration.EventSessionStart, bindings, actor, claimClock{})
 	}
-	require.NoError(t, claim("first"))
-	require.NoError(t, claim("second"), "a conflicting later claim is a silent no-op, not a fault")
-	require.NoError(t, claim("first"), "an already-claimed session is a no-op even for the same actor")
+	firstOutcome, err := claim("first")
+	require.NoError(t, err)
+	require.Equal(t, tasks.SessionClaimWrote, firstOutcome.State)
+	require.Equal(t, "first", firstOutcome.StoredActor)
+	secondOutcome, err := claim("second")
+	require.NoError(t, err, "a conflicting later claim is a typed outcome, not a fault")
+	require.Equal(t, tasks.SessionClaimAlreadyClaimed, secondOutcome.State)
+	require.Equal(t, "first", secondOutcome.StoredActor, "an already-claimed session reports the stored actor")
+	require.True(t, secondOutcome.Mismatch("second"), "a differing attempted actor is a mismatch")
+	require.False(t, secondOutcome.Mismatch("first"), "the same actor is not a mismatch")
+	sameOutcome, err := claim("first")
+	require.NoError(t, err, "an already-claimed session is a no-op even for the same actor")
+	require.Equal(t, tasks.SessionClaimAlreadyClaimed, sameOutcome.State)
+	require.False(t, sameOutcome.Mismatch("first"))
 	var count int
 	var actor string
 	var at int64
@@ -74,8 +85,10 @@ func TestSessionClaimIsWrittenOnceAndKeepsTheFirstActor(t *testing.T) {
 	require.Equal(t, "first", actor, "duplicate claim must leave the first actor unchanged")
 	require.Equal(t, claimClock{}.Now().UnixNano(), at, "duplicate claim must leave the first timestamp unchanged")
 	bindings[0].Value = "two"
-	require.NoError(t, claim("second"))
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessCodex, registration.EventCodexSessionStart, bindings, "third", claimClock{}))
+	_, err = claim("second")
+	require.NoError(t, err)
+	_, err = tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessCodex, registration.EventCodexSessionStart, bindings, "third", claimClock{})
+	require.NoError(t, err)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pasture_session_claim`).Scan(&count))
 	require.Equal(t, 3, count, "different sessions and harnesses have separate claims")
 }
@@ -85,10 +98,17 @@ func TestSessionClaimIsWrittenOnceAndKeepsTheFirstActor(t *testing.T) {
 // event is skipped whatever its kind, so no event can claim an unknown session.
 func TestSessionClaimZeroActorAndSessionlessEventsDoNotWrite(t *testing.T) {
 	t.Parallel()
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), nil, ir.HarnessClaudeCode, registration.EventSessionStart, nil, "", nil))
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), nil, ir.HarnessClaudeCode, registration.EventPreToolUse, nil, "actor", nil))
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), nil, ir.HarnessClaudeCode, registration.EventPreToolUse,
-		[]model.NativeBinding{{Kind: model.BindingTurn, Value: "turn"}}, "actor", nil))
+	zero, err := tasks.RecordLifecycleSessionClaim(t.Context(), nil, ir.HarnessClaudeCode, registration.EventSessionStart, nil, "", nil)
+	require.NoError(t, err)
+	require.Equal(t, tasks.SessionClaimNotAttempted, zero.State, "a zero actor writes nothing")
+	sessionless, err := tasks.RecordLifecycleSessionClaim(t.Context(), nil, ir.HarnessClaudeCode, registration.EventPreToolUse, nil, "actor", nil)
+	require.NoError(t, err)
+	require.Equal(t, tasks.SessionClaimNotAttempted, sessionless.State, "a sessionless event writes nothing")
+	require.False(t, sessionless.Mismatch("actor"), "a skipped claim is never a mismatch")
+	nonSession, err := tasks.RecordLifecycleSessionClaim(t.Context(), nil, ir.HarnessClaudeCode, registration.EventPreToolUse,
+		[]model.NativeBinding{{Kind: model.BindingTurn, Value: "turn"}}, "actor", nil)
+	require.NoError(t, err)
+	require.Equal(t, tasks.SessionClaimNotAttempted, nonSession.State)
 }
 
 // RED: restrict the write to a session-start event kind. The FIRST OBSERVED
@@ -111,13 +131,19 @@ func TestSessionClaimWritesOnTheFirstObservedEventOfAnyKind(t *testing.T) {
 			t.Parallel()
 			tracker, db, _ := claimStore(t)
 			bindings := []model.NativeBinding{{Kind: model.BindingSession, Value: testCase.session}}
-			require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), tracker, testCase.harness, testCase.event, bindings, "first-actor", claimClock{}))
+			first, err := tasks.RecordLifecycleSessionClaim(t.Context(), tracker, testCase.harness, testCase.event, bindings, "first-actor", claimClock{})
+			require.NoError(t, err)
+			require.Equal(t, tasks.SessionClaimWrote, first.State, "the first observed event must write the claim")
+			require.Equal(t, "first-actor", first.StoredActor)
 			var count int
 			var actor string
 			require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ? AND session = ?`, string(testCase.harness), testCase.session).Scan(&count, &actor))
 			require.Equal(t, 1, count, "the first observed event must write the claim")
 			require.Equal(t, "first-actor", actor)
-			require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), tracker, testCase.harness, testCase.event, bindings, "second-actor", claimClock{}))
+			later, err := tasks.RecordLifecycleSessionClaim(t.Context(), tracker, testCase.harness, testCase.event, bindings, "second-actor", claimClock{})
+			require.NoError(t, err)
+			require.Equal(t, tasks.SessionClaimAlreadyClaimed, later.State)
+			require.Equal(t, "first-actor", later.StoredActor)
 			require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ? AND session = ?`, string(testCase.harness), testCase.session).Scan(&count, &actor))
 			require.Equal(t, 1, count, "a later event must not add a claim")
 			require.Equal(t, "first-actor", actor, "a later event must not replace the first actor")
@@ -257,14 +283,56 @@ func TestSessionClaimV2SessionCreatedWritesClaim(t *testing.T) {
 	t.Parallel()
 	tracker, db, _ := claimStore(t)
 	bindings := []model.NativeBinding{{Kind: model.BindingSession, NativeName: "sessionID", Value: "v2-session"}}
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessOpenCode, registration.EventOpenCode2SessionCreated, bindings, "v2-actor", claimClock{}))
+	first, err := tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessOpenCode, registration.EventOpenCode2SessionCreated, bindings, "v2-actor", claimClock{})
+	require.NoError(t, err)
+	require.Equal(t, tasks.SessionClaimWrote, first.State)
 	var count int
 	var actor string
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ? AND session = ?`, string(ir.HarnessOpenCode), "v2-session").Scan(&count, &actor))
 	require.Equal(t, 1, count, "the v2 session-created coordinate must write the session claim")
 	require.Equal(t, "v2-actor", actor)
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessOpenCode, registration.EventOpenCode2SessionPrompt, bindings, "other", claimClock{}))
+	later, err := tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessOpenCode, registration.EventOpenCode2SessionPrompt, bindings, "other", claimClock{})
+	require.NoError(t, err)
+	require.Equal(t, tasks.SessionClaimAlreadyClaimed, later.State)
+	require.Equal(t, "v2-actor", later.StoredActor)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ? AND session = ?`, string(ir.HarnessOpenCode), "v2-session").Scan(&count, &actor))
 	require.Equal(t, 1, count, "a later v2 coordinate must not add a second claim")
 	require.Equal(t, "v2-actor", actor, "a later v2 coordinate must not replace the first actor")
+}
+
+// TestSessionClaimLostRaceNamesTheWinner is the race proof. A writer that loses
+// the race must not fail, and it must name the actor that won instead of
+// silently discarding the outcome the way the old no-op did. The race is forced
+// deterministically with a BEFORE INSERT trigger that installs the winner
+// between this writer's read and its INSERT ... ON CONFLICT DO NOTHING, so the
+// insert affects no row and the re-read names the winner.
+//
+// RED when: a lost race becomes an error, reports wrote, or leaves StoredActor
+// empty while a winner row exists.
+func TestSessionClaimLostRaceNamesTheWinner(t *testing.T) {
+	t.Parallel()
+	tracker, db, _ := claimStore(t)
+	// recursive_triggers stays OFF (the SQLite default): the trigger's own
+	// insert must not fire the trigger again.
+	_, err := db.ExecContext(t.Context(), `PRAGMA recursive_triggers = OFF`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(t.Context(), `CREATE TRIGGER claim_lost_race_winner BEFORE INSERT ON pasture_session_claim
+		WHEN NEW.session = 'lost-race'
+		BEGIN
+			INSERT INTO pasture_session_claim (harness, session, actor, claimed_at)
+			VALUES (NEW.harness, NEW.session, 'winner', 7);
+		END`)
+	require.NoError(t, err)
+	bindings := []model.NativeBinding{{Kind: model.BindingSession, NativeName: "session_id", Value: "lost-race"}}
+	outcome, err := tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessClaudeCode, registration.EventPreToolUse, bindings, "loser", claimClock{})
+	require.NoError(t, err, "a lost race is a typed outcome, never a hook failure")
+	require.Equal(t, tasks.SessionClaimLostRace, outcome.State)
+	require.Equal(t, "winner", outcome.StoredActor, "the winner must be named")
+	require.True(t, outcome.Mismatch("loser"))
+	require.False(t, outcome.Mismatch("winner"))
+	var count int
+	var actor string
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ? AND session = ?`, string(ir.HarnessClaudeCode), "lost-race").Scan(&count, &actor))
+	require.Equal(t, 1, count, "the winner's row is the only row")
+	require.Equal(t, "winner", actor)
 }

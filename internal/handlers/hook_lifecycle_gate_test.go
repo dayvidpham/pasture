@@ -943,11 +943,12 @@ func ClaimGateSession(t *testing.T, dbPath string, harness ir.HarnessID, session
 	defer func() { require.NoError(t, tracker.Close()) }()
 	agent, err := tracker.RegisterHumanAgent("lifecycle-gate-proof", "gate-owner", "gate-owner@example.invalid")
 	require.NoError(t, err)
-	require.NoError(t, tasks.RecordLifecycleSessionClaim(
+	_, err = tasks.RecordLifecycleSessionClaim(
 		context.Background(), tracker, harness, sessionStartEventKind(harness),
 		[]model.NativeBinding{{Kind: model.BindingSession, Value: session}},
 		tasks.ActorClaim(agent.ID.String()), gateClock{},
-	))
+	)
+	require.NoError(t, err)
 	return agent.ID
 }
 

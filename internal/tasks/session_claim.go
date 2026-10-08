@@ -18,6 +18,77 @@ import (
 // actor is retained as claimed; the authority reader decides whether it exists.
 type ActorClaim string
 
+// SessionClaimState names what ONE session-claim attempt did. It is the typed
+// half of the claim write's result: the hook path may never fail because a
+// claim was not stored, so the caller that wants to know what happened reads
+// this instead of an error.
+type SessionClaimState int
+
+const (
+	// SessionClaimNotAttempted is the zero value: the invocation carried no
+	// actor, carried no session binding, or was refused before the store was
+	// reached, so no claim row was read or written. It is the zero value on
+	// purpose, so a caller that ignores the outcome cannot mistake a skipped
+	// claim for a written one.
+	SessionClaimNotAttempted SessionClaimState = iota
+	// SessionClaimWrote means this invocation inserted the claim row, so the
+	// store now holds the actor it attempted.
+	SessionClaimWrote
+	// SessionClaimAlreadyClaimed means a claim row already existed; this
+	// invocation read it and wrote nothing.
+	SessionClaimAlreadyClaimed
+	// SessionClaimLostRace means the INSERT ... ON CONFLICT DO NOTHING changed
+	// no row because another writer claimed the session between this
+	// invocation's read and its insert. StoredActor names the winner when it
+	// could be read back.
+	SessionClaimLostRace
+)
+
+// String returns the stable, lower-case spelling of the state, for a diagnostic
+// a maintainer can grep. The zero value answers "not_attempted" rather than the
+// empty string, so a member that was never set is distinguishable in text.
+func (s SessionClaimState) String() string {
+	switch s {
+	case SessionClaimWrote:
+		return "wrote"
+	case SessionClaimAlreadyClaimed:
+		return "already_claimed"
+	case SessionClaimLostRace:
+		return "lost_race"
+	default:
+		return "not_attempted"
+	}
+}
+
+// SessionClaimOutcome is what one session-claim attempt did, plus the actor the
+// store holds for the session afterwards. It is returned beside an error, and
+// the error is reserved for a genuine fault: the three ordinary results — a
+// written claim, an already-claimed session, and a claim that lost the race —
+// are all nil-error outcomes, because none of them may fail the hook.
+type SessionClaimOutcome struct {
+	State SessionClaimState
+	// StoredActor is the actor the store now holds for the session: the actor
+	// read before a write that found an existing row, the actor this invocation
+	// wrote, or the winner read back after a lost race. It is empty when no
+	// claim row exists or the winner could not be read back.
+	StoredActor string
+}
+
+// Mismatch reports whether this outcome names a stored actor different from the
+// attempted one. It is true only for an already-claimed session or a lost race
+// whose stored actor differs; a written claim and a skipped claim are never a
+// mismatch. The comparison is deliberately not attempted for a state that
+// stores nobody, so a non-empty actor on a sessionless event cannot manufacture
+// a diagnostic about an actor nobody recorded.
+func (o SessionClaimOutcome) Mismatch(attempted ActorClaim) bool {
+	switch o.State {
+	case SessionClaimAlreadyClaimed, SessionClaimLostRace:
+		return o.StoredActor != string(attempted)
+	default:
+		return false
+	}
+}
+
 // RecordLifecycleSessionClaim stores a claim the first time a session is
 // observed. It reads the row for the event's session and, only when no row
 // exists, performs one INSERT ... ON CONFLICT DO NOTHING with no retry.
@@ -33,29 +104,31 @@ type ActorClaim string
 // harness.
 //
 // A zero claim, an event with no session binding, and an event for a session
-// that already has a claim all return nil without reading a clock or taking a
-// write lock beyond the claim read. The supplied actor is deliberately not
-// resolved here: an unknown claim is still a claim, and is not an unbound
+// that already has a claim all return a nil error without reading a clock or
+// taking a write lock beyond the claim read. The supplied actor is deliberately
+// not resolved here: an unknown claim is still a claim, and is not an unbound
 // session. The first claim wins; a claim that loses the race between this read
-// and this insert is a silent no-op, not a fault, because the hot hook path
-// must not fail every subsequent event of an already-claimed session.
-func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTracker, harness ir.HarnessID, event model.ContractEventKind, bindings []model.NativeBinding, claim ActorClaim, clock receipt.Clock) error {
+// and this insert reports SessionClaimLostRace rather than a fault, because the
+// hot hook path must not fail every subsequent event of an already-claimed
+// session. The typed outcome is what lets a caller name the winner that the
+// silent no-op used to discard.
+func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTracker, harness ir.HarnessID, event model.ContractEventKind, bindings []model.NativeBinding, claim ActorClaim, clock receipt.Clock) (SessionClaimOutcome, error) {
 	if claim == "" {
-		return nil
+		return SessionClaimOutcome{}, nil
 	}
 	session, err := lifecycleSession(bindings)
 	if err != nil {
-		return err
+		return SessionClaimOutcome{}, err
 	}
 	if strings.TrimSpace(session) == "" {
-		return nil
+		return SessionClaimOutcome{}, nil
 	}
 	if ctx == nil || clock == nil || strings.TrimSpace(string(claim)) != string(claim) {
-		return sessionClaimError("the context, clock, session identity, or actor claim is invalid", "pass a context, clock, verified session identity, and non-blank actor identifier")
+		return SessionClaimOutcome{}, sessionClaimError("the context, clock, session identity, or actor claim is invalid", "pass a context, clock, verified session identity, and non-blank actor identifier")
 	}
 	store, ok := tracker.(lifecycleReceiptStore)
 	if !ok || store.auditDBHandle() == nil {
-		return sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
+		return SessionClaimOutcome{}, sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}
 	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().SQLiteBusy())
 	defer cancel()
@@ -63,23 +136,36 @@ func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTrack
 	// already claimed, and that case must take no write lock. A read fault is a
 	// fault: reporting an already-claimed session as claimable would let a
 	// second writer race the first.
-	if _, present, readErr := readSessionClaimRow(bounded, store.auditDBHandle(), harness, session); readErr != nil {
-		return sessionClaimError("the store refused the claim read: "+readErr.Error(), "release other store writers or repair the database, then start a new session")
+	if stored, present, readErr := readSessionClaimRow(bounded, store.auditDBHandle(), harness, session); readErr != nil {
+		return SessionClaimOutcome{}, sessionClaimError("the store refused the claim read: "+readErr.Error(), "release other store writers or repair the database, then start a new session")
 	} else if present {
-		return nil
+		return SessionClaimOutcome{State: SessionClaimAlreadyClaimed, StoredActor: stored}, nil
 	}
 	result, err := store.auditDBHandle().ExecContext(bounded,
 		`INSERT INTO pasture_session_claim (harness, session, actor, claimed_at) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(harness, session) DO NOTHING`, string(harness), session, string(claim), clock.Now().UnixNano())
 	if err != nil {
-		return sessionClaimError("the store refused the claim write: "+err.Error(), "release other store writers or repair the database, then start a new session")
+		return SessionClaimOutcome{}, sessionClaimError("the store refused the claim write: "+err.Error(), "release other store writers or repair the database, then start a new session")
 	}
-	if _, err := result.RowsAffected(); err != nil {
-		return sessionClaimError("the store did not report whether it stored the claim: "+err.Error(), "inspect pasture_session_claim before you start a new session")
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return SessionClaimOutcome{}, sessionClaimError("the store did not report whether it stored the claim: "+err.Error(), "inspect pasture_session_claim before you start a new session")
 	}
-	// A RowsAffected of 0 means another writer claimed the session between this
-	// read and this insert. The first claim wins and this one is a silent no-op.
-	return nil
+	if affected == 0 {
+		// A RowsAffected of 0 means another writer claimed the session between
+		// this read and this insert. The first claim wins and this one wrote
+		// nothing. Naming the winner is BEST EFFORT: the receipt is already
+		// committed and the first claim already stands, so a re-read fault must
+		// not turn a lost race into a hook failure. An empty StoredActor is the
+		// honest answer when the winner cannot be read back, and the caller's
+		// diagnostic still fires because the attempted actor cannot equal it.
+		winner, present, readErr := readSessionClaimRow(bounded, store.auditDBHandle(), harness, session)
+		if readErr != nil || !present {
+			return SessionClaimOutcome{State: SessionClaimLostRace}, nil
+		}
+		return SessionClaimOutcome{State: SessionClaimLostRace, StoredActor: winner}, nil
+	}
+	return SessionClaimOutcome{State: SessionClaimWrote, StoredActor: string(claim)}, nil
 }
 
 // lifecycleSession extracts the session identity from verified native
