@@ -94,7 +94,7 @@ func lifecycleSession(bindings []model.NativeBinding) (string, error) {
 	for _, binding := range bindings {
 		if binding.Kind == model.BindingSession {
 			if session != "" {
-				return "", sessionClaimError("more than one session identity was supplied", "pass the verified session-start bindings")
+				return "", sessionClaimError("more than one session identity was supplied", "pass exactly one verified session binding")
 			}
 			session = binding.Value
 		}

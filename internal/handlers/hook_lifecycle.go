@@ -527,8 +527,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 //     start, so a refusal here means the event reached the gate from outside
 //     every manifest this build holds.
 //  3. THE SESSION IDENTITY COMES FROM THE SAME HELPER THE CLAIM WRITE USES, so
-//     the gate can never look up a different session than the one a session
-//     start event claimed. Two session identities are a fault rather than a
+//     the gate can never look up a different session than the one the claim
+//     writer claimed. Two session identities are a fault rather than a
 //     choice.
 //  4. One snapshot answers both the claim and the authority. The authority is
 //     read ONLY for a bound claim, because an unbound snapshot refuses every

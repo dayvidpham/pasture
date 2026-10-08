@@ -478,19 +478,24 @@ binds when it is the first event observed. Without both conditions, every gate
 records a PROCEED whose reason says the session was UNBOUND, and no gate can
 deny anything; that is the fail-open default rather than a fault, and the
 receipt names the reason so the difference between "allowed" and "never asked"
-stays readable after the fact. The claim is written after the gate on the event
-that binds it, so the FIRST event of a session is honestly evaluated as UNBOUND
-and every later event on that session reads the claim; a host that delivers a
-gate as the session's first observed event is in that same state for that one
+stays readable after the fact. While no claim exists, evaluated gates record
+UNBOUND; an eligible event writes the claim after any gate evaluation and
+successful receipt commit. Later evaluated gates after a successful claim write
+read that claim — an observation event does not evaluate a gate, and a later
+invocation without an actor does not unbind an existing claim. A host that
+delivers a gate as the session's first observed event is UNBOUND for that one
 event, and not after it.
 
 **A DENIAL IS REACHABLE ONLY WHERE THE HOST'S ROW CARRIES A RESPONSE
 CHANNEL.** The durable reason is recorded on every evaluated gate, whatever the
 host can do about it, but a host row that cannot express a refusal is answered
 with its proceed bytes and the receipt carries the UNENFORCED denial as its
-reason. That channel is cited for Claude Code only, so a Deny is representable
-there and nowhere else today: the Codex and OpenCode rows proceed with the
-reason recorded.
+reason. Which rows carry that channel is row-specific and evidence-bound:
+Claude Code's gate rows cite their host documentation, and OpenCode's
+`permission.evaluate` row cites the committed live capture in which the host
+honoured pasture's deny as a blocked tool carrying pasture's reason (the fourth
+batch of the OpenCode fixture clearance record). Rows without such evidence
+proceed with the reason recorded.
 
 ### Schema migration (`pasture migrate`)
 
