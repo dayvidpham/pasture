@@ -393,12 +393,12 @@ Captured and not used (not committed; recorded, not selected):
   None is refused or unclearable; they stay in the two capture directories
   outside the repository.
 
-### Fifth batch — OpenCode 2.0.20 environment-dump exemption — proposed 2026-10-08; fixture acceptance pending
+### Fifth batch — OpenCode 2.0.20 environment-dump exemption — accepted 2026-10-08
 
-One fixture is proposed from the 2.0.20 sitting: the `shell.create.before`
-coordinate the second batch recorded as withheld. The policy decision below is
-granted; the fixture bytes await the user's acceptance, and nothing in this
-batch may reach a remote before it is recorded.
+One fixture is cleared from the 2.0.20 sitting: the `shell.create.before`
+coordinate the second batch recorded as withheld. The policy decision and the
+fixture acceptance are recorded below, and nothing in this batch reaches a
+remote except through the landing pull request that follows them.
 
 The raw capture is the same file the second batch recorded, byte for byte:
 `opencode_shell_create_before_2_0_20.1.json` (29339 bytes,
@@ -409,11 +409,10 @@ environment variable names and 35 Nix stdenv derivation attributes
 name-shape refusal is keyed on those member names, and no value-only rule that
 preserves them can clear it, which is why the second batch withheld it. The
 user's decision on 2026-10-08 is the policy exemption that admits it, and it
-accepts the residual the committed fixture would carry: the `.env` member-name
+accepts the residual the committed fixture carries: the `.env` member-name
 set — the 139 environment variable names and the 35 Nix attribute names —
-while every value is redacted. The fixture bytes themselves are proposed and
-are not cleared until the user's acceptance is recorded in the User acceptance
-section below.
+while every value is redacted. The fixture bytes themselves are accepted; the
+acceptance is recorded in the User acceptance section below.
 
 ## Inventory
 
@@ -1908,7 +1907,7 @@ opencode_session_context_2_0_21.8.json
 ### Fifth batch — OpenCode 2.0.20
 
 The raw inventory of `opencode_shell_create_before_2_0_20.1.json` is the
-listing above (second batch). After the rules below, the proposed fixture
+listing above (second batch). After the rules below, the committed fixture
 carries the same field paths, nesting and types: `.command` is free-text
 (placeholder), `.cwd` and `.shell` are paths, `.timeout` is a number, and every
 string leaf under `.env` is the fixed placeholder `[env-dump-v1]`. The member
@@ -2145,14 +2144,14 @@ unselected members of this batch are sizes not chosen, not refused.
 The `shell.create.before` payload carries an environment dump, a class refused
 whatever the substitution. The user granted a policy exemption on 2026-10-08
 ("Value-redact + policy exemption") that admits a rule-marked, value-redacted
-environment dump while every unredacted dump still fails. The proposed fixture
-is cleared only when the user's acceptance is recorded in the User acceptance
-section below.
+environment dump while every unredacted dump still fails. The fixture is
+cleared under this exemption; the acceptance is recorded in the User
+acceptance section below.
 
 The mechanism, in `internal/lifecycle/ingress/inventory.go`:
 
 - `RefusedFields` remains the unconditional authority: it still names the
-  `.env` environment dump on both the raw bytes and the proposed bytes.
+  `.env` environment dump on both the raw bytes and the committed bytes.
 - `RefusedFieldsAdmittingRedaction(body, rules)` admits a
   `RefusalEnvironmentDump` on an object path only when (a) `rules` lists
   `env-dump-v1` AND (b) every string leaf under that path is the fixed
@@ -2165,10 +2164,10 @@ The mechanism, in `internal/lifecycle/ingress/inventory.go`:
   non-vacuity clause requires at least one committed fixture to be an
   environment dump admitted this way.
 
-The residual the exemption carries (accepted with the policy decision): the
-fixture would carry the `.env` member names (139 environment variable names
-plus 35 Nix attribute names). Every value is the placeholder. No other refused
-class is present; the payload carries no tool response above 4096 bytes.
+The residual the user accepts: the committed fixture carries the `.env` member
+names (139 environment variable names plus 35 Nix attribute names). Every value
+is the placeholder. No other refused class is present; the payload carries no
+tool response above 4096 bytes.
 
 ## Fixtures
 
@@ -2229,15 +2228,14 @@ acceptance.
 
 Sizes not chosen for the selected events are recorded in the Capture section.
 
-### Fifth batch — OpenCode 2.0.20, one fixture — proposed; fixture acceptance pending (policy decision 2026-10-08)
+### Fifth batch — OpenCode 2.0.20, one fixture — accepted 2026-10-08
 
 - `opencode_shell_create_before_2_0_20.1.json` — shell.create.before — sha256:5087777494c076ee091641b3cbb39ca8b5553e3d0a90bbe0ce011af356982039 (5686 bytes)
 
-This is the 2.0.20 `shell.create.before` capture, proposed for clearance under
-the environment-dump exemption above. It is the last withheld 2.0.20
-coordinate. The fixture is not cleared until the user's acceptance is recorded
-in the User acceptance section below; the row enablement is a separate change
-after it.
+This is the 2.0.20 `shell.create.before` capture, cleared under the
+environment-dump exemption above. It is the last withheld 2.0.20 coordinate;
+the row enablement lands only after this acceptance is recorded, and this
+acceptance itself enables no row.
 
 ## User acceptance
 
@@ -2310,7 +2308,7 @@ Good to go.
 The six row enablements and the deny flip are a separate change after this
 acceptance; this acceptance itself enables no row.
 
-### Fifth batch — OpenCode 2.0.20 — proposed 2026-10-08; fixture acceptance pending
+### Fifth batch — OpenCode 2.0.20 — accepted 2026-10-08
 
 The `shell.create.before` payload was first reported as an unclearable
 environment dump. The user was asked to decide between keeping it withheld and
@@ -2327,13 +2325,21 @@ name-shape refusal without a policy decision, the user decided, verbatim:
 Value-redact + policy exemption
 ```
 
-This decision accepts the policy and the residual: the committed fixture would
-carry the `.env` member names (139 environment variable names plus 35 Nix
-attribute names) while every value is redacted to the fixed `[env-dump-v1]`
-placeholder. THE FIXTURE ACCEPTANCE IS STILL OWED: when the user grants it,
-their wording, verbatim, and its date are recorded here, and only then does
-the batch become accepted. The row enablement is a separate change after that
-acceptance.
+Accepted by the user on 2026-10-08, for the one cleared fixture above, after
+the clearance evidence was presented (fixture digest, rules applied, the
+secret-scan result with its reach control, the raw-vs-cleared comparison, and
+the accepted residual). The user was asked for their acceptance wording,
+verbatim, and answered, verbatim:
+
+```
+yes, let's go.
+```
+
+This accepts the policy and the residual: the committed fixture carries the
+`.env` member names (139 environment variable names plus 35 Nix attribute
+names) while every value is redacted to the fixed `[env-dump-v1]` placeholder.
+The row enablement lands only after this acceptance is recorded, and this
+acceptance itself enables no row.
 
 ## Pull request
 
