@@ -558,7 +558,7 @@ func sessionClaimMismatchDiagnostic(in HookLifecycleInput, bindings []model.Nati
 		"pasture: session claim not stored (%s) on harness %q session %q: this invocation attempted to claim actor %q, "+
 			"but the store already holds actor %q; the first claim stands and this invocation's claim was not stored; "+
 			"this happened in internal/handlers/hook_lifecycle.go after the lifecycle receipt was committed, so the event "+
-			"was recorded and the host is not blocked; the receipt remains authored by the system actor; if this is "+
+			"was recorded and the claim mismatch does not change the committed host decision; the receipt remains authored by the system actor; if this is "+
 			"unexpected, inspect pasture_session_claim for this session and check which host process exported PASTURE_ACTOR_ID",
 		outcome.State.String(), string(in.Harness), session, string(in.ActorClaim), stored)
 }

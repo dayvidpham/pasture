@@ -10,6 +10,7 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,6 +20,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/provenance"
 )
 
 // TestSessionClaimDiagnosticOnlyOnAMismatch is the pure contract of the
@@ -36,6 +38,7 @@ func TestSessionClaimDiagnosticOnlyOnAMismatch(t *testing.T) {
 	}{
 		{"already-claimed", tasks.SessionClaimAlreadyClaimed, "attempted-actor", "stored-actor"},
 		{"lost-race", tasks.SessionClaimLostRace, "attempted-actor", "winner-actor"},
+		{"lost-race-unknown-holder", tasks.SessionClaimLostRace, "attempted-actor", ""},
 	}
 	for _, testCase := range mismatched {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -46,9 +49,18 @@ func TestSessionClaimDiagnosticOnlyOnAMismatch(t *testing.T) {
 				tasks.SessionClaimOutcome{State: testCase.state, StoredActor: testCase.stored},
 			)
 			require.Contains(t, line, `"`+testCase.attempted+`"`, "the attempted actor must be named")
-			require.Contains(t, line, `"`+testCase.stored+`"`, "the stored actor must be named")
+			if testCase.stored == "" {
+				require.Contains(t, line, "unknown (the store refused the read that names the holder)",
+					"a lost race whose winner could not be read back must say the holder is unknown")
+			} else {
+				require.Contains(t, line, `"`+testCase.stored+`"`, "the stored actor must be named")
+			}
 			require.Contains(t, line, "session-x", "the session must be named")
 			require.Contains(t, line, testCase.state.String(), "the outcome state must be readable")
+			require.NotContains(t, line, "the host is not blocked",
+				"the retired sentence is false when the committed decision is a deny; a claim mismatch must not claim the host is unblocked")
+			require.Contains(t, line, "the claim mismatch does not change the committed host decision",
+				"the diagnostic may claim only that the mismatch did not change the committed host decision")
 		})
 	}
 	noMismatch := []struct {
@@ -59,6 +71,7 @@ func TestSessionClaimDiagnosticOnlyOnAMismatch(t *testing.T) {
 	}{
 		{"wrote", tasks.SessionClaimWrote, "actor", "actor"},
 		{"already-claimed-same-actor", tasks.SessionClaimAlreadyClaimed, "actor", "actor"},
+		{"lost-race-same-actor", tasks.SessionClaimLostRace, "actor", "actor"},
 		{"not-attempted", tasks.SessionClaimNotAttempted, "actor", ""},
 	}
 	for _, testCase := range noMismatch {
@@ -79,7 +92,8 @@ func TestSessionClaimDiagnosticOnlyOnAMismatch(t *testing.T) {
 // then invoked by another. The hook must succeed with the same committed
 // outcome, and the mismatch must reach the diagnostic sink naming both actors.
 //
-// RED when: the mismatch fails the hook, writes a second journal row, or is
+// RED when: the mismatch fails the hook, writes a second journal row, changes
+// the committed host response, writes more than one diagnostic line, or is
 // discarded.
 func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testing.T) {
 	t.Parallel()
@@ -95,23 +109,49 @@ func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testin
 	require.NoError(t, err)
 	require.NoError(t, seed.Close())
 
+	// THE CONTROL is the same invocation against a store whose claim already
+	// names the SAME actor this invocation attempts. Only the claim outcome
+	// differs — no mismatch instead of one — so the committed host response must
+	// be IDENTICAL: the diagnostic path may not touch it.
+	controlPath := gateStore(t)
+	controlSeed, err := tasks.OpenTaskTracker(controlPath)
+	require.NoError(t, err)
+	_, err = tasks.RecordLifecycleSessionClaim(context.Background(), controlSeed, ir.HarnessClaudeCode,
+		sessionStartEventKind(ir.HarnessClaudeCode),
+		[]model.NativeBinding{{Kind: model.BindingSession, Value: session}}, "attempted-actor", gateClock{})
+	require.NoError(t, err)
+	require.NoError(t, controlSeed.Close())
+	controlInput := gateInput(t, controlPath, "SessionStart", raw)
+	controlInput.ActorClaim = tasks.ActorClaim("attempted-actor")
+	var controlDiagnostics bytes.Buffer
+	controlInput.Diagnostics = &controlDiagnostics
+	control, err := hookLifecycle(t.Context(), controlInput, tasks.OpenTaskTracker, tasks.NewGateReader)
+	require.NoError(t, err)
+	require.Empty(t, controlDiagnostics.String(), "a claim by the same actor is not a mismatch and must stay silent")
+
 	input := gateInput(t, dbPath, "SessionStart", raw)
 	input.ActorClaim = tasks.ActorClaim("attempted-actor")
 	var diagnostics bytes.Buffer
 	input.Diagnostics = &diagnostics
 
-	_, err = hookLifecycle(t.Context(), input, tasks.OpenTaskTracker, tasks.NewGateReader)
+	response, err := hookLifecycle(t.Context(), input, tasks.OpenTaskTracker, tasks.NewGateReader)
 	require.NoError(t, err, "a claim mismatch must never fail the hook")
+	require.Equal(t, control, response, "the claim mismatch must not change the committed host response")
+	require.Equal(t, 1, strings.Count(diagnostics.String(), "\n"),
+		"exactly one diagnostic line must be written for one mismatch")
 	require.Contains(t, diagnostics.String(), `"attempted-actor"`)
 	require.Contains(t, diagnostics.String(), `"stored-actor"`)
 	require.Contains(t, diagnostics.String(), session)
 	require.Contains(t, diagnostics.String(), tasks.SessionClaimAlreadyClaimed.String())
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1"}), 1,
+		"the invocation commits exactly one occurrence; the claim write adds no journal row")
 }
 
 // TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner forces the race
 // deterministically with a BEFORE INSERT trigger that installs the winner
 // between the handler's read and its INSERT ... ON CONFLICT DO NOTHING. The
-// hook must succeed and the diagnostic must name the winner.
+// hook must succeed, the committed host response must be unchanged, and exactly
+// one diagnostic must name the winner.
 func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 	t.Parallel()
 	raw := gateFixture(t, gateClaudeSessionStartFixture)
@@ -132,17 +172,35 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 
+	// THE CONTROL is the same invocation against a store with no competing
+	// writer: the claim is written and no diagnostic is emitted. The committed
+	// host response must be identical to the lost-race run's, because the race
+	// settles after the response is decided and may not touch it.
+	controlPath := gateStore(t)
+	controlInput := gateInput(t, controlPath, "SessionStart", raw)
+	controlInput.ActorClaim = tasks.ActorClaim("loser-actor")
+	var controlDiagnostics bytes.Buffer
+	controlInput.Diagnostics = &controlDiagnostics
+	control, err := hookLifecycle(t.Context(), controlInput, tasks.OpenTaskTracker, tasks.NewGateReader)
+	require.NoError(t, err)
+	require.Empty(t, controlDiagnostics.String(), "a written claim is not a mismatch and must stay silent")
+
 	input := gateInput(t, dbPath, "SessionStart", raw)
 	input.ActorClaim = tasks.ActorClaim("loser-actor")
 	var diagnostics bytes.Buffer
 	input.Diagnostics = &diagnostics
 
-	_, err = hookLifecycle(t.Context(), input, tasks.OpenTaskTracker, tasks.NewGateReader)
+	response, err := hookLifecycle(t.Context(), input, tasks.OpenTaskTracker, tasks.NewGateReader)
 	require.NoError(t, err, "a lost race must never fail the hook")
+	require.Equal(t, control, response, "the lost race must not change the committed host response")
+	require.Equal(t, 1, strings.Count(diagnostics.String(), "\n"),
+		"exactly one diagnostic line must be written for one lost race")
 	require.Contains(t, diagnostics.String(), `"loser-actor"`)
 	require.Contains(t, diagnostics.String(), `"winner-actor"`)
 	require.Contains(t, diagnostics.String(), session)
 	require.Contains(t, diagnostics.String(), tasks.SessionClaimLostRace.String())
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1"}), 1,
+		"the invocation commits exactly one occurrence; the race trigger adds no journal row")
 }
 
 // TestSessionClaimNoDiagnosticForWroteOrSameActor drives the ordinary claims
