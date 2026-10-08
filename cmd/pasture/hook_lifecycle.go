@@ -391,6 +391,10 @@ func lifecycleOutcomeWithCompletion(
 			Barrier:    barrier,
 			ActorClaim: tasks.ActorClaim(env.ActorClaim),
 			Settlement: settlement,
+			// The command's standard error is the best-effort channel for the
+			// session-claim mismatch line: the receipt is committed before the
+			// claim is written, so the committed host Outcome cannot carry it.
+			Diagnostics: cmd.ErrOrStderr(),
 		})
 		completed <- lifecycleWork{outcome: committed, err: err}
 	}()

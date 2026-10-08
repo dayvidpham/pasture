@@ -331,10 +331,11 @@ func gateJournal(t *testing.T, store *trackerImpl, journal provenance.Journal) {
 func gateClaim(t *testing.T, store *trackerImpl, actor provenance.ActorID, session string) {
 	t.Helper()
 	bindings := []model.NativeBinding{{Kind: model.BindingSession, NativeName: "session_id", Value: session}}
-	require.NoError(t, RecordLifecycleSessionClaim(
+	_, err := RecordLifecycleSessionClaim(
 		t.Context(), store, gateHarness, registration.EventSessionStart, bindings,
 		ActorClaim(actor.String()), gateClock{},
-	))
+	)
+	require.NoError(t, err)
 }
 
 // gateSnapshot opens a reader and takes one snapshot, requiring it to succeed.
