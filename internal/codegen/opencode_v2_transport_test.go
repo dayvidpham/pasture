@@ -585,11 +585,6 @@ assert.deepEqual(calls.at(-1).argv, [...base, "session.context", "--host-version
 `)
 }
 
-// TestOpenCodeHookVersionAbsentWithoutHostReport proves the setup-observed
-// version is never invented and never a non-release: a setup whose context
-// carries no usable ctx.app.version sends no --host-version flag, leaving the
-// binary to resolve the version itself, and a later setup with a version
-// still captures it.
 func TestOpenCodeSuccessfulDecisionSurvivesDiagnosticSinkFailure(t *testing.T) {
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {
@@ -682,6 +677,11 @@ try {
 	}
 }
 
+// TestOpenCodeHookVersionAbsentWithoutHostReport proves the setup-observed
+// version is never invented and never a non-release: a setup whose context
+// carries no usable ctx.app.version sends no --host-version flag, leaving the
+// binary to resolve the version itself, and a later setup with a version
+// still captures it.
 func TestOpenCodeHookVersionAbsentWithoutHostReport(t *testing.T) {
 	module, err := GenerateOpenCodeHooksModule()
 	if err != nil {

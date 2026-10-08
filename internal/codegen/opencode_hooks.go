@@ -333,14 +333,17 @@ function parseResponse(stdout: string, event: string): LifecycleResponse | undef
   // none. The old wording sent an operator who had just lost a gate evaluation
   // to hunt for a file that is not there on exactly the routes it fires on.
   //
-  // THE STREAM IT NAMES IS REACHED BECAUSE invokeLifecycle FORWARDS IT. That is
-  // the whole reason the imperative is allowed to stand: for one round this
-  // line named standard error while the spawn above piped fd 2 and dropped
-  // everything it caught on the exit-0 route, so the operator was sent to a
-  // stream this callback had emptied. Evidence named to a reader who cannot
-  // reach it is the same defect as evidence that does not exist.
+  // THE STREAM IT NAMES IS ATTEMPTED, NOT GUARANTEED. invokeLifecycle forwards
+  // the child's diagnostic best effort: a healthy sink receives it, while a
+  // sink the host has closed or that rejects the write neither fails the hook
+  // nor delivers the bytes. For one round this line named standard error while
+  // the spawn above piped fd 2 and dropped everything it caught on the exit-0
+  // route, so the operator was sent to a stream this callback had emptied.
+  // Evidence named to a reader who cannot reach it is the same defect as
+  // evidence that does not exist; best-effort forwarding must therefore say so
+  // rather than promise delivery.
   if (stdout.trim() === "") {
-    console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. Read the pasture diagnostic on standard error first: this plugin forwards it there, and pasture reports every such fault there, including the case where it could not write a durable record. A line may also have been appended to lifecycle-faults.jsonl beside the pasture database, but a fault whose record could not be placed or written leaves none, and the diagnostic then quotes the path it tried.");
+    console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. The pasture diagnostic is forwarded to standard error best effort, so it may be missing when the host has closed that stream; pasture reports every such fault there, including the case where it could not write a durable record. A line may also have been appended to lifecycle-faults.jsonl beside the pasture database, but a fault whose record could not be placed or written leaves none, and the diagnostic then quotes the path it tried.");
     return;
   }
   let response: unknown;
