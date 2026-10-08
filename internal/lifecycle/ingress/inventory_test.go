@@ -290,6 +290,9 @@ func TestFixtureInventoryReport(t *testing.T) {
 		require.NoError(t, err)
 		for _, refusal := range refusals {
 			fmt.Printf("  REFUSED %s: %s (%d bytes); this payload cannot be committed\n", refusal.Class, refusal.Path, refusal.Bytes)
+			if refusal.Class == ingress.RefusalEnvironmentDump {
+				fmt.Printf("    an object-form dump at %s is clearable by %s when its provenance records the rule and every value is neutralized to %q; a NAME=value line string is not\n", refusal.Path, ingress.EnvDumpRule, ingress.EnvDumpPlaceholder)
+			}
 		}
 		reasons, err := ingress.Unclearable(raw)
 		require.NoError(t, err)
@@ -303,8 +306,16 @@ func TestFixtureInventoryReport(t *testing.T) {
 
 func TestEveryCommittedFixtureWithFreeTextListsTheFreeTextRule(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{ingress.HomePathRule, ingress.FreeTextRule} {
+	for _, name := range []string{ingress.HomePathRule, ingress.EnvDumpRule, ingress.FreeTextRule} {
 		require.True(t, acceptance.RedactionRule(name).IsValid(), "this package names the substitution %q, which the capture provenance does not accept as a redaction rule; the two names must agree, or no sidecar can declare the substitution", name)
+	}
+	// canonicalOrder is the order the rules are applied in and recorded in a
+	// sidecar. A fixture that lists an earlier rule after a later one is RED
+	// naming the fixture.
+	canonicalOrder := map[string]int{
+		ingress.HomePathRule: 0,
+		ingress.EnvDumpRule:  1,
+		ingress.FreeTextRule: 2,
 	}
 	checked := 0
 	for _, fixture := range committedFixtures(t) {
@@ -330,17 +341,14 @@ func TestEveryCommittedFixtureWithFreeTextListsTheFreeTextRule(t *testing.T) {
 		assert.True(t, hasRule,
 			"fixture %s carries free text in field %s (and %d more) but its provenance lists redaction %v without %s; substitute the free text with the rule before committing, or the user's prompt and tool text reaches the repository verbatim",
 			fixture.name, freeText[0], len(freeText)-1, rules, ingress.FreeTextRule)
-		home, free := -1, -1
-		for index, rule := range rules {
-			switch rule {
-			case ingress.HomePathRule:
-				home = index
-			case ingress.FreeTextRule:
-				free = index
+		last := -1
+		for _, rule := range rules {
+			rank, ranked := canonicalOrder[string(rule)]
+			if !ranked {
+				continue
 			}
-		}
-		if home >= 0 && free >= 0 {
-			assert.Less(t, home, free, "fixture %s lists the rules out of order; %s is applied before %s", fixture.name, ingress.HomePathRule, ingress.FreeTextRule)
+			assert.Greater(t, rank, last, "fixture %s lists the rules out of order; the canonical order is %s, then %s, then %s", fixture.name, ingress.HomePathRule, ingress.EnvDumpRule, ingress.FreeTextRule)
+			last = rank
 		}
 	}
 	// Non-vacuity: the corpus carries free text (prompts, tool commands, a
@@ -352,14 +360,33 @@ func TestEveryCommittedFixtureWithFreeTextListsTheFreeTextRule(t *testing.T) {
 
 func TestNoCommittedFixtureCarriesARefusedClass(t *testing.T) {
 	t.Parallel()
+	envDumpAdmitted := 0
 	for _, fixture := range committedFixtures(t) {
-		refusals, err := ingress.RefusedFields(fixture.payload)
+		rules := redactionRules(t, fixture)
+		names := make([]string, 0, len(rules))
+		for _, rule := range rules {
+			names = append(names, string(rule))
+		}
+		refusals, err := ingress.RefusedFieldsAdmittingRedaction(fixture.payload, names)
 		require.NoError(t, err, fixture.name)
 		for _, refusal := range refusals {
 			assert.Fail(t, "refused payload class in the committed corpus",
 				"fixture %s field %s is %s (%d bytes); this class is never committed whatever the substitution", fixture.name, refusal.Path, refusal.Class, refusal.Bytes)
 		}
+		// The unconditional authority must still name the environment dump, so
+		// the fixture's admission is the exemption and not a classifier gap.
+		raw, err := ingress.RefusedFields(fixture.payload)
+		require.NoError(t, err, fixture.name)
+		for _, refusal := range raw {
+			if refusal.Class == ingress.RefusalEnvironmentDump {
+				envDumpAdmitted++
+			}
+		}
 	}
+	// Non-vacuity: the exemption was exercised on real bytes. If no committed
+	// fixture is a rule-admitted environment dump, the exemption path above
+	// proved nothing.
+	require.Positive(t, envDumpAdmitted, "no committed fixture carries an environment dump admitted by its redaction rule, so the exemption was never exercised on real bytes")
 }
 
 func TestRefusedFieldsNamesEachRefusedClass(t *testing.T) {
@@ -408,4 +435,138 @@ func TestUnclearableNamesWhatSubstitutionCannotClear(t *testing.T) {
 	require.Len(t, reasons, 1)
 	assert.Contains(t, reasons[0], "field .tool_response is refused as tool-response-over-limit")
 	sort.Strings(reasons)
+}
+
+// TestSubstituteEnvDumpReplacesEveryValueKeepsKeysAndShape proves the
+// env-dump rule is value-only: every string under an environment-dump object
+// becomes the fixed placeholder, and keys, nesting, types, nulls and every
+// value outside such an object are untouched.
+func TestSubstituteEnvDumpReplacesEveryValueKeepsKeysAndShape(t *testing.T) {
+	t.Parallel()
+	payload := []byte(`{"command":"ls -la","env":{"PATH":"/usr/bin","HOME":"/home/u","SHELL":"/bin/sh","NESTED":{"INNER":"x"}},"other":{"PATH":"/usr/bin","HOME":"/home/u"},"count":2,"ok":true,"none":null}`)
+	out, paths, err := ingress.SubstituteEnvDump(payload)
+	require.NoError(t, err)
+	assert.Equal(t, []string{".env.PATH", ".env.HOME", ".env.SHELL", ".env.NESTED.INNER"}, paths)
+
+	var before, after any
+	require.NoError(t, json.Unmarshal(payload, &before))
+	require.NoError(t, json.Unmarshal(out, &after), "the substituted document must still be valid JSON")
+	assert.Equal(t, jsonShape(before), jsonShape(after), "keys, nesting, types and nulls must be unchanged")
+
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(out, &decoded))
+	env := decoded["env"].(map[string]any)
+	for _, key := range []string{"PATH", "HOME", "SHELL"} {
+		assert.Equal(t, ingress.EnvDumpPlaceholder, env[key], "env member %s must be the placeholder", key)
+	}
+	assert.Equal(t, ingress.EnvDumpPlaceholder, env["NESTED"].(map[string]any)["INNER"], "a nested string under the dump must be the placeholder")
+	// An object with two env-shaped members is not a dump and is untouched.
+	assert.Equal(t, "/usr/bin", decoded["other"].(map[string]any)["PATH"])
+	assert.Equal(t, "ls -la", decoded["command"])
+	assert.Equal(t, float64(2), decoded["count"])
+	assert.Equal(t, true, decoded["ok"])
+	assert.Nil(t, decoded["none"])
+
+	// A second pass changes nothing: the placeholder is not itself a dump value.
+	again, againPaths, err := ingress.SubstituteEnvDump(out)
+	require.NoError(t, err)
+	assert.Equal(t, out, again, "a second pass must be a no-op on the bytes")
+	assert.Equal(t, paths, againPaths, "a second pass reports the same environment-dump fields")
+
+	// A string of NAME=value lines is not an object and is left for the
+	// free-text rule; env-dump-v1 preserves member names and has none here.
+	lines := []byte(`{"output":"PATH=/usr/bin\nHOME=/home/u\nSHELL=/bin/sh\n"}`)
+	unchanged, paths, err := ingress.SubstituteEnvDump(lines)
+	require.NoError(t, err)
+	assert.Equal(t, lines, unchanged)
+	assert.Empty(t, paths)
+}
+
+// TestEnvironmentDumpExemptionAdmitsOnlyRuleMarkedNeutralizedDumps is the
+// exemption proof. The name-shape refusal still fails for an unredacted dump
+// with or without the rule; it is admitted only when the rule is recorded AND
+// every value under the path is the placeholder; and every other refusal,
+// including a NAME=value string, stays unconditional.
+func TestEnvironmentDumpExemptionAdmitsOnlyRuleMarkedNeutralizedDumps(t *testing.T) {
+	t.Parallel()
+	const rawDump = `{"env":{"PATH":"/usr/bin","HOME":"/home/u","SHELL":"/bin/sh"}}`
+	redacted := `{"env":{"PATH":"` + ingress.EnvDumpPlaceholder + `","HOME":"` + ingress.EnvDumpPlaceholder + `","SHELL":"` + ingress.EnvDumpPlaceholder + `"}}`
+	partial := `{"env":{"PATH":"` + ingress.EnvDumpPlaceholder + `","HOME":"/home/u","SHELL":"` + ingress.EnvDumpPlaceholder + `"}}`
+	nonString := `{"env":{"PATH":"` + ingress.EnvDumpPlaceholder + `","HOME":"` + ingress.EnvDumpPlaceholder + `","SHELL":"` + ingress.EnvDumpPlaceholder + `","COUNT":3}}`
+	envLines := `{"output":"PATH=/usr/bin\nHOME=/home/u\nSHELL=/bin/sh\n"}`
+	cases := []struct {
+		name    string
+		payload string
+		rules   []string
+		admit   bool
+	}{
+		{"unredacted dump without the rule", rawDump, nil, false},
+		{"unredacted dump with the rule", rawDump, []string{ingress.EnvDumpRule}, false},
+		{"neutralized dump without the rule", redacted, nil, false},
+		{"neutralized dump with the rule", redacted, []string{ingress.EnvDumpRule}, true},
+		{"partly neutralized dump with the rule", partial, []string{ingress.EnvDumpRule}, false},
+		{"dump with a non-string member and the rule", nonString, []string{ingress.EnvDumpRule}, false},
+		{"NAME=value string with the rule", envLines, []string{ingress.EnvDumpRule}, false},
+		{"neutralized dump with only free-text recorded", redacted, []string{ingress.FreeTextRule}, false},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := ingress.RefusedFieldsAdmittingRedaction([]byte(tc.payload), tc.rules)
+			require.NoError(t, err)
+			refused := false
+			for _, refusal := range got {
+				if refusal.Class == ingress.RefusalEnvironmentDump {
+					refused = true
+				}
+			}
+			assert.Equal(t, !tc.admit, refused, "refusals: %+v", got)
+		})
+	}
+}
+
+// TestEnvDumpPlaceholderIsIdentifierShapedAndSecretScanClean pins the two
+// properties the placeholder must carry: the classifier reads it as an
+// identifier (no whitespace, bounded length), and it matches no committed
+// secret shape, so a redacted fixture cannot re-trigger either guard.
+func TestEnvDumpPlaceholderIsIdentifierShapedAndSecretScanClean(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, ingress.ClassIdentifier, ingress.Classify(ingress.EnvDumpPlaceholder))
+	assert.Empty(t, ingress.ScanSecrets([]byte(ingress.EnvDumpPlaceholder)))
+	assert.NotContains(t, ingress.EnvDumpPlaceholder, "=", "the placeholder must not read as a NAME=value line")
+}
+
+// TestCommittedShellFixtureRecordsTheEnvDumpRule pins the cleared
+// shell.create.before fixture: its provenance lists env-dump-v1, the
+// unconditional authority still names the dump, and the rule-aware authority
+// admits it only because every value was neutralized.
+func TestCommittedShellFixtureRecordsTheEnvDumpRule(t *testing.T) {
+	t.Parallel()
+	var shell *corpusFixture
+	for _, fixture := range committedFixtures(t) {
+		if strings.Contains(fixture.name, "opencode_shell_create_before_2_0_20.1.json") {
+			found := fixture
+			shell = &found
+		}
+	}
+	require.NotNil(t, shell, "the cleared shell.create.before fixture is missing")
+	rules := redactionRules(t, *shell)
+	hasEnvRule := false
+	for _, rule := range rules {
+		if rule == ingress.EnvDumpRule {
+			hasEnvRule = true
+		}
+	}
+	require.True(t, hasEnvRule, "the shell fixture must list %s", ingress.EnvDumpRule)
+	raw, err := ingress.RefusedFields(shell.payload)
+	require.NoError(t, err)
+	require.NotEmpty(t, raw, "the unconditional authority must still name the shell fixture's environment dump")
+	names := make([]string, 0, len(rules))
+	for _, rule := range rules {
+		names = append(names, string(rule))
+	}
+	admitted, err := ingress.RefusedFieldsAdmittingRedaction(shell.payload, names)
+	require.NoError(t, err)
+	assert.Empty(t, admitted, "the shell fixture must be admitted by its recorded rules")
 }

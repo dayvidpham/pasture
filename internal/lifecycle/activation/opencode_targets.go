@@ -34,6 +34,7 @@ var openCodeCaptureProofs = [...]captureProofDeclaration{
 	{ordinal: 215, arm: "OpenCode2SessionExperimentalWsSend", event: registration.EventOpenCode2SessionExperimentalWsSend, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_send_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
 	{ordinal: 216, arm: "OpenCode2SessionExperimentalWsReceive", event: registration.EventOpenCode2SessionExperimentalWsReceive, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_experimental_ws_receive_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
 	{ordinal: 217, arm: "OpenCode2SessionRetry", event: registration.EventOpenCode2SessionRetry, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_session_retry_2_0_21.1.json (OpenCode 2.0.21 authentic hook capture)"},
+	{ordinal: 218, arm: "OpenCode2ShellCreateBefore", event: registration.EventOpenCode2ShellCreateBefore, fixture: "internal/lifecycle/ingress/opencode/testdata/fixtures/opencode_shell_create_before_2_0_20.1.json (OpenCode 2.0.20 authentic hook capture, environment values cleared by env-dump-v1)"},
 }
 
 // openCodeProductionProofs declares every OpenCode production proof. The arm
@@ -57,6 +58,7 @@ var openCodeProductionProofs = [...]productionProofDeclaration{
 	{ordinal: 215, arm: "OpenCode2SessionExperimentalWsSend", event: registration.EventOpenCode2SessionExperimentalWsSend, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.send"},
 	{ordinal: 216, arm: "OpenCode2SessionExperimentalWsReceive", event: registration.EventOpenCode2SessionExperimentalWsReceive, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.experimental.ws.receive"},
 	{ordinal: 217, arm: "OpenCode2SessionRetry", event: registration.EventOpenCode2SessionRetry, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/session.retry"},
+	{ordinal: 218, arm: "OpenCode2ShellCreateBefore", event: registration.EventOpenCode2ShellCreateBefore, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledOpenCode2HandlersToDurableReadBack/shell.create.before"},
 }
 
 // openCodeTargetEventDeclarations is the static typed target declaration for
@@ -81,20 +83,20 @@ func OpenCode1_18_29() ([]Entry, error) {
 // OpenCode at the 2.0.20 contract, recorded by the capture sittings in
 // internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md.
 //
-// Sixteen coordinates are enabled. Nine were captured at 2.0.20;
-// session.created did not fire in that sitting and was captured later on an
-// OpenCode 2.0.21 host, a later release the 2.0.20 contract admits, through
-// the plugin's bus subscription; the six remaining coordinates did not fire in
-// that sitting either and were captured later on the same 2.0.21 host, through
-// their registered hooks. Each enabled row binds the capture proof naming its
-// committed fixture (the smallest authentic capture, so the sequence number is
-// not always 1) and the production proof that drives those bytes through the
-// built binary. The shell create row fired and was captured, but its payload
-// is an environment dump the substitution rules cannot make safe; it stays
-// withheld by the user decision recorded in that CLEARANCE.md, and it is the
-// only withheld coordinate. Enabling a row is a data change only: declare its
-// proofs above and bind them here; the response capability derivation is
-// untouched.
+// Seventeen coordinates are enabled. Ten were captured at 2.0.20 (nine
+// coordinates plus shell.create.before); session.created did not fire in that
+// sitting and was captured later on an OpenCode 2.0.21 host, a later release
+// the 2.0.20 contract admits, through the plugin's bus subscription; the six
+// remaining coordinates did not fire in that sitting either and were captured
+// later on the same 2.0.21 host, through their registered hooks. Each enabled
+// row binds the capture proof naming its committed fixture (the smallest
+// authentic capture, so the sequence number is not always 1) and the
+// production proof that drives those bytes through the built binary. The shell
+// create payload is an environment dump; its values are redacted to a fixed
+// placeholder by env-dump-v1 and the name-shape refusal is admitted only
+// because the provenance records that rule and every value under the dump is
+// neutralized. Enabling a row is a data change only: declare its proofs above
+// and bind them here; the response capability derivation is untouched.
 var openCode2TargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventOpenCode2SessionCreated, captureProof: CaptureProofOpenCode2SessionCreated, productionProof: ProductionProofOpenCode2SessionCreated},
 	{event: registration.EventOpenCode2SessionPrompt, captureProof: CaptureProofOpenCode2SessionPrompt, productionProof: ProductionProofOpenCode2SessionPrompt},
@@ -112,7 +114,7 @@ var openCode2TargetEventDeclarations = [...]targetEventDeclaration{
 	{event: registration.EventOpenCode2ToolExecuteBefore, captureProof: CaptureProofOpenCode2ToolExecuteBefore, productionProof: ProductionProofOpenCode2ToolExecuteBefore},
 	{event: registration.EventOpenCode2ToolExecuteAfter, captureProof: CaptureProofOpenCode2ToolExecuteAfter, productionProof: ProductionProofOpenCode2ToolExecuteAfter},
 	{event: registration.EventOpenCode2PermissionEvaluate, captureProof: CaptureProofOpenCode2PermissionEvaluate, productionProof: ProductionProofOpenCode2PermissionEvaluate},
-	{event: registration.EventOpenCode2ShellCreateBefore, withheldReason: WithheldUnclearablePayload, clearance: "internal/lifecycle/ingress/opencode/testdata/fixtures/CLEARANCE.md"},
+	{event: registration.EventOpenCode2ShellCreateBefore, captureProof: CaptureProofOpenCode2ShellCreateBefore, productionProof: ProductionProofOpenCode2ShellCreateBefore},
 }
 
 // OpenCode2_0_20TargetEvents returns a defensive copy of the 2.0.20 target set.

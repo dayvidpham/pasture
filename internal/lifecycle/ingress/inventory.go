@@ -72,7 +72,20 @@ const FreeTextLengthLimit = 128
 const (
 	FreeTextRule = "free-text-v1"
 	HomePathRule = "home-path-v1"
+	// EnvDumpRule names the value-only substitution that replaces every value
+	// of an environment-dump object by a fixed placeholder, preserving keys,
+	// nesting and types. It is the one rule that can clear a name-shape
+	// environment-dump refusal, and only together with the provenance record
+	// and the neutralization check in RefusedFieldsAdmittingRedaction.
+	EnvDumpRule = "env-dump-v1"
 )
+
+// EnvDumpPlaceholder is the value env-dump-v1 writes for every string under an
+// environment-dump object. It is a fixed token, not a same-length run, so the
+// neutralization check is an exact comparison: a value is neutralized iff it
+// equals this token. It carries no whitespace and no "NAME=" shape, so it can
+// neither re-trigger the environment-line refusal nor match a secret shape.
+const EnvDumpPlaceholder = "[env-dump-v1]"
 
 // MaxToolResponseBytes bounds a tool-response value a fixture may carry. Raw
 // file contents from a tool response above it are refused whatever the
@@ -243,6 +256,84 @@ func SubstituteFreeText(body []byte) ([]byte, []string, error) {
 	return out, paths, nil
 }
 
+// SubstituteEnvDump applies the env-dump rule: every string leaf under an
+// environment-dump object is replaced by the fixed EnvDumpPlaceholder. Keys,
+// nesting, types and non-string values are untouched, so the object keeps its
+// shape and every member name survives. It returns the substituted document
+// and the paths substituted, in document order. A document with no
+// environment-dump object comes back as an unchanged copy with no paths.
+//
+// The placeholder is a fixed token rather than a same-length run, so
+// neutralization is an exact comparison and the refusal exemption in
+// RefusedFieldsAdmittingRedaction can verify it without re-deriving the rule.
+func SubstituteEnvDump(body []byte) ([]byte, []string, error) {
+	fields, err := Inventory(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	parents := environmentDumpParents(fields)
+	var out []byte
+	var paths []string
+	previous := 0
+	placeholder := `"` + EnvDumpPlaceholder + `"`
+	for _, field := range fields {
+		if !isStringClass(field.Class) {
+			continue
+		}
+		if !underEnvironmentDump(parents, field.Path) {
+			continue
+		}
+		if field.start < 0 || field.end <= field.start+1 {
+			return nil, nil, fmt.Errorf("the environment-dump field %s could not be located in the document; this happened in SubstituteEnvDump (internal/lifecycle/ingress/inventory.go); nothing was substituted; report this with the payload", field.Path)
+		}
+		out = append(out, body[previous:field.start]...)
+		out = append(out, placeholder...)
+		previous = field.end
+		paths = append(paths, field.Path)
+	}
+	if out == nil {
+		return append([]byte(nil), body...), nil, nil
+	}
+	out = append(out, body[previous:]...)
+	return out, paths, nil
+}
+
+// isStringClass reports whether a leaf class carries a decoded string value.
+func isStringClass(class ValueClass) bool {
+	return class == ClassFreeText || class == ClassIdentifier || class == ClassPath
+}
+
+// environmentDumpParents returns, per object path, how many of its direct
+// members are string leaves whose name reads as an environment variable. A
+// parent with environmentDumpMembers or more is an environment-dump object.
+func environmentDumpParents(fields []Field) map[string]int {
+	members := map[string]int{}
+	for _, field := range fields {
+		if !isStringClass(field.Class) {
+			continue
+		}
+		parent, name := splitLastSegment(field.Path)
+		if strings.HasPrefix(name, ".") && environmentName.MatchString(name[1:]) {
+			members[parent]++
+		}
+	}
+	return members
+}
+
+// underEnvironmentDump reports whether path is a descendant leaf of an object
+// that environmentDumpParents identified as an environment dump.
+func underEnvironmentDump(parents map[string]int, path string) bool {
+	for parent, count := range parents {
+		if count < environmentDumpMembers {
+			continue
+		}
+		if strings.HasPrefix(path, parent+".") || strings.HasPrefix(path, parent+"[") {
+			return true
+		}
+	}
+	return false
+}
+
 // RefusalClass is one payload class that is never committed, whatever the
 // substitution.
 type RefusalClass uint8
@@ -253,7 +344,10 @@ const (
 	// MaxToolResponseBytes: raw file contents a fixture has no reason to hold.
 	RefusalToolResponseOverLimit
 	// RefusalEnvironmentDump is an object whose members read as environment
-	// variables, or a string that lists them line by line.
+	// variables, or a string that lists them line by line. An object-form
+	// refusal can be admitted by RefusedFieldsAdmittingRedaction when the
+	// provenance records EnvDumpRule and every value under the object is the
+	// placeholder; the string form is never admitted.
 	RefusalEnvironmentDump
 )
 
@@ -288,19 +382,39 @@ var environmentName = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 // that makes an object an environment dump rather than a constant or two.
 const environmentDumpMembers = 3
 
-// RefusedFields lists the fields of a payload that belong to a refused class.
-// A tool-response string above MaxToolResponseBytes is refused, and an
-// environment dump is refused whether it arrives as an object of
-// SCREAMING_CASE members or as a string of NAME=value lines.
+// RefusedFields lists the fields of a payload that belong to a refused class,
+// with no redaction admitted. A tool-response string above
+// MaxToolResponseBytes is refused, and an environment dump is refused whether
+// it arrives as an object of SCREAMING_CASE members or as a string of
+// NAME=value lines. It is the authority for raw bytes: an unredacted
+// environment dump always fails here.
 func RefusedFields(body []byte) ([]Refusal, error) {
+	return RefusedFieldsAdmittingRedaction(body, nil)
+}
+
+// RefusedFieldsAdmittingRedaction lists refused fields, admitting one class
+// under one condition. A RefusalEnvironmentDump on an object path is admitted
+// only when rules names EnvDumpRule AND every string leaf under that path is
+// already the EnvDumpPlaceholder: the fixture's provenance records the rule,
+// and neutralization is verified. Every other refusal fails unconditionally,
+// including an environment-dump STRING of NAME=value lines, which env-dump-v1
+// does not rewrite because a string has no member names to preserve. A
+// rule-named path that is only partly neutralized stays refused, so recording
+// the rule cannot admit a payload the rule did not finish.
+func RefusedFieldsAdmittingRedaction(body []byte, rules []string) ([]Refusal, error) {
 	fields, err := Inventory(body)
 	if err != nil {
 		return nil, err
 	}
+	admitsEnvDump := false
+	for _, rule := range rules {
+		if rule == EnvDumpRule {
+			admitsEnvDump = true
+		}
+	}
 	var refusals []Refusal
-	members := map[string]int{}
 	for _, field := range fields {
-		if field.Class == ClassFreeText || field.Class == ClassIdentifier || field.Class == ClassPath {
+		if isStringClass(field.Class) {
 			size := len(field.Value)
 			if size > MaxToolResponseBytes && pathHasResponseSegment(field.Path) {
 				refusals = append(refusals, Refusal{Class: RefusalToolResponseOverLimit, Path: field.Path, Bytes: size})
@@ -308,18 +422,37 @@ func RefusedFields(body []byte) ([]Refusal, error) {
 			if len(environmentLine.FindAllStringIndex(field.Value, -1)) >= environmentDumpMembers {
 				refusals = append(refusals, Refusal{Class: RefusalEnvironmentDump, Path: field.Path, Bytes: size})
 			}
-			parent, name := splitLastSegment(field.Path)
-			if strings.HasPrefix(name, ".") && environmentName.MatchString(name[1:]) {
-				members[parent]++
-			}
 		}
 	}
-	for parent, count := range members {
-		if count >= environmentDumpMembers {
-			refusals = append(refusals, Refusal{Class: RefusalEnvironmentDump, Path: parent, Bytes: count})
+	for parent, count := range environmentDumpParents(fields) {
+		if count < environmentDumpMembers {
+			continue
 		}
+		if admitsEnvDump && envDumpNeutralized(fields, parent) {
+			continue
+		}
+		refusals = append(refusals, Refusal{Class: RefusalEnvironmentDump, Path: parent, Bytes: count})
 	}
 	return refusals, nil
+}
+
+// envDumpNeutralized reports whether every string leaf under the
+// environment-dump object at parent is the EnvDumpPlaceholder. A leaf of any
+// other class, or a string that is not the placeholder, means the object is
+// not neutralized and stays refused. At least one leaf must be seen, so an
+// empty path can never be admitted by vacuity.
+func envDumpNeutralized(fields []Field, parent string) bool {
+	seen := false
+	for _, field := range fields {
+		if !strings.HasPrefix(field.Path, parent+".") && !strings.HasPrefix(field.Path, parent+"[") {
+			continue
+		}
+		seen = true
+		if !isStringClass(field.Class) || field.Value != EnvDumpPlaceholder {
+			return false
+		}
+	}
+	return seen
 }
 
 func pathHasResponseSegment(path string) bool {
@@ -392,12 +525,15 @@ func ScanSecrets(body []byte) []SecretHit {
 	return hits
 }
 
-// Unclearable lists the reasons a payload cannot be cleared by value
-// substitution alone: a refused field, or a secret shape that survives the
-// free-text substitution because it sits in an identifier or path value that
-// substitution must not touch. A payload with no reasons is clearable by the
-// listed rules; a payload with any reason needs a user decision, and its event
-// stays withheld.
+// Unclearable lists the reasons a payload cannot be committed as it stands: a
+// refused field, or a secret shape that survives the free-text substitution
+// because it sits in an identifier or path value that substitution must not
+// touch. It reads the raw bytes with no provenance, so it reports a refused
+// environment-dump object even though env-dump-v1 can clear one: the rule is
+// admitted only with the provenance record and the neutralization check that
+// RefusedFieldsAdmittingRedaction performs. A payload with no reasons is
+// clearable by the listed rules; a payload with any reason needs a user
+// decision, and its event stays withheld until one is recorded.
 func Unclearable(body []byte) ([]string, error) {
 	refusals, err := RefusedFields(body)
 	if err != nil {

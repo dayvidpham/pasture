@@ -326,6 +326,10 @@ func TestCaptureProvenanceRedactionRewriteRecomputesDigest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []acceptance.RedactionRule{acceptance.RedactionNone}, none)
 
+	envDump, err := acceptance.ParseRedaction("home-path-v1,env-dump-v1,free-text-v1")
+	require.NoError(t, err)
+	require.Equal(t, []acceptance.RedactionRule{acceptance.RedactionHomePath, acceptance.RedactionEnvDump, acceptance.RedactionFreeText}, envDump, "the environment-dump rule is in the closed set and parses in the applied order")
+
 	for name, tc := range map[string]struct{ value, want string }{
 		"empty":        {"", "redaction is empty"},
 		"unknown-rule": {"home-path-v2", `unknown rule "home-path-v2"`},

@@ -46,6 +46,13 @@ const (
 	// RedactionFreeText replaces free-text fields (prompt text, tool arguments,
 	// tool output) with placeholders of the same shape.
 	RedactionFreeText RedactionRule = "free-text-v1"
+	// RedactionEnvDump replaces every value of an environment-dump object with
+	// a fixed placeholder, preserving keys, nesting and types. It is the one
+	// rule that can clear a name-shape environment-dump refusal, and only
+	// together with a neutralization check: the refusal is admitted for a path
+	// only when the provenance lists this rule and every value under that path
+	// is already the placeholder.
+	RedactionEnvDump RedactionRule = "env-dump-v1"
 )
 
 // redactionRuleSeparator joins the rules of a Redaction value in the order they
@@ -54,7 +61,7 @@ const redactionRuleSeparator = ","
 
 func (r RedactionRule) IsValid() bool {
 	switch r {
-	case RedactionNone, RedactionHomePath, RedactionFreeText:
+	case RedactionNone, RedactionHomePath, RedactionFreeText, RedactionEnvDump:
 		return true
 	default:
 		return false
@@ -89,7 +96,7 @@ func ParseRedaction(value string) ([]RedactionRule, error) {
 }
 
 func knownRedactionRules() string {
-	return fmt.Sprintf("%q, %q, %q", RedactionNone, RedactionHomePath, RedactionFreeText)
+	return fmt.Sprintf("%q, %q, %q, %q", RedactionNone, RedactionHomePath, RedactionEnvDump, RedactionFreeText)
 }
 
 // clearanceFileName is the file that holds the user's verbatim acceptance of a
