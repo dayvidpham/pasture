@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.11] - 2026-10-08
+
+### Fixed
+- fix(tasks): bind session claim on first observed event
+- fix(opencode): tolerate diagnostic forwarding failures
+
+### Documentation
+- docs(opencode): keep the operator directive while qualifying best-effort forwarding
+- docs(opencode): qualify the best-effort diagnostic wording (review MINORs)
+- docs(tasks): qualify the first-observation claim wording per review
+
+### Other
+- Merge pull request #164 from dayvidpham/fix/opencode-best-effort-diagnostics
+- test(opencode): assert the qualified best-effort diagnostic wording
+- Merge pull request #165 from dayvidpham/pasture-157--fix--first-session-claim
+
 ## [0.0.10] - 2026-10-07
 
 ### Added
