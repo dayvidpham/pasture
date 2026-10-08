@@ -2363,8 +2363,9 @@ after the acceptance above was recorded.
 
 ### Fifth batch — OpenCode 2.0.20
 
-Pending: the integrator appends the landing pull request URL in the landing
-commit, after the acceptance above. This fixture reaches no remote before it.
+Landing pull request: https://github.com/dayvidpham/pasture/pull/169 — opened
+after the acceptance above was recorded; the accepted capture first reaches a
+remote through it.
 
 ## Current source revision transport — 2026-09-07
 
