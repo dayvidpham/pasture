@@ -170,7 +170,7 @@ function parseResponse(stdout: string, event: string): LifecycleResponse | undef
   // evidence that does not exist; best-effort forwarding must therefore say so
   // rather than promise delivery.
   if (stdout.trim() === "") {
-    console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. The pasture diagnostic is forwarded to standard error best effort, so it may be missing when the host has closed that stream; pasture reports every such fault there, including the case where it could not write a durable record. A line may also have been appended to lifecycle-faults.jsonl beside the pasture database, but a fault whose record could not be placed or written leaves none, and the diagnostic then quotes the path it tried.");
+    console.error("Pasture did not evaluate " + event + " and returned no decision; the host continues unevaluated. Read the pasture diagnostic on standard error first: pasture writes every such fault there, including the case where it could not write a durable record, and this plugin forwards it there best effort — so it may be missing when the host has closed that stream. A line may also have been appended to lifecycle-faults.jsonl beside the pasture database, but a fault whose record could not be placed or written leaves none, and the diagnostic then quotes the path it tried.");
     return;
   }
   let response: unknown;

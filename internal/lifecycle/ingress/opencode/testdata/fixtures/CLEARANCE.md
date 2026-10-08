@@ -2385,7 +2385,7 @@ invocation failure, and a writable sink receives the child's diagnostic with
 the existing terminal newline policy. This is a generated transport behavior
 change in `internal/codegen/opencode_hooks.go`; the committed
 `.opencode/plugins/pasture-lifecycle.ts` is now sha256
-`eb0331c546dc8a9791bf877190306d5b5b89cc826e74062fe8ce160db1fc10b6`.
+`40abe30a64ef6195e84182e95ba1a3fe03e7030c1330398a79f6897c5bf823db`.
 A reader who hashes the shipped plugin gets the digest above.
 
 This addendum records no new live capture, fixture acceptance or host

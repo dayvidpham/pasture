@@ -326,7 +326,8 @@ func TestOpenCodeGeneratedPluginEmptyBodyDiagnostic(t *testing.T) {
   assert.equal(failure, undefined, "empty-body belt continues unevaluated");
   assert.equal(logged.length, 1, "empty-body belt logs once");
   assert.match(logged[0], /did not evaluate tool.execute.before/, "empty-body diagnostic names event");
-  assert.match(logged[0], /forwarded to standard error best effort/, "empty-body diagnostic names the best-effort forwarding");
+  assert.match(logged[0], /Read the pasture diagnostic on standard error first/, "empty-body diagnostic still directs the operator to standard error");
+  assert.match(logged[0], /forwards it there best effort/, "empty-body diagnostic names the best-effort forwarding");
   assert.match(logged[0], /may be missing when the host has closed that stream/, "empty-body diagnostic does not promise delivery");
 `)
 	if stderr != "  old binary diagnostic α\n" {
