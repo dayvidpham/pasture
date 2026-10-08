@@ -10,7 +10,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
-	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -19,27 +18,39 @@ import (
 // actor is retained as claimed; the authority reader decides whether it exists.
 type ActorClaim string
 
-// RecordLifecycleSessionClaim stores a claim after a valid native session-start
-// receipt commits. It performs at most one INSERT, with no retry. A zero claim
-// or an event other than session start does not read a clock or touch the store.
-// The supplied actor is deliberately not resolved here: an unknown claim is
-// still a claim, and is not an unbound session.
+// RecordLifecycleSessionClaim stores a claim the first time a session is
+// observed. It reads the row for the event's session and, only when no row
+// exists, performs one INSERT ... ON CONFLICT DO NOTHING with no retry.
+//
+// THE TRIGGER IS FIRST OBSERVATION, NOT THE SESSION-START EVENT. A host that
+// publishes its session-start event before its plugins can subscribe leaves
+// that first session unclaimed for its whole life — OpenCode v2 publishes
+// session.created inside Session.create, and the plugin's subscription is
+// established later with no replay — and every gate on it records UNBOUND and
+// fails open. Binding on the first event that carries the session makes the
+// claim independent of which event arrived first; a session-start event still
+// binds when it is the first one observed. The rule is the same on every
+// harness.
+//
+// A zero claim, an event with no session binding, and an event for a session
+// that already has a claim all return nil without reading a clock or taking a
+// write lock beyond the claim read. The supplied actor is deliberately not
+// resolved here: an unknown claim is still a claim, and is not an unbound
+// session. The first claim wins; a claim that loses the race between this read
+// and this insert is a silent no-op, not a fault, because the hot hook path
+// must not fail every subsequent event of an already-claimed session.
 func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTracker, harness ir.HarnessID, event model.ContractEventKind, bindings []model.NativeBinding, claim ActorClaim, clock receipt.Clock) error {
 	if claim == "" {
-		return nil
-	}
-	start := (harness == ir.HarnessClaudeCode && event == registration.EventSessionStart) ||
-		(harness == ir.HarnessCodex && event == registration.EventCodexSessionStart) ||
-		(harness == ir.HarnessOpenCode && event == registration.EventOpenCodeSessionCreated) ||
-		(harness == ir.HarnessOpenCode && event == registration.EventOpenCode2SessionCreated)
-	if !start {
 		return nil
 	}
 	session, err := lifecycleSession(bindings)
 	if err != nil {
 		return err
 	}
-	if ctx == nil || clock == nil || strings.TrimSpace(session) == "" || strings.TrimSpace(string(claim)) != string(claim) {
+	if strings.TrimSpace(session) == "" {
+		return nil
+	}
+	if ctx == nil || clock == nil || strings.TrimSpace(string(claim)) != string(claim) {
 		return sessionClaimError("the context, clock, session identity, or actor claim is invalid", "pass a context, clock, verified session identity, and non-blank actor identifier")
 	}
 	store, ok := tracker.(lifecycleReceiptStore)
@@ -48,19 +59,26 @@ func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTrack
 	}
 	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().SQLiteBusy())
 	defer cancel()
+	// READ FIRST. The common case on the hot hook path is a session that is
+	// already claimed, and that case must take no write lock. A read fault is a
+	// fault: reporting an already-claimed session as claimable would let a
+	// second writer race the first.
+	if _, present, readErr := readSessionClaimRow(bounded, store.auditDBHandle(), harness, session); readErr != nil {
+		return sessionClaimError("the store refused the claim read: "+readErr.Error(), "release other store writers or repair the database, then start a new session")
+	} else if present {
+		return nil
+	}
 	result, err := store.auditDBHandle().ExecContext(bounded,
 		`INSERT INTO pasture_session_claim (harness, session, actor, claimed_at) VALUES (?, ?, ?, ?)
 		 ON CONFLICT(harness, session) DO NOTHING`, string(harness), session, string(claim), clock.Now().UnixNano())
 	if err != nil {
 		return sessionClaimError("the store refused the claim write: "+err.Error(), "release other store writers or repair the database, then start a new session")
 	}
-	written, err := result.RowsAffected()
-	if err != nil {
+	if _, err := result.RowsAffected(); err != nil {
 		return sessionClaimError("the store did not report whether it stored the claim: "+err.Error(), "inspect pasture_session_claim before you start a new session")
 	}
-	if written == 0 {
-		return sessionClaimError(fmt.Sprintf("session %q on harness %q already has an actor claim; the first claim is unchanged", session, harness), "keep the original actor or start a new session to claim a different actor")
-	}
+	// A RowsAffected of 0 means another writer claimed the session between this
+	// read and this insert. The first claim wins and this one is a silent no-op.
 	return nil
 }
 
@@ -76,7 +94,7 @@ func lifecycleSession(bindings []model.NativeBinding) (string, error) {
 	for _, binding := range bindings {
 		if binding.Kind == model.BindingSession {
 			if session != "" {
-				return "", sessionClaimError("more than one session identity was supplied", "pass the verified session-start bindings")
+				return "", sessionClaimError("more than one session identity was supplied", "pass exactly one verified session binding")
 			}
 			session = binding.Value
 		}
@@ -113,8 +131,18 @@ func LifecycleSession(bindings []model.NativeBinding) (string, error) {
 func (t *trackerImpl) readLifecycleSessionClaim(ctx context.Context, harness ir.HarnessID, session string) (actor string, present bool, err error) {
 	bounded, cancel := context.WithTimeout(ctx, t.timeoutProfile.SQLiteBusy())
 	defer cancel()
+	return readSessionClaimRow(bounded, t.auditDB, harness, session)
+}
+
+// readSessionClaimRow is the ONE point lookup on (harness, session) that both
+// the claim write and the gate read perform, so the two can never key
+// differently. present is false when no claim row exists, which is an unbound
+// session and not an error. A returned error is a read fault; the caller
+// decides its kind. The caller owns the connection lease and releases it when
+// the scan returns.
+func readSessionClaimRow(ctx context.Context, db *sql.DB, harness ir.HarnessID, session string) (actor string, present bool, err error) {
 	var claimed string
-	scanErr := t.auditDB.QueryRowContext(bounded,
+	scanErr := db.QueryRowContext(ctx,
 		`SELECT actor FROM pasture_session_claim WHERE harness=? AND session=?`,
 		string(harness), session,
 	).Scan(&claimed)
@@ -128,5 +156,5 @@ func (t *trackerImpl) readLifecycleSessionClaim(ctx context.Context, harness ir.
 }
 
 func sessionClaimError(why, fix string) error {
-	return fmt.Errorf("The session actor claim was refused because %s. Where: internal/tasks/session_claim.go, during the session-start claim write. Impact: this claim failure is not a policy decision; the receipt author remains the system actor. Fix: %s.", why, fix)
+	return fmt.Errorf("The session actor claim was refused because %s. Where: internal/tasks/session_claim.go, during the session claim write. Impact: this claim failure is not a policy decision; the receipt author remains the system actor. Fix: %s.", why, fix)
 }

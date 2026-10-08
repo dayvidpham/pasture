@@ -904,10 +904,12 @@ func TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage(t *tes
 //     statements, no paging loop and NO episode cap. Condition: a BOUND session
 //     only. Measured: `bound gate` minus `unbound gate` below, i.e. the
 //     ownership-transaction contribution.
-//  3. session-start claim write — one INSERT ... ON CONFLICT DO NOTHING on
-//     pasture_session_claim. Condition: the host's own session-start event with
-//     an actor, once per session; never on a gate path. Measured separately
-//     in-process with distinct sessions (the `session-start-claim-write` line).
+//  3. first-observed claim write — one point SELECT on pasture_session_claim,
+//     then one INSERT ... ON CONFLICT DO NOTHING only when the session is
+//     still unclaimed. Condition: the first event that carries the session and
+//     an actor, once per session; a later event on a claimed session is the
+//     read alone. Measured separately in-process with distinct sessions (the
+//     `session-start-claim-write` line).
 //  4. first-open v8->v9 migration — one-time per store, on the first command
 //     that opens a v8 file, reported on its own line and never averaged into
 //     hook cost. Measured by the built-binary subjects in

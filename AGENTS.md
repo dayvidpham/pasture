@@ -465,23 +465,37 @@ any byte on standard output is read as a decision.
 verdict on an evaluated gate is read at the moment the event fires: the session
 claim says which actor the session belongs to, and the active-assignment read
 says what that actor currently owns. Both come from the store, and a claim is
-written only when BOTH of the following hold — the environment supplies
-`PASTURE_ACTOR_ID` (`cmd/pasture/hook_environment.go`) and the harness's own
-session-start event fires (`internal/tasks/session_claim.go`, which is the only
-writer of `pasture_session_claim`). Without both, every gate records a PROCEED
-whose reason says the session was UNBOUND, and no gate can deny anything; that
-is the fail-open default rather than a fault, and the receipt names the reason
-so the difference between "allowed" and "never asked" stays readable after the
-fact. A host that delivers a gate before its own session-start event is in that
-same state by construction, for the same reason.
+written the first time a session is observed when BOTH of the following hold —
+the environment supplies `PASTURE_ACTOR_ID` (`cmd/pasture/hook_environment.go`)
+and the event carries a session binding (`internal/tasks/session_claim.go`,
+which is the only writer of `pasture_session_claim`). The trigger is the
+session's FIRST OBSERVED EVENT, not only its session-start event: a host that
+publishes its session-start event before its plugins can subscribe (OpenCode v2
+publishes `session.created` inside `Session.create`, before activation, with no
+replay) would otherwise leave that first session unclaimed for its whole life.
+One claim per session is still written once, and the session-start event still
+binds when it is the first event observed. Without both conditions, every gate
+records a PROCEED whose reason says the session was UNBOUND, and no gate can
+deny anything; that is the fail-open default rather than a fault, and the
+receipt names the reason so the difference between "allowed" and "never asked"
+stays readable after the fact. While no claim exists, evaluated gates record
+UNBOUND; an eligible event writes the claim after any gate evaluation and
+successful receipt commit. Later evaluated gates after a successful claim write
+read that claim — an observation event does not evaluate a gate, and a later
+invocation without an actor does not unbind an existing claim. A host that
+delivers a gate as the session's first observed event is UNBOUND for that one
+event, and not after it.
 
 **A DENIAL IS REACHABLE ONLY WHERE THE HOST'S ROW CARRIES A RESPONSE
 CHANNEL.** The durable reason is recorded on every evaluated gate, whatever the
 host can do about it, but a host row that cannot express a refusal is answered
 with its proceed bytes and the receipt carries the UNENFORCED denial as its
-reason. That channel is cited for Claude Code only, so a Deny is representable
-there and nowhere else today: the Codex and OpenCode rows proceed with the
-reason recorded.
+reason. Which rows carry that channel is row-specific and evidence-bound:
+Claude Code's gate rows cite their host documentation, and OpenCode's
+`permission.evaluate` row cites the committed live capture in which the host
+honoured pasture's deny as a blocked tool carrying pasture's reason (the fourth
+batch of the OpenCode fixture clearance record). Rows without such evidence
+proceed with the reason recorded.
 
 ### Schema migration (`pasture migrate`)
 
