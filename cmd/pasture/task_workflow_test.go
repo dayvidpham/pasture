@@ -384,9 +384,44 @@ func TestCLI_TaskDepTreeDefaultBlockedByUnchanged(t *testing.T) {
 		"        └── blocked by " + h + "\n"
 	require.Equal(t, wantText, def.stdout)
 
-	jsonOut := runCLI(t, "--db", db, "--format", "json", "task", "dep", "tree", e)
-	require.Zero(t, jsonOut.exitCode)
-	require.NotContains(t, jsonOut.stdout, "repeated")
+	// The pre-change JSON template, byte for byte: two-space indent, one
+	// object per line, the edge order normalizeDepTree produces, and the
+	// trailing newline fmt.Fprintln adds. A whitespace or key-order regression
+	// in the legacy path would fail here.
+	wantJSON := "{\n" +
+		"  \"root\": \"" + e + "\",\n" +
+		"  \"edges\": [\n" +
+		"    {\n" +
+		"      \"sourceId\": \"" + e + "\",\n" +
+		"      \"targetId\": \"" + f + "\",\n" +
+		"      \"kind\": \"blocked_by\"\n" +
+		"    },\n" +
+		"    {\n" +
+		"      \"sourceId\": \"" + f + "\",\n" +
+		"      \"targetId\": \"" + h + "\",\n" +
+		"      \"kind\": \"blocked_by\"\n" +
+		"    },\n" +
+		"    {\n" +
+		"      \"sourceId\": \"" + e + "\",\n" +
+		"      \"targetId\": \"" + g + "\",\n" +
+		"      \"kind\": \"blocked_by\"\n" +
+		"    },\n" +
+		"    {\n" +
+		"      \"sourceId\": \"" + g + "\",\n" +
+		"      \"targetId\": \"" + h + "\",\n" +
+		"      \"kind\": \"blocked_by\"\n" +
+		"    }\n" +
+		"  ]\n" +
+		"}\n"
+
+	defJSON := runCLI(t, "--db", db, "--format", "json", "task", "dep", "tree", e)
+	explicitJSON := runCLI(t, "--db", db, "--format", "json", "task", "dep", "tree", e, "--kind", "blocked_by")
+	require.Zero(t, defJSON.exitCode, "%s", defJSON.stderr)
+	require.Zero(t, explicitJSON.exitCode, "%s", explicitJSON.stderr)
+	require.Equal(t, wantJSON, defJSON.stdout)
+	require.Equal(t, wantJSON, explicitJSON.stdout)
+	require.Equal(t, defJSON.stdout, explicitJSON.stdout)
+	require.NotContains(t, defJSON.stdout, "repeated")
 }
 
 func TestCLI_TaskDepTreeRejectsUnknownKindBeforeDBOpen(t *testing.T) {

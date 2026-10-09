@@ -10,7 +10,7 @@ import (
 
 // treeID builds a valid wire-format task ID for a small numeric suffix, so the
 // walk can parse and expand it.
-func treeID(n byte) string {
+func treeID(n int) string {
 	return fmt.Sprintf("tree--00000000-0000-0000-0000-%012x", n)
 }
 
@@ -142,6 +142,65 @@ func TestCollectTypedTree_PerKindDedup(t *testing.T) {
 		a + "->" + b + ":supersedes",
 		a + "->" + c + ":supersedes",
 	}, edgePairs(edges))
+}
+
+// Two different kinds from the same source to the same target must both
+// survive; only the target's EXPANSION is deduped, not the edges into it.
+func TestCollectTypedTree_TwoKindsSameTargetBothSurvive(t *testing.T) {
+	t.Parallel()
+
+	a, b, c := treeID(0xa), treeID(0xb), treeID(0xc)
+	fetchCalls := map[string]int{}
+	table := fetchTable{
+		a: {
+			provenance.EdgeBlockedBy:   {b},
+			provenance.EdgeDerivedFrom: {b},
+		},
+		b: {provenance.EdgeSupersedes: {c}},
+	}
+	counted := func(source provenance.TaskID, kind provenance.EdgeKind) ([]provenance.Edge, error) {
+		fetchCalls[source.String()]++
+		return table.fetch(source, kind)
+	}
+	edges, err := collectTypedTree(a, canonicalTreeKinds, counted)
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		a + "->" + b + ":blocked_by",
+		b + "->" + c + ":supersedes",
+		a + "->" + b + ":derived_from",
+	}, edgePairs(edges))
+	// B is expanded once, so it is fetched once per selected kind (not twice).
+	require.Equal(t, len(canonicalTreeKinds), fetchCalls[b])
+	// The B->C edge appears exactly once, proving the second A->B edge did not
+	// re-expand B.
+	require.Equal(t, 1, countPairs(edges, b, c))
+}
+
+// A long chain must terminate and visit each node exactly once.
+func TestCollectTypedTree_LongChainIsBounded(t *testing.T) {
+	t.Parallel()
+
+	const n = 4096
+	table := fetchTable{}
+	for i := 0; i < n; i++ {
+		table[treeID(i)] = map[provenance.EdgeKind][]string{
+			provenance.EdgeSupersedes: {treeID(i + 1)},
+		}
+	}
+	edges, err := collectTypedTree(treeID(0), []provenance.EdgeKind{provenance.EdgeSupersedes}, table.fetch)
+	require.NoError(t, err)
+	require.Len(t, edges, n)
+	require.Equal(t, treeID(n), edges[n-1].TargetID)
+}
+
+func countPairs(edges []provenance.Edge, source, target string) int {
+	count := 0
+	for _, e := range edges {
+		if e.SourceID == source && e.TargetID == target {
+			count++
+		}
+	}
+	return count
 }
 
 func TestCollectTypedTree_NonTaskTargetIsLeaf(t *testing.T) {

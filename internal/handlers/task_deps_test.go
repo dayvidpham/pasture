@@ -366,36 +366,59 @@ func TestTaskDepTree_BlockedByOnlyLegacyBytes(t *testing.T) {
 	}
 }
 
+// A non-blocking typed edge must leave readiness unchanged. The source is
+// otherwise ready, and the before/after sets are compared per kind.
 func TestTaskDepTree_TypedEdgesDoNotChangeReadiness(t *testing.T) {
 	t.Parallel()
-	path := dbPath(t)
 
-	blocked := createTask(t, path, "blocked")
-	blocker := createTask(t, path, "blocker")
-	other := createTask(t, path, "other")
-	mustAddEdge(t, path, blocked, blocker, provenance.EdgeBlockedBy)
-	mustAddEdge(t, path, blocked, other, provenance.EdgeSupersedes)
+	for _, kind := range []provenance.EdgeKind{
+		provenance.EdgeDerivedFrom,
+		provenance.EdgeSupersedes,
+		provenance.EdgeDiscoveredFrom,
+	} {
+		t.Run(kind.String(), func(t *testing.T) {
+			t.Parallel()
+			path := dbPath(t)
 
-	var readyOut bytes.Buffer
-	if _, err := handlers.TaskReady(&readyOut, path, types.OutputJSON, ""); err != nil {
+			src := createTask(t, path, "src")
+			tgt := createTask(t, path, "tgt")
+
+			before := readyTaskSet(t, path)
+			if !before[src] || !before[tgt] {
+				t.Fatalf("fixture must start ready: %+v", before)
+			}
+
+			mustAddEdge(t, path, src, tgt, kind)
+
+			after := readyTaskSet(t, path)
+			if !after[src] {
+				t.Fatalf("a non-blocking %s edge must not block its source: %+v", kind, after)
+			}
+			if len(after) != len(before) {
+				t.Fatalf("readiness set changed size after a %s edge: before=%v after=%v", kind, before, after)
+			}
+			for id := range before {
+				if !after[id] {
+					t.Fatalf("task %s left the ready set after a %s edge", id, kind)
+				}
+			}
+		})
+	}
+}
+
+// readyTaskSet runs the production ready handler and returns the set of IDs it
+// reports as ready.
+func readyTaskSet(t *testing.T, path string) map[string]bool {
+	t.Helper()
+	var out bytes.Buffer
+	if _, err := handlers.TaskReady(&out, path, types.OutputJSON, ""); err != nil {
 		t.Fatalf("ready failed: %v", err)
 	}
-	ready := decodeTaskList(t, readyOut.String())
-	if containsTask(ready, blocked) {
-		t.Fatalf("blocked task must not be ready: %+v", ready)
+	set := map[string]bool{}
+	for _, task := range decodeTaskList(t, out.String()) {
+		set[task.ID] = true
 	}
-	if !containsTask(ready, blocker) || !containsTask(ready, other) {
-		t.Fatalf("a typed (non-blocked_by) edge must not block its target: %+v", ready)
-	}
-
-	var blockedOut bytes.Buffer
-	if _, err := handlers.TaskBlocked(&blockedOut, path, types.OutputJSON, ""); err != nil {
-		t.Fatalf("blocked failed: %v", err)
-	}
-	blockedList := decodeTaskList(t, blockedOut.String())
-	if !containsTask(blockedList, blocked) {
-		t.Fatalf("expected the blocked_by source to remain blocked: %+v", blockedList)
-	}
+	return set
 }
 
 func TestTaskDepTree_NonTaskTargetRendersAsLeaf(t *testing.T) {

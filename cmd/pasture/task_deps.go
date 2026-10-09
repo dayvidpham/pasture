@@ -69,7 +69,9 @@ var taskDepTreeCmd = &cobra.Command{
 		"--kind selects which relation kind to traverse: blocked_by (the default),\n" +
 		"derived_from, supersedes, discovered_from, or all. Only blocked_by affects\n" +
 		"readiness (`pasture task ready` / `pasture task blocked`). Traversal is\n" +
-		"outgoing only; a node that repeats prints once and is never expanded again.",
+		"outgoing only; a node that repeats prints once and is never expanded again.\n\n" +
+		"Outside the blocked_by default, a repeated node is marked `(already shown)`;\n" +
+		"the default and explicit `--kind blocked_by` output keeps the legacy unmarked form.",
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		kindText, _ := cmd.Flags().GetString("kind")
