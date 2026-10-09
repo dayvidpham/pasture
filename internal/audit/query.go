@@ -59,7 +59,7 @@ func QueryEventsOn(ctx context.Context, db *sql.DB, epochId string, phase *proto
 		args = append(args, legacyRoleAgentNamePrefix+*role)
 	}
 
-	query := `SELECT ce.context_id, ae.phase, COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
+	query := `SELECT ae.id, ce.context_id, ae.phase, COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
 	          FROM audit_events ae
 	          INNER JOIN context_edges ce ON ce.event_id = ae.id
 	          LEFT JOIN agents_software asw ON asw.agent_id = ae.agent_id
@@ -86,9 +86,10 @@ func QueryEventsOn(ctx context.Context, db *sql.DB, epochId string, phase *proto
 
 	var events []protocol.AuditEvent
 	for rows.Next() {
+		var eventID int64
 		var epochIDCol, phaseCol, agentName, eventTypeCol, payloadCol string
 		var tsNano int64
-		if err := rows.Scan(&epochIDCol, &phaseCol, &agentName, &eventTypeCol, &payloadCol, &tsNano); err != nil {
+		if err := rows.Scan(&eventID, &epochIDCol, &phaseCol, &agentName, &eventTypeCol, &payloadCol, &tsNano); err != nil {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What: fmt.Sprintf(
@@ -118,6 +119,7 @@ func QueryEventsOn(ctx context.Context, db *sql.DB, epochId string, phase *proto
 			}
 		}
 		events = append(events, protocol.AuditEvent{
+			ID:        eventID,
 			EpochId:   epochIDCol,
 			Phase:     protocol.PhaseId(phaseCol),
 			Role:      stripLegacyRolePrefix(agentName),

@@ -800,7 +800,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	var query string
 	if hasRole {
 		// Pre-v3 shape (legacy db that has not yet been migrated past v2).
-		query = `SELECT ae.epoch_id, ae.phase, ae.role, ae.event_type, ae.payload, ae.timestamp
+		query = `SELECT ae.id, ae.epoch_id, ae.phase, ae.role, ae.event_type, ae.payload, ae.timestamp
 		         FROM context_edges ce
 		         JOIN audit_events ae ON ae.id = ce.event_id
 		         WHERE ce.context_kind = ? AND ce.context_id = ?
@@ -813,7 +813,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 		// S7 carry their own pasture/automaton/... names). decodeAuditEvent
 		// strips the legacy prefix to recover the original role string,
 		// preserving the existing API contract for callers.
-		query = `SELECT ` + epochProj + ` AS epoch_id, COALESCE(ae.phase, '') AS phase,
+		query = `SELECT ae.id, ` + epochProj + ` AS epoch_id, COALESCE(ae.phase, '') AS phase,
 		                COALESCE(asw.name, ''), ae.event_type, ae.payload, ae.timestamp
 		         FROM context_edges ce
 		         JOIN audit_events ae ON ae.id = ce.event_id
@@ -848,10 +848,11 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 	events := make([]protocol.AuditEvent, 0)
 	for rows.Next() {
 		var (
+			eventID                                                   int64
 			epochId, phaseStr, roleOrAgent, eventTypeStr, payloadJSON string
 			tsNano                                                    int64
 		)
-		if err := rows.Scan(&epochId, &phaseStr, &roleOrAgent, &eventTypeStr, &payloadJSON, &tsNano); err != nil {
+		if err := rows.Scan(&eventID, &epochId, &phaseStr, &roleOrAgent, &eventTypeStr, &payloadJSON, &tsNano); err != nil {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     fmt.Sprintf("Pasture couldn't read one of the timeline rows for %s %q.", contextIDLabel(kind), contextId),
@@ -867,7 +868,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 				Cause: err,
 			}
 		}
-		ev, perr := decodeAuditEvent(epochId, phaseStr, roleOrAgent, eventTypeStr, payloadJSON, tsNano)
+		ev, perr := decodeAuditEvent(eventID, epochId, phaseStr, roleOrAgent, eventTypeStr, payloadJSON, tsNano)
 		if perr != nil {
 			return nil, perr
 		}

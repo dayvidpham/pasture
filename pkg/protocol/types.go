@@ -301,6 +301,11 @@ func (e EventType) IsValid() bool {
 // empty; the column is then NULL and the partial unique index ignores the row,
 // preserving the legacy insert-always behaviour.
 type AuditEvent struct {
+	// ID is the audit_events.id row identifier. It is the durable handle a
+	// reader uses to look up the event's context links (see
+	// protocol.TaskTracker.EventContexts). Zero means "not read from a
+	// store" (for example, an event a caller is about to record).
+	ID        int64          `json:"id,omitempty"`
 	EpochId   string         `json:"epochId"`
 	Phase     PhaseId        `json:"phase"`
 	Role      string         `json:"role"`

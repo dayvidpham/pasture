@@ -58,6 +58,10 @@ func (m *InMemoryAuditTrail) RecordEventReturningId(_ context.Context, event pro
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lastEventId++
+	// Stamp the synthetic id onto the stored copy so a later QueryEvents
+	// returns the same handle the id-returning call handed back, mirroring
+	// the SQLite trail where the row id is recoverable from a read.
+	event.ID = m.lastEventId
 	m.events = append(m.events, event)
 	return m.lastEventId, nil
 }

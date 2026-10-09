@@ -5951,6 +5951,7 @@ var guardSweepForeign = map[string]string{
 	"main_test.go":                               "not changed by this slice",
 	"migrate_v8_v9_cli_test.go":                  "audit schema v8 to v9 migration proof on the built binary, outside the lifecycle transport sweep",
 	"queue_test.go":                              "not changed by this slice",
+	"task_residual_verbs_test.go":                "task agent registration and events/contexts CLI proof, outside the lifecycle transport sweep",
 	"task_workflow_test.go":                      "task workflow CLI proof, outside the lifecycle transport sweep",
 	"version_test.go":                            "not changed by this slice",
 }
