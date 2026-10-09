@@ -72,7 +72,7 @@ func init() {
 		Short: "Show outgoing blocked_by dependencies only",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			code, err := handlers.TaskDepTree(cmd.OutOrStdout(), flagDBPath, args[0], resolveFormat())
+			code, err := handlers.TaskDepTree(cmd.OutOrStdout(), flagDBPath, args[0], []provenance.EdgeKind{provenance.EdgeBlockedBy}, resolveFormat())
 			return finishTaskCommand(code, err)
 		},
 	})

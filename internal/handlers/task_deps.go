@@ -97,8 +97,14 @@ func TaskDepAdd(w io.Writer, dbPath, sourceIdStr, targetIdStr string, kind prove
 	return 0, nil
 }
 
-// TaskDepTree prints the blocked-by tree rooted at the given task in DFS order.
-func TaskDepTree(w io.Writer, dbPath, idStr string, format types.OutputFormat) (int, error) {
+// TaskDepTree prints the outgoing relation tree rooted at the given task in
+// DFS order, following the selected kinds.
+//
+// The blocked_by-only selection keeps the legacy path (one DepTree query and
+// FormatDepTree) so its bytes never change. Every other selection — a single
+// non-blocked_by kind or all kinds — walks the store through collectTypedTree
+// and renders through FormatTypedTree, which marks repeats.
+func TaskDepTree(w io.Writer, dbPath, idStr string, kinds []provenance.EdgeKind, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseTaskID(idStr)
 	if err != nil {
 		return wrapInvalidId("task dep tree", idStr, err)
@@ -113,13 +119,29 @@ func TaskDepTree(w io.Writer, dbPath, idStr string, format types.OutputFormat) (
 	if _, err := tr.Show(id); err != nil {
 		return wrapTaskOpError("dep tree root", err)
 	}
-	edges, err := tr.DepTree(id)
-	if err != nil {
-		return wrapTaskOpError("dep tree", err)
-	}
-	out, fErr := formatters.FormatDepTree(idStr, edges, format)
-	if fErr != nil {
-		return pasterrors.ExitCode(fErr), fErr
+
+	selection := normalizeTreeKinds(kinds)
+	var out string
+	if isBlockedByOnly(selection) {
+		edges, err := tr.DepTree(id)
+		if err != nil {
+			return wrapTaskOpError("dep tree", err)
+		}
+		out, err = formatters.FormatDepTree(idStr, edges, format)
+		if err != nil {
+			return pasterrors.ExitCode(err), err
+		}
+	} else {
+		edges, err := collectTypedTree(idStr, selection, func(source provenance.TaskID, kind provenance.EdgeKind) ([]provenance.Edge, error) {
+			return tr.Edges(source, &kind)
+		})
+		if err != nil {
+			return wrapTaskOpError("dep tree", err)
+		}
+		out, err = formatters.FormatTypedTree(idStr, edges, selection, format)
+		if err != nil {
+			return pasterrors.ExitCode(err), err
+		}
 	}
 	fmt.Fprintln(w, out)
 	return 0, nil
