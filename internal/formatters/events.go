@@ -31,6 +31,7 @@ import (
 // camelCase keys mirror protocol.AuditEvent's existing struct tags so the
 // formatter shape is byte-stable across the public façade.
 type auditEventJSON struct {
+	Id        int64          `json:"id"`
 	EpochId   string         `json:"epochId"`
 	Phase     string         `json:"phase"`
 	Role      string         `json:"role"`
@@ -41,6 +42,7 @@ type auditEventJSON struct {
 
 func toAuditEventJSON(e protocol.AuditEvent) auditEventJSON {
 	return auditEventJSON{
+		Id:        e.ID,
 		EpochId:   e.EpochId,
 		Phase:     string(e.Phase),
 		Role:      e.Role,
@@ -113,6 +115,7 @@ func FormatAuditEvents(events []protocol.AuditEvent, format types.OutputFormat) 
 
 func renderAuditEventText(e protocol.AuditEvent) string {
 	var b strings.Builder
+	fmt.Fprintf(&b, "Id:        %d\n", e.ID)
 	fmt.Fprintf(&b, "EpochId:   %s\n", e.EpochId)
 	fmt.Fprintf(&b, "Phase:     %s\n", e.Phase)
 	fmt.Fprintf(&b, "Role:      %s\n", e.Role)
@@ -132,8 +135,8 @@ func renderAuditEventText(e protocol.AuditEvent) string {
 
 func renderAuditEventListLine(e protocol.AuditEvent) string {
 	ts := e.Timestamp.UTC().Format(time.RFC3339)
-	return fmt.Sprintf("%s [%s] [%s] %s/%s — %s",
-		ts, e.Phase, e.Role, e.EpochId, e.EventType, summarisePayload(e.Payload))
+	return fmt.Sprintf("#%d %s [%s] [%s] %s/%s — %s",
+		e.ID, ts, e.Phase, e.Role, e.EpochId, e.EventType, summarisePayload(e.Payload))
 }
 
 // summarisePayload returns a one-line summary suitable for the list view.

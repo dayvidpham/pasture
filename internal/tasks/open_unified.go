@@ -511,6 +511,9 @@ const legacyRoleAgentNamePrefix = "pasture/legacy-role/"
 // Centralised here so Timeline, future event-listing queries, and any future
 // CLI-side decoders share the same JSON-unmarshal + UTC reconciliation logic.
 //
+// eventID is the audit_events.id row handle, carried through so a caller can
+// address the event's context links with TaskTracker.EventContexts.
+//
 // The roleOrAgentName argument is either:
 //   - The legacy v1/v2 audit_events.role string (legacy DBs), or
 //   - The agents_software.name joined via audit_events.agent_id (post-v3).
@@ -519,7 +522,7 @@ const legacyRoleAgentNamePrefix = "pasture/legacy-role/"
 // stripped to recover the original free-string role; other names (S7
 // well-known automaton agents, future live SoftwareAgents) are returned
 // as-is so the caller still sees a stable, non-empty Role.
-func decodeAuditEvent(epochId, phaseStr, roleOrAgentName, eventTypeStr, payloadJSON string, tsNano int64) (protocol.AuditEvent, error) {
+func decodeAuditEvent(eventID int64, epochId, phaseStr, roleOrAgentName, eventTypeStr, payloadJSON string, tsNano int64) (protocol.AuditEvent, error) {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
 		return protocol.AuditEvent{}, &pasterrors.StructuredError{
@@ -546,6 +549,7 @@ func decodeAuditEvent(epochId, phaseStr, roleOrAgentName, eventTypeStr, payloadJ
 		role = role[len(legacyRoleAgentNamePrefix):]
 	}
 	return protocol.AuditEvent{
+		ID:        eventID,
 		EpochId:   epochId,
 		Phase:     protocol.PhaseId(phaseStr),
 		Role:      role,

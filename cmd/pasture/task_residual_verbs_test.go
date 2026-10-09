@@ -121,18 +121,70 @@ func TestCLI_TaskEventsAndContexts(t *testing.T) {
 	require.Equal(t, epochID, events[0]["epochId"])
 	require.Equal(t, "PhaseTransition", events[0]["eventType"])
 
+	// The event ID must be printed so the user can feed it to
+	// `task contexts`. Discover it from the CLI output, not the seeder.
+	printedID, ok := events[0]["id"].(float64)
+	require.True(t, ok, "events JSON must carry the numeric event id: %v", events[0])
+	require.Equal(t, eventID, int64(printedID))
+
+	// The text format carries the ID too.
+	text := runCLI(t, "--db", db, "task", "events", "--epoch-id", epochID)
+	require.Zero(t, text.exitCode, text.stderr)
+	require.Contains(t, text.stdout, "#"+strconv.FormatInt(eventID, 10))
+
 	// --context-kind/--context-id path.
 	out = runCLI(t, "--db", db, "--format", "json", "task", "events", "--context-kind", "GitContext", "--context-id", sha)
 	require.Zero(t, out.exitCode, out.stderr)
 	require.NoError(t, json.Unmarshal([]byte(out.stdout), &events))
 	require.Len(t, events, 1)
 
-	// contexts path.
-	out = runCLI(t, "--db", db, "--format", "json", "task", "contexts", strconv.FormatInt(eventID, 10))
+	// The combined context + epoch filter keeps the event that carries both
+	// edges.
+	out = runCLI(t, "--db", db, "--format", "json", "task", "events",
+		"--context-kind", "GitContext", "--context-id", sha, "--epoch-id", epochID)
+	require.Zero(t, out.exitCode, out.stderr)
+	require.NoError(t, json.Unmarshal([]byte(out.stdout), &events))
+	require.Len(t, events, 1)
+
+	// The real flow: take the ID printed by `task events` and use it for
+	// `task contexts`.
+	out = runCLI(t, "--db", db, "--format", "json", "task", "contexts", strconv.FormatInt(int64(printedID), 10))
 	require.Zero(t, out.exitCode, out.stderr)
 	var contexts []map[string]any
 	require.NoError(t, json.Unmarshal([]byte(out.stdout), &contexts))
 	require.Len(t, contexts, 2)
+}
+
+// TestCLI_TaskAgentsRegisterDuplicateRefused proves the duplicate policy over
+// the real CLI: a repeat is refused, the existing ID is printed, and it can be
+// reused as a comment author.
+func TestCLI_TaskAgentsRegisterDuplicateRefused(t *testing.T) {
+	t.Parallel()
+
+	db := newDB(t)
+	run := func(args ...string) runOutcome {
+		return runCLI(t, append([]string{"--db", db, "--format", "json", "task"}, args...)...)
+	}
+
+	first := run("agents", "register", "human", "--name", "Ada Lovelace", "--contact", "ada@example.com", "--namespace", "acme")
+	require.Zero(t, first.exitCode, first.stderr)
+	var created map[string]any
+	require.NoError(t, json.Unmarshal([]byte(first.stdout), &created))
+	existing := created["agentId"].(string)
+
+	repeat := run("agents", "register", "human", "--name", "Ada Lovelace", "--contact", "ada@example.com", "--namespace", "acme")
+	require.Equal(t, 1, repeat.exitCode)
+	require.Contains(t, repeat.stderr, existing)
+	require.Contains(t, repeat.stderr, "--author "+existing)
+	require.Empty(t, repeat.stdout)
+
+	// The named ID is a usable author.
+	createdTask := run("create", "authored work", "--namespace", "acme")
+	require.Zero(t, createdTask.exitCode, createdTask.stderr)
+	var task map[string]any
+	require.NoError(t, json.Unmarshal([]byte(createdTask.stdout), &task))
+	add := run("comment", "add", task["id"].(string), "reused author", "--author", existing)
+	require.Zero(t, add.exitCode, add.stderr)
 }
 
 // TestCLI_TaskEventsContextsValidation proves the restored verbs surface

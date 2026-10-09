@@ -90,6 +90,120 @@ func TestTaskAgentsRegister_AllKindsThenCommentAdd(t *testing.T) {
 	}
 }
 
+// TestTaskAgentsRegister_DuplicateRefused proves the duplicate policy for
+// every agent kind: an exact repeat is refused, names the existing ID, tells
+// the user how to reuse it, and creates no second identity.
+func TestTaskAgentsRegister_DuplicateRefused(t *testing.T) {
+	t.Parallel()
+
+	model := provenance.DefaultModelRegistry().Models()[0]
+	cases := []struct {
+		name string
+		in   handlers.TaskAgentRegisterInput
+	}{
+		{
+			name: "human",
+			in: handlers.TaskAgentRegisterInput{
+				Kind: handlers.AgentRegisterHuman, Name: "Ada Lovelace", Contact: "ada@example.com",
+			},
+		},
+		{
+			name: "software",
+			in: handlers.TaskAgentRegisterInput{
+				Kind: handlers.AgentRegisterSoftware, Name: "pasture-cli", Version: "0.0.13", Source: "github.com/dayvidpham/pasture",
+			},
+		},
+		{
+			name: "ml",
+			in: handlers.TaskAgentRegisterInput{
+				Kind: handlers.AgentRegisterML, Role: "worker", Provider: string(model.Provider), Model: string(model.Name),
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			path := dbPath(t)
+			first := tc.in
+			first.DBPath = path
+			first.Namespace = "acme"
+
+			var out bytes.Buffer
+			code, err := handlers.TaskAgentsRegister(&out, first, types.OutputJSON)
+			require.NoError(t, err)
+			require.Zero(t, code)
+			var created registeredAgentJSON
+			require.NoError(t, json.Unmarshal(out.Bytes(), &created))
+
+			before := agentRegistryCount(t, path)
+
+			out.Reset()
+			code, err = handlers.TaskAgentsRegister(&out, first, types.OutputJSON)
+			require.Equal(t, 1, code)
+			var se *pasterrors.StructuredError
+			require.ErrorAs(t, err, &se)
+			require.Equal(t, pasterrors.CategoryValidation, se.Category)
+			require.Contains(t, se.What, created.AgentID)
+			require.Contains(t, se.Fix, "--author "+created.AgentID)
+			require.Contains(t, se.Fix, "agents show "+created.AgentID)
+			require.Empty(t, out.String())
+
+			require.Equal(t, before, agentRegistryCount(t, path), "a refused duplicate must not add an identity")
+
+			// A genuinely different registration still succeeds.
+			distinct := first
+			switch tc.name {
+			case "human":
+				distinct.Name = "Grace Hopper"
+			case "software":
+				distinct.Version = "0.0.14"
+			case "ml":
+				distinct.Role = "reviewer"
+			}
+			out.Reset()
+			code, err = handlers.TaskAgentsRegister(&out, distinct, types.OutputJSON)
+			require.NoError(t, err)
+			require.Zero(t, code)
+		})
+	}
+}
+
+// TestTaskAgentsRegister_DuplicateIsNamespaceScoped proves the duplicate key
+// includes the namespace: the same details in a different namespace is a
+// distinct author, not a duplicate.
+func TestTaskAgentsRegister_DuplicateIsNamespaceScoped(t *testing.T) {
+	t.Parallel()
+
+	path := dbPath(t)
+	for _, ns := range []string{"acme", "other"} {
+		var out bytes.Buffer
+		code, err := handlers.TaskAgentsRegister(&out, handlers.TaskAgentRegisterInput{
+			DBPath:    path,
+			Namespace: ns,
+			Kind:      handlers.AgentRegisterHuman,
+			Name:      "Ada Lovelace",
+			Contact:   "ada@example.com",
+		}, types.OutputJSON)
+		require.NoError(t, err)
+		require.Zero(t, code, "namespace %q", ns)
+		var created registeredAgentJSON
+		require.NoError(t, json.Unmarshal(out.Bytes(), &created))
+		require.True(t, strings.HasPrefix(created.AgentID, ns+"--"))
+	}
+}
+
+func agentRegistryCount(t *testing.T, path string) int {
+	t.Helper()
+	var out bytes.Buffer
+	code, err := handlers.TaskAgentsList(&out, path, types.OutputJSON)
+	require.NoError(t, err)
+	require.Zero(t, code)
+	var entries []registeredAgentJSON
+	require.NoError(t, json.Unmarshal(out.Bytes(), &entries))
+	return len(entries)
+}
+
 // TestTaskAgentsRegister_TextOutputCarriesID ensures the human-readable output
 // still prints the ID (the whole point of the verb).
 func TestTaskAgentsRegister_TextOutputCarriesID(t *testing.T) {

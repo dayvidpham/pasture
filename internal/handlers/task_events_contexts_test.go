@@ -18,6 +18,7 @@ import (
 
 // eventJSONShape mirrors the formatter's audit-event wire shape.
 type eventJSONShape struct {
+	Id        int64          `json:"id"`
 	EpochId   string         `json:"epochId"`
 	Phase     string         `json:"phase"`
 	Role      string         `json:"role"`
@@ -70,7 +71,7 @@ func TestTaskEvents_EpochFilter(t *testing.T) {
 
 	path := dbPath(t)
 	epochID := "acme--01968a3c-0000-7000-8000-000000000001"
-	seedAuditEvent(t, path, protocol.AuditEvent{
+	seededID := seedAuditEvent(t, path, protocol.AuditEvent{
 		EpochId:   epochID,
 		Phase:     protocol.PhaseWorkerSlices,
 		Role:      "supervisor",
@@ -92,6 +93,122 @@ func TestTaskEvents_EpochFilter(t *testing.T) {
 	require.Equal(t, epochID, events[0].EpochId)
 	require.Equal(t, "worker-slices", events[0].Phase)
 	require.Equal(t, "PhaseTransition", events[0].EventType)
+	// The event ID must survive the query so `task contexts <id>` is reachable.
+	require.Equal(t, seededID, events[0].Id)
+}
+
+// TestTaskEvents_CombinedEpochAndContextFilter is the regression for a
+// combined --context-kind/--context-id + --epoch-id query: an event carrying
+// both an EpochContext and a GitContext edge must appear under the combined
+// filter, and an event carrying only the GitContext edge must not.
+func TestTaskEvents_CombinedEpochAndContextFilter(t *testing.T) {
+	t.Parallel()
+
+	path := dbPath(t)
+	const (
+		epochID = "acme--01968a3c-0000-7000-8000-000000000010"
+		sha     = "deadbeefcafebabe1234567890abcdef12345678"
+	)
+
+	// In-epoch event with both edges.
+	seedAuditEvent(t, path, protocol.AuditEvent{
+		Phase:     protocol.PhaseWorkerSlices,
+		Role:      "worker",
+		EventType: protocol.EventSliceStarted,
+		Timestamp: time.Now().UTC(),
+	}, map[protocol.ContextKind]string{
+		protocol.ContextEpoch: epochID,
+		protocol.ContextGit:   sha,
+	})
+	// Git-only event: same commit, no epoch edge.
+	seedAuditEvent(t, path, protocol.AuditEvent{
+		Phase:     protocol.PhaseWorkerSlices,
+		Role:      "worker",
+		EventType: protocol.EventSliceCompleted,
+		Timestamp: time.Now().UTC(),
+	}, map[protocol.ContextKind]string{protocol.ContextGit: sha})
+
+	kind := protocol.ContextGit
+	var out bytes.Buffer
+	code, err := handlers.TaskEvents(&out, handlers.TaskEventsInput{
+		DBPath:      path,
+		ContextKind: &kind,
+		ContextId:   sha,
+		EpochId:     epochID,
+	}, types.OutputJSON)
+	require.NoError(t, err)
+	require.Zero(t, code)
+
+	events := decodeEvents(t, out.String())
+	require.Len(t, events, 1, "only the epoch member survives the combined filter")
+	require.Equal(t, "SliceStarted", events[0].EventType)
+}
+
+// TestTaskEvents_AgentFilterMatchesLiveAndLegacyNames proves --agent matches
+// the recorded attribution for both a live well-known agent name and a plain
+// legacy role name, on both the epoch and context query paths.
+func TestTaskEvents_AgentFilterMatchesLiveAndLegacyNames(t *testing.T) {
+	t.Parallel()
+
+	path := dbPath(t)
+	const (
+		epochLive   = "acme--01968a3c-0000-7000-8000-000000000020"
+		epochLegacy = "acme--01968a3c-0000-7000-8000-000000000021"
+		liveName    = "pasture/automaton/check-constraints"
+		legacyName  = "worker"
+	)
+
+	seedAuditEvent(t, path, protocol.AuditEvent{
+		Phase:     protocol.PhaseCodeReview,
+		Role:      liveName,
+		EventType: protocol.EventConstraintChecked,
+		Timestamp: time.Now().UTC(),
+	}, map[protocol.ContextKind]string{protocol.ContextEpoch: epochLive})
+	seedAuditEvent(t, path, protocol.AuditEvent{
+		Phase:     protocol.PhaseWorkerSlices,
+		Role:      legacyName,
+		EventType: protocol.EventSliceStarted,
+		Timestamp: time.Now().UTC(),
+	}, map[protocol.ContextKind]string{protocol.ContextEpoch: epochLegacy})
+
+	cases := []struct {
+		name    string
+		epochID string
+		agent   string
+	}{
+		{"live name on epoch path", epochLive, liveName},
+		{"legacy name on epoch path", epochLegacy, legacyName},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			code, err := handlers.TaskEvents(&out, handlers.TaskEventsInput{
+				DBPath:  path,
+				EpochId: tc.epochID,
+				Agent:   tc.agent,
+			}, types.OutputJSON)
+			require.NoError(t, err)
+			require.Zero(t, code)
+			events := decodeEvents(t, out.String())
+			require.Len(t, events, 1)
+			require.Equal(t, tc.agent, events[0].Role)
+		})
+	}
+
+	// The same attribution filter works on the epoch-context path.
+	kind := protocol.ContextEpoch
+	var out bytes.Buffer
+	code, err := handlers.TaskEvents(&out, handlers.TaskEventsInput{
+		DBPath:      path,
+		ContextKind: &kind,
+		ContextId:   epochLive,
+		Agent:       liveName,
+	}, types.OutputJSON)
+	require.NoError(t, err)
+	require.Zero(t, code)
+	events := decodeEvents(t, out.String())
+	require.Len(t, events, 1)
+	require.Equal(t, liveName, events[0].Role)
 }
 
 // TestTaskEvents_ContextFilter exercises the --context-kind/--context-id path

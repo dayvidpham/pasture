@@ -1,6 +1,6 @@
 // Package handlers — task_agents_register.go
 //
-// Handler for `pasture task agents register` (PROPOSAL-2 §7.4 / §7.9).
+// Handler for `pasture task agents register`.
 //
 // Surface:
 //
@@ -17,6 +17,19 @@
 // The namespace comes from the global --namespace flag and is resolved exactly
 // like task creation (internal/tasks.ResolveNamespace), so an agent and the
 // tasks it authors share one project namespace by default.
+//
+// Duplicate policy. The provenance registration calls
+// (RegisterHumanAgent / RegisterSoftwareAgent / RegisterMLAgent) always mint a
+// fresh UUIDv7 and the schema carries no unique constraint over the
+// registration fields, so nothing at the store layer stops a repeated
+// registration from creating a second identity that splits one author's
+// comment history across two IDs. This handler therefore treats the full
+// registration tuple plus the resolved namespace as the duplicate key, looks
+// for an existing exact match before writing, and refuses with the existing
+// ID rather than creating a duplicate or silently reusing one. The check is
+// advisory under concurrent registrations (the store offers no atomic
+// insert-if-absent primitive), which is why the error names the existing ID
+// instead of pretending the write was conditional.
 package handlers
 
 import (
@@ -27,6 +40,7 @@ import (
 
 	"github.com/dayvidpham/provenance"
 
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -113,6 +127,10 @@ func registerHumanAgent(w io.Writer, in TaskAgentRegisterInput, format types.Out
 	}
 	defer tr.Close()
 
+	if code, err := rejectDuplicateAgent(in.DBPath, ns, in); err != nil {
+		return code, err
+	}
+
 	agent, err := tr.RegisterHumanAgent(ns, name, strings.TrimSpace(in.Contact))
 	if err != nil {
 		return agentRegisterStoreError("human", err)
@@ -158,6 +176,10 @@ func registerSoftwareAgent(w io.Writer, in TaskAgentRegisterInput, format types.
 		return pasterrors.ExitCode(err), err
 	}
 	defer tr.Close()
+
+	if code, err := rejectDuplicateAgent(in.DBPath, ns, in); err != nil {
+		return code, err
+	}
 
 	agent, err := tr.RegisterSoftwareAgent(ns, name, version, strings.TrimSpace(in.Source))
 	if err != nil {
@@ -256,6 +278,10 @@ func registerMLAgent(w io.Writer, in TaskAgentRegisterInput, format types.Output
 	}
 	defer tr.Close()
 
+	if code, err := rejectDuplicateAgent(in.DBPath, ns, in); err != nil {
+		return code, err
+	}
+
 	agent, err := tr.RegisterMLAgent(ns, role, provider, model)
 	if err != nil {
 		return agentRegisterStoreError("machine-learning", err)
@@ -287,6 +313,129 @@ func resolveAgentNamespace(explicit string) (string, int, error) {
 		return "", pasterrors.ExitCode(err), err
 	}
 	return ns, 0, nil
+}
+
+// rejectDuplicateAgent refuses a registration whose key already exists. It
+// returns (0, nil) when no match is found, and the actionable duplicate error
+// otherwise.
+func rejectDuplicateAgent(dbPath, namespace string, in TaskAgentRegisterInput) (int, error) {
+	existing, err := findDuplicateAgentID(dbPath, namespace, in)
+	if err != nil {
+		return agentRegisterLookupError(err)
+	}
+	if existing != "" {
+		return agentRegisterDuplicate(existing, in.Kind)
+	}
+	return 0, nil
+}
+
+// findDuplicateAgentID returns the wire-format ID of an existing agent whose
+// registration tuple and namespace exactly match the requested one, or "" when
+// none exists. The namespace is compared on the parsed AgentID rather than in
+// SQL so a namespace containing LIKE wildcards cannot over-match.
+func findDuplicateAgentID(dbPath, namespace string, in TaskAgentRegisterInput) (string, error) {
+	path := dbPath
+	if path == "" {
+		path = tasks.DefaultDBPath()
+	}
+	db, err := dbconn.OpenReadOnlyDB(path)
+	if err != nil {
+		return "", err
+	}
+	defer db.Close()
+
+	var query string
+	var args []any
+	switch in.Kind {
+	case AgentRegisterHuman:
+		query = `SELECT a.id FROM agents a JOIN agents_human h ON h.agent_id = a.id
+		         WHERE h.name = ? AND h.contact = ?`
+		args = []any{strings.TrimSpace(in.Name), strings.TrimSpace(in.Contact)}
+	case AgentRegisterSoftware:
+		query = `SELECT a.id FROM agents a JOIN agents_software s ON s.agent_id = a.id
+		         WHERE s.name = ? AND s.version = ? AND s.source = ?`
+		args = []any{strings.TrimSpace(in.Name), strings.TrimSpace(in.Version), strings.TrimSpace(in.Source)}
+	case AgentRegisterML:
+		query = `SELECT a.id FROM agents a
+		         JOIN agents_ml ml ON ml.agent_id = a.id
+		         JOIN roles r ON r.id = ml.role_id
+		         JOIN ml_models m ON m.id = ml.model_id
+		         JOIN providers p ON p.id = m.provider_id
+		         WHERE r.name = ? AND p.name = ? AND m.name = ?`
+		args = []any{strings.TrimSpace(in.Role), strings.TrimSpace(in.Provider), strings.TrimSpace(in.Model)}
+	default:
+		return "", nil
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return "", err
+		}
+		agentID, perr := provenance.ParseAgentID(id)
+		if perr != nil {
+			continue
+		}
+		if agentID.Namespace == namespace {
+			return id, nil
+		}
+	}
+	return "", rows.Err()
+}
+
+// agentRegisterDuplicate builds the refusal for a registration that already
+// exists. It names the existing ID and how to reuse it; it never reuses the
+// identity on the user's behalf.
+func agentRegisterDuplicate(existingID string, kind AgentRegisterKind) (int, error) {
+	se := &pasterrors.StructuredError{
+		Category: pasterrors.CategoryValidation,
+		What:     fmt.Sprintf("An identical %s agent is already registered as %q.", agentRegisterKindLabel(kind), existingID),
+		Why: "Registering the same details again would mint a second ID for the same author, " +
+			"splitting that author's comment history across two identities.",
+		Where:  "Registering an author identity (internal/handlers/task_agents_register.go).",
+		Impact: "No new identity was created; the existing one is unchanged.",
+		Fix: "1. Reuse the existing identity where an author is required:\n" +
+			"     pasture task comment add <task-id> \"<text>\" --author " + existingID + "\n" +
+			"2. Or inspect it:\n" +
+			"     pasture task agents show " + existingID + "\n" +
+			"3. If you meant a different author, change the registration details so it is distinct.",
+	}
+	return pasterrors.ExitCode(se), se
+}
+
+// agentRegisterLookupError wraps a failure to read the registry while checking
+// for a duplicate.
+func agentRegisterLookupError(err error) (int, error) {
+	se := &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What:     "Couldn't check whether this author is already registered.",
+		Why:      "Reading the agent registry to look for an existing match failed.",
+		Where:    "Registering an author identity (internal/handlers/task_agents_register.go).",
+		Impact:   "No author identity was created.",
+		Fix: "1. Confirm the store is readable:\n" +
+			"     pasture task agents list\n" +
+			"2. Retry the registration once the store is healthy.",
+		Cause: err,
+	}
+	return pasterrors.ExitCode(se), se
+}
+
+func agentRegisterKindLabel(kind AgentRegisterKind) string {
+	switch kind {
+	case AgentRegisterHuman:
+		return "human"
+	case AgentRegisterSoftware:
+		return "software"
+	case AgentRegisterML:
+		return "machine-learning"
+	default:
+		return string(kind)
+	}
 }
 
 // agentRegisterValidation builds a CategoryValidation error for a bad or
