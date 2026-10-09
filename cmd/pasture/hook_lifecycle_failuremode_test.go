@@ -3455,9 +3455,9 @@ var openCodeBeltArtefacts = []string{
 //
 // MUTATION, AT THE DEFECT SITE: delete the forwarding line from
 // invokeLifecycle in internal/codegen/templates/opencode-lifecycle.ts and
-// regenerate, or delete it from a shipped artefact alone. This test turns RED on the token
-// assertion for that artefact: the belt line is still printed and the host
-// still continues, and the diagnostic is nowhere.
+// regenerate, or delete it from a shipped artefact alone. This test turns RED
+// on the token assertion for that artefact: the belt line is still printed and
+// the host still continues, and the diagnostic is nowhere.
 func TestTheOpenCodeBeltSurfacesTheDiagnosticItSendsTheOperatorTo(t *testing.T) {
 	t.Parallel()
 
