@@ -84,8 +84,9 @@ func init() {
 
 	agentsCmd := &cobra.Command{
 		Use:   "agents",
-		Short: "Discover registered comment authors",
+		Short: "Register and discover comment authors",
 	}
+	agentsCmd.AddCommand(newTaskAgentsRegisterCmd())
 	agentsCmd.AddCommand(&cobra.Command{
 		Use:   "list",
 		Short: "List all registered agents",

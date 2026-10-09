@@ -21,7 +21,8 @@ var taskCmd = &cobra.Command{
 	Long: `Manage tasks and their generic Provenance-backed relationships.
 
 Subcommands cover task creation, retrieval, updates, closure, readiness, labels,
-dependencies, registered agents, comments, and timelines. Epoch lifecycle operations are available only below
+dependencies, agent registration and discovery, comments, timelines, and audit
+event/context queries. Epoch lifecycle operations are available only below
 "pasture epoch".
 
 All subcommands accept the global flags --db, --format, and --namespace.`,
