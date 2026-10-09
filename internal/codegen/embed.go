@@ -1,4 +1,4 @@
-// Package codegen — shared embed FS for all Go text/template files.
+// Package codegen — shared embed FS for Go text/template and TypeScript files.
 //
 // This file declares the single embed.FS that all generator functions in this
 // package share (agents.go, skills.go, etc.). Keeping the embed directive here
@@ -7,7 +7,7 @@ package codegen
 
 import "embed"
 
-// templatesFS is the embedded filesystem containing all Go text/template files
+// templatesFS is the embedded filesystem containing Go text/template and TypeScript files
 // under internal/codegen/templates/. All generator functions in this package
 // must load templates via this FS rather than from the real filesystem, so
 // that the generated binary works without access to the source tree.

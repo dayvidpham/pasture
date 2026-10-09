@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/dayvidpham/provenance"
 
@@ -12,8 +13,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-// TaskReady prints the set of tasks that are open and have no open blockers.
-func TaskReady(w io.Writer, dbPath string, format types.OutputFormat) (int, error) {
+// TaskReady prints non-closed tasks that have no non-closed stored blockers.
+func TaskReady(w io.Writer, dbPath string, format types.OutputFormat, label string) (int, error) {
 	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
@@ -24,6 +25,11 @@ func TaskReady(w io.Writer, dbPath string, format types.OutputFormat) (int, erro
 	if err != nil {
 		return wrapTaskOpError("ready", err)
 	}
+	ts, err = filterReadinessLabels(tr, ts, label)
+	if err != nil {
+		return wrapTaskOpError("ready labels", err)
+	}
+	sortTasks(ts, true)
 	out, fErr := formatters.FormatTasks(ts, format)
 	if fErr != nil {
 		return pasterrors.ExitCode(fErr), fErr
@@ -32,8 +38,8 @@ func TaskReady(w io.Writer, dbPath string, format types.OutputFormat) (int, erro
 	return 0, nil
 }
 
-// TaskBlocked prints the set of tasks that are open but have at least one open blocker.
-func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat) (int, error) {
+// TaskBlocked prints non-closed tasks with at least one non-closed stored blocker.
+func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat, label string) (int, error) {
 	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
@@ -44,6 +50,11 @@ func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat) (int, er
 	if err != nil {
 		return wrapTaskOpError("blocked", err)
 	}
+	ts, err = filterReadinessLabels(tr, ts, label)
+	if err != nil {
+		return wrapTaskOpError("blocked labels", err)
+	}
+	sortTasks(ts, true)
 	out, fErr := formatters.FormatTasks(ts, format)
 	if fErr != nil {
 		return pasterrors.ExitCode(fErr), fErr
@@ -57,7 +68,7 @@ func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat) (int, er
 // kinds can be specified by passing the wire-format string for the kind.
 //
 // Convention: `pasture task dep add A --blocked-by B` means "A is blocked by
-// B" — A cannot proceed until B closes. This matches the bd convention.
+// B" — A cannot proceed until B closes.
 func TaskDepAdd(w io.Writer, dbPath, sourceIdStr, targetIdStr string, kind provenance.EdgeKind, format types.OutputFormat) (int, error) {
 	sourceId, err := provenance.ParseTaskID(sourceIdStr)
 	if err != nil {
@@ -99,6 +110,9 @@ func TaskDepTree(w io.Writer, dbPath, idStr string, format types.OutputFormat) (
 	}
 	defer tr.Close()
 
+	if _, err := tr.Show(id); err != nil {
+		return wrapTaskOpError("dep tree root", err)
+	}
 	edges, err := tr.DepTree(id)
 	if err != nil {
 		return wrapTaskOpError("dep tree", err)
@@ -109,4 +123,38 @@ func TaskDepTree(w io.Writer, dbPath, idStr string, format types.OutputFormat) (
 	}
 	fmt.Fprintln(w, out)
 	return 0, nil
+}
+
+// Readiness is computed by the tracker before the label filter is applied.
+func filterReadinessLabels(tr provenance.Tracker, ts []provenance.Task, label string) ([]provenance.Task, error) {
+	if label == "" {
+		return ts, nil
+	}
+	out := make([]provenance.Task, 0, len(ts))
+	for _, task := range ts {
+		labels, err := tr.Labels(task.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range labels {
+			if candidate == label {
+				out = append(out, task)
+				break
+			}
+		}
+	}
+	return out, nil
+}
+
+func sortTasks(ts []provenance.Task, priority bool) {
+	sort.Slice(ts, func(i, j int) bool {
+		a, b := ts[i], ts[j]
+		if priority && a.Priority != b.Priority {
+			return a.Priority < b.Priority
+		}
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.Before(b.CreatedAt)
+		}
+		return a.ID.String() < b.ID.String()
+	})
 }

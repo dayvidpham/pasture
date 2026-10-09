@@ -128,10 +128,10 @@ func TestTaskCommentAdd_RejectsUnknownAuthor(t *testing.T) {
 		Body:     "ghost",
 	}, types.OutputText)
 	if err == nil {
-		t.Fatal("expected workflow error for unknown agent")
+		t.Fatal("expected validation error for unknown agent")
 	}
-	if code != 3 {
-		t.Fatalf("expected exit 3 (workflow), got %d", code)
+	if code != 1 {
+		t.Fatalf("expected exit 1 (validation), got %d", code)
 	}
 }
 

@@ -247,6 +247,7 @@ func init() {
 	taskCmd.AddCommand(taskShowCmd)
 	taskCmd.AddCommand(taskUpdateCmd)
 	taskCmd.AddCommand(taskCloseCmd)
+	taskCmd.AddCommand(taskListCmd)
 }
 
 // parseStatus converts a CLI string into a provenance.Status. Accepts the
