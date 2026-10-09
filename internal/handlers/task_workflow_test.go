@@ -193,7 +193,7 @@ func TestTaskReadiness_UsesAllBlockersBeforeLabelFilter(t *testing.T) {
 	check(false)
 
 	var out bytes.Buffer
-	code, err := handlers.TaskDepTree(&out, path, provenance.TaskID{Namespace: "unknown"}.String(), types.OutputJSON)
+	code, err := handlers.TaskDepTree(&out, path, provenance.TaskID{Namespace: "unknown"}.String(), []provenance.EdgeKind{provenance.EdgeBlockedBy}, types.OutputJSON)
 	require.Equal(t, 3, code)
 	require.Error(t, err)
 	require.Empty(t, out.String())

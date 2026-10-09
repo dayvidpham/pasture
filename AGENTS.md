@@ -552,7 +552,7 @@ registered agents with `pasture task agents list`.
 | `pasture task list` | List all statuses and namespaces, or intersect status, priority, type, phase, namespace, and one exact label filter. |
 | `pasture task ready` / `pasture task blocked` | List non-closed candidates, with an optional exact `--label` filter applied after readiness. |
 | `pasture task dep add` | Add a typed edge with `--target` and `--kind`, or use `--blocked-by TARGET` alone. `relation` is an alias of `dep`. |
-| `pasture task dep tree` | Follow outgoing `blocked_by` edges only, including closed blockers. Other typed tree traversal is deferred. |
+| `pasture task dep tree` | Follow outgoing task-to-task relations, including closed targets. `--kind` selects `blocked_by` (default), `derived_from`, `supersedes`, `discovered_from`, or `all`; a repeated node prints once and is never re-expanded. |
 | `pasture task label add` / `remove` / `list` | Change or read the sorted label set; changes print the post-state. |
 | `pasture task comment add` | Add a comment with explicit `--author AGENT-ID`; the author must already be registered. |
 | `pasture task comments` | Read comments in chronological order. |
@@ -563,8 +563,8 @@ Task operations use `protocol.TaskTracker`. Agent discovery reads the base
 registry with optional Pasture categories. It includes human, ML, and software
 agents without categories. Use `pasture task agents list` to select an author;
 comment commands never register or choose an identity for you. `events` and
-`contexts` are not CLI commands. `relation tree` is the same blocked-by-only
-command as `dep tree`.
+`contexts` are not CLI commands. `relation tree` is the same command as
+`dep tree`, including its `--kind` selection.
 
 List order is created time then full ID. Ready/blocked order is numeric priority,
 created time, then full ID. Empty JSON collections are arrays. A single exact

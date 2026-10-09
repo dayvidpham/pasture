@@ -15,6 +15,10 @@ type edgeJSON struct {
 	SourceId string `json:"sourceId"`
 	TargetId string `json:"targetId"`
 	Kind     string `json:"kind"`
+	// Repeated marks an edge whose target was already shown earlier in a typed
+	// traversal. It is omitempty so the legacy blocked_by-only output (and the
+	// single-edge confirmation from `task dep add`) stays byte-identical.
+	Repeated bool `json:"repeated,omitempty"`
 }
 
 type depTreeJSON struct {

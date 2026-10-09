@@ -60,6 +60,7 @@ type edgeJSONShape struct {
 	SourceId string `json:"sourceId"`
 	TargetId string `json:"targetId"`
 	Kind     string `json:"kind"`
+	Repeated bool   `json:"repeated"`
 }
 
 // depTreeJSONShape mirrors the dep tree formatter's JSON wire shape.
