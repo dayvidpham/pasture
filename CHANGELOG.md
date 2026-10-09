@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.13] - 2026-10-09
+
+### Other
+- Merge pull request #171 from dayvidpham/pasture-43--test--combined-validation
+- style: integrate diagnostic mutation comment wrap
+- test: integrate extracted diagnostic source guard correction
+- test: combine reviewed workflow CLI and template slices
+
 ## [0.0.12] - 2026-10-08
 
 ### Added
