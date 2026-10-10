@@ -67,14 +67,32 @@ Exit codes:
   4  config error
   5  storage error (migration / schema failure)`,
 	Version: version,
+	// --upgrade is the root spelling of the default upgrade flow: a local bool
+	// on the root command, dispatched from this RunE. It deliberately takes no
+	// upgrade flags of its own. The root already owns --version as cobra's
+	// version-printer bool (with the reserved -v shorthand); a second string
+	// --version at the root would collide with it, so `pasture --upgrade
+	// --version` keeps printing the version and the full flag set lives on
+	// `upgrade`/`update`. The child's own --version shadows nothing: the root's
+	// flag is local, not persistent, so a subcommand never inherits it. Adding
+	// this RunE changes no visible root behavior: bare `pasture` still prints
+	// help (now from cmd.Help()), and `pasture <unknown>` still errors through
+	// cobra's legacyArgs because rootCmd.Args stays nil.
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		if flagRootUpgrade {
+			return runUpgradeRoot(cmd)
+		}
+		return cmd.Help()
+	},
 }
 
 // Global flag values. Each subcommand reads these via the helper functions
 // below to avoid threading the cobra.Command pointer through every handler.
 var (
-	flagDBPath    string
-	flagFormat    string
-	flagNamespace string
+	flagDBPath      string
+	flagFormat      string
+	flagNamespace   string
+	flagRootUpgrade bool
 )
 
 func init() {
@@ -85,6 +103,10 @@ func init() {
 		"Output format: text or json")
 	pf.StringVar(&flagNamespace, "namespace", "",
 		"Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)")
+
+	// Local to the root so no subcommand inherits it (see the RunE comment).
+	rootCmd.Flags().BoolVar(&flagRootUpgrade, "upgrade", false,
+		"Upgrade pasture to the latest release (same as `pasture upgrade`)")
 }
 
 // resolveFormat returns the typed OutputFormat for the current command.

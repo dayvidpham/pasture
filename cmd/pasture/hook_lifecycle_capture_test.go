@@ -174,6 +174,7 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 	captureCalls := 0
 	stdinReads := 0
 	versionPipeReads := 0
+	upgradeHTTPReads := 0
 	for _, name := range sources {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
@@ -204,6 +205,10 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 				case "queryLifecycleHostVersion":
 					versionPipeReads++
 					assertVersionQueryReadUsesPrivatePipes(t, owner, call)
+				case "getUpgradeJSON", "downloadUpgradeBytes":
+					upgradeHTTPReads++
+					assert.Contains(t, sourceOf(call.Args[0]), "io.LimitReader(resp.Body,",
+						"the release read must consume a bounded HTTP response body, never stdin")
 				default:
 					t.Errorf("unclassified ReadAll site in %s: %s reads %s", name, owner.Name.Name, sourceOf(call.Args[0]))
 				}
@@ -281,6 +286,7 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 	assert.Equal(t, 1, captureCalls, "exactly one capture call site exists on the host-facing path")
 	assert.Equal(t, 1, stdinReads, "exactly one native stdin capture read exists, inside captureHostPayload")
 	assert.Equal(t, 1, versionPipeReads, "exactly one bounded private-pipe read site exists, shared by version stdout and stderr")
+	assert.Equal(t, 3, upgradeHTTPReads, "the upgrade command reads three bounded HTTP response bodies and nothing else")
 }
 
 // assertVersionQueryReadUsesPrivatePipes traces the classified read helper from

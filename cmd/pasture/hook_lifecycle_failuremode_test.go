@@ -5938,6 +5938,7 @@ var guardSweepOwned = []string{
 // not change. The guards they carry are handed to their owners, not reached for.
 var guardSweepForeign = map[string]string{
 	"bundle_export_test.go":                      "not changed by this slice",
+	"cmd_upgrade_test.go":                        "upgrade command core tests, outside the lifecycle transport sweep",
 	"epoch_test.go":                              "not changed by this slice",
 	"hook_lifecycle_context_production_test.go":  "not changed by this slice",
 	"hook_lifecycle_gate_test.go":                "not changed by this slice",
@@ -5953,6 +5954,7 @@ var guardSweepForeign = map[string]string{
 	"queue_test.go":                              "not changed by this slice",
 	"task_residual_verbs_test.go":                "task agent registration and events/contexts CLI proof, outside the lifecycle transport sweep",
 	"task_workflow_test.go":                      "task workflow CLI proof, outside the lifecycle transport sweep",
+	"upgrade_cli_test.go":                        "upgrade command subprocess tests, outside the lifecycle transport sweep",
 	"version_test.go":                            "not changed by this slice",
 }
 
