@@ -1144,6 +1144,48 @@ entry in the parent `aura-plugins/.claude-plugin/marketplace.json`.
 - **Versioning policy** (MAJOR/MINOR/PATCH per consumption channel):
   [docs/VERSIONING.md](docs/VERSIONING.md).
 
+## Self-upgrade and installation
+
+`pasture upgrade` (aliases `update` and the root `--upgrade`) replaces the raw
+`pasture` binary, and the co-located `pastured` daemon, with the release builds
+for this machine after verifying each against the release's `checksums.txt`. The
+internal release tool (`pasture-release`) is never part of the user
+install/upgrade surface.
+
+- **Raw installs self-replace.** Both binaries are downloaded and SHA-256-verified
+  before either is renamed into place, `pasture` first. A mid-sequence failure
+  leaves a partial pair that the next run at the same tag repairs, replacing only
+  the destinations whose bytes differ.
+- **Package-managed installs are advised, never modified.** nix, homebrew,
+  apt/dpkg, dnf/rpm and pacman destinations print the manager-owned upgrade path
+  and stop; a pair split across channels is refused with a channel-aware fix.
+- **A `devel` build is refused.** A plain `go build` or `make build` is not
+  stamped, so the command refuses before any GitHub call and points at the
+  installer or the release page. Managed installs get their manager's advice
+  instead.
+- **Flags:** `--version TAG`, `--dry-run`, `--yes`, `--allow-downgrade` (only
+  together with `--version`). There is no `--prerelease`; the flow resolves the
+  stable-only `/releases/latest`.
+
+The one-line installer lives at the repository root and is fetched through the
+GitHub raw content path:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dayvidpham/pasture/main/install.sh | bash
+```
+
+It plans, confirms through the terminal (or `PASTURE_YES=1`), verifies both
+downloads against `checksums.txt` before replacing either, installs `pasture` and
+`pastured` to `~/.local/bin`, and prints PATH advice without editing a profile.
+`PASTURE_VERSION=vX.Y.Z` pins a release. The script is functions-only with
+`main "$@"` on its last line, so a truncated transfer runs nothing; CI checks the
+syntax and that last line, while behavior is covered by the acceptance recipes.
+
+Releases publish `checksums.txt` (one `sha256sum` line per asset) from the
+`release` job. Both the command and the installer verify against it, and the
+checksum step globs the merged artifact set, so a new asset is covered
+automatically.
+
 ## Protocol Evolution
 
 For modifying or extending the protocol — adding or changing constraints, roles,

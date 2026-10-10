@@ -23,6 +23,32 @@ nix build .#pastured
 nix build .#pasture
 ```
 
+## Install
+
+Install the `pasture` CLI and the `pastured` daemon into `~/.local/bin` with the
+in-repo installer, fetched through the GitHub raw content path:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dayvidpham/pasture/main/install.sh | bash
+```
+
+The installer prints a plan, asks for confirmation (set `PASTURE_YES=1` to skip
+the prompt), verifies both downloads against the release's `checksums.txt` before
+replacing either, and prints PATH advice without editing a shell profile. Pin a
+release with `PASTURE_VERSION=vX.Y.Z`.
+
+Once installed, upgrade in place:
+
+```bash
+pasture upgrade            # latest stable release, interactive confirm
+pasture upgrade --dry-run  # print the plan and change nothing
+pasture upgrade --yes      # skip the prompt
+```
+
+`pasture upgrade` (also `pasture update` and `pasture --upgrade`) replaces a raw
+`pasture` and co-located `pastured` pair after checksum verification;
+package-managed installs are advised, never modified.
+
 ## Running With The DBOS Backend
 
 Pasture now uses DBOS Transact over the local SQLite file instead of a Temporal

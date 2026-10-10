@@ -102,6 +102,24 @@ jobs:
             exit 1
           fi
 
+      - name: Installer script syntax and truncation safety
+        # Syntax and shape only, not behavioral proof: bash -n parses the
+        # script, and the last-line check keeps a truncated transfer from
+        # running a half install. Behavior is covered by the acceptance
+        # recipes against a real release.
+        run: |
+          bash -n install.sh
+          last="$(awk 'NF{last=$0} END{print last}' install.sh)"
+          if [ "$last" != 'main "$@"' ]; then
+            echo "::error::install.sh must call main on its last non-empty line (truncated-transfer safety)"
+            exit 1
+          fi
+
+      - name: Installer staging cleanup
+        # Behavioral and hermetic: a failing cp or chmod during staging must
+        # leave no `.pasture-install.*` file and must install neither binary.
+        run: bash tools/install-staging-test.sh
+
   codegen-drift:
     name: Codegen Drift
     runs-on: ubuntu-latest

@@ -155,11 +155,25 @@ jobs:
       - name: List downloaded files
         run: ls -la
 
+      - name: Generate checksums.txt
+        # One line per release asset in sha256sum's "<hex>  <name>" format. The
+        # installer's awk and the upgrade command's parser both match by name
+        # and tolerate sha256sum's binary-mode "*" marker.
+        #
+        # `pasture-*` also matches `pasture-release-*`; `sort -u` de-duplicates,
+        # so the file covers exactly the published assets and adapts if the
+        # build matrix grows. A missing pattern fails the step loudly.
+        run: |
+          set -euo pipefail
+          ls -1 pastured-* pasture-* | sort -u | xargs sha256sum > checksums.txt
+          cat checksums.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ needs.detect.outputs.version }}
           files: |
+            checksums.txt
             pastured-*
             pasture-*
             pasture-release-*
