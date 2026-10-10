@@ -214,6 +214,15 @@ func writeTestBinary(t *testing.T, path, content string, mode os.FileMode) {
 	}
 }
 
+// upgradeTempExecutable returns a temp-dir path holding a plausible installed
+// main binary, so the destination planner finds no co-located daemon sibling.
+func upgradeTempExecutable(t *testing.T) string {
+	t.Helper()
+	target := filepath.Join(t.TempDir(), upgradeMainBinaryName)
+	writeTestBinary(t, target, "installed-bytes", 0o755)
+	return target
+}
+
 func TestUpgradeCommandRegisteredWithUpdateAlias(t *testing.T) {
 	// SERIAL: this test reads the shared rootCmd, which other serial tests
 	// execute, so it must not use t.Parallel.
@@ -445,7 +454,7 @@ func TestUpgradeVersionOrder(t *testing.T) {
 		t.Parallel()
 		s := newUpgradeTestServer(t)
 		s.setLatest(s.release("v0.0.16", checksumsName, pastureAsset))
-		deps := upgradeDepsForServer(t, s, "/usr/local/bin/pasture")
+		deps := upgradeDepsForServer(t, s, upgradeTempExecutable(t))
 
 		output, err := runUpgradeForTest(upgradeOptions{DryRun: true}, deps, nil)
 		if err != nil {
@@ -465,7 +474,7 @@ func TestUpgradeVersionOrder(t *testing.T) {
 		t.Parallel()
 		s := newUpgradeTestServer(t)
 		s.setLatest(s.release("v0.0.14", checksumsName, pastureAsset))
-		deps := upgradeDepsForServer(t, s, "/usr/local/bin/pasture")
+		deps := upgradeDepsForServer(t, s, upgradeTempExecutable(t))
 
 		_, err := runUpgradeForTest(upgradeOptions{}, deps, nil)
 		ue := requireUpgradeError(t, err, 1)
@@ -482,7 +491,7 @@ func TestUpgradeVersionOrder(t *testing.T) {
 		s := newUpgradeTestServer(t)
 		release := s.release("v0.0.14", checksumsName, pastureAsset)
 		s.setTag(release)
-		deps := upgradeDepsForServer(t, s, "/usr/local/bin/pasture")
+		deps := upgradeDepsForServer(t, s, upgradeTempExecutable(t))
 
 		output, err := runUpgradeForTest(upgradeOptions{Version: "0.0.14", VersionSet: true, AllowDowngrade: true, DryRun: true}, deps, nil)
 		if err != nil {
@@ -499,8 +508,11 @@ func TestUpgradeVersionOrder(t *testing.T) {
 	t.Run("same-target-already-at", func(t *testing.T) {
 		t.Parallel()
 		s := newUpgradeTestServer(t)
+		target := filepath.Join(t.TempDir(), upgradeMainBinaryName)
+		writeTestBinary(t, target, "installed-bytes", 0o755)
+		s.setAsset(checksumsName, checksumsFor(map[string][]byte{pastureAsset: []byte("installed-bytes")}))
 		s.setLatest(s.release("v0.0.15", checksumsName, pastureAsset))
-		deps := upgradeDepsForServer(t, s, "/usr/local/bin/pasture")
+		deps := upgradeDepsForServer(t, s, target)
 
 		output, err := runUpgradeForTest(upgradeOptions{}, deps, nil)
 		if err != nil {
@@ -509,8 +521,11 @@ func TestUpgradeVersionOrder(t *testing.T) {
 		if !strings.Contains(output, "already at v0.0.15; no files were changed.") {
 			t.Fatalf("missing already-at message:\n%s", output)
 		}
-		if s.totalAssetRequests() != 0 {
-			t.Fatalf("already-at must make zero asset requests, got %d", s.totalAssetRequests())
+		if s.assetRequestCount(pastureAsset) != 0 {
+			t.Fatalf("already-at must not request the binary asset, got %d", s.assetRequestCount(pastureAsset))
+		}
+		if s.assetRequestCount(checksumsName) != 1 {
+			t.Fatalf("already-at must fetch checksums.txt exactly once, got %d", s.assetRequestCount(checksumsName))
 		}
 	})
 }
@@ -591,7 +606,7 @@ func TestUpgradeAssetSelection(t *testing.T) {
 		s := newUpgradeTestServer(t)
 		release := s.release("v0.0.16", "checksums.txt", "pasture-windows-amd64")
 		s.setLatest(release)
-		deps := upgradeDepsForServer(t, s, "/usr/local/bin/pasture")
+		deps := upgradeDepsForServer(t, s, upgradeTempExecutable(t))
 		deps.GOOS = "windows"
 
 		_, err := runUpgradeForTest(upgradeOptions{DryRun: true}, deps, nil)
@@ -606,7 +621,7 @@ func TestUpgradeAssetSelection(t *testing.T) {
 		s := newUpgradeTestServer(t)
 		release := s.release("v0.0.16", "checksums.txt", "pasture-linux-386")
 		s.setLatest(release)
-		deps := upgradeDepsForServer(t, s, "/usr/local/bin/pasture")
+		deps := upgradeDepsForServer(t, s, upgradeTempExecutable(t))
 		deps.GOARCH = "386"
 
 		_, err := runUpgradeForTest(upgradeOptions{DryRun: true}, deps, nil)
@@ -620,7 +635,7 @@ func TestUpgradeAssetSelection(t *testing.T) {
 		t.Parallel()
 		s := newUpgradeTestServer(t)
 		s.setLatest(s.release("v0.0.16", "pasture-linux-amd64"))
-		deps := upgradeDepsForServer(t, s, "/usr/local/bin/pasture")
+		deps := upgradeDepsForServer(t, s, upgradeTempExecutable(t))
 
 		_, err := runUpgradeForTest(upgradeOptions{DryRun: true}, deps, nil)
 		ue := requireUpgradeError(t, err, 1)
@@ -633,7 +648,7 @@ func TestUpgradeAssetSelection(t *testing.T) {
 		t.Parallel()
 		s := newUpgradeTestServer(t)
 		s.setLatest(s.release("v0.0.16", "checksums.txt"))
-		deps := upgradeDepsForServer(t, s, "/usr/local/bin/pasture")
+		deps := upgradeDepsForServer(t, s, upgradeTempExecutable(t))
 
 		_, err := runUpgradeForTest(upgradeOptions{DryRun: true}, deps, nil)
 		ue := requireUpgradeError(t, err, 1)
@@ -871,4 +886,227 @@ func TestInstallPastureBinaryCleansTempOnRenameFailure(t *testing.T) {
 			t.Fatalf("staging temp left behind: %s", entry.Name())
 		}
 	}
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(got) != want {
+		t.Fatalf("%s content = %q, want %q", path, got, want)
+	}
+}
+
+func requireFileMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if info.Mode().Perm() != want {
+		t.Fatalf("%s mode = %v, want %v", path, info.Mode().Perm(), want)
+	}
+}
+
+func TestUpgradePairHappyPath(t *testing.T) {
+	t.Parallel()
+	s := newUpgradeTestServer(t)
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, upgradeMainBinaryName)
+	daemonPath := filepath.Join(dir, upgradeDaemonBinaryName)
+	releaseToolPath := filepath.Join(dir, "pasture-release")
+	writeTestBinary(t, mainPath, "old-pasture", 0o755)
+	writeTestBinary(t, daemonPath, "old-pastured", 0o700)
+	writeTestBinary(t, releaseToolPath, "internal-tool-bytes", 0o755)
+
+	mainBytes := []byte("new-pasture-bytes")
+	daemonBytes := []byte("new-pastured-bytes")
+	mainAsset := upgradeAssetName(upgradeMainBinaryName, "linux", "amd64")
+	daemonAsset := upgradeAssetName(upgradeDaemonBinaryName, "linux", "amd64")
+	s.setAsset(mainAsset, mainBytes)
+	s.setAsset(daemonAsset, daemonBytes)
+	s.setAsset("checksums.txt", checksumsFor(map[string][]byte{mainAsset: mainBytes, daemonAsset: daemonBytes}))
+	s.setLatest(s.release("v0.0.16", "checksums.txt", mainAsset, daemonAsset))
+
+	deps := upgradeDepsForServer(t, s, mainPath)
+	output, err := runUpgradeForTest(upgradeOptions{Yes: true}, deps, nil)
+	if err != nil {
+		t.Fatalf("pair install returned error: %v\n%s", err, output)
+	}
+	assertFileContent(t, mainPath, string(mainBytes))
+	assertFileContent(t, daemonPath, string(daemonBytes))
+	requireFileMode(t, daemonPath, 0o700)
+	assertFileContent(t, releaseToolPath, "internal-tool-bytes")
+	for _, want := range []string{
+		"installed pasture at " + mainPath,
+		"installed pastured at " + daemonPath,
+		"restart pastured when convenient",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("pair output missing %q:\n%s", want, output)
+		}
+	}
+	if s.assetRequestCount("pasture-release-linux-amd64") != 0 {
+		t.Fatal("the internal release tool must never be requested")
+	}
+}
+
+func TestUpgradePartialFailureRerun(t *testing.T) {
+	t.Parallel()
+	s := newUpgradeTestServer(t)
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, upgradeMainBinaryName)
+	daemonPath := filepath.Join(dir, upgradeDaemonBinaryName)
+	writeTestBinary(t, mainPath, "old-pasture", 0o755)
+	writeTestBinary(t, daemonPath, "old-pastured", 0o755)
+
+	mainBytes := []byte("new-pasture-bytes")
+	daemonBytes := []byte("new-pastured-bytes")
+	mainAsset := upgradeAssetName(upgradeMainBinaryName, "linux", "amd64")
+	daemonAsset := upgradeAssetName(upgradeDaemonBinaryName, "linux", "amd64")
+	s.setAsset(mainAsset, mainBytes)
+	s.setAsset(daemonAsset, daemonBytes)
+	s.setAsset("checksums.txt", checksumsFor(map[string][]byte{mainAsset: mainBytes, daemonAsset: daemonBytes}))
+	s.setLatest(s.release("v0.0.16", "checksums.txt", mainAsset, daemonAsset))
+
+	failDaemon := true
+	deps := upgradeDepsForServer(t, s, mainPath)
+	deps.InstallBinary = func(path string, bytes []byte, mode os.FileMode) error {
+		if filepath.Base(path) == upgradeDaemonBinaryName && failDaemon {
+			return errors.New("simulated daemon replacement failure")
+		}
+		return installPastureBinary(path, bytes, mode)
+	}
+
+	// Run 1: the main binary is replaced, the daemon rename fails.
+	_, err := runUpgradeForTest(upgradeOptions{Yes: true}, deps, nil)
+	ue := requireUpgradeError(t, err, 1)
+	if !strings.Contains(ue.Error(), "pasture was replaced") {
+		t.Fatalf("partial failure must name the replaced binary:\n%s", ue.Error())
+	}
+	assertFileContent(t, mainPath, string(mainBytes))
+	assertFileContent(t, daemonPath, "old-pastured")
+	mainRequestsAfterRun1 := s.assetRequestCount(mainAsset)
+
+	// Run 2: the new CLI at the same tag repairs only the differing daemon.
+	failDaemon = false
+	deps.CurrentVersion = "v0.0.16"
+	output, err := runUpgradeForTest(upgradeOptions{Yes: true}, deps, nil)
+	if err != nil {
+		t.Fatalf("rerun returned error: %v\n%s", err, output)
+	}
+	assertFileContent(t, mainPath, string(mainBytes))
+	assertFileContent(t, daemonPath, string(daemonBytes))
+	if got := s.assetRequestCount(mainAsset); got != mainRequestsAfterRun1 {
+		t.Fatalf("repair must not re-download the matching binary: requests %d -> %d", mainRequestsAfterRun1, got)
+	}
+	if got := s.assetRequestCount(daemonAsset); got < 2 {
+		t.Fatalf("repair must download the differing daemon asset: requests %d", got)
+	}
+}
+
+func TestUpgradeSameTagRepair(t *testing.T) {
+	t.Parallel()
+	mainAsset := upgradeAssetName(upgradeMainBinaryName, "linux", "amd64")
+	daemonAsset := upgradeAssetName(upgradeDaemonBinaryName, "linux", "amd64")
+	mainBytes := []byte("new-pasture-bytes")
+	daemonBytes := []byte("new-pastured-bytes")
+
+	setup := func(t *testing.T, mainContent, daemonContent string) (*upgradeTestServer, string, string) {
+		t.Helper()
+		s := newUpgradeTestServer(t)
+		dir := t.TempDir()
+		mainPath := filepath.Join(dir, upgradeMainBinaryName)
+		daemonPath := filepath.Join(dir, upgradeDaemonBinaryName)
+		writeTestBinary(t, mainPath, mainContent, 0o755)
+		writeTestBinary(t, daemonPath, daemonContent, 0o755)
+		s.setAsset(mainAsset, mainBytes)
+		s.setAsset(daemonAsset, daemonBytes)
+		s.setAsset("checksums.txt", checksumsFor(map[string][]byte{mainAsset: mainBytes, daemonAsset: daemonBytes}))
+		s.setLatest(s.release("v0.0.16", "checksums.txt", mainAsset, daemonAsset))
+		return s, mainPath, daemonPath
+	}
+
+	t.Run("main-differs-only", func(t *testing.T) {
+		t.Parallel()
+		s, mainPath, daemonPath := setup(t, "stale-pasture", string(daemonBytes))
+		deps := upgradeDepsForServer(t, s, mainPath)
+		deps.CurrentVersion = "v0.0.16"
+
+		output, err := runUpgradeForTest(upgradeOptions{Yes: true}, deps, nil)
+		if err != nil {
+			t.Fatalf("repair returned error: %v\n%s", err, output)
+		}
+		assertFileContent(t, mainPath, string(mainBytes))
+		assertFileContent(t, daemonPath, string(daemonBytes))
+		if !strings.Contains(output, "Repair plan") || !strings.Contains(output, mainPath) {
+			t.Fatalf("repair plan must name the differing binary:\n%s", output)
+		}
+		if strings.Contains(output, daemonPath) {
+			t.Fatalf("repair plan must not name the matching binary:\n%s", output)
+		}
+		if s.assetRequestCount(daemonAsset) != 0 {
+			t.Fatal("a matching binary's asset must not be downloaded")
+		}
+	})
+
+	t.Run("sibling-differs-only", func(t *testing.T) {
+		t.Parallel()
+		s, mainPath, daemonPath := setup(t, string(mainBytes), "stale-pastured")
+		deps := upgradeDepsForServer(t, s, mainPath)
+		deps.CurrentVersion = "v0.0.16"
+
+		output, err := runUpgradeForTest(upgradeOptions{Yes: true}, deps, nil)
+		if err != nil {
+			t.Fatalf("repair returned error: %v\n%s", err, output)
+		}
+		assertFileContent(t, mainPath, string(mainBytes))
+		assertFileContent(t, daemonPath, string(daemonBytes))
+		daemonLine := "binary to verify and repair if it differs: " + daemonPath + "\n"
+		mainLine := "binary to verify and repair if it differs: " + mainPath + "\n"
+		if !strings.Contains(output, daemonLine) || strings.Contains(output, mainLine) {
+			t.Fatalf("repair plan must name only the differing daemon:\n%s", output)
+		}
+		if s.assetRequestCount(mainAsset) != 0 {
+			t.Fatal("a matching binary's asset must not be downloaded")
+		}
+	})
+
+	t.Run("checksums-entry-missing", func(t *testing.T) {
+		t.Parallel()
+		s, mainPath, daemonPath := setup(t, "stale-pasture", "stale-pastured")
+		s.setAsset("checksums.txt", checksumsFor(map[string][]byte{mainAsset: mainBytes}))
+		deps := upgradeDepsForServer(t, s, mainPath)
+		deps.CurrentVersion = "v0.0.16"
+
+		_, err := runUpgradeForTest(upgradeOptions{Yes: true}, deps, nil)
+		ue := requireUpgradeError(t, err, 1)
+		if !strings.Contains(ue.Error(), daemonAsset) {
+			t.Fatalf("missing-entry failure must name the asset:\n%s", ue.Error())
+		}
+		assertFileContent(t, mainPath, "stale-pasture")
+		assertFileContent(t, daemonPath, "stale-pastured")
+	})
+
+	t.Run("dry-run-no-fetch", func(t *testing.T) {
+		t.Parallel()
+		s, mainPath, daemonPath := setup(t, "stale-pasture", "stale-pastured")
+		deps := upgradeDepsForServer(t, s, mainPath)
+		deps.CurrentVersion = "v0.0.16"
+
+		output, err := runUpgradeForTest(upgradeOptions{DryRun: true}, deps, nil)
+		if err != nil {
+			t.Fatalf("repair dry run returned error: %v\n%s", err, output)
+		}
+		if !strings.Contains(output, "Repair plan") || !strings.Contains(output, "dry run: no files were changed") {
+			t.Fatalf("repair dry run missing plan or dry-run line:\n%s", output)
+		}
+		if s.totalAssetRequests() != 0 {
+			t.Fatalf("repair dry run must make zero asset requests, got %d", s.totalAssetRequests())
+		}
+		assertFileContent(t, mainPath, "stale-pasture")
+		assertFileContent(t, daemonPath, "stale-pastured")
+	})
 }

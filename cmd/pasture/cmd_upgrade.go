@@ -419,8 +419,7 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, in io.Reader, opts up
 	}
 	switch order {
 	case upgradeVersionSame:
-		printUpgradeAlreadyAt(out, destinations, release.TagName)
-		return nil
+		return runUpgradeRepairPath(ctx, out, in, opts, deps, release, destinations)
 	case upgradeVersionAfter:
 		if opts.Version == "" || !opts.AllowDowngrade {
 			return downgradeRefusalError(deps.CurrentVersion, release.TagName)
@@ -460,12 +459,24 @@ func runUpgradeCommand(ctx context.Context, out io.Writer, in io.Reader, opts up
 	return replaceUpgradeBinaries(out, deps, verified)
 }
 
-// planUpgradeDestinations resolves the binaries this run may replace. The main
-// binary is always the resolved running executable.
-func planUpgradeDestinations(_ upgradeDeps, resolvedPath string) []upgradeDestination {
-	return []upgradeDestination{
+// planUpgradeDestinations resolves the binaries this run may replace: the main
+// binary at the resolved running path, plus the co-located pastured daemon when
+// it is present and its symlink resolves. The internal release tool is never a
+// destination. A sibling whose symlink does not resolve is skipped rather than
+// replaced through.
+func planUpgradeDestinations(deps upgradeDeps, resolvedPath string) []upgradeDestination {
+	destinations := []upgradeDestination{
 		{Name: upgradeMainBinaryName, Path: resolvedPath},
 	}
+	sibling := filepath.Join(filepath.Dir(resolvedPath), upgradeDaemonBinaryName)
+	if _, err := deps.Stat(sibling); err != nil {
+		return destinations
+	}
+	evaluated, err := deps.EvalSymlinks(sibling)
+	if err != nil || evaluated == "" {
+		return destinations
+	}
+	return append(destinations, upgradeDestination{Name: upgradeDaemonBinaryName, Path: evaluated})
 }
 
 // classifyUpgradeDestinations classifies every planned destination. A probe that
@@ -758,12 +769,24 @@ func confirmUpgradePlan(in io.Reader, out io.Writer, opts upgradeOptions, deps u
 // SHA-256-verifies every planned asset before the first rename. A failure at any
 // point leaves every target byte-identical to its prior content.
 func downloadAndVerifyUpgradeAssets(ctx context.Context, deps upgradeDeps, plan upgradePlan) ([]verifiedBinary, error) {
+	checksums, err := downloadUpgradeChecksums(ctx, deps, plan)
+	if err != nil {
+		return nil, err
+	}
+	return downloadAndVerifyUpgradeItems(ctx, deps, checksums, plan.Items)
+}
+
+func downloadUpgradeChecksums(ctx context.Context, deps upgradeDeps, plan upgradePlan) ([]byte, error) {
 	checksums, err := downloadUpgradeBytes(ctx, deps.HTTPClient, plan.Checksums.BrowserDownloadURL, upgradeChecksumsLimit)
 	if err != nil {
 		return nil, checksumsDownloadError(err)
 	}
-	verified := make([]verifiedBinary, 0, len(plan.Items))
-	for _, item := range plan.Items {
+	return checksums, nil
+}
+
+func downloadAndVerifyUpgradeItems(ctx context.Context, deps upgradeDeps, checksums []byte, items []upgradePlanItem) ([]verifiedBinary, error) {
+	verified := make([]verifiedBinary, 0, len(items))
+	for _, item := range items {
 		expected, err := checksumForUpgradeAsset(checksums, item.Asset.Name)
 		if err != nil {
 			return nil, err
@@ -780,6 +803,89 @@ func downloadAndVerifyUpgradeAssets(ctx context.Context, deps upgradeDeps, plan 
 		verified = append(verified, verifiedBinary{Destination: item.Destination, Bytes: assetBytes, Mode: mode})
 	}
 	return verified, nil
+}
+
+// runUpgradeRepairPath handles the current-equals-target case. It plans the
+// pair, compares each planned destination's local SHA-256 with the published
+// checksum, and repairs only the destinations whose bytes differ. When every
+// hash already matches it changes nothing.
+func runUpgradeRepairPath(ctx context.Context, out io.Writer, in io.Reader, opts upgradeOptions, deps upgradeDeps, release upgradeRelease, destinations []upgradeDestination) error {
+	plan, err := assembleUpgradePlan(deps, release, destinations)
+	if err != nil {
+		return err
+	}
+	if opts.DryRun {
+		printUpgradeRepairPlan(out, deps, release, plan, nil)
+		fmt.Fprintln(out, "dry run: no files were changed")
+		return nil
+	}
+
+	checksums, err := downloadUpgradeChecksums(ctx, deps, plan)
+	if err != nil {
+		return err
+	}
+	differing := make([]upgradePlanItem, 0, len(plan.Items))
+	for _, item := range plan.Items {
+		expected, err := checksumForUpgradeAsset(checksums, item.Asset.Name)
+		if err != nil {
+			return err
+		}
+		local, err := hashUpgradeLocalBinary(item.Destination.Path)
+		if err != nil {
+			return err
+		}
+		if !strings.EqualFold(local, expected) {
+			differing = append(differing, item)
+		}
+	}
+	if len(differing) == 0 {
+		printUpgradeAlreadyAt(out, destinations, release.TagName)
+		return nil
+	}
+
+	printUpgradeRepairPlan(out, deps, release, plan, differing)
+	confirmed, err := confirmUpgradePlan(in, out, opts, deps)
+	if err != nil {
+		return err
+	}
+	if !confirmed {
+		return nil
+	}
+
+	verified, err := downloadAndVerifyUpgradeItems(ctx, deps, checksums, differing)
+	if err != nil {
+		return err
+	}
+	return replaceUpgradeBinaries(out, deps, verified)
+}
+
+func hashUpgradeLocalBinary(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", localBinaryReadError(path, err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
+}
+
+func printUpgradeRepairPlan(out io.Writer, deps upgradeDeps, release upgradeRelease, plan upgradePlan, differing []upgradePlanItem) {
+	items := plan.Items
+	if differing != nil {
+		items = differing
+	}
+	names := make([]string, 0, len(items))
+	for _, item := range items {
+		names = append(names, item.Destination.Name)
+	}
+	fmt.Fprintln(out, "Repair plan:")
+	fmt.Fprintf(out, "  current version: %s\n", deps.CurrentVersion)
+	fmt.Fprintf(out, "  target version:  %s\n", release.TagName)
+	fmt.Fprintf(out, "  machine:         %s/%s\n", deps.GOOS, deps.GOARCH)
+	fmt.Fprintf(out, "  binaries:        %s\n", strings.Join(names, ", "))
+	fmt.Fprintf(out, "  checksums source: %s\n", plan.Checksums.BrowserDownloadURL)
+	fmt.Fprintln(out, "  temporary replacement files: staged beside each target and removed if the step fails")
+	for _, item := range items {
+		fmt.Fprintf(out, "  binary to verify and repair if it differs: %s\n", item.Destination.Path)
+	}
 }
 
 func checksumForUpgradeAsset(checksums []byte, assetName string) (string, error) {
@@ -1334,6 +1440,18 @@ func missingChecksumEntryError(name string) *upgradeError {
 		"pasture will not install a binary it cannot verify, so no files were changed",
 		"check the release checksums.txt and retry after the release is repaired",
 	)
+}
+
+func localBinaryReadError(path string, cause error) *upgradeError {
+	return newUpgradeError(
+		1,
+		"the installed pasture binary could not be read for verification",
+		fmt.Sprintf("%s could not be read", path),
+		"pasture upgrade",
+		"before deciding which binaries need repair",
+		"pasture cannot prove the installed bytes match the release, so no files were changed",
+		"check that the binary and its directory are readable, then retry",
+	).withCause(cause)
 }
 
 func replaceFailureError(destination upgradeDestination, replaced []string, cause error) *upgradeError {
