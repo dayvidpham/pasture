@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.15] - 2026-10-10
+
+### Documentation
+- docs: refresh README and AGENTS.md for the restored CLI verbs and activation counts
+
+### Other
+- Merge pull request #176 from dayvidpham/pasture-b4c3--docs--readme-agents
+
 ## [0.0.14] - 2026-10-10
 
 ### Added
