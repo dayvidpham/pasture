@@ -46,72 +46,92 @@ description: Review implementation slices with EAGER severity tree
 - Then: elicit concrete validation cases — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures
 - Should not: ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them
 
+## Task Recovery
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+## Task Attribution
+
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
 ## When to Use
 
 Assigned to review code implementation after worker slices complete (Phase 10).
 
 ## Severity Tree: EAGER Creation
 
-**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:
+First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:
 
 ### Step 1: Create All 3 Severity Groups Immediately
 
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-bd create --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
-  --title "SLICE-1-REVIEW-A-1 BLOCKER" \
+BLOCKER_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-id>
-  review: <review-id>
+  slice: "${SLICE_ID_URI}"
+  review: "${REVIEW_ID_URI}"
 ---
-BLOCKER findings for this review round"
-# Result: <blocker-group-id>
+BLOCKER findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
+pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-bd create --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
-  --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
+IMPORTANT_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-id>
-  review: <review-id>
+  slice: "${SLICE_ID_URI}"
+  review: "${REVIEW_ID_URI}"
 ---
-IMPORTANT findings for this review round"
-# Result: <important-group-id>
+IMPORTANT findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
+pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-bd create --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
-  --title "SLICE-1-REVIEW-A-1 MINOR" \
+MINOR_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-id>
-  review: <review-id>
+  slice: "${SLICE_ID_URI}"
+  review: "${REVIEW_ID_URI}"
 ---
-MINOR findings for this review round"
-# Result: <minor-group-id>
+MINOR findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
+pasture task label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire severity groups to review task
-bd dep add <review-id> --blocked-by <blocker-group-id>
-bd dep add <review-id> --blocked-by <important-group-id>
-bd dep add <review-id> --blocked-by <minor-group-id>
+pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
+pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
+pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
 ```
 
 ### Adding Findings to Severity Groups
 
 ```bash
 # BLOCKER finding — dual-parent relationship
-bd create --title "BLOCKER: <finding title>" \
-  --description "<finding details with file:line references>"
-bd dep add <blocker-group-id> --blocked-by <blocker-finding-id>
-bd dep add <slice-id> --blocked-by <blocker-finding-id>
+BLOCKER_FINDING_ID_URI=$(pasture task create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "<finding details with file:line references>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+pasture task dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
 
 # IMPORTANT finding — single parent (severity group only)
-bd create --title "IMPORTANT: <finding title>" \
-  --description "<finding details>"
-bd dep add <important-group-id> --blocked-by <important-finding-id>
+IMPORTANT_FINDING_ID_URI=$(pasture task create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
 
 # MINOR finding — single parent (severity group only)
-bd create --title "MINOR: <finding title>" \
-  --description "<finding details>"
-bd dep add <minor-group-id> --blocked-by <minor-finding-id>
+MINOR_FINDING_ID_URI=$(pasture task create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
 ```
 
 ### Closing Empty Groups
@@ -120,10 +140,10 @@ Empty severity groups (no findings) are closed immediately:
 
 ```bash
 # If no IMPORTANT findings were found:
-bd close <important-group-id>
+pasture task close "${IMPORTANT_GROUP_ID_URI}"
 
 # If no MINOR findings were found:
-bd close <minor-group-id>
+pasture task close "${MINOR_GROUP_ID_URI}"
 ```
 
 ### Dual-Parent BLOCKER Relationship
@@ -143,8 +163,8 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 ### Step 1: Read Code Changes and URD
 
 ```bash
-bd show <slice-id>
-bd show <urd-id>   # Read URD for requirements context
+pasture task show "${SLICE_ID_URI}"
+pasture task show "${URD_ID_URI}"   # Read URD for requirements context
 ```
 
 ### Step 2: Run Quality Gates
@@ -160,15 +180,15 @@ Apply end-user alignment criteria (see `pasture:reviewer`) and verify production
 ### Step 4: Create Review Task
 
 ```bash
-bd create --labels "pasture:p10-impl:s10-review" \
-  --title "SLICE-1-REVIEW-A-1: <feature>" \
+REVIEW_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-id>
-  urd: <urd-id>
+  slice: "${SLICE_ID_URI}"
+  urd: "${URD_ID_URI}"
 ---
-VOTE: <ACCEPT|REVISE> - <justification>"
-bd dep add <slice-id> --blocked-by <review-id>
+VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
+pasture task dep add "${SLICE_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 ```
 
 ### Steps 5–8: Severity Tree and Vote
@@ -176,7 +196,7 @@ bd dep add <slice-id> --blocked-by <review-id>
 5. Create severity tree (EAGER — all 3 groups immediately)
 6. Add findings to appropriate severity groups
 7. Close empty severity groups
-8. Cast vote via `bd comments add`
+8. Cast vote via `pasture task comment add`
 
 ## Verify Production Code Paths
 
@@ -260,9 +280,9 @@ When reviewing follow-up slices, use the same procedure:
 
 ```bash
 # Add vote comment to the review task
-bd comments add <review-id> "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
 
 # Or
-bd comments add <review-id> "VOTE: REVISE - BLOCKERs found, see severity tree for details"
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - BLOCKERs found, see severity tree for details"
 ```
 <!-- END GENERATED FROM pasture schema -->

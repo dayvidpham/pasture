@@ -50,43 +50,66 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 - Then: supervisor creates the FOLLOWUP epic from the user-DEFER'd UAT items only
 - Should not: create a FOLLOWUP epic from any review severity (BLOCKER/IMPORTANT/MINOR)
 
+## Task Recovery
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+## Task Attribution
+
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
 ## Severity Tree (EAGER Creation)
 
 Per [frag--sup-review-severity-groups], create all 3 severity groups immediately:
 
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID=$(bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
+BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
+  slice: "${SLICE_1_ID_URI}"
   review_round: 1
 ---
-BLOCKER findings from Reviewer A (Correctness) on SLICE-1.")
+BLOCKER findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
+pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
-IMPORTANT_ID=$(bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
+IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
+  slice: "${SLICE_1_ID_URI}"
   review_round: 1
 ---
-IMPORTANT findings from Reviewer A (Correctness) on SLICE-1.")
+IMPORTANT findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
+pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
-MINOR_ID=$(bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
+MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
+  slice: "${SLICE_1_ID_URI}"
   review_round: 1
 ---
-MINOR findings from Reviewer A (Correctness) on SLICE-1.")
+MINOR findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$MINOR_ID_URI" pasture:severity:minor
+pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire severity groups to the review round task
-bd dep add <review-round-id> --blocked-by $BLOCKER_ID
-bd dep add <review-round-id> --blocked-by $IMPORTANT_ID
-bd dep add <review-round-id> --blocked-by $MINOR_ID
+pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$BLOCKER_ID_URI"
+pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
+pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
 # IMPORTANT/MINOR must ALSO reach 0 before wave close — they are NOT routed to FOLLOWUP.
@@ -94,8 +117,8 @@ bd dep add <review-round-id> --blocked-by $MINOR_ID
 
 # Step 3: Close empty groups immediately
 # If a group has no findings, close it right away
-bd close $IMPORTANT_ID   # if no IMPORTANT findings
-bd close $MINOR_ID        # if no MINOR findings
+pasture task close "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
+pasture task close "$MINOR_ID_URI"        # if no MINOR findings
 ```
 
 ### Naming Convention
@@ -123,37 +146,37 @@ BLOCKER findings have **two parents**:
 
 ```bash
 # Create a BLOCKER finding
-FINDING_ID=$(bd create --title "BLOCKER: Missing error handling in auth flow" \
-  --labels "pasture:p10-impl:s10-review" \
+FINDING_ID=$(pasture task create "BLOCKER: Missing error handling in auth flow" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
+  slice: "${SLICE_1_ID_URI}"
   reviewer: reviewer-A
   round: 1
 ---
-Missing error handling causes silent failure in auth flow.")
+Missing error handling causes silent failure in auth flow." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FINDING_ID" pasture:p10-impl:s10-review
 
 # Wire dual-parent: finding blocks BOTH severity group AND slice
-bd dep add $BLOCKER_ID --blocked-by $FINDING_ID
-bd dep add <slice-1-id> --blocked-by $FINDING_ID
+pasture task dep add "$BLOCKER_GROUP_ID_URI" --blocked-by "$FINDING_ID"
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$FINDING_ID"
 ```
 
 Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent), but ALL severity groups (BLOCKER/IMPORTANT/MINOR) must reach 0 before the review wave closes — they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
 
 ```bash
 # IMPORTANT finding — attaches to the IMPORTANT severity group (NOT the slice)
-IMPORTANT_FINDING_ID=$(bd create --title "IMPORTANT: Add request timeout" \
-  --labels "pasture:p10-impl:s10-review" \
+IMPORTANT_FINDING_ID=$(pasture task create "IMPORTANT: Add request timeout" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
+  slice: "${SLICE_1_ID_URI}"
   reviewer: reviewer-A
   round: 1
 ---
-API calls should have configurable timeouts.")
+API calls should have configurable timeouts." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
 
 # Attaches to the IMPORTANT severity group (NOT the slice); the group must still reach 0
-bd dep add $IMPORTANT_ID --blocked-by $IMPORTANT_FINDING_ID
+pasture task dep add "$IMPORTANT_GROUP_ID_URI" --blocked-by "$IMPORTANT_FINDING_ID"
 ```
 
 ## Review Structure
@@ -182,16 +205,16 @@ Task({
   subagent_type: "general-purpose",
   run_in_background: true,
   prompt: `You are Reviewer A (Correctness).
-URD: <urd-id> (read with bd show <urd-id> for user requirements context)
+URD: "${URD_ID_URI}" (read with pasture task show "${URD_ID_URI}" for user requirements context)
 Focus: Does implementation faithfully serve the user? Are technical decisions consistent with rationale?
-Review ALL slices: <slice-1-id>, <slice-2-id>, <slice-3-id>
-For each slice, run: bd show <slice-id>
+Review ALL slices: "${SLICE_1_ID_URI}", "${SLICE_2_ID_URI}", "${SLICE_3_ID_URI}"
+For each slice, run: pasture task show "${SLICE_ID_URI}"
 Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: SLICE-N-REVIEW-A-1
 Call Skill(/pasture:reviewer-review-code) for the review procedure.`
 })
 ```
 
-**Handoff:** Before spawning each reviewer, author its handoff in a Beads task body (the task body IS the handoff — no filesystem path).
+**Handoff:** Before spawning each reviewer, author its handoff in a Pasture task body (the task body IS the handoff — no filesystem path).
 
 ### Supervisor → Reviewer Handoff Template
 
@@ -199,19 +222,19 @@ Call Skill(/pasture:reviewer-review-code) for the review procedure.`
 # Handoff: Supervisor → Reviewer <N>
 
 ## Context
-- Request: <request-task-id>
-- URD: <urd-task-id>
-- IMPL_PLAN: <impl-plan-task-id>
-- Ratified Proposal: <proposal-task-id>
+- Request: "${REQUEST_ID_URI}"
+- URD: "${URD_ID_URI}"
+- IMPL_PLAN: "${IMPL_PLAN_ID_URI}"
+- Ratified Proposal: "${PROPOSAL_ID_URI}"
 
 ## Slices to Review
 | Slice | Task ID | Description | Worker |
 |-------|---------|-------------|--------|
-| SLICE-1 | <id> | <description> | worker-1 |
-| SLICE-2 | <id> | <description> | worker-2 |
+| SLICE-1 | "${ID_URI}" | <description> | worker-1 |
+| SLICE-2 | "${ID_URI}" | <description> | worker-2 |
 
 ## Review Procedure
-1. For each slice: `bd show <slice-id>`
+1. For each slice: `pasture task show "${SLICE_ID_URI}"`
 2. Create 3 severity groups per slice (EAGER)
 3. Add findings as children of severity groups
 4. BLOCKER findings: dual-parent (severity group + slice)
@@ -226,7 +249,7 @@ Each reviewer checks each slice for:
 1. **Requirements Alignment (check URD)**
    - Does implementation match ratified plan?
    - Are all acceptance criteria met?
-   - Read URD (`bd show <urd-id>`) for requirements traceability
+   - Read URD (`pasture task show "${URD_ID_URI}"`) for requirements traceability
 
 2. **User Vision (check URD)**
    - Does it fulfill the user's original request (as documented in URD)?
@@ -250,11 +273,11 @@ Each reviewer checks each slice for:
 | **ACCEPT** | All 5 criteria satisfied; no BLOCKER items |
 | **REVISE** | BLOCKER issues found; must provide actionable feedback |
 
-**Documentation (via Beads comments):**
+**Documentation (via Pasture comments):**
 ```bash
-bd comments add <slice-id> "VOTE: ACCEPT - [reason]"
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: ACCEPT - [reason]"
 # OR
-bd comments add <slice-id> "VOTE: REVISE - [specific issue]. Suggest: [fix]"
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: REVISE - [specific issue]. Suggest: [fix]"
 ```
 
 ## Consensus Check
@@ -263,10 +286,10 @@ All reviews across all slices must be ACCEPT:
 
 ```bash
 # Check for any REVISE votes
-bd list --labels="pasture:p10-impl:s10-review" --desc-contains "VOTE: REVISE"
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p10-impl:s10-review"
 
 # Check for unresolved BLOCKERs
-bd list --labels="pasture:severity:blocker" --status=open
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
 
 # If any REVISE or open BLOCKERs, return to implementation
 # If all ACCEPT and BLOCKERs resolved, proceed to Phase 11 (UAT)
@@ -282,7 +305,7 @@ If any reviewer votes REVISE on any slice:
 
 ```bash
 # Mark slice as needing revision
-bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "REVISION NEEDED: <specific issues>"
 
 # After worker fixes, start new review round
 # New severity groups are created fresh for the new round
@@ -290,25 +313,24 @@ bd comments add <slice-id> "REVISION NEEDED: <specific issues>"
 
 ## Follow-up Epic (EPIC_FOLLOWUP)
 
-Per [frag--sup-followup-epic-timing], create immediately after review completes.
+Per [frag--sup-followup-epic-timing], create only when UAT produces user-DEFER'd items. Review findings of every severity must be resolved before the review wave closes.
 
 ### Step 1: Create the follow-up epic
 
 ```bash
-bd create --type=epic --priority=3 \
-  --title="FOLLOWUP: Non-blocking improvements from code review" \
+FOLLOWUP_EPIC_ID_URI=$(pasture task create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
   --description="---
 references:
-  request: <request-task-id>
-  urd: <urd-task-id>
-  review_round: <review-round-ids>
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
+  review_round: ${REVIEW_ROUND_ID_URI}
 ---
-Aggregated IMPORTANT and MINOR findings from code review." \
-  --add-label "pasture:epic-followup"
+User-DEFER'd UAT items only; no review findings." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 
-# Link IMPORTANT/MINOR severity groups
-bd dep add <followup-epic-id> --blocked-by <important-group-id>
-bd dep add <followup-epic-id> --blocked-by <minor-group-id>
+# Link only the UAT-deferred item leaves
+pasture task dep add "$FOLLOWUP_EPIC_ID_URI" --blocked-by "$DEFERRED_ITEM_ID_1_URI"
+pasture task dep add "$FOLLOWUP_EPIC_ID_URI" --blocked-by "$DEFERRED_ITEM_ID_2_URI"
 ```
 
 ### Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
@@ -317,8 +339,8 @@ The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task t
 
 ```
 FOLLOWUP epic (pasture:epic-followup)
-  ├── relates_to: original URD
-  ├── relates_to: original REVIEW-A/B/C tasks
+  ├── frontmatter reference: original URD
+  ├── frontmatter reference: original REVIEW-A/B/C tasks
   └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which DEFER'd items to address)
         └── blocked-by: FOLLOWUP_URD   (Phase 2: requirements for follow-up)
               └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
@@ -331,27 +353,26 @@ FOLLOWUP epic (pasture:epic-followup)
 
 ```bash
 # Create follow-up lifecycle tasks
-FOLLOWUP_URE_ID=$(bd create \
-  --title "FOLLOWUP_URE: Scope follow-up for <feature>" \
-  --labels "pasture:p2-user:s2_1-elicit" \
+FOLLOWUP_URE_ID=$(pasture task create "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  followup_epic: <followup-epic-id>
-  original_urd: <original-urd-id>
+  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
+  original_urd: "${ORIGINAL_URD_ID_URI}"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address.")
-bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
+Scoping URE: determine which user-DEFER'd UAT items to address." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
+pasture task dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "$FOLLOWUP_URE_ID"
 
-FOLLOWUP_URD_ID=$(bd create \
-  --title "FOLLOWUP_URD: Requirements for <feature> follow-up" \
-  --labels "pasture:p2-user:s2_2-urd,pasture:urd" \
+FOLLOWUP_URD_ID=$(pasture task create "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  followup_epic: <followup-epic-id>
-  original_urd: <original-urd-id>
+  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
+  original_urd: "${ORIGINAL_URD_ID_URI}"
 ---
-Follow-up requirements. References original URD.")
-bd dep add $FOLLOWUP_URE_ID --blocked-by $FOLLOWUP_URD_ID
+Follow-up requirements. References original URD." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
+pasture task label add "$FOLLOWUP_URD_ID" pasture:urd
+pasture task dep add "$FOLLOWUP_URE_ID" --blocked-by "$FOLLOWUP_URD_ID"
 ```
 
 ### Step 3: DEFER'd-item leaf adoption (dual-parent)
@@ -360,22 +381,22 @@ When the supervisor creates FOLLOWUP_SLICE-N tasks, the user-DEFER'd UAT-item le
 
 ```bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
-bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-1>
-bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-2>
-# Leaf task already has: bd dep add <deferred-items-tracking-group-id> --blocked-by <leaf-task-id>
+pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
+pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
+# Leaf task already has: pasture task dep add "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"
 ```
 
 ### Followup Handoff (h5)
 
-The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (all review severities reach 0 before the wave closes). Author this handoff in its Beads task body (no filesystem path):
+The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (all review severities reach 0 before the wave closes). Author this handoff in its Pasture task body (no filesystem path):
 
 ```markdown
 # Handoff: Reviewer → Supervisor (review wave complete)
 
 ## Context
-- Request: <request-task-id>
-- URD: <urd-task-id>
-- Ratified Proposal: <proposal-task-id>
+- Request: ${REQUEST_ID_URI}
+- URD: ${URD_ID_URI}
+- Ratified Proposal: ${PROPOSAL_ID_URI}
 
 ## Review Outcome
 - All slices reviewed; ALL severity groups (BLOCKER/IMPORTANT/MINOR) reached 0 on a fix-free clean round.
@@ -399,7 +420,7 @@ Inside the follow-up lifecycle, the same handoff types (h1-h4) apply but scoped 
 | 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
-Follow-up handoff storage: each handoff is authored in its Beads task body (no filesystem path).
+Follow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).
 
 See `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples and field requirements.
 
@@ -407,9 +428,9 @@ See `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples and fi
 
 Only when ALL reviews are ACCEPT and all BLOCKERs are resolved:
 
-```bash
+```text
 # Verify consensus — no open BLOCKERs
-bd list --labels="pasture:severity:blocker" --status=open
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
 # Should return 0 results
 
 # Proceed to Phase 11 (Implementation UAT)

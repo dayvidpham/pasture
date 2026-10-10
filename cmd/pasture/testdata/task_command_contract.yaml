@@ -1,0 +1,133 @@
+namespaces:
+  - https://github.com/dayvidpham/pasture
+  - https://github.com/dayvidpham/aura-plugins
+registration:
+  - {name: ready, path: [ready], flags: [label]}
+  - {name: blocked, path: [blocked], flags: [label]}
+  - {name: list, path: [list], flags: [namespace, status, priority, type, phase, label]}
+  - {name: show, path: [show], flags: [format]}
+  - {name: create, path: [create], flags: [namespace, description, type, priority, phase]}
+  - {name: update, path: [update], flags: [title, description, notes, status, phase, priority]}
+  - {name: close, path: [close], flags: [reason]}
+  - {name: comment add, path: [comment, add], flags: [author]}
+  - {name: comments, path: [comments], flags: [format]}
+  - {name: label add, path: [label, add], flags: [format]}
+  - {name: label remove, path: [label, remove], flags: [format]}
+  - {name: label list, path: [label, list], flags: [format]}
+  - {name: dep add, path: [dep, add], flags: [blocked-by, target, kind]}
+  - {name: dep tree, path: [dep, tree], flags: [kind]}
+  - {name: assignment transfer, path: [assignment, transfer], flags: [slot, assignment, actor, occupant]}
+rejected:
+  - {name: no stats, args: [stats], error: 'unknown command'}
+  - {name: no count, args: [count], error: 'unknown command'}
+  - {name: no search, args: [search], error: 'unknown command'}
+  - {name: no prime, args: [prime], error: 'unknown command'}
+  - {name: no sync, args: [sync], error: 'unknown command'}
+  - {name: no edit, args: [edit], error: 'unknown command'}
+  - {name: no mol, args: [mol], error: 'unknown command'}
+  - {name: no doctor, args: [doctor], error: 'unknown command'}
+  - {name: no nested task, args: [task], error: 'unknown command'}
+  - {name: no quick create, args: [q], error: 'unknown command'}
+  - {name: no import, args: [import], error: 'unknown command'}
+  - {name: no reopen, args: [reopen], error: 'unknown command'}
+  - {name: positional title required, args: [create, '--title', example], error: 'unknown flag: --title'}
+  - {name: labels are separate, args: [create, example, '--labels', work], error: 'unknown flag: --labels'}
+  - {name: no create design, args: [create, example, '--design', body], error: 'unknown flag: --design'}
+  - {name: no create notes, args: [create, example, '--notes', body], error: 'unknown flag: --notes'}
+  - {name: no create assignee, args: [create, example, '--assignee', ACTOR], error: 'unknown flag: --assignee'}
+  - {name: no create parent, args: [create, example, '--parent', URI], error: 'unknown flag: --parent'}
+  - {name: no generic assignee, args: [update, URI, '--assignee', ACTOR], error: 'unknown flag: --assignee'}
+  - {name: no update label imitation, args: [update, URI, '--add-label', work], error: 'unknown flag: --add-label'}
+  - {name: no tree direction, args: [dep, tree, URI, '--direction', both], error: 'unknown flag: --direction'}
+  - {name: no tree all paths, args: [dep, tree, URI, '--show-all-paths'], error: 'unknown flag: --show-all-paths'}
+  - {name: label accepts one operand, args: [label, add, URI, work, second], error: 'accepts 2 arg(s), received 3'}
+  - name: assignment real argv validation
+    args: [assignment, transfer, invalid, '--slot', owner-responsibility, '--assignment', recipe-next, '--actor', 'recipe--01960000-0000-7000-8000-000000000001', '--occupant', 'recipe--01960000-0000-7000-8000-000000000002']
+    error: Pasture store was not opened
+recipe:
+  - name: register explicit author
+    args: [agents, register, human, '--name', Recipe author, '--namespace', '$NAMESPACE']
+    bind: $AUTHOR
+    id_field: agentId
+  - name: create parent positional title and frontmatter
+    args: [create, 'Parent: preserve exact title', '--description', "---\nreferences:\n  source: https://example.com/design\n---\nParent intent.", '--namespace', '$NAMESPACE', '--type', feature, '--priority', high, '--phase', request]
+    bind: $PARENT
+    id_field: id
+    want: {title: 'Parent: preserve exact title', status: open, type: feature, phase: request}
+  - name: create blocker without labels
+    args: [create, Child implementation, '--namespace', '$NAMESPACE', '--priority', medium]
+    bind: $CHILD
+    id_field: id
+    want: {title: Child implementation, status: open}
+  - name: create unrelated namespace
+    args: [create, Outside scope, '--namespace', https://example.com/other]
+    want: {title: Outside scope, status: open}
+  - name: labels are second non-atomic command
+    args: [label, add, '$PARENT', work]
+    want: {labels: [work]}
+  - name: one label per command
+    args: [label, add, '$PARENT', 'epoch:demo']
+    want: {labels: ['epoch:demo', work]}
+  - name: retry labels without recreating parent
+    args: [label, add, '$PARENT', work]
+    want: {labels: ['epoch:demo', work]}
+  - name: sorted label read
+    args: [label, list, '$PARENT']
+    want: {labels: ['epoch:demo', work]}
+  - name: comma labels are not a set filter
+    args: [list, '--namespace', '$NAMESPACE', '--label', 'epoch:demo,work']
+    want_rows: []
+  - name: supported update fields
+    args: [update, '$PARENT', '--title', 'Updated: exact title', '--description', "---\nreferences:\n  child: $CHILD\n---\nReviewed body.", '--notes', Evidence retained, '--status', in_progress, '--phase', request, '--priority', high]
+    want: {id: '$PARENT', title: 'Updated: exact title', status: in_progress, phase: request, notes: Evidence retained}
+  - name: show persisted exact namespace URI and body
+    args: [show, '$PARENT']
+    want: {id: '$PARENT', title: 'Updated: exact title', status: in_progress, description: "---\nreferences:\n  child: $CHILD\n---\nReviewed body.", notes: Evidence retained}
+  - name: list intersects namespace status label priority type phase
+    args: [list, '--namespace', '$NAMESPACE', '--status', in_progress, '--label', work, '--priority', high, '--type', feature, '--phase', request]
+    want_rows: [{id: '$PARENT', title: 'Updated: exact title', status: in_progress}]
+  - name: explicit attributed comment
+    args: [comment, add, '$PARENT', 'Intent: preserve verbatim.', '--author', '$AUTHOR']
+    want: {authorId: '$AUTHOR', body: 'Intent: preserve verbatim.'}
+  - name: second chronological comment
+    args: [comment, add, '$PARENT', Evidence follows intent, '--author', '$AUTHOR']
+    want: {authorId: '$AUTHOR', body: Evidence follows intent}
+  - name: chronological comments read
+    args: [comments, '$PARENT']
+    want_rows: [{authorId: '$AUTHOR', body: 'Intent: preserve verbatim.'}, {authorId: '$AUTHOR', body: Evidence follows intent}]
+  - name: parent blocked by child never inverse
+    args: [dep, add, '$PARENT', '--blocked-by', '$CHILD']
+    want: {sourceId: '$PARENT', targetId: '$CHILD', kind: blocked_by}
+  - name: outgoing tree retains blocker
+    args: [dep, tree, '$PARENT', '--kind', blocked_by]
+    want: {edges: [{sourceId: '$PARENT', targetId: '$CHILD', kind: blocked_by}]}
+  - name: blocker without candidate label still blocks
+    args: [ready, '--label', work]
+    want_rows: []
+  - name: blocked label candidate
+    args: [blocked, '--label', work]
+    want_rows: [{id: '$PARENT', status: in_progress}]
+  - name: supervisor closes child
+    args: [close, '$CHILD', '--reason', Implementation verified]
+    want: {id: '$CHILD', status: closed}
+  - name: child closure releases parent
+    args: [ready, '--label', work]
+    want_rows: [{id: '$PARENT', status: in_progress}]
+  - name: closed child no longer blocks
+    args: [blocked, '--label', work]
+    want_rows: []
+  - name: explicit typed relationship not reference frontmatter
+    args: [dep, add, '$CHILD', '--target', '$PARENT', '--kind', derived_from]
+    want: {sourceId: '$CHILD', targetId: '$PARENT', kind: derived_from}
+  - name: remove ordinary label
+    args: [label, remove, '$PARENT', work]
+    want: {labels: ['epoch:demo']}
+  - name: supervisor closes parent
+    args: [close, '$PARENT', '--reason', All child evidence verified]
+    want: {id: '$PARENT', status: closed}
+  - name: exact namespace terminal inventory
+    args: [list, '--namespace', '$NAMESPACE', '--status', closed]
+    want_rows: [{id: '$PARENT', status: closed}, {id: '$CHILD', status: closed}]
+  - name: closed parent absent from ready
+    args: [ready, '--label', 'epoch:demo']
+    want_rows: []

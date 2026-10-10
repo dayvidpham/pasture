@@ -21,7 +21,7 @@ description: Vertical slice implementer (full production code path)
 | Command | Description | Phases |
 |---------|-------------|--------|
 | `pasture:worker` | Vertical slice implementer (full production code path) | p9-worker-slices |
-| `pasture:worker:blocked` | Report a blocker to supervisor via Beads | p9-worker-slices |
+| `pasture:worker:blocked` | Report a blocker to supervisor via Pasture | p9-worker-slices |
 | `pasture:worker:complete` | Signal slice completion after quality gates pass | p9-worker-slices |
 | `pasture:worker:implement` | Implement assigned vertical slice following TDD layers | p9-worker-slices |
 
@@ -54,18 +54,18 @@ git commit -m "feat: add login"
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: bd dep add parent --blocked-by child
+- Then: chain dependency: pasture task dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
 _Example (correct)_
 
 ```bash
 # Full dependency chain: work flows bottom-up, closure flows top-down
-bd dep add request-id --blocked-by ure-id
-bd dep add ure-id --blocked-by proposal-id
-bd dep add proposal-id --blocked-by impl-plan-id
-bd dep add impl-plan-id --blocked-by slice-1-id
-bd dep add slice-1-id --blocked-by leaf-task-a-id
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
+pasture task dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
+pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
 ```
 
 **[C-audit-never-delete]**
@@ -75,28 +75,28 @@ bd dep add slice-1-id --blocked-by leaf-task-a-id
 - Should not: delete or close tasks prematurely, remove labels
 
 **[C-dep-direction]**
-- Given: adding a Beads dependency
+- Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first
+- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 _Example (correct)_ — also illustrates: C-audit-dep-chain
 
 ```bash
-bd dep add request-id --blocked-by ure-id
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
 ```
 
 _Example (anti-pattern)_
 
 ```bash
-bd dep add ure-id --blocked-by request-id
+pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 ```
 
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
 - When: linking tasks
 - Then: use description frontmatter references: block
-- Should not: use bd dep relate (buggy) or blocking dependencies for reference docs
+- Should not: invent relationship commands or use blocking dependencies for reference documents
 
 **[C-worker-gates]**
 - Given: worker finishes implementation
@@ -170,10 +170,10 @@ NOT: A single file or horizontal layer (e.g., 'all types' or 'all tests'). YES: 
 - [ ] Production code path verified end-to-end via code inspection
 
 **slice-closure gates:**
-- [ ] Supervisor notified via bd comments add (not bd close)
+- [ ] Supervisor notified via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close)
 - [ ] All completion-gate items passed
 - [ ] Can only close on a review wave, not a worker wave
-- [ ] Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings
+- [ ] Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings
 
 ### Inter-Agent Coordination
 
@@ -181,13 +181,13 @@ Agents coordinate through **beads** tasks and comments:
 
 | Action | Command |
 |--------|---------|
-| List blocked | `bd blocked` |
-| Report completion | `bd close <task-id>` |
-| Add progress note | `bd comments add <task-id> "Progress: ..."` |
-| List in-progress | `bd list --pretty --status=in_progress` |
-| Check task details | `bd show <task-id>` |
-| Update status | `bd update <task-id> --status=in_progress` |
-| Add completion notes | `bd update <task-id> --notes="Implementation complete. Production code verified."` |
+| List blocked | `pasture task blocked` |
+| Report completion without closing | `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."` |
+| Add progress note | `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
+| List in-progress | `pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
+| Check task details | `pasture task show "${TASK_ID_URI}"` |
+| Update status | `pasture task update "${TASK_ID_URI}" --status=in_progress` |
+| Add completion notes | `pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified."` |
 
 ## Workflows
 
@@ -196,7 +196,7 @@ Agents coordinate through **beads** tasks and comments:
 TDD layer-by-layer implementation within a vertical slice. Worker implements types first, then tests (will fail), then production code to make tests pass.
 
 ### Stage 1: Types _(sequential)_
-- Read slice task and identify required types (`bd show <slice-task-id>`)
+- Read slice task and identify required types (`pasture task show "${SLICE_TASK_ID_URI}"`)
 - Define types, interfaces, and schemas (no deps) — only types for YOUR slice
 
 Exit conditions:
@@ -214,7 +214,7 @@ Exit conditions:
 - Wire with real dependencies (not mocks in production code)
 - Run tests — all Layer 2 tests must pass
 - Commit completed work (`git agent-commit -m ...`)
-- Notify supervisor of completion via bd comments add (`bd comments add <slice-id> "Implementation complete"`)
+- Notify supervisor of completion via pasture task comment add (`pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Implementation complete"`)
 
 Exit conditions:
 - **success**: All tests pass; no TODO placeholders; real deps wired; production code path verified via code inspection
@@ -260,6 +260,26 @@ L2 Test File Requirements:
 - Then: deliver production code that is fully wired and working end-to-end
 - Should not: leave TODO placeholders, test-only exports, or unimplemented stubs
 
+## Task Recovery
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+## Task Attribution
+
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
 ## Vertical Slice Ownership in Practice
 
 **Example vertical slice: "CLI command with list subcommand"**
@@ -278,7 +298,7 @@ L2 Test File Requirements:
 
 1. **Identify your production code path:**
    ```bash
-   bd show <task-id>  # Look for "productionCodePath" field
+   pasture task show "${TASK_ID_URI}"  # Look for "productionCodePath" field
    # Example: "cli-tool command list"
    # This is what end users will actually run
    ```
@@ -408,11 +428,11 @@ Per [wrk-no-stubs], deliver fully wired production code.
 
 **Key insight:** A failing test for unimplemented code is NOT a blocker - it's the specification you're implementing against.
 
-## Reading from Beads
+## Reading from Pasture
 
 Get your task details:
 ```bash
-bd show <task-id>
+pasture task show "${TASK_ID_URI}"
 ```
 
 Look for:
@@ -424,10 +444,10 @@ Look for:
 
 Update status on start:
 ```bash
-bd update <task-id> --status=in_progress
+pasture task update "${TASK_ID_URI}" --status=in_progress
 ```
 
-## Vertical Slice Fields (From Beads Task)
+## Vertical Slice Fields (From Pasture Task)
 
 - `slice`: Your slice identifier (e.g., "feature-list")
 - `productionCodePath`: What users run (e.g., "cli-tool command list")
@@ -442,31 +462,30 @@ bd update <task-id> --status=in_progress
 
 You may be assigned a `FOLLOWUP_SLICE-N` task instead of a `SLICE-N` task. The implementation procedure is identical, with these additions:
 
-- **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check `bd show <task-id>` for a "DEFER'd-Item Leaf Tasks" section.
+- **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check `pasture task show "${TASK_ID_URI}"` for a "DEFER'd-Item Leaf Tasks" section.
 - **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
 - **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which DEFER'd-item leaf tasks were resolved.
 
 ```bash
 # Completion comment for follow-up slices should include:
-bd comments add <task-id> "Implementation complete. Resolved DEFER'd-item leaf tasks: <leaf-task-id-1>, <leaf-task-id-2>"
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved DEFER'd-item leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
 ```
 
-## Updating Beads Status
+## Updating Pasture Status
 
 On start:
 ```bash
-bd update <task-id> --status=in_progress
+pasture task update "${TASK_ID_URI}" --status=in_progress
 ```
 
 On complete:
 ```bash
-bd update <task-id> --status=done
-bd update <task-id> --notes="Implementation complete. Production code verified working via code inspection."
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
+pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working via code inspection."
 ```
 
 On blocked:
 ```bash
-bd update <task-id> --status=blocked
-bd update <task-id> --notes="Blocked: <reason>. Need: <dependency or clarification>"
+pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>. Need: <dependency or clarification>"
 ```
 <!-- END GENERATED FROM pasture schema -->

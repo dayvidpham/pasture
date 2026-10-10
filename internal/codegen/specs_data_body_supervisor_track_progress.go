@@ -10,7 +10,7 @@ var supervisorTrackProgressBody = SkillBody{
 			Id:        "sup-track-poll-rate",
 			Given:     "workers running",
 			When:      "monitoring",
-			Then:      "check Beads status at natural intervals (when a worker signals completion or blocker)",
+			Then:      "check Pasture status at natural intervals (when a worker signals completion or blocker)",
 			ShouldNot: "poll aggressively or busy-wait in a tight loop",
 		},
 		{
@@ -31,7 +31,7 @@ var supervisorTrackProgressBody = SkillBody{
 			Id:        "sup-track-urd-source-of-truth",
 			Given:     "requirements question arises",
 			When:      "resolving",
-			Then:      "consult the URD (" + "`bd show <urd-id>`" + ") as the single source of truth",
+			Then:      "consult the URD (`pasture task show \"${URD_ID_URI}\"`) as the single source of truth",
 			ShouldNot: "guess at user intent without checking the URD first",
 		},
 		{
@@ -44,58 +44,60 @@ var supervisorTrackProgressBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "sup-track-when-to-use",
 			Title:   "When to Use",
-			Content: `Workers spawned and running — monitoring for completions and blockers until all slices reach ` + "`done`" + ` or a phase transition is warranted.`,
+			Content: "Workers spawned and running — monitoring for completions and blockers until all slices reach `closed` or a phase transition is warranted.",
 		},
 		{
-			Id:    "sup-track-beads-queries",
-			Title: "Beads Status Queries",
-			Content: "```" + `bash
+			Id:    "sup-track-task-queries",
+			Title: "Pasture Status Queries",
+			Content: `` + "```" + `bash
 # Check all implementation slices
-bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
 
 # Check for blocked slices
-bd list --labels="pasture:p9-impl:s9-slice" --status=blocked
+pasture task blocked --label="pasture:p9-impl:s9-slice"
 
 # Check specific task
-bd show <task-id>
+pasture task show "${TASK_ID_URI}"
 
 # Check completed slices
-bd list --labels="pasture:p9-impl:s9-slice" --status=done
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
 
 # Check BLOCKER severity groups (during/after review)
-bd list --labels="pasture:severity:blocker" --status=open
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
 
 # Check follow-up epic
-bd list --labels="pasture:epic-followup"
-` + "```",
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
+` + "```" + ``,
 		},
 		{
 			Id:    "sup-track-coordination",
-			Title: "Tracking via Beads",
-			Content: `All coordination happens through beads task status and comments:
+			Title: "Tracking via Pasture",
+			Content: `All coordination happens through Pasture task state and authored comments:
 
 ` + "```" + `bash
 # Check for task updates
-bd show <task-id>
+pasture task show "${TASK_ID_URI}"
 
 # Review comments for status updates
-bd comments <task-id>
+pasture task comments "${TASK_ID_URI}"
 
 # Add coordination notes
-bd comments add <task-id> "All slices complete — proceeding to Phase 10 (code review)"
-` + "```",
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "All slices complete — proceeding to Phase 10 (code review)"
+` + "```" + ``,
 		},
 		{
 			Id:    "sup-track-status-patterns",
 			Title: "Status Patterns",
 			Content: `| Status | Action |
 |--------|--------|
-| ` + "`done`" + ` | Mark slice progress, check if all slices complete |
-| ` + "`blocked`" + ` | Review ` + "`bd show <id>`" + ` for blocker details, resolve or reassign |
-| ` + "`in_progress`" + ` | Worker is actively working |`,
+| ` + "`" + `closed` + "`" + ` | Mark slice progress, check if all slices complete |
+| Open blocked_by child | Review ` + "`" + `pasture task show "${ID_URI}"` + "`" + ` for blocker details, resolve or reassign |
+| ` + "`" + `in_progress` + "`" + ` | Worker is actively working |`,
 		},
 		{
 			Id:    "sup-track-severity",
@@ -111,13 +113,13 @@ bd comments add <task-id> "All slices complete — proceeding to Phase 10 (code 
 		{
 			Id:    "sup-track-followup-lifecycle",
 			Title: "Follow-up Lifecycle Tracking",
-			Content: "```" + `bash
+			Content: `` + "```" + `bash
 # Track follow-up lifecycle progress
-bd list --labels="pasture:epic-followup"
-bd list --labels="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
-bd list --labels="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
-bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
-` + "```",
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
+` + "```" + ``,
 		},
 	},
 

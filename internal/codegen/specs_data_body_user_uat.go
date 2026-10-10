@@ -59,7 +59,7 @@ var userUatBody = SkillBody{
 			Id:        "uat-update-urd",
 			Given:     "UAT completes",
 			When:      "results are captured",
-			Then:      "update the URD with UAT results via `bd comments add <urd-id> \"UAT: <summary>\"`",
+			Then:      "update the URD with UAT results via `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 \"${URD_ID_URI}\" \"UAT: <summary>\"`",
 			ShouldNot: "leave the URD out of date after UAT",
 		},
 		{
@@ -84,6 +84,8 @@ var userUatBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "uat-phases",
 			Title:   "UAT Phases",
@@ -154,10 +156,10 @@ The user needs to see the actual thing — definition, behavior, example — and
 			Title: "Pre-requisite: Cross-reference URE Against the Proposal",
 			Content: `UAT is the **second time** the user evaluates this feature. Before designing UAT questions, cross-reference the URE responses and URD against the proposal:
 
-` + "```bash" + `
-bd show <elicit-id>     # Re-read the user's original URE responses
-bd show <urd-id>        # The structured requirements document
-bd show <proposal-id>   # The architect's proposal and tradeoffs
+` + "```" + `bash
+pasture task show "${ELICIT_ID_URI}"     # Re-read the user's original URE responses
+pasture task show "${URD_ID_URI}"        # The structured requirements document
+pasture task show "${PROPOSAL_ID_URI}"   # The architect's proposal and tradeoffs
 ` + "```" + `
 
 Look for:
@@ -310,54 +312,62 @@ One open-ended question — "Is there anything from your original requirements t
 				{
 					Id:    "uat-plan-task",
 					Title: "Plan UAT Task (Phase 5)",
-					Content: "```bash\n" +
-						"bd create --labels \"pasture:p5-user:s5-uat\" \\\n" +
-						"  --title \"UAT: Plan acceptance for <feature>\" \\\n" +
-						"  --description \"---\n" +
-						"references:\n" +
-						"  request: <request-task-id>\n" +
-						"  urd: <urd-task-id>\n" +
-						"  proposal: <proposal-N-id>\n" +
-						"---\n" +
-						"## Components Reviewed\n\n" +
-						"### Component: <component-name>\n" +
-						"**Definition shown:** <interface/type/signature shown to user>\n" +
-						"**Motivating example shown:** <before/after or input/output example>\n" +
-						"**Question asked:** <exact question text>\n" +
-						"**Options presented:** <exact option labels and descriptions>\n" +
-						"**User response:** <verbatim selection(s)>\n" +
-						"**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>\n\n" +
-						"## Final Decision\n" +
-						"<ACCEPT or REVISE with verbatim reason>\"\n\n" +
-						"bd dep add <proposal-id> --blocked-by <uat-task-id>\n\n" +
-						"# Update URD with plan UAT results\n" +
-						"bd comments add <urd-id> \"Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>\"\n" +
-						"```",
+					Content: `` + "```" + `bash
+UAT_ID_URI=$(pasture task create "UAT: Plan acceptance for <feature>" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "---
+references:
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
+  proposal: "${PROPOSAL_ID_URI}"
+---
+## Components Reviewed
+
+### Component: <component-name>
+**Definition shown:** <interface/type/signature shown to user>
+**Motivating example shown:** <before/after or input/output example>
+**Question asked:** <exact question text>
+**Options presented:** <exact option labels and descriptions>
+**User response:** <verbatim selection(s)>
+**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>
+
+## Final Decision
+<ACCEPT or REVISE with verbatim reason>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$UAT_ID_URI" pasture:p5-user:s5-uat
+
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
+
+# Update URD with plan UAT results
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
+` + "```" + ``,
 				},
 				{
 					Id:    "uat-impl-task",
 					Title: "Implementation UAT Task (Phase 11)",
-					Content: "```bash\n" +
-						"bd create --labels \"pasture:p11-user:s11-uat\" \\\n" +
-						"  --title \"UAT: Implementation acceptance for <feature>\" \\\n" +
-						"  --description \"---\n" +
-						"references:\n" +
-						"  request: <request-task-id>\n" +
-						"  urd: <urd-task-id>\n" +
-						"  impl_plan: <impl-plan-task-id>\n" +
-						"---\n" +
-						"## Components Demonstrated\n\n" +
-						"### Component: <component-name>\n" +
-						"**Command run / output shown:** <actual terminal output shown to user>\n" +
-						"**Question asked:** <exact question>\n" +
-						"**User response:** <verbatim response>\n" +
-						"**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>\n\n" +
-						"## Final Decision\n" +
-						"<ACCEPT or REVISE>\"\n\n" +
-						"bd dep add <impl-plan-id> --blocked-by <impl-uat-task-id>\n\n" +
-						"# Update URD with implementation UAT results\n" +
-						"bd comments add <urd-id> \"Impl UAT: <ACCEPT or REVISE> - <summary of findings>\"\n" +
-						"```",
+					Content: `` + "```" + `bash
+IMPL_UAT_ID_URI=$(pasture task create "UAT: Implementation acceptance for <feature>" --phase impl_uat --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "---
+references:
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
+  impl_plan: "${IMPL_PLAN_ID_URI}"
+---
+## Components Demonstrated
+
+### Component: <component-name>
+**Command run / output shown:** <actual terminal output shown to user>
+**Question asked:** <exact question>
+**User response:** <verbatim response>
+**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>
+
+## Final Decision
+<ACCEPT or REVISE>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPL_UAT_ID_URI" pasture:p11-user:s11-uat
+
+pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${IMPL_UAT_ID_URI}"
+
+# Update URD with implementation UAT results
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
+` + "```" + ``,
 				},
 			},
 		},

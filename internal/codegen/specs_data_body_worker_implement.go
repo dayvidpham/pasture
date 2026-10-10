@@ -56,10 +56,12 @@ var workerImplementBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "wimpl-when-to-use",
 			Title:   "When to Use",
-			Content: `You have a Beads task ID for a vertical slice and are ready to implement end-to-end.`,
+			Content: "You have a Pasture task ID for a vertical slice and are ready to implement end-to-end.",
 		},
 		{
 			Id:      "wimpl-steps",
@@ -69,10 +71,10 @@ var workerImplementBody = SkillBody{
 				{
 					Id:    "wimpl-step0-plan",
 					Title: "Step 0: Plan backwards from production code path (before implementing)",
-					Content: `**Given** Beads task **when** starting **then** identify production code path first
+					Content: `**Given** Pasture task **when** starting **then** identify production code path first
 
-` + "```bash" + `
-bd show <task-id>
+` + "```" + `bash
+pasture task show "${TASK_ID_URI}"
 # Look for: "productionCodePath": "cli-command subcommand" or "api-endpoint"
 ` + "```" + `
 
@@ -91,17 +93,17 @@ End: User runs production command
 				},
 				{
 					Id:    "wimpl-step1-read",
-					Title: "Step 1: Read Beads task for full context",
-					Content: "```bash" + `
-bd show <task-id>
-` + "```",
+					Title: "Step 1: Read Pasture task for full context",
+					Content: `` + "```" + `bash
+pasture task show "${TASK_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:    "wimpl-step2-status",
 					Title: "Step 2: Update status",
-					Content: "```bash" + `
-bd update <task-id> --status=in_progress
-` + "```",
+					Content: `` + "```" + `bash
+pasture task update "${TASK_ID_URI}" --status=in_progress
+` + "```" + ``,
 				},
 				{
 					Id:    "wimpl-step3-layers",
@@ -150,45 +152,34 @@ There is **no** request-type axis or enum gating this — what a request needs i
 					Id:    "wimpl-step5-commit",
 					Title: "Step 5: Commit safely in a shared worktree",
 					Content: `Stage **only** the files belonging to your slice, by name:
-` + "```bash" + `
+` + "```" + `bash
 git add cmd/feature/list.go pkg/feature/service.go pkg/feature/types.go
 git agent-commit -m "feat(feature): add list subcommand"
 ` + "```" + `
 
-**Never** use ` + "`git add .`" + `, ` + "`git add -A`" + `, or ` + "`git commit -am ...`" + ` —
+**Never** use ` + "`" + `git add .` + "`" + `, ` + "`" + `git add -A` + "`" + `, or ` + "`" + `git commit -am ...` + "`" + ` —
 they sweep peer-worker WIP into your commit.
 
-**Never** use destructive git operations (` + "`git reset --hard`" + `,
-` + "`git checkout HEAD -- <path>`" + `, ` + "`git stash pop`" + `, ` + "`git stash apply`" + `,
-` + "`git clean -fd`" + `, ` + "`git branch -D`" + `) on the shared worktree. A
+**Never** use destructive git operations (` + "`" + `git reset --hard` + "`" + `,
+` + "`" + `git checkout HEAD -- <path>` + "`" + `, ` + "`" + `git stash pop` + "`" + `, ` + "`" + `git stash apply` + "`" + `,
+` + "`" + `git clean -fd` + "`" + `, ` + "`" + `git branch -D` + "`" + `) on the shared worktree. A
 PreToolUse hook blocks these for worker agents; if you find peer
-work in your way, post ` + "`bd comments add`" + ` and wait for supervisor
+work in your way, post ` + "`" + `pasture task comment add` + "`" + ` and wait for supervisor
 coordination instead. See **Shared-Worktree Git Discipline** in
-` + "`/pasture:worker`" + ` for the full rationale and the escape hatch.`,
+` + "`" + `/pasture:worker` + "`" + ` for the full rationale and the escape hatch.`,
 				},
 			},
 		},
 		{
-			Id:    "wimpl-checklist",
-			Title: "Checklist",
-			Content: `- [ ] Planned backwards from production code path
-- [ ] Read Beads task for validation_checklist
-- [ ] Each validation_checklist item satisfied
-- [ ] BDD acceptance_criteria met
-- [ ] Tests import actual production code (not test-only export)
-- [ ] No dual-export anti-pattern (one code path for tests and production)
-- [ ] No TODO placeholders in production code
-- [ ] Service wired with real dependencies (not mocks in production)
-- [ ] Quality gates pass (type checking + tests)
-- [ ] Production code path verified (via code inspection: no TODOs, real deps wired, tests import production code)
-- [ ] Files staged individually by name (no ` + "`git add .`" + ` / ` + "`git add -A`" + `)
-- [ ] No destructive git operations (` + "`reset --hard`" + `, ` + "`checkout HEAD -- <path>`" + `, ` + "`stash pop/apply`" + `, ` + "`clean -fd`" + `, ` + "`branch -D`" + `) used on the shared worktree`,
+			Id:      "wimpl-checklist",
+			Title:   "Checklist",
+			Content: "- [ ] Planned backwards from production code path\n- [ ] Read Pasture task for validation_checklist\n- [ ] Each validation_checklist item satisfied\n- [ ] BDD acceptance_criteria met\n- [ ] Tests import actual production code (not test-only export)\n- [ ] No dual-export anti-pattern (one code path for tests and production)\n- [ ] No TODO placeholders in production code\n- [ ] Service wired with real dependencies (not mocks in production)\n- [ ] Quality gates pass (type checking + tests)\n- [ ] Production code path verified (via code inspection: no TODOs, real deps wired, tests import production code)\n- [ ] Files staged individually by name (no `git add .` / `git add -A`)\n- [ ] No destructive git operations (`reset --hard`, `checkout HEAD -- <path>`, `stash pop/apply`, `clean -fd`, `branch -D`) used on the shared worktree",
 		},
 		{
 			Id:    "wimpl-followup-slices",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
-			Content: `If your Beads task is a ` + "`FOLLOWUP_SLICE-N`" + `, the implementation procedure is identical. Additionally:
-- Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`bd show <task-id>`" + ` — these are user-DEFER'd UAT items you must resolve
+			Content: `If your Pasture task is a ` + "`" + `FOLLOWUP_SLICE-N` + "`" + `, the implementation procedure is identical. Additionally:
+- Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`" + `pasture task show "${TASK_ID_URI}"` + "`" + ` — these are user-DEFER'd UAT items you must resolve
 - Your implementation must address each DEFER'd-item leaf task's acceptance criteria
 - On completion, report which DEFER'd-item leaf tasks were resolved`,
 		},

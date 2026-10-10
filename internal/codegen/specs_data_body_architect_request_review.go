@@ -17,12 +17,14 @@ var architectRequestReviewBody = SkillBody{
 			Id:        "arch-review-provide-context",
 			Given:     "reviewers",
 			When:      "assigning",
-			Then:      "provide Beads task ID and context",
+			Then:      "provide Pasture task ID and context",
 			ShouldNot: "expect reviewers to search",
 		},
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "arch-review-when-to-use",
 			Title:   "When to Use",
@@ -48,16 +50,9 @@ var architectRequestReviewBody = SkillBody{
 			},
 		},
 		{
-			Id:    "arch-review-steps",
-			Title: "Steps",
-			Content: "1. Verify PROPOSAL-N task is complete with all sections\n" +
-				"2. Spawn three reviewers with the task ID and URD reference:\n\n" +
-				"```\n" +
-				"Task(description: \"Reviewer A: correctness\", prompt: \"Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer A (Correctness). Focus: Does it faithfully serve the user? Are technical decisions consistent with rationale? Create review task titled PROPOSAL-1-REVIEW-A-1...\", subagent_type: \"general-purpose\")\n" +
-				"Task(description: \"Reviewer B: test quality\", prompt: \"Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer B (Test quality). Focus: Integration over unit? SUT not mocked? Shared fixtures? Assert outcomes? Create review task titled PROPOSAL-1-REVIEW-B-1...\", subagent_type: \"general-purpose\")\n" +
-				"Task(description: \"Reviewer C: elegance\", prompt: \"Review PROPOSAL-1 task <task-id>. URD: <urd-id> (read for requirements context). You are Reviewer C (Elegance). Focus: Right API? Not over/under-engineered? Complexity proportional to problem? Create review task titled PROPOSAL-1-REVIEW-C-1...\", subagent_type: \"general-purpose\")\n" +
-				"```\n\n" +
-				"3. Wait for all 3 reviewers to vote ACCEPT",
+			Id:      "arch-review-steps",
+			Title:   "Steps",
+			Content: "1. Verify PROPOSAL-N task is complete with all sections\n2. Spawn three reviewers with the task ID and URD reference:\n\n```\nTask(description: \"Reviewer A: correctness\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer A (Correctness). Focus: Does it faithfully serve the user? Are technical decisions consistent with rationale? Create review task titled PROPOSAL-1-REVIEW-A-1...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer B: test quality\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer B (Test quality). Focus: Integration over unit? SUT not mocked? Shared fixtures? Assert outcomes? Create review task titled PROPOSAL-1-REVIEW-B-1...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer C: elegance\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer C (Elegance). Focus: Right API? Not over/under-engineered? Complexity proportional to problem? Create review task titled PROPOSAL-1-REVIEW-C-1...\", subagent_type: \"general-purpose\")\n```\n\n3. Wait for all 3 reviewers to vote ACCEPT",
 		},
 		{
 			Id:      "arch-review-consensus",
@@ -67,21 +62,21 @@ var architectRequestReviewBody = SkillBody{
 		{
 			Id:    "arch-review-checking",
 			Title: "Checking Reviews",
-			Content: "```bash\n" +
-				"bd show <proposal-id>\n" +
-				"bd comments <proposal-id>\n" +
-				"```",
+			Content: `` + "```" + `bash
+pasture task show "${PROPOSAL_ID_URI}"
+pasture task comments "${PROPOSAL_ID_URI}"
+` + "```" + ``,
 		},
 		{
 			Id:    "arch-review-coordination",
 			Title: "Coordination",
-			Content: "```bash\n" +
-				"# Add comment to notify that review is ready\n" +
-				"bd comments add <proposal-id> \"Review requested — 3 reviewers spawned\"\n" +
-				"\n" +
-				"# Check for review votes\n" +
-				"bd comments <proposal-id>\n" +
-				"```",
+			Content: `` + "```" + `bash
+# Add comment to notify that review is ready
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "Review requested — 3 reviewers spawned"
+
+# Check for review votes
+pasture task comments "${PROPOSAL_ID_URI}"
+` + "```" + ``,
 		},
 		{
 			Id:    "arch-review-followup",

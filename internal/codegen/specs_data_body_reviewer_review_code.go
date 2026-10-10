@@ -42,6 +42,8 @@ var reviewerReviewCodeBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "rev-code-when-to-use",
 			Title:   "When to Use",
@@ -50,82 +52,82 @@ var reviewerReviewCodeBody = SkillBody{
 		{
 			Id:      "rev-code-severity-tree",
 			Title:   "Severity Tree: EAGER Creation",
-			Content: `**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:`,
+			Content: `First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:`,
 			Subsections: []ProseSection{
 				{
 					Id:    "rev-code-create-groups",
 					Title: "Step 1: Create All 3 Severity Groups Immediately",
-					Content: "```" + `bash` + "\n" +
-						`# Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-bd create --labels "pasture:severity:blocker,pasture:p10-impl:s10-review" \
-  --title "SLICE-1-REVIEW-A-1 BLOCKER" \
+					Content: `` + "```" + `bash
+# Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
+BLOCKER_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-id>
-  review: <review-id>
+  slice: "${SLICE_ID_URI}"
+  review: "${REVIEW_ID_URI}"
 ---
-BLOCKER findings for this review round"
-# Result: <blocker-group-id>
+BLOCKER findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
+pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-bd create --labels "pasture:severity:important,pasture:p10-impl:s10-review" \
-  --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
+IMPORTANT_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-id>
-  review: <review-id>
+  slice: "${SLICE_ID_URI}"
+  review: "${REVIEW_ID_URI}"
 ---
-IMPORTANT findings for this review round"
-# Result: <important-group-id>
+IMPORTANT findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
+pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-bd create --labels "pasture:severity:minor,pasture:p10-impl:s10-review" \
-  --title "SLICE-1-REVIEW-A-1 MINOR" \
+MINOR_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-id>
-  review: <review-id>
+  slice: "${SLICE_ID_URI}"
+  review: "${REVIEW_ID_URI}"
 ---
-MINOR findings for this review round"
-# Result: <minor-group-id>
+MINOR findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
+pasture task label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire severity groups to review task
-bd dep add <review-id> --blocked-by <blocker-group-id>
-bd dep add <review-id> --blocked-by <important-group-id>
-bd dep add <review-id> --blocked-by <minor-group-id>` + "\n" +
-						"```",
+pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
+pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
+pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:    "rev-code-add-findings",
 					Title: "Adding Findings to Severity Groups",
-					Content: "```" + `bash` + "\n" +
-						`# BLOCKER finding — dual-parent relationship
-bd create --title "BLOCKER: <finding title>" \
-  --description "<finding details with file:line references>"
-bd dep add <blocker-group-id> --blocked-by <blocker-finding-id>
-bd dep add <slice-id> --blocked-by <blocker-finding-id>
+					Content: `` + "```" + `bash
+# BLOCKER finding — dual-parent relationship
+BLOCKER_FINDING_ID_URI=$(pasture task create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "<finding details with file:line references>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+pasture task dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
 
 # IMPORTANT finding — single parent (severity group only)
-bd create --title "IMPORTANT: <finding title>" \
-  --description "<finding details>"
-bd dep add <important-group-id> --blocked-by <important-finding-id>
+IMPORTANT_FINDING_ID_URI=$(pasture task create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
 
 # MINOR finding — single parent (severity group only)
-bd create --title "MINOR: <finding title>" \
-  --description "<finding details>"
-bd dep add <minor-group-id> --blocked-by <minor-finding-id>` + "\n" +
-						"```",
+MINOR_FINDING_ID_URI=$(pasture task create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:    "rev-code-close-empty",
 					Title: "Closing Empty Groups",
 					Content: `Empty severity groups (no findings) are closed immediately:
 
-` + "```" + `bash` + "\n" +
-						`# If no IMPORTANT findings were found:
-bd close <important-group-id>
+` + "```" + `bash
+# If no IMPORTANT findings were found:
+pasture task close "${IMPORTANT_GROUP_ID_URI}"
 
 # If no MINOR findings were found:
-bd close <minor-group-id>` + "\n" +
-						"```",
+pasture task close "${MINOR_GROUP_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:    "rev-code-dual-parent-rule",
@@ -148,10 +150,10 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 				{
 					Id:    "rev-code-step1-read",
 					Title: "Step 1: Read Code Changes and URD",
-					Content: "```" + `bash` + "\n" +
-						`bd show <slice-id>
-bd show <urd-id>   # Read URD for requirements context` + "\n" +
-						"```",
+					Content: `` + "```" + `bash
+pasture task show "${SLICE_ID_URI}"
+pasture task show "${URD_ID_URI}"   # Read URD for requirements context
+` + "```" + ``,
 				},
 				{
 					Id:    "rev-code-step2-gates",
@@ -168,17 +170,17 @@ bd show <urd-id>   # Read URD for requirements context` + "\n" +
 				{
 					Id:    "rev-code-step4-create",
 					Title: "Step 4: Create Review Task",
-					Content: "```" + `bash` + "\n" +
-						`bd create --labels "pasture:p10-impl:s10-review" \
-  --title "SLICE-1-REVIEW-A-1: <feature>" \
+					Content: `` + "```" + `bash
+REVIEW_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-id>
-  urd: <urd-id>
+  slice: "${SLICE_ID_URI}"
+  urd: "${URD_ID_URI}"
 ---
-VOTE: <ACCEPT|REVISE> - <justification>"
-bd dep add <slice-id> --blocked-by <review-id>` + "\n" +
-						"```",
+VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
+pasture task dep add "${SLICE_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:    "rev-code-step5-severity",
@@ -186,7 +188,7 @@ bd dep add <slice-id> --blocked-by <review-id>` + "\n" +
 					Content: `5. Create severity tree (EAGER — all 3 groups immediately)
 6. Add findings to appropriate severity groups
 7. Close empty severity groups
-8. Cast vote via ` + "`bd comments add`",
+8. Cast vote via ` + "`" + `pasture task comment add` + "`" + ``,
 				},
 			},
 		},
@@ -281,13 +283,13 @@ An implementation that ships without validation-case fixtures is an IMPORTANT fi
 		{
 			Id:    "rev-code-report",
 			Title: "Report Results",
-			Content: "```" + `bash` + "\n" +
-				`# Add vote comment to the review task
-bd comments add <review-id> "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
+			Content: `` + "```" + `bash
+# Add vote comment to the review task
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
 
 # Or
-bd comments add <review-id> "VOTE: REVISE - BLOCKERs found, see severity tree for details"` + "\n" +
-				"```",
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - BLOCKERs found, see severity tree for details"
+` + "```" + ``,
 		},
 	},
 }

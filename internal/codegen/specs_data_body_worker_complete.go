@@ -21,22 +21,24 @@ var workerCompleteBody = SkillBody{
 			ShouldNot: "complete with unchecked items",
 		},
 		{
-			Id:        "wcomp-beads-update",
+			Id:        "wcomp-task-update",
 			Given:     "completion",
 			When:      "reporting",
-			Then:      "update Beads task status",
-			ShouldNot: "omit Beads update",
+			Then:      "record completion evidence without closing the task",
+			ShouldNot: "omit Pasture update",
 		},
 		{
 			Id:        "wcomp-handoff-doc",
 			Given:     "completion",
 			When:      "handing off to reviewer",
-			Then:      "author the worker→reviewer handoff in the Beads task body (the slice/handoff task body IS the handoff)",
+			Then:      "author the worker→reviewer handoff in the Pasture task body (the slice/handoff task body IS the handoff)",
 			ShouldNot: "skip handoff for actor transitions",
 		},
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "wcomp-when-to-use",
 			Title:   "When to Use",
@@ -52,15 +54,15 @@ var workerCompleteBody = SkillBody{
    - [ ] No TODO placeholders in production code
    - [ ] Service wired with real dependencies (not mocks in production)
 3. Verify all validation_checklist items satisfied:
-   ` + "```bash" + `
-   bd show <task-id>  # Review checklist items
+   ` + "```" + `bash
+   pasture task show "${TASK_ID_URI}"  # Review checklist items
    ` + "```" + `
-4. Update Beads task:
-   ` + "```bash" + `
-   bd update <task-id> --status=done
-   bd update <task-id> --notes="Implementation complete. Production code verified working."
+4. Update Pasture task:
+   ` + "```" + `bash
+   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
+   pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working."
    ` + "```" + `
-5. Author the worker→reviewer handoff in the Beads task body (see template below)`,
+5. Author the worker→reviewer handoff in the Pasture task body (see template below)`,
 		},
 		{
 			Id:      "wcomp-handoff-template",
@@ -70,19 +72,19 @@ var workerCompleteBody = SkillBody{
 				{
 					Id:      "wcomp-handoff-storage",
 					Title:   "Storage",
-					Content: `Authored in the Beads task body — the slice (or a dedicated handoff) task body IS the handoff. No filesystem path.`,
+					Content: "Authored in the Pasture task body — the slice (or a dedicated handoff) task body IS the handoff. No filesystem path.",
 				},
 				{
 					Id:    "wcomp-handoff-content",
 					Title: "Template",
-					Content: "```markdown" + `
+					Content: `` + "```" + `markdown
 # Handoff: Worker <N> → Reviewer
 
 ## Context
-- Request: <request-task-id>
-- URD: <urd-task-id>
+- Request: ${REQUEST_ID_URI}
+- URD: ${URD_ID_URI}
 - Slice: SLICE-<N>
-- Task ID: <slice-task-id>
+- Task ID: ${SLICE_TASK_ID_URI}
 
 ## What Was Implemented
 - Production Code Path: <what end users run>
@@ -99,26 +101,25 @@ var workerCompleteBody = SkillBody{
 
 ## Areas of Concern
 - <any areas the reviewer should pay special attention to>
-` + "```",
+` + "```" + ``,
 				},
 			},
 		},
 		{
 			Id:    "wcomp-report-completion",
 			Title: "Report Completion",
-			Content: "```bash" + `
-# Close the task and add completion notes
-bd close <task-id>
-bd comments add <task-id> "Implementation complete. Quality gates pass. Production code verified."
-` + "```",
+			Content: `` + "```" + `bash
+# Report completion; only the supervisor closes after independent review
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Quality gates pass. Production code verified."
+` + "```" + ``,
 		},
 		{
 			Id:    "wcomp-followup-slice",
 			Title: "Follow-up Slice Completion (FOLLOWUP_SLICE-N)",
 			Content: `When completing a FOLLOWUP_SLICE-N, additionally report which original leaf tasks were resolved:
 
-` + "```bash" + `
-bd comments add <task-id> "Implementation complete. Resolved leaf tasks: <leaf-task-id-1>, <leaf-task-id-2>"
+` + "```" + `bash
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
 ` + "```" + `
 
 The handoff to the reviewer (h4) must include which original leaf tasks were resolved so reviewers can verify.`,

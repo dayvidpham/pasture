@@ -10,7 +10,7 @@ var workerBlockedBody = SkillBody{
 			Id:        "wblk-update-status",
 			Given:     "a blocker",
 			When:      "reporting",
-			Then:      "update Beads task status and document details",
+			Then:      "update Pasture task status and document details",
 			ShouldNot: "guess or work around the blocker",
 		},
 		{
@@ -23,6 +23,8 @@ var workerBlockedBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "wblk-when-to-use",
 			Title:   "When to Use",
@@ -33,18 +35,17 @@ var workerBlockedBody = SkillBody{
 			Title: "Steps",
 			Content: `1. Identify what's blocking (missing type, unclear requirement, file dependency)
 
-2. Update Beads task:
-   ` + "```bash" + `
-   bd update <task-id> --status=blocked
-   bd update <task-id> --notes="Blocked: <reason>. Missing: <dependency or clarification needed>"
+2. Update Pasture task:
+   ` + "```" + `bash
+   pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>. Missing: <dependency or clarification needed>"
    ` + "```" + `
 
 3. Document the blocker in the task:
-   ` + "```bash" + `
-   bd comments add <task-id> "BLOCKED: <reason>. Need: <dependency or clarification>"
+   ` + "```" + `bash
+   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "BLOCKED: <reason>. Need: <dependency or clarification>"
    ` + "```" + `
 
-4. Wait for supervisor or dependency resolution — check with ` + "`bd show <task-id>`",
+4. Wait for supervisor or dependency resolution — check with ` + "`" + `pasture task show "${TASK_ID_URI}"` + "`" + ``,
 		},
 		{
 			Id:    "wblk-common-blockers",

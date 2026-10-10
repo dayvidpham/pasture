@@ -1,0 +1,30 @@
+cases:
+  - name: generated reviewer severity graph with review binding
+    skill: reviewer-review-code
+    anchor: '### Step 1: Create All 3 Severity Groups Immediately'
+    blocked_input: true
+    titles:
+      - SLICE-1-REVIEW-A-1 BLOCKER
+      - SLICE-1-REVIEW-A-1 IMPORTANT
+      - SLICE-1-REVIEW-A-1 MINOR
+  - name: generated supervisor plan heredoc with bound slice URIs
+    skill: supervisor
+    anchor: '7. Bind SLICE_1_ID_URI'
+    titles: []
+  - name: generated vertical plan heredoc with bound slice URIs
+    skill: supervisor-plan-tasks
+    anchor: '7. **Update IMPL_PLAN'
+    titles: []
+  - name: generated shared severity graph
+    skill: supervisor
+    anchor: '### Severity Tree (EAGER Creation)'
+    blocked_input: true
+    titles:
+      - SLICE-1-REVIEW-A-1 BLOCKER
+      - SLICE-1-REVIEW-A-1 IMPORTANT
+      - SLICE-1-REVIEW-A-1 MINOR
+  - name: generated positional request capture and metadata
+    skill: user-request
+    anchor: '### Capture verbatim and create the request task'
+    titles:
+      - 'REQUEST: {{short summary}}'
