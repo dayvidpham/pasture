@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.0.16] - 2026-10-10
+
+### Added
+- feat(install): add the in-repo curl installer for the pasture/pastured pair
+- feat(pasture): manage the pasture/pastured pair with same-tag repair
+- feat(pasture): add upgrade command core and root --upgrade adapter
+
+### Fixed
+- fix(pasture): close review findings in upgrade and installer
+
+### Documentation
+- docs: document self-upgrade and the in-repo installer
+
+### Other
+- Merge pull request #178 from dayvidpham/pasture-7b23--feat--upgrade-installer
+- ci(release): publish checksums.txt covering all release assets
+
 ## [0.0.15] - 2026-10-10
 
 ### Documentation
