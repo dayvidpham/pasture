@@ -29,7 +29,7 @@ You review from an end-user alignment perspective. See the project's protocol/CO
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: bd dep add parent --blocked-by child
+- Then: chain dependency: pasture task dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
 **[C-audit-never-delete]**
@@ -45,16 +45,16 @@ You review from an end-user alignment perspective. See the project's protocol/CO
 - Should not: add to severity group only
 
 **[C-dep-direction]**
-- Given: adding a Beads dependency
+- Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first
+- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
 - When: linking tasks
 - Then: use description frontmatter references: block
-- Should not: use bd dep relate (buggy) or blocking dependencies for reference docs
+- Should not: invent relationship commands or use blocking dependencies for reference documents
 
 **[C-review-binary]**
 - Given: a reviewer

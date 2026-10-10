@@ -14,15 +14,17 @@ var reviewerCommentBody = SkillBody{
 			ShouldNot: "leave unstructured feedback",
 		},
 		{
-			Id:        "rev-comment-beads",
+			Id:        "rev-comment-task",
 			Given:     "comment to create",
 			When:      "creating",
-			Then:      "add via `bd comments add`",
+			Then:      "add via `pasture task comment add`",
 			ShouldNot: "create standalone files for review comments",
 		},
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "rev-comment-when-to-use",
 			Title:   "When to Use",
@@ -31,20 +33,20 @@ var reviewerCommentBody = SkillBody{
 		{
 			Id:    "rev-comment-steps",
 			Title: "Steps",
-			Content: `1. Identify the task to comment on (` + "`bd show <task-id>`" + `)
+			Content: `1. Identify the task to comment on (` + "`" + `pasture task show "${TASK_ID_URI}"` + "`" + `)
 2. Categorize findings by severity
-3. Add structured comment via Beads`,
+3. Add structured comment via Pasture`,
 		},
 		{
-			Id:    "rev-comment-beads-command",
-			Title: "Comment via Beads",
-			Content: "```" + `bash` + "\n" +
-				`# Plan review comment (no severity tree)
-bd comments add <proposal-id> "VOTE: ACCEPT - End-user alignment confirmed. MVP scope achievable."
+			Id:    "rev-comment-task-command",
+			Title: "Comment via Pasture",
+			Content: `` + "```" + `bash
+# Plan review comment (no severity tree)
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user alignment confirmed. MVP scope achievable."
 
 # Code review comment (with severity references)
-bd comments add <review-id> "VOTE: REVISE - 1 BLOCKER found (see severity tree). Suggestion: fix type error in auth middleware."` + "\n" +
-				"```",
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - 1 BLOCKER found (see severity tree). Suggestion: fix type error in auth middleware."
+` + "```" + ``,
 		},
 		{
 			Id:    "rev-comment-format",
@@ -73,8 +75,8 @@ bd comments add <review-id> "VOTE: REVISE - 1 BLOCKER found (see severity tree).
 			Content: `| Severity | When to Use | Blocks? |
 |----------|-------------|---------|
 | BLOCKER | Security, type errors, test failures, broken production code paths | Yes (code review only) |
-| IMPORTANT | Performance, missing validation, architectural concerns | No (follow-up epic) |
-| MINOR | Style, optional optimizations, naming improvements | No (follow-up epic) |`,
+| IMPORTANT | Performance, missing validation, architectural concerns | Must reach 0 before review wave closes |
+| MINOR | Style, optional optimizations, naming improvements | Must reach 0 before review wave closes |`,
 		},
 		{
 			Id:    "rev-comment-plan-vs-code",

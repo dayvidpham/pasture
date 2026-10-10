@@ -17,76 +17,78 @@ var supervisorCommitBody = SkillBody{
 			Id:        "sup-commit-message-format",
 			Given:     "commit message",
 			When:      "formatting",
-			Then:      "reference Beads task IDs in the trailer (Task: aura-xxx, aura-yyy)",
+			Then:      "reference Pasture task IDs in the trailer (Task: ${TASK_A_URI}, ${TASK_B_URI})",
 			ShouldNot: "use vague messages without task references",
 		},
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "sup-commit-when-to-use",
 			Title:   "When to Use",
-			Content: `All workers for a layer have completed successfully — quality gates pass, Beads tasks updated, IMPL_PLAN ready for progress note.`,
+			Content: "All workers for a review wave have completed successfully — quality gates pass, Pasture tasks updated, IMPL_PLAN ready for progress note.",
 		},
 		{
-			Id:    "sup-commit-steps",
-			Title: "Steps",
-			Content: `1. Run quality gates (type checking + tests) — must pass
-2. Stage changed files
-3. Create commit with format below
-4. Close Beads tasks
-5. Update IMPL_PLAN progress`,
+			Id:      "sup-commit-steps",
+			Title:   "Steps",
+			Content: "1. Run quality gates (type checking + tests) — must pass\n2. Stage changed files\n3. Create commit with format below\n4. Close Pasture tasks\n5. Update IMPL_PLAN progress",
 		},
 		{
 			Id:    "sup-commit-format",
 			Title: "Commit Format",
-			Content: "```" + `
+			Content: `` + "```" + `
 feat|fix|docs|refactor(scope): Description
 
 Files: file1.go, file2.go
-Task: aura-xxx, aura-yyy
-Ratified-Plan: <ratified-plan-id>
+Task: ${TASK_A_URI}, ${TASK_B_URI}
+Ratified-Plan: ${RATIFIED_PLAN_ID_URI}
 
 Co-Authored-By: Claude <noreply@anthropic.com>
-` + "```",
+` + "```" + ``,
 		},
 		{
-			Id:    "sup-commit-close-beads",
-			Title: "Close Beads Tasks",
-			Content: "```" + `bash
-bd close aura-xxx aura-yyy --reason="Committed in <commit-hash>"
-` + "```",
+			Id:    "sup-commit-close-task",
+			Title: "Close Pasture Tasks",
+			Content: `` + "```" + `bash
+pasture task close "${TASK_A_URI}" --reason="Committed in <commit-hash>"
+pasture task close "${TASK_B_URI}" --reason="Committed in <commit-hash>"
+` + "```" + ``,
 		},
 		{
 			Id:    "sup-commit-update-impl-plan",
 			Title: "Update IMPL_PLAN",
-			Content: "```" + `bash
-bd update <impl-plan-id> --notes="SLICE-N complete: aura-xxx, aura-yyy"
-` + "```",
+			Content: `` + "```" + `bash
+pasture task update "${IMPL_PLAN_ID_URI}" --notes="SLICE-N complete: "${TASK_A_URI}", ${TASK_B_URI}"
+` + "```" + ``,
 		},
 		{
 			Id:    "sup-commit-followup",
 			Title: "Follow-up Commits",
-			Content: `For follow-up slices, add ` + "`Followup-Epic:`" + ` to the commit message trailer:
+			Content: `For follow-up slices, add ` + "`" + `Followup-Epic:` + "`" + ` to the commit message trailer:
 
 ` + "```" + `
 feat|fix(scope): Description (follow-up)
 
 Files: file1.go, file2.go
-Task: aura-xxx (FOLLOWUP_SLICE-1)
-Followup-Epic: aura-yyy
-Ratified-Plan: aura-zzz (FOLLOWUP_PROPOSAL-1)
+Task: ${TASK_A_URI} (FOLLOWUP_SLICE-1)
+Followup-Epic: ${TASK_B_URI}
+Ratified-Plan: ${TASK_C_URI} (FOLLOWUP_PROPOSAL-1)
 
 Co-Authored-By: Claude <noreply@anthropic.com>
-` + "```",
+` + "```" + ``,
 		},
 		{
 			Id:    "sup-commit-commands",
 			Title: "Commands",
-			Content: "```" + `bash
-git add <files>
+			Content: `` + "```" + `bash
+# Set these to the reviewed canonical source and direct test paths for this slice.
+SLICE_SOURCE_FILE=path/to/source.go
+SLICE_TEST_FILE=path/to/source_test.go
+git add "$SLICE_SOURCE_FILE" "$SLICE_TEST_FILE"
 git agent-commit -m "..."
-` + "```",
+` + "```" + ``,
 		},
 	},
 

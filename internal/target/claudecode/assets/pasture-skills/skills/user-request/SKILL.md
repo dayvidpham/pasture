@@ -46,6 +46,26 @@ description: Capture user feature request verbatim (Phase 1)
 - Then: elicit concrete validation cases — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures
 - Should not: ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them
 
+## Task Recovery
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+## Task Attribution
+
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
 ## Phase 1 Sub-steps
 
 | Sub-step | Label | Description | Parallel? |
@@ -67,10 +87,10 @@ description: Capture user feature request verbatim (Phase 1)
 
 2. **Create the request task:**
    ```bash
-   bd create --labels "pasture:p1-user:s1_1-classify" \
-     --title "REQUEST: {{short summary}}" \
-     --description "{{VERBATIM user request - do not edit}}" \
-     --assignee architect
+   REQUEST_ID_URI=$(pasture task create "REQUEST: {{short summary}}" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
+     --description "{{VERBATIM user request - do not edit}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+   pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+   pasture task update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
    ```
 
 3. **Classify along 4 axes:**
@@ -81,7 +101,7 @@ description: Capture user feature request verbatim (Phase 1)
 
 4. **Record classification** via comment on the request task:
    ```bash
-   bd comments add {{request-task-id}} \
+   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
      "Classification: scope={{scope}}, complexity={{complexity}}, risk={{risk}}, novelty={{novelty}}"
    ```
 
@@ -93,7 +113,7 @@ When the intent is to fix existing behavior, the **validation-case lifecycle** a
 
 Record the recognition in the same classification comment so downstream phases pick it up:
 ```bash
-bd comments add {{request-task-id}} \
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Fix-intent: yes — validation-case lifecycle applies (elicit cases in URE, confirm in UAT, store as fixtures)"
 ```
 
@@ -123,7 +143,7 @@ AskUserQuestion:
 Record the user's depth choice, then spawn two parallel agents:
 
 ```bash
-bd comments add {{request-task-id}} \
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Research depth: {{depth}} (user confirmed)"
 ```
 
@@ -134,7 +154,7 @@ Spawn both agents in parallel (via Task tool with `run_in_background: true`). Ea
 Invoke `/pasture:research` with:
 - **topic:** derived from the user's request
 - **depth:** the user-confirmed research depth
-- **request-task-id:** the REQUEST beads task ID
+- **request-task-id:** the REQUEST pasture task ID
 
 The `/pasture:research` skill handles the full research workflow: depth-scoped checklist, structured report written to `docs/research/<topic>.md`, and summary comment on the REQUEST task.
 
@@ -156,7 +176,7 @@ See [skills/research/SKILL.md](../research/SKILL.md) for full procedure, output 
 
 **Record findings** as a comment on the REQUEST task:
 ```bash
-bd comments add {{request-task-id}} \
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}
@@ -170,7 +190,7 @@ bd comments add {{request-task-id}} \
 Invoke `/pasture:explore` with:
 - **topic:** derived from the user's request
 - **depth:** the user-confirmed research depth (same depth applies)
-- **request-task-id:** the REQUEST beads task ID
+- **request-task-id:** the REQUEST pasture task ID
 
 The `/pasture:explore` skill handles the full exploration workflow: depth-scoped checklist, structured findings, and summary comment on the REQUEST task.
 
@@ -193,7 +213,7 @@ See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output fo
 
 **Record findings** as a comment on the REQUEST task:
 ```bash
-bd comments add {{request-task-id}} \
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions}}
   - Related types: {{existing types/schemas}}
@@ -211,13 +231,12 @@ Both agents must complete before proceeding to Phase 2. Their findings are recor
 User says: "I want to add a logout button to the header that clears the session and redirects to the login page"
 
 ```bash
-bd create --labels "pasture:p1-user:s1_1-classify" \
-  --title "REQUEST: Add logout button to header" \
-  --description "I want to add a logout button to the header that clears the session and redirects to the login page" \
-  --assignee architect
-# Returns: bd-abc123
+REQUEST_ID_URI=$(pasture task create "REQUEST: Add logout button to header" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "I want to add a logout button to the header that clears the session and redirects to the login page" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+pasture task update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
 
-bd comments add bd-abc123 \
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Classification: scope=module, complexity=low, risk=internal-only, novelty=familiar"
 ```
 
@@ -227,6 +246,6 @@ After Phase 1 completes, invoke `/pasture:user-elicit` to begin requirements eli
 
 The elicit task will block this request task:
 ```bash
-bd dep add {{request-task-id}} --blocked-by {{elicit-task-id}}
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
 ```
 <!-- END GENERATED FROM pasture schema -->

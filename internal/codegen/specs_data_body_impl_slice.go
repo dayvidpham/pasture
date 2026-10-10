@@ -17,7 +17,7 @@ var implSliceBody = SkillBody{
 			Id:        "impl-slice-dep-chain",
 			Given:     "slice assigned",
 			When:      "creating task",
-			Then:      "chain dependency to IMPL_PLAN: bd dep add <impl-plan-id> --blocked-by <slice-id>",
+			Then:      "chain dependency to IMPL_PLAN: pasture task dep add \"${IMPL_PLAN_ID_URI}\" --blocked-by \"${SLICE_ID_URI}\"",
 			ShouldNot: "create orphan slices",
 		},
 		{
@@ -37,6 +37,8 @@ var implSliceBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:    "impl-slice-structure",
 			Title: "Slice Structure",
@@ -49,84 +51,94 @@ var implSliceBody = SkillBody{
 		{
 			Id:    "impl-slice-creating",
 			Title: "Creating Slices",
-			Content: "After supervisor decomposes the ratified plan:\n\n" +
-				"```bash\n" +
-				"# Create SLICE-1\n" +
-				"bd create --labels \"pasture:p9-impl:s9-slice\" \\\n" +
-				"  --title \"SLICE-1: <slice name>\" \\\n" +
-				"  --description \"---\n" +
-				"references:\n" +
-				"  impl_plan: <impl-plan-task-id>\n" +
-				"  urd: <urd-task-id>\n" +
-				"---\n" +
-				"## Specification\n" +
-				"<detailed implementation spec>\n\n" +
-				"## Files Owned\n" +
-				"<list of files this slice owns>\n\n" +
-				"## Acceptance Criteria\n" +
-				"<criteria from ratified plan>\n\n" +
-				"## Validation Checklist\n" +
-				"- [ ] Types defined\n" +
-				"- [ ] Tests written (import production code)\n" +
-				"- [ ] Implementation complete\n" +
-				"- [ ] Wiring complete\n" +
-				"- [ ] Production code path verified\" \\\n" +
-				"  --design='{\"validation_checklist\":[\"Types defined\",\"Tests written (import production code)\",\"Implementation complete\",\"Wiring complete\",\"Production code path verified\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"ratified_plan\":\"<ratified-plan-id>\"}' \\\n" +
-				"  --assignee worker-1\n\n" +
-				"bd dep add <impl-plan-id> --blocked-by <slice-1-id>\n" +
-				"```",
+			Content: `After supervisor decomposes the ratified plan:
+
+` + "```" + `bash
+# Create SLICE-1
+SLICE_1_ID_URI=$(pasture task create "SLICE-1: <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "---
+references:
+  impl_plan: "${IMPL_PLAN_ID_URI}"
+  urd: "${URD_ID_URI}"
+---
+## Specification
+<detailed implementation spec>
+
+## Files Owned
+<list of files this slice owns>
+
+## Acceptance Criteria
+<criteria from ratified plan>
+
+## Validation Checklist
+- [ ] Types defined
+- [ ] Tests written (import production code)
+- [ ] Implementation complete
+- [ ] Wiring complete
+- [ ] Production code path verified" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$SLICE_1_ID_URI" pasture:p9-impl:s9-slice
+pasture task update "$SLICE_1_ID_URI" --notes "Design: '{\"validation_checklist\":[\"Types defined\",\"Tests written (import production code)\",\"Implementation complete\",\"Wiring complete\",\"Production code path verified\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"ratified_plan\":\"${RATIFIED_PLAN_ID_URI}\"}'; Requested role (not an assignment): worker-1"
+
+pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+` + "```" + ``,
 		},
 		{
 			Id:    "impl-slice-assigning",
 			Title: "Assigning Workers",
-			Content: "```bash\n" +
-				"bd update <slice-1-id> --assignee=\"worker-1\"\n" +
-				"bd update <slice-2-id> --assignee=\"worker-2\"\n" +
-				"bd update <slice-3-id> --assignee=\"worker-3\"\n" +
-				"```",
+			Content: `` + "```" + `bash
+pasture task assignment transfer "${SLICE_1_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_1_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_1}"
+pasture task assignment transfer "${SLICE_2_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_2_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_2}"
+pasture task assignment transfer "${SLICE_3_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_3_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_3}"
+` + "```" + ``,
 		},
 		{
 			Id:    "impl-slice-tracking",
 			Title: "Tracking Progress",
-			Content: "```bash\n" +
-				"# Worker starts\n" +
-				"bd update <slice-id> --status in_progress\n\n" +
-				"# Check all slice status\n" +
-				"bd list --labels=\"pasture:p9-impl:s9-slice\" --status=open\n" +
-				"bd list --labels=\"pasture:p9-impl:s9-slice\" --status=in_progress\n\n" +
-				"# Worker completes (add comment and label)\n" +
-				"bd comments add <slice-id> \"COMPLETE: All checklist items verified. Production code path working.\"\n" +
-				"bd label add <slice-id> pasture:p9-impl:slice-complete\n" +
-				"```",
+			Content: `` + "```" + `bash
+# Worker starts
+pasture task update "${SLICE_ID_URI}" --status in_progress
+
+# Check all slice status
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=open
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
+
+# Worker completes (add comment and label)
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "COMPLETE: All checklist items verified. Production code path working."
+pasture task label add "${SLICE_ID_URI}" pasture:p9-impl:slice-complete
+` + "```" + ``,
 		},
 		{
 			Id:    "impl-slice-dependencies",
 			Title: "Slice Dependencies",
-			Content: "Slices can have dependencies on each other (sync points):\n\n" +
-				"```bash\n" +
-				"# SLICE-2 depends on SLICE-1 completing first\n" +
-				"bd dep add <slice-2-id> --blocked-by <slice-1-id>\n" +
-				"```\n\n" +
-				"Minimize inter-slice dependencies when possible.",
+			Content: `Slices can have dependencies on each other (sync points):
+
+` + "```" + `bash
+# SLICE-2 depends on SLICE-1 completing first
+pasture task dep add "${SLICE_2_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+` + "```" + `
+
+Minimize inter-slice dependencies when possible.`,
 		},
 		{
 			Id:    "impl-slice-aggregation",
 			Title: "Aggregation",
-			Content: "The aggregation step waits for all slices to complete before code review:\n\n" +
-				"```bash\n" +
-				"# Check if all slices have complete label\n" +
-				"bd list --labels=\"pasture:p9-impl:slice-complete\"\n\n" +
-				"# Compare to total slices\n" +
-				"bd list --labels=\"pasture:p9-impl:s9-slice\"\n" +
-				"```",
+			Content: `The aggregation step waits for all slices to complete before code review:
+
+` + "```" + `bash
+# Check if all slices have complete label
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:slice-complete"
+
+# Compare to total slices
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice"
+` + "```" + ``,
 		},
 		{
 			Id:    "impl-slice-followup",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `Follow-up slices use the same structure and tracking, with additional fields:
-- **Title prefix:** ` + "`FOLLOWUP_SLICE-N:`" + ` (e.g., ` + "`FOLLOWUP_SLICE-1: Add request-id correlation`" + `)
-- **Adopted leaf tasks:** Original IMPORTANT/MINOR leaf tasks from review become dual-parent children (original severity group + follow-up slice)
-- **Tracking:** Same ` + "`bd list --labels=\"pasture:p9-impl:s9-slice\"`" + ` queries include both regular and follow-up slices`,
+- **Title prefix:** ` + "`" + `FOLLOWUP_SLICE-N:` + "`" + ` (e.g., ` + "`" + `FOLLOWUP_SLICE-1: Add "${REQUEST_ID_URI}" correlation` + "`" + `)
+- **Adopted leaf tasks:** User-DEFER'd UAT-item leaf tasks become dual-parent children (original severity group + follow-up slice)
+- **Tracking:** Same ` + "`" + `pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice"` + "`" + ` queries include both regular and follow-up slices`,
 		},
 	},
 

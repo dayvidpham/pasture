@@ -24,7 +24,7 @@ var reviewerReviewPlanBody = SkillBody{
 			Id:        "rev-plan-document",
 			Given:     "review complete",
 			When:      "documenting",
-			Then:      "add comment to Beads task",
+			Then:      "add comment to Pasture task",
 			ShouldNot: "vote without written justification",
 		},
 		{
@@ -37,6 +37,8 @@ var reviewerReviewPlanBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "rev-plan-when-to-use",
 			Title:   "When to Use",
@@ -89,10 +91,10 @@ var reviewerReviewPlanBody = SkillBody{
 				{
 					Id:    "rev-plan-step1-read",
 					Title: "Step 1: Read PROPOSAL-N and URD",
-					Content: "```" + `bash` + "\n" +
-						`bd show <proposal-id>
-bd show <urd-id>   # Read URD for user requirements context` + "\n" +
-						"```",
+					Content: `` + "```" + `bash
+pasture task show "${PROPOSAL_ID_URI}"
+pasture task show "${URD_ID_URI}"   # Read URD for user requirements context
+` + "```" + ``,
 				},
 				{
 					Id:      "rev-plan-step2-criteria",
@@ -102,28 +104,28 @@ bd show <urd-id>   # Read URD for user requirements context` + "\n" +
 				{
 					Id:    "rev-plan-step3-create",
 					Title: "Step 3: Create Review Task",
-					Content: "```" + `bash` + "\n" +
-						`bd create --labels "pasture:p4-plan:s4-review" \
-  --title "PROPOSAL-1-REVIEW-A-1: <feature>" \
+					Content: `` + "```" + `bash
+REVIEW_ID_URI=$(pasture task create "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  proposal: <proposal-id>
-  urd: <urd-id>
+  proposal: "${PROPOSAL_ID_URI}"
+  urd: "${URD_ID_URI}"
 ---
-VOTE: <ACCEPT|REVISE> - <justification>"
-bd dep add <proposal-id> --blocked-by <review-id>` + "\n" +
-						"```",
+VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$REVIEW_ID_URI" pasture:p4-plan:s4-review
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:    "rev-plan-step4-vote",
 					Title: "Step 4: Add Vote Comment",
-					Content: "```" + `bash` + "\n" +
-						`# If accepting:
-bd comments add <proposal-id> "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+					Content: `` + "```" + `bash
+# If accepting:
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
 
 # If requesting revision:
-bd comments add <proposal-id> "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."` + "\n" +
-						"```",
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+` + "```" + ``,
 				},
 			},
 		},

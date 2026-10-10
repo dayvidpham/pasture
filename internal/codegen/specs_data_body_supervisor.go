@@ -9,7 +9,7 @@ var supervisorBody = SkillBody{
 			Id:        "sup-assign-slices",
 			Given:     "slices created",
 			When:      "assigning",
-			Then:      "use `bd update <slice-id> --assignee=\"worker-N\"` for assignment",
+			Then:      "transfer an existing owner-responsibility assignment only after resolving its slot, successor assignment ID, registered committing actor and registered worker occupant; unassigned task allocation remains with the supervisor",
 			ShouldNot: "leave slices unassigned",
 		},
 		{
@@ -23,8 +23,8 @@ var supervisorBody = SkillBody{
 			Id:        "sup-teamcreate-msg",
 			Given:     "teammates spawned via TeamCreate",
 			When:      "assigning work via SendMessage",
-			Then:      "the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path",
-			ShouldNot: "send bare instructions without Beads context — teammates have no prior knowledge of the task",
+			Then:      "the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `pasture task show \"${TASK_ID_URI}\"` for full context, and (4) the handoff authored in the Pasture task body",
+			ShouldNot: "send bare instructions without Pasture context — teammates have no prior knowledge of the task",
 		},
 		{
 			Id:        "sup-layer-integration-points",
@@ -37,7 +37,7 @@ var supervisorBody = SkillBody{
 			Id:        "sup-followup-deps",
 			Given:     "IMPORTANT or MINOR severity groups",
 			When:      "linking dependencies",
-			Then:      "wire each group to its review round only: `bd dep add <review-round-id> --blocked-by <important-group-id>` — ALL severity groups must reach 0 before the wave closes",
+			Then:      "wire each group to its review round only: `pasture task dep add \"${REVIEW_ROUND_ID_URI}\" --blocked-by \"${IMPORTANT_GROUP_ID_URI}\"` — ALL severity groups must reach 0 before the wave closes",
 			ShouldNot: "route IMPORTANT or MINOR severity groups to the FOLLOWUP epic, or wire them as blocking IMPL_PLAN/any slice — only BLOCKER findings block slices, and the FOLLOWUP epic is fed solely by user-DEFER'd UAT items",
 		},
 		behaviorRef(FragSupReviewAllSlices),
@@ -50,7 +50,7 @@ var supervisorBody = SkillBody{
 			Id:        "sup-worker-persistence",
 			Given:     "worker completes initial implementation",
 			When:      "deciding whether to shut down the worker",
-			Then:      "keep workers alive for the review-fix cycle; workers notify supervisor via bd comments add but do NOT shut down",
+			Then:      "keep workers alive for the review-fix cycle; workers notify supervisor via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 but do NOT shut down",
 			ShouldNot: "shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings",
 		},
 		{
@@ -67,6 +67,8 @@ var supervisorBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:    "sup-first-steps",
 			Title: "First Steps",
@@ -74,8 +76,8 @@ var supervisorBody = SkillBody{
 
 1. Read the RATIFIED_PLAN and the **URD** to understand the full scope, user requirements, and **identify production code paths**
    ` + "```" + `bash
-   bd show <ratified-plan-id>
-   bd show <urd-id>
+   pasture task show "${RATIFIED_PLAN_ID_URI}"
+   pasture task show "${URD_ID_URI}"
    ` + "```" + `
 2. **Explore the codebase** using ephemeral Explore subagents (see [Exploration](#exploration-ephemeral-explore-subagents) below) — spawn scoped Explore subagents for codebase queries before decomposing into slices.
 3. **Prefer vertical slice decomposition** (feature ownership end-to-end) when possible:
@@ -88,14 +90,14 @@ var supervisorBody = SkillBody{
    - Layer 4: Integration tests (if needed)
 5. **Identify horizontal Layer Integration Points** where slices must inter-op — document in IMPL_PLAN (see [supervisor-plan-tasks](../supervisor-plan-tasks/SKILL.md) step 5)
 6. **Create leaf tasks for every slice** (see [Step 3](#step-3-create-leaf-tasks-within-each-slice-critical)) — a slice without leaf tasks is undecomposed and cannot be tracked
-7. Update the IMPL_PLAN with the layer breakdown + integration points:
+7. Bind SLICE_1_ID_URI and SLICE_2_ID_URI from the corresponding slice create outputs first. Update the IMPL_PLAN with the layer breakdown + integration points:
    ` + "```" + `bash
-   bd update <impl-plan-id> --description="$(cat <<'EOF'
+   pasture task update "${IMPL_PLAN_ID_URI}" --description="$(cat <<EOF
    ---
    references:
-     request: <request-task-id>
-     urd: <urd-task-id>
-     proposal: <ratified-proposal-id>
+     request: "${REQUEST_ID_URI}"
+     urd: "${URD_ID_URI}"
+     proposal: "${RATIFIED_PROPOSAL_ID_URI}"
    ---
    ## Layer Structure (TDD)
 
@@ -112,8 +114,8 @@ var supervisorBody = SkillBody{
    - Layer 4: integration_test.go (depends on L3)
 
    ## Tasks
-   - <task-id-1>: SLICE-1 ...
-   - <task-id-2>: SLICE-2 ...
+   - "${SLICE_1_ID_URI}": SLICE-1 ...
+   - "${SLICE_2_ID_URI}": SLICE-2 ...
    ...
    EOF
    )"
@@ -144,37 +146,20 @@ Explore the codebase for the requested topic. Produce structured findings
 Spawn as many Explore subagents as needed — they are cheap and disposable. Use them during Phase 8 (IMPL_PLAN) to understand codebase areas before decomposing into slices.`,
 		},
 		{
-			Id:    "sup-reading-from-beads",
-			Title: "Reading from Beads",
+			Id:    "sup-reading-from-task",
+			Title: "Reading from Pasture",
 			Content: `Get the ratified plan and URD:
 ` + "```" + `bash
-bd show <ratified-plan-id>
-bd show <urd-id>
-bd list --labels="pasture:p6-plan:s6-ratify" --status=open
-bd list --labels="pasture:urd"
-` + "```",
+pasture task show "${RATIFIED_PLAN_ID_URI}"
+pasture task show "${URD_ID_URI}"
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p6-plan:s6-ratify" --status=open
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:urd"
+` + "```" + ``,
 		},
 		{
-			Id:    "sup-impl-task-structure",
-			Title: "Implementation Task Structure",
-			Content: "```" + `go
-type ImplementationTask struct {
-    File            string          // file path
-    TaskId          string          // Beads task ID (e.g., "aura-xxx")
-    RequirementRef  string
-    Prompt          string
-    Context         struct {
-        RelatedFiles    []struct{ File, Summary string }
-        TaskDescription string
-    }
-    Status          string          // "Pending" | "Claimed" | "Complete" | "Failed"
-    // Beads fields:
-    ValidationChecklist []string              // Items from RATIFIED_PLAN
-    AcceptanceCriteria  []AcceptanceCriterion // {Given, When, Then, ShouldNot}
-    Tradeoffs           []Tradeoff           // {Decision, Rationale}
-    RatifiedPlan        string               // Link to RATIFIED_PLAN task ID
-}
-` + "```",
+			Id:      "sup-impl-task-structure",
+			Title:   "Implementation Task Structure",
+			Content: "```go\ntype ImplementationTask struct {\n    File            string          // file path\n    TaskId          string          // Pasture task ID (e.g., \"${TASK_A_URI}\")\n    RequirementRef  string\n    Prompt          string\n    Context         struct {\n        RelatedFiles    []struct{ File, Summary string }\n        TaskDescription string\n    }\n    Status          string          // \"Pending\" | \"Claimed\" | \"Complete\" | \"Failed\"\n    // Pasture fields:\n    ValidationChecklist []string              // Items from RATIFIED_PLAN\n    AcceptanceCriteria  []AcceptanceCriterion // {Given, When, Then, ShouldNot}\n    Tradeoffs           []Tradeoff           // {Decision, Rationale}\n    RatifiedPlan        string               // Link to RATIFIED_PLAN task ID\n}\n```",
 		},
 		{
 			Id:      "sup-creating-vertical-slices",
@@ -184,14 +169,13 @@ type ImplementationTask struct {
 				{
 					Id:    "sup-step1-impl-plan",
 					Title: "Step 1: Create the IMPL_PLAN task",
-					Content: "```" + `bash
-bd create --labels "pasture:p8-impl:s8-plan" \
-  --title "IMPL_PLAN: <feature>" \
+					Content: `` + "```" + `bash
+IMPL_PLAN_ID_URI=$(pasture task create "IMPL_PLAN: <feature>" --phase impl_plan --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  request: <request-task-id>
-  urd: <urd-task-id>
-  proposal: <ratified-proposal-id>
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
+  proposal: "${RATIFIED_PROPOSAL_ID_URI}"
 ---
 ## Horizontal Layers
 - L1: Types and schemas
@@ -200,20 +184,20 @@ references:
 
 ## Vertical Slices
 - SLICE-1: <description> (files: ...)
-- SLICE-2: <description> (files: ...)"
-bd dep add <request-id> --blocked-by <impl-plan-id>
-` + "```",
+- SLICE-2: <description> (files: ...)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPL_PLAN_ID_URI" pasture:p8-impl:s8-plan
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:    "sup-step2-create-slices",
 					Title: "Step 2: Create each slice",
-					Content: "```" + `bash
-bd create --labels "pasture:p9-impl:s9-slice" \
-  --title "SLICE-1: <slice name>" \
+					Content: `` + "```" + `bash
+SLICE_1_ID_URI=$(pasture task create "SLICE-1: <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  impl_plan: <impl-plan-task-id>
-  urd: <urd-task-id>
+  impl_plan: "${IMPL_PLAN_ID_URI}"
+  urd: "${URD_ID_URI}"
 ---
 ## Specification
 <detailed spec from ratified plan>
@@ -230,25 +214,25 @@ references:
 - [ ] Types defined
 - [ ] Tests written (import production code)
 - [ ] Implementation complete
-- [ ] Production path verified" \
-  --design='{"validation_checklist":["Types defined","Tests written (import production code)","Implementation complete","Production path verified"],"acceptance_criteria":[{"given":"X","when":"Y","then":"Z"}],"ratified_plan":"<ratified-plan-id>"}'
-bd dep add <impl-plan-id> --blocked-by <slice-1-id>
-` + "```",
+- [ ] Production path verified" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$SLICE_1_ID_URI" pasture:p9-impl:s9-slice
+pasture task update "$SLICE_1_ID_URI" --notes "Design: '{\"validation_checklist\":[\"Types defined\",\"Tests written (import production code)\",\"Implementation complete\",\"Production path verified\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"ratified_plan\":\"${RATIFIED_PLAN_ID_URI}\"}'"
+pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:    "sup-step3-leaf-tasks",
 					Title: "Step 3: Create leaf tasks within each slice (CRITICAL)",
-					Content: `Per [C-slice-leaf-tasks], create Beads tasks for each implementation unit within the slice, then chain them as dependencies. Leaf tasks are what workers actually implement.
+					Content: `Per [C-slice-leaf-tasks], create Pasture tasks for each implementation unit within the slice, then chain them as dependencies. Leaf tasks are what workers actually implement.
 
 ` + "```" + `bash
 # L1: Types and interfaces for this slice
-LEAF_L1=$(bd create --labels "pasture:p9-impl:s9-slice" \
-  --title "SLICE-1-L1: Types — <slice name>" \
+LEAF_L1=$(pasture task create "SLICE-1-L1: Types — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
-  impl_plan: <impl-plan-task-id>
-  urd: <urd-task-id>
+  slice: "${SLICE_1_ID_URI}"
+  impl_plan: "${IMPL_PLAN_ID_URI}"
+  urd: "${URD_ID_URI}"
 ---
 ## Scope
 Define types, interfaces, and schemas for this slice.
@@ -258,16 +242,16 @@ Define types, interfaces, and schemas for this slice.
 - <file-path-2>
 
 ## Acceptance Criteria
-Given <context> when <action> then <outcome> should never <anti-pattern>")
-bd dep add <slice-1-id> --blocked-by $LEAF_L1
+Given <context> when <action> then <outcome> should never <anti-pattern>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$LEAF_L1" pasture:p9-impl:s9-slice
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L1"
 
 # L2: Tests (import production code, will fail until L3)
-LEAF_L2=$(bd create --labels "pasture:p9-impl:s9-slice" \
-  --title "SLICE-1-L2: Tests — <slice name>" \
+LEAF_L2=$(pasture task create "SLICE-1-L2: Tests — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
-  impl_plan: <impl-plan-task-id>
+  slice: "${SLICE_1_ID_URI}"
+  impl_plan: "${IMPL_PLAN_ID_URI}"
 ---
 ## Scope
 Write tests that import from production code paths. Tests MUST fail until L3.
@@ -276,18 +260,18 @@ Write tests that import from production code paths. Tests MUST fail until L3.
 - <test-file-path-1>
 
 ## Acceptance Criteria
-Given <context> when <action> then <outcome> should never <anti-pattern>")
-bd dep add <slice-1-id> --blocked-by $LEAF_L2
+Given <context> when <action> then <outcome> should never <anti-pattern>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$LEAF_L2" pasture:p9-impl:s9-slice
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L2"
 # L2 depends on L1 types being defined first
-bd dep add $LEAF_L2 --blocked-by $LEAF_L1
+pasture task dep add "$LEAF_L2" --blocked-by "$LEAF_L1"
 
 # L3: Implementation (makes tests pass)
-LEAF_L3=$(bd create --labels "pasture:p9-impl:s9-slice" \
-  --title "SLICE-1-L3: Impl — <slice name>" \
+LEAF_L3=$(pasture task create "SLICE-1-L3: Impl — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
-  impl_plan: <impl-plan-task-id>
+  slice: "${SLICE_1_ID_URI}"
+  impl_plan: "${IMPL_PLAN_ID_URI}"
 ---
 ## Scope
 Implement production code to make L2 tests pass.
@@ -296,10 +280,11 @@ Implement production code to make L2 tests pass.
 - <impl-file-path-1>
 
 ## Acceptance Criteria
-Given <context> when <action> then <outcome> should never <anti-pattern>")
-bd dep add <slice-1-id> --blocked-by $LEAF_L3
+Given <context> when <action> then <outcome> should never <anti-pattern>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$LEAF_L3" pasture:p9-impl:s9-slice
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L3"
 # L3 depends on L2 tests existing first
-bd dep add $LEAF_L3 --blocked-by $LEAF_L2
+pasture task dep add "$LEAF_L3" --blocked-by "$LEAF_L2"
 ` + "```" + `
 
 The resulting tree per slice:
@@ -319,58 +304,22 @@ Workers are assigned to leaf tasks, not slices. The slice closes when all its le
 		{
 			Id:    "sup-assigning-slices",
 			Title: "Assigning Slices",
-			Content: "```" + `bash
+			Content: `` + "```" + `bash
 # Assign slices to workers
-bd update <slice-1-id> --assignee="worker-1"
-bd update <slice-2-id> --assignee="worker-2"
-bd update <slice-3-id> --assignee="worker-3"
-` + "```",
+pasture task assignment transfer "${SLICE_1_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_1_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_1}"
+pasture task assignment transfer "${SLICE_2_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_2_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_2}"
+pasture task assignment transfer "${SLICE_3_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_3_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_3}"
+` + "```" + ``,
 		},
 		{
-			Id:    "sup-spawning-workers",
-			Title: "Spawning Workers",
-			Content: `Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
-
-Workers are **general-purpose agents** that call ` + "`/pasture:worker`" + ` at the start. Select the model based on task complexity:
-
-` + "```" + `
-// Non-trivial work → sonnet model
-Task({
-  subagent_type: "general-purpose",
-  model: "sonnet",
-  run_in_background: true,
-  prompt: ` + "`" + `Call Skill(/pasture:worker) and implement the assigned slice.\n\nBeads Task ID: ${taskId}...` + "`" + `
-})
-
-// Trivial work (config tweak, typo fix, single-file edit) → haiku model
-Task({
-  subagent_type: "general-purpose",
-  model: "haiku",
-  run_in_background: true,
-  prompt: ` + "`" + `Call Skill(/pasture:worker) and fix the typo in...\n\nBeads Task ID: ${taskId}...` + "`" + `
-})
-
-// WRONG: Supervisor implementing changes directly
-Edit({ file_path: "src/foo.ts", ... })  // Supervisors coordinate, they don't implement!
-
-// WRONG: Do not use specialized agent types like "pasture:worker" directly
-Task({
-  subagent_type: "pasture:worker",  // This doesn't exist!
-  ...
-})
-` + "```",
+			Id:      "sup-spawning-workers",
+			Title:   "Spawning Workers",
+			Content: "Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.\n\nWorkers are **general-purpose agents** that call `/pasture:worker` at the start. Select the model based on task complexity:\n\n```\n// Non-trivial work → sonnet model\nTask({\n  subagent_type: \"general-purpose\",\n  model: \"sonnet\",\n  run_in_background: true,\n  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\\n\\nPasture Task ID: ${taskId}...`\n})\n\n// Trivial work (config tweak, typo fix, single-file edit) → haiku model\nTask({\n  subagent_type: \"general-purpose\",\n  model: \"haiku\",\n  run_in_background: true,\n  prompt: `Call Skill(/pasture:worker) and fix the typo in...\\n\\nPasture Task ID: ${taskId}...`\n})\n\n// WRONG: Supervisor implementing changes directly\nEdit({ file_path: \"src/foo.ts\", ... })  // Supervisors coordinate, they don't implement!\n\n// WRONG: Do not use specialized agent types like \"pasture:worker\" directly\nTask({\n  subagent_type: \"pasture:worker\",  // This doesn't exist!\n  ...\n})\n```",
 			Subsections: []ProseSection{
 				{
-					Id:    "sup-model-selection",
-					Title: "Model Selection Guide",
-					Content: `| Complexity | Model | Examples |
-|------------|-------|----------|
-| Trivial | ` + "`haiku`" + ` | Single-file edit, config change, typo fix, renaming, adding a label |
-| Non-trivial | ` + "`sonnet`" + ` | Multi-file changes, new features, architectural work, complex logic, test suites |
-
-**Handoff:** Before spawning each worker, author its handoff in the slice (or a dedicated handoff) Beads task body — the task body IS the handoff (no filesystem path).
-
-See: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) for handoff template.`,
+					Id:      "sup-model-selection",
+					Title:   "Model Selection Guide",
+					Content: "| Complexity | Model | Examples |\n|------------|-------|----------|\n| Trivial | `haiku` | Single-file edit, config change, typo fix, renaming, adding a label |\n| Non-trivial | `sonnet` | Multi-file changes, new features, architectural work, complex logic, test suites |\n\n**Handoff:** Before spawning each worker, author its handoff in the slice (or a dedicated handoff) Pasture task body — the task body IS the handoff (no filesystem path).\n\nSee: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) for handoff template.",
 				},
 				{
 					Id:    "sup-teamcreate-context",
@@ -383,25 +332,25 @@ SendMessage({
   recipient: "worker-1",
   content: ` + "`" + `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
 
-Your Beads task ID: <slice-task-id>
-Run this to get full requirements + handoff: bd show <slice-task-id>
+Your Pasture task ID: "${SLICE_TASK_ID_URI}"
+Run this to get full requirements + handoff: pasture task show "${SLICE_TASK_ID_URI}"
 
 Key context:
-- Request: <request-task-id> (run: bd show <request-task-id>)
-- URD: <urd-task-id> (run: bd show <urd-task-id>)
-- IMPL_PLAN: <impl-plan-task-id> (run: bd show <impl-plan-task-id>)
+- Request: "${REQUEST_ID_URI}" (run: pasture task show "${REQUEST_ID_URI}")
+- URD: "${URD_ID_URI}" (run: pasture task show "${URD_ID_URI}")
+- IMPL_PLAN: "${IMPL_PLAN_ID_URI}" (run: pasture task show "${IMPL_PLAN_ID_URI}")
 
-Read the handoff doc and your Beads task before starting implementation.` + "`" + `,
-  summary: "SLICE-1 assignment with Beads context"
+Read the handoff doc and your Pasture task before starting implementation.` + "`" + `,
+  summary: "SLICE-1 assignment with Pasture context"
 })
 ` + "```" + `
 
-Per [sup-teamcreate-msg], every assignment must include actionable ` + "`bd show`" + ` commands. Teammates cannot see your conversation history, the Beads task tree, or any prior context.
+Per [sup-teamcreate-msg], every assignment must include actionable ` + "`" + `pasture task show` + "`" + ` commands. Teammates cannot see your conversation history, the Pasture task tree, or any prior context.
 
 The worker skill provides:
 - File ownership validation
 - Standard DI patterns
-- Completion/blocked signaling via Beads`,
+- Completion/blocked signaling via Pasture`,
 				},
 			},
 		},
@@ -413,21 +362,20 @@ The worker skill provides:
 				{
 					Id:    "sup-followup-step1",
 					Title: "Step 1: Create follow-up epic",
-					Content: "```" + `bash
-bd create --type=epic --priority=3 \
-  --title="FOLLOWUP: User-deferred improvements from UAT" \
+					Content: `` + "```" + `bash
+FOLLOWUP_EPIC_ID_URI=$(pasture task create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
   --description="---
 references:
-  request: <request-task-id>
-  urd: <urd-task-id>
-  uat: <uat-task-ids>
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
+  uat: ${UAT_ID_URI}
 ---
-Aggregated user-DEFER'd items from UAT (Phase 5/11)." \
-  --add-label "pasture:epic-followup"
+Aggregated user-DEFER'd items from UAT (Phase 5/11)." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 
 # Link the DEFER'd UAT items as children of the follow-up epic
-bd dep add <followup-epic-id> --blocked-by <deferred-item-id-1>
-bd dep add <followup-epic-id> --blocked-by <deferred-item-id-2>
+pasture task dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "${DEFERRED_ITEM_ID_1_URI}"
+pasture task dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "${DEFERRED_ITEM_ID_2_URI}"
 ` + "```" + `
 
 Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred-followup]: all review severities reach 0; the FOLLOWUP epic is DEFER-fed only.`,
@@ -439,8 +387,8 @@ Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred
 
 ` + "```" + `
 FOLLOWUP epic (pasture:epic-followup)
-  ├── relates_to: original URD
-  ├── relates_to: original REVIEW-A/B/C tasks
+  ├── frontmatter reference: original URD
+  ├── frontmatter reference: original REVIEW-A/B/C tasks
   └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which DEFER'd items to address)
         └── blocked-by: FOLLOWUP_URD   (Phase 2: requirements for follow-up)
               └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
@@ -453,28 +401,27 @@ FOLLOWUP epic (pasture:epic-followup)
 
 ` + "```" + `bash
 # Create FOLLOWUP_URE — user scoping which findings to address
-FOLLOWUP_URE_ID=$(bd create \
-  --title "FOLLOWUP_URE: Scope follow-up for <feature>" \
-  --labels "pasture:p2-user:s2_1-elicit" \
+FOLLOWUP_URE_ID=$(pasture task create "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  followup_epic: <followup-epic-id>
-  original_urd: <original-urd-id>
+  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
+  original_urd: "${ORIGINAL_URD_ID_URI}"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address.")
-bd dep add <followup-epic-id> --blocked-by $FOLLOWUP_URE_ID
+Scoping URE: determine which user-DEFER'd UAT items to address." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
+pasture task dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "$FOLLOWUP_URE_ID"
 
 # Create FOLLOWUP_URD — requirements for follow-up scope
-FOLLOWUP_URD_ID=$(bd create \
-  --title "FOLLOWUP_URD: Requirements for <feature> follow-up" \
-  --labels "pasture:p2-user:s2_2-urd,pasture:urd" \
+FOLLOWUP_URD_ID=$(pasture task create "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  followup_epic: <followup-epic-id>
-  original_urd: <original-urd-id>
+  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
+  original_urd: "${ORIGINAL_URD_ID_URI}"
 ---
-Follow-up requirements. References original URD.")
-bd dep add $FOLLOWUP_URE_ID --blocked-by $FOLLOWUP_URD_ID
+Follow-up requirements. References original URD." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
+pasture task label add "$FOLLOWUP_URD_ID" pasture:urd
+pasture task dep add "$FOLLOWUP_URE_ID" --blocked-by "$FOLLOWUP_URD_ID"
 ` + "```" + `
 
 The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_SLICE) are created as the follow-up epic progresses through the protocol phases.`,
@@ -486,30 +433,15 @@ The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_S
 
 ` + "```" + `bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
-bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-1>
-bd dep add <followup-slice-id> --blocked-by <deferred-item-leaf-id-2>
-# Leaf task already has: bd dep add <deferred-items-tracking-group-id> --blocked-by <leaf-task-id>
-` + "```",
+pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
+pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
+# Leaf task already has: pasture task dep add "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"
+` + "```" + ``,
 				},
 				{
-					Id:    "sup-followup-handoff-chain",
-					Title: "Follow-up Handoff Chain",
-					Content: `Inside the follow-up lifecycle, the same handoff types (h1-h4) reapply:
-
-| Order | Handoff | Transition |
-|-------|---------|------------|
-| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |
-| 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |
-| 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
-| 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
-| 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
-| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
-| 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
-| 8 | h4 | Worker → Reviewer: Follow-up slice completion |
-
-Follow-up handoff storage: each handoff is authored in its Beads task body (no filesystem path).
-
-See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examples.`,
+					Id:      "sup-followup-handoff-chain",
+					Title:   "Follow-up Handoff Chain",
+					Content: "Inside the follow-up lifecycle, the same handoff types (h1-h4) reapply:\n\n| Order | Handoff | Transition |\n|-------|---------|------------|\n| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |\n| 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |\n| 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |\n| 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |\n| 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |\n| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |\n| 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |\n| 8 | h4 | Worker → Reviewer: Follow-up slice completion |\n\nFollow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).\n\nSee `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples.",
 				},
 			},
 		},
@@ -527,27 +459,27 @@ See ` + "`../protocol/HANDOFF_TEMPLATE.md`" + ` for full follow-up handoff examp
 		{
 			Id:    "sup-tracking-progress",
 			Title: "Tracking Progress",
-			Content: "```" + `bash
+			Content: `` + "```" + `bash
 # Check all implementation slices
-bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
 
 # Check for blocked tasks
-bd list --labels="pasture:p9-impl:s9-slice" --status=blocked
+pasture task blocked --label="pasture:p9-impl:s9-slice"
 
 # Check completed slices
-bd list --labels="pasture:p9-impl:s9-slice" --status=done
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
 
 # Check specific task
-bd show <task-id>
+pasture task show "${TASK_ID_URI}"
 
 # Check severity groups from review
-bd list --labels="pasture:severity:blocker"
-bd list --labels="pasture:severity:important"
-bd list --labels="pasture:severity:minor"
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker"
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:important"
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:minor"
 
 # Check follow-up epics
-bd list --labels="pasture:epic-followup"
-` + "```",
+pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
+` + "```" + ``,
 		},
 	},
 

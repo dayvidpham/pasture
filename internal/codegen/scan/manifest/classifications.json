@@ -111,7 +111,7 @@
     {
       "owner": "skills/architect-handoff/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- Teammates have **zero prior context**: every SendMessage assignment MUST be self-contained (call `Skill(/pasture:supervisor)`, the Beads task IDs, and `bd show` commands to fetch full requirements).",
+      "content_window": "- Teammates have **zero prior context**: every SendMessage assignment MUST be self-contained (call `Skill(/pasture:supervisor)`, the Pasture task IDs, and `pasture task show` commands to fetch full requirements).",
       "section": "Spawning via TeamCreate",
       "ordinal": 0,
       "classification": "orchestration",
@@ -408,7 +408,7 @@
     {
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Beads task ID, (3) instruction to run `bd show <task-id>` for full context, and (4) the handoff document path",
+      "content_window": "- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `pasture task show \"${TASK_ID_URI}\"` for full context, and (4) the handoff authored in the Pasture task body",
       "section": "Ride the Wave \u2014 Coordinated Phase 8-10 Execution",
       "ordinal": 0,
       "classification": "orchestration",
@@ -426,7 +426,7 @@
     {
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\\n\\nBeads Task ID: ${taskId}...`",
+      "content_window": "prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\\n\\nPasture Task ID: ${taskId}...`",
       "section": "Spawning Workers",
       "ordinal": 0,
       "classification": "orchestration",
@@ -435,7 +435,7 @@
     {
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "prompt: `Call Skill(/pasture:worker) and fix the typo in...\\n\\nBeads Task ID: ${taskId}...`",
+      "content_window": "prompt: `Call Skill(/pasture:worker) and fix the typo in...\\n\\nPasture Task ID: ${taskId}...`",
       "section": "Spawning Workers",
       "ordinal": 0,
       "classification": "orchestration",

@@ -1,179 +1,36 @@
 ---
 name: swarm
-description: Launch worktree-based or intree agent workflows using aura-swarm
+description: Deprecated orchestration entry; use the supervisor and worker role workflow
 ---
 
 # Swarm — Unified Agent Orchestration
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-**Command:** `pasture:swarm` — Launch worktree-based or intree agent workflows using aura-swarm
+**Command:** `pasture:swarm` — Deprecated orchestration entry; use the supervisor and worker role workflow
 
-Orchestrate Claude agent sessions in two modes:
-- **Worktree mode** (default): Isolated git worktrees per epic, with beads task discovery and rich prompt generation.
-- **Intree mode**: In-place parallel agents (replaces `aura-parallel`). No worktree, prompt required.
+Deprecated orchestration entry. Do not invoke aura-swarm or its session registry. Use the supervisor and worker role workflow in isolated issue-named Git worktrees.
 
-**[swarm-epic-worktree]**
-- Given: an epic needs implementation
-- When: launching agents
-- Then: use `aura-swarm start --epic <id>` to create an isolated worktree
-- Should not: launch long-running workers as Task tool subagents
+## Task Recovery
 
-**[swarm-intree-longrunning]**
-- Given: a long-running agent is needed in-place
-- When: launching
-- Then: use `aura-swarm start --swarm-mode intree --role <role> -n 1 --prompt "..."`
-- Should not: spawn long-running agents as Task tool subagents
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
 
-**[swarm-task-assignment]**
-- Given: multiple workers are needed in-place
-- When: distributing tasks
-- Then: use `--task-id` to assign one task per worker
-- Should not: launch workers without task assignments
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-**[swarm-reviewer-subagents]**
-- Given: reviewers are needed
-- When: spawning
-- Then: use Task tool subagents or TeamCreate instead
-- Should not: use `aura-swarm start` for reviewer rounds
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-**[swarm-status-check]**
-- Given: agents are running
-- When: checking progress
-- Then: use `aura-swarm status` to see all active sessions
-- Should not: try to inspect tmux sessions manually
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
-**[swarm-cleanup]**
-- Given: an epic is complete
-- When: cleaning up
-- Then: use `aura-swarm cleanup <id>` or `aura-swarm cleanup --done`
-- Should not: manually delete worktrees or branches
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-## When to Use
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
 
-- Starting a new epic implementation (`aura-swarm start --epic <id>`)
-- Launching parallel in-place agents (`aura-swarm start --swarm-mode intree -n N --prompt "..."`)
-- Checking status of running agent sessions (`aura-swarm status`)
-- Attaching to a running session (`aura-swarm attach`)
-- Merging completed work back to the epic branch (`aura-swarm merge`)
-- Launching code review rounds (`aura-swarm review`)
-- Cleaning up finished worktrees (`aura-swarm cleanup`)
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
 
-## Branch Model (worktree mode)
+## Task Attribution
 
-```
-main
- └── epic/<epic-id>                 (aura-swarm creates this branch + worktree)
-       ├── agent/<task-id-1>         (Claude's Agent Teams creates these)
-       ├── agent/<task-id-2>
-       └── agent/<task-id-3>
-```
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
-## Commands
+## Supported Workflow
 
-
-
-### Worktree Mode (default)
-
-```bash
-# Start an epic (creates worktree, gathers beads context, launches Claude)
-aura-swarm start --epic <epic-id>
-aura-swarm start --epic <epic-id> --model opus
-aura-swarm start --epic <epic-id> --restart
-
-# Window mode (agents accumulate in one tmux session)
-aura-swarm start --epic <epic-id> --tmux-dest window -n 2
-
-# With additional instructions appended to auto-generated prompt
-aura-swarm start --epic <epic-id> --prompt-addon "Focus on tests first"
-```
-
-### Intree Mode (replaces aura-parallel)
-
-```bash
-# Launch a single supervisor
-aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "..."
-
-# Launch 3 workers with task distribution (1:1 mapping)
-aura-swarm start --swarm-mode intree --role worker -n 3 \
-  --task-id impl-001 --task-id impl-002 --task-id impl-003 \
-  --prompt "Implement the assigned task"
-
-# Launch with skill invocation
-aura-swarm start --swarm-mode intree --role reviewer -n 3 \
-  --skill pasture:reviewer-review-plan --prompt "Review plan aura-xyz"
-
-# Dry run (preview commands without executing)
-aura-swarm start --swarm-mode intree --role supervisor -n 1 --prompt "..." --dry-run
-```
-
-### Management
-
-```bash
-# Check status of all running agent sessions
-aura-swarm status
-
-# Attach to a running session's tmux
-aura-swarm attach <epic-id-or-session-id>
-
-# Stop a running session (keeps worktree)
-aura-swarm stop <epic-id-or-session-id>
-
-# Merge agent branches back to epic branch
-aura-swarm merge <epic-id>
-
-# Launch code review round for an epic
-aura-swarm review --epic <epic-id>
-
-# Clean up a specific epic's worktree
-aura-swarm cleanup <epic-id>
-
-# Clean up all completed epics
-aura-swarm cleanup --done
-
-# Clean up everything (including in-progress)
-aura-swarm cleanup --all
-```
-
-## Options
-
-| Flag | Description |
-|------|-------------|
-| `--epic` | Epic beads ID (required for worktree mode, optional for intree) |
-| `--swarm-mode` | `worktree` (default) or `intree` |
-| `--tmux-dest` | `session` (default) or `window` (agents accumulate in one tmux session) |
-| `-n/--njobs` | Number of parallel agents (default: 1) |
-| `--role` | Agent role: `architect`, `supervisor`, `reviewer`, `worker` (default: supervisor) |
-| `--model` | Claude model: `sonnet`, `opus`, `haiku` (default: sonnet) |
-| `--prompt` | Prompt text (required for intree mode) |
-| `--prompt-file` | Read prompt from file (mutually exclusive with `--prompt`) |
-| `--prompt-addon` | Additional instructions appended to auto-generated prompt (worktree mode) |
-| `--skill` | Skill to invoke at session start |
-| `--task-id` | Beads task IDs (repeatable). Intree: distributed 1:1 across agents |
-| `--permission-mode` | `default`, `acceptEdits`, `bypassPermissions`, `plan` (default: acceptEdits) |
-| `--restart` | Stop existing session and start fresh |
-| `--dry-run` | Preview commands without executing |
-| `--attach` | Attach to first session after launching |
-| `--session-name` | Override tmux session name |
-| `--working-dir` | Working directory (default: git root) |
-
-## Prerequisites
-
-- `aura-swarm` must be on PATH (installed via Nix or symlinked)
-- `tmux` and `claude` must be available
-- **Worktree mode**: `git` and `bd` (beads CLI) must be available; must be in a git repo with beads initialized
-- **Intree mode**: `--prompt` or `--prompt-file` required; `bd` only needed if `--epic` is provided
-
-## Migration from aura-parallel
-
-`aura-parallel` is deprecated. All commands translate directly:
-
-```bash
-# Old:
-aura-parallel --role worker -n 3 --prompt "..."
-
-# New:
-aura-swarm start --swarm-mode intree --role worker -n 3 --prompt "..."
-```
-
-The `aura-parallel` command still works as a thin wrapper but prints a deprecation warning.
+Read the assigned implementation plan and full task URIs from Pasture. The supervisor assigns vertical slices; workers own their production paths and report evidence. Follow the repository's Git isolation, review, and landing rules. Do not start the deprecated orchestrator or introduce a replacement Python protocol engine.
 <!-- END GENERATED FROM pasture schema -->

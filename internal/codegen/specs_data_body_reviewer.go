@@ -4,6 +4,8 @@ package codegen
 var reviewerBody = SkillBody{
 	Preamble: "**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)**",
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:    "rev-plan-vs-code",
 			Title: "Plan Review vs Code Review",
@@ -34,8 +36,8 @@ var reviewerBody = SkillBody{
 			Content: `| Severity | When to Use | Blocks Slice? |
 |----------|-------------|---------------|
 | BLOCKER | Security, type errors, test failures, broken production code paths | Yes |
-| IMPORTANT | Performance, missing validation, architectural concerns | No (follow-up epic) |
-| MINOR | Style, optional optimizations, naming improvements | No (follow-up epic) |`,
+| IMPORTANT | Performance, missing validation, architectural concerns | Must reach 0 before review wave closes |
+| MINOR | Style, optional optimizations, naming improvements | Must reach 0 before review wave closes |`,
 		},
 		{
 			Id:    "rev-followup-lifecycle",
@@ -47,22 +49,22 @@ var reviewerBody = SkillBody{
 - **All severities reach 0 (no followup-of-followup):** ALL findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review must reach 0 before the follow-up wave closes — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.`,
 		},
 		{
-			Id:    "rev-beads-process",
-			Title: "Beads Review Process",
+			Id:    "rev-task-process",
+			Title: "Pasture Review Process",
 			Content: `Read the plan and URD:
-` + "```bash\n" +
-				`bd show <task-id>
-bd show <urd-id>   # Read URD for user requirements context
+` + "```" + `bash
+pasture task show "${TASK_ID_URI}"
+pasture task show "${URD_ID_URI}"   # Read URD for user requirements context
 ` + "```" + `
 
 Add review comment with vote:
-` + "```bash\n" +
-				`# If accepting:
-bd comments add <task-id> "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+` + "```" + `bash
+# If accepting:
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
 
 # If requesting revision:
-bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
-` + "```",
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+` + "```" + ``,
 		},
 		{
 			Id:    "rev-consensus",

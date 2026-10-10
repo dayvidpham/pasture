@@ -91,7 +91,7 @@
     <label id="L-sev-blocker" value="pasture:severity:blocker" special="true" severity-ref="BLOCKER"></label>
     <label id="L-sev-import" value="pasture:severity:important" special="true" severity-ref="IMPORTANT"></label>
     <label id="L-sev-minor" value="pasture:severity:minor" special="true" severity-ref="MINOR"></label>
-    <label id="L-followup" value="pasture:epic-followup" special="true" description="Follow-up epic for non-blocking findings"></label>
+    <label id="L-followup" value="pasture:epic-followup" special="true" description="Follow-up epic for user-DEFER&#39;d UAT items only"></label>
   </labels>
   <!-- ═══════════════════════════════════════════════════════════════════════
        REVIEW AXES
@@ -247,7 +247,7 @@
         </substep>
       </substeps>
       <transitions>
-        <transition to-phase="p8" condition="handoff authored in the HANDOFF Beads task body">
+        <transition to-phase="p8" condition="handoff authored in the HANDOFF Pasture task body">
           <skill-invocation target-role="supervisor" command-ref="cmd-supervisor" directive="Supervisor launch prompt MUST start with Skill(/pasture:supervisor)"></skill-invocation>
         </transition>
       </transitions>
@@ -263,8 +263,8 @@
               <command>Skill(/pasture:supervisor)</command>
             </step>
             <step order="2" id="S-supervisor-read-plan">
-              <instruction>Read RATIFIED_PLAN, URD, UAT, and elicit tasks via bd show for full context</instruction>
-              <command>bd show &lt;ratified-plan-id&gt; &amp;&amp; bd show &lt;urd-id&gt; &amp;&amp; bd show &lt;uat-id&gt; &amp;&amp; bd show &lt;elicit-id&gt;</command>
+              <instruction>Read RATIFIED_PLAN, URD, UAT, and elicit tasks via pasture task show for full context</instruction>
+              <command>pasture task show &#34;${RATIFIED_PLAN_ID_URI}&#34; &amp;&amp; pasture task show &#34;${URD_ID_URI}&#34; &amp;&amp; pasture task show &#34;${UAT_ID_URI}&#34; &amp;&amp; pasture task show &#34;${ELICIT_ID_URI}&#34;</command>
             </step>
             <step order="3" id="S-supervisor-explore-ephemeral">
               <instruction>Spawn ephemeral Explore subagents via Task tool for scoped codebase queries</instruction>
@@ -276,7 +276,7 @@
             </step>
             <step order="5" id="S-supervisor-create-leaf-tasks">
               <instruction>Create leaf tasks (L1/L2/L3) for every slice</instruction>
-              <command>bd create --labels pasture:p9-impl:s9-slice --title &#34;SLICE-{K}-L{1,2,3}: &lt;description&gt;&#34; ...</command>
+              <command>CREATED_URI=$(pasture task create &#34;SLICE-{K}-L{1,2,3}: &lt;description&gt;&#34; --phase worker_slices --namespace &#34;$PASTURE_NAMESPACE&#34; --format json --description &#34;Describe the specific work and reference full task URIs&#34; | python3 -c &#39;import json,sys; print(json.load(sys.stdin)[&#34;id&#34;])&#39;)&#xA;pasture task label add &#34;$CREATED_URI&#34; pasture:p9-impl:s9-slice</command>
             </step>
             <step order="6" id="S-supervisor-spawn-workers" next-state="p9">
               <instruction>Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.</instruction>
@@ -360,7 +360,7 @@
       <description>Commit, push, close tasks, hand off</description>
       <substeps>
         <substep id="s12" type="landing" execution="sequential" order="1" label-ref="L-p12s12">
-          <description>git agent-commit, bd sync, git push. Close upstream tasks.</description>
+          <description>git agent-commit, tracker evidence, and approved Git publication. Close upstream tasks only after review.</description>
         </substep>
       </substeps>
       <transitions>
@@ -525,10 +525,10 @@
       </phases>
       <file>skills/epoch/SKILL.md</file>
     </command>
-    <command id="cmd-status" name="pasture:status" description="Project status and monitoring via Beads queries">
+    <command id="cmd-status" name="pasture:status" description="Project status and monitoring via Pasture queries">
       <file>skills/status/SKILL.md</file>
     </command>
-    <command id="cmd-swarm" name="pasture:swarm" description="Launch worktree-based or intree agent workflows using aura-swarm">
+    <command id="cmd-swarm" name="pasture:swarm" description="Deprecated orchestration entry; use the supervisor and worker role workflow">
       <file>skills/swarm/SKILL.md</file>
     </command>
     <command id="cmd-user-request" name="pasture:user:request" role-ref="architect" description="Capture user feature request verbatim (Phase 1)">
@@ -641,7 +641,7 @@
       </creates-labels>
       <file>skills/supervisor-spawn-worker/SKILL.md</file>
     </command>
-    <command id="cmd-sup-track" name="pasture:supervisor:track-progress" role-ref="supervisor" description="Monitor worker status via Beads">
+    <command id="cmd-sup-track" name="pasture:supervisor:track-progress" role-ref="supervisor" description="Monitor worker status via Pasture">
       <phases>
         <phase-ref ref="p9"></phase-ref>
         <phase-ref ref="p10"></phase-ref>
@@ -678,7 +678,7 @@
       </phases>
       <file>skills/worker-complete/SKILL.md</file>
     </command>
-    <command id="cmd-work-blocked" name="pasture:worker:blocked" role-ref="worker" description="Report a blocker to supervisor via Beads">
+    <command id="cmd-work-blocked" name="pasture:worker:blocked" role-ref="worker" description="Report a blocker to supervisor via Pasture">
       <phases>
         <phase-ref ref="p9"></phase-ref>
       </phases>
@@ -712,7 +712,7 @@
       </creates-labels>
       <file>skills/reviewer-review-code/SKILL.md</file>
     </command>
-    <command id="cmd-rev-comment" name="pasture:reviewer:comment" role-ref="reviewer" description="Leave structured review comment via Beads">
+    <command id="cmd-rev-comment" name="pasture:reviewer:comment" role-ref="reviewer" description="Leave structured review comment via Pasture">
       <phases>
         <phase-ref ref="p4"></phase-ref>
         <phase-ref ref="p10"></phase-ref>
@@ -812,14 +812,14 @@
   <constraints>
     <!-- Audit trail -->
     <constraint id="C-audit-never-delete" given="any task or label" when="modifying" then="add labels and comments only" should-not="delete or close tasks prematurely, remove labels" />
-    <constraint id="C-audit-dep-chain" given="any phase transition" when="creating new task" then="chain dependency: bd dep add parent --blocked-by child" should-not="skip dependency chaining or invert direction" command="bd dep add &lt;parent&gt; --blocked-by &lt;child&gt;">
+    <constraint id="C-audit-dep-chain" given="any phase transition" when="creating new task" then="chain dependency: pasture task dep add parent --blocked-by child" should-not="skip dependency chaining or invert direction" command="pasture task dep add &quot;${PARENT_URI}&quot; --blocked-by &quot;${CHILD_URI}&quot;">
       <example id="C-audit-dep-chain-full" lang="bash" label="correct">
         <code><![CDATA[# Full dependency chain: work flows bottom-up, closure flows top-down
-bd dep add request-id --blocked-by ure-id
-bd dep add ure-id --blocked-by proposal-id
-bd dep add proposal-id --blocked-by impl-plan-id
-bd dep add impl-plan-id --blocked-by slice-1-id
-bd dep add slice-1-id --blocked-by leaf-task-a-id]]></code>
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
+pasture task dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
+pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"]]></code>
       </example>
     </constraint>
     <!-- Reviews -->
@@ -828,22 +828,26 @@ bd dep add slice-1-id --blocked-by leaf-task-a-id]]></code>
     <constraint id="C-severity-eager" given="code review round (p10 only)" when="starting review" then="ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately" should-not="lazily create severity groups only when findings exist" role-ref="reviewer" phase-ref="p10">
       <example id="C-severity-eager-create" lang="bash" label="correct">
         <code><![CDATA[# Create all 3 severity groups immediately (even if empty)
-bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review"
-bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "pasture:severity:important,pasture:p10-impl:s10-review"
-bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "pasture:severity:minor,pasture:p10-impl:s10-review"
+BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
+pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
+pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$MINOR_ID_URI" pasture:severity:minor
+pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Close empty groups immediately
-bd close <empty-important-id>
-bd close <empty-minor-id>]]></code>
+pasture task close "${IMPORTANT_ID_URI}"
+pasture task close "${MINOR_ID_URI}"]]></code>
       </example>
       <example id="C-severity-eager-anti" lang="bash" label="anti-pattern">
         <code><![CDATA[# WRONG: only creating groups when findings exist
 # This skips empty groups and breaks the audit trail
-if blocker_findings:
-    bd create --title "BLOCKER" ...]]></code>
+if [ -n "$BLOCKER_FINDINGS" ]; then
+    BLOCKER_ID_URI=$(pasture task create "BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+fi]]></code>
       </example>
     </constraint>
     <constraint id="C-severity-not-plan" given="plan review (p4)" when="reviewing" then="use binary ACCEPT/REVISE only" should-not="create severity tree for plan reviews" role-ref="reviewer" phase-ref="p4" />
@@ -858,20 +862,20 @@ if blocker_findings:
     <constraint id="C-autonomous-progression" given="supervisor orchestrating phases" when="deciding whether to proceed" then="5 user-gated phases only: (1) research depth decision, (2) URE survey, (3) Plan UAT, (4) Phase 8 implementation-effort / review-effort budget request, (5) Impl UAT; all other phase transitions are auto-ratified by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification without user gate" should-not="add additional user gates beyond the 5 defined; require user approval for ratification after UAT ACCEPT" />
     <constraint id="C-integration-points" given="multiple vertical slices share types, interfaces, or data flows" when="decomposing IMPL_PLAN in Phase 8" then="identify horizontal Layer Integration Points and document them in IMPL_PLAN; each integration point specifies: owning slice, consuming slices, shared contract, merge timing; include integration points in slice descriptions so workers know what to export and import" should-not="leave cross-slice dependencies implicit; assume workers will discover contracts on their own" role-ref="epoch,supervisor" phase-ref="p8" />
     <constraint id="C-interface-first-slices" given="decomposing a RATIFIED plan into vertical slices (Phase 8 IMPL_PLAN)" when="ordering the slices" then="prefer an interface-first FOUNDATION slice that exports all shared identifiers (types, constraints, fragments) and lands green BEFORE dependent slices (Strong SHOULD); if a linear (non-interface-first) decomposition is chosen instead, justify it explicitly in the IMPL_PLAN" should-not="leave cross-slice contracts implicit; choose a linear decomposition without recording the justification in the IMPL_PLAN" />
-    <constraint id="C-slice-review-before-close" given="workers complete their implementation slices" when="slice implementation is done" then="workers notify supervisor with bd comments add (not bd close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes" should-not="close slices immediately upon worker completion; allow workers to close their own slices" role-ref="epoch,supervisor" phase-ref="p9,p10" />
-    <constraint id="C-slice-leaf-tasks" given="vertical slice created" when="decomposing slice into implementation units" then="create one or more Beads leaf tasks per slice, named after the real work units they represent, with bd dep add slice-id --blocked-by leaf-task-id; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)" should-not="create slices without leaf tasks — a slice with no children is undecomposed and cannot be tracked; force every slice into a fixed L1/L2/L3 triple when the real work units differ" role-ref="supervisor" phase-ref="p8,p9" command="bd dep add &lt;slice-id&gt; --blocked-by &lt;leaf-task-id&gt;" />
+    <constraint id="C-slice-review-before-close" given="workers complete their implementation slices" when="slice implementation is done" then="workers notify supervisor with pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes" should-not="close slices immediately upon worker completion; allow workers to close their own slices" role-ref="epoch,supervisor" phase-ref="p9,p10" />
+    <constraint id="C-slice-leaf-tasks" given="vertical slice created" when="decomposing slice into implementation units" then="create one or more Pasture leaf tasks per slice, named after the real work units they represent, with pasture task dep add &quot;${SLICE_ID_URI}&quot; --blocked-by &quot;${LEAF_TASK_ID_URI}&quot;; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)" should-not="create slices without leaf tasks — a slice with no children is undecomposed and cannot be tracked; force every slice into a fixed L1/L2/L3 triple when the real work units differ" role-ref="supervisor" phase-ref="p8,p9" command="pasture task dep add &quot;${SLICE_ID_URI}&quot; --blocked-by &quot;${LEAF_TASK_ID_URI}&quot;" />
     <constraint id="C-handoff-skill-invocation" given="an agent is launched for a new phase (especially p7 to p8 handoff)" when="composing the launch prompt" then="prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions" should-not="launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation" role-ref="epoch,architect,supervisor" phase-ref="p7" />
     <constraint id="C-interview-skill-invocation" given="a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT)" when="conducting the phase" then="the agent MUST invoke the matching interview skill (Skill(/pasture:user-elicit) for URE, Skill(/pasture:user-uat) for UAT) so the verbatim-capture and disposition procedures are loaded" should-not="conduct an interview phase without invoking its skill — skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures" />
     <!-- Task management -->
-    <constraint id="C-dep-direction" given="adding a Beads dependency" when="determining direction" then="parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first" should-not="invert (child blocked-by parent)" command="bd dep add &lt;stays-open&gt; --blocked-by &lt;must-finish-first&gt;">
+    <constraint id="C-dep-direction" given="adding a Pasture dependency" when="determining direction" then="parent blocked-by child: pasture task dep add &quot;${STAYS_OPEN_URI}&quot; --blocked-by &quot;${MUST_FINISH_FIRST_URI}&quot;" should-not="invert (child blocked-by parent)" command="pasture task dep add &quot;${STAYS_OPEN_URI}&quot; --blocked-by &quot;${MUST_FINISH_FIRST_URI}&quot;">
       <example id="C-dep-direction-correct" lang="bash" label="correct" also-illustrates="C-audit-dep-chain">
-        <code><![CDATA[bd dep add request-id --blocked-by ure-id]]></code>
+        <code><![CDATA[pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"]]></code>
       </example>
       <example id="C-dep-direction-anti" lang="bash" label="anti-pattern">
-        <code><![CDATA[bd dep add ure-id --blocked-by request-id]]></code>
+        <code><![CDATA[pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"]]></code>
       </example>
     </constraint>
-    <constraint id="C-frontmatter-refs" given="cross-task references (URD, request, etc.)" when="linking tasks" then="use description frontmatter references: block" should-not="use bd dep relate (buggy) or blocking dependencies for reference docs" />
+    <constraint id="C-frontmatter-refs" given="cross-task references (URD, request, etc.)" when="linking tasks" then="use description frontmatter references: block" should-not="invent relationship commands or use blocking dependencies for reference documents" />
     <!-- Git -->
     <constraint id="C-agent-commit" given="code is ready to commit" when="committing" then="use git agent-commit -m ..." should-not="use git commit -m ..." role-ref="architect,supervisor,worker" phase-ref="p9,p12" command="git agent-commit -m ...">
       <example id="C-agent-commit-correct" lang="bash" label="correct">
@@ -885,10 +889,10 @@ if blocker_findings:
     <constraint id="C-proposal-naming" given="a new or revised proposal" when="creating task" then="title PROPOSAL-{N} where N increments; mark old as pasture:superseded" should-not="reuse N or delete old proposals" role-ref="architect" phase-ref="p3" />
     <constraint id="C-review-naming" given="a review task" when="creating" then="title {SCOPE}-REVIEW-{axis}-{round} where axis=A|B|C, round starts at 1" should-not="use numeric reviewer IDs (1/2/3) instead of axis letters" role-ref="reviewer" phase-ref="p4,p10" />
     <!-- User interviews -->
-    <constraint id="C-ure-verbatim" given="user interview (Request, URE, or UAT), URD update, or mid-implementation design decision" when="recording in Beads" then="capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured" should-not="summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews" role-ref="architect" phase-ref="p2,p5,p11">
+    <constraint id="C-ure-verbatim" given="user interview (Request, URE, or UAT), URD update, or mid-implementation design decision" when="recording in Pasture" then="capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 whenever user intent is captured" should-not="summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews" role-ref="architect" phase-ref="p2,p5,p11">
       <example id="C-ure-verbatim-correct" lang="bash" label="correct">
         <code><![CDATA[# Full question, all options with descriptions, verbatim response
-bd create --title "UAT: Plan acceptance for feature-X" \
+UAT_ID_URI=$(pasture task create "UAT: Plan acceptance for feature-X" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
   --description "## Component: Verbose fields
 **Question:** Which verbose fields are useful?
 **Options:**
@@ -896,12 +900,12 @@ bd create --title "UAT: Plan acceptance for feature-X" \
 - session ID: Enables log correlation across events
 - repo path + hash: Confirms which git repo was detected
 **User response:** backupDir (full path), session ID
-**Decision:** ACCEPT"]]></code>
+**Decision:** ACCEPT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')]]></code>
       </example>
       <example id="C-ure-verbatim-anti" lang="bash" label="anti-pattern">
         <code><![CDATA[# WRONG: options summarized as numbers, response paraphrased
-bd create --title "UAT: Plan acceptance" \
-  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted."]]></code>
+UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')]]></code>
       </example>
     </constraint>
     <constraint id="C-validation-cases" given="any REQUEST (every request, not only fix-intent ones)" when="eliciting (URE), acceptance-testing (UAT), or implementing" then="elicit concrete validation cases for the request — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures" should-not="ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them (recognize what a request needs semantically instead)" role-ref="supervisor" />
@@ -1112,8 +1116,8 @@ bd create --title "UAT: Plan acceptance" \
         <command>Skill(/pasture:supervisor)</command>
       </step>
       <step order="2" id="S-supervisor-read-plan">
-        <instruction>Read RATIFIED_PLAN, URD, UAT, and elicit tasks via bd show for full context</instruction>
-        <command>bd show &lt;ratified-plan-id&gt; &amp;&amp; bd show &lt;urd-id&gt; &amp;&amp; bd show &lt;uat-id&gt; &amp;&amp; bd show &lt;elicit-id&gt;</command>
+        <instruction>Read RATIFIED_PLAN, URD, UAT, and elicit tasks via pasture task show for full context</instruction>
+        <command>pasture task show "${RATIFIED_PLAN_ID_URI}" &amp;&amp; pasture task show "${URD_ID_URI}" &amp;&amp; pasture task show "${UAT_ID_URI}" &amp;&amp; pasture task show "${ELICIT_ID_URI}"</command>
       </step>
       <step order="3" id="S-supervisor-explore-ephemeral">
         <instruction>Spawn ephemeral Explore subagents via Task tool for scoped codebase queries</instruction>
@@ -1125,17 +1129,18 @@ bd create --title "UAT: Plan acceptance" \
       </step>
       <step order="5" id="S-supervisor-create-leaf-tasks">
         <instruction>Create leaf tasks (L1/L2/L3) for every slice</instruction>
-        <command>bd create --labels pasture:p9-impl:s9-slice --title "SLICE-{K}-L{1,2,3}: &lt;description&gt;" ...</command>
+        <command>CREATED_URI=$(pasture task create "SLICE-{K}-L{1,2,3}: &lt;description&gt;" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice</command>
         <example id="S-supervisor-create-leaf-tasks-frontmatter" lang="bash" label="template" also-illustrates="C-frontmatter-refs">
-          <code><![CDATA[bd create --labels pasture:p9-impl:s9-slice \
-  --title "SLICE-1-L1: Types -- <slice name>" \
+          <code><![CDATA[CREATED_URI=$(pasture task create "SLICE-1-L1: Types -- <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: <slice-1-id>
-  impl_plan: <impl-plan-task-id>
-  urd: <urd-task-id>
+  slice: "${SLICE_1_ID_URI}"
+  impl_plan: "${IMPL_PLAN_ID_URI}"
+  urd: "${URD_ID_URI}"
 ---
-Layer 1: types and interfaces for <slice name>."]]></code>
+Layer 1: types and interfaces for <slice name>." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
         </example>
       </step>
       <step order="6" id="S-supervisor-spawn-workers" next-state="p9">
@@ -1170,7 +1175,7 @@ Layer 1: types and interfaces for <slice name>."]]></code>
       <item id="CL-sup-review-eligible" required="true">Eligible to close only after review by independent agents with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings</item>
     </checklist>
     <checklist id="supervisor-review-ready" role-ref="supervisor" gate="review-ready">
-      <item id="CL-sup-all-slices-notified" required="true">All workers have notified completion via bd comments add</item>
+      <item id="CL-sup-all-slices-notified" required="true">All workers have notified completion via pasture task comment add</item>
       <item id="CL-sup-reviewers-assigned" required="true">Ephemeral reviewers spawned for all slices</item>
       <item id="CL-sup-severity-groups-created" required="true">Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice</item>
     </checklist>
@@ -1183,10 +1188,10 @@ Layer 1: types and interfaces for <slice name>."]]></code>
       <item id="CL-worker-production-path" required="true">Production code path verified end-to-end via code inspection</item>
     </checklist>
     <checklist id="worker-slice-closure" role-ref="worker" gate="slice-closure">
-      <item id="CL-worker-notified-supervisor" required="true">Supervisor notified via bd comments add (not bd close)</item>
+      <item id="CL-worker-notified-supervisor" required="true">Supervisor notified via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close)</item>
       <item id="CL-worker-completion-done" required="true">All completion-gate items passed</item>
       <item id="CL-worker-close-on-review-wave" required="true">Can only close on a review wave, not a worker wave</item>
-      <item id="CL-worker-review-eligible" required="true">Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings</item>
+      <item id="CL-worker-review-eligible" required="true">Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings</item>
     </checklist>
   </checklists>
   <!-- ═══════════════════════════════════════════════════════════════════════
@@ -1195,16 +1200,16 @@ Layer 1: types and interfaces for <slice name>."]]></code>
      Beads coordination commands shared across roles and role-specific.
        ═══════════════════════════════════════════════════════════════════════ -->
   <coordination-commands>
-    <coord-cmd id="cmd-coord-assign" action="Assign task" template="bd update &lt;task-id&gt; --assignee &#34;&lt;worker-name&gt;&#34;" role-ref="supervisor"></coord-cmd>
-    <coord-cmd id="cmd-coord-blocked" action="List blocked" template="bd blocked" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-close" action="Report completion" template="bd close &lt;task-id&gt;" role-ref="worker"></coord-cmd>
-    <coord-cmd id="cmd-coord-comment" action="Add progress note" template="bd comments add &lt;task-id&gt; &#34;Progress: ...&#34;" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-dep-add" action="Chain dependency" template="bd dep add &lt;parent&gt; --blocked-by &lt;child&gt;" role-ref="supervisor"></coord-cmd>
-    <coord-cmd id="cmd-coord-label" action="Label completed slice" template="bd label add &lt;slice-id&gt; pasture:p9-impl:slice-complete" role-ref="supervisor"></coord-cmd>
-    <coord-cmd id="cmd-coord-list" action="List in-progress" template="bd list --pretty --status=in_progress" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-show" action="Check task details" template="bd show &lt;task-id&gt;" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-status" action="Update status" template="bd update &lt;task-id&gt; --status=in_progress" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-worker-notes" action="Add completion notes" template="bd update &lt;task-id&gt; --notes=&#34;Implementation complete. Production code verified.&#34;" role-ref="worker"></coord-cmd>
+    <coord-cmd id="cmd-coord-assign" action="Transfer existing assignment (supervisor only)" template="pasture task assignment transfer &#34;${TASK_ID_URI}&#34; --slot owner-responsibility --assignment &#34;${SUCCESSOR_ASSIGNMENT_ID}&#34; --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant &#34;${REGISTERED_WORKER_ACTOR}&#34;" role-ref="supervisor"></coord-cmd>
+    <coord-cmd id="cmd-coord-blocked" action="List blocked" template="pasture task blocked" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-close" action="Report completion without closing" template="pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 &#34;${TASK_ID_URI}&#34; &#34;Implementation complete; awaiting independent review and supervisor closure.&#34;" role-ref="worker"></coord-cmd>
+    <coord-cmd id="cmd-coord-comment" action="Add progress note" template="pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 &#34;${TASK_ID_URI}&#34; &#34;Progress: ...&#34;" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-dep-add" action="Chain dependency" template="pasture task dep add &#34;${PARENT_URI}&#34; --blocked-by &#34;${CHILD_URI}&#34;" role-ref="supervisor"></coord-cmd>
+    <coord-cmd id="cmd-coord-label" action="Label completed slice" template="pasture task label add &#34;${SLICE_ID_URI}&#34; pasture:p9-impl:slice-complete" role-ref="supervisor"></coord-cmd>
+    <coord-cmd id="cmd-coord-list" action="List in-progress" template="pasture task list --namespace &#34;$PASTURE_NAMESPACE&#34; --status=in_progress" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-show" action="Check task details" template="pasture task show &#34;${TASK_ID_URI}&#34;" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-status" action="Update status" template="pasture task update &#34;${TASK_ID_URI}&#34; --status=in_progress" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-worker-notes" action="Add completion notes" template="pasture task update &#34;${TASK_ID_URI}&#34; --notes=&#34;Implementation complete. Production code verified.&#34;" role-ref="worker"></coord-cmd>
   </coordination-commands>
   <!-- ═══════════════════════════════════════════════════════════════════════
        WORKFLOWS
@@ -1247,14 +1252,14 @@ Layer 1: types and interfaces for <slice name>."]]></code>
         <exit-condition type="proceed" condition="Proposal ratified, IMPL_PLAN placeholder created"></exit-condition>
       </stage>
       <stage id="asf-handoff" name="Handoff" order="7" execution="sequential" phase-ref="p7">
-        <action id="asf-handoff-doc" instruction="Author the HANDOFF in its Beads task body with full inline provenance (include the HANDOFF task ID)"></action>
+        <action id="asf-handoff-doc" instruction="Author the HANDOFF in its Pasture task body with full inline provenance (include the HANDOFF task ID)"></action>
         <action id="asf-handoff-transfer" instruction="Transfer to supervisor via /pasture:architect:handoff"></action>
-        <exit-condition type="success" condition="Handoff authored in the HANDOFF Beads task body, supervisor notified"></exit-condition>
+        <exit-condition type="success" condition="Handoff authored in the HANDOFF Pasture task body, supervisor notified"></exit-condition>
       </stage>
     </workflow>
     <workflow id="layer-cake" name="Layer Cake" role-ref="worker" description="TDD layer-by-layer implementation within a vertical slice. Worker implements types first, then tests (will fail), then production code to make tests pass.">
       <stage id="lc-types" name="Types" order="1" execution="sequential" phase-ref="p9">
-        <action id="lc-types-read" instruction="Read slice task and identify required types" command="bd show &lt;slice-task-id&gt;"></action>
+        <action id="lc-types-read" instruction="Read slice task and identify required types" command="pasture task show &#34;${SLICE_TASK_ID_URI}&#34;"></action>
         <action id="lc-types-define" instruction="Define types, interfaces, and schemas (no deps) — only types for YOUR slice"></action>
         <exit-condition type="proceed" condition="All required types defined; file imports without error"></exit-condition>
       </stage>
@@ -1268,24 +1273,24 @@ Layer 1: types and interfaces for <slice name>."]]></code>
         <action id="lc-impl-wire" instruction="Wire with real dependencies (not mocks in production code)"></action>
         <action id="lc-impl-run-tests" instruction="Run tests — all Layer 2 tests must pass"></action>
         <action id="lc-impl-commit" instruction="Commit completed work" command="git agent-commit -m ..."></action>
-        <action id="lc-impl-notify" instruction="Notify supervisor of completion via bd comments add" command="bd comments add &lt;slice-id&gt; &#34;Implementation complete&#34;"></action>
+        <action id="lc-impl-notify" instruction="Notify supervisor of completion via pasture task comment add" command="pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 &#34;${SLICE_ID_URI}&#34; &#34;Implementation complete&#34;"></action>
         <exit-condition type="success" condition="All tests pass; no TODO placeholders; real deps wired; production code path verified via code inspection"></exit-condition>
         <exit-condition type="escalate" condition="Blocker encountered — use /pasture:worker-blocked with details"></exit-condition>
       </stage>
     </workflow>
     <workflow id="ride-the-wave" name="Ride the Wave" role-ref="supervisor" description="Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate.">
       <stage id="rtw-plan" name="Plan" order="1" execution="sequential" phase-ref="p8">
-        <action id="rtw-plan-read" instruction="Read RATIFIED_PLAN and URD via bd show" command="bd show &lt;ratified-plan-id&gt; &amp;&amp; bd show &lt;urd-id&gt;"></action>
+        <action id="rtw-plan-read" instruction="Read RATIFIED_PLAN and URD via pasture task show" command="pasture task show &#34;${RATIFIED_PLAN_ID_URI}&#34; &amp;&amp; pasture task show &#34;${URD_ID_URI}&#34;"></action>
         <action id="rtw-plan-explore" instruction="Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams"></action>
         <action id="rtw-plan-decompose" instruction="Use Explore findings to decompose into vertical slices with integration points"></action>
-        <action id="rtw-plan-leaf-tasks" instruction="Create leaf tasks (L1/L2/L3) for every slice" command="bd dep add &lt;slice-id&gt; --blocked-by &lt;leaf-task-id&gt;"></action>
+        <action id="rtw-plan-leaf-tasks" instruction="Create leaf tasks (L1/L2/L3) for every slice" command="pasture task dep add &#34;${SLICE_ID_URI}&#34; --blocked-by &#34;${LEAF_TASK_ID_URI}&#34;"></action>
         <exit-condition type="proceed" condition="All slices created with leaf tasks, dependency-chained, assigned"></exit-condition>
       </stage>
       <stage id="rtw-build" name="Build" order="2" execution="parallel" phase-ref="p9">
         <action id="rtw-build-spawn" instruction="Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity."></action>
-        <action id="rtw-build-monitor" instruction="Monitor worker progress via bd list and bd show" command="bd list --labels=&#34;pasture:p9-impl:s9-slice&#34; --status=in_progress"></action>
+        <action id="rtw-build-monitor" instruction="Monitor worker progress via pasture task list --namespace &#34;$PASTURE_NAMESPACE&#34; and pasture task show" command="pasture task list --namespace &#34;$PASTURE_NAMESPACE&#34; --label=&#34;pasture:p9-impl:s9-slice&#34; --status=in_progress"></action>
         <action id="rtw-build-integrate" instruction="Supervisor commits at integration points (atomic commits) — commit small, integrate early and often"></action>
-        <exit-condition type="proceed" condition="All workers have notified completion via bd comments add"></exit-condition>
+        <exit-condition type="proceed" condition="All workers have notified completion via pasture task comment add"></exit-condition>
       </stage>
       <stage id="rtw-review-fix" name="Review + Fix Cycles" order="3" execution="conditional-loop" phase-ref="p10">
         <action id="rtw-review-spawn" instruction="Spawn reviewers via Task tool for per-slice code review"></action>

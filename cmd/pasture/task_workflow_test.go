@@ -1,14 +1,17 @@
 package main_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/stretchr/testify/require"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/dayvidpham/pasture/internal/tasks"
-	"github.com/stretchr/testify/require"
 )
 
 func TestCLI_TaskWorkflow(t *testing.T) {
@@ -452,4 +455,91 @@ func TestCLI_TaskDepTreeHelpTruthfulAndNoDepthFlag(t *testing.T) {
 	got := runCLI(t, "task", "dep", "tree", "demo--00000000-0000-0000-0000-000000000001", "--depth", "1")
 	require.Equal(t, 1, got.exitCode)
 	require.Contains(t, got.stderr, "unknown flag")
+}
+
+// Execute the emitted bytes, not a hand-maintained imitation of their argv.
+func TestCLI_GeneratedTaskRecipes(t *testing.T) {
+	t.Parallel()
+	var fixture struct {
+		Cases []struct {
+			Name         string   `yaml:"name"`
+			Skill        string   `yaml:"skill"`
+			Anchor       string   `yaml:"anchor"`
+			Titles       []string `yaml:"titles"`
+			BlockedInput bool     `yaml:"blocked_input"`
+		} `yaml:"cases"`
+	}
+	testutil.LoadFixtures(t, testutil.GeneratedTaskRecipes, &fixture)
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			db := newDB(t)
+			namespace := "https://example.com/recipe"
+			create := runCLI(t, "--db", db, "--format", "json", "--namespace", namespace, "task", "create", "Review input")
+			require.Zero(t, create.exitCode, create.stderr)
+			var input struct {
+				ID string `json:"id"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(create.stdout), &input))
+			data, err := os.ReadFile(filepath.Join("..", "..", "skills", tc.Skill, "SKILL.md"))
+			require.NoError(t, err)
+			text := string(data)
+			start := strings.Index(text, tc.Anchor)
+			require.NotEqual(t, -1, start)
+			block := regexp.MustCompile("(?ms)^([ \\t]*)```bash\\n(.*?)^[ \\t]*```").FindStringSubmatch(text[start:])
+			require.Len(t, block, 3)
+			// Markdown list fences strip their indentation when copied as shell text.
+			var lines []string
+			for _, line := range strings.Split(block[2], "\n") {
+				lines = append(lines, strings.TrimPrefix(line, block[1]))
+			}
+			script := "set -euo pipefail\npasture() { \"$PASTURE_BINARY\" --db \"$RECIPE_DB\" \"$@\"; }\n" + strings.Join(lines, "\n")
+			cmd := exec.Command("bash", "-c", script)
+			cmd.Env = append(os.Environ(), "PASTURE_BINARY="+binaryPath, "RECIPE_DB="+db,
+				"PASTURE_NAMESPACE="+namespace, "SLICE_1_ID_URI="+input.ID, "REVIEW_ROUND_ID_URI="+input.ID,
+				"SLICE_ID_URI="+input.ID, "REVIEW_ID_URI="+input.ID, "IMPL_PLAN_ID_URI="+input.ID,
+				"REQUEST_ID_URI="+input.ID, "URD_ID_URI="+input.ID, "RATIFIED_PROPOSAL_ID_URI="+input.ID,
+				"SLICE_2_ID_URI="+input.ID, "SLICE_3_ID_URI="+input.ID, "SLICE_4_ID_URI="+input.ID)
+			var output bytes.Buffer
+			cmd.Stdout = &output
+			cmd.Stderr = &output
+			require.NoError(t, cmd.Run(), "%s\n%s", script, output.String())
+			listed := runCLI(t, "--db", db, "--format", "json", "task", "list", "--namespace", namespace)
+			require.Zero(t, listed.exitCode, listed.stderr)
+			var tasks []struct {
+				ID     string   `json:"id"`
+				Title  string   `json:"title"`
+				Labels []string `json:"labels"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(listed.stdout), &tasks))
+			require.Len(t, tasks, len(tc.Titles)+1)
+			var titles []string
+			for _, task := range tasks {
+				require.True(t, strings.HasPrefix(task.ID, namespace+"--"), task.ID)
+				if task.ID != input.ID {
+					titles = append(titles, task.Title)
+					labels := runCLI(t, "--db", db, "--format", "json", "task", "label", "list", task.ID)
+					require.Zero(t, labels.exitCode, labels.stderr)
+					var labeled struct {
+						Labels []string `json:"labels"`
+					}
+					require.NoError(t, json.Unmarshal([]byte(labels.stdout), &labeled))
+					require.NotEmpty(t, labeled.Labels)
+				}
+			}
+			require.ElementsMatch(t, tc.Titles, titles)
+			blocked := runCLI(t, "--db", db, "--format", "json", "task", "blocked")
+			require.Zero(t, blocked.exitCode, blocked.stderr)
+			var blockers []struct {
+				ID string `json:"id"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(blocked.stdout), &blockers))
+			if tc.BlockedInput {
+				require.Len(t, blockers, 1)
+				require.Equal(t, input.ID, blockers[0].ID, "generated graph must leave the parent blocked by its finding group, never the inverse")
+			} else {
+				require.Empty(t, blockers)
+			}
+		})
+	}
 }

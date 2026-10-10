@@ -1,0 +1,28 @@
+forbidden:
+  - name: retired tracker commands
+    pattern: '\bbd\s+(?:ready|blocked|list|show|create|q|update|close|comments?|label|dep|stats|count|search|task|prime|sync|edit|mol|doctor)\b'
+  - name: invented task verbs
+    pattern: '\bpasture\s+task\s+(?:stats|count|search|task|prime|sync|edit|mol|doctor|q|import|reopen)\b'
+  - name: unsupported create flags
+    pattern: '\bpasture\s+task\s+create\b[^\n]*(?:--title|--labels|--add-label|--design|--notes|--assignee|--parent)\b'
+  - name: unsupported update flags
+    pattern: '\bpasture\s+task\s+update\b[^\n]*(?:--assignee|--owner|--add-label|--remove-label|--set-labels|--design)\b'
+  - name: unsupported tree flags
+    pattern: '\bpasture\s+task\s+dep\s+tree\b[^\n]*(?:--direction|--show-all-paths)\b'
+  - name: one label operand per mutation
+    pattern: '(?m)^[ \t]*pasture[ \t]+task[ \t]+label[ \t]+(?:add|remove)[ \t]+"?[^ \t\n"]+"?[ \t]+[^ \t\n]+[ \t]+[^ \t\n#]+'
+  - name: unsupported statuses
+    pattern: '\bpasture\s+task\s+(?:list|update)\b[^\n]*--status(?:=|\s+)(?:blocked|done)\b'
+  - name: unbound retired URI aliases
+    pattern: '\$\{(?:EMPTY_IMPORTANT_ID_URI|EMPTY_MINOR_ID_URI|IMPL_PLAN_TASK_ID_URI|HANDOFF_TASK_ID_URI|PROPOSAL_N_ID_URI|REQUEST_URI|URD_URI|PROPOSAL_URI|HANDOFF_URI|ELICIT_URI|TASK_ID_[12]_URI)\}|\$(?:BLOCKER_ID|IMPORTANT_ID)\b'
+  - name: retired short task IDs
+    pattern: '\baura-(?:xxx|yyy|zzz|www)\b'
+  - name: unsupported relation vocabulary
+    pattern: '\brelates_to:'
+fragments:
+  - id: frag--task-recovery
+    every_body: true
+    contains: [PASTURE_DB_PATH, XDG_DATA_HOME, '--namespace', 'pasture task ready', 'pasture task blocked', 'pasture task list', '--status in_progress', 'pasture task show', 'pasture task comments', 'pasture task timeline', '--blocked-by', 'references:', non-atomic, supervisor, 'git agent-commit', 'explicit user approval']
+  - id: frag--task-author
+    every_body: true
+    contains: ['pasture task agents list', '--author', 'pasture-system--00000000-0000-0000-0000-000000000000', verbatim]
