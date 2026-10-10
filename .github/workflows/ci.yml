@@ -115,6 +115,11 @@ jobs:
             exit 1
           fi
 
+      - name: Installer staging cleanup
+        # Behavioral and hermetic: a failing cp or chmod during staging must
+        # leave no `.pasture-install.*` file and must install neither binary.
+        run: bash tools/install-staging-test.sh
+
   codegen-drift:
     name: Codegen Drift
     runs-on: ubuntu-latest

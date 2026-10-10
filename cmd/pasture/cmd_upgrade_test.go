@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // roundTripFunc adapts a function to http.RoundTripper so a test can fail loudly
@@ -1108,5 +1110,194 @@ func TestUpgradeSameTagRepair(t *testing.T) {
 		}
 		assertFileContent(t, mainPath, "stale-pasture")
 		assertFileContent(t, daemonPath, "stale-pastured")
+	})
+}
+
+func TestUpgradeChecksumParserToleratesBinaryMarker(t *testing.T) {
+	t.Parallel()
+	const name = "pasture-linux-amd64"
+	hash := strings.Repeat("ab", 32)
+	other := strings.Repeat("cd", 32)
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "plain-two-space", body: hash + "  " + name + "\n", want: hash},
+		{name: "binary-star-marker", body: hash + "  *" + name + "\n", want: hash},
+		{name: "after-unrelated-entry", body: other + "  other\n" + hash + "  *" + name + "\n", want: hash},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := checksumForUpgradeAsset([]byte(tc.body), name)
+			if err != nil {
+				t.Fatalf("checksumForUpgradeAsset error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("checksum = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if _, err := checksumForUpgradeAsset([]byte(other+"  other\n"), name); err == nil {
+		t.Fatal("a checksums.txt without the asset must fail")
+	}
+}
+
+func TestUpgradeDaemonChecksumMismatchPreservesBoth(t *testing.T) {
+	t.Parallel()
+	s := newUpgradeTestServer(t)
+	dir := t.TempDir()
+	mainPath := filepath.Join(dir, upgradeMainBinaryName)
+	daemonPath := filepath.Join(dir, upgradeDaemonBinaryName)
+	writeTestBinary(t, mainPath, "old-pasture", 0o755)
+	writeTestBinary(t, daemonPath, "old-pastured", 0o755)
+
+	mainBytes := []byte("new-pasture-bytes")
+	daemonGood := []byte("new-pastured-bytes")
+	mainAsset := upgradeAssetName(upgradeMainBinaryName, "linux", "amd64")
+	daemonAsset := upgradeAssetName(upgradeDaemonBinaryName, "linux", "amd64")
+	s.setAsset(mainAsset, mainBytes)
+	// The daemon asset does not match its published checksum.
+	s.setAsset(daemonAsset, []byte("tampered-daemon"))
+	s.setAsset("checksums.txt", checksumsFor(map[string][]byte{mainAsset: mainBytes, daemonAsset: daemonGood}))
+	s.setLatest(s.release("v0.0.16", "checksums.txt", mainAsset, daemonAsset))
+
+	deps := upgradeDepsForServer(t, s, mainPath)
+	_, err := runUpgradeForTest(upgradeOptions{Yes: true}, deps, nil)
+	ue := requireUpgradeError(t, err, 1)
+	if !strings.Contains(ue.Error(), daemonAsset) {
+		t.Fatalf("mismatch must name the daemon asset:\n%s", ue.Error())
+	}
+	// The all-verified gate means the main binary is not replaced either.
+	assertFileContent(t, mainPath, "old-pasture")
+	assertFileContent(t, daemonPath, "old-pastured")
+	assertNoUpgradeStaging(t, dir)
+}
+
+func assertNoUpgradeStaging(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir %s: %v", dir, err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".pasture-upgrade-") {
+			t.Fatalf("staging temp left behind: %s", entry.Name())
+		}
+	}
+}
+
+// upgradeFakeFileInfo satisfies fs.FileInfo for a faked sibling stat.
+type upgradeFakeFileInfo struct{}
+
+func (upgradeFakeFileInfo) Name() string       { return upgradeDaemonBinaryName }
+func (upgradeFakeFileInfo) Size() int64        { return 0 }
+func (upgradeFakeFileInfo) Mode() os.FileMode  { return 0o755 }
+func (upgradeFakeFileInfo) ModTime() time.Time { return time.Time{} }
+func (upgradeFakeFileInfo) IsDir() bool        { return false }
+func (upgradeFakeFileInfo) Sys() any           { return nil }
+
+type upgradeProbeSpec struct{ name, args, stdout string }
+
+// mixedChannelDeps wires the complete core with a faked sibling stat/symlink and
+// failing network and install primitives, so a mixed-channel refusal must stop
+// before either.
+func mixedChannelDeps(t *testing.T, mainPath, siblingLink, siblingTarget string, probes []upgradeProbeSpec) upgradeDeps {
+	t.Helper()
+	return upgradeDeps{
+		Executable: func() (string, error) { return mainPath, nil },
+		EvalSymlinks: func(path string) (string, error) {
+			if path == siblingLink {
+				return siblingTarget, nil
+			}
+			return path, nil
+		},
+		Stat: func(path string) (fs.FileInfo, error) {
+			if path == siblingLink {
+				return upgradeFakeFileInfo{}, nil
+			}
+			return os.Stat(path)
+		},
+		CommandOutput: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			joined := strings.Join(args, " ")
+			for _, p := range probes {
+				if p.name == name && p.args == joined {
+					return []byte(p.stdout), nil
+				}
+			}
+			return nil, errors.New("not managed by this test command")
+		},
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("mixed-channel refusal must not call the network")
+			return nil, errors.New("unexpected request")
+		})},
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		CurrentVersion: "v0.0.15",
+		InstallBinary: func(string, []byte, os.FileMode) error {
+			t.Fatal("mixed-channel refusal must not replace anything")
+			return nil
+		},
+		StdinIsTerminal: func(io.Reader) bool { return false },
+	}
+}
+
+func assertMixedRefusal(t *testing.T, ue *upgradeError, wants []string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(ue.Error(), want) {
+			t.Fatalf("mixed refusal missing %q:\n%s", want, ue.Error())
+		}
+	}
+}
+
+func TestUpgradeMixedChannelsFullCore(t *testing.T) {
+	t.Parallel()
+
+	t.Run("raw-main-managed-sibling", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		mainPath := filepath.Join(dir, upgradeMainBinaryName)
+		link := filepath.Join(dir, upgradeDaemonBinaryName)
+		deps := mixedChannelDeps(t, mainPath, link, "/usr/bin/pastured",
+			[]upgradeProbeSpec{{name: "dpkg-query", args: "-S /usr/bin/pastured", stdout: "pasture: /usr/bin/pastured\n"}})
+		_, err := runUpgradeForTest(upgradeOptions{}, deps, nil)
+		assertMixedRefusal(t, requireUpgradeError(t, err, 1), []string{mainPath, "/usr/bin/pastured", "raw", "dpkg"})
+	})
+
+	t.Run("managed-main-raw-sibling", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		mainPath := "/usr/bin/pasture"
+		link := "/usr/bin/pastured"
+		siblingTarget := filepath.Join(dir, upgradeDaemonBinaryName)
+		deps := mixedChannelDeps(t, mainPath, link, siblingTarget,
+			[]upgradeProbeSpec{{name: "dpkg-query", args: "-S /usr/bin/pasture", stdout: "pasture: /usr/bin/pasture\n"}})
+		_, err := runUpgradeForTest(upgradeOptions{}, deps, nil)
+		assertMixedRefusal(t, requireUpgradeError(t, err, 1), []string{mainPath, siblingTarget, "dpkg", "raw"})
+	})
+
+	t.Run("two-manager-kinds", func(t *testing.T) {
+		t.Parallel()
+		mainPath := "/nix/store/abc-pasture/bin/pasture"
+		link := "/nix/store/abc-pasture/bin/pastured"
+		deps := mixedChannelDeps(t, mainPath, link, "/usr/bin/pastured",
+			[]upgradeProbeSpec{{name: "dpkg-query", args: "-S /usr/bin/pastured", stdout: "pasture: /usr/bin/pastured\n"}})
+		_, err := runUpgradeForTest(upgradeOptions{}, deps, nil)
+		assertMixedRefusal(t, requireUpgradeError(t, err, 1), []string{mainPath, "/usr/bin/pastured", "nix", "dpkg"})
+	})
+
+	t.Run("symlinked-managed-sibling", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		mainPath := filepath.Join(dir, upgradeMainBinaryName)
+		link := filepath.Join(dir, upgradeDaemonBinaryName)
+		// The sibling is a symlink that resolves into the nix store; its
+		// resolved path must be classified, not the raw link path.
+		deps := mixedChannelDeps(t, mainPath, link, "/nix/store/abc-pastured/bin/pastured", nil)
+		_, err := runUpgradeForTest(upgradeOptions{}, deps, nil)
+		assertMixedRefusal(t, requireUpgradeError(t, err, 1), []string{mainPath, "/nix/store/abc-pastured/bin/pastured", "raw", "nix"})
 	})
 }

@@ -234,12 +234,16 @@ verify() {
 # Copy a verified download beside its destination and mark it executable. A raw
 # download carries no exec bit, and a same-directory rename later avoids
 # ETXTBSY when the running binary is the one being replaced.
+#
+# The staging path is recorded in STAGED BEFORE cp runs: a failure in cp or in
+# chmod must still leave the path known to the EXIT trap, or the partially
+# created file survives the run. rm -f tolerates a path cp never created.
 stage_binary() {
   local dir="$1" asset="$2" b="$3"
   local staged="${BIN_DIR}/.pasture-install.$$.${b}"
+  STAGED+=("$staged")
   cp "${dir}/${asset}" "$staged"
   chmod 0755 "$staged"
-  STAGED+=("$staged")
 }
 
 # What happened, in the same shape as what was promised.

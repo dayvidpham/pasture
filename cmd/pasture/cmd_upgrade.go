@@ -891,7 +891,14 @@ func printUpgradeRepairPlan(out io.Writer, deps upgradeDeps, release upgradeRele
 func checksumForUpgradeAsset(checksums []byte, assetName string) (string, error) {
 	for _, line := range strings.Split(string(checksums), "\n") {
 		fields := strings.Fields(line)
-		if len(fields) < 2 || filepath.Base(fields[len(fields)-1]) != assetName {
+		if len(fields) < 2 {
+			continue
+		}
+		// sha256sum may mark binary mode with a leading "*" on the filename;
+		// the workflow does not emit it, but tolerate it rather than miss the
+		// entry and refuse a valid release.
+		name := strings.TrimPrefix(fields[len(fields)-1], "*")
+		if filepath.Base(name) != assetName {
 			continue
 		}
 		hash := strings.TrimSpace(fields[0])
