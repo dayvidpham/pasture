@@ -114,16 +114,20 @@ pkg/
 
 ## CLI Surface (`pasture`)
 
-The local `pasture` CLI hosts task verbs (`task create / show / update / close / list`,
-`task ready`, `task blocked`, `task dep add|tree`, `task label add|remove`,
-`task comment add`, `task comments`) and event/audit verbs:
+The local `pasture` CLI hosts the task workflow verbs — `task create / show / update / close`,
+`task list` (status/priority/type/phase/namespace plus one exact label filter),
+`task ready` and `task blocked` (optional exact `--label`), `task dep add` with
+`--kind` (`relation` is an alias), `task dep tree --kind` (`blocked_by` by
+default; `derived_from`, `supersedes`, `discovered_from`, or `all`),
+`task label add|remove|list`, `task comment add --author` and `task comments`,
+and `task assignment` — plus event/audit verbs:
 
 | Subcommand | Purpose |
 |---|---|
-| `pasture task events [--epoch-id <id>] [--phase <p>] [--role <r>]` | Query audit events |
+| `pasture task events [--epoch-id <id>] [--phase <p>] [--agent <a>] [--type <t>] [--since <ts>] [--context-kind <k> --context-id <id>]` | Query audit events; each row prints its event ID for `task contexts` |
 | `pasture task timeline TASK-ID` | Show all events attached to a task |
 | `pasture task contexts EVENT-ID` | List context_edges attached to an event |
-| `pasture task agents [list\|show]` | List or inspect registered agents |
+| `pasture task agents list\|show\|register` | Discover or inspect agents, or register one (registration is the only identity creator; comments need an explicit registered `--author`) |
 | `pasture migrate [--dry-run]` | Run pending audit-database schema migrations (top-level — NOT under `pasture task`) |
 
 ## Key Conventions
@@ -174,12 +178,12 @@ model — raw payloads traverse the same lifecycle parse/bind/verifier/gate
 pipeline as native events and commit the same occurrence evidence kind.
 
 Exact provider payloads are not interchangeable fixtures. Lifecycle activation
-is proof-gated per host contract: Claude has 8 enabled events, OpenCode has two
-user-reviewed callback records (`session.created` and `tool.execute.before`),
-and Codex has two command-hook records (`SessionStart` and `PreToolUse`), each
-captured at the host version its fixture's provenance records. The remaining
-generated events are explicitly
-withheld until authentic capture and production-path proofs exist. See
+is proof-gated per host contract, each row captured at the host version its
+fixture's provenance records: Claude Code has 9 of 33 events enabled;
+OpenCode's 2.0.20 contract is fully enabled (17/17); and Codex is 12/12 at its
+recorded contract. Claude's remaining events stay explicitly withheld — that
+workstream is deferred by user decision — until authentic capture and
+production-path proofs exist. See
 [docs/privacy.md](docs/privacy.md) for the complete clearance boundary.
 
 - **Architecture + data-flow diagram:** [docs/codegen.md](docs/codegen.md)

@@ -229,7 +229,7 @@ func TestCLI_TaskHelpAndDocumentationAgree(t *testing.T) {
 	end := strings.Index(string(doc)[start:], "## Dependencies") + start
 	inventory := string(doc)[start:end]
 
-	for _, name := range []string{"list", "ready", "blocked", "label", "comments", "agents", "dep"} {
+	for _, name := range []string{"list", "ready", "blocked", "label", "comments", "agents", "dep", "events", "contexts"} {
 		help := runCLI(t, "task", name, "--help")
 		require.Zero(t, help.exitCode)
 		require.Contains(t, inventory, "pasture task "+name)
@@ -242,9 +242,6 @@ func TestCLI_TaskHelpAndDocumentationAgree(t *testing.T) {
 			require.Contains(t, help.stdout, "pasture task dep "+verb)
 		}
 	}
-
-	require.NotContains(t, inventory, "| `pasture task events")
-	require.NotContains(t, inventory, "| `pasture task contexts")
 }
 
 // depTreeCLIFixture creates A,B,C,D,X and the cross-kind cycle plus diamond

@@ -557,13 +557,16 @@ registered agents with `pasture task agents list`.
 | `pasture task comment add` | Add a comment with explicit `--author AGENT-ID`; the author must already be registered. |
 | `pasture task comments` | Read comments in chronological order. |
 | `pasture task timeline TASK-ID` | Show all events attached to a task in chronological order. |
-| `pasture task agents [list\|show]` | List or inspect registered agents and their pasture-side categories. |
+| `pasture task events` | Query audit events by epoch, phase, agent, type, since, or context; each row prints its event ID. |
+| `pasture task contexts EVENT-ID` | List the context edges attached to an event. |
+| `pasture task agents list\|show\|register` | List or inspect registered agents and their pasture-side categories, or register one (the only identity creator). |
 
 Task operations use `protocol.TaskTracker`. Agent discovery reads the base
 registry with optional Pasture categories. It includes human, ML, and software
-agents without categories. Use `pasture task agents list` to select an author;
-comment commands never register or choose an identity for you. `events` and
-`contexts` are not CLI commands. `relation tree` is the same command as
+agents without categories. Use `pasture task agents list` to select an author,
+or `pasture task agents register` to create one; comment commands never register
+or choose an identity for you. `task events` prints each event's ID, which
+`task contexts` consumes. `relation tree` is the same command as
 `dep tree`, including its `--kind` selection.
 
 List order is created time then full ID. Ready/blocked order is numeric priority,
