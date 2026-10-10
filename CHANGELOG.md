@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.0.14] - 2026-10-10
+
+### Added
+- feat(pasture): add --kind to task dep tree
+- feat(handlers): walk typed relation trees for task dep tree
+- feat(formatters): add typed relation tree renderer with repeat markers
+- feat(cli): restore task agents register, events, and contexts verbs
+
+### Fixed
+- fix(cli): carry event IDs, fix combined/agent filters, refuse duplicate agents
+
+### Documentation
+- docs: describe task dep tree --kind selection
+
+### Other
+- Merge pull request #174 from dayvidpham/pasture-0443--feat--kind-tree
+- test(pasture): pin legacy tree JSON bytes and fill review gaps
+- Merge pull request #173 from dayvidpham/pasture-3375--feat--residual-verbs
+
 ## [0.0.13] - 2026-10-09
 
 ### Other
