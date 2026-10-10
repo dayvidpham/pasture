@@ -1,27 +1,21 @@
 // Package tasks — well_known_cache.go
 //
 // WellKnownAgentCache is the in-memory map populated by RegisterWellKnownAgents
-// at `pastured` startup (PROPOSAL-2 §7.7.3). It maps each well-known logical
-// name (the PK in `pasture_well_known_agents`) to the `provenance.AgentID`
-// minted (or recovered) for that name.
+// during durable store construction and at daemon startup. It maps each
+// well-known logical name (UNIQUE in `pasture_well_known_agents`) to the
+// `provenance.AgentID` minted (or recovered) for that name.
 //
 // Lifecycle:
 //
-//   1. `cmd/pastured/main.go` constructs an empty cache via NewWellKnownAgentCache.
-//   2. `RegisterWellKnownAgents(tracker, cache)` populates it during startup,
-//      using `ensureWellKnownAgent` per row in the canonical registry.
-//   3. The daemon holds the populated cache and reports its size at startup.
-//      It has no other production reader today: Get and MustGet are called
-//      only from tests.
+// Durable CLI/daemon construction uses a local cache and discards it after
+// ensuring the persisted registry. The daemon constructs a separate cache,
+// repeats registration to recover the same IDs, and retains that cache to
+// report its size at startup. Get and MustGet have no production reader today.
+// The database, not either cache, is the durable identity source.
 //
-// Concurrency: Lookups (Get / Names) happen on the workflow hot path from
-// many concurrent goroutines. Writes happen ONLY during startup
-// before the durable runtime is started — there is a clear happens-before
-// ordering enforced by the daemon's main loop. We use a sync.RWMutex so
-// concurrent readers do not contend, and writes (during startup) take the
-// exclusive lock; this is over-cautious for the current single-writer model
-// but cheap insurance against future code that mutates the cache after
-// startup (e.g. dynamic agent registration).
+// Concurrency: a sync.RWMutex protects population and lookups within one cache.
+// It does not synchronize independent opens or processes; the database's UNIQUE
+// name binding and registration transaction provide that consistency.
 
 package tasks
 

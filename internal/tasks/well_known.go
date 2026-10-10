@@ -1,12 +1,13 @@
 // Package tasks — well_known.go
 //
-// Idempotent automaton-agent registration at `pastured` startup.
+// Idempotent automaton-agent registration during durable CLI/daemon store
+// construction, and again at daemon startup to populate its retained cache.
 //
 // The flow per well-known name:
 //
 //  1. Lookup-by-name in `pasture_well_known_agents` (O(1) via the UNIQUE index
 //     on `name`). If found, recover the AgentId and skip steps 2-3 (idempotent
-//     fast path; second-and-subsequent restarts hit only this branch).
+//     fast path; second-and-subsequent opens hit only this branch).
 //  2. If absent: call `provenance.Tracker.RegisterSoftwareAgent("pasture",
 //     name, version, source)` — this mints one fresh UUIDv7 in the
 //     Provenance subsystem (separate `*sql.DB` handle on the same file).
@@ -16,7 +17,7 @@
 //     (agent_id, automaton_role, pasture_role); all under one `BEGIN
 //     IMMEDIATE` transaction on the audit `*sql.DB`. See bindWellKnownAgent.
 //
-// Two daemons starting against one file at the same moment both miss step 1
+// Two durable callers opening one file at the same moment can both miss step 1
 // and both mint in step 2. Step 3 is where they meet: the one that takes the
 // write lock second finds the name bound, adopts that id, and writes nothing.
 //
@@ -103,10 +104,11 @@ type auditDBHolder interface {
 //   - CategoryStorage (exit 5): SQLite read/write or transaction failure.
 //   - CategoryWorkflow (exit 3): Provenance RegisterSoftwareAgent failure.
 //
-// The function takes ctx for cancellation; long-running registrations
-// (15 entries × {1 SELECT + maybe 1 RegisterSoftwareAgent + 2 INSERTs}) take
-// well under a second on local SQLite, so context-deadline rejection is
-// primarily about clean shutdown if the daemon is killed during startup.
+// The function takes ctx for cancellation. Durable construction supplies a
+// background context (the opener has no context parameter); explicit callers
+// can supply cancellation through ctx. Fresh opens mint every missing entry;
+// warm opens recover IDs without sequential identity growth. Defensive
+// table DDL still runs, so a warm call is not a strictly read-only operation.
 func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, cache *WellKnownAgentCache) error {
 	if cache == nil {
 		return &pasterrors.StructuredError{

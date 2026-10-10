@@ -14,7 +14,9 @@
 //     here unblocks S5's race test before S2 lands and is a no-op once S2's
 //     migrator does the same work in the proper migration step.
 //  6. Wires the trio (provenance.Tracker, audit.Trail, *sql.DB) into a
-//     trackerImpl and returns it.
+//     trackerImpl and configures it.
+//  7. Ensures the canonical built-in name/category bindings before returning
+//     the tracker, including CLI-only installations without a daemon.
 //
 // init() registers the constructor with pkg/protocol so external callers can
 // use protocol.OpenTaskTracker without importing internal/tasks directly.
@@ -22,6 +24,7 @@
 package tasks
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	stderrors "errors"
@@ -60,8 +63,10 @@ func init() {
 //
 // Errors are *pasterrors.StructuredError with category:
 //   - CategoryConnection (exit 2): file/dir cannot be opened.
-//   - CategoryStorage    (exit 5): migration or DDL failure.
+//   - CategoryStorage    (exit 5): migration, DDL, or saved built-in mapping failure.
 //   - CategoryValidation (exit 1): newer-schema rejection.
+//   - CategoryConfig     (exit 4): built-in registration wiring failure.
+//   - CategoryWorkflow   (exit 3): built-in agent creation failure.
 //
 // Callers MUST call Close on the returned tracker to release file handles.
 //
@@ -278,6 +283,26 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	tracker.storeClock = cfg.clock
 	tracker.diagnostics = cfg.diagnostics
 	tracker.afterGenesisCommit = cfg.afterGenesisCommit
+	// Durable CLI and daemon callers receive the same complete registry. The
+	// daemon separately recovers these IDs into its startup cache.
+	cache := NewWellKnownAgentCache()
+	if err := RegisterWellKnownAgents(context.Background(), tracker, cache); err != nil {
+		_ = tracker.Close()
+		category := pasterrors.CategoryStorage
+		var registrationError *pasterrors.StructuredError
+		if stderrors.As(err, &registrationError) {
+			category = registrationError.Category
+		}
+		return nil, &pasterrors.StructuredError{
+			Category: category,
+			What:     "Pasture couldn't initialize its built-in agents.",
+			Why:      err.Error(),
+			Where:    fmt.Sprintf("Built-in agent registration while opening %q (internal/tasks/open_unified.go:openTaskTrackerWithOptions).", dbPath),
+			Impact:   "No tracker was returned to this command or daemon startup. Earlier successful registrations may remain in the database.",
+			Fix:      "1. Inspect the underlying cause and the identified built-in name mapping; back up the database before repairing a corrupt mapping.\n2. Restore writable, compatible storage with free space if a storage operation failed.\n3. Then retry the same CLI command; no daemon is required.",
+			Cause:    err,
+		}
+	}
 	return tracker, nil
 }
 

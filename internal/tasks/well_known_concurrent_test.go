@@ -14,33 +14,52 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"io"
 	"path/filepath"
 	"sync"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/provenance"
 	"github.com/google/uuid"
 )
 
-// openFreshTracker opens the production tracker on a new file under t.TempDir
-// and returns it with its audit handle. The file is migrated by the open, as
-// a first daemon start migrates it.
+// openFreshTracker assembles a real unregistered tracker for registrar tests.
+// The durable public opener ensures built-ins, so these collision tests use
+// the low-level audit and Provenance constructors instead.
 func openFreshTracker(t *testing.T, dbPath string) (*trackerImpl, *sql.DB) {
 	t.Helper()
-	tracker, err := OpenTaskTracker(dbPath)
+	trail, err := audit.NewSqliteAuditTrail(dbPath)
 	if err != nil {
-		t.Fatalf("OpenTaskTracker(%q): %v", dbPath, err)
+		t.Fatalf("open audit fixture: %v", err)
 	}
+	db, err := openAuditHandle(dbPath, 1, timeouts.TestProfile())
+	if err != nil {
+		_ = trail.Close()
+		t.Fatal(err)
+	}
+	if err := ensurePastureTables(db); err != nil {
+		_ = db.Close()
+		_ = trail.Close()
+		t.Fatal(err)
+	}
+	prov, err := provenance.OpenBorrowedSQLite(db)
+	if err != nil {
+		_ = db.Close()
+		_ = trail.Close()
+		t.Fatal(err)
+	}
+	tracker := newTrackerImpl(prov, trail, db)
+	tracker.timeoutProfile = timeouts.TestProfile()
+	tracker.storeClock = wallClock{}
+	tracker.diagnostics = io.Discard
 	t.Cleanup(func() {
 		if err := tracker.Close(); err != nil {
 			t.Errorf("tracker.Close: %v", err)
 		}
 	})
-	impl, ok := tracker.(*trackerImpl)
-	if !ok {
-		t.Fatalf("OpenTaskTracker returned %T, want *trackerImpl", tracker)
-	}
-	return impl, impl.auditDBHandle()
+	return tracker, tracker.auditDBHandle()
 }
 
 func mintedId() provenance.AgentID {

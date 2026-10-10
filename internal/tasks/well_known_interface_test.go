@@ -61,11 +61,9 @@ func TestRegisterWellKnownAgents_NonTrackerImplSucceeds_WhiteBox(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 
 	// Open a real tracker to supply Provenance operations (RegisterSoftwareAgent).
-	inner, err := OpenTaskTracker(dbPath)
-	if err != nil {
-		t.Fatalf("OpenTaskTracker: %v", err)
-	}
-	t.Cleanup(func() { _ = inner.Close() })
+	// Keep this fixture unregistered so the interface proof exercises both
+	// minting through the inner tracker and binding through the supplied pool.
+	inner, _ := openFreshTracker(t, dbPath)
 
 	// Open a second *sql.DB handle on the same file for the audit side.
 	db, err := sql.Open("sqlite", dbPath)
