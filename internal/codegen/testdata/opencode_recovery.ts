@@ -43,6 +43,8 @@ for (const stage of ["first", "repeat", "continuation"]) {
   verify(event);
   assert.equal(calls.length, n + 1, stage + " retains lifecycle consultation");
   assert.ok(calls.at(-1).argv.includes("session.context"));
+  if (stage === "first") assert.deepEqual(calls.at(-1).payload.system, [before, after], "consult pristine host system before injection");
+  else assert.equal(calls.at(-1).payload.system.filter(p => p.text.startsWith(marker)).length, 1, "later consultation sees at most the prior single owned part");
   assert.deepEqual(event.system.filter(p => !p.text.startsWith(marker)), [before, after]);
 }
 const compacted = { ...event, system: [after] };
@@ -74,6 +76,9 @@ await a.hooks["session.context"]({ ...event, system: Object.freeze([before]) });
 assert.equal(calls.length, n + 1, "injection failure cannot suppress receipt transport");
 assert.equal(logs.length, 1);
 assert.ok(logs[0].includes("session.context") && logs[0].includes("/constructed/a") && logs[0].includes("2.0.20"));
+await a.hooks["session.context"]({ ...event, system: Object.freeze([before]) });
+assert.equal(calls.length, n + 2, "persistent injection fault still consults lifecycle");
+assert.equal(logs.length, 1, "persistent injection fault reports once per registration");
 await cleanA(); await cleanB();
 assert.equal(a.disposed.length, 16); assert.equal(b.disposed.length, 16);
 assert.equal(Object.keys(a.hooks).length, 0);

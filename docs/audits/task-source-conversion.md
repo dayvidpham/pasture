@@ -158,6 +158,14 @@ by their assigned increments, then the combined tree must pass strict scanning.
 The scan is a conservative independent lexical report, not the future strict
 executable-context classifier. The old context injection remains wired here.
 
+Historical scope note (2026-10-11): the paragraph above records the initial
+source-conversion increment, not the current tree. Later regeneration converted
+the protocol documents and Git discipline payload. The recovery replacement
+subsequently retired root and embedded `bd-prime.md` and its Claude cat commands,
+and composed static Pasture recovery into the OpenCode lifecycle context hook.
+Those later changes do not alter this increment's historical counts. Installed
+user-home retirement and fresh-session proof remain separate deployment work.
+
 No task CLI surface, lifecycle transport, Git hooks, installed user settings,
 archive, other repository, or well-known actor registration was changed.
 

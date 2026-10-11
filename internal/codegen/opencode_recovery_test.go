@@ -48,3 +48,27 @@ func TestOpenCodeRecoveryComposition(t *testing.T) {
 		t.Fatalf("recovery runner did not finish: %s", out)
 	}
 }
+
+func TestOpenCodeRecoveryMissingFragmentReturnsActionableError(t *testing.T) {
+	t.Parallel()
+	_, err := openCodeRecoveryJSON(map[FragmentId]SharedFragment{})
+	if err == nil || !strings.Contains(err.Error(), string(FragTaskRecovery)) || !strings.Contains(err.Error(), "specs_data_fragments.go") {
+		t.Fatalf("missing recovery fragment must fail actionably rather than panic: %v", err)
+	}
+}
+
+func TestOpenCodeRecoveryNilProseReturnsActionableError(t *testing.T) {
+	t.Parallel()
+	_, err := openCodeRecoveryJSON(map[FragmentId]SharedFragment{FragTaskRecovery: {Id: FragTaskRecovery, Kind: FragmentKindProse}})
+	if err == nil || !strings.Contains(err.Error(), string(FragTaskRecovery)) {
+		t.Fatalf("nil recovery prose must fail actionably rather than panic: %v", err)
+	}
+}
+
+func TestOpenCodeRecoveryMissingAuthorReturnsActionableError(t *testing.T) {
+	t.Parallel()
+	_, err := openCodeRecoveryJSON(map[FragmentId]SharedFragment{FragTaskRecovery: SharedFragmentSpecs[FragTaskRecovery]})
+	if err == nil || !strings.Contains(err.Error(), string(FragTaskAuthor)) {
+		t.Fatalf("missing attribution must fail actionably rather than panic: %v", err)
+	}
+}

@@ -2552,3 +2552,15 @@ bytes, provenance sidecars, historical digests, pairing and acceptance records
 above remain unchanged. This addendum records no new live session, capture,
 fixture acceptance, installed configuration change or host capability. Live
 replacement deployment and fresh-session verification remain separate work.
+
+### Recovery review hardening — 2026-10-11
+
+The current committed plugin SHA-256 is
+`5a70d61088a561ad0a9be8a5610a13619cb68403ba66a5e51b67bf9fc22551f4`.
+This later revision makes injection diagnostics once-per-registration and
+documents the void callback contract and the source-declared, not yet live-
+capture-proved mutation. Tests now pin consultation-before-injection explicitly.
+No lifecycle response or registration surface changed. The preceding digest
+identifies the initial recovery revision; neither revision participated in the
+historical captures above. All prior fixture bytes, sidecars, historical digests
+and user acceptance remain unchanged. No new live verification is claimed.

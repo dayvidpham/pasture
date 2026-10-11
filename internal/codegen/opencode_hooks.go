@@ -202,9 +202,9 @@ func generateOpenCodeHooksModule(manifest []registration.Event, activationEntrie
 	}
 	// Reuse the same canonical prose the skill bodies render; attribution is
 	// a separate shared fragment, not a second authored recovery text.
-	recovery, err := json.Marshal(SharedFragmentSpecs[FragTaskRecovery].Prose.Content + "\n\n" + SharedFragmentSpecs[FragTaskAuthor].Prose.Content)
+	recovery, err := openCodeRecoveryJSON(SharedFragmentSpecs)
 	if err != nil {
-		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: encode shared recovery prose before emission: %w; restore the shared fragments and regenerate", err)
+		return "", err
 	}
 	return renderOpenCodeHooksTemplate(string(source), openCodeHooksTemplateData{
 		Contract:     metadata.Contract,
@@ -214,8 +214,23 @@ func generateOpenCodeHooksModule(manifest []registration.Event, activationEntrie
 		BinaryEnv:    adapterBinaryEnv,
 		Helpers:      helpers,
 		Setup:        setup,
-		RecoveryJSON: string(recovery),
+		RecoveryJSON: recovery,
 	}), nil
+}
+
+func openCodeRecoveryJSON(fragments map[FragmentId]SharedFragment) (string, error) {
+	var contents []string
+	for _, id := range []FragmentId{FragTaskRecovery, FragTaskAuthor} {
+		fragment, ok := fragments[id]
+		if !ok || fragment.Kind != FragmentKindProse || fragment.Prose == nil || strings.TrimSpace(fragment.Prose.Content) == "" {
+			return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: shared recovery fragment %q is missing or has no prose during plugin emission; no plugin emitted — restore its prose in internal/codegen/specs_data_fragments.go and regenerate", id)
+		}
+		contents = append(contents, fragment.Prose.Content)
+	}
+	// JSON encoding a string cannot fail; fragment lookup is the actual fallible
+	// boundary, including direct callers outside the all-target generator.
+	encoded, _ := json.Marshal(strings.Join(contents, "\n\n"))
+	return string(encoded), nil
 }
 
 // openCodeHookTarget splits one dotted 2.0.20 native coordinate into the

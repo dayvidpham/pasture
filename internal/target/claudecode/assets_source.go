@@ -204,7 +204,8 @@ func SortedAssetKeys(m map[string][]byte) []string {
 // emits (its assets-relative path is absent from generated). It enumerates only
 // the codegen-driven surface: generated skills, agents, hooks.json, and the
 // lifecycle adapter, verbatim skill trees and Git discipline payload. Plugin
-// scaffolding and the legacy context payload are never reported or removed.
+// scaffolding is never reported or removed. The retired legacy context payload
+// path is managed so any reintroduced embedded copy is reported and pruned.
 func StaleGeneratedAssets(assetsDir string, generated map[string][]byte) ([]string, error) {
 	var stale []string
 	for _, packageDir := range []string{skillsPackageDir, agentsPackageDir, hooksPackageDir} {

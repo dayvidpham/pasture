@@ -18,6 +18,9 @@ const TASK_RECOVERY_TEXT = "__PASTURE_RECOVERY_LITERAL__";
 // OpenCode 2.0.20 packages/plugin/src/promise/session.ts declares system as
 // Array<SystemPart>; text parts have type and text, not a native source field.
 // A stable prefix owns only our whole part, never unrelated embedded text.
+// Mutation is source-declared, not yet proved by a fresh live recovery capture.
+// Runtime tests prove callback composition; deployment must separately verify
+// that the running host consumes this system text in its outgoing request.
 function injectTaskRecovery(event): void {
   if (!Array.isArray(event?.system)) throw new Error("context system is not the pinned host's mutable SystemPart array");
   const replacement = { type: "text", text: TASK_RECOVERY_MARKER + "\n" + TASK_RECOVERY_TEXT };
@@ -40,7 +43,8 @@ function reportRecoveryFault(ctx, operation: string, error): void {
     "; the host continues and other lifecycle callbacks remain installed. Recovery may be missing; regenerate/reinstall the OpenCode 2.0.20 lifecycle module and restart the session; use the generated skill recovery instructions meanwhile.");
 }
 
-function withTaskRecovery(ctx, lifecycleCallback) {
+function withTaskRecovery(ctx, lifecycleCallback: (event: any) => Promise<void>) {
+  let reported = false;
   return async (hookEvent) => {
     // Consult lifecycle with the original host payload. A recovery fault cannot
     // suppress the receipt transport or change its decision handling.
@@ -48,7 +52,10 @@ function withTaskRecovery(ctx, lifecycleCallback) {
     try {
       injectTaskRecovery(hookEvent);
     } catch (error) {
-      reportRecoveryFault(ctx, "session.context injection", error);
+      if (!reported) {
+        reported = true;
+        reportRecoveryFault(ctx, "session.context injection", error);
+      }
     }
   };
 }
