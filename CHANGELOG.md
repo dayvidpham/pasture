@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.0.17] - 2026-10-11
+
+### Added
+- feat(storage): carry hook context through SQLite activation
+- feat: replace bd-prime injection with pasture recovery
+
+### Fixed
+- fix: replace live FOLLOWUP_URD blocker edges with frontmatter references
+- fix: register the well-known automaton agents by default (CLI-only installs)
+
+### Changed
+- refactor: harden recovery composition and fragment errors
+- refactor(codegen): complete tracker regeneration across targets
+- refactor: convert canonical skill sources to pasture task
+
+### Other
+- Merge pull request #184 from dayvidpham/pasture-43--feat--recovery-replacement
+- Merge pull request #185 from dayvidpham/pasture-162--feat--context-threading
+- Merge pull request #183 from dayvidpham/pasture-43--refactor--bd-regen-completeness
+- Merge pull request #182 from dayvidpham/pasture-43--refactor--bd-source-conversion
+- Merge pull request #181 from dayvidpham/pasture-180--fix--well-known-agents-default
+
 ## [0.0.16] - 2026-10-10
 
 ### Added
