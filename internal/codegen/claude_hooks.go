@@ -205,14 +205,6 @@ func emitClaudeHooks(root string, opts GenerateOptions, manifest registration.Ma
 	if len(stateByKind) != len(manifest.Events) {
 		return nil, fmt.Errorf("codegen.emitClaudeHooks: activation has %d entries for %d generated events; remove non-manifest entries and provide one exact decision per event", len(stateByKind), len(manifest.Events))
 	}
-	if groups := config.Hooks["SessionStart"]; len(groups) > 0 {
-		groups[0].Hooks = append([]claudeHookCommand{{Type: "command", Command: "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1"}}, groups[0].Hooks...)
-		config.Hooks["SessionStart"] = groups
-	}
-	if groups := config.Hooks["PreCompact"]; len(groups) > 0 {
-		groups[0].Hooks = append([]claudeHookCommand{{Type: "command", Command: "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1"}}, groups[0].Hooks...)
-		config.Hooks["PreCompact"] = groups
-	}
 	config.Hooks["PreToolUse"] = append([]claudeHookGroup{{
 		Matcher: "Bash",
 		Hooks: []claudeHookCommand{{

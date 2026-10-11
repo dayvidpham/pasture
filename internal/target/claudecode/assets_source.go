@@ -22,8 +22,8 @@ import (
 //
 // Verbatim skills come from skills/protocol and skills/install-cli; the Git
 // discipline payload comes from hooks/scripts/git-discipline.sh. Package
-// scaffolding and the legacy context payload remain authored in this assets
-// tree until their respective owning generators retire or replace them.
+// scaffolding remains authored in this assets tree. The legacy context payload
+// is retired; recovery prose now belongs to the generated skills.
 const (
 	// assetsDirName is the on-disk directory (relative to this package) that the
 	// //go:embed all:assets directive captures.
@@ -254,6 +254,7 @@ func isManagedGeneratedPath(packageDir, assetsRel string) bool {
 		return !strings.Contains(assetsRel, "/.claude-plugin/")
 	}
 	return assetsRel == hooksPackageDir+"/hooks/scripts/git-discipline.sh" ||
+		assetsRel == hooksPackageDir+"/hooks/bd-prime.md" ||
 		assetsRel == hooksPackageDir+"/hooks/hooks.json" ||
 		assetsRel == hooksPackageDir+"/hooks/pasture-activation.json"
 }
