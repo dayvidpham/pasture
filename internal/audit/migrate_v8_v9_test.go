@@ -378,7 +378,7 @@ func TestMigrateV8ToV9RollsBackEveryDropWhenTheStepFails(t *testing.T) {
 	db := openV8AssignmentIndex(t)
 	injected := errors.New("injected failure after the first drop")
 
-	err := runStep(db, migrationStep{
+	err := runStep(t.Context(), db, migrationStep{
 		fromVersion: 8,
 		toVersion:   9,
 		apply: func(tx *sql.Tx, _ int64) error {

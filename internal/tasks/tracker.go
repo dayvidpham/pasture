@@ -139,37 +139,46 @@ func (t *trackerImpl) lifecycleDiagnosticSink() io.Writer        { return t.diag
 // that Timeline never issues PRAGMA table_info more than once per tracker
 // lifetime.
 func newTrackerImpl(prov provenance.Tracker, trail audit.Trail, auditDB *sql.DB) *trackerImpl {
+	t, err := newTrackerImplContext(context.Background(), prov, trail, auditDB, false)
+	if err != nil {
+		t = &trackerImpl{prov: prov, trail: trail, auditDB: auditDB, pastureTablesErr: err}
+		t.pastureTablesOnce.Do(func() {})
+	}
+	return t
+}
+
+// tablesReady seeds the Once after the production opener has completed setup,
+// rather than issuing the defensive DDL a second time.
+func newTrackerImplContext(ctx context.Context, prov provenance.Tracker, trail audit.Trail, auditDB *sql.DB, tablesReady bool) (*trackerImpl, error) {
 	t := &trackerImpl{
 		prov:    prov,
 		trail:   trail,
 		auditDB: auditDB,
 	}
 
-	// Prime the pasture tables and column-cache eagerly. openTaskTrackerImpl
-	// already called ensurePastureTables before reaching here, so this is
-	// effectively a no-op (the Once body runs but the DDL is idempotent and
-	// fast). For test helpers that bypass openTaskTrackerImpl the Once ensures
-	// the tables exist before any method body touches them.
+	// The production opener completed table setup before borrowed activation.
+	// Seed the Once without repeating DDL; white-box helpers still initialize it.
 	t.pastureTablesOnce.Do(func() {
-		t.pastureTablesErr = ensurePastureTables(auditDB)
+		if !tablesReady {
+			t.pastureTablesErr = ensurePastureTablesContext(ctx, auditDB)
+		}
 	})
 
-	// Probe the audit_events schema once. If auditDB is nil or
-	// ensurePastureTables failed we leave both flags false (safe default:
-	// callers will receive a storage error when they actually try to query).
-	if auditDB != nil && t.pastureTablesErr == nil {
-		// Use a background context for the one-time probe; it is not
-		// cancellable by the caller because it happens at construction time.
-		ctx := context.Background()
-		if hasRole, err := auditEventsHasColumn(ctx, auditDB, "role"); err == nil {
-			t.hasRoleColumn = hasRole
-		}
-		if hasEpochId, err := auditEventsHasColumn(ctx, auditDB, "epoch_id"); err == nil {
-			t.hasEpochIDColumn = hasEpochId
-		}
+	// A failed or cancelled probe is an initialization error, not a false
+	// cached column flag on a usable tracker.
+	if t.pastureTablesErr != nil {
+		return nil, t.pastureTablesErr
 	}
-
-	return t
+	var err error
+	t.hasRoleColumn, err = auditEventsHasColumn(ctx, auditDB, "role")
+	if err != nil {
+		return nil, err
+	}
+	t.hasEpochIDColumn, err = auditEventsHasColumn(ctx, auditDB, "epoch_id")
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func (t *trackerImpl) InitializeGovernedRoot(ctx context.Context, request provenance.RootGenesisRequest) (provenance.OperationClosure, error) {
@@ -181,8 +190,12 @@ func (t *trackerImpl) InitializeGovernedRoot(ctx context.Context, request proven
 // that was already fired in newTrackerImpl (so this is a no-op on the hot
 // path) and returns the cached error if the initial DDL call failed.
 func (t *trackerImpl) ensurePastureTablesOnce() error {
+	return t.ensurePastureTablesOnceContext(context.Background())
+}
+
+func (t *trackerImpl) ensurePastureTablesOnceContext(ctx context.Context) error {
 	t.pastureTablesOnce.Do(func() {
-		t.pastureTablesErr = ensurePastureTables(t.auditDB)
+		t.pastureTablesErr = ensurePastureTablesContext(ctx, t.auditDB)
 	})
 	return t.pastureTablesErr
 }
@@ -614,7 +627,7 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventId int64, kind pro
 		}
 	}
 
-	if err := t.ensurePastureTablesOnce(); err != nil {
+	if err := t.ensurePastureTablesOnceContext(ctx); err != nil {
 		return err
 	}
 
@@ -652,7 +665,7 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventId int64, kind pro
 // insertion order (rowid ASC). Returns an empty (non-nil) slice when no
 // edges exist for eventId.
 func (t *trackerImpl) EventContexts(ctx context.Context, eventId int64) ([]protocol.Context, error) {
-	if err := t.ensurePastureTablesOnce(); err != nil {
+	if err := t.ensurePastureTablesOnceContext(ctx); err != nil {
 		return nil, err
 	}
 
@@ -766,7 +779,7 @@ func (t *trackerImpl) Timeline(ctx context.Context, kind protocol.ContextKind, c
 		return []protocol.AuditEvent{}, nil
 	}
 
-	if err := t.ensurePastureTablesOnce(); err != nil {
+	if err := t.ensurePastureTablesOnceContext(ctx); err != nil {
 		return nil, err
 	}
 

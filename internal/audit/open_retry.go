@@ -59,19 +59,30 @@ func retryOnBusy(ctx context.Context, policy busyRetryPolicy, dbPath, doing stri
 	deadline := time.Now().Add(policy.ceiling)
 	delay := policy.initialDelay
 	attempts := 0
+	var lastErr error
 	for {
+		if err := ctx.Err(); err != nil {
+			return openCancelledError(dbPath, doing, attempts, err, nil)
+		}
+		if attempts > 0 && !time.Now().Before(deadline) {
+			return openHeldByAnotherProcessError(dbPath, doing, policy.ceiling, attempts, lastErr)
+		}
 		attempts++
 		err := op()
 		if err == nil {
 			return nil
 		}
+		if ctx.Err() != nil {
+			return openCancelledError(dbPath, doing, attempts, ctx.Err(), err)
+		}
+		lastErr = err
 		if !isBusyError(err) {
 			return err
 		}
 		if time.Now().After(deadline) {
 			return openHeldByAnotherProcessError(dbPath, doing, policy.ceiling, attempts, err)
 		}
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(min(delay, max(time.Until(deadline), 0)))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -138,11 +149,11 @@ func openCancelledError(dbPath, doing string, attempts int, cancelCause, lastErr
 				"when its caller cancelled start-up (last error: %v).",
 			attempts, doing, dbPath, lastErr),
 		Where:  "Opening the audit database (internal/audit/sqlite.go in audit.NewSqliteAuditTrail).",
-		Impact: "This process didn't open the audit database. No data was changed by this attempt.",
+		Impact: "This process didn't open the audit database. Earlier completed setup or migration steps may remain; an uncommitted migration step is rolled back.",
 		Fix: "1. Identify what cancelled start-up (an interrupted command, a shutdown signal, a caller\n" +
 			"   timeout) and let it clear.\n" +
 			"2. Run the command again once the other process has finished with the file:\n" +
 			"     pgrep -fa 'pasture|pastured'",
-		Cause: cancelCause,
+		Cause: errors.Join(cancelCause, lastErr),
 	}
 }

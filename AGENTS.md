@@ -187,14 +187,13 @@ or plugin process-kill limits are separate: the in-process fence cannot promise
 delivery after the process is terminated. The fence does not lengthen a work
 context or retry an append; it waits for the existing append to settle.
 
-The context does NOT reach the code that waits. `OpenTaskTracker` takes no
-context and `audit.Migrate` has none either, so the retry loop below opens with
-its own background context and runs to its own ceiling. The loops themselves do
-honour a context; they are simply never given one. The goroutine and select at
-the hook boundary can abandon this pre-fence work. Once receipt commit is in
-flight it instead waits for settlement as described above. Threading a context
-through the opener is tracked separately; the deadline does not bound that
-opener's retry loop.
+The hook passes its context through `OpenTaskTrackerContext`, audit setup and
+`MigrateContext`, connection initialization and borrowed Provenance activation.
+The compatibility `OpenTaskTracker` and `audit.Migrate` entry points delegate
+with Background for callers with no cancellation budget. The goroutine and
+select at the hook boundary still permit pre-fence abandonment without joining
+worker cleanup. Once receipt commit is in flight the command instead waits for
+settlement as described above.
 
 Two longer retry ceilings sit **above** the profile and are not part of it.
 Both bound a retry loop, not a single wait, and both are 30 s:
@@ -582,7 +581,7 @@ do not promise a snapshot under concurrent writers.
 | `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
 | `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
 | `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `github.com/dayvidpham/provenance` | v0.3.0 | Task, edge and receipt store; built on the same DBOS version |
+| `github.com/dayvidpham/provenance` | v0.4.0 | Task, edge and receipt store; context-aware borrowed activation; built on the same DBOS version |
 | `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
 | `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |

@@ -102,13 +102,29 @@ func WithSkipMigrations() SqliteAuditTrailOption {
 //
 // The caller must call Close when done to release the file handle.
 func NewSqliteAuditTrail(dbPath string) (*SqliteAuditTrail, error) {
-	return NewSqliteAuditTrailWithOptions(dbPath)
+	return NewSqliteAuditTrailContext(context.Background(), dbPath)
+}
+
+// NewSqliteAuditTrailContext uses ctx for connection setup and migrations only.
+func NewSqliteAuditTrailContext(ctx context.Context, dbPath string) (*SqliteAuditTrail, error) {
+	return NewSqliteAuditTrailContextWithOptions(ctx, dbPath)
 }
 
 // NewSqliteAuditTrailWithOptions opens the SQLite audit trail with explicit
 // opt-in behavior for tests that need to bypass migrations on a known-current
 // golden database.
 func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOption) (*SqliteAuditTrail, error) {
+	return NewSqliteAuditTrailContextWithOptions(context.Background(), dbPath, opts...)
+}
+
+// NewSqliteAuditTrailContextWithOptions refuses nil ctx and does not retain it.
+func NewSqliteAuditTrailContextWithOptions(ctx context.Context, dbPath string, opts ...SqliteAuditTrailOption) (*SqliteAuditTrail, error) {
+	if ctx == nil {
+		return nil, contextValidationError("NewSqliteAuditTrailContextWithOptions")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, openCancelledError(dbPath, "start audit setup", 0, err, nil)
+	}
 	cfg := sqliteAuditTrailOptions{}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -141,11 +157,9 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	// methods) is a write transaction that should hold the lock from
 	// statement one. The cost is negligible — IMMEDIATE acquires the same
 	// lock DEFERRED would have lazily, just earlier.
-	// The shared DSN encodes the full concurrency contract as connection-string
-	// params (WAL, the profile's busy_timeout, synchronous=NORMAL,
-	// foreign_keys=ON, _txlock=immediate), applied to every connection in the
-	// pool.
-	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(dbPath, cfg.timeouts))
+	// The connector applies the same static concurrency contract to every
+	// connection, with setup SQL governed by that connection's acquisition ctx.
+	db, err := dbconn.NewSharedDBWithProfile(dbPath, cfg.timeouts)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"audit.NewSqliteAuditTrail: cannot open database at %q: %w — "+
@@ -167,7 +181,7 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	db.SetMaxOpenConns(1)
 
 	if cfg.skipMigrations {
-		if err := assertCurrentSchema(db); err != nil {
+		if err := assertCurrentSchemaContext(ctx, db); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -197,7 +211,7 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	if busyRetry == (busyRetryPolicy{}) {
 		busyRetry = defaultBusyRetryPolicy()
 	}
-	openCtx := context.Background()
+	openCtx := ctx
 	if err := execWithBusyRetry(openCtx, busyRetry, db, dbPath,
 		"relax foreign-key enforcement for the migration window", `PRAGMA foreign_keys=OFF`); err != nil {
 		db.Close()
@@ -214,7 +228,7 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	// lock the other process held for longer than one busy window is safe to
 	// run again.
 	if err := retryOnBusy(openCtx, busyRetry, dbPath, "create the audit tables", func() error {
-		return ensureSchema(db)
+		return ensureSchemaContext(ctx, db)
 	}); err != nil {
 		db.Close()
 		if isStructuredError(err) {
@@ -234,13 +248,13 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 	// wrote it), Migrate returns a *pasterrors.StructuredError with
 	// Category=CategoryStorage — propagated unwrapped so callers can
 	// errors.As() it (PROPOSAL-2 §11 Scenario 5).
-	if err := Migrate(db); err != nil {
+	if err := MigrateContext(ctx, db); err != nil {
 		db.Close()
 		return nil, err
 	}
 
 	// Restore foreign-key enforcement now that the rebuild migrations are done.
-	if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys=ON`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf(
 			"audit.NewSqliteAuditTrail: cannot restore foreign-key enforcement after migration on %q: %w",
@@ -255,7 +269,11 @@ func NewSqliteAuditTrailWithOptions(dbPath string, opts ...SqliteAuditTrailOptio
 }
 
 func assertCurrentSchema(db *sql.DB) error {
-	version, err := ReadSchemaVersion(db)
+	return assertCurrentSchemaContext(context.Background(), db)
+}
+
+func assertCurrentSchemaContext(ctx context.Context, db *sql.DB) error {
+	version, err := readVersionContext(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -996,7 +1014,11 @@ func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionId stri
 // caller that writes during this window (NewSqliteAuditTrail runs
 // ensureSchema then Migrate then returns the trail handle).
 func ensureSchema(db *sql.DB) error {
-	_, err := db.Exec(`
+	return ensureSchemaContext(context.Background(), db)
+}
+
+func ensureSchemaContext(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS audit_events (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			epoch_id   TEXT    NOT NULL,
@@ -1011,7 +1033,7 @@ func ensureSchema(db *sql.DB) error {
 		return fmt.Errorf("create table audit_events: %w", err)
 	}
 
-	_, err = db.Exec(`
+	_, err = db.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS session_entries (
 			id               INTEGER PRIMARY KEY AUTOINCREMENT,
 			session_id       TEXT    NOT NULL,
@@ -1044,7 +1066,7 @@ func ensureSchema(db *sql.DB) error {
 		return fmt.Errorf("create table session_entries: %w", err)
 	}
 
-	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_id ON session_entries (session_id)`)
+	_, err = db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_session_id ON session_entries (session_id)`)
 	if err != nil {
 		return fmt.Errorf("create index idx_session_id: %w", err)
 	}

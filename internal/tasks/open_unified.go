@@ -73,7 +73,13 @@ func init() {
 // This is the in-package entry point. External callers should use
 // protocol.OpenTaskTracker, which is wired through init() above.
 func OpenTaskTracker(dbPath string) (protocol.TaskTracker, error) {
-	return openTaskTrackerImpl(dbPath)
+	return OpenTaskTrackerContext(context.Background(), dbPath)
+}
+
+// OpenTaskTrackerContext carries the caller budget through every open phase.
+// The returned tracker does not retain this context.
+func OpenTaskTrackerContext(ctx context.Context, dbPath string) (protocol.TaskTracker, error) {
+	return openTaskTrackerWithOptions(ctx, dbPath, productionOpenDefaults())
 }
 
 type openTaskTrackerOptions struct {
@@ -83,6 +89,8 @@ type openTaskTrackerOptions struct {
 	timeouts           timeouts.Profile
 	clock              receipt.Clock
 	diagnostics        io.Writer
+	beforeActivation   func(context.Context, *sql.DB) error
+	activationObserver func(string)
 }
 
 func WithTimeoutProfile(profile timeouts.Profile) OpenTaskTrackerOption {
@@ -144,21 +152,33 @@ func WithMaxOpenConns(n int) OpenTaskTrackerOption {
 // OpenTaskTrackerWithOptions opens the unified tracker with explicit opt-in
 // behavior for tests that copy a current golden database.
 func OpenTaskTrackerWithOptions(dbPath string, opts ...OpenTaskTrackerOption) (protocol.TaskTracker, error) {
+	return OpenTaskTrackerContextWithOptions(context.Background(), dbPath, opts...)
+}
+
+// OpenTaskTrackerContextWithOptions opens through the same production path
+// with explicit opt-in test configuration and the caller's opening budget.
+func OpenTaskTrackerContextWithOptions(ctx context.Context, dbPath string, opts ...OpenTaskTrackerOption) (protocol.TaskTracker, error) {
 	cfg := productionOpenDefaults()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	return openTaskTrackerWithOptions(dbPath, cfg)
+	return openTaskTrackerWithOptions(ctx, dbPath, cfg)
 }
 
 // openTaskTrackerImpl is the actual constructor. Split out so init() can
 // register it without recursive resolution of the public OpenTaskTracker
 // symbol via the protocol package.
 func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
-	return openTaskTrackerWithOptions(dbPath, productionOpenDefaults())
+	return OpenTaskTrackerContext(context.Background(), dbPath)
 }
 
-func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (protocol.TaskTracker, error) {
+func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTaskTrackerOptions) (protocol.TaskTracker, error) {
+	if ctx == nil {
+		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The unified store has no opening context.", Why: "A nil context cannot govern SQLite waits.", Where: "tasks.openTaskTrackerWithOptions entry (internal/tasks/open_unified.go)", Impact: "No handles were opened.", Fix: "Supply a live context or use OpenTaskTracker."}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, wrapOpenError(dbPath, "opening context", err)
+	}
 	if cfg.timeouts.IsZero() {
 		cfg.timeouts = timeouts.ProductionProfile()
 	}
@@ -216,9 +236,9 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	var trail *audit.SqliteAuditTrail
 	var err error
 	if cfg.skipMigrations {
-		trail, err = audit.NewSqliteAuditTrailWithOptions(dbPath, audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.timeouts))
+		trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.timeouts))
 	} else {
-		trail, err = audit.NewSqliteAuditTrailWithOptions(dbPath, audit.WithTimeoutProfile(cfg.timeouts))
+		trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithTimeoutProfile(cfg.timeouts))
 	}
 	if err != nil {
 		return nil, wrapOpenError(dbPath, "audit subsystem", err)
@@ -231,7 +251,7 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	// same disk state. The shared DSN (WAL + busy_timeout + _txlock=immediate)
 	// gives this handle the same write serialisation as the audit handle.
 	// poolSize was already resolved above (WithMaxOpenConns > env > default 1).
-	auditDB, err := openAuditHandle(dbPath, poolSize, cfg.timeouts)
+	auditDB, err := openAuditHandleContext(ctx, dbPath, poolSize, cfg.timeouts)
 	if err != nil {
 		_ = trail.Close()
 		return nil, err
@@ -242,7 +262,7 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	// S5's race test (which writes to context_edges) without forking the
 	// schema. Once S2 lands the migrator runs the same DDL inside its
 	// transaction and this call is a no-op.
-	if err := ensurePastureTables(auditDB); err != nil {
+	if err := ensurePastureTablesContext(ctx, auditDB); err != nil {
 		_ = auditDB.Close()
 		_ = trail.Close()
 		return nil, err
@@ -251,7 +271,15 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	// Provenance borrows auditDB, not the audit trail's separate pool. The
 	// returned tracker owns auditDB and must close it after the borrower has
 	// drained its scopes; closing Provenance alone never closes this pool.
-	prov, err := provenance.OpenBorrowedSQLite(auditDB)
+	if cfg.beforeActivation != nil {
+		if err := cfg.beforeActivation(ctx, auditDB); err != nil {
+			_ = auditDB.Close()
+			_ = trail.Close()
+			return nil, wrapOpenError(dbPath, "pre-activation boundary", err)
+		}
+	}
+	activationOptions := borrowedActivationOptions(cfg)
+	prov, err := provenance.OpenBorrowedSQLiteContext(ctx, auditDB, activationOptions...)
 	if err != nil {
 		_ = auditDB.Close()
 		_ = trail.Close()
@@ -278,7 +306,13 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 		}
 	}
 
-	tracker := newTrackerImpl(prov, trail, auditDB)
+	tracker, err := newTrackerImplContext(ctx, prov, trail, auditDB, true)
+	if err != nil {
+		_ = prov.Close()
+		_ = auditDB.Close()
+		_ = trail.Close()
+		return nil, wrapOpenError(dbPath, "schema initialization", err)
+	}
 	tracker.timeoutProfile = cfg.timeouts
 	tracker.storeClock = cfg.clock
 	tracker.diagnostics = cfg.diagnostics
@@ -286,7 +320,7 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 	// Durable CLI and daemon callers receive the same complete registry. The
 	// daemon separately recovers these IDs into its startup cache.
 	cache := NewWellKnownAgentCache()
-	if err := RegisterWellKnownAgents(context.Background(), tracker, cache); err != nil {
+	if err := RegisterWellKnownAgents(ctx, tracker, cache); err != nil {
 		_ = tracker.Close()
 		category := pasterrors.CategoryStorage
 		var registrationError *pasterrors.StructuredError
@@ -312,7 +346,11 @@ func openTaskTrackerWithOptions(dbPath string, cfg openTaskTrackerOptions) (prot
 // handle serialise correctly against audit and Provenance writes. The WAL
 // multi-writer model + busy_timeout replaces the former single-connection cap.
 func openAuditHandle(dbPath string, maxOpenConns int, profile timeouts.Profile) (*sql.DB, error) {
-	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(dbPath, profile))
+	return openAuditHandleContext(context.Background(), dbPath, maxOpenConns, profile)
+}
+
+func openAuditHandleContext(ctx context.Context, dbPath string, maxOpenConns int, profile timeouts.Profile) (*sql.DB, error) {
+	db, err := dbconn.OpenSharedDBContextWithProfile(ctx, dbPath, profile)
 	if err != nil {
 		return nil, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryConnection,
@@ -410,6 +448,10 @@ func wrapOpenError(dbPath, subsystem string, err error) error {
 //     Timeline (defensively, in case the wrapper is constructed via test
 //     helpers that bypass openTaskTrackerImpl).
 func ensurePastureTables(db *sql.DB) error {
+	return ensurePastureTablesContext(context.Background(), db)
+}
+
+func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -501,7 +543,7 @@ func ensurePastureTables(db *sql.DB) error {
 	}
 
 	for _, s := range statements {
-		if _, err := db.Exec(s.ddl); err != nil {
+		if _, err := db.ExecContext(ctx, s.ddl); err != nil {
 			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What:     fmt.Sprintf("Pasture couldn't create the %q table in the database.", s.name),

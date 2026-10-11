@@ -287,13 +287,10 @@ func lifecycleOutcomeWithCompletion(
 	// brief; no delivery is promised after an external host kills the process.
 	//
 	// The deadline is enforced HERE, around the work, and not only by handing a
-	// context down. Layers below retry a locked SQLite database on their own
-	// ceilings, which are longer than the smallest host budget, and the deadline context
-	// does not reach all of them: the store opener takes no context, so the
-	// migrator below it runs to its own ceiling whatever this deadline says.
-	// Measured on a database held under a write lock, the hook returned after
-	// about 31 seconds, three times the Claude budget. Selecting on the deadline
-	// bounds pre-fence waiting despite that opener. It is NOT a hard response
+	// context down. The opener, connection setup and migrator now receive this
+	// context, so their longer compatibility retry ceilings cannot outlive it.
+	// Selecting on the deadline still bounds pre-fence host waiting independently
+	// of worker cleanup. It is NOT a hard response
 	// cap after entry into the receipt commit fence.
 	//
 	// Waiting for entered commit settlement, fault reporting and stream writes

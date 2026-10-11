@@ -363,7 +363,7 @@ func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 			case "hookLifecycle":
 				coreCallers++
 				require.Len(t, call.Args, 4, "%s calls the core with the wrong shape", name)
-				require.Equal(t, "tasks.OpenTaskTracker", gateSourceOf(call.Args[2]),
+				require.Equal(t, "tasks.OpenTaskTrackerContext", gateSourceOf(call.Args[2]),
 					"the core must open the unified store itself, so the receipt and the gate read share one file")
 				require.Equal(t, "tasks.NewGateReader", gateSourceOf(call.Args[3]),
 					"PRODUCTION MUST SUPPLY THE REAL READER. A caller that passes anything else evaluates the gate "+
@@ -436,7 +436,7 @@ func TestObservationNeverConsultsTheReader(t *testing.T) {
 	reader := &gateFakeReader{fault: errors.New("the reader must not be reached for an observation")}
 	dbPath := gateStore(t)
 
-	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "SessionStart", raw), tasks.OpenTaskTracker, reader.gateFactory)
+	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "SessionStart", raw), tasks.OpenTaskTrackerContext, reader.gateFactory)
 
 	require.NoError(t, err, "an observation is answered by the middle end and needs no reader")
 	require.Empty(t, reader.opened, "the reader factory must not be called for an observation")
@@ -458,7 +458,7 @@ func TestTheGateConsultsTheReaderWithTheBoundSession(t *testing.T) {
 	reader := &gateFakeReader{snap: snapshot}
 	dbPath := gateStore(t)
 
-	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker, reader.gateFactory)
+	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTrackerContext, reader.gateFactory)
 
 	require.NoError(t, err)
 	require.Equal(t, []gateOpened{{harness: ir.HarnessClaudeCode, session: GateSessionIdentity(t, raw, "session_id")}}, reader.opened,
@@ -485,7 +485,7 @@ func TestTheGateDeniesABoundActorWithNoAssignment(t *testing.T) {
 	reader := &gateFakeReader{snap: snapshot}
 	dbPath := gateStore(t)
 
-	response, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker, reader.gateFactory)
+	response, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTrackerContext, reader.gateFactory)
 
 	require.NoError(t, err, "a denial is a decision, not a fault")
 	require.True(t, response.IsValid(), "a denial reaches the host as a response")
@@ -507,7 +507,7 @@ func TestAnUnboundSessionProceedsWithoutAReaderFault(t *testing.T) {
 	reader := &gateFakeReader{snap: snapshot}
 	dbPath := gateStore(t)
 
-	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker, reader.gateFactory)
+	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTrackerContext, reader.gateFactory)
 
 	require.NoError(t, err)
 	require.Empty(t, snapshot.askedAbout,
@@ -760,7 +760,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 			reader := row.build()
 			dbPath := gateStore(t)
 
-			_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker, reader.gateFactory)
+			_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTrackerContext, reader.gateFactory)
 
 			require.Error(t, err, "a read or evaluation fault is an error; it is never a decision the host may act on")
 			require.ErrorIs(t, err, ErrLifecycleBeforeDurableWrite,
@@ -802,7 +802,7 @@ func TestReaderConstructionFaultKeepsItsKind(t *testing.T) {
 	dbPath := gateStore(t)
 	cause := &tasks.GateReaderScopeError{Operation: "open a gate reader over a store that is not the unified Pasture task store"}
 
-	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTracker,
+	_, err := hookLifecycle(t.Context(), gateInput(t, dbPath, "PreToolUse", raw), tasks.OpenTaskTrackerContext,
 		func(protocol.TaskTracker, ir.HarnessID, string) (gateauthority.Reader, error) { return nil, cause })
 
 	require.ErrorIs(t, err, cause)
