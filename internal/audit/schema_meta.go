@@ -17,6 +17,7 @@
 package audit
 
 import (
+	"context"
 	"database/sql"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -40,8 +41,12 @@ CREATE TABLE IF NOT EXISTS audit_schema_meta (
 // The error return covers infrastructure failures only (db handle closed,
 // file deleted mid-query); a missing table is not an error.
 func schemaMetaTableExists(db *sql.DB) (bool, error) {
+	return schemaMetaTableExistsContext(context.Background(), db)
+}
+
+func schemaMetaTableExistsContext(ctx context.Context, db *sql.DB) (bool, error) {
 	var name string
-	err := db.QueryRow(
+	err := db.QueryRowContext(ctx,
 		`SELECT name FROM sqlite_master WHERE type='table' AND name='audit_schema_meta'`,
 	).Scan(&name)
 	switch {
@@ -73,7 +78,11 @@ func schemaMetaTableExists(db *sql.DB) (bool, error) {
 // Returns 0 only on infrastructure failure (with a *StructuredError); a
 // successfully-detected legacy database always returns 1.
 func readVersion(db *sql.DB) (int, error) {
-	exists, err := schemaMetaTableExists(db)
+	return readVersionContext(context.Background(), db)
+}
+
+func readVersionContext(ctx context.Context, db *sql.DB) (int, error) {
+	exists, err := schemaMetaTableExistsContext(ctx, db)
 	if err != nil {
 		return 0, err
 	}
@@ -83,7 +92,7 @@ func readVersion(db *sql.DB) (int, error) {
 	}
 
 	var version sql.NullInt64
-	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
+	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Couldn't read the audit database's current version.",

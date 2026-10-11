@@ -125,7 +125,7 @@ func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testin
 	controlInput.ActorClaim = tasks.ActorClaim("attempted-actor")
 	var controlDiagnostics bytes.Buffer
 	controlInput.Diagnostics = &controlDiagnostics
-	control, err := hookLifecycle(t.Context(), controlInput, tasks.OpenTaskTracker, tasks.NewGateReader)
+	control, err := hookLifecycle(t.Context(), controlInput, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err)
 	require.Empty(t, controlDiagnostics.String(), "a claim by the same actor is not a mismatch and must stay silent")
 
@@ -134,7 +134,7 @@ func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testin
 	var diagnostics bytes.Buffer
 	input.Diagnostics = &diagnostics
 
-	response, err := hookLifecycle(t.Context(), input, tasks.OpenTaskTracker, tasks.NewGateReader)
+	response, err := hookLifecycle(t.Context(), input, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err, "a claim mismatch must never fail the hook")
 	require.Equal(t, control, response, "the claim mismatch must not change the committed host response")
 	require.Equal(t, 1, strings.Count(diagnostics.String(), "\n"),
@@ -181,7 +181,7 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 	controlInput.ActorClaim = tasks.ActorClaim("loser-actor")
 	var controlDiagnostics bytes.Buffer
 	controlInput.Diagnostics = &controlDiagnostics
-	control, err := hookLifecycle(t.Context(), controlInput, tasks.OpenTaskTracker, tasks.NewGateReader)
+	control, err := hookLifecycle(t.Context(), controlInput, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err)
 	require.Empty(t, controlDiagnostics.String(), "a written claim is not a mismatch and must stay silent")
 
@@ -190,7 +190,7 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 	var diagnostics bytes.Buffer
 	input.Diagnostics = &diagnostics
 
-	response, err := hookLifecycle(t.Context(), input, tasks.OpenTaskTracker, tasks.NewGateReader)
+	response, err := hookLifecycle(t.Context(), input, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err, "a lost race must never fail the hook")
 	require.Equal(t, control, response, "the lost race must not change the committed host response")
 	require.Equal(t, 1, strings.Count(diagnostics.String(), "\n"),
@@ -217,7 +217,7 @@ func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
 	first.ActorClaim = tasks.ActorClaim("same-actor")
 	var firstDiagnostics bytes.Buffer
 	first.Diagnostics = &firstDiagnostics
-	_, err := hookLifecycle(t.Context(), first, tasks.OpenTaskTracker, tasks.NewGateReader)
+	_, err := hookLifecycle(t.Context(), first, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err)
 	require.Empty(t, firstDiagnostics.String(), "a written claim is not a mismatch")
 
@@ -226,7 +226,7 @@ func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
 	second.ActorClaim = tasks.ActorClaim("same-actor")
 	var secondDiagnostics bytes.Buffer
 	second.Diagnostics = &secondDiagnostics
-	_, err = hookLifecycle(t.Context(), second, tasks.OpenTaskTracker, tasks.NewGateReader)
+	_, err = hookLifecycle(t.Context(), second, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err)
 	require.Empty(t, secondDiagnostics.String(), "the same actor is not a mismatch")
 }

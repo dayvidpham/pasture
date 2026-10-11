@@ -86,7 +86,7 @@ type HookLifecycleInput struct {
 	Activations []activation.Entry
 }
 
-type lifecycleStoreOpener func(string) (protocol.TaskTracker, error)
+type lifecycleStoreOpener func(context.Context, string) (protocol.TaskTracker, error)
 
 // lifecycleReaderFactory opens the read side of the gate for ONE invocation: the
 // store the hook opened, the harness it was invoked for, and the session the
@@ -111,14 +111,14 @@ func HookLifecycle(ctx context.Context, in HookLifecycleInput) error {
 // HookLifecycleResponse records the lifecycle receipt before returning an
 // optional response to the native host.
 //
-// IT WIRES THE REAL DEPENDENCIES, AND THE PIN IS BY NAME. tasks.OpenTaskTracker
+// IT WIRES THE REAL DEPENDENCIES, AND THE PIN IS BY NAME. tasks.OpenTaskTrackerContext
 // is the store the receipt and the gate read share, and tasks.NewGateReader is
 // the only reader this build has; an in-process proof injects its own pair one
 // layer down, at hookLifecycle, so the production pairing is stated here where
 // a reader can see it and is checked by an AST scan rather than by a value a
 // table can compare.
 func HookLifecycleResponse(ctx context.Context, in HookLifecycleInput) (backend.HostResponse, error) {
-	return hookLifecycle(ctx, in, tasks.OpenTaskTracker, tasks.NewGateReader)
+	return hookLifecycle(ctx, in, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 }
 
 type lifecycleCapture struct {
@@ -319,7 +319,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	// EVIDENCE, and this is the evidence.
 	//
 	// THE REGION IS RE-DERIVED, AND IT IS NOT WHERE THE FIRST VERSION PUT IT.
-	// That version set the marker before open(in.DBPath) and called that "the
+	// That version set the marker before open(ctx, in.DBPath) and called that "the
 	// line the durable region begins". OPENING A STORE WRITES NO OCCURRENCE.
 	// A --db under a read-only directory therefore reported record-unknown and
 	// sent the operator to "the lifecycle occurrence journal" of a database
@@ -430,7 +430,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 			"The lifecycle parser returned inconsistent diagnostic evidence. "+err.Error(),
 			err.Error(), "No occurrence was written or evaluated.", "Report the parser result; do not infer a payload repair from it.", nil)
 	}
-	tracker, err := open(in.DBPath)
+	tracker, err := open(ctx, in.DBPath)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}

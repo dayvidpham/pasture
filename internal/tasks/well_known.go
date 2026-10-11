@@ -176,7 +176,13 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 	// this too (through the migrator path);
 	// repeating here means RegisterWellKnownAgents is robust to future
 	// constructor refactors that drop the defensive call.
-	if err := ensurePastureTables(auditDB); err != nil {
+	var setupErr error
+	if concrete, ok := tracker.(*trackerImpl); ok {
+		setupErr = concrete.ensurePastureTablesOnceContext(ctx)
+	} else {
+		setupErr = ensurePastureTablesContext(ctx, auditDB)
+	}
+	if err := setupErr; err != nil {
 		return err
 	}
 

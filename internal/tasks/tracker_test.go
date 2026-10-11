@@ -730,8 +730,8 @@ func TestEveryProductionOpenerPassesTheProcessStderrAndTheWallClock(t *testing.T
 				}
 				if ident.Name == "openTaskTrackerWithOptions" {
 					constructorCalls++
-					require.Len(t, call.Args, 2, "production opener %s: openTaskTrackerWithOptions takes the path and the options value", name)
-					assert.True(t, optionsRootedInProductionDefaults(call.Args[1], enclosing.Body),
+					require.Len(t, call.Args, 3, "production opener %s: openTaskTrackerWithOptions takes the context, path and options value", name)
+					assert.True(t, optionsRootedInProductionDefaults(call.Args[2], enclosing.Body),
 						"production opener %s passes openTaskTrackerWithOptions an options value that is not rooted in productionOpenDefaults() (in %s): it must pass the call itself or a local assigned from it, or the opener carries neither the process stderr nor the wall clock", name, enclosing.Name.Name)
 					return true
 				}

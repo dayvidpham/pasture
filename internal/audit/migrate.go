@@ -58,6 +58,7 @@ package audit
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -158,6 +159,17 @@ func migrationSteps() []migrationStep {
 // Callers should treat the returned error as a *pasterrors.StructuredError
 // (use errors.As).
 func Migrate(db *sql.DB) error {
+	return MigrateContext(context.Background(), db)
+}
+
+// MigrateContext applies whole migration steps under the caller's budget.
+func MigrateContext(ctx context.Context, db *sql.DB) error {
+	if ctx == nil {
+		return contextValidationError("MigrateContext")
+	}
+	if err := ctx.Err(); err != nil {
+		return migrationCancelledError("before schema read", err)
+	}
 	if db == nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -171,7 +183,7 @@ func Migrate(db *sql.DB) error {
 		}
 	}
 
-	currentVersion, err := readVersion(db)
+	currentVersion, err := readVersionContext(ctx, db)
 	if err != nil {
 		// readVersion already returns a *StructuredError.
 		return err
@@ -191,6 +203,9 @@ func Migrate(db *sql.DB) error {
 	// a crash between steps leaves the file at the most recent fully-
 	// committed version.
 	for _, step := range migrationSteps() {
+		if err := ctx.Err(); err != nil {
+			return migrationCancelledError("before next step", err)
+		}
 		if step.fromVersion < currentVersion {
 			continue
 		}
@@ -218,7 +233,7 @@ func Migrate(db *sql.DB) error {
 			}
 		}
 
-		if err := runStep(db, step); err != nil {
+		if err := runStep(ctx, db, step); err != nil {
 			// runStep returns *StructuredError already.
 			return err
 		}
@@ -266,8 +281,7 @@ func Migrate(db *sql.DB) error {
 // step's fromVersion while we were spinning, we roll back without
 // changes; the outer Migrate loop will see the new version and exit
 // cleanly (or pick up a later step).
-func runStep(db *sql.DB, step migrationStep) error {
-	ctx := context.Background()
+func runStep(ctx context.Context, db *sql.DB, step migrationStep) error {
 
 	tx, err := beginImmediateWithRetry(ctx, db, step.fromVersion, step.toVersion)
 	if err != nil {
@@ -316,22 +330,33 @@ func runStep(db *sql.DB, step migrationStep) error {
 	}
 
 	nowUnixNano := time.Now().UTC().UnixNano()
+	if err := ctx.Err(); err != nil {
+		return migrationCancelledError("before applying step", err)
+	}
 	if err := step.apply(tx, nowUnixNano); err != nil {
+		if ctx.Err() != nil {
+			return migrationCancelledError("during step application", errors.Join(ctx.Err(), err))
+		}
 		// step.apply returns *StructuredError already.
 		return err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return migrationCancelledError("before step commit", err)
+	}
 	if err := tx.Commit(); err != nil {
+		if ctx.Err() != nil {
+			return migrationCancelledError("during step commit; inspect recorded version before retrying", errors.Join(ctx.Err(), err))
+		}
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What: fmt.Sprintf(
 				"The upgrade from audit-database version %d to %d couldn't be saved.",
 				step.fromVersion, step.toVersion,
 			),
-			Why:   "The database refused to commit the upgrade transaction.",
-			Where: "Upgrading the audit database (internal/audit/migrate.go in audit.runStep).",
-			Impact: "The upgrade was rolled back — your audit database is unchanged and stays at the\n" +
-				"previous version. No data was lost; the upgrade simply didn't happen.",
+			Why:    "The database refused to commit the upgrade transaction.",
+			Where:  "Upgrading the audit database (internal/audit/migrate.go in audit.runStep).",
+			Impact: "The commit failed. Inspect the recorded schema version before retrying; earlier completed steps remain committed.",
 			Fix: "1. Confirm the audit database file is writable and the disk has free space:\n" +
 				"     ls -l <path-to-audit.db>\n" +
 				"     df -h <path-to-audit.db>\n" +
@@ -354,13 +379,30 @@ func runStep(db *sql.DB, step migrationStep) error {
 // Rollback. On total-timeout or permanent error, returns the
 // PROPOSAL-2 §7.10.3 Scenario 12 *StructuredError.
 func beginImmediateWithRetry(ctx context.Context, db *sql.DB, fromVersion, toVersion int) (*sql.Tx, error) {
-	deadline := time.Now().Add(busyRetryCeiling)
-	delay := busyRetryInitialDelay
+	return beginImmediateWithRetryPolicy(ctx, db, fromVersion, toVersion, defaultBusyRetryPolicy())
+}
+
+func beginImmediateWithRetryPolicy(ctx context.Context, db *sql.DB, fromVersion, toVersion int, policy busyRetryPolicy) (*sql.Tx, error) {
+	deadline := time.Now().Add(policy.ceiling)
+	delay := policy.initialDelay
+	var lastErr error
+	attempts := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, migrationCancelledError("before write-lock attempt", err)
+		}
+		if lastErr != nil && !time.Now().Before(deadline) {
+			return nil, openHeldByAnotherProcessError("audit database", "acquire migration write access", policy.ceiling, attempts, lastErr)
+		}
+		attempts++
 		tx, err := db.BeginTx(ctx, nil)
 		if err == nil {
 			return tx, nil
 		}
+		if ctx.Err() != nil {
+			return nil, migrationCancelledError("during write-lock attempt", errors.Join(ctx.Err(), err))
+		}
+		lastErr = err
 		if !isBusyError(err) {
 			return nil, &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
@@ -389,11 +431,12 @@ func beginImmediateWithRetry(ctx context.Context, db *sql.DB, fromVersion, toVer
 					"This process waited more than %s for write access to the audit database, but another\n"+
 						"pasture or pastured process held it the whole time. That other process is upgrading\n"+
 						"the database from version %d to %d, so we can't safely start the same upgrade in parallel.",
-					busyRetryCeiling, fromVersion, toVersion,
+					policy.ceiling, fromVersion, toVersion,
 				),
 				Where: "Upgrading the audit database (internal/audit/migrate.go in audit.beginImmediateWithRetry).",
 				Impact: "This process can't open the audit database until the other migration finishes.\n" +
 					"No data was changed by this attempt — the wait simply timed out.",
+				Cause: err,
 				Fix: "1. Wait for the other pasture or pastured process to finish, then re-run:\n" +
 					"     pasture migrate\n" +
 					"2. If the other process is stuck, find and stop it:\n" +
@@ -403,7 +446,7 @@ func beginImmediateWithRetry(ctx context.Context, db *sql.DB, fromVersion, toVer
 					"     pasture task agents list",
 			}
 		}
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(min(delay, max(time.Until(deadline), 0)))
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -426,8 +469,8 @@ func beginImmediateWithRetry(ctx context.Context, db *sql.DB, fromVersion, toVer
 		case <-timer.C:
 		}
 		delay *= 2
-		if delay > busyRetryMaxDelay {
-			delay = busyRetryMaxDelay
+		if delay > policy.maxDelay {
+			delay = policy.maxDelay
 		}
 	}
 }
