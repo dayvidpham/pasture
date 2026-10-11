@@ -36,7 +36,7 @@
 #     plain-language error to stderr and exits 2 (blocking error).
 #   - Escape hatch: set BYPASS_GIT_DISCIPLINE=1 in the agent session env
 #     to skip enforcement for a single command (intended for "I'm alone on
-#     this branch" cases — must be justified in a bd comment).
+#     this branch" cases — must be justified in an attributed Pasture comment).
 #
 # Hooks must NOT block on transient failure: if jq is missing or the input
 # cannot be parsed, the hook exits 0 (allow) rather than 2 (block). Failing
@@ -151,11 +151,11 @@ Error: This destructive git operation is blocked for worker agents.
        almost certainly peer-worker work-in-progress. Do NOT clean them up.
        Raise the concern to your team-lead and wait for direction — post a
        coordination comment on your slice task so the escalation is recorded:
-         bd comments add <your-task-id> "Blocked: peer-worker changes present in <files>; raising to team-lead for coordination."
+         pasture task comment add <your-task-uri> "Blocked: peer-worker changes present in <files>; raising to team-lead for coordination." --author <registered-actor-id>
     3. If you genuinely need to run this command (for example, resolving a
        merge conflict on a branch where you are the only worker), bypass this
        hook for that single command by setting BYPASS_GIT_DISCIPLINE=1 in the
-       environment, and record in a 'bd comments add' why the bypass was needed:
+       environment, and record in an attributed 'pasture task comment add' why the bypass was needed:
          BYPASS_GIT_DISCIPLINE=1 <your-git-command>
     4. The full rationale and the complete list of forbidden operations are
        documented in this hook's header and the /pasture:worker role guidance.

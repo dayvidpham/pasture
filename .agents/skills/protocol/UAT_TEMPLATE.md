@@ -2,14 +2,18 @@
 
 Use this XML template to capture UAT results. Each component is presented one at a time to the user with its definition, motivating example, and design-space questions.
 
+All task reference placeholders contain full task URIs from tracker reads or
+create JSON `.id`. Use the namespace/store/registered-author bindings in
+[PROCESS.md](PROCESS.md#tracker-setup-and-recipe-bindings).
+
 ## Template
 
 ```xml
 <uat>
   <metadata>
     <title>{{UAT_TITLE}}</title>
-    <beads-id>{{BEADS_TASK_ID}}</beads-id>
-    <proposal-ref>{{PROPOSAL_BEADS_ID}}</proposal-ref>
+    <task-uri>{{UAT_TASK_URI}}</task-uri>
+    <proposal-ref>{{PROPOSAL_TASK_URI}}</proposal-ref>
     <phase>{{plan | implementation}}</phase>
     <date>{{YYYY-MM-DD}}</date>
   </metadata>
@@ -96,32 +100,35 @@ Use this XML template to capture UAT results. Each component is presented one at
 </uat>
 ```
 
-## Beads Commands
+## Pasture Task Commands
 
 ```bash
 # 1. Create the UAT task with structured description
-#    - Labels link it to the proposal and UAT phase
+#    - Frontmatter references the proposal; label identifies the UAT phase
 #    - Description contains the full XML-structured UAT record
-bd create \
-  --labels "pasture:p5-user:s5-uat" \
-  --title "UAT: {{PLAN_OR_IMPL}} acceptance for {{FEATURE}}" \
+UAT_URI=$(pasture task create "UAT: {{PLAN_OR_IMPL}} acceptance for {{FEATURE}}" --phase plan_uat \
+  --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  proposal: {{PROPOSAL_TASK_ID}}
-  urd: {{URD_TASK_ID}}
-  request: {{REQUEST_TASK_ID}}
+  proposal: $PROPOSAL_URI
+  urd: $URD_URI
+  request: $REQUEST_URI
 ---
-<FULL_XML_STRUCTURED_DESCRIPTION>"
+<FULL_XML_STRUCTURED_DESCRIPTION>" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+# Plan UAT; for implementation use --phase impl_uat above and pasture:p11-user:s11-uat below
+pasture task label add "$UAT_URI" pasture:p5-user:s5-uat
+# Retain UAT_URI if labeling fails; retry labels without creating another task.
 
 # 2. Record post-UAT addenda as comments (user feedback after main survey)
-bd comments add {{UAT_TASK_ID}} "UAT ADDENDUM (user-initiated, verbatim): {{VERBATIM}}"
+pasture task comment add "$UAT_URI" "UAT ADDENDUM (user-initiated, verbatim): {{VERBATIM}}" --author "$AUTHOR"
 
 # 3. Update URD with UAT results
-bd comments add {{URD_TASK_ID}} "UAT {{PHASE}}: {{VERDICT}} - {{key design decisions summary}}"
+pasture task comment add "$URD_URI" "UAT {{PHASE}}: {{VERDICT}} - {{key design decisions summary}}" --author "$AUTHOR"
 
 # 4. After UAT passes, proceed to ratification (Phase 6)
-bd label add {{PROPOSAL_TASK_ID}} pasture:p6-plan:s6-ratify
-bd comments add {{PROPOSAL_TASK_ID}} "RATIFIED: All 3 reviewers ACCEPT, UAT passed ({{UAT_TASK_ID}})."
+pasture task label add "$PROPOSAL_URI" pasture:p6-plan:s6-ratify
+pasture task comment add "$PROPOSAL_URI" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ($UAT_URI)." --author "$AUTHOR"
 
 # 5. If UAT fails (REVISE), return to proposal phase
 #    - Do NOT ratify

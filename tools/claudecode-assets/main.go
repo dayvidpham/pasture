@@ -9,9 +9,8 @@
 // `make generate` runs it after the canonical skills/ and agents/ trees are
 // regenerated.
 //
-// It manages only the codegen-driven files. The plugin scaffolding
-// (.claude-plugin/plugin.json), the pasture-hooks package, and the hand-authored
-// verbatim skill trees (skills/protocol, skills/install-cli) are never touched.
+// It manages emitted files, canonical verbatim skill trees and Git discipline.
+// Independently authored plugin scaffolding and legacy context remain untouched.
 //
 // Exits non-zero if rendering or any filesystem write fails.
 package main
@@ -66,15 +65,26 @@ func run() error {
 		if mkErr := os.MkdirAll(filepath.Dir(dst), 0o755); mkErr != nil {
 			return fmt.Errorf("claudecode-assets: create parent directory for %q: %w", dst, mkErr)
 		}
-		if wErr := os.WriteFile(dst, generated[assetsRel], 0o644); wErr != nil {
+		mode := os.FileMode(0o644)
+		if assetsRel == "pasture-hooks/hooks/scripts/git-discipline.sh" {
+			info, err := os.Stat(filepath.Join(repoRoot, "hooks/scripts/git-discipline.sh"))
+			if err != nil {
+				return fmt.Errorf("claudecode-assets: read canonical Git discipline mode: %w; restore its source before generation", err)
+			}
+			mode = info.Mode().Perm()
+		}
+		if wErr := os.WriteFile(dst, generated[assetsRel], mode); wErr != nil {
 			return fmt.Errorf("claudecode-assets: write generated asset %q: %w", dst, wErr)
+		}
+		if err := os.Chmod(dst, mode); err != nil {
+			return fmt.Errorf("claudecode-assets: preserve generated asset mode for %q: %w; ensure the output is writable and regenerate", dst, err)
 		}
 		written++
 	}
 
 	// Remove any codegen-managed asset the live pipeline no longer emits, so a
-	// removed skill or renamed agent cannot linger in the embed. Verbatim skill
-	// trees and plugin scaffolding are never enumerated here.
+	// removed skill or renamed agent cannot linger in the embed. Verbatim skills
+	// participate; independently authored plugin scaffolding does not.
 	stale, err := claudecode.StaleGeneratedAssets(assetsDir, generated)
 	if err != nil {
 		return fmt.Errorf("claudecode-assets: %w", err)

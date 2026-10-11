@@ -147,9 +147,9 @@ func TestG2_NoHandoffStoragePaths(t *testing.T) {
 		assert.NotContains(t, string(data), handoffStoragePathToken,
 			"G2: generated file %q still contains the retired handoff storage path %q — "+
 				"R8/A3 retired the .git/.aura/handoff filesystem pattern; every handoff is "+
-				"authored in its Beads task body. Fix: replace the path reference with the "+
+				"authored in its Pasture task body. Fix: replace the path reference with the "+
 				"task-body convention (sentinel %q in HandoffsSection.StoragePattern).",
-			rel, handoffStoragePathToken, "beads-task-body")
+			rel, handoffStoragePathToken, "pasture-task-body")
 	}
 }
 

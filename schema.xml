@@ -37,7 +37,7 @@
     </enum>
     <enum name="ContentLevel">
       <value id="full-provenance" description="Full inline context with all decisions and rationale"></value>
-      <value id="summary-with-ids" description="Summary with Beads task ID references"></value>
+      <value id="summary-with-ids" description="Summary with Pasture task URI references"></value>
     </enum>
     <enum name="ClassificationScope">
       <value id="single-file" description="Change is isolated to a single file"></value>
@@ -774,7 +774,7 @@
      6 transitions require handoff documents.
      Same-actor transitions (p5→p6, p6→p7) do NOT require handoffs.
        ═══════════════════════════════════════════════════════════════════════ -->
-  <handoffs storage-pattern="beads-task-body">
+  <handoffs storage-pattern="pasture-task-body">
     <handoff id="h1" source-role="architect" target-role="supervisor" at-phase="p7" content-level="full-provenance" file-pattern="architect-to-supervisor.md">
       <required-fields>request, urd, proposal, ratified-plan, context, key-decisions, open-items, acceptance-criteria</required-fields>
       <skill-invocation directive="Skill(/pasture:supervisor)" note="Supervisor launch prompt MUST start with this invocation. Without it, supervisor skips leaf task creation."></skill-invocation>
@@ -1046,17 +1046,17 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
     </document>
   </documents>
   <!-- ═══════════════════════════════════════════════════════════════════════
-       DEPENDENCY DIRECTION (Beads)
+       DEPENDENCY DIRECTION (Pasture)
 
      Canonical definition of how work flows through the dependency tree.
        ═══════════════════════════════════════════════════════════════════════ -->
   <dependency-model>
     <rule>Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.</rule>
     <canonical-chain>REQUEST → blocked-by ELICIT → blocked-by PROPOSAL → blocked-by IMPL_PLAN → blocked-by SLICE-N → blocked-by leaf tasks</canonical-chain>
-    <command>bd dep add {parent-id} --blocked-by {child-id}</command>
-    <anti-pattern>bd dep add {child-id} --blocked-by {parent-id}</anti-pattern>
+    <command>pasture task dep add {parent-uri} --blocked-by {child-uri}</command>
+    <anti-pattern>pasture task dep add {child-uri} --blocked-by {parent-uri}</anti-pattern>
     <reference-links note="URD and other reference docs use frontmatter, not blocking deps">
-      <pattern>description frontmatter:&#xA;  references:&#xA;    urd: {urd-task-id}&#xA;    request: {request-task-id}</pattern>
+      <pattern>description frontmatter:&#xA;  references:&#xA;    urd: {urd-task-uri}&#xA;    request: {request-task-uri}</pattern>
     </reference-links>
   </dependency-model>
   <!-- ═══════════════════════════════════════════════════════════════════════
@@ -1085,7 +1085,7 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
     </dependency-chain>
     <leaf-task-adoption>
       <rule>When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.</rule>
-      <command>bd dep add {followup-slice-id} --blocked-by {important-leaf-task-id}&#xA;bd dep add {followup-slice-id} --blocked-by {minor-leaf-task-id}</command>
+      <command>pasture task dep add {followup-slice-uri} --blocked-by {important-leaf-task-uri}&#xA;pasture task dep add {followup-slice-uri} --blocked-by {minor-leaf-task-uri}</command>
       <note>Leaf tasks retain their original parent (the severity group from the original review) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.</note>
     </leaf-task-adoption>
     <references>
@@ -1197,7 +1197,7 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
   <!-- ═══════════════════════════════════════════════════════════════════════
        COORDINATION COMMANDS
 
-     Beads coordination commands shared across roles and role-specific.
+     Pasture coordination commands shared across roles and role-specific.
        ═══════════════════════════════════════════════════════════════════════ -->
   <coordination-commands>
     <coord-cmd id="cmd-coord-assign" action="Transfer existing assignment (supervisor only)" template="pasture task assignment transfer &#34;${TASK_ID_URI}&#34; --slot owner-responsibility --assignment &#34;${SUCCESSOR_ASSIGNMENT_ID}&#34; --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant &#34;${REGISTERED_WORKER_ACTOR}&#34;" role-ref="supervisor"></coord-cmd>

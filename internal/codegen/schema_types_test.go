@@ -88,7 +88,7 @@ func TestSectionStructsInstantiate(t *testing.T) {
 
 	t.Run("HandoffsSection", func(t *testing.T) {
 		s := codegen.HandoffsSection{
-			StoragePattern: "beads-task-body",
+			StoragePattern: "pasture-task-body",
 			Handoffs: []codegen.HandoffElem{
 				{
 					Id:           "h2",
@@ -178,10 +178,10 @@ func TestSectionStructsInstantiate(t *testing.T) {
 	t.Run("CoordinationCommandsSection", func(t *testing.T) {
 		s := codegen.CoordinationCommandsSection{
 			Commands: []codegen.CoordCmdElem{
-				{Id: "bd-show", Action: "show", Template: "bd show {id}"},
+				{Id: "pasture-show", Action: "show", Template: "pasture task show {uri}"},
 			},
 		}
-		assert.Equal(t, "bd-show", s.Commands[0].Id)
+		assert.Equal(t, "pasture-show", s.Commands[0].Id)
 	})
 
 	t.Run("WorkflowsSection", func(t *testing.T) {
@@ -278,7 +278,7 @@ func TestXMLTagsReviewAxesSection(t *testing.T) {
 
 // TestXMLTagsHandoffsSection verifies <handoffs> element with storage-pattern attr.
 func TestXMLTagsHandoffsSection(t *testing.T) {
-	pattern := "beads-task-body"
+	pattern := "pasture-task-body"
 	s := codegen.HandoffsSection{
 		StoragePattern: pattern,
 		Handoffs: []codegen.HandoffElem{
@@ -399,7 +399,7 @@ func TestXMLTagsFiguresSection(t *testing.T) {
 func TestXMLTagsCoordCmdElem(t *testing.T) {
 	s := codegen.CoordinationCommandsSection{
 		Commands: []codegen.CoordCmdElem{
-			{Id: "bd-show", Action: "show", Template: "bd show {id}", Shared: "true"},
+			{Id: "pasture-show", Action: "show", Template: "pasture task show {uri}", Shared: "true"},
 		},
 	}
 	out, err := xml.Marshal(s)

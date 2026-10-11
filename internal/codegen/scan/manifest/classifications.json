@@ -246,7 +246,7 @@
     {
       "owner": "skills/protocol/CLAUDE.md",
       "pattern": "skill_invocation",
-      "content_window": "**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant Beads task IDs, (3) `bd show <task-id>` commands for each reference, and (4) the HANDOFF Beads task ID if applicable (handoffs are authored in their task body, not a file path). **SHOULD NEVER** send bare instructions without Beads context \u2014 teammates spawned via TeamCreate have zero prior context and cannot see your conversation history or task tree.",
+      "content_window": "**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant full task URIs, (3) `pasture task show \"$TASK_URI\"` reads for each reference, and (4) the HANDOFF Pasture task URI if applicable (handoffs are authored in their task body, not a file path). **SHOULD NEVER** send bare instructions without tracker context \u2014 teammates have zero prior context and cannot see your conversation history or task tree.",
       "section": "Agent Orchestration",
       "ordinal": 0,
       "classification": "orchestration",

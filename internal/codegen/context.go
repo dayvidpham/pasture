@@ -74,7 +74,7 @@ var generalConstraints = map[string]bool{
 	"C-audit-never-delete": true,
 	// C-audit-dep-chain: "any phase transition" when creating new task → universal
 	"C-audit-dep-chain": true,
-	// C-dep-direction: "adding a Beads dependency" → universal
+	// C-dep-direction: "adding a task dependency" → universal
 	"C-dep-direction": true,
 	// C-frontmatter-refs: "cross-task references" → universal
 	"C-frontmatter-refs": true,

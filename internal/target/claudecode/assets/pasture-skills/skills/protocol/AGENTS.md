@@ -58,7 +58,7 @@ See [PROCESS.md](PROCESS.md) for the full step-by-step workflow. See [SKILLS.md]
 **Receives from:** User (Phase 1 request) OR Supervisor via h6 (follow-up lifecycle: FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL creation)
 **Hands off to:** Supervisor (Phase 7 h1 handoff document, or follow-up h1 after FOLLOWUP_PROPOSAL ratified)
 
-**Handoff:** Authored in the HANDOFF Beads task body with full inline provenance — includes all task references (REQUEST, URD, PROPOSAL, ratified plan), key decisions with rationale, open items, and acceptance criteria.
+**Handoff:** Authored in the HANDOFF Pasture task body with full inline provenance — includes full task URIs (REQUEST, URD, PROPOSAL, ratified plan), key decisions with rationale, open items, and acceptance criteria.
 
 ---
 
@@ -157,22 +157,22 @@ Empty groups are closed immediately. **Configurable review-effort budget:** iter
 1. Type checking passes
 2. Tests pass
 3. Production code path verified via code inspection (no TODOs, real deps wired)
-4. Update Beads task with completion comment
+4. Record an attributed Pasture completion comment; keep `in_progress` and NEVER close tasks (supervisor owns closure after review)
 
 ---
 
 ## Handoff Matrix
 
-Every handoff is **authored inline in its own HANDOFF Beads task body** (no filesystem path) and located by task ID:
+Every handoff is **authored inline in its own HANDOFF Pasture task body** (no filesystem path) and located by full task URI:
 
 | # | From | To | Phase | Authored In | Content Level |
 |---|------|----|-------|-------------|--------------|
-| 1 | Architect | Supervisor | 7 | HANDOFF Beads task body | Full inline provenance |
-| 2 | Supervisor | Worker | 9 | HANDOFF Beads task body | Summary + bd IDs |
-| 3 | Supervisor | Reviewer | 10 | HANDOFF Beads task body | Summary + bd IDs |
-| 4 | Worker | Reviewer | 10 | HANDOFF Beads task body | Summary + bd IDs |
-| 5 | Reviewer | Followup | post-10 | HANDOFF Beads task body | Summary + bd IDs |
-| 6 | Supervisor | Architect | Follow-up lifecycle | HANDOFF Beads task body | Summary + bd IDs |
+| 1 | Architect | Supervisor | 7 | HANDOFF Pasture task body | Full inline provenance |
+| 2 | Supervisor | Worker | 9 | HANDOFF Pasture task body | Summary + full task URIs |
+| 3 | Supervisor | Reviewer | 10 | HANDOFF Pasture task body | Summary + full task URIs |
+| 4 | Worker | Reviewer | 10 | HANDOFF Pasture task body | Summary + full task URIs |
+| 5 | Reviewer | Followup | post-10 | HANDOFF Pasture task body | Summary + full task URIs |
+| 6 | Supervisor | Architect | Follow-up lifecycle | HANDOFF Pasture task body | Summary + full task URIs |
 
 **Same-actor transitions** (no handoff needed): Plan UAT → Ratify (Phase 5→6), Ratify → Handoff (Phase 6→7) — both performed by the architect. In the follow-up lifecycle, Supervisor creating FOLLOWUP_URE and FOLLOWUP_URD are also same-actor transitions.
 

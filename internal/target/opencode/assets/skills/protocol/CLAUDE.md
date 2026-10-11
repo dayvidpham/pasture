@@ -37,32 +37,32 @@ Copy or include this file in your project's CLAUDE.md alongside project-specific
 
 **Given** code changes **when** committing **then** type checking and tests must pass **should never** allow optional CI
 
-### Git & Beads
+### Git & Pasture
 
 **Given** task is implemented **when** you are about to commit **then** you **should** use `git agent-commit -m ...`, **should never** use `git commit -m ...`
 
-**Given** you want to execute Beads **when** you are about to call `bd <command> ...` **then** you **should never** `cd <repo_root> && bd <command> ...`, instead you **should** always just call `bd <command> ...`
+Use the namespace/store/author and full-URI bindings in [PROCESS.md](PROCESS.md#tracker-setup-and-recipe-bindings). Never change directory merely to select a tracker. Task writes are durable; Git history lands separately. Never install, enable or modify any Git hook without explicit user approval.
 
-**Given** you are adding a Beads dependency **when** determining the direction **then** the **parent** (plan, request, epic) is blocked by the **child** (implementation, proposal, task). The parent stays open until the child resolves it. **MUST** use `bd dep add <parent-id> --blocked-by <child-id>`. **SHOULD NEVER** make the child blocked by the parent — that inverts the relationship and means the child can't start until the parent closes, which is backwards.
+**Given** you are adding a Pasture dependency **when** determining the direction **then** the **parent** (plan, request, epic) is blocked by the **child** (implementation, proposal, task). The parent stays open until the child resolves it. **MUST** use `pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI"`. **SHOULD NEVER** make the child blocked by the parent — that inverts the relationship and means the child can't start until the parent closes, which is backwards.
 
-**The rule:** Ask "which one stays open until the other finishes?" That one is the parent. `bd dep add <stays-open> --blocked-by <must-finish-first>`.
+**The rule:** Ask "which one stays open until the other finishes?" That one is the parent. `pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI"`.
 
 ### Correct: `--blocked-by` points at what must finish first
 
 ```bash
 # "REQUEST is blocked by URE" — URE must complete before REQUEST can close
-bd dep add request-id --blocked-by ure-id
+pasture task dep add "$REQUEST_URI" --blocked-by "$URE_URI"
 
 # "PROPOSAL is blocked by IMPL PLAN"
-bd dep add proposal-id --blocked-by impl-plan-id
+pasture task dep add "$PROPOSAL_URI" --blocked-by "$IMPL_PLAN_URI"
 
 # "IMPL PLAN is blocked by each slice"
-bd dep add impl-plan-id --blocked-by slice-1-id
-bd dep add impl-plan-id --blocked-by slice-2-id
+pasture task dep add "$IMPL_PLAN_URI" --blocked-by "$SLICE_1_URI"
+pasture task dep add "$IMPL_PLAN_URI" --blocked-by "$SLICE_2_URI"
 
 # "slice is blocked by its leaf tasks"
-bd dep add slice-1-id --blocked-by leaf-task-a-id
-bd dep add slice-1-id --blocked-by leaf-task-b-id
+pasture task dep add "$SLICE_1_URI" --blocked-by "$LEAF_A_URI"
+pasture task dep add "$SLICE_1_URI" --blocked-by "$LEAF_B_URI"
 ```
 
 Produces the correct tree (leaf work at the bottom, user request at the top):
@@ -85,7 +85,7 @@ REQUEST
 ```bash
 # WRONG — this says "URE is blocked by REQUEST", meaning the request
 # must finish before requirements gathering can start (backwards)
-bd dep add ure-id --blocked-by request-id
+pasture task dep add "$URE_URI" --blocked-by "$REQUEST_URI"
 ```
 
 **Rule of thumb:** The `--blocked-by` target is always the thing you do *first*. Work flows bottom-up; closure flows top-down.
@@ -94,25 +94,25 @@ bd dep add ure-id --blocked-by request-id
 
 **Given** Phase 2 (URE) completes **when** requirements are captured **then** create a URD task (label `pasture:urd`) as the single source of truth for user requirements **should never** scatter requirements across multiple unlinked tasks
 
-**Given** a URD exists **when** any phase creates or updates requirements **then** update the URD via `bd comments add <urd-id> "..."` **should never** leave the URD stale when scope changes
+**Given** a URD exists **when** any phase creates or updates requirements **then** update the URD via `pasture task comment add "$URD_URI" "..." --author "$AUTHOR"` **should never** leave the URD stale when scope changes
 
-**Given** a URD exists **when** architects, reviewers, or supervisors need to understand user intent **then** read the URD with `bd show <urd-id>` **should never** rely solely on the original REQUEST task for requirements
+**Given** a URD exists **when** architects, reviewers, or supervisors need to understand user intent **then** read the URD with `pasture task show "$URD_URI"` **should never** rely solely on the original REQUEST task for requirements
 
-**Given** a URD is created **when** linking to other tasks **then** include the URD task ID in the description frontmatter of referencing tasks (e.g., `urd: <urd-id>`) **should never** make the URD a blocking dependency — it is a living reference document
+**Given** a URD is created **when** linking to other tasks **then** include its full task URI in description frontmatter (e.g., `urd: {{URD_TASK_URI}}`) **should never** make the URD a blocking dependency — it is a living reference document
 
 ### Agent Orchestration
 
 **Given** the **IMPL_PLAN phase** **then** **SHOULD** prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** (not `aura-swarm`). A supervisor that has just dispatched Explore subagents may *appear* idle while they work — **SHOULD NOT** shut it down pre-emptively.
 
-**Given** you need to launch parallel agents for an epic **then** use `aura-swarm start --epic <id>` to create worktree-based agent sessions. Use `aura-swarm status` to monitor. **SHOULD NOT** launch long-running supervisors or workers as Task tool subagents.
+**Given** you need to launch parallel agents **then** use available native agent tooling with isolated worktrees and explicit file ownership. The deprecated orchestration launcher is not an operational alternative.
 
-**Given** you need a separate supervisor or architect to plan a new epic **then** use `aura-swarm start --swarm-mode intree --role <role> -n 1 --prompt "..."` to launch in a tmux session. **SHOULD** only use `aura-swarm` for long-running supervisor/architect agents that need persistent context. **SHOULD NOT** use `aura-swarm start` for reviewer rounds.
+**Given** you need a separate supervisor or architect **then** dispatch through available native agent tooling with the role skill, task URIs and full handoff context.
 
 **Given** you need reviewer rounds (plan review or code review) **then** spawn reviewers as subagents (via the Task tool) or coordinate via TeamCreate. Reviewers are short-lived and should stay in-session for direct result collection. **SHOULD NOT** use `aura-swarm start` for reviewers.
 
-**Given** inter-agent communication is needed **then** use beads for coordination (`bd comments add`, `bd update --notes`, `bd show`). **SHOULD NOT** reference `aura agent send/broadcast/inbox` — that CLI does not exist.
+**Given** inter-agent communication is needed **then** use Pasture task comments (explicit registered `--author`), update notes and show reads for coordination. **SHOULD NOT** reference `aura agent send/broadcast/inbox` — that CLI does not exist.
 
-**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant Beads task IDs, (3) `bd show <task-id>` commands for each reference, and (4) the HANDOFF Beads task ID if applicable (handoffs are authored in their task body, not a file path). **SHOULD NEVER** send bare instructions without Beads context — teammates spawned via TeamCreate have zero prior context and cannot see your conversation history or task tree.
+**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant full task URIs, (3) `pasture task show "$TASK_URI"` reads for each reference, and (4) the HANDOFF Pasture task URI if applicable (handoffs are authored in their task body, not a file path). **SHOULD NEVER** send bare instructions without tracker context — teammates have zero prior context and cannot see your conversation history or task tree.
 
 **Given** you are a supervisor **when** implementation work is needed (code edits, file creation, config changes — no matter how small) **then** MUST delegate to a worker teammate or subagent. **MUST NEVER** use Edit, Write, or other file-modification tools directly. The supervisor's role is coordination, tracking, and quality control — never implementation.
 
@@ -133,7 +133,7 @@ bd dep add ure-id --blocked-by request-id
 
 **Given** a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT) **when** conducting the phase **then** the agent **MUST** invoke the matching interview skill (`Skill(/pasture:user-elicit)` for URE, `Skill(/pasture:user-uat)` for UAT) so the verbatim-capture and disposition procedures are loaded. **SHOULD NEVER** conduct an interview phase without invoking its skill — skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures and yields shallow questions.
 
-**Given** a user interview (requirements elicitation or UAT) **when** capturing the Q&A in a Beads task **then** you **MUST** record the full question, ALL options presented with their descriptions, AND the user's verbatim response. **SHOULD NEVER** summarize options as "(1)", "(2)", "(3)" without the option text — the user's answer referencing option numbers is meaningless without the full options.
+**Given** a user interview (requirements elicitation or UAT) **when** capturing the Q&A in a Pasture task **then** you **MUST** record the full question, ALL options presented with their descriptions, AND the user's verbatim response. **SHOULD NEVER** summarize options as "(1)", "(2)", "(3)" without the option text — the user's answer referencing option numbers is meaningless without the full options.
 
 **Given** feedback or a proposed deferral gathered during UAT (Phase 5 or Phase 11) — deferrals may be flagged by the user OR **proposed by the architect/supervisor** **when** recording each item **then** assign every item an explicit, user-confirmed disposition of **FIX-NOW** or **DEFER**; ALL deferred items — whoever proposed them — **MUST be raised to the user at the next user gate** (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, and DEFER'd items are the **SOLE** source feeding the FOLLOWUP epic. **SHOULD NEVER** leave UAT feedback without a confirmed disposition, silently defer any item without raising it to the user at the next gate, or route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it.
 
@@ -144,14 +144,14 @@ bd dep add ure-id --blocked-by request-id
 **Given** a worker finishes implementation **when** signaling completion **then** the worker **MUST**:
 1. Run all quality gates (type checking + tests must pass)
 2. Verify production code path via code inspection (no TODOs, real deps wired)
-3. Update beads task status (`bd close <task-id>`)
-4. Add completion comment (`bd comments add <task-id> "Implementation complete."`)
+3. Keep task `in_progress`; workers NEVER close tasks
+4. Add completion evidence (`pasture task comment add "$TASK_URI" "Implementation complete, awaiting review; evidence: ..." --author "$AUTHOR"`)
 
-**SHOULD NEVER** close a bead with only "tests pass" as the completion gate — must also verify production code path.
+Only the supervisor closes tasks after review and acceptance gates; tests alone do not establish completion.
 
 ### Slice Reviews
 
-**Given** a slice implementation is complete (tests + typecheck pass) **when** considering closing the bead **then** you **MUST** launch a code review before closing the bead, and **MUST** iterate review → fix → re-review **up to the configurable review-effort budget** chosen at Phase 8 (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget (all three severities reach 0 — none is deferrable); on **budget exhaustion without a clean round**, surface the outstanding findings to the user at a gate for a decision. **SHOULD NEVER** close a slice bead with only "tests pass" as the completion gate, close on a fix-applying round, hardcode the budget, or proceed past the chosen budget without surfacing to the user.
+**Given** a slice implementation is complete (tests + typecheck pass) **when** the supervisor considers closing its task **then** launch code review and iterate review → fix → re-review **up to the configurable review-effort budget** chosen at Phase 8 (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget; on exhaustion without clean, surface outstanding findings to the user. Workers never close tasks. Never close on tests alone or a fix-applying round, hardcode the budget, or proceed past it silently.
 
 ## Behavior
 
@@ -188,7 +188,7 @@ Before claiming completion:
 
 ## 12-Phase Workflow
 
-All work flows through Beads tasks using 12 phases:
+All work flows through Pasture tasks using 12 phases:
 
 ```
 Phase 1:  REQUEST (user prompt)
@@ -198,7 +198,7 @@ Phase 3:  PROPOSAL-N (architect proposes, s3-propose)
 Phase 4:  PROPOSAL-N-REVIEW-{axis}-{round} (3 axis-specific reviewers: A/B/C, ACCEPT/REVISE)
 Phase 5:  Plan UAT (user acceptance test on plan)
 Phase 6:  Ratification (pasture:superseded marks old proposals)
-Phase 7:  Handoff (architect → supervisor, authored in the HANDOFF Beads task body)
+Phase 7:  Handoff (architect → supervisor, authored in the HANDOFF Pasture task body)
 Phase 8:  IMPL_PLAN (supervisor decomposes into slices + leaf tasks; interface-first FOUNDATION slice preferred)
 Phase 9:  SLICE-N (parallel workers, each owns one production code path)
             Each slice MUST have leaf tasks — ANY number, named after real work
@@ -255,29 +255,32 @@ Special labels:
 
 ### Frontmatter References
 
-Instead of peer-reference commands, include task IDs in the description frontmatter:
+Instead of peer-reference commands, include full task URIs in the description frontmatter:
 
 ```bash
-bd create --title "URD: Feature name" \
+URD_URI=$(pasture task create "URD: Feature name" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  request: <request-task-id>
-  elicit: <elicit-task-id>
+  request: $REQUEST_URI
+  elicit: $ELICIT_URI
 ---
 ## Requirements
-..."
+..." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$URD_URI" pasture:urd
+pasture task label add "$URD_URI" pasture:p2-user:s2_2-urd
 ```
 
 Other tasks reference the URD similarly:
 ```bash
-bd create --title "PROPOSAL-1: Technical approach" \
+PROPOSAL_URI=$(pasture task create "PROPOSAL-1: Technical approach" --phase propose --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  request: <request-task-id>
-  urd: <urd-task-id>
+  request: $REQUEST_URI
+  urd: $URD_URI
 ---
 ## Proposal
-..."
+..." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$PROPOSAL_URI" pasture:p3-plan:s3-propose
 ```
 
 ### Review Severity Tree (Code Reviews Only)
@@ -288,18 +291,21 @@ Code review rounds (Phase 10) use a severity tree with **EAGER creation**:
 
 ```bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
-bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" --labels "pasture:severity:blocker" ...
-bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" --labels "pasture:severity:important" ...
-bd create --title "SLICE-1-REVIEW-A-1 MINOR" --labels "pasture:severity:minor" ...
+BLOCKER_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$BLOCKER_URI" pasture:severity:blocker
+IMPORTANT_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPORTANT_URI" pasture:severity:important
+MINOR_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$MINOR_URI" pasture:severity:minor
 
-# Empty groups have no children and are closed immediately
-bd close <empty-important-id>
-bd close <empty-minor-id>
+# Supervisor only: close groups verified to have no findings
+pasture task close "$IMPORTANT_URI" --reason "Review group has no findings"
+pasture task close "$MINOR_URI" --reason "Review group has no findings"
 ```
 
 **Dual-parent BLOCKER relationship:** BLOCKER findings have two parents:
 1. The severity group task (`pasture:severity:blocker`)
-2. The proposal or slice they block (via `bd dep add <slice-id> --blocked-by <blocker-finding-id>`)
+2. The proposal or slice they block (via `pasture task dep add "$SLICE_URI" --blocked-by "$FINDING_URI"`)
 
 This ensures BLOCKERs both categorize under the severity tree AND block the artifact they apply to.
 
@@ -362,20 +368,20 @@ Check **end-user alignment**, not technical specializations:
 - Satisfying validation checklist items
 - Meeting BDD acceptance criteria
 - Running quality gates (type checking + tests)
-- Signaling completion via beads
+- Signaling completion via attributed Pasture comments; never closing tasks
 
 ### Handoff Documents
 
-6 actor-change transitions require handoffs. Each handoff is **authored inline in its own HANDOFF Beads task body** (no filesystem path) and located by task ID:
+6 actor-change transitions require handoffs. Each handoff is **authored inline in its own HANDOFF Pasture task body** (no filesystem path) and located by full task URI:
 
 | Transition | Authored In | Content Level |
 |---|---|---|
-| Architect → Supervisor | HANDOFF Beads task body | Full inline provenance |
-| Supervisor → Worker | HANDOFF Beads task body | Summary + bd IDs |
-| Supervisor → Reviewer | HANDOFF Beads task body | Summary + bd IDs |
-| Worker → Reviewer | HANDOFF Beads task body | Summary + bd IDs |
-| Reviewer → Followup | HANDOFF Beads task body | Summary + bd IDs |
-| Supervisor → Architect | HANDOFF Beads task body | Summary + bd IDs |
+| Architect → Supervisor | HANDOFF Pasture task body | Full inline provenance |
+| Supervisor → Worker | HANDOFF Pasture task body | Summary + full task URIs |
+| Supervisor → Reviewer | HANDOFF Pasture task body | Summary + full task URIs |
+| Worker → Reviewer | HANDOFF Pasture task body | Summary + full task URIs |
+| Reviewer → Followup | HANDOFF Pasture task body | Summary + full task URIs |
+| Supervisor → Architect | HANDOFF Pasture task body | Summary + full task URIs |
 
 **Same-actor transitions do NOT need handoff:** UAT → Ratify and Ratify → Handoff are performed by the same actor (architect), so no handoff document is needed.
 
@@ -389,12 +395,11 @@ See [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) for the standardized template.
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
+3. **Update tracker evidence** - Workers leave tasks in_progress with attributed evidence; supervisor alone closes after review gates
 4. **COMMIT AND PUSH** - This is MANDATORY:
    ```bash
    git add <files>
    git agent-commit -m "feat(scope): description"
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -408,7 +413,7 @@ See [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) for the standardized template.
 - NEVER stop before pushing — that leaves work stranded locally
 - NEVER say "ready to push when you are" — YOU must push
 - If push fails, resolve and retry until it succeeds
-- Use new label format (`pasture:p{N}-{domain}:s{M}-{type}`) for all beads operations
+- Use new label format (`pasture:p{N}-{domain}:s{M}-{type}`) for all Pasture label operations
 
 ## References
 
