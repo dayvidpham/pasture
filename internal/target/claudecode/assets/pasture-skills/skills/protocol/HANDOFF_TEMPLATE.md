@@ -2,7 +2,7 @@
 
 Standardized template for all 6 actor-change transitions in the Pasture protocol.
 
-**Storage:** the HANDOFF Beads task body (no filesystem path). Author each handoff inline in its own dedicated HANDOFF Beads task and locate it by task ID. The template below describes the body content authored into that task's description.
+**Storage:** the HANDOFF Pasture task body (no filesystem path). Author each handoff inline in its own dedicated HANDOFF Pasture task and locate it by full task URI. The template below describes the body content authored into that task's description.
 
 ---
 
@@ -11,11 +11,11 @@ Standardized template for all 6 actor-change transitions in the Pasture protocol
 | # | From | To | When | Content Level |
 |---|------|-----|------|---------------|
 | 1 | Architect | Supervisor | Phase 7 (Handoff) | Full inline provenance |
-| 2 | Supervisor | Worker | Phase 9 (Slice assignment) | Summary + bd IDs |
-| 3 | Supervisor | Reviewer | Phase 10 (Code review) | Summary + bd IDs |
-| 4 | Worker | Reviewer | Phase 10 (Code review) | Summary + bd IDs |
-| 5 | Reviewer | Followup | After Phase 10 (code-review results to supervisor) | Summary + bd IDs |
-| 6 | Supervisor | Architect | Follow-up lifecycle (FOLLOWUP_URE/URD → FOLLOWUP_PROPOSAL) | Summary + bd IDs |
+| 2 | Supervisor | Worker | Phase 9 (Slice assignment) | Summary + full task URIs |
+| 3 | Supervisor | Reviewer | Phase 10 (Code review) | Summary + full task URIs |
+| 4 | Worker | Reviewer | Phase 10 (Code review) | Summary + full task URIs |
+| 5 | Reviewer | Followup | After Phase 10 (code-review results to supervisor) | Summary + full task URIs |
+| 6 | Supervisor | Architect | Follow-up lifecycle (FOLLOWUP_URE/URD → FOLLOWUP_PROPOSAL) | Summary + full task URIs |
 
 ### Same-Actor Transitions (NO Handoff Needed)
 
@@ -25,24 +25,30 @@ These transitions are performed by the same actor and do not require a handoff d
 
 ---
 
+All task-URI placeholders must be replaced with full tracker URIs, read from
+the tracker or captured from create JSON `.id`, never legacy short IDs.
+Use the bindings in [PROCESS.md](PROCESS.md#tracker-setup-and-recipe-bindings).
+The worked bodies below are illustrative, not historical transcripts; map each
+named URI placeholder to the corresponding task in your own namespace.
+
 ## Template Structure
 
 ```markdown
 # Handoff: {{SOURCE_ROLE}} → {{TARGET_ROLE}}
 
 ## Metadata
-- **Request:** {{REQUEST_TASK_ID}} — {{REQUEST_TITLE}}
+- **Request:** {{REQUEST_TASK_URI}} — {{REQUEST_TITLE}}
 - **Date:** {{YYYY-MM-DD}}
 - **Source:** {{SOURCE_ROLE}} ({{SOURCE_AGENT_ID}})
 - **Target:** {{TARGET_ROLE}}
 
 ## Task References
-- **Request:** {{request-task-id}}
-- **URD:** {{urd-task-id}}
-- **Proposal:** {{proposal-task-id}}
-- **Ratified Plan:** {{ratified-task-id}}  <!-- if applicable -->
-- **Impl Plan:** {{impl-plan-task-id}}    <!-- if applicable -->
-- **Slice:** {{slice-task-id}}            <!-- if applicable -->
+- **Request:** {{REQUEST_TASK_URI}}
+- **URD:** {{URD_TASK_URI}}
+- **Proposal:** {{PROPOSAL_TASK_URI}}
+- **Ratified Plan:** {{RATIFIED_TASK_URI}}  <!-- if applicable -->
+- **Impl Plan:** {{IMPL_PLAN_TASK_URI}}    <!-- if applicable -->
+- **Slice:** {{SLICE_TASK_URI}}            <!-- if applicable -->
 
 ## Context
 {{BRIEF_DESCRIPTION_OF_WHAT_WAS_DONE_AND_WHY}}
@@ -88,16 +94,16 @@ These transitions are performed by the same actor and do not require a handoff d
 # Handoff: Architect → Supervisor
 
 ## Metadata
-- **Request:** aura-scripts-abc — REQUEST: Add structured logging
+- **Request:** {{REQUEST_TASK_URI}} — REQUEST: Add structured logging
 - **Date:** 2026-02-20
 - **Source:** Architect (architect-agent-1)
 - **Target:** Supervisor
 
 ## Task References
-- **Request:** aura-scripts-abc
-- **URD:** aura-scripts-def
-- **Proposal:** aura-scripts-ghi (PROPOSAL-2, ratified)
-- **Ratified Plan:** aura-scripts-jkl
+- **Request:** {{REQUEST_TASK_URI}}
+- **URD:** {{URD_TASK_URI}}
+- **Proposal:** {{PROPOSAL_TASK_URI}} (PROPOSAL-2, ratified)
+- **Ratified Plan:** {{RATIFIED_TASK_URI}}
 
 ## Context
 User requested structured logging across all CLI commands. After URE survey,
@@ -122,24 +128,24 @@ was ratified after 1 revision round (3/3 ACCEPT).
 - Tests verify log output format
 ```
 
-### 2. Supervisor → Worker (Summary + bd IDs)
+### 2. Supervisor → Worker (Summary + full task URIs)
 
 ```markdown
 # Handoff: Supervisor → Worker
 
 ## Metadata
-- **Request:** aura-scripts-abc — REQUEST: Add structured logging
+- **Request:** {{REQUEST_TASK_URI}} — REQUEST: Add structured logging
 - **Date:** 2026-02-20
 - **Source:** Supervisor (supervisor-agent-1)
 - **Target:** Worker (SLICE-1 owner)
 
 ## Task References
-- **Request:** aura-scripts-abc
-- **URD:** aura-scripts-def
-- **Proposal:** aura-scripts-ghi
-- **Ratified Plan:** aura-scripts-jkl
-- **Impl Plan:** aura-scripts-mno
-- **Slice:** aura-scripts-pqr (SLICE-1)
+- **Request:** {{REQUEST_TASK_URI}}
+- **URD:** {{URD_TASK_URI}}
+- **Proposal:** {{PROPOSAL_TASK_URI}}
+- **Ratified Plan:** {{RATIFIED_TASK_URI}}
+- **Impl Plan:** {{IMPL_PLAN_TASK_URI}}
+- **Slice:** {{SLICE_TASK_URI}} (SLICE-1)
 
 ## Context
 SLICE-1 covers the core logging infrastructure: slog handler setup, JSON
@@ -153,26 +159,26 @@ formatter, and LOG_LEVEL env var parsing. Other slices depend on this.
 - SLICE-2 (CLI integration) depends on SLICE-1 completing first.
 
 ## Acceptance Criteria
-- See bd task aura-scripts-pqr for full validation_checklist and acceptance_criteria.
+- See Pasture task {{SLICE_TASK_URI}} for full validation_checklist and acceptance_criteria.
 ```
 
-### 3. Supervisor → Reviewer (Summary + bd IDs)
+### 3. Supervisor → Reviewer (Summary + full task URIs)
 
 ```markdown
 # Handoff: Supervisor → Reviewer
 
 ## Metadata
-- **Request:** aura-scripts-abc — REQUEST: Add structured logging
+- **Request:** {{REQUEST_TASK_URI}} — REQUEST: Add structured logging
 - **Date:** 2026-02-20
 - **Source:** Supervisor (supervisor-agent-1)
 - **Target:** Reviewer
 
 ## Task References
-- **Request:** aura-scripts-abc
-- **URD:** aura-scripts-def
-- **Proposal:** aura-scripts-ghi
-- **Ratified Plan:** aura-scripts-jkl
-- **Impl Plan:** aura-scripts-mno
+- **Request:** {{REQUEST_TASK_URI}}
+- **URD:** {{URD_TASK_URI}}
+- **Proposal:** {{PROPOSAL_TASK_URI}}
+- **Ratified Plan:** {{RATIFIED_TASK_URI}}
+- **Impl Plan:** {{IMPL_PLAN_TASK_URI}}
 
 ## Context
 All 3 slices are complete. Code review covers the full implementation
@@ -188,22 +194,22 @@ against the ratified plan and URD requirements.
 - Vote ACCEPT or REVISE per slice.
 ```
 
-### 4. Worker → Reviewer (Summary + bd IDs)
+### 4. Worker → Reviewer (Summary + full task URIs)
 
 ```markdown
 # Handoff: Worker → Reviewer
 
 ## Metadata
-- **Request:** aura-scripts-abc — REQUEST: Add structured logging
+- **Request:** {{REQUEST_TASK_URI}} — REQUEST: Add structured logging
 - **Date:** 2026-02-20
 - **Source:** Worker (worker-slice-1)
 - **Target:** Reviewer
 
 ## Task References
-- **Request:** aura-scripts-abc
-- **URD:** aura-scripts-def
-- **Impl Plan:** aura-scripts-mno
-- **Slice:** aura-scripts-pqr (SLICE-1)
+- **Request:** {{REQUEST_TASK_URI}}
+- **URD:** {{URD_TASK_URI}}
+- **Impl Plan:** {{IMPL_PLAN_TASK_URI}}
+- **Slice:** {{SLICE_TASK_URI}} (SLICE-1)
 
 ## Context
 SLICE-1 implements the core logging infrastructure. All quality gates pass
@@ -217,24 +223,24 @@ SLICE-1 implements the core logging infrastructure. All quality gates pass
 - Consider adding log rotation in follow-up (not in scope for MVP).
 
 ## Acceptance Criteria
-- See bd task aura-scripts-pqr for validation_checklist completion status.
+- See Pasture task {{SLICE_TASK_URI}} for validation_checklist completion status.
 ```
 
-### 5. Reviewer → Followup (Summary + bd IDs)
+### 5. Reviewer → Followup (Summary + full task URIs)
 
 ```markdown
 # Handoff: Reviewer → Followup
 
 ## Metadata
-- **Request:** aura-scripts-abc — REQUEST: Add structured logging
+- **Request:** {{REQUEST_TASK_URI}} — REQUEST: Add structured logging
 - **Date:** 2026-02-20
 - **Source:** Reviewer (reviewer-A)
 - **Target:** Followup (Supervisor creates follow-up epic)
 
 ## Task References
-- **Request:** aura-scripts-abc
-- **URD:** aura-scripts-def
-- **Proposal:** aura-scripts-ghi
+- **Request:** {{REQUEST_TASK_URI}}
+- **URD:** {{URD_TASK_URI}}
+- **Proposal:** {{PROPOSAL_TASK_URI}}
 
 ## Context
 Code review reached a fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR
@@ -260,7 +266,7 @@ fixed in-wave and re-reviewed). Slice passes — handing results to the supervis
 
 The follow-up epic runs the same protocol phases using 6 handoff types (h1-h5 reused from the main lifecycle, plus h6 unique to the follow-up lifecycle), scoped to the follow-up epic.
 
-**Storage:** the HANDOFF Beads task body (no filesystem path) — same convention as the main lifecycle; each follow-up handoff is authored inline in its own HANDOFF Beads task and located by task ID.
+**Storage:** the HANDOFF Pasture task body (no filesystem path) — same convention as the main lifecycle; each follow-up handoff is authored inline in its own HANDOFF Pasture task and located by full task URI.
 
 ### Handoff Chain Through Follow-up Lifecycle
 
@@ -281,18 +287,18 @@ The follow-up epic runs the same protocol phases using 6 handoff types (h1-h5 re
 # Handoff: Supervisor → Architect (Follow-up)
 
 ## Metadata
-- **Request:** aura-scripts-abc — REQUEST: Add structured logging
-- **Follow-up Epic:** aura-scripts-xyz — FOLLOWUP: User-DEFER'd UAT items
+- **Request:** {{REQUEST_TASK_URI}} — REQUEST: Add structured logging
+- **Follow-up Epic:** {{FOLLOWUP_TASK_URI}} — FOLLOWUP: User-DEFER'd UAT items
 - **Date:** 2026-02-25
 - **Source:** Supervisor
 - **Target:** Architect
 
 ## Task References
-- **Original Request:** aura-scripts-abc
-- **Original URD:** aura-scripts-def
-- **Follow-up Epic:** aura-scripts-xyz
-- **FOLLOWUP_URE:** aura-scripts-stu
-- **FOLLOWUP_URD:** aura-scripts-uvw
+- **Original Request:** {{REQUEST_TASK_URI}}
+- **Original URD:** {{URD_TASK_URI}}
+- **Follow-up Epic:** {{FOLLOWUP_TASK_URI}}
+- **FOLLOWUP_URE:** {{FOLLOWUP_URE_TASK_URI}}
+- **FOLLOWUP_URD:** {{FOLLOWUP_URD_TASK_URI}}
 
 ## Context
 Supervisor completed FOLLOWUP_URE with user (scoped 2 of the user-DEFER'd UAT
@@ -302,9 +308,9 @@ for FOLLOWUP_PROPOSAL creation.
 ## Deferred-Item Summary
 | Item ID | Source | UAT Phase | Scoped? | Description |
 |---------|--------|-----------|---------|-------------|
-| aura-scripts-111 | DEFER'd UAT item | Phase 11 | Yes | Request-id correlation |
-| aura-scripts-222 | DEFER'd UAT item | Phase 11 | Yes | Performance benchmark |
-| aura-scripts-333 | DEFER'd UAT item | Phase 11 | No (deferred again) | Rename LogConfig |
+| {{CORRELATION_TASK_URI}} | DEFER'd UAT item | Phase 11 | Yes | Request-id correlation |
+| {{BENCHMARK_TASK_URI}} | DEFER'd UAT item | Phase 11 | Yes | Performance benchmark |
+| {{RENAME_TASK_URI}} | DEFER'd UAT item | Phase 11 | No (deferred again) | Rename LogConfig |
 
 (All code-review severities had already reached 0 in-wave — none appears here.)
 
@@ -313,7 +319,7 @@ for FOLLOWUP_PROPOSAL creation.
 2. The third DEFER'd item is held for a future follow-up — user considers it low-priority.
 
 ## Open Items
-- DEFER'd item aura-scripts-333 remains unscoped for future follow-up.
+- DEFER'd item {{RENAME_TASK_URI}} remains unscoped for future follow-up.
 
 ## Acceptance Criteria
 - FOLLOWUP_PROPOSAL accounts for original URD + FOLLOWUP_URD.
@@ -334,19 +340,19 @@ for FOLLOWUP_PROPOSAL creation.
 # Handoff: Supervisor → Worker (Follow-up)
 
 ## Metadata
-- **Request:** aura-scripts-abc — REQUEST: Add structured logging
-- **Follow-up Epic:** aura-scripts-xyz — FOLLOWUP: User-DEFER'd UAT items
+- **Request:** {{REQUEST_TASK_URI}} — REQUEST: Add structured logging
+- **Follow-up Epic:** {{FOLLOWUP_TASK_URI}} — FOLLOWUP: User-DEFER'd UAT items
 - **Date:** 2026-02-25
 - **Source:** Supervisor
 - **Target:** Worker (FOLLOWUP_SLICE-1 owner)
 
 ## Task References
-- **Original Request:** aura-scripts-abc
-- **Original URD:** aura-scripts-def
-- **Follow-up Epic:** aura-scripts-xyz
-- **FOLLOWUP_URD:** aura-scripts-uvw
-- **FOLLOWUP_IMPL_PLAN:** aura-scripts-stu
-- **Slice:** aura-scripts-pqr (FOLLOWUP_SLICE-1)
+- **Original Request:** {{REQUEST_TASK_URI}}
+- **Original URD:** {{URD_TASK_URI}}
+- **Follow-up Epic:** {{FOLLOWUP_TASK_URI}}
+- **FOLLOWUP_URD:** {{FOLLOWUP_URD_TASK_URI}}
+- **FOLLOWUP_IMPL_PLAN:** {{FOLLOWUP_IMPL_PLAN_TASK_URI}}
+- **Slice:** {{FOLLOWUP_SLICE_TASK_URI}} (FOLLOWUP_SLICE-1)
 
 ## Context
 FOLLOWUP_SLICE-1 addresses 2 user-DEFER'd UAT items: request-id correlation
@@ -355,8 +361,8 @@ and performance benchmarking.
 ## Adopted Leaf Tasks
 | Leaf Task ID | Source | UAT Phase | Description |
 |-------------|--------|-----------|-------------|
-| aura-scripts-111 | DEFER'd UAT item | Phase 11 | Add request-id correlation to log entries |
-| aura-scripts-222 | DEFER'd UAT item | Phase 11 | Performance benchmark for high-throughput paths |
+| {{CORRELATION_TASK_URI}} | DEFER'd UAT item | Phase 11 | Add request-id correlation to log entries |
+| {{BENCHMARK_TASK_URI}} | DEFER'd UAT item | Phase 11 | Performance benchmark for high-throughput paths |
 
 ## Key Decisions
 1. Correlation ID passed via context.Context (not global state).
@@ -367,5 +373,5 @@ and performance benchmarking.
 
 ## Acceptance Criteria
 - Both adopted leaf tasks resolved (tests pass, production code path verified).
-- See bd task aura-scripts-pqr for full validation_checklist.
+- See Pasture task {{FOLLOWUP_SLICE_TASK_URI}} for full validation_checklist.
 ```

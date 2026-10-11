@@ -5,9 +5,83 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestEmbeddedVerbatimAssetsMatchCanonicalSources(t *testing.T) {
+	t.Parallel()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot, err := FindModuleRootFrom(wd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{"protocol", "install-cli"} {
+		source := filepath.Join(repoRoot, "skills", dir)
+		expected := map[string]bool{}
+		err := filepath.WalkDir(source, func(name string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			rel, err := filepath.Rel(repoRoot, name)
+			if err != nil {
+				return err
+			}
+			want, err := os.ReadFile(name)
+			if err != nil {
+				return err
+			}
+			embedded := path.Join(assetsDirName, skillsPackageDir, filepath.ToSlash(rel))
+			expected[embedded] = true
+			got, err := assetsFS.ReadFile(embedded)
+			if err != nil || !bytes.Equal(got, want) {
+				t.Errorf("verbatim asset %s differs from canonical source: %v; %s", rel, err, regenerateHint)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = fs.WalkDir(assetsFS, path.Join(assetsDirName, skillsPackageDir, "skills", dir), func(name string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if !entry.IsDir() && !expected[name] {
+				t.Errorf("verbatim asset %s has no canonical source; %s", name, regenerateHint)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(filepath.Join(repoRoot, "hooks/scripts/git-discipline.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := assetsFS.ReadFile("assets/pasture-hooks/hooks/scripts/git-discipline.sh")
+	if err != nil || !bytes.Equal(got, want) {
+		t.Errorf("git discipline payload differs from canonical source: %v; %s", err, regenerateHint)
+	}
+	sourceInfo, err := os.Stat(filepath.Join(repoRoot, "hooks/scripts/git-discipline.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyInfo, err := os.Stat(filepath.Join(repoRoot, "internal/target/claudecode/assets/pasture-hooks/hooks/scripts/git-discipline.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sourceInfo.Mode().Perm() != copyInfo.Mode().Perm() {
+		t.Errorf("git discipline payload mode differs from canonical source; %s", regenerateHint)
+	}
+}
 
 // regenerateHint is the actionable remediation printed on any drift failure. It
 // names the exact command that rewrites the embedded assets from the live
@@ -24,8 +98,8 @@ const regenerateHint = "run `make generate` (or `go generate ./internal/target/c
 // template change updates the canonical skills/agents but leaves the embed
 // stale.
 //
-// It checks the codegen-driven surface only. Plugin scaffolding, hand-authored
-// hook support files, and verbatim skill trees remain out of scope.
+// It checks emitted files plus canonical verbatim skills and Git discipline.
+// Independently authored plugin scaffolding remains out of scope.
 func TestEmbeddedAssetsMatchLivePipeline(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -62,8 +136,8 @@ func TestEmbeddedAssetsMatchLivePipeline(t *testing.T) {
 
 	// 2. Deletion guard: no embedded codegen-driven file may exist that the live
 	//    pipeline no longer emits (a skill removed from specs, or a renamed
-	//    agent, would otherwise linger in the embed forever). Verbatim skill
-	//    trees and plugin scaffolding are excluded by design.
+	//    agent, would otherwise linger in the embed forever). Canonical verbatim
+	//    trees are included; independently authored scaffolding is excluded.
 	for _, packageDir := range []string{skillsPackageDir, agentsPackageDir, hooksPackageDir} {
 		root := path.Join(assetsDirName, packageDir)
 		walkErr := fs.WalkDir(assetsFS, root, func(p string, d fs.DirEntry, err error) error {

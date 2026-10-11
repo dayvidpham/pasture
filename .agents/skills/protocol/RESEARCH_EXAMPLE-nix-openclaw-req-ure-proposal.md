@@ -1,3 +1,9 @@
+# Historical research transcript — non-operational quotation
+
+> The original material below is preserved verbatim as historical evidence.
+> Its legacy tracker commands and identifiers are NOT instructions to execute.
+> For current task operations use [PROCESS.md](PROCESS.md).
+
 dayvidpham/nix-openclaw-vm [main]
  I  -> pwd
 /home/minttea/codebases/dayvidpham/nix-openclaw-vm

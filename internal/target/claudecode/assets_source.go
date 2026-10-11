@@ -2,6 +2,7 @@ package claudecode
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -19,9 +20,10 @@ import (
 // in generate.go and guarded against silent drift by
 // TestEmbeddedAssetsMatchLivePipeline.
 //
-// The remaining embedded content - each package's .claude-plugin/plugin.json,
-// pasture-hooks/bd-prime.md, git-discipline.sh, and the hand-authored verbatim
-// skill trees - is authored directly in this assets tree.
+// Verbatim skills come from skills/protocol and skills/install-cli; the Git
+// discipline payload comes from hooks/scripts/git-discipline.sh. Package
+// scaffolding and the legacy context payload remain authored in this assets
+// tree until their respective owning generators retire or replace them.
 const (
 	// assetsDirName is the on-disk directory (relative to this package) that the
 	// //go:embed all:assets directive captures.
@@ -36,9 +38,8 @@ const (
 
 // verbatimSkillDirs are the top-level skill directories under
 // pasture-skills/skills that are hand-authored (copied verbatim) rather than
-// emitted by the claude-code codegen pipeline. They are excluded from the
-// generated-file drift check because codegen.EmitHarness(ClaudeCodeTarget) does
-// not emit them (the claude-code target declares no Verbatim trees).
+// emitted by the claude-code harness. RenderGeneratedAssets adds these canonical
+// source trees to the embedded output and its drift/pruning inventory.
 var verbatimSkillDirs = map[string]struct{}{
 	"protocol":    {},
 	"install-cli": {},
@@ -110,12 +111,45 @@ func RenderGeneratedAssets(repoRoot string) (map[string][]byte, error) {
 		}
 		out[assetsRel] = []byte(file.Content)
 	}
+	// Verbatim documents and hook support payloads have canonical repository
+	// owners too. Installation must never ship a separately maintained copy.
+	for dir := range verbatimSkillDirs {
+		sourceRoot := filepath.Join(repoRoot, "skills", dir)
+		err := filepath.WalkDir(sourceRoot, func(name string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			if entry.Type()&os.ModeSymlink != 0 {
+				return fmt.Errorf("canonical verbatim source %q is a symlink; replace it with a regular file before generating embedded assets", name)
+			}
+			rel, err := filepath.Rel(repoRoot, name)
+			if err != nil {
+				return err
+			}
+			content, err := os.ReadFile(name)
+			if err != nil {
+				return err
+			}
+			out[skillsPackageDir+"/"+filepath.ToSlash(rel)] = content
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%s: read canonical skills/%s during embedded asset generation: %w; repair that source tree and run make generate", where, dir, err)
+		}
+	}
+	content, err := os.ReadFile(filepath.Join(repoRoot, "hooks/scripts/git-discipline.sh"))
+	if err != nil {
+		return nil, fmt.Errorf("%s: read canonical git discipline payload during embedded asset generation: %w; restore hooks/scripts/git-discipline.sh and run make generate", where, err)
+	}
+	out[hooksPackageDir+"/hooks/scripts/git-discipline.sh"] = content
 	return out, nil
 }
 
 // isVerbatimSkillPath reports whether an assets-relative path lives under a
-// hand-authored verbatim skill directory (skills/protocol or skills/install-cli)
-// and is therefore not part of the codegen-driven, drift-checked surface.
+// hand-authored verbatim skill directory (skills/protocol or skills/install-cli).
 func isVerbatimSkillPath(assetsRel string) bool {
 	const prefix = skillsPackageDir + "/skills/"
 	if !strings.HasPrefix(assetsRel, prefix) {
@@ -169,8 +203,8 @@ func SortedAssetKeys(m map[string][]byte) []string {
 // the absolute paths of every codegen-managed file the live pipeline no longer
 // emits (its assets-relative path is absent from generated). It enumerates only
 // the codegen-driven surface: generated skills, agents, hooks.json, and the
-// lifecycle adapter. Plugin scaffolding, bd-prime.md, git-discipline.sh, and
-// verbatim skill trees are never reported or removed.
+// lifecycle adapter, verbatim skill trees and Git discipline payload. Plugin
+// scaffolding and the legacy context payload are never reported or removed.
 func StaleGeneratedAssets(assetsDir string, generated map[string][]byte) ([]string, error) {
 	var stale []string
 	for _, packageDir := range []string{skillsPackageDir, agentsPackageDir, hooksPackageDir} {
@@ -208,17 +242,18 @@ func StaleGeneratedAssets(assetsDir string, generated map[string][]byte) ([]stri
 }
 
 // isManagedGeneratedPath reports whether an assets-relative path is a
-// codegen-driven file the pipeline owns: a generated SKILL.md leaf outside the
-// verbatim skill trees, or an agent role file outside the package's plugin
-// scaffolding. It is the single predicate shared by the drift test's deletion
+// pipeline-owned file: a generated SKILL.md, a canonical verbatim skill leaf,
+// an agent outside plugin scaffolding, or a managed hook payload.
+// It is the single predicate shared by the drift test's deletion
 // guard and the generator's pruning step.
 func isManagedGeneratedPath(packageDir, assetsRel string) bool {
 	if packageDir == skillsPackageDir {
-		return !isVerbatimSkillPath(assetsRel) && path.Base(assetsRel) == "SKILL.md"
+		return isVerbatimSkillPath(assetsRel) || path.Base(assetsRel) == "SKILL.md"
 	}
 	if packageDir == agentsPackageDir {
 		return !strings.Contains(assetsRel, "/.claude-plugin/")
 	}
-	return assetsRel == hooksPackageDir+"/hooks/hooks.json" ||
+	return assetsRel == hooksPackageDir+"/hooks/scripts/git-discipline.sh" ||
+		assetsRel == hooksPackageDir+"/hooks/hooks.json" ||
 		assetsRel == hooksPackageDir+"/hooks/pasture-activation.json"
 }

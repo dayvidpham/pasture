@@ -1,3 +1,9 @@
+# Historical handoff record — non-operational quotation
+
+> The original material below is preserved verbatim as historical evidence.
+> Legacy identifiers and XML fields describe the original record, not current templates.
+> For current handoffs use [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md).
+
 # Handoff: WebSocket Connector + `aura web` Command Implementation
 
 > Request: unified-schema-cgo

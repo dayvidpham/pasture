@@ -92,6 +92,32 @@ CRUD, `pasture migrate` for schema upgrades, and the `pasture epoch`, `pasture
 phase`, `pasture signal`, `pasture query`, `pasture session`, and `pasture slice`
 verbs for durable workflow control.
 
+### Task tracker setup after installation
+
+Use [the protocol tracker bindings](../protocol/PROCESS.md#tracker-setup-and-recipe-bindings)
+before creating or recovering work. Set the shell binding `PASTURE_NAMESPACE`
+to the repository URL and pass it explicitly as `--namespace`; the CLI does
+not read that variable automatically. Without the flag it infers the Git
+remote or directory namespace. Store precedence is `--db`, `PASTURE_DB_PATH`,
+XDG data directory, home data directory, then the relative fallback.
+Use the same store throughout; an open failure is not an empty task list.
+
+```bash
+pasture task agents list
+pasture task ready
+pasture task blocked
+pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress
+```
+
+Ready/blocked read the whole selected store and accept only an exact `--label`
+filter; inspect each returned full URI before choosing repository work.
+Select an already-registered author explicitly for every comment. Create with
+a positional title and `--format json`, capture `.id` as the full task URI,
+then add labels separately; retain that URI and retry a failed label step
+without duplicating the task. Workers record evidence and blockers while
+remaining `in_progress`; only the supervisor closes after review/acceptance.
+Installation never grants permission to install or modify Git hooks.
+
 ## Fallback: Nix
 
 If a Nix-enabled system is available:

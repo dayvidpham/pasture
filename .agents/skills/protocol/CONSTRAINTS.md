@@ -24,7 +24,7 @@ Common constraints referenced by all agent and skill files.
 
 **Given** task is implemented **when** you are about to commit **then** you **should** use `git agent-commit -m ...`, **should never** use `git commit -m ...`
 
-**Given** you want to execute Beads **when** you are about to call `bd <command> ...` **then** you **should never** `cd <repo_root> && bd <command> ...`, instead you **should** always just call `bd <command> ...`
+**Given** tracker operations **when** selecting scope **then** use the namespace/store/registered-author bindings in [PROCESS.md](PROCESS.md#tracker-setup-and-recipe-bindings), and full task URIs **should never** change directory merely to select the tracker or invent task flags
 
 ## Workflow Constraints
 
@@ -42,7 +42,7 @@ Common constraints referenced by all agent and skill files.
 
 **Given** a vertical slice **when** decomposing it into leaf tasks **then** create one or more leaves named after the real work units — a slice may have ANY number (the L1/L2/L3 triple is one illustrative shape, not a required count) **should never** force every slice into a fixed L1/L2/L3 triple, or create a slice with no leaf tasks
 
-**Given** an actor-change transition **when** authoring the handoff **then** author it inline in its own HANDOFF Beads task body and locate it by task ID **should never** write the handoff to a filesystem path
+**Given** an actor-change transition **when** authoring the handoff **then** author it inline in its own HANDOFF Pasture task body and locate it by full task URI **should never** write the handoff to a filesystem path
 
 ## Checklists
 
@@ -90,9 +90,9 @@ Binary only. No intermediate levels.
 
 **No followup-of-followup:** Any user-DEFER'd items from a follow-up UAT are tracked on the existing follow-up epic as tasks. A nested follow-up-of-followup epic is never created.
 
-## Beads Task Naming & Tagging Standards
+## Pasture Task Naming & Tagging Standards
 
-All work flows through Beads with standardized titles and the v2 label schema:
+All work flows through Pasture tasks with standardized titles and the v2 label schema:
 
 ### Label Schema
 
@@ -163,24 +163,26 @@ Special labels:
 
 ### Frontmatter References
 
-Instead of peer-reference commands, include task IDs in the description frontmatter:
+Instead of peer-reference commands, include full task URIs in the description frontmatter. Bind the variables using [PROCESS.md](PROCESS.md#tracker-setup-and-recipe-bindings):
 
 ```bash
-bd create --title "URD: Feature name" \
+URD_URI=$(pasture task create "URD: Feature name" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  request: <request-task-id>
-  elicit: <elicit-task-id>
+  request: $REQUEST_URI
+  elicit: $ELICIT_URI
 ---
 ## Requirements
-..."
+..." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$URD_URI" pasture:urd
+pasture task label add "$URD_URI" pasture:p2-user:s2_2-urd
 ```
 
 This replaces the old peer-reference command for linking related tasks. The URD is a living reference document — not a blocking dependency.
 
-### Design Field Schema (Canonical)
+### Design Metadata Schema (Canonical)
 
-All implementation tasks use this structure in the `design` field:
+All implementation tasks include this design metadata in the description (there is no create-time design flag):
 
 ```json
 {
@@ -207,7 +209,7 @@ All implementation tasks use this structure in the `design` field:
       "rationale": "why this over alternatives"
     }
   ],
-  "ratified_plan": "<task-id>"
+  "ratified_plan": "{{RATIFIED_PLAN_TASK_URI}}"
 }
 ```
 
@@ -217,9 +219,9 @@ All implementation tasks use this structure in the `design` field:
 
 **Given** Phase 2 (URE) completes **when** creating the URD **then** use label `pasture:urd` and include structured requirements (priorities, design choices, MVP goals, end-vision goals) **should never** leave requirements scattered across REQUEST and ELICIT tasks without a URD
 
-**Given** a URD exists **when** linking to other tasks **then** include the URD task ID in the description frontmatter of referencing tasks (e.g., `urd: <urd-id>`) **should never** use `--blocked-by` for URD links — it is a reference document, not a blocking dependency
+**Given** a URD exists **when** linking to other tasks **then** include its full task URI in description frontmatter (e.g., `urd: {{URD_TASK_URI}}`) **should never** use `--blocked-by` for URD links — it is a reference document, not a blocking dependency
 
-**Given** scope changes at any phase **when** updating requirements **then** add a comment to the URD via `bd comments add <urd-id> "..."` **should never** leave the URD out of date when UAT results, ratification, or user feedback modify requirements
+**Given** scope changes at any phase **when** updating requirements **then** add a comment via `pasture task comment add "$URD_URI" "..." --author "$AUTHOR"` with a registered author **should never** leave the URD out of date when UAT results, ratification, or user feedback modify requirements
 
 ## Documentation Standards
 

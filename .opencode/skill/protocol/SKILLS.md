@@ -11,7 +11,7 @@ See [AGENTS.md](AGENTS.md) for role definitions and phase ownership.
 | Command | Phase | Description |
 |---------|-------|-------------|
 | `/pasture:epoch` | 1-12 | Master orchestrator for the full 12-phase workflow. Delegates to role-specific skills per phase. |
-| `/pasture:status` | any | Project status and monitoring via Beads queries. |
+| `/pasture:status` | any | Project status and monitoring via Pasture queries. |
 
 ---
 
@@ -33,7 +33,7 @@ See [AGENTS.md](AGENTS.md) for role definitions and phase ownership.
 | `/pasture:architect-propose-plan` | 3 | `pasture:p3-plan:s3-propose` | Create a PROPOSAL-N task with full technical plan. Includes public interfaces, implementation approach, validation checklist, and BDD acceptance criteria. |
 | `/pasture:architect-request-review` | 4 | `pasture:p4-plan:s4-review` | Spawn 3 parallel reviewers with axis-specific focus. Creates PROPOSAL-N-REVIEW-{axis}-{round} tasks (A=Correctness, B=Test quality, C=Elegance). |
 | `/pasture:architect-ratify` | 6 | `pasture:p6-plan:s6-ratify` | Ratify proposal after all 3 reviewers ACCEPT. Marks old proposals as `pasture:superseded`. Creates placeholder IMPL_PLAN task for supervisor. |
-| `/pasture:architect-handoff` | 7 | `pasture:p7-plan:s7-handoff` | Author the handoff (full inline provenance) inline in the HANDOFF Beads task body. Transfers ownership to supervisor. |
+| `/pasture:architect-handoff` | 7 | `pasture:p7-plan:s7-handoff` | Author the handoff (full inline provenance) inline in the HANDOFF Pasture task body. Transfers ownership to supervisor. |
 
 ---
 
@@ -43,9 +43,9 @@ See [AGENTS.md](AGENTS.md) for role definitions and phase ownership.
 |---------|-------|-------|-------------|
 | `/pasture:supervisor` | 7-12 | (multiple) | Main supervisor role. Receives handoff, decomposes plan, spawns workers, coordinates reviews, and lands code. |
 | `/pasture:supervisor-plan-tasks` | 8 | `pasture:p8-impl:s8-plan` | Decompose ratified plan into vertical slices (SLICE-N tasks). Each slice = one production code path owned by one worker. |
-| `/pasture:supervisor-spawn-worker` | 9 | `pasture:p9-impl:s9-slice` | Launch a worker agent for an assigned slice. Creates handoff document (summary + bd IDs). Worker must call `/pasture:worker` at start. |
-| `/pasture:supervisor-track-progress` | 9-10 | `pasture:p9-impl:s9-slice` | Monitor worker status via Beads. Check for blocked/complete/in-progress slices. |
-| `/pasture:supervisor-commit` | 12 | `pasture:p12-impl:s12-landing` | Atomic commit per completed layer/slice. Uses `git agent-commit`. Syncs Beads and pushes. |
+| `/pasture:supervisor-spawn-worker` | 9 | `pasture:p9-impl:s9-slice` | Launch a worker agent for an assigned slice. Creates handoff document (summary + full task URIs). Worker must call `/pasture:worker` at start. |
+| `/pasture:supervisor-track-progress` | 9-10 | `pasture:p9-impl:s9-slice` | Monitor Pasture notes/comments and readiness; blockers are edges, not a status. |
+| `/pasture:supervisor-commit` | 12 | `pasture:p12-impl:s12-landing` | Atomic commit per completed layer/slice. Uses `git agent-commit`. Records durable tracker evidence and pushes. |
 
 ---
 
@@ -56,7 +56,7 @@ See [AGENTS.md](AGENTS.md) for role definitions and phase ownership.
 | `/pasture:worker` | 9 | `pasture:p9-impl:s9-slice` | Main worker role. Reads slice assignment, implements full vertical (types → tests → impl → wiring). |
 | `/pasture:worker-implement` | 9 | `pasture:p9-impl:s9-slice` | Implement the assigned vertical slice following TDD layers (L1 types, L2 tests, L3 implementation). |
 | `/pasture:worker-complete` | 9 | `pasture:p9-impl:s9-slice` | Signal slice completion after all quality gates pass (typecheck + tests + production code path verified). |
-| `/pasture:worker-blocked` | 9 | `pasture:p9-impl:s9-slice` | Report a blocker to the supervisor via Beads comment. |
+| `/pasture:worker-blocked` | 9 | `pasture:p9-impl:s9-slice` | Report a blocker via attributed Pasture comment/notes; keep in_progress. |
 
 ---
 
@@ -67,7 +67,7 @@ See [AGENTS.md](AGENTS.md) for role definitions and phase ownership.
 | `/pasture:reviewer` | 4, 10 | `pasture:p4-plan:s4-review`, `pasture:p10-impl:s10-review` | Main reviewer role. Reviews plans (Phase 4) and code (Phase 10) against 3 axes. |
 | `/pasture:reviewer-review-plan` | 4 | `pasture:p4-plan:s4-review` | Review a PROPOSAL-N against one axis (A/B/C). Binary vote: ACCEPT or REVISE. No severity tree for plan reviews. |
 | `/pasture:reviewer-review-code` | 10 | `pasture:p10-impl:s10-review`, `pasture:severity:*` | Review implementation slices against one axis. EAGER severity tree creation (BLOCKER/IMPORTANT/MINOR). |
-| `/pasture:reviewer-comment` | 4, 10 | — | Leave structured feedback on a Beads task. Utility command (no task creation). |
+| `/pasture:reviewer-comment` | 4, 10 | — | Leave structured feedback on a Pasture task with explicit registered author. Utility command (no task creation). |
 | `/pasture:reviewer-vote` | 4, 10 | — | Cast ACCEPT or REVISE vote. Binary only. |
 
 ### Review Axes

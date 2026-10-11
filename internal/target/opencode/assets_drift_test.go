@@ -12,6 +12,7 @@ import (
 )
 
 func TestEmbeddedAssetsMatchOpenCodeHarness(t *testing.T) {
+	t.Parallel()
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -24,6 +25,8 @@ func TestEmbeddedAssetsMatchOpenCodeHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render OpenCode harness: %v", err)
 	}
+	// The harness inventory includes verbatim protocol/install documents;
+	// compare those bytes and hidden leaves as well as registered skills.
 	want := map[string][]byte{}
 	for _, file := range files {
 		rel, relErr := filepath.Rel(root, file.Path)

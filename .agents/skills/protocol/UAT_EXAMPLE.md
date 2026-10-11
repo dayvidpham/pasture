@@ -1,3 +1,9 @@
+# Historical UAT record — non-operational quotation
+
+> The original material below is preserved verbatim as historical evidence.
+> Its legacy tracker and deprecated launcher recipes are NOT instructions to execute.
+> Use [UAT_TEMPLATE.md](UAT_TEMPLATE.md) and [PROCESS.md](PROCESS.md) for current operations.
+
 # UAT Example: Plan Acceptance for aura-scripts Nix Flake REVISION-2
 
 > Source: aura-scripts-ci4

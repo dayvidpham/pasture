@@ -23,6 +23,8 @@ forbidden:
     pattern: '\baura-(?:xxx|yyy|zzz|www)\b'
   - name: unsupported relation vocabulary
     pattern: '\brelates_to:'
+  - name: readiness queries do not filter by namespace
+    pattern: '\bpasture\s+task\s+(?:ready|blocked)\s+--namespace\b'
 fragments:
   - id: frag--task-recovery
     every_body: true
@@ -30,3 +32,33 @@ fragments:
   - id: frag--task-author
     every_body: true
     contains: ['pasture task agents list', '--author', 'pasture-system--00000000-0000-0000-0000-000000000000', verbatim]
+historical:
+  - owner: skills/protocol/UAT_EXAMPLE.md
+    banner: "# Historical UAT record — non-operational quotation"
+    windows:
+      - 'bd create --labels "pasture:user:uat,proposal-2:uat-1" \'
+      - 'bd dep relate aura-scripts-ci4 aura-scripts-82l'
+      - 'bd comments add aura-scripts-ci4 "UAT ADDENDUM (user-initiated, verbatim): ..."'
+      - 'bd label add aura-scripts-82l pasture:plan:ratify'
+      - 'bd comments add aura-scripts-82l "RATIFIED: All 3 reviewers ACCEPT on REVISION-2, UAT passed (aura-scripts-ci4)."'
+      - "**Q1: aura-swarm needs tmux and git at runtime (plus bd and claude for worktree mode). Should ALL runtime deps be baked into the Nix wrapper, or should some be expected from the user's PATH?**"
+      - '- Bake all in (hermetic) — writeShellApplication with all runtimeInputs. aura-swarm gets python3+tmux+git+bd+claude. Fully reproducible.'
+      - '- Bake tmux+python, expect claude+bd from PATH — claude and bd are user-managed tools (not in nixpkgs or custom). Wrap what Nix can provide, leave the rest to PATH.'
+      - '- Expect all from PATH — Only patch the shebang. User is responsible for having tmux, git, claude, bd available. Lightest wrapper.'
+  - owner: skills/protocol/RESEARCH_EXAMPLE-nix-openclaw-req-ure-proposal.md
+    banner: "# Historical research transcript — non-operational quotation"
+    windows:
+      - ' I  -> bd show nix-openclaw-vm-et5'
+      - ' I  -> bd show nix-openclaw-vm-whp'
+      - ' I  -> bd show nix-openclaw-vm-35e'
+  - owner: skills/protocol/user-request-revamp-v2.md
+    banner: "# Historical request and transcript — non-operational quotation"
+    windows:
+      - ' I  -> bd dep tree unified-schema-t9d                                                             minttea@desktop'
+      - ' I  -> bd dep tree unified-schema-ldl                                                             minttea@desktop'
+  - owner: skills/protocol/MIGRATION_v1_to_v2.md
+    banner: '| Historical v1 command (DO NOT RUN) | Current replacement | Notes |'
+    windows:
+      - '| Historical only: `bd dep relate <a> <b>` | Frontmatter `references:` in description | Peer references via full task URIs |'
+      - '| Historical only: `bd label add <id> pasture:plan:propose` | `pasture task label add "$TASK_URI" pasture:p3-plan:s3-propose` | Additive label change |'
+      - '| Historical only: `bd label add <id> pasture:plan:ratify` | `pasture task label add "$TASK_URI" pasture:p6-plan:s6-ratify` | Additive label change |'

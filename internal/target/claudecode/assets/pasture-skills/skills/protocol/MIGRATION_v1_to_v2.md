@@ -2,6 +2,12 @@
 
 This document describes how to migrate existing Pasture protocol usage from v1 labels and conventions to v2.
 
+The old-command column below is **historical, non-operational comparison only**.
+Recommended procedures use Pasture against tasks already in its store; this
+label migration does not authorize writes to a frozen legacy tracker archive.
+Use full task-URI and namespace/store/author bindings from
+[PROCESS.md](PROCESS.md#tracker-setup-and-recipe-bindings).
+
 ## Principles
 
 1. **Additive approach:** Old labels are NOT removed. New labels are ADDED alongside existing ones.
@@ -76,11 +82,11 @@ This document describes how to migrate existing Pasture protocol usage from v1 l
 
 ### Commands
 
-| v1 Command | v2 Replacement | Notes |
+| Historical v1 command (DO NOT RUN) | Current replacement | Notes |
 |------------|---------------|-------|
-| `bd dep relate <a> <b>` | Frontmatter `references:` in description | Peer references via description frontmatter |
-| `bd label add <id> pasture:plan:propose` | `bd label add <id> pasture:p3-plan:s3-propose` | New label format |
-| `bd label add <id> pasture:plan:ratify` | `bd label add <id> pasture:p6-plan:s6-ratify` | New label format |
+| Historical only: `bd dep relate <a> <b>` | Frontmatter `references:` in description | Peer references via full task URIs |
+| Historical only: `bd label add <id> pasture:plan:propose` | `pasture task label add "$TASK_URI" pasture:p3-plan:s3-propose` | Additive label change |
+| Historical only: `bd label add <id> pasture:plan:ratify` | `pasture task label add "$TASK_URI" pasture:p6-plan:s6-ratify` | Additive label change |
 
 ---
 
@@ -90,12 +96,12 @@ This document describes how to migrate existing Pasture protocol usage from v1 l
 
 ```bash
 # List all open tasks with old-format labels
-bd list --status=open --labels="pasture:plan:request"
-bd list --status=open --labels="pasture:plan:propose"
-bd list --status=open --labels="pasture:plan:revision"
-bd list --status=open --labels="pasture:review"
-bd list --status=open --labels="pasture:plan:ratified"
-bd list --status=open --labels="pasture:impl"
+pasture task list --namespace "$PASTURE_NAMESPACE" --status open --label pasture:plan:request
+pasture task list --namespace "$PASTURE_NAMESPACE" --status open --label pasture:plan:propose
+pasture task list --namespace "$PASTURE_NAMESPACE" --status open --label pasture:plan:revision
+pasture task list --namespace "$PASTURE_NAMESPACE" --status open --label pasture:review
+pasture task list --namespace "$PASTURE_NAMESPACE" --status open --label pasture:plan:ratified
+pasture task list --namespace "$PASTURE_NAMESPACE" --status open --label pasture:impl
 ```
 
 ### Step 2: Add New Labels (Additive)
@@ -104,31 +110,32 @@ For each open task, add the corresponding v2 label WITHOUT removing the v1 label
 
 ```bash
 # Example: REQUEST_PLAN task
-bd label add <task-id> pasture:p1-user:s1_1-classify
+pasture task label add "$TASK_URI" pasture:p1-user:s1_1-classify
 # Old pasture:plan:request label remains
 
 # Example: PROPOSE_PLAN task
-bd label add <task-id> pasture:p3-plan:s3-propose
+pasture task label add "$TASK_URI" pasture:p3-plan:s3-propose
 # Old pasture:plan:propose label remains
 
 # Example: Implementation slice
-bd label add <task-id> pasture:p9-impl:s9-slice
+pasture task label add "$TASK_URI" pasture:p9-impl:s9-slice
 # Old pasture:impl label remains
 ```
 
 ### Step 3: Add Frontmatter References
 
-For tasks that previously used `bd dep relate`, add frontmatter references to the description:
+For tasks that previously used peer-reference commands, add frontmatter references to the description. Read the existing description first and preserve all its content; do not append a second frontmatter block to an existing one:
 
 ```bash
-# Instead of: bd dep relate <urd-id> <request-id>
-# Update URD description to include frontmatter:
-bd update <urd-id> --description "---
+pasture task show "$URD_URI" --format json
+# Bind PRESERVED_BODY to the complete existing body after reviewing the read.
+# Merge existing reference frontmatter if present rather than duplicating it.
+pasture task update "$URD_URI" --description "---
 references:
-  request: <request-id>
-  elicit: <elicit-id>
+  request: $REQUEST_URI
+  elicit: $ELICIT_URI
 ---
-$(bd show <urd-id> --field=description)"
+$PRESERVED_BODY"
 ```
 
 ### Step 4: Update Titles (Optional)
@@ -137,17 +144,17 @@ Optionally rename task titles to match new conventions. This is cosmetic and not
 
 ```bash
 # Example: REQUEST_PLAN → REQUEST
-bd update <task-id> --title "REQUEST: Description"
+pasture task update "$TASK_URI" --title "REQUEST: Description"
 
 # Example: PROPOSE_PLAN → PROPOSAL-1
-bd update <task-id> --title "PROPOSAL-1: Description"
+pasture task update "$TASK_URI" --title "PROPOSAL-1: Description"
 ```
 
 ### Step 5: Create Missing Phase Tasks
 
 If the in-flight epic predates v2, create tasks for phases that didn't exist in v1:
 
-- **Handoff task** (Phase 7) — if architect-to-supervisor transition already happened, create retroactively and close
+- **Handoff task** (Phase 7) — record the historical transition and its date honestly; supervisor closes only after checking evidence
 - **Code review tasks** (Phase 10) — if reviews already happened, no action needed
 - **Severity groups** — only needed for future review rounds
 
@@ -155,9 +162,10 @@ If the in-flight epic predates v2, create tasks for phases that didn't exist in 
 
 ```bash
 # Check: no open tasks with ONLY old labels (no corresponding v2 label)
-bd list --status=open --labels="pasture:plan:request" | while read id; do
-  bd show $id --field=labels | grep -q "pasture:p1-user" || echo "NEEDS UPDATE: $id"
-done
+pasture task list --namespace "$PASTURE_NAMESPACE" --status open --label pasture:plan:request --format json \
+  | python3 -c 'import json,sys; print("\n".join(t["id"] for t in json.load(sys.stdin)))'
+# For each returned URI, inspect the sorted labels and verify its v2 counterpart:
+pasture task label list "$TASK_URI"
 
 # Repeat for each old label...
 ```
@@ -167,7 +175,7 @@ done
 Once all open tasks have v2 labels alongside their v1 labels:
 
 ```bash
-bd comments add <request-id> "Migration v1→v2 complete. All open tasks have v2 labels."
+pasture task comment add "$REQUEST_URI" "Migration v1→v2 complete. All open tasks have v2 labels." --author "$AUTHOR"
 ```
 
 ---
@@ -175,7 +183,7 @@ bd comments add <request-id> "Migration v1→v2 complete. All open tasks have v2
 ## What NOT to Do
 
 1. **DO NOT** remove old labels from existing tasks — they serve as historical record
-2. **DO NOT** restructure existing dependency trees — dependencies using `bd dep add --blocked-by` are correct in both v1 and v2
+2. **DO NOT** restructure existing dependency trees — retain the parent-blocked-by-child direction
 3. **DO NOT** retroactively create severity groups for past reviews — only apply to new review rounds
 4. **DO NOT** delete or modify closed tasks — they are immutable historical records
 5. **DO NOT** rename closed tasks — title mapping applies only to open/new tasks

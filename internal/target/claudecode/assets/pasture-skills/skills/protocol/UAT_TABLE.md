@@ -1,3 +1,9 @@
+# Historical UAT responses — non-operational quotation
+
+> The original material below is preserved verbatim as historical evidence.
+> Legacy identifiers and prior review-disposition choices are not current instructions.
+> Use [UAT_TEMPLATE.md](UAT_TEMPLATE.md) and [PROCESS.md](PROCESS.md) for current operations.
+
 ---
 references:
   followup_epic: aura-plugins-2tj

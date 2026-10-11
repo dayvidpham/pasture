@@ -1,3 +1,9 @@
+# Historical handoff record — non-operational quotation
+
+> The original material below is preserved verbatim as historical evidence.
+> Legacy identifiers and launcher recipes are NOT instructions to execute.
+> For current handoffs use [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md).
+
 # Handoff: `aura ingest` Data Ingestion Pipeline
 
 > Request: unified-schema-t9d

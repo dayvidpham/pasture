@@ -19,7 +19,7 @@ Complete reference documentation for the Pasture 12-phase workflow system.
 | [CLAUDE.md](CLAUDE.md) | Reusable agent directive for projects using Pasture |
 | [SKILLS.md](SKILLS.md) | Complete skill reference by role and phase |
 | [README.md](README.md) | Protocol overview and quick-start |
-| [schema.xml](schema.xml) | Beads label schema (XML format) |
+| [schema.xml](schema.xml) | Pasture task label schema (XML format) |
 
 ### Templates & Examples
 

@@ -464,6 +464,7 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 		Cases []struct {
 			Name               string   `yaml:"name"`
 			Skill              string   `yaml:"skill"`
+			Document           string   `yaml:"document"`
 			Anchor             string   `yaml:"anchor"`
 			Titles             []string `yaml:"titles"`
 			BlockedInput       bool     `yaml:"blocked_input"`
@@ -494,7 +495,11 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 				originalURDID = document.ID
 				inputCount++
 			}
-			data, err := os.ReadFile(filepath.Join("..", "..", "skills", tc.Skill, "SKILL.md"))
+			name := filepath.Join("..", "..", "skills", tc.Skill, "SKILL.md")
+			if tc.Document != "" {
+				name = filepath.Join("..", "..", "skills", "protocol", tc.Document)
+			}
+			data, err := os.ReadFile(name)
 			require.NoError(t, err)
 			text := string(data)
 			start := strings.Index(text, tc.Anchor)
@@ -513,7 +518,8 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 				"SLICE_ID_URI="+input.ID, "REVIEW_ID_URI="+input.ID, "IMPL_PLAN_ID_URI="+input.ID,
 				"REQUEST_ID_URI="+input.ID, "URD_ID_URI="+input.ID, "RATIFIED_PROPOSAL_ID_URI="+input.ID,
 				"SLICE_2_ID_URI="+input.ID, "SLICE_3_ID_URI="+input.ID, "SLICE_4_ID_URI="+input.ID,
-				"FOLLOWUP_EPIC_ID_URI="+input.ID, "ORIGINAL_URD_ID_URI="+originalURDID)
+				"FOLLOWUP_EPIC_ID_URI="+input.ID, "ORIGINAL_URD_ID_URI="+originalURDID,
+				"REQUEST_URI="+input.ID, "URD_URI="+input.ID, "ELICIT_URI="+input.ID)
 			var output bytes.Buffer
 			cmd.Stdout = &output
 			cmd.Stderr = &output

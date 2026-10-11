@@ -240,7 +240,7 @@ func buildEnums(buf *bytes.Buffer, depth int) {
 				Name: "ContentLevel",
 				Values: []EnumValue{
 					{Id: "full-provenance", Description: "Full inline context with all decisions and rationale"},
-					{Id: "summary-with-ids", Description: "Summary with Beads task ID references"},
+					{Id: "summary-with-ids", Description: "Summary with Pasture task URI references"},
 				},
 			},
 			// Classification axes (s1_1-classify)
@@ -838,8 +838,8 @@ var handoffTriggers = map[string]string{
 func buildHandoffs(buf *bytes.Buffer, depth int) {
 	section := HandoffsSection{
 		// R8/A3: the .git/.aura/handoff filesystem pattern is retired — every handoff
-		// is authored in its Beads task body. Sentinel records that retirement.
-		StoragePattern: "beads-task-body",
+		// is authored in its Pasture task body. Sentinel records that retirement.
+		StoragePattern: "pasture-task-body",
 	}
 
 	handoffOrderList := []string{"h1", "h2", "h3", "h4", "h5", "h6"}
@@ -1216,11 +1216,11 @@ func buildDependencyModel(buf *bytes.Buffer, depth int) {
 	section := DependencyModelSection{
 		Rule:           "Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.",
 		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-N \u2192 blocked-by leaf tasks",
-		Command:        "bd dep add {parent-id} --blocked-by {child-id}",
-		AntiPattern:    "bd dep add {child-id} --blocked-by {parent-id}",
+		Command:        "pasture task dep add {parent-uri} --blocked-by {child-uri}",
+		AntiPattern:    "pasture task dep add {child-uri} --blocked-by {parent-uri}",
 		ReferenceLinks: &ReferenceLinksElem{
 			Note:    "URD and other reference docs use frontmatter, not blocking deps",
-			Pattern: "description frontmatter:\n  references:\n    urd: {urd-task-id}\n    request: {request-task-id}",
+			Pattern: "description frontmatter:\n  references:\n    urd: {urd-task-uri}\n    request: {request-task-uri}",
 		},
 	}
 	marshalSection(buf, depth, section)
@@ -1244,7 +1244,7 @@ func buildFollowupLifecycle(buf *bytes.Buffer, depth int) {
 		},
 		LeafTaskAdoption: &LeafTaskAdoptElem{
 			Rule:    "When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.",
-			Command: "bd dep add {followup-slice-id} --blocked-by {important-leaf-task-id}\nbd dep add {followup-slice-id} --blocked-by {minor-leaf-task-id}",
+			Command: "pasture task dep add {followup-slice-uri} --blocked-by {important-leaf-task-uri}\npasture task dep add {followup-slice-uri} --blocked-by {minor-leaf-task-uri}",
 			Note:    "Leaf tasks retain their original parent (the severity group from the original review) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.",
 		},
 		References: &FollowupRefsElem{
@@ -1585,11 +1585,11 @@ func generateSchemaContent() string {
 		{"CONSTRAINTS (Given/When/Then/Should)\n\n     Protocol-level constraints. Coding-standard constraints live in\n     CONSTRAINTS.md and are not duplicated here.", buildConstraints},
 		{"TASK TITLE CONVENTIONS\n\n     Mapping from task titles to labels and creating roles.", buildTaskTitles},
 		{"DOCUMENTS\n\n     Mapping from protocol documentation files to the entities they cover.", buildDocuments},
-		{"DEPENDENCY DIRECTION (Beads)\n\n     Canonical definition of how work flows through the dependency tree.", buildDependencyModel},
+		{"DEPENDENCY DIRECTION (Pasture)\n\n     Canonical definition of how work flows through the dependency tree.", buildDependencyModel},
 		{"FOLLOW-UP LIFECYCLE (R6 from URD)\n\n     When code review produces IMPORTANT or MINOR findings, the supervisor\n     creates a follow-up epic that runs the same protocol phases with\n     FOLLOWUP_* prefixed task types. The IMPORTANT/MINOR leaf tasks from\n     the original review gain a second parent: the follow-up slice they\n     are assigned to (dual-parent).\n\n     Kind: Separate enum values (FOLLOWUP_URE, FOLLOWUP_SLICE, etc.).\n     Simple single-parent epic relationship — no followup-of-followup.", buildFollowupLifecycle},
 		{"PROCEDURE STEPS\n\n     Per-role ordered steps (startup sequence for supervisor,\n     TDD layers for worker). Only roles with non-empty steps are listed.", buildProcedureSteps},
 		{"CHECKLISTS\n\n     Per-role quality gate checklists for slice completion, review readiness,\n     and landing.", buildChecklists},
-		{"COORDINATION COMMANDS\n\n     Beads coordination commands shared across roles and role-specific.", buildCoordinationCommands},
+		{"COORDINATION COMMANDS\n\n     Pasture coordination commands shared across roles and role-specific.", buildCoordinationCommands},
 		{"WORKFLOWS\n\n     Named agent workflows: Ride the Wave (supervisor), Layer Cake (worker),\n     Architect State Flow (architect).", buildWorkflows},
 		{"FIGURES\n\n     ASCII diagram figures associated with roles and workflows.\n     Content stored in YAML files, not in schema.xml.", buildFigures},
 	}

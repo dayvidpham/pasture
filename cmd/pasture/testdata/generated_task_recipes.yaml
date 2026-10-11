@@ -1,4 +1,19 @@
 cases:
+  - name: verbatim protocol positional request capture and separate label
+    document: PROCESS.md
+    anchor: '### REQUEST Task'
+    titles:
+      - 'REQUEST: Brief description of need'
+  - name: verbatim protocol URD capture keeps references outside blockers
+    document: PROCESS.md
+    anchor: '### User Requirements Document (s2_2)'
+    titles:
+      - 'URD: {{feature name}}'
+  - name: verbatim protocol proposal capture keeps metadata in body
+    document: PROCESS.md
+    anchor: '### PROPOSAL-N Task'
+    titles:
+      - 'PROPOSAL-1: Technical proposal for feature'
   - name: generated supervisor followup keeps requirements reference-only
     skill: supervisor
     anchor: '### Step 2: Follow-up lifecycle'

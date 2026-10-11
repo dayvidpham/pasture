@@ -13,6 +13,11 @@ import (
 )
 
 type canonicalTaskFixture struct {
+	Historical []struct {
+		Owner   string   `yaml:"owner"`
+		Banner  string   `yaml:"banner"`
+		Windows []string `yaml:"windows"`
+	} `yaml:"historical"`
 	Forbidden []struct {
 		Name    string `yaml:"name"`
 		Pattern string `yaml:"pattern"`

@@ -1,6 +1,6 @@
 # Pasture Protocol
 
-Multi-agent orchestration protocol for AI coding agents. Defines a 12-phase workflow from user request to landed code, with structured review gates, audit trail preservation, and inter-agent coordination via Beads.
+Multi-agent orchestration protocol for AI coding agents. Defines a 12-phase workflow from user request to landed code, with structured review gates, audit trail preservation, and inter-agent coordination via Pasture.
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ Multi-agent orchestration protocol for AI coding agents. Defines a 12-phase work
 | [PROCESS.md](PROCESS.md) | Step-by-step workflow execution for all 12 phases | When running or debugging a phase |
 | [AGENTS.md](AGENTS.md) | Role taxonomy: phases owned, tools, handoff procedures | When spawning agents or assigning work |
 | [SKILLS.md](SKILLS.md) | Command reference: every `/pasture:*` skill mapped to phase and role | When invoking a skill or looking up usage |
-| [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) | Standardized template for 6 actor-change transitions (authored in the HANDOFF Beads task body) | When creating handoffs |
+| [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) | Standardized template for 6 actor-change transitions (authored in the HANDOFF Pasture task body) | When creating handoffs |
 | [MR_TEMPLATE.md](MR_TEMPLATE.md) | Reusable merge/pull request description skeleton | When opening a merge/pull request |
 | [EXAMPLE_MR_DESCRIPTION.md](EXAMPLE_MR_DESCRIPTION.md) | Worked merge request description example | Reference for MR_TEMPLATE |
 | [MIGRATION_v1_to_v2.md](MIGRATION_v1_to_v2.md) | Label and title migration from v1 to v2 | When updating old tasks |
@@ -66,7 +66,7 @@ Special labels:
 ## Key Principles
 
 - **Audit trail preservation** — Never delete tasks, labels, or information
-- **Dependency chaining** — `bd dep add <parent> --blocked-by <child>` (child finishes first)
+- **Dependency chaining** — `pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI"` (full task URIs; child finishes first)
 - **Consensus required** — All 3 reviewers must ACCEPT before proceeding
 - **Binary votes** — ACCEPT or REVISE only (no intermediate levels)
 - **EAGER severity tree** — Always create 3 severity groups per code review round
