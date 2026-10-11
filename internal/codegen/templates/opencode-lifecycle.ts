@@ -12,6 +12,54 @@ type LifecycleResponse =
 const CHILD_WAIT_MS = 8000;
 const CONFIGURATION_ADVICE = "; verify PASTURE_BIN and the generated OpenCode __PASTURE_HOST_VERSION__ configuration";
 
+const TASK_RECOVERY_MARKER = "[pasture:task-recovery]";
+const TASK_RECOVERY_TEXT = "__PASTURE_RECOVERY_LITERAL__";
+
+// OpenCode 2.0.20 packages/plugin/src/promise/session.ts declares system as
+// Array<SystemPart>; text parts have type and text, not a native source field.
+// A stable prefix owns only our whole part, never unrelated embedded text.
+// Mutation is source-declared, not yet proved by a fresh live recovery capture.
+// Runtime tests prove callback composition; deployment must separately verify
+// that the running host consumes this system text in its outgoing request.
+function injectTaskRecovery(event): void {
+  if (!Array.isArray(event?.system)) throw new Error("context system is not the pinned host's mutable SystemPart array");
+  const replacement = { type: "text", text: TASK_RECOVERY_MARKER + "\n" + TASK_RECOVERY_TEXT };
+  const parts = [];
+  let replaced = false;
+  for (const part of event.system) {
+    if (part?.type === "text" && typeof part.text === "string" && part.text.startsWith(TASK_RECOVERY_MARKER + "\n")) {
+      if (!replaced) parts.push(replacement);
+      replaced = true;
+    } else parts.push(part);
+  }
+  if (!replaced) parts.push(replacement);
+  event.system.splice(0, event.system.length, ...parts);
+}
+
+function reportRecoveryFault(ctx, operation: string, error): void {
+  console.error("Pasture recovery failed during " + operation + " at location " +
+    (ctx?.location?.directory ?? "<unknown>") + " on OpenCode " +
+    (ctx?.app?.version ?? "<unknown>") + ": " + error +
+    "; the host continues and other lifecycle callbacks remain installed. Recovery may be missing; regenerate/reinstall the OpenCode 2.0.20 lifecycle module and restart the session; use the generated skill recovery instructions meanwhile.");
+}
+
+function withTaskRecovery(ctx, lifecycleCallback: (event: any) => Promise<void>) {
+  let reported = false;
+  return async (hookEvent) => {
+    // Consult lifecycle with the original host payload. A recovery fault cannot
+    // suppress the receipt transport or change its decision handling.
+    await lifecycleCallback(hookEvent);
+    try {
+      injectTaskRecovery(hookEvent);
+    } catch (error) {
+      if (!reported) {
+        reported = true;
+        reportRecoveryFault(ctx, "session.context injection", error);
+      }
+    }
+  };
+}
+
 async function forwardDiagnostic(stderr: string, event: string): Promise<void> {
   const sink = process.stderr;
   try {

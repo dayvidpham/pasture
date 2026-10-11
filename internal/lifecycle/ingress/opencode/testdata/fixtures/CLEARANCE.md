@@ -2532,3 +2532,35 @@ This addendum records no new live capture, fixture acceptance or host
 capability. It changes no capture payload, capture kit, fixture identity,
 activation state, or response capability. All historical fixture bytes,
 sidecars, pairing and acceptance records above remain unchanged.
+
+## Static recovery transport addendum — 2026-10-11
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`071b5d87e0a9957870bda0b273ad27e10a6263cdd9f04da534c54639f0808fc4`.
+The existing location-scoped session.context registration composes static
+Pasture recovery after its lifecycle consultation. Recovery replaces and
+deduplicates its own marked system text part while preserving unrelated parts.
+Its canonical prose is shared with generated skills; no runtime task query,
+file read or cached task state is added. Injection faults report and continue.
+Lifecycle transport, activation, version guards and decision handling remain
+unchanged. The generated plugin and embedded hook asset have identical bytes.
+
+This is the current committed transport identity, not a capture-kit identity.
+It differs from the historical transports above as a later generated revision;
+none of the historical captures ran through these current bytes. All fixture
+bytes, provenance sidecars, historical digests, pairing and acceptance records
+above remain unchanged. This addendum records no new live session, capture,
+fixture acceptance, installed configuration change or host capability. Live
+replacement deployment and fresh-session verification remain separate work.
+
+### Recovery review hardening — 2026-10-11
+
+The current committed plugin SHA-256 is
+`5a70d61088a561ad0a9be8a5610a13619cb68403ba66a5e51b67bf9fc22551f4`.
+This later revision makes injection diagnostics once-per-registration and
+documents the void callback contract and the source-declared, not yet live-
+capture-proved mutation. Tests now pin consultation-before-injection explicitly.
+No lifecycle response or registration surface changed. The preceding digest
+identifies the initial recovery revision; neither revision participated in the
+historical captures above. All prior fixture bytes, sidecars, historical digests
+and user acceptance remain unchanged. No new live verification is claimed.

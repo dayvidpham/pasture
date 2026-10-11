@@ -883,3 +883,18 @@ The event set, matcher, activation metadata and budgets are unchanged. All
 accepted fixture and sidecar bytes and historical statements above remain
 unchanged. Scratch replay through the generated shell command, built CLI and
 durable store is not a new live capture or a new clearance decision.
+
+## Current transport digest: legacy context retirement (2026-10-11)
+
+The generated `hooks/hooks.json` now has SHA-256
+`68c52a62f30493ac0410d1df301c6ad40e141f8106e17c39a74605dbec1c1cf8`.
+It removes the legacy context-payload cat commands from SessionStart and
+PreCompact. Lifecycle commands, activation, matchers, budgets and the empty
+Claude proceed stdout contract are unchanged. No new Claude hook is adopted.
+
+This is the current committed transport identity, not a capture-kit identity.
+It differs from the historical transports above only as a later generated
+revision; none of the historical captures ran through these current bytes.
+All fixture bytes, provenance sidecars, historical digests and user acceptance
+records above are unchanged. This addendum records no new live session,
+capture, fixture acceptance, installed configuration change or host capability.

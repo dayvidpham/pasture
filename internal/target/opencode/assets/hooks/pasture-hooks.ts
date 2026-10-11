@@ -12,6 +12,54 @@ type LifecycleResponse =
 const CHILD_WAIT_MS = 8000;
 const CONFIGURATION_ADVICE = "; verify PASTURE_BIN and the generated OpenCode 2.0.20 configuration";
 
+const TASK_RECOVERY_MARKER = "[pasture:task-recovery]";
+const TASK_RECOVERY_TEXT = "Recover from live Pasture state at session start and after compaction; never trust cached task rows.\n\nStore selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.\n\nSet PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.\n\nRun pasture task ready, pasture task blocked, and pasture task list --namespace \"$PASTURE_NAMESPACE\" --status in_progress. For each referenced active task, run pasture task show \"$TASK_URI\", pasture task comments \"$TASK_URI\", and pasture task timeline \"$TASK_URI\". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.\n\nCreate returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)[\"id\"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.\n\nAssignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.\n\nParent stays open and is blocked by child: pasture task dep add \"$PARENT_URI\" --blocked-by \"$CHILD_URI\". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.\n\nSelect the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.";
+
+// OpenCode 2.0.20 packages/plugin/src/promise/session.ts declares system as
+// Array<SystemPart>; text parts have type and text, not a native source field.
+// A stable prefix owns only our whole part, never unrelated embedded text.
+// Mutation is source-declared, not yet proved by a fresh live recovery capture.
+// Runtime tests prove callback composition; deployment must separately verify
+// that the running host consumes this system text in its outgoing request.
+function injectTaskRecovery(event): void {
+  if (!Array.isArray(event?.system)) throw new Error("context system is not the pinned host's mutable SystemPart array");
+  const replacement = { type: "text", text: TASK_RECOVERY_MARKER + "\n" + TASK_RECOVERY_TEXT };
+  const parts = [];
+  let replaced = false;
+  for (const part of event.system) {
+    if (part?.type === "text" && typeof part.text === "string" && part.text.startsWith(TASK_RECOVERY_MARKER + "\n")) {
+      if (!replaced) parts.push(replacement);
+      replaced = true;
+    } else parts.push(part);
+  }
+  if (!replaced) parts.push(replacement);
+  event.system.splice(0, event.system.length, ...parts);
+}
+
+function reportRecoveryFault(ctx, operation: string, error): void {
+  console.error("Pasture recovery failed during " + operation + " at location " +
+    (ctx?.location?.directory ?? "<unknown>") + " on OpenCode " +
+    (ctx?.app?.version ?? "<unknown>") + ": " + error +
+    "; the host continues and other lifecycle callbacks remain installed. Recovery may be missing; regenerate/reinstall the OpenCode 2.0.20 lifecycle module and restart the session; use the generated skill recovery instructions meanwhile.");
+}
+
+function withTaskRecovery(ctx, lifecycleCallback: (event: any) => Promise<void>) {
+  let reported = false;
+  return async (hookEvent) => {
+    // Consult lifecycle with the original host payload. A recovery fault cannot
+    // suppress the receipt transport or change its decision handling.
+    await lifecycleCallback(hookEvent);
+    try {
+      injectTaskRecovery(hookEvent);
+    } catch (error) {
+      if (!reported) {
+        reported = true;
+        reportRecoveryFault(ctx, "session.context injection", error);
+      }
+    }
+  };
+}
+
 async function forwardDiagnostic(stderr: string, event: string): Promise<void> {
   const sink = process.stderr;
   try {
@@ -575,7 +623,11 @@ export default {
     pastureHostVersionArgs = pastureReleaseShaped(observedVersion) ? ["--host-version", observedVersion] : [];
     const registrations = [];
     registrations.push(await ctx.session.hook("prompt", sessionPrompt));
-    registrations.push(await ctx.session.hook("context", sessionContext));
+    try {
+      registrations.push(await ctx.session.hook("context", withTaskRecovery(ctx, sessionContext)));
+    } catch (error) {
+      reportRecoveryFault(ctx, "session.context registration", error);
+    }
     registrations.push(await ctx.session.hook("compaction", sessionCompaction));
     registrations.push(await ctx.session.hook("generate", sessionGenerate));
     registrations.push(await ctx.session.hook("title", sessionTitle));

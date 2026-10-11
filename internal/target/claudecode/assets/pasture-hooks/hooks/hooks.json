@@ -67,10 +67,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2\u003e\u00261"
-          },
-          {
-            "type": "command",
             "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event PreCompact",
             "timeout": 10
           }
@@ -115,10 +111,6 @@
       {
         "matcher": "",
         "hooks": [
-          {
-            "type": "command",
-            "command": "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2\u003e\u00261"
-          },
           {
             "type": "command",
             "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event SessionStart",

@@ -168,20 +168,33 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 		}
 	}
 	session := config.Hooks["SessionStart"]
-	if len(session) != 1 || session[0].Matcher != "" || len(session[0].Hooks) != 2 {
+	for event, groups := range config.Hooks {
+		for _, group := range groups {
+			for _, hook := range group.Hooks {
+				if strings.Contains(hook.Command, "bd-prime") || strings.HasPrefix(hook.Command, "cat ") {
+					t.Fatalf("%s still prints a retired context payload instead of preserving lifecycle-only stdout: %q", event, hook.Command)
+				}
+			}
+		}
+	}
+	for _, name := range []string{
+		filepath.Join("..", "..", "hooks", "bd-prime.md"),
+		filepath.Join("..", "target", "claudecode", "assets", "pasture-hooks", "hooks", "bd-prime.md"),
+	} {
+		if _, err := os.Stat(name); !os.IsNotExist(err) {
+			t.Fatalf("retired payload %s remains or cannot be inspected: %v", name, err)
+		}
+	}
+	if len(session) != 1 || session[0].Matcher != "" || len(session[0].Hooks) != 1 {
 		t.Fatalf("SessionStart hook group changed: %+v", session)
 	}
-	if session[0].Hooks[0].Command != "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1" {
-		t.Errorf("SessionStart bd-prime command=%q", session[0].Hooks[0].Command)
-	}
 	wantLifecycle := `"${PASTURE_BIN:-pasture}" hook lifecycle --harness claude-code --event SessionStart`
-	if session[0].Hooks[1].Command != wantLifecycle || session[0].Hooks[1].Type != "command" || session[0].Hooks[1].Timeout != 10 {
-		t.Errorf("SessionStart lifecycle command=%+v, want %q", session[0].Hooks[1], wantLifecycle)
+	if session[0].Hooks[0].Command != wantLifecycle || session[0].Hooks[0].Type != "command" || session[0].Hooks[0].Timeout != 10 {
+		t.Errorf("SessionStart lifecycle command=%+v, want %q", session[0].Hooks[0], wantLifecycle)
 	}
 	compact := config.Hooks["PreCompact"]
-	if len(compact) != 1 || compact[0].Matcher != "" || len(compact[0].Hooks) != 2 ||
-		compact[0].Hooks[0].Command != "cat ${CLAUDE_PLUGIN_ROOT}/hooks/bd-prime.md 2>&1" ||
-		!strings.Contains(compact[0].Hooks[1].Command, "--event PreCompact") {
+	if len(compact) != 1 || compact[0].Matcher != "" || len(compact[0].Hooks) != 1 ||
+		!strings.Contains(compact[0].Hooks[0].Command, "--event PreCompact") {
 		t.Fatalf("PreCompact hook group changed: %+v", compact)
 	}
 	pre := config.Hooks["PreToolUse"]

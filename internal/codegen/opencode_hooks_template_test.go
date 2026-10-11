@@ -25,6 +25,7 @@ func TestOpenCodeHooksTemplateMarkersAndRendering(t *testing.T) {
 		"__PASTURE_BINARY_ENV__",
 		"/* PASTURE_HELPERS */",
 		"/* PASTURE_SETUP */",
+		`"__PASTURE_RECOVERY_LITERAL__"`,
 	}
 	remainder := string(source)
 	for _, marker := range markers {

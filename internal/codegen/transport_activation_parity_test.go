@@ -437,7 +437,7 @@ const openCodePluginExport = "export default {"
 
 // openCodeHookRegistration captures one location-scoped hook registration:
 // the plugin domain, the hook name, and the helper it invokes.
-var openCodeHookRegistration = regexp.MustCompile(`registrations\.push\(await ctx\.([A-Za-z0-9_]+)\.hook\("([^"]+)", ([A-Za-z0-9_]+)\)`)
+var openCodeHookRegistration = regexp.MustCompile(`registrations\.push\(await ctx\.([A-Za-z0-9_]+)\.hook\("([^"]+)", (?:withTaskRecovery\(ctx, )?([A-Za-z0-9_]+)\)`)
 
 // openCodeBusGuard captures one bus-event filter of the event subscription:
 // the bus type it selects and the helper it calls.
@@ -488,6 +488,11 @@ func openCodeWiredLifecycleEvents(t *testing.T, path string) map[string]struct{}
 func openCodeRegisteredEvents(t *testing.T, path, source string) map[string]struct{} {
 	t.Helper()
 	setup := openCodePluginSetupBody(t, path, source)
+	if strings.Contains(setup, "withTaskRecovery(ctx,") {
+		require.Equal(t, 1, strings.Count(setup, "withTaskRecovery(ctx,"), "only context composes recovery")
+		require.Contains(t, setup, `ctx.session.hook("context", withTaskRecovery(ctx, sessionContext))`)
+		require.Equal(t, 1, strings.Count(source, "await lifecycleCallback(hookEvent);"), "recovery composition must call the original lifecycle handler once")
+	}
 	registered := make(map[string]struct{})
 	add := func(event, origin string) {
 		_, duplicate := registered[event]

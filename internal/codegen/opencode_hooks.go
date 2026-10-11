@@ -26,6 +26,7 @@ type openCodeHooksTemplateData struct {
 	BinaryEnv    string
 	Helpers      string
 	Setup        string
+	RecoveryJSON string
 }
 
 func renderOpenCodeHooksTemplate(source string, data openCodeHooksTemplateData) string {
@@ -38,6 +39,7 @@ func renderOpenCodeHooksTemplate(source string, data openCodeHooksTemplateData) 
 		"__PASTURE_BINARY_ENV__", data.BinaryEnv,
 		"/* PASTURE_HELPERS */", data.Helpers,
 		"/* PASTURE_SETUP */", data.Setup,
+		`"__PASTURE_RECOVERY_LITERAL__"`, data.RecoveryJSON,
 	).Replace(source)
 }
 
@@ -198,6 +200,12 @@ func generateOpenCodeHooksModule(manifest []registration.Event, activationEntrie
 	if err != nil {
 		return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: cannot read embedded templates/opencode-lifecycle.ts during render: %w; no plugin emitted — restore the template and rebuild the generator", err)
 	}
+	// Reuse the same canonical prose the skill bodies render; attribution is
+	// a separate shared fragment, not a second authored recovery text.
+	recovery, err := openCodeRecoveryJSON(SharedFragmentSpecs)
+	if err != nil {
+		return "", err
+	}
 	return renderOpenCodeHooksTemplate(string(source), openCodeHooksTemplateData{
 		Contract:     metadata.Contract,
 		NativeTools:  allowList,
@@ -206,7 +214,23 @@ func generateOpenCodeHooksModule(manifest []registration.Event, activationEntrie
 		BinaryEnv:    adapterBinaryEnv,
 		Helpers:      helpers,
 		Setup:        setup,
+		RecoveryJSON: recovery,
 	}), nil
+}
+
+func openCodeRecoveryJSON(fragments map[FragmentId]SharedFragment) (string, error) {
+	var contents []string
+	for _, id := range []FragmentId{FragTaskRecovery, FragTaskAuthor} {
+		fragment, ok := fragments[id]
+		if !ok || fragment.Kind != FragmentKindProse || fragment.Prose == nil || strings.TrimSpace(fragment.Prose.Content) == "" {
+			return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: shared recovery fragment %q is missing or has no prose during plugin emission; no plugin emitted — restore its prose in internal/codegen/specs_data_fragments.go and regenerate", id)
+		}
+		contents = append(contents, fragment.Prose.Content)
+	}
+	// JSON encoding a string cannot fail; fragment lookup is the actual fallible
+	// boundary, including direct callers outside the all-target generator.
+	encoded, _ := json.Marshal(strings.Join(contents, "\n\n"))
+	return string(encoded), nil
 }
 
 // openCodeHookTarget splits one dotted 2.0.20 native coordinate into the
@@ -419,6 +443,15 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 	for _, event := range manifest {
 		hook, isHook := hookByKind[event.Kind]
 		if !isHook {
+			continue
+		}
+		if event.NativeName == "session.context" {
+			fmt.Fprintf(&setup, `    try {
+      registrations.push(await ctx.session.hook("context", withTaskRecovery(ctx, %s)));
+    } catch (error) {
+      reportRecoveryFault(ctx, "session.context registration", error);
+    }
+`, helperByKind[event.Kind])
 			continue
 		}
 		fmt.Fprintf(&setup, "    registrations.push(await ctx.%s.hook(%q, %s));\n", hook[0], hook[1], helperByKind[event.Kind])
