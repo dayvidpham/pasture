@@ -847,13 +847,13 @@ FOLLOWUP epic (pasture:epic-followup)
   ├── frontmatter reference: original URD
   ├── frontmatter reference: original REVIEW-A/B/C tasks
   └── blocked-by: FOLLOWUP_URE         (Phase 2: scope which DEFER'd items to address)
-        └── blocked-by: FOLLOWUP_URD   (Phase 2: requirements for follow-up)
-              └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
-                    └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
-                          ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
-                          │     ├── blocked-by: deferred-item-leaf-task-...
-                          │     └── blocked-by: deferred-item-leaf-task-...
-                          └── blocked-by: FOLLOWUP_SLICE-2
+        ├── frontmatter reference: FOLLOWUP_URD (living requirements document)
+        └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
+              └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
+                    ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
+                    │     ├── blocked-by: deferred-item-leaf-task-...
+                    │     └── blocked-by: deferred-item-leaf-task-...
+                    └── blocked-by: FOLLOWUP_SLICE-2
 ```
 
 ```bash
@@ -878,7 +878,14 @@ references:
 Follow-up requirements. References original URD." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
 pasture task label add "$FOLLOWUP_URD_ID" pasture:urd
-pasture task dep add "$FOLLOWUP_URE_ID" --blocked-by "$FOLLOWUP_URD_ID"
+# Preserve the URE's references and scoping text; the living URD is not blocking work.
+pasture task update "$FOLLOWUP_URE_ID" --description "---
+references:
+  followup_epic: \"${FOLLOWUP_EPIC_ID_URI}\"
+  original_urd: \"${ORIGINAL_URD_ID_URI}\"
+  followup_urd: \"${FOLLOWUP_URD_ID}\"
+---
+Scoping URE: determine which user-DEFER'd UAT items to address."
 ```
 
 The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_SLICE) are created as the follow-up epic progresses through the protocol phases.

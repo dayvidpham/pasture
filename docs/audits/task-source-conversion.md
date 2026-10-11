@@ -160,3 +160,22 @@ executable-context classifier. The old context injection remains wired here.
 
 No task CLI surface, lifecycle transport, Git hooks, installed user settings,
 archive, other repository, or well-known actor registration was changed.
+
+## Follow-up reference correction
+
+Correctness review of the initial conversion found that the implementation-review
+and supervisor follow-up recipes still made their living requirements document
+a blocker. Both canonical recipes now update the elicitation task's description
+frontmatter with `followup_urd`, preserving `followup_epic`, `original_urd`, and
+the scoping text; neither creates an edge to the document. Both lifecycle diagrams
+show it as a reference beside the work chain.
+
+Two additional YAML-driven, verbatim emitted-shell cases use the real CLI and
+isolated stores. Distinct original-document and epic inputs prove reference
+preservation; the new requirements document remains open, elicitation stays
+ready, and neither requirements document appears in the epic's blocker tree.
+Canonical fixture rules also reject URD dependency targets and the old diagram
+edge. Both source and shell tests failed against the original recipes before
+the repair, and pass after regeneration. There are now seven emitted-recipe
+cases. Focused codegen/CLI race tests, formatting, vet, and fresh pure-Go builds
+pass; post-commit twice-regeneration evidence is recorded in the tracking task.

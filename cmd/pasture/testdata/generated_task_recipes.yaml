@@ -1,4 +1,20 @@
 cases:
+  - name: generated supervisor followup keeps requirements reference-only
+    skill: supervisor
+    anchor: '### Step 2: Follow-up lifecycle'
+    blocked_input: true
+    followup_references: true
+    titles:
+      - 'FOLLOWUP_URE: Scope follow-up for <feature>'
+      - 'FOLLOWUP_URD: Requirements for <feature> follow-up'
+  - name: generated implementation review followup keeps requirements reference-only
+    skill: impl-review
+    anchor: '### Step 2: Follow-up lifecycle'
+    blocked_input: true
+    followup_references: true
+    titles:
+      - 'FOLLOWUP_URE: Scope follow-up for <feature>'
+      - 'FOLLOWUP_URD: Requirements for <feature> follow-up'
   - name: generated reviewer severity graph with review binding
     skill: reviewer-review-code
     anchor: '### Step 1: Create All 3 Severity Groups Immediately'

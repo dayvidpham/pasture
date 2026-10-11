@@ -1,4 +1,8 @@
 forbidden:
+  - name: reference URD is never blocking work
+    pattern: '\bpasture\s+task\s+dep\s+add\b[^\n]*--(?:blocked-by|target)(?:=|\s+)"?\$\{?[A-Z_]*URD(?:_ID)?(?:_URI)?\}?'
+  - name: diagrams keep followup URD outside blocker chains
+    pattern: 'blocked-by:\s*FOLLOWUP_URD\b'
   - name: retired tracker commands
     pattern: '\bbd\s+(?:ready|blocked|list|show|create|q|update|close|comments?|label|dep|stats|count|search|task|prime|sync|edit|mol|doctor)\b'
   - name: invented task verbs

@@ -462,11 +462,12 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 	t.Parallel()
 	var fixture struct {
 		Cases []struct {
-			Name         string   `yaml:"name"`
-			Skill        string   `yaml:"skill"`
-			Anchor       string   `yaml:"anchor"`
-			Titles       []string `yaml:"titles"`
-			BlockedInput bool     `yaml:"blocked_input"`
+			Name               string   `yaml:"name"`
+			Skill              string   `yaml:"skill"`
+			Anchor             string   `yaml:"anchor"`
+			Titles             []string `yaml:"titles"`
+			BlockedInput       bool     `yaml:"blocked_input"`
+			FollowupReferences bool     `yaml:"followup_references"`
 		} `yaml:"cases"`
 	}
 	testutil.LoadFixtures(t, testutil.GeneratedTaskRecipes, &fixture)
@@ -481,6 +482,18 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 				ID string `json:"id"`
 			}
 			require.NoError(t, json.Unmarshal([]byte(create.stdout), &input))
+			originalURDID := input.ID
+			inputCount := 1
+			if tc.FollowupReferences {
+				original := runCLI(t, "--db", db, "--format", "json", "--namespace", namespace, "task", "create", "Original requirements")
+				require.Zero(t, original.exitCode, original.stderr)
+				var document struct {
+					ID string `json:"id"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(original.stdout), &document))
+				originalURDID = document.ID
+				inputCount++
+			}
 			data, err := os.ReadFile(filepath.Join("..", "..", "skills", tc.Skill, "SKILL.md"))
 			require.NoError(t, err)
 			text := string(data)
@@ -499,7 +512,8 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 				"PASTURE_NAMESPACE="+namespace, "SLICE_1_ID_URI="+input.ID, "REVIEW_ROUND_ID_URI="+input.ID,
 				"SLICE_ID_URI="+input.ID, "REVIEW_ID_URI="+input.ID, "IMPL_PLAN_ID_URI="+input.ID,
 				"REQUEST_ID_URI="+input.ID, "URD_ID_URI="+input.ID, "RATIFIED_PROPOSAL_ID_URI="+input.ID,
-				"SLICE_2_ID_URI="+input.ID, "SLICE_3_ID_URI="+input.ID, "SLICE_4_ID_URI="+input.ID)
+				"SLICE_2_ID_URI="+input.ID, "SLICE_3_ID_URI="+input.ID, "SLICE_4_ID_URI="+input.ID,
+				"FOLLOWUP_EPIC_ID_URI="+input.ID, "ORIGINAL_URD_ID_URI="+originalURDID)
 			var output bytes.Buffer
 			cmd.Stdout = &output
 			cmd.Stderr = &output
@@ -512,11 +526,11 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 				Labels []string `json:"labels"`
 			}
 			require.NoError(t, json.Unmarshal([]byte(listed.stdout), &tasks))
-			require.Len(t, tasks, len(tc.Titles)+1)
+			require.Len(t, tasks, len(tc.Titles)+inputCount)
 			var titles []string
 			for _, task := range tasks {
 				require.True(t, strings.HasPrefix(task.ID, namespace+"--"), task.ID)
-				if task.ID != input.ID {
+				if task.ID != input.ID && task.ID != originalURDID {
 					titles = append(titles, task.Title)
 					labels := runCLI(t, "--db", db, "--format", "json", "task", "label", "list", task.ID)
 					require.Zero(t, labels.exitCode, labels.stderr)
@@ -539,6 +553,49 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 				require.Equal(t, input.ID, blockers[0].ID, "generated graph must leave the parent blocked by its finding group, never the inverse")
 			} else {
 				require.Empty(t, blockers)
+			}
+			if tc.FollowupReferences {
+				var ureID, urdID string
+				for _, task := range tasks {
+					if strings.HasPrefix(task.Title, "FOLLOWUP_URE:") {
+						ureID = task.ID
+					}
+					if strings.HasPrefix(task.Title, "FOLLOWUP_URD:") {
+						urdID = task.ID
+					}
+				}
+				require.NotEmpty(t, ureID)
+				require.NotEmpty(t, urdID)
+				shown := runCLI(t, "--db", db, "--format", "json", "task", "show", ureID)
+				require.Zero(t, shown.exitCode, shown.stderr)
+				var ure struct {
+					Description string `json:"description"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(shown.stdout), &ure))
+				frontmatter := strings.SplitN(ure.Description, "---", 3)
+				require.Len(t, frontmatter, 3)
+				require.Empty(t, frontmatter[0])
+				require.Contains(t, frontmatter[1], "references:")
+				require.Contains(t, frontmatter[1], `followup_urd: "`+urdID+`"`)
+				require.Contains(t, frontmatter[1], `followup_epic: "`+input.ID+`"`)
+				require.Contains(t, frontmatter[1], `original_urd: "`+originalURDID+`"`)
+				require.Contains(t, frontmatter[2], "Scoping URE:")
+				ready := runCLI(t, "--db", db, "--format", "json", "task", "ready")
+				require.Zero(t, ready.exitCode, ready.stderr)
+				var candidates []struct {
+					ID string `json:"id"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(ready.stdout), &candidates))
+				var readyIDs []string
+				for _, candidate := range candidates {
+					readyIDs = append(readyIDs, candidate.ID)
+				}
+				require.ElementsMatch(t, []string{originalURDID, ureID, urdID}, readyIDs, "the living URD must not block elicitation")
+				tree := runCLI(t, "--db", db, "task", "dep", "tree", input.ID)
+				require.Zero(t, tree.exitCode, tree.stderr)
+				require.Contains(t, tree.stdout, ureID)
+				require.NotContains(t, tree.stdout, urdID, "reference documents must never enter the live blocker tree")
+				require.NotContains(t, tree.stdout, originalURDID)
 			}
 		})
 	}
