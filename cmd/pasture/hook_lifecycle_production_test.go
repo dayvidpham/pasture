@@ -736,6 +736,7 @@ console.log("opencode 2.0.21 production drive passed");
 			require.Equal(t, 1, byKind[row.event], "coordinate %s must read back as exactly one durable occurrence", row.native)
 		})
 	}
+	assertNativeReceiptAuthorsAndBuiltIns(t, rawBoundary(t, dbPath), queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind))
 }
 
 // The two contract ids every durable record must carry, read from the

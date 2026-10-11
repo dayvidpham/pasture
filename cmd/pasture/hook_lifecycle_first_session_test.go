@@ -13,15 +13,18 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/provenance"
 )
@@ -89,6 +92,15 @@ func TestFirstObservedSessionEventBindsTheClaimAndTheNextGateDenies(t *testing.T
 	require.NoError(t, tracker.Close())
 	actor := agent.ID.String()
 
+	// Model an existing CLI-only store from before built-in initialization:
+	// native ingress identity and gate prerequisites exist, but no well-known
+	// bindings do. The hook's real durable open must fill the missing registry.
+	db := rawBoundary(t, dbPath)
+	_, err = db.Exec(`DELETE FROM pasture_agent_categories WHERE agent_id IN (SELECT agent_id FROM pasture_well_known_agents)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`DELETE FROM pasture_well_known_agents`)
+	require.NoError(t, err)
+
 	fixtureDir := filepath.Join("..", "..", "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
 	prompt, err := os.ReadFile(filepath.Join(fixtureDir, "opencode_session_prompt_2_0_20.1.json"))
 	require.NoError(t, err)
@@ -101,13 +113,14 @@ func TestFirstObservedSessionEventBindsTheClaimAndTheNextGateDenies(t *testing.T
 	// EVENT 1 — session.prompt, the first event the plugin observes. No
 	// session.created is ever sent. The gate runs before the claim write, so
 	// this event proceeds as UNBOUND and then binds the session.
+	started := time.Now()
 	promptRun := runFirstSessionBinary(t, binary, dbPath, actor, "session.prompt", "2.0.21", prompt)
+	t.Logf("native hook with all built-in bindings missing: %s", time.Since(started))
 	require.Equal(t, 0, promptRun.exit, promptRun.stderr)
 	require.JSONEq(t, `{"decision":"proceed"}`, promptRun.stdout)
 
 	var count int
 	var claimed string
-	db := rawBoundary(t, dbPath)
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ? AND session = ?`, "opencode", session).Scan(&count, &claimed))
 	require.Equal(t, 1, count, "the first observed event must write the claim even without session.created")
 	require.Equal(t, actor, claimed)
@@ -139,4 +152,26 @@ func TestFirstObservedSessionEventBindsTheClaimAndTheNextGateDenies(t *testing.T
 	permissionDecision := readerConsultationDecisionOf(t, permissionConsultations[1].Payload)
 	require.Equal(t, "deny", permissionDecision.Decision)
 	require.Equal(t, backend.ReasonNoActiveAssignment.String(), permissionDecision.Reason)
+
+	assertNativeReceiptAuthorsAndBuiltIns(t, db, permissionConsultations)
+}
+
+func assertNativeReceiptAuthorsAndBuiltIns(t *testing.T, db *sql.DB, receipts []provenance.EvidenceRow) {
+	t.Helper()
+	// Native receipts still commit as the system actor, not as a legacy hook
+	// automaton. Inspect only receipt operations, not bootstrap registrations.
+	for _, evidence := range receipts {
+		var committer string
+		require.NoError(t, db.QueryRow(`SELECT actor_id FROM journal WHERE journal_id = ?`, evidence.ProducingOperationJournalID).Scan(&committer))
+		require.Equal(t, provadapter.PastureSystemDefaultActorID().String(), committer)
+	}
+	var canonical int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM pasture_well_known_agents`).Scan(&canonical))
+	require.Equal(t, len(tasks.WellKnownAgents()), canonical)
+	for _, spec := range tasks.WellKnownAgents() {
+		var role string
+		require.NoError(t, db.QueryRow(`SELECT c.automaton_role FROM pasture_well_known_agents w
+			JOIN pasture_agent_categories c ON c.agent_id = w.agent_id WHERE w.name = ?`, spec.Name).Scan(&role))
+		require.Equal(t, string(spec.Role), role)
+	}
 }

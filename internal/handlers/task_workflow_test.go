@@ -203,7 +203,10 @@ func TestTaskAgents_EmptyRegistry(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "empty.db")
-	tr, err := tasks.OpenTaskTracker(path)
+	// Agent discovery is read-only and must also support an empty base registry.
+	// The durable Pasture constructor now ensures built-ins, so use the existing
+	// low-level registry constructor for this deliberately unregistered fixture.
+	tr, err := provenance.OpenSQLite(path)
 	require.NoError(t, err)
 	require.NoError(t, tr.Close())
 
