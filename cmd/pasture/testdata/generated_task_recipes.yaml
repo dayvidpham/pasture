@@ -1,0 +1,46 @@
+cases:
+  - name: generated supervisor followup keeps requirements reference-only
+    skill: supervisor
+    anchor: '### Step 2: Follow-up lifecycle'
+    blocked_input: true
+    followup_references: true
+    titles:
+      - 'FOLLOWUP_URE: Scope follow-up for <feature>'
+      - 'FOLLOWUP_URD: Requirements for <feature> follow-up'
+  - name: generated implementation review followup keeps requirements reference-only
+    skill: impl-review
+    anchor: '### Step 2: Follow-up lifecycle'
+    blocked_input: true
+    followup_references: true
+    titles:
+      - 'FOLLOWUP_URE: Scope follow-up for <feature>'
+      - 'FOLLOWUP_URD: Requirements for <feature> follow-up'
+  - name: generated reviewer severity graph with review binding
+    skill: reviewer-review-code
+    anchor: '### Step 1: Create All 3 Severity Groups Immediately'
+    blocked_input: true
+    titles:
+      - SLICE-1-REVIEW-A-1 BLOCKER
+      - SLICE-1-REVIEW-A-1 IMPORTANT
+      - SLICE-1-REVIEW-A-1 MINOR
+  - name: generated supervisor plan heredoc with bound slice URIs
+    skill: supervisor
+    anchor: '7. Bind SLICE_1_ID_URI'
+    titles: []
+  - name: generated vertical plan heredoc with bound slice URIs
+    skill: supervisor-plan-tasks
+    anchor: '7. **Update IMPL_PLAN'
+    titles: []
+  - name: generated shared severity graph
+    skill: supervisor
+    anchor: '### Severity Tree (EAGER Creation)'
+    blocked_input: true
+    titles:
+      - SLICE-1-REVIEW-A-1 BLOCKER
+      - SLICE-1-REVIEW-A-1 IMPORTANT
+      - SLICE-1-REVIEW-A-1 MINOR
+  - name: generated positional request capture and metadata
+    skill: user-request
+    anchor: '### Capture verbatim and create the request task'
+    titles:
+      - 'REQUEST: {{short summary}}'

@@ -111,7 +111,7 @@ var PhaseSpecs = map[protocol.PhaseId]PhaseSpec{
 		Transitions: []Transition{
 			{
 				ToPhase:   protocol.PhaseImplPlan,
-				Condition: "handoff authored in the HANDOFF Beads task body",
+				Condition: "handoff authored in the HANDOFF Pasture task body",
 			},
 		},
 	},
@@ -207,20 +207,20 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:        "C-audit-dep-chain",
 		Given:     "any phase transition",
 		When:      "creating new task",
-		Then:      "chain dependency: bd dep add parent --blocked-by child",
+		Then:      "chain dependency: pasture task dep add parent --blocked-by child",
 		ShouldNot: "skip dependency chaining or invert direction",
-		Command:   "bd dep add <parent> --blocked-by <child>",
+		Command:   "pasture task dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
 		Examples: []Example{
 			{
 				Id:    "C-audit-dep-chain-full",
 				Lang:  "bash",
 				Label: "correct",
-				Code: "# Full dependency chain: work flows bottom-up, closure flows top-down\n" +
-					"bd dep add request-id --blocked-by ure-id\n" +
-					"bd dep add ure-id --blocked-by proposal-id\n" +
-					"bd dep add proposal-id --blocked-by impl-plan-id\n" +
-					"bd dep add impl-plan-id --blocked-by slice-1-id\n" +
-					"bd dep add slice-1-id --blocked-by leaf-task-a-id",
+				Code: `# Full dependency chain: work flows bottom-up, closure flows top-down
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
+pasture task dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
+pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"`,
 			},
 		},
 	},
@@ -249,25 +249,30 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 				Id:    "C-severity-eager-create",
 				Lang:  "bash",
 				Label: "correct",
-				Code: "# Create all 3 severity groups immediately (even if empty)\n" +
-					"bd create --title \"SLICE-1-REVIEW-A-1 BLOCKER\" \\\n" +
-					"  --labels \"pasture:severity:blocker,pasture:p10-impl:s10-review\"\n" +
-					"bd create --title \"SLICE-1-REVIEW-A-1 IMPORTANT\" \\\n" +
-					"  --labels \"pasture:severity:important,pasture:p10-impl:s10-review\"\n" +
-					"bd create --title \"SLICE-1-REVIEW-A-1 MINOR\" \\\n" +
-					"  --labels \"pasture:severity:minor,pasture:p10-impl:s10-review\"\n\n" +
-					"# Close empty groups immediately\n" +
-					"bd close <empty-important-id>\n" +
-					"bd close <empty-minor-id>",
+				Code: `# Create all 3 severity groups immediately (even if empty)
+BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
+pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
+pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$MINOR_ID_URI" pasture:severity:minor
+pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+
+# Close empty groups immediately
+pasture task close "${IMPORTANT_ID_URI}"
+pasture task close "${MINOR_ID_URI}"`,
 			},
 			{
 				Id:    "C-severity-eager-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
-				Code: "# WRONG: only creating groups when findings exist\n" +
-					"# This skips empty groups and breaks the audit trail\n" +
-					"if blocker_findings:\n" +
-					"    bd create --title \"BLOCKER\" ...",
+				Code: `# WRONG: only creating groups when findings exist
+# This skips empty groups and breaks the audit trail
+if [ -n "$BLOCKER_FINDINGS" ]; then
+    BLOCKER_ID_URI=$(pasture task create "BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+fi`,
 			},
 		},
 	},
@@ -368,9 +373,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:    "C-slice-review-before-close",
 		Given: "workers complete their implementation slices",
 		When:  "slice implementation is done",
-		Then: "workers notify supervisor with bd comments add (not bd close); " +
-			"slices must be reviewed at least once by reviewers before closure; " +
-			"only the supervisor closes slices, after review passes",
+		Then:  "workers notify supervisor with pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes",
 		ShouldNot: "close slices immediately upon worker completion; " +
 			"allow workers to close their own slices",
 	},
@@ -378,13 +381,11 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:    "C-slice-leaf-tasks",
 		Given: "vertical slice created",
 		When:  "decomposing slice into implementation units",
-		Then: "create one or more Beads leaf tasks per slice, named after the real work units they represent, " +
-			"with bd dep add slice-id --blocked-by leaf-task-id; a slice may have ANY number of leaves " +
-			"(the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)",
+		Then:  "create one or more Pasture leaf tasks per slice, named after the real work units they represent, with pasture task dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)",
 		ShouldNot: "create slices without leaf tasks — " +
 			"a slice with no children is undecomposed and cannot be tracked; " +
 			"force every slice into a fixed L1/L2/L3 triple when the real work units differ",
-		Command: "bd dep add <slice-id> --blocked-by <leaf-task-id>",
+		Command: "pasture task dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"",
 	},
 	"C-handoff-skill-invocation": {
 		Id:    "C-handoff-skill-invocation",
@@ -397,24 +398,24 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 	},
 	"C-dep-direction": {
 		Id:        "C-dep-direction",
-		Given:     "adding a Beads dependency",
+		Given:     "adding a Pasture dependency",
 		When:      "determining direction",
-		Then:      "parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first",
+		Then:      "parent blocked-by child: pasture task dep add \"${STAYS_OPEN_URI}\" --blocked-by \"${MUST_FINISH_FIRST_URI}\"",
 		ShouldNot: "invert (child blocked-by parent)",
-		Command:   "bd dep add <stays-open> --blocked-by <must-finish-first>",
+		Command:   "pasture task dep add \"${STAYS_OPEN_URI}\" --blocked-by \"${MUST_FINISH_FIRST_URI}\"",
 		Examples: []Example{
 			{
 				Id:              "C-dep-direction-correct",
 				Lang:            "bash",
 				Label:           "correct",
-				Code:            "bd dep add request-id --blocked-by ure-id",
+				Code:            "pasture task dep add \"${REQUEST_ID_URI}\" --blocked-by \"${URE_ID_URI}\"",
 				AlsoIllustrates: "C-audit-dep-chain",
 			},
 			{
 				Id:    "C-dep-direction-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
-				Code:  "bd dep add ure-id --blocked-by request-id",
+				Code:  "pasture task dep add \"${URE_ID_URI}\" --blocked-by \"${REQUEST_ID_URI}\"",
 			},
 		},
 	},
@@ -423,7 +424,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Given:     "cross-task references (URD, request, etc.)",
 		When:      "linking tasks",
 		Then:      "use description frontmatter references: block",
-		ShouldNot: "use bd dep relate (buggy) or blocking dependencies for reference docs",
+		ShouldNot: "invent relationship commands or use blocking dependencies for reference documents",
 	},
 	"C-agent-commit": {
 		Id:        "C-agent-commit",
@@ -464,12 +465,8 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 	"C-ure-verbatim": {
 		Id:    "C-ure-verbatim",
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
-		When:  "recording in Beads",
-		Then: "capture full question text, ALL option descriptions, AND user's verbatim response, " +
-			"INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, " +
-			"or definition blocks (the preview/stimulus the user actually saw); " +
-			"the URD is the living document of ALL user requests, URE, UAT, and mid-implementation " +
-			"design decisions and feedback — update it via bd comments add whenever user intent is captured",
+		When:  "recording in Pasture",
+		Then:  "capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 whenever user intent is captured",
 		ShouldNot: "summarize options as (1)/(2)/(3) without option text, paraphrase user responses, " +
 			"or omit code/snippets shown inside option previews",
 		Examples: []Example{
@@ -477,24 +474,24 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 				Id:    "C-ure-verbatim-correct",
 				Lang:  "bash",
 				Label: "correct",
-				Code: "# Full question, all options with descriptions, verbatim response\n" +
-					"bd create --title \"UAT: Plan acceptance for feature-X\" \\\n" +
-					"  --description \"## Component: Verbose fields\n" +
-					"**Question:** Which verbose fields are useful?\n" +
-					"**Options:**\n" +
-					"- backupDir (full path): Shows where the backup landed\n" +
-					"- session ID: Enables log correlation across events\n" +
-					"- repo path + hash: Confirms which git repo was detected\n" +
-					"**User response:** backupDir (full path), session ID\n" +
-					"**Decision:** ACCEPT\"",
+				Code: `# Full question, all options with descriptions, verbatim response
+UAT_ID_URI=$(pasture task create "UAT: Plan acceptance for feature-X" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "## Component: Verbose fields
+**Question:** Which verbose fields are useful?
+**Options:**
+- backupDir (full path): Shows where the backup landed
+- session ID: Enables log correlation across events
+- repo path + hash: Confirms which git repo was detected
+**User response:** backupDir (full path), session ID
+**Decision:** ACCEPT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')`,
 			},
 			{
 				Id:    "C-ure-verbatim-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
-				Code: "# WRONG: options summarized as numbers, response paraphrased\n" +
-					"bd create --title \"UAT: Plan acceptance\" \\\n" +
-					"  --description \"Asked about verbose fields (1-4). User picked 1 and 2. Accepted.\"",
+				Code: `# WRONG: options summarized as numbers, response paraphrased
+UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')`,
 			},
 		},
 	},
@@ -840,7 +837,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-status": {
 		Id:          "cmd-status",
 		Name:        "pasture:status",
-		Description: "Project status and monitoring via Beads queries",
+		Description: "Project status and monitoring via Pasture queries",
 		Title:       "Pasture Status",
 		File:        "skills/status/SKILL.md",
 	},
@@ -959,7 +956,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-sup-track": {
 		Id:          "cmd-sup-track",
 		Name:        "pasture:supervisor:track-progress",
-		Description: "Monitor worker status via Beads",
+		Description: "Monitor worker status via Pasture",
 		Title:       "Supervisor: Track Progress",
 		RoleRef:     protocol.RoleSupervisor,
 		Phases:      []protocol.PhaseId{protocol.PhaseWorkerSlices, protocol.PhaseCodeReview},
@@ -1005,7 +1002,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-work-blocked": {
 		Id:          "cmd-work-blocked",
 		Name:        "pasture:worker:blocked",
-		Description: "Report a blocker to supervisor via Beads",
+		Description: "Report a blocker to supervisor via Pasture",
 		Title:       "Worker: Handle Blockers",
 		RoleRef:     protocol.RoleWorker,
 		Phases:      []protocol.PhaseId{protocol.PhaseWorkerSlices},
@@ -1042,7 +1039,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-rev-comment": {
 		Id:          "cmd-rev-comment",
 		Name:        "pasture:reviewer:comment",
-		Description: "Leave structured review comment via Beads",
+		Description: "Leave structured review comment via Pasture",
 		Title:       "Leave Structured Review Comment",
 		RoleRef:     protocol.RoleReviewer,
 		Phases:      []protocol.PhaseId{protocol.PhaseReview, protocol.PhaseCodeReview},
@@ -1098,7 +1095,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-swarm": {
 		Id:          "cmd-swarm",
 		Name:        "pasture:swarm",
-		Description: "Launch worktree-based or intree agent workflows using aura-swarm",
+		Description: "Deprecated orchestration entry; use the supervisor and worker role workflow",
 		Title:       "Swarm — Unified Agent Orchestration",
 		File:        "skills/swarm/SKILL.md",
 	},
@@ -1228,17 +1225,17 @@ var ChecklistSpecs = map[string]Checklist{
 		RoleRef: protocol.RoleWorker,
 		Gate:    "slice-closure",
 		Items: []ChecklistItem{
-			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via bd comments add (not bd close)", Required: true},
+			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close)", Required: true},
 			{Id: "CL-worker-completion-done", Text: "All completion-gate items passed", Required: true},
 			{Id: "CL-worker-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
-			{Id: "CL-worker-review-eligible", Text: "Eligible to close only after review by independent agents with no BLOCKERS or IMPORTANT findings", Required: true},
+			{Id: "CL-worker-review-eligible", Text: "Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings", Required: true},
 		},
 	},
 	"supervisor-review-ready": {
 		RoleRef: protocol.RoleSupervisor,
 		Gate:    "review-ready",
 		Items: []ChecklistItem{
-			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via bd comments add", Required: true},
+			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via pasture task comment add", Required: true},
 			{Id: "CL-sup-reviewers-assigned", Text: "Ephemeral reviewers spawned for all slices", Required: true},
 			{Id: "CL-sup-severity-groups-created", Text: "Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice", Required: true},
 		},
@@ -1264,61 +1261,61 @@ var CoordinationCommands = map[string]CoordinationCommand{
 	"cmd-coord-show": {
 		Id:       "cmd-coord-show",
 		Action:   "Check task details",
-		Template: "bd show <task-id>",
+		Template: "pasture task show \"${TASK_ID_URI}\"",
 		Shared:   true,
 	},
 	"cmd-coord-status": {
 		Id:       "cmd-coord-status",
 		Action:   "Update status",
-		Template: "bd update <task-id> --status=in_progress",
+		Template: "pasture task update \"${TASK_ID_URI}\" --status=in_progress",
 		Shared:   true,
 	},
 	"cmd-coord-comment": {
 		Id:       "cmd-coord-comment",
 		Action:   "Add progress note",
-		Template: `bd comments add <task-id> "Progress: ..."`,
+		Template: "pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Progress: ...\"",
 		Shared:   true,
 	},
 	"cmd-coord-list": {
 		Id:       "cmd-coord-list",
 		Action:   "List in-progress",
-		Template: "bd list --pretty --status=in_progress",
+		Template: "pasture task list --namespace \"$PASTURE_NAMESPACE\" --status=in_progress",
 		Shared:   true,
 	},
 	"cmd-coord-blocked": {
 		Id:       "cmd-coord-blocked",
 		Action:   "List blocked",
-		Template: "bd blocked",
+		Template: "pasture task blocked",
 		Shared:   true,
 	},
 	"cmd-coord-assign": {
 		Id:       "cmd-coord-assign",
-		Action:   "Assign task",
-		Template: `bd update <task-id> --assignee "<worker-name>"`,
+		Action:   "Transfer existing assignment (supervisor only)",
+		Template: "pasture task assignment transfer \"${TASK_ID_URI}\" --slot owner-responsibility --assignment \"${SUCCESSOR_ASSIGNMENT_ID}\" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant \"${REGISTERED_WORKER_ACTOR}\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-label": {
 		Id:       "cmd-coord-label",
 		Action:   "Label completed slice",
-		Template: "bd label add <slice-id> pasture:p9-impl:slice-complete",
+		Template: "pasture task label add \"${SLICE_ID_URI}\" pasture:p9-impl:slice-complete",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-dep-add": {
 		Id:       "cmd-coord-dep-add",
 		Action:   "Chain dependency",
-		Template: "bd dep add <parent> --blocked-by <child>",
+		Template: "pasture task dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-close": {
 		Id:       "cmd-coord-close",
-		Action:   "Report completion",
-		Template: "bd close <task-id>",
+		Action:   "Report completion without closing",
+		Template: "pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Implementation complete; awaiting independent review and supervisor closure.\"",
 		RoleRef:  protocol.RoleWorker,
 	},
 	"cmd-coord-worker-notes": {
 		Id:       "cmd-coord-worker-notes",
 		Action:   "Add completion notes",
-		Template: `bd update <task-id> --notes="Implementation complete. Production code verified."`,
+		Template: "pasture task update \"${TASK_ID_URI}\" --notes=\"Implementation complete. Production code verified.\"",
 		RoleRef:  protocol.RoleWorker,
 	},
 }
@@ -1345,8 +1342,8 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						Id:          "rtw-plan-read",
-						Instruction: "Read RATIFIED_PLAN and URD via bd show",
-						Command:     "bd show <ratified-plan-id> && bd show <urd-id>",
+						Instruction: "Read RATIFIED_PLAN and URD via pasture task show",
+						Command:     "pasture task show \"${RATIFIED_PLAN_ID_URI}\" && pasture task show \"${URD_ID_URI}\"",
 					},
 					{
 						Id:          "rtw-plan-explore",
@@ -1359,7 +1356,7 @@ var WorkflowSpecs = map[string]Workflow{
 					{
 						Id:          "rtw-plan-leaf-tasks",
 						Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
-						Command:     "bd dep add <slice-id> --blocked-by <leaf-task-id>",
+						Command:     "pasture task dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"",
 					},
 				},
 				OperationalDetail: "",
@@ -1387,8 +1384,8 @@ var WorkflowSpecs = map[string]Workflow{
 					},
 					{
 						Id:          "rtw-build-monitor",
-						Instruction: "Monitor worker progress via bd list and bd show",
-						Command:     `bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress`,
+						Instruction: "Monitor worker progress via pasture task list --namespace \"$PASTURE_NAMESPACE\" and pasture task show",
+						Command:     "pasture task list --namespace \"$PASTURE_NAMESPACE\" --label=\"pasture:p9-impl:s9-slice\" --status=in_progress",
 					},
 					{
 						Id:          "rtw-build-integrate",
@@ -1399,7 +1396,7 @@ var WorkflowSpecs = map[string]Workflow{
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "proceed",
-						Condition: "All workers have notified completion via bd comments add",
+						Condition: "All workers have notified completion via pasture task comment add",
 					},
 				},
 			},
@@ -1495,7 +1492,7 @@ var WorkflowSpecs = map[string]Workflow{
 					{
 						Id:          "lc-types-read",
 						Instruction: "Read slice task and identify required types",
-						Command:     "bd show <slice-task-id>",
+						Command:     "pasture task show \"${SLICE_TASK_ID_URI}\"",
 					},
 					{
 						Id:          "lc-types-define",
@@ -1558,8 +1555,8 @@ var WorkflowSpecs = map[string]Workflow{
 					},
 					{
 						Id:          "lc-impl-notify",
-						Instruction: "Notify supervisor of completion via bd comments add",
-						Command:     `bd comments add <slice-id> "Implementation complete"`,
+						Instruction: "Notify supervisor of completion via pasture task comment add",
+						Command:     "pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 \"${SLICE_ID_URI}\" \"Implementation complete\"",
 					},
 				},
 				ExitConditions: []ExitCondition{
@@ -1738,7 +1735,7 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						Id:          "asf-handoff-doc",
-						Instruction: "Author the HANDOFF in its Beads task body with full inline provenance (include the HANDOFF task ID)",
+						Instruction: "Author the HANDOFF in its Pasture task body with full inline provenance (include the HANDOFF task ID)",
 					},
 					{
 						Id:          "asf-handoff-transfer",
@@ -1748,7 +1745,7 @@ var WorkflowSpecs = map[string]Workflow{
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "success",
-						Condition: "Handoff authored in the HANDOFF Beads task body, supervisor notified",
+						Condition: "Handoff authored in the HANDOFF Pasture task body, supervisor notified",
 					},
 				},
 			},
@@ -1814,8 +1811,8 @@ var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 		{
 			Id:          "S-supervisor-read-plan",
 			Order:       2,
-			Instruction: "Read RATIFIED_PLAN, URD, UAT, and elicit tasks via bd show for full context",
-			Command:     "bd show <ratified-plan-id> && bd show <urd-id> && bd show <uat-id> && bd show <elicit-id>",
+			Instruction: "Read RATIFIED_PLAN, URD, UAT, and elicit tasks via pasture task show for full context",
+			Command:     "pasture task show \"${RATIFIED_PLAN_ID_URI}\" && pasture task show \"${URD_ID_URI}\" && pasture task show \"${UAT_ID_URI}\" && pasture task show \"${ELICIT_ID_URI}\"",
 		},
 		{
 			Id:          "S-supervisor-explore-ephemeral",
@@ -1835,21 +1832,22 @@ var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 			Id:          "S-supervisor-create-leaf-tasks",
 			Order:       5,
 			Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
-			Command:     `bd create --labels pasture:p9-impl:s9-slice --title "SLICE-{K}-L{1,2,3}: <description>" ...`,
+			Command: `CREATED_URI=$(pasture task create "SLICE-{K}-L{1,2,3}: <description>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice`,
 			Examples: []Example{
 				{
 					Id:    "S-supervisor-create-leaf-tasks-frontmatter",
 					Lang:  "bash",
 					Label: "template",
-					Code: "bd create --labels pasture:p9-impl:s9-slice \\\n" +
-						"  --title \"SLICE-1-L1: Types -- <slice name>\" \\\n" +
-						"  --description \"---\n" +
-						"references:\n" +
-						"  slice: <slice-1-id>\n" +
-						"  impl_plan: <impl-plan-task-id>\n" +
-						"  urd: <urd-task-id>\n" +
-						"---\n" +
-						"Layer 1: types and interfaces for <slice name>.\"",
+					Code: `CREATED_URI=$(pasture task create "SLICE-1-L1: Types -- <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "---
+references:
+  slice: "${SLICE_1_ID_URI}"
+  impl_plan: "${IMPL_PLAN_ID_URI}"
+  urd: "${URD_ID_URI}"
+---
+Layer 1: types and interfaces for <slice name>." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice`,
 					AlsoIllustrates: "C-frontmatter-refs",
 				},
 			},
@@ -1909,7 +1907,7 @@ var LabelSpecs = map[string]LabelSpec{
 	"L-sev-blocker": {Id: "L-sev-blocker", Value: "pasture:severity:blocker", Special: true, SeverityRef: "BLOCKER"},
 	"L-sev-import":  {Id: "L-sev-import", Value: "pasture:severity:important", Special: true, SeverityRef: "IMPORTANT"},
 	"L-sev-minor":   {Id: "L-sev-minor", Value: "pasture:severity:minor", Special: true, SeverityRef: "MINOR"},
-	"L-followup":    {Id: "L-followup", Value: "pasture:epic-followup", Special: true, Description: "Follow-up epic for non-blocking findings"},
+	"L-followup":    {Id: "L-followup", Value: "pasture:epic-followup", Special: true, Description: "Follow-up epic for user-DEFER'd UAT items only"},
 }
 
 // ─── TitleConventions ─────────────────────────────────────────────────────────
@@ -2076,7 +2074,7 @@ var SubstepDataMap = map[string][]SubstepData{
 		{
 			Id: "s12", Type: "landing", Execution: "sequential", Order: 1,
 			LabelRef:    "L-p12s12",
-			Description: "git agent-commit, bd sync, git push. Close upstream tasks.",
+			Description: "git agent-commit, tracker evidence, and approved Git publication. Close upstream tasks only after review.",
 		},
 	},
 }

@@ -3,15 +3,15 @@ package main_test
 import (
 	"context"
 	"encoding/json"
+	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/stretchr/testify/require"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/dayvidpham/pasture/internal/tasks"
-	"github.com/dayvidpham/pasture/pkg/protocol"
-	"github.com/stretchr/testify/require"
 )
 
 // TestCLI_TaskAgentsRegisterThenComment is the end-to-end production path for
@@ -232,5 +232,128 @@ func TestCLI_TaskHelpAdvertisesResidualVerbs(t *testing.T) {
 	require.Zero(t, agents.exitCode, agents.stderr)
 	for _, sub := range []string{"register", "list", "show"} {
 		require.Contains(t, agents.stdout, sub)
+	}
+}
+
+type taskContractFixture struct {
+	Namespaces   []string `yaml:"namespaces"`
+	Registration []struct {
+		Name  string   `yaml:"name"`
+		Path  []string `yaml:"path"`
+		Flags []string `yaml:"flags"`
+	} `yaml:"registration"`
+	Rejected []struct {
+		Name  string   `yaml:"name"`
+		Args  []string `yaml:"args"`
+		Error string   `yaml:"error"`
+	} `yaml:"rejected"`
+	Recipe []struct {
+		Name     string           `yaml:"name"`
+		Args     []string         `yaml:"args"`
+		Bind     string           `yaml:"bind"`
+		IDField  string           `yaml:"id_field"`
+		Want     map[string]any   `yaml:"want"`
+		WantRows []map[string]any `yaml:"want_rows"`
+	} `yaml:"recipe"`
+}
+
+func TestCLI_TaskMappedCommandRegistration(t *testing.T) {
+	t.Parallel()
+	var fixture taskContractFixture
+	testutil.LoadFixtures(t, testutil.TaskCommandContract, &fixture)
+	for _, tc := range fixture.Registration {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			args := append([]string{"task"}, tc.Path...)
+			out := runCLI(t, append(args, "--help")...)
+			require.Zero(t, out.exitCode, out.stderr)
+			require.Contains(t, out.stdout, "pasture task "+strings.Join(tc.Path, " "))
+			for _, flag := range tc.Flags {
+				require.Contains(t, out.stdout, "--"+flag)
+			}
+		})
+	}
+	for _, tc := range fixture.Rejected {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			db := absentDB(t)
+			out := runCLI(t, append([]string{"--db", db, "task"}, tc.Args...)...)
+			if tc.Error == "unknown command" {
+				// Cobra's non-runnable task group prints help for unknown operands.
+				require.NotContains(t, commandNames(out.stdout), tc.Args[0])
+				require.Contains(t, out.stdout, "Available Commands:")
+			} else {
+				require.NotZero(t, out.exitCode)
+				require.Contains(t, out.stderr, tc.Error)
+				require.Empty(t, out.stdout)
+			}
+			require.NoFileExists(t, db, "unsupported argv must not open the store")
+		})
+	}
+}
+
+func TestCLI_TaskMappedMultiCommandRecipe(t *testing.T) {
+	t.Parallel()
+	var fixture taskContractFixture
+	testutil.LoadFixtures(t, testutil.TaskCommandContract, &fixture)
+	for _, namespace := range fixture.Namespaces {
+		t.Run(namespace, func(t *testing.T) {
+			t.Parallel()
+			db := newDB(t)
+			bindings := map[string]string{"$NAMESPACE": namespace}
+			expand := func(text string) string {
+				for key, value := range bindings {
+					text = strings.ReplaceAll(text, key, value)
+				}
+				return text
+			}
+			for _, step := range fixture.Recipe {
+				if !t.Run(step.Name, func(t *testing.T) {
+					args := []string{"--db", db, "--format", "json", "task"}
+					for _, arg := range step.Args {
+						args = append(args, expand(arg))
+					}
+					out := runCLI(t, args...)
+					require.Zero(t, out.exitCode, "%v: %s", args, out.stderr)
+					require.Empty(t, out.stderr)
+					var got any
+					require.NoError(t, json.Unmarshal([]byte(out.stdout), &got))
+					if step.Bind != "" {
+						object, ok := got.(map[string]any)
+						require.True(t, ok)
+						id, ok := object[step.IDField].(string)
+						require.True(t, ok, "actual JSON must expose %s", step.IDField)
+						require.True(t, strings.HasPrefix(id, namespace+"--"), id)
+						bindings[step.Bind] = id
+					}
+					if step.Want != nil {
+						assertTaskContractFields(t, expand, step.Want, got)
+					}
+					if step.WantRows != nil {
+						rows, ok := got.([]any)
+						require.True(t, ok, "collections must be JSON arrays")
+						require.Len(t, rows, len(step.WantRows))
+						for i, want := range step.WantRows {
+							assertTaskContractFields(t, expand, want, rows[i])
+						}
+					}
+				}) {
+					return // Later commands must not run with an unbound create ID.
+				}
+			}
+		})
+	}
+}
+
+func assertTaskContractFields(t *testing.T, expand func(string) string, want map[string]any, got any) {
+	t.Helper()
+	object, ok := got.(map[string]any)
+	require.True(t, ok, "want object, got %T", got)
+	for field, value := range want {
+		encoded, err := json.Marshal(value)
+		require.NoError(t, err)
+		var normalized any
+		require.NoError(t, json.Unmarshal([]byte(expand(string(encoded))), &normalized))
+		require.Equal(t, normalized, object[field], "JSON field %s", field)
 	}
 }

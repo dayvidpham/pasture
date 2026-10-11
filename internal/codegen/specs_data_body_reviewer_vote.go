@@ -17,7 +17,7 @@ var reviewerVoteBody = SkillBody{
 			Id:        "rev-vote-rationale",
 			Given:     "vote to record",
 			When:      "recording",
-			Then:      "add comment to Beads task with justification",
+			Then:      "add comment to Pasture task with justification",
 			ShouldNot: "vote without written rationale",
 		},
 		{
@@ -30,6 +30,8 @@ var reviewerVoteBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "rev-vote-when-to-use",
 			Title:   "When to Use",
@@ -48,20 +50,20 @@ var reviewerVoteBody = SkillBody{
 			Content: `**All 3 reviewers must vote ACCEPT** for plan to be ratified or code to be approved.`,
 		},
 		{
-			Id:    "rev-vote-beads",
-			Title: "Adding Vote to Beads",
-			Content: "```" + `bash` + "\n" +
-				`# If accepting:
-bd comments add <task-id> "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+			Id:    "rev-vote-task",
+			Title: "Adding Vote to Pasture",
+			Content: `` + "```" + `bash
+# If accepting:
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
 
 # If requesting revision:
-bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."` + "\n" +
-				"```",
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+` + "```" + ``,
 		},
 		{
 			Id:      "rev-vote-report",
 			Title:   "Report Vote",
-			Content: `Votes are recorded via beads comments (see "Adding Vote to Beads" above). No separate messaging step is needed.`,
+			Content: "Votes are recorded via pasture comments (see \"Adding Vote to Pasture\" above). No separate messaging step is needed.",
 		},
 	},
 }

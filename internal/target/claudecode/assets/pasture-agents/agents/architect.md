@@ -41,7 +41,7 @@ You design specifications and coordinate the planning phases of epochs. See the 
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: bd dep add parent --blocked-by child
+- Then: chain dependency: pasture task dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
 **[C-audit-never-delete]**
@@ -51,16 +51,16 @@ You design specifications and coordinate the planning phases of epochs. See the 
 - Should not: delete or close tasks prematurely, remove labels
 
 **[C-dep-direction]**
-- Given: adding a Beads dependency
+- Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first
+- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
 - When: linking tasks
 - Then: use description frontmatter references: block
-- Should not: use bd dep relate (buggy) or blocking dependencies for reference docs
+- Should not: invent relationship commands or use blocking dependencies for reference documents
 
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
@@ -76,8 +76,8 @@ You design specifications and coordinate the planning phases of epochs. See the 
 
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
-- When: recording in Beads
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
+- When: recording in Pasture
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 whenever user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 ## Behaviors
@@ -176,12 +176,12 @@ Exit conditions:
 
 **Stage 7: Handoff** _(sequential)_
 
-- Author the HANDOFF in its Beads task body with full inline provenance (include the HANDOFF task ID)
+- Author the HANDOFF in its Pasture task body with full inline provenance (include the HANDOFF task ID)
 
 - Transfer to supervisor via /pasture:architect:handoff
 
 Exit conditions:
-- **success**: Handoff authored in the HANDOFF Beads task body, supervisor notified
+- **success**: Handoff authored in the HANDOFF Pasture task body, supervisor notified
 
 ## Figures
 

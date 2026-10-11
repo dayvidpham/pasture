@@ -30,6 +30,8 @@ var architectRatifyBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "arch-ratify-when-to-use",
 			Title:   "When to Use",
@@ -51,10 +53,10 @@ var architectRatifyBody = SkillBody{
 				{
 					Id:    "arch-ratify-step1-check",
 					Title: "Step 1: Check all reviews",
-					Content: "```bash\n" +
-						"bd show <proposal-id>\n" +
-						"bd comments <proposal-id>\n" +
-						"```",
+					Content: `` + "```" + `bash
+pasture task show "${PROPOSAL_ID_URI}"
+pasture task comments "${PROPOSAL_ID_URI}"
+` + "```" + ``,
 				},
 				{
 					Id:      "arch-ratify-step2-verify",
@@ -64,26 +66,26 @@ var architectRatifyBody = SkillBody{
 				{
 					Id:    "arch-ratify-step3-label",
 					Title: "Step 3: Add ratify label to PROPOSAL-N",
-					Content: "Do NOT create a new task — add label to the existing proposal:\n" +
-						"```bash\n" +
-						"bd label add <proposal-id> pasture:p6-plan:s6-ratify\n" +
-						"bd comments add <proposal-id> \"RATIFIED: All 3 reviewers ACCEPT, UAT passed (<uat-task-id>)\"\n" +
-						"```",
+					Content: `Do NOT create a new task — add label to the existing proposal:
+` + "```" + `bash
+pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
+` + "```" + ``,
 				},
 				{
 					Id:    "arch-ratify-step4-supersede",
 					Title: "Step 4: Mark all previous proposals as superseded",
-					Content: "```bash\n" +
-						"bd label add <old-proposal-id> pasture:superseded\n" +
-						"bd comments add <old-proposal-id> \"Superseded by PROPOSAL-N (<ratified-proposal-id>)\"\n" +
-						"```",
+					Content: `` + "```" + `bash
+pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
+` + "```" + ``,
 				},
 				{
 					Id:    "arch-ratify-step5-urd",
 					Title: "Step 5: Update URD with ratification",
-					Content: "```bash\n" +
-						"bd comments add <urd-id> \"Ratified: scope confirmed. Ratified proposal: <ratified-proposal-id>\"\n" +
-						"```",
+					Content: `` + "```" + `bash
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed. Ratified proposal: ${RATIFIED_PROPOSAL_ID_URI}"
+` + "```" + ``,
 				},
 			},
 		},
@@ -96,12 +98,9 @@ var architectRatifyBody = SkillBody{
 				"Implementation is handled by the supervisor and workers spawned during handoff.",
 		},
 		{
-			Id:    "arch-ratify-followup",
-			Title: "Follow-up Proposals (FOLLOWUP_PROPOSAL-N)",
-			Content: "When ratifying a FOLLOWUP_PROPOSAL-N, the next step is the same h1 handoff but scoped to the follow-up epic:\n" +
-				"- **Storage:** the follow-up handoff is authored in its HANDOFF Beads task body (no filesystem path)\n" +
-				"- The supervisor then creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks\n" +
-				"- The follow-up scope comes from the user-DEFER'd UAT items the FOLLOWUP epic was created from",
+			Id:      "arch-ratify-followup",
+			Title:   "Follow-up Proposals (FOLLOWUP_PROPOSAL-N)",
+			Content: "When ratifying a FOLLOWUP_PROPOSAL-N, the next step is the same h1 handoff but scoped to the follow-up epic:\n- **Storage:** the follow-up handoff is authored in its HANDOFF Pasture task body (no filesystem path)\n- The supervisor then creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks\n- The follow-up scope comes from the user-DEFER'd UAT items the FOLLOWUP epic was created from",
 		},
 	},
 

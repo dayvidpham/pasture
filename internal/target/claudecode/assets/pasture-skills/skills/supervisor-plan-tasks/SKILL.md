@@ -92,6 +92,26 @@ L2 Test File Requirements:
 - Then: request a configurable review-effort budget from the user (defaults: 3 rounds, 1 round, 0 rounds, unlimited, custom); the Phase-10 review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
+## Task Recovery
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+## Task Attribution
+
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
 ## When to Use
 
 Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_PLAN task.
@@ -141,8 +161,8 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
 
 1. **Read RATIFIED_PLAN and URD tasks:**
    ```bash
-   bd show <ratified-plan-id>
-   bd show <urd-id>
+   pasture task show "${RATIFIED_PLAN_ID_URI}"
+   pasture task show "${URD_ID_URI}"
    ```
 
 2. **Identify production code paths** (what end users will actually run):
@@ -181,26 +201,24 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
 
 6. **Create vertical slice tasks:**
    ```bash
-   bd create --type=task \
-     --labels="pasture:p9-impl:s9-slice" \
-     --title="SLICE-1: Implement 'cli-tool feature list' command (full vertical)" \
-     --description="$(cat <<'EOF'
+   SLICE_1_ID_URI=$(pasture task create "SLICE-1: Implement 'cli-tool feature list' command (full vertical)" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --type=task \
+     --description="$(cat <<EOF
    ---
    references:
-     impl_plan: <impl-plan-task-id>
-     urd: <urd-task-id>
+     impl_plan: "${IMPL_PLAN_ID_URI}"
+     urd: "${URD_ID_URI}"
    ---
    ## Production Code Path
 
-   **End user runs:** `./bin/cli-tool feature list`
+   **End user runs:** \`./bin/cli-tool feature list\`
 
    ## Worker Owns (Full Vertical Slice)
 
    Plan backwards from production code path:
-   1. End: CLI entry point `listCmd (cobra.Command) RunE handler`
-   2. Back: Service call `feature.NewService(deps).ListItems(opts)`
-   3. Back: Service method `ListItems(opts ListOptions) ([]ListEntry, error)`
-   4. Back: Types `ListOptions`, `ListEntry`
+   1. End: CLI entry point \`listCmd (cobra.Command) RunE handler\`
+   2. Back: Service call \`feature.NewService(deps).ListItems(opts)\`
+   3. Back: Service method \`ListItems(opts ListOptions) ([]ListEntry, error)\`
+   4. Back: Types \`ListOptions\`, \`ListEntry\`
 
    ## Files You Own (Within These Files)
 
@@ -216,7 +234,7 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
    - Do NOT add types for other slices (e.g., DetailView)
 
    **Layer 2: Tests** (importing production code)
-   - Import actual CLI: `import "myproject/cmd/feature"`
+   - Import actual CLI: \`import "myproject/cmd/feature"\`
    - Test the actual command users will run
    - Tests will FAIL - expected, no implementation yet
 
@@ -235,37 +253,38 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
    - [ ] No TODO placeholders
    - [ ] Service wired with real dependencies
    EOF
-   )" \
-     --design='{
-       "productionCodePath": "cli-tool feature list",
-       "validation_checklist": [
-         "Type checking passes",
-         "Tests pass",
-         "Production code verified via code inspection",
-         "Tests import production CLI package",
-         "No TODO placeholders in CLI action",
-         "Service wired with real dependencies"
+   )" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+   pasture task label add "$SLICE_1_ID_URI" pasture:p9-impl:s9-slice
+   pasture task update "$SLICE_1_ID_URI" --notes "Design: '{
+       \"productionCodePath\": \"cli-tool feature list\",
+       \"validation_checklist\": [
+         \"Type checking passes\",
+         \"Tests pass\",
+         \"Production code verified via code inspection\",
+         \"Tests import production CLI package\",
+         \"No TODO placeholders in CLI action\",
+         \"Service wired with real dependencies\"
        ],
-       "acceptance_criteria": [{
-         "given": "user runs cli-tool feature list",
-         "when": "command executes",
-         "then": "shows list from actual service",
-         "should_not": "have dual-export (test vs production paths)"
+       \"acceptance_criteria\": [{
+         \"given\": \"user runs cli-tool feature list\",
+         \"when\": \"command executes\",
+         \"then\": \"shows list from actual service\",
+         \"should_not\": \"have dual-export (test vs production paths)\"
        }],
-       "ratified_plan": "<ratified-plan-id>"
-     }'
+       \"ratified_plan\": \"${RATIFIED_PLAN_ID_URI}\"
+     }'"
 
-   bd dep add <impl-plan-id> --blocked-by <slice-task-id>
+   pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
    ```
 
-7. **Update IMPL_PLAN with vertical slice breakdown + integration points:**
+7. **Update IMPL_PLAN with vertical slice breakdown + integration points:** First create each remaining slice using the Step 6 pattern and bind SLICE_2_ID_URI, SLICE_3_ID_URI and SLICE_4_ID_URI from their respective create outputs.
    ```bash
-   bd update <impl-plan-id> --description="$(cat <<'EOF'
+   pasture task update "${IMPL_PLAN_ID_URI}" --description="$(cat <<EOF
    ---
    references:
-     request: <request-task-id>
-     urd: <urd-task-id>
-     proposal: <ratified-proposal-id>
+     request: "${REQUEST_ID_URI}"
+     urd: "${URD_ID_URI}"
+     proposal: "${RATIFIED_PROPOSAL_ID_URI}"
    ---
    ## Vertical Slice Decomposition
 
@@ -279,27 +298,27 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
 
    **SLICE-1: "cli-tool feature" (default command)**
    - Worker: A
-   - Production path: `./bin/cli-tool feature`
+   - Production path: \`./bin/cli-tool feature\`
    - Owns: default action, recent items logic
-   - Task: aura-xxx
+    - Task: "${SLICE_1_ID_URI}"
 
    **SLICE-2: "cli-tool feature list"**
    - Worker: B
-   - Production path: `./bin/cli-tool feature list`
+   - Production path: \`./bin/cli-tool feature list\`
    - Owns: ListOptions types, list tests, listItems() method, list CLI wiring
-   - Task: aura-yyy
+    - Task: "${SLICE_2_ID_URI}"
 
    **SLICE-3: "cli-tool feature detail"**
    - Worker: C
-   - Production path: `./bin/cli-tool feature detail <id>`
+    - Production path: \`./bin/cli-tool feature detail FEATURE_ID\`
    - Owns: DetailView types, detail tests, getItemDetail() method, detail CLI wiring
-   - Task: aura-zzz
+    - Task: ${SLICE_3_ID_URI}
 
    **SLICE-4: "cli-tool feature search"**
    - Worker: D
-   - Production path: `./bin/cli-tool feature search`
+   - Production path: \`./bin/cli-tool feature search\`
    - Owns: SearchQuery types, search tests, searchItems() method, search CLI wiring
-   - Task: aura-www
+    - Task: ${SLICE_4_ID_URI}
 
    ## Horizontal Layer Integration Points
 
@@ -322,7 +341,7 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
    All production code paths verified via code inspection:
    - ./bin/cli-tool feature
    - ./bin/cli-tool feature list
-   - ./bin/cli-tool feature detail <id>
+   - ./bin/cli-tool feature detail "${ID_URI}"
    - ./bin/cli-tool feature search
    - All integration points verified: contracts match between owner and consumers
    EOF
@@ -335,7 +354,7 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
 {
   "slice": "feature-list",
   "productionCodePath": "cli-tool feature list",
-  "taskId": "aura-xxx",
+  "taskId": "${TASK_A_URI}",
   "workerOwns": {
     "endPoint": "listCmd (cobra.Command) RunE handler",
     "types": ["ListOptions", "ListEntry"],
@@ -360,7 +379,7 @@ SLICE-2: "feature detail command" (Worker B owns full vertical)
     "then": "shows session list from actual service",
     "should_not": "have dual-export or TODO placeholders"
   }],
-  "ratified_plan": "<ratified-plan-id>",
+  "ratified_plan": "${RATIFIED_PLAN_ID_URI}",
   "urd": "<urd-id>"
 }
 ```
@@ -419,33 +438,30 @@ When planning for a follow-up epic (after receiving h1 from architect post-FOLLO
 
 ```bash
 # Create FOLLOWUP_IMPL_PLAN
-bd create --type=epic --priority=2 \
-  --labels="pasture:p8-impl:s8-plan" \
-  --title="FOLLOWUP_IMPL_PLAN: <follow-up feature>" \
+FOLLOWUP_IMPL_PLAN_ID_URI=$(pasture task create "FOLLOWUP_IMPL_PLAN: <follow-up feature>" --phase impl_plan --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=2 \
   --description="---
 references:
-  followup_epic: <followup-epic-id>
-  original_request: <request-task-id>
-  original_urd: <urd-task-id>
-  followup_urd: <followup-urd-id>
-  followup_proposal: <followup-proposal-id>
+  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
+  original_request: "${REQUEST_ID_URI}"
+  original_urd: "${URD_ID_URI}"
+  followup_urd: "${FOLLOWUP_URD_ID_URI}"
+  followup_proposal: "${FOLLOWUP_PROPOSAL_ID_URI}"
 ---
-Vertical slice decomposition for follow-up epic."
+Vertical slice decomposition for follow-up epic." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_IMPL_PLAN_ID_URI" pasture:p8-impl:s8-plan
 
 # Create FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks
-bd create --type=task \
-  --labels="pasture:p9-impl:s9-slice" \
-  --title="FOLLOWUP_SLICE-1: <description>" \
+FOLLOWUP_SLICE_ID_URI=$(pasture task create "FOLLOWUP_SLICE-1: <description>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --type=task \
   --description="---
 references:
-  followup_impl_plan: <followup-impl-plan-id>
-  followup_urd: <followup-urd-id>
+  followup_impl_plan: "${FOLLOWUP_IMPL_PLAN_ID_URI}"
+  followup_urd: "${FOLLOWUP_URD_ID_URI}"
 ---
 ## DEFER'd-Item Leaf Tasks
 | Leaf Task ID | Source UAT | DEFER'd Item | Description |
 |---|---|---|---|
-| <leaf-id-1> | <uat-id> | <deferred-item-id> | <description> |
-| <leaf-id-2> | <uat-id> | <deferred-item-id> | <description> |
+| "${LEAF_ID_1_URI}" | "${UAT_ID_URI}" | "${DEFERRED_ITEM_ID_URI}" | <description> |
+| "${LEAF_ID_2_URI}" | "${UAT_ID_URI}" | "${DEFERRED_ITEM_ID_URI}" | <description> |
 
 ## Specification
 <detailed spec>
@@ -453,10 +469,11 @@ references:
 ## Validation Checklist
 - [ ] All DEFER'd-item leaf tasks resolved
 - [ ] Tests pass
-- [ ] Production code path verified"
+- [ ] Production code path verified" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_SLICE_ID_URI" pasture:p9-impl:s9-slice
 
 # Wire dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice
-bd dep add <followup-slice-id> --blocked-by <leaf-task-id-1>
-bd dep add <followup-slice-id> --blocked-by <leaf-task-id-2>
+pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_1_URI}"
+pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_2_URI}"
 ```
 <!-- END GENERATED FROM pasture schema -->

@@ -21,7 +21,7 @@ skills: pasture:architect-handoff, pasture:architect-propose-plan, pasture:archi
 | `p4-review` | Review | plan | → `p5-plan-uat` (all 3 reviewers vote ACCEPT); → `p3-propose` (any reviewer votes REVISE) |
 | `p5-plan-uat` | Plan UAT | user | → `p6-ratify` (user accepts plan); → `p3-propose` (user requests changes) |
 | `p6-ratify` | Ratify | plan | → `p7-handoff` (proposal ratified, IMPL_PLAN placeholder created) |
-| `p7-handoff` | Handoff | plan | → `p8-impl-plan` (handoff authored in the HANDOFF Beads task body) |
+| `p7-handoff` | Handoff | plan | → `p8-impl-plan` (handoff authored in the HANDOFF Pasture task body) |
 
 ### Commands
 
@@ -64,18 +64,18 @@ git commit -m "feat: add login"
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: bd dep add parent --blocked-by child
+- Then: chain dependency: pasture task dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
 _Example (correct)_
 
 ```bash
 # Full dependency chain: work flows bottom-up, closure flows top-down
-bd dep add request-id --blocked-by ure-id
-bd dep add ure-id --blocked-by proposal-id
-bd dep add proposal-id --blocked-by impl-plan-id
-bd dep add impl-plan-id --blocked-by slice-1-id
-bd dep add slice-1-id --blocked-by leaf-task-a-id
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
+pasture task dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
+pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
 ```
 
 **[C-audit-never-delete]**
@@ -85,28 +85,28 @@ bd dep add slice-1-id --blocked-by leaf-task-a-id
 - Should not: delete or close tasks prematurely, remove labels
 
 **[C-dep-direction]**
-- Given: adding a Beads dependency
+- Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first
+- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 _Example (correct)_ — also illustrates: C-audit-dep-chain
 
 ```bash
-bd dep add request-id --blocked-by ure-id
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
 ```
 
 _Example (anti-pattern)_
 
 ```bash
-bd dep add ure-id --blocked-by request-id
+pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 ```
 
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
 - When: linking tasks
 - Then: use description frontmatter references: block
-- Should not: use bd dep relate (buggy) or blocking dependencies for reference docs
+- Should not: invent relationship commands or use blocking dependencies for reference documents
 
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
@@ -122,15 +122,15 @@ bd dep add ure-id --blocked-by request-id
 
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
-- When: recording in Beads
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via bd comments add whenever user intent is captured
+- When: recording in Pasture
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 whenever user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 _Example (correct)_
 
 ```bash
 # Full question, all options with descriptions, verbatim response
-bd create --title "UAT: Plan acceptance for feature-X" \
+UAT_ID_URI=$(pasture task create "UAT: Plan acceptance for feature-X" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
   --description "## Component: Verbose fields
 **Question:** Which verbose fields are useful?
 **Options:**
@@ -138,15 +138,15 @@ bd create --title "UAT: Plan acceptance for feature-X" \
 - session ID: Enables log correlation across events
 - repo path + hash: Confirms which git repo was detected
 **User response:** backupDir (full path), session ID
-**Decision:** ACCEPT"
+**Decision:** ACCEPT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 ```
 
 _Example (anti-pattern)_
 
 ```bash
 # WRONG: options summarized as numbers, response paraphrased
-bd create --title "UAT: Plan acceptance" \
-  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted."
+UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 ```
 
 ### Handoffs
@@ -206,11 +206,11 @@ Agents coordinate through **beads** tasks and comments:
 
 | Action | Command |
 |--------|---------|
-| List blocked | `bd blocked` |
-| Add progress note | `bd comments add <task-id> "Progress: ..."` |
-| List in-progress | `bd list --pretty --status=in_progress` |
-| Check task details | `bd show <task-id>` |
-| Update status | `bd update <task-id> --status=in_progress` |
+| List blocked | `pasture task blocked` |
+| Add progress note | `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
+| List in-progress | `pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
+| Check task details | `pasture task show "${TASK_ID_URI}"` |
+| Update status | `pasture task update "${TASK_ID_URI}" --status=in_progress` |
 
 ## Workflows
 
@@ -263,11 +263,11 @@ Exit conditions:
 - **proceed**: Proposal ratified, IMPL_PLAN placeholder created
 
 ### Stage 7: Handoff _(sequential)_
-- Author the HANDOFF in its Beads task body with full inline provenance (include the HANDOFF task ID)
+- Author the HANDOFF in its Pasture task body with full inline provenance (include the HANDOFF task ID)
 - Transfer to supervisor via /pasture:architect:handoff
 
 Exit conditions:
-- **success**: Handoff authored in the HANDOFF Beads task body, supervisor notified
+- **success**: Handoff authored in the HANDOFF Pasture task body, supervisor notified
 
 ##### Architect State Flow — Sequential Planning Phases 1-7
 
@@ -317,14 +317,34 @@ Exit: Supervisor receives ratified plan + handoff document
 - Then: create FOLLOWUP_PROPOSAL-N referencing both original URD and FOLLOWUP_URD
 - Should not: create FOLLOWUP_PROPOSAL without reading the original URD
 
+## Task Recovery
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+## Task Attribution
+
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
 ## PROPOSAL-N Naming
 
 Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. When a revision is needed:
 1. Create PROPOSAL-N+1 with fixes
 2. Mark PROPOSAL-N as superseded:
    ```bash
-   bd label add <old-proposal-id> pasture:superseded
-   bd comments add <old-proposal-id> "Superseded by PROPOSAL-N+1 (<new-proposal-id>)"
+   pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
    ```
 3. Re-spawn all 3 reviewers to assess PROPOSAL-N+1
 
@@ -332,7 +352,7 @@ Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. When a revisi
 
 Idle → Eliciting → Drafting → AwaitingReview → AwaitingUAT → Ratified → HandoffToSupervisor → Idle
 
-## Beads Task Creation (12-Phase)
+## Pasture Task Creation (12-Phase)
 
 
 
@@ -340,116 +360,112 @@ Idle → Eliciting → Drafting → AwaitingReview → AwaitingUAT → Ratified 
 
 Captures the original user prompt verbatim:
 ```bash
-bd create --labels "pasture:p1-user:s1_1-classify" \
-  --title "REQUEST: <summary>" \
-  --description "<verbatim user prompt - do not paraphrase>"
-# Result: task-req
+REQUEST_ID_URI=$(pasture task create "REQUEST: <summary>" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "<verbatim user prompt - do not paraphrase>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
 ```
 
 ### Phase 2: ELICIT Task
 
 Run `/pasture:user-elicit` first, then capture results:
 ```bash
-bd create --labels "pasture:p2-user:s2_1-elicit" \
-  --title "ELICIT: <feature>" \
-  --description "<questions and user responses verbatim>"
-bd dep add <request-id> --blocked-by <elicit-id>
-# Result: task-eli
+ELICIT_ID_URI=$(pasture task create "ELICIT: <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "<questions and user responses verbatim>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
 ```
 
 ### Phase 2.5: URD (User Requirements Document)
 
 Create the URD as the single source of truth after elicitation:
 ```bash
-bd create --labels "pasture:urd,pasture:p2-user:s2_2-urd" \
-  --title "URD: <feature>" \
+URD_ID_URI=$(pasture task create "URD: <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  request: <request-id>
-  elicit: <elicit-id>
+  request: "${REQUEST_ID_URI}"
+  elicit: "${ELICIT_ID_URI}"
 ---
-<structured requirements, priorities, design choices, MVP goals, end-vision>"
-# Result: task-urd
+<structured requirements, priorities, design choices, MVP goals, end-vision>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$URD_ID_URI" pasture:urd
+pasture task label add "$URD_ID_URI" pasture:p2-user:s2_2-urd
 ```
 
 ### Phase 3: PROPOSAL-N Task
 
 Contains full plan with validation checklist and acceptance criteria:
 ```bash
-bd create --labels "pasture:p3-plan:s3-propose" \
-  --title "PROPOSAL-1: <feature>" \
+PROPOSAL_ID_URI=$(pasture task create "PROPOSAL-1: <feature>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  request: <request-id>
-  urd: <urd-id>
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
 ---
-<plan content in markdown>" \
-  --design='{"validation_checklist":["item1","item2"],"acceptance_criteria":[{"given":"X","when":"Y","then":"Z"}],"tradeoffs":[{"decision":"X","rationale":"Y"}]}'
-bd dep add <request-id> --blocked-by <proposal-id>
-# Result: task-prop
+<plan content in markdown>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
+pasture task update "$PROPOSAL_ID_URI" --notes "Design: '{\"validation_checklist\":[\"item1\",\"item2\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"tradeoffs\":[{\"decision\":\"X\",\"rationale\":\"Y\"}]}'"
+pasture task dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
 ```
 
 ### Phase 4: REVIEW Tasks
 
 Each reviewer creates their own task:
 ```bash
-bd create --labels "pasture:p4-plan:s4-review" \
-  --title "PROPOSAL-1-REVIEW-A-1: <feature>" \
-  --description "VOTE: <ACCEPT|REVISE> - <justification>"
-bd dep add <proposal-id> --blocked-by <review-id>
+REVIEW_ID_URI=$(pasture task create "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review --namespace "$PASTURE_NAMESPACE" --format json \
+  --description "VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$REVIEW_ID_URI" pasture:p4-plan:s4-review
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 ```
 
 ### Phase 5: UAT Task
 
 After all 3 reviewers ACCEPT, run `/pasture:user-uat`:
 ```bash
-bd create --labels "pasture:p5-user:s5-uat" \
-  --title "UAT-1: <feature>" \
+UAT_ID_URI=$(pasture task create "UAT-1: <feature>" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  proposal: <proposal-id>
-  urd: <urd-id>
+  proposal: "${PROPOSAL_ID_URI}"
+  urd: "${URD_ID_URI}"
 ---
-<demonstrative examples and user responses>"
-bd dep add <proposal-id> --blocked-by <uat-id>
+<demonstrative examples and user responses>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$UAT_ID_URI" pasture:p5-user:s5-uat
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
 
 # Update URD with UAT results
-bd comments add <urd-id> "UAT results: <summary of user acceptance/feedback>"
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: <summary of user acceptance/feedback>"
 ```
 
 ### Phase 6: RATIFY
 
 Add label to proposal (DO NOT close, delete, or create new task):
 ```bash
-bd label add <proposal-id> pasture:p6-plan:s6-ratify
-bd comments add <proposal-id> "RATIFIED: All 3 reviewers ACCEPT, UAT passed (<uat-task-id>)"
+pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
 
 # Mark all previous proposals as superseded
-bd label add <old-proposal-id> pasture:superseded
-bd comments add <old-proposal-id> "Superseded by PROPOSAL-N (<ratified-proposal-id>)"
+pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
 
 # Update URD with ratification
-bd comments add <urd-id> "Ratified: scope confirmed as <summary>"
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as <summary>"
 ```
 
 ### Phase 7: HANDOFF
 
 Create the HANDOFF task — its body IS the handoff document:
 ```bash
-bd create --type=task --priority=2 \
-  --title "HANDOFF: Architect → Supervisor for REQUEST" \
+HANDOFF_ID_URI=$(pasture task create "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --namespace "$PASTURE_NAMESPACE" --format json --type=task --priority=2 \
   --description "---
 references:
-  request: <request-id>
-  urd: <urd-id>
-  proposal: <ratified-proposal-id>
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
+  proposal: "${RATIFIED_PROPOSAL_ID_URI}"
 ---
 # Handoff: Architect → Supervisor
-<full handoff body — the task body IS the handoff>" \
-  --add-label "pasture:p7-plan:s7-handoff"
+<full handoff body — the task body IS the handoff>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
 ```
 
-Storage: the handoff is authored in this HANDOFF Beads task body (no filesystem path).
+Storage: the handoff is authored in this HANDOFF Pasture task body (no filesystem path).
 
 ## Plan Structure
 
@@ -483,16 +499,16 @@ In the follow-up lifecycle, the architect receives a handoff (h6) from the super
 
 ```bash
 # After receiving h6 from supervisor:
-bd create --labels "pasture:p3-plan:s3-propose" \
-  --title "FOLLOWUP_PROPOSAL-1: <follow-up feature>" \
+FOLLOWUP_PROPOSAL_ID_URI=$(pasture task create "FOLLOWUP_PROPOSAL-1: <follow-up feature>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  request: <original-request-id>
-  original_urd: <original-urd-id>
-  followup_urd: <followup-urd-id>
-  followup_epic: <followup-epic-id>
+  request: "${ORIGINAL_REQUEST_ID_URI}"
+  original_urd: "${ORIGINAL_URD_ID_URI}"
+  followup_urd: "${FOLLOWUP_URD_ID_URI}"
+  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
 ---
-<proposal content addressing the scoped user-DEFER'd UAT items>"
+<proposal content addressing the scoped user-DEFER'd UAT items>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$FOLLOWUP_PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
 ```
 
 The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PROPOSAL is ratified, hand off to supervisor via h1 for FOLLOWUP_IMPL_PLAN creation.
@@ -516,13 +532,13 @@ Skill(skill: "pasture:architect-handoff")
 ```
 
 The handoff skill guides you through:
-1. Authoring the handoff in a HANDOFF Beads task body (no filesystem path)
+1. Authoring the handoff in a HANDOFF Pasture task body (no filesystem path)
 2. Launching the supervisor (and workers) as **Opus** teammates via TeamCreate, then assigning work via SendMessage
 
 **CRITICAL:** The supervisor assignment MUST:
 1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation
-2. Include all Beads task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)
-3. Reference the HANDOFF Beads task ID — the handoff is in that task body
+2. Include all Pasture task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)
+3. Reference the HANDOFF Pasture task ID — the handoff is in that task body
 
 A supervisor that appears idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.
 

@@ -30,6 +30,8 @@ var architectProposePlanBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:      "arch-propose-when-to-use",
 			Title:   "When to Use",
@@ -42,98 +44,96 @@ var architectProposePlanBody = SkillBody{
 				"Old proposals are marked `pasture:superseded` with a comment explaining why.",
 		},
 		{
-			Id:    "arch-propose-beads-task",
-			Title: "Beads Task Creation",
-			Content: "```bash\n" +
-				"bd create --type=feature \\\n" +
-				"  --labels=\"pasture:p3-plan:s3-propose\" \\\n" +
-				"  --title=\"PROPOSAL-1: <feature name>\" \\\n" +
-				"  --description=\"$(cat <<'EOF'\n" +
-				"---\n" +
-				"references:\n" +
-				"  request: <request-id>\n" +
-				"  urd: <urd-id>\n" +
-				"---\n" +
-				"\n" +
-				"## Problem Space\n" +
-				"\n" +
-				"**Axes of the problem:**\n" +
-				"- Parallelism: ...\n" +
-				"- Distribution: ...\n" +
-				"\n" +
-				"**Has-a / Is-a:**\n" +
-				"- X HAS-A Y\n" +
-				"- Z IS-A W\n" +
-				"\n" +
-				"## Engineering Tradeoffs\n" +
-				"\n" +
-				"| Option | Pros | Cons | Decision |\n" +
-				"|--------|------|------|----------|\n" +
-				"| A | ... | ... | Selected |\n" +
-				"| B | ... | ... | Rejected |\n" +
-				"\n" +
-				"## MVP Milestone\n" +
-				"\n" +
-				"<scope with tradeoff rationale>\n" +
-				"\n" +
-				"## Public Interfaces\n" +
-				"\n" +
-				"\\`\\`\\`go\n" +
-				"type Example interface { /* ... */ }\n" +
-				"\\`\\`\\`\n" +
-				"\n" +
-				"## Types & Enums\n" +
-				"\n" +
-				"\\`\\`\\`go\n" +
-				"type ExampleType int\n" +
-				"\n" +
-				"const (\n" +
-				"    ExampleTypeA ExampleType = iota\n" +
-				"    ExampleTypeB\n" +
-				")\n" +
-				"\\`\\`\\`\n" +
-				"\n" +
-				"## Validation Checklist\n" +
-				"\n" +
-				"### Phase 1\n" +
-				"- [ ] Item 1\n" +
-				"- [ ] Item 2\n" +
-				"\n" +
-				"### Phase 2\n" +
-				"- [ ] Item 3\n" +
-				"\n" +
-				"## BDD Acceptance Criteria\n" +
-				"\n" +
-				"**Given** precondition\n" +
-				"**When** action\n" +
-				"**Then** outcome\n" +
-				"**Should Not** negative case\n" +
-				"\n" +
-				"## Files Affected\n" +
-				"- pkg/path/file1.go (create)\n" +
-				"- pkg/path/file2.go (modify)\n" +
-				"EOF\n" +
-				")\" \\\n" +
-				"  --design='{\"validation_checklist\":[\"Item 1\",\"Item 2\",\"Item 3\"],\"tradeoffs\":[{\"decision\":\"Use A\",\"rationale\":\"Because...\"}],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\",\"should_not\":\"W\"}]}'\n" +
-				"\n" +
-				"# Link to request\n" +
-				"bd dep add <request-id> --blocked-by <proposal-id>\n" +
-				"```",
+			Id:    "arch-propose-task-task",
+			Title: "Pasture Task Creation",
+			Content: `` + "```" + `bash
+PROPOSAL_ID_URI=$(pasture task create "PROPOSAL-1: <feature name>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json --type=feature \
+  --description="$(cat <<EOF
+---
+references:
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
+---
+
+## Problem Space
+
+**Axes of the problem:**
+- Parallelism: ...
+- Distribution: ...
+
+**Has-a / Is-a:**
+- X HAS-A Y
+- Z IS-A W
+
+## Engineering Tradeoffs
+
+| Option | Pros | Cons | Decision |
+|--------|------|------|----------|
+| A | ... | ... | Selected |
+| B | ... | ... | Rejected |
+
+## MVP Milestone
+
+<scope with tradeoff rationale>
+
+## Public Interfaces
+
+\\` + "`" + `\\` + "`" + `\\` + "`" + `go
+type Example interface { /* ... */ }
+\\` + "`" + `\\` + "`" + `\\` + "`" + `
+
+## Types & Enums
+
+\\` + "`" + `\\` + "`" + `\\` + "`" + `go
+type ExampleType int
+
+const (
+    ExampleTypeA ExampleType = iota
+    ExampleTypeB
+)
+\\` + "`" + `\\` + "`" + `\\` + "`" + `
+
+## Validation Checklist
+
+### Phase 1
+- [ ] Item 1
+- [ ] Item 2
+
+### Phase 2
+- [ ] Item 3
+
+## BDD Acceptance Criteria
+
+**Given** precondition
+**When** action
+**Then** outcome
+**Should Not** negative case
+
+## Files Affected
+- pkg/path/file1.go (create)
+- pkg/path/file2.go (modify)
+EOF
+)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
+pasture task update "$PROPOSAL_ID_URI" --notes "Design: '{\"validation_checklist\":[\"Item 1\",\"Item 2\",\"Item 3\"],\"tradeoffs\":[{\"decision\":\"Use A\",\"rationale\":\"Because...\"}],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\",\"should_not\":\"W\"}]}'"
+
+# Link to request
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+` + "```" + ``,
 		},
 		{
 			Id:    "arch-propose-before-creating",
 			Title: "Before Creating the Proposal",
-			Content: "Read the URD and Phase 1 outputs to understand full context before drafting:\n" +
-				"```bash\n" +
-				"bd show <urd-id>\n" +
-				"bd show <request-id>   # includes classification, research findings, explore findings as comments\n" +
-				"```\n\n" +
-				"The URD contains the structured requirements, priorities, design choices, and MVP goals from the URE survey. " +
-				"The REQUEST task comments contain Phase 1 outputs: classification (4 axes), domain research findings (prior art, standards), " +
-				"and codebase exploration findings (entry points, related types, dependencies). Your proposal must:\n" +
-				"- Trace back to URD requirements\n" +
-				"- Incorporate research findings (prior art, domain standards) into engineering tradeoffs\n" +
-				"- Reference explore findings (entry points, existing patterns) in the files affected section",
+			Content: `Read the URD and Phase 1 outputs to understand full context before drafting:
+` + "```" + `bash
+pasture task show "${URD_ID_URI}"
+pasture task show "${REQUEST_ID_URI}"   # includes classification, research findings, explore findings as comments
+` + "```" + `
+
+The URD contains the structured requirements, priorities, design choices, and MVP goals from the URE survey. The REQUEST task comments contain Phase 1 outputs: classification (4 axes), domain research findings (prior art, standards), and codebase exploration findings (entry points, related types, dependencies). Your proposal must:
+- Trace back to URD requirements
+- Incorporate research findings (prior art, domain standards) into engineering tradeoffs
+- Reference explore findings (entry points, existing patterns) in the files affected section`,
 		},
 		{
 			Id:    "arch-propose-plan-structure",

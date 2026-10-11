@@ -115,9 +115,14 @@ var AllFragmentIds = []FragmentId{
 	FragRevPlanVoteOptions,
 	FragValidationCases,
 	FragReviewCleanExit,
+	FragTaskRecovery,
+	FragTaskAuthor,
 }
 
 const (
+	FragTaskRecovery FragmentId = "frag--task-recovery"
+	FragTaskAuthor   FragmentId = "frag--task-author"
+
 	// FragRevVoteOptions is the canonical vote-options table shared between the
 	// reviewer and reviewer-vote skill bodies (D3-ratified ACCEPT row wording).
 	FragRevVoteOptions FragmentId = "frag--rev-vote-options"
@@ -210,13 +215,13 @@ type SharedFragment struct {
 
 // ─── RecipeBlock ──────────────────────────────────────────────────────────────
 
-// RecipeBlock is a bd command recipe with context and code example.
+// RecipeBlock is a task command recipe with context and code example.
 type RecipeBlock struct {
 	Id          string // unique within skill body; not used during template rendering — available for programmatic lookup
 	Title       string // e.g. "Phase 1: REQUEST Task"
 	Description string // context paragraph before the code block
 	Lang        string // code block language, typically "bash"
-	Code        string // the actual bd command template
+	Code        string // the actual task command template
 }
 
 // ─── SkillBody ────────────────────────────────────────────────────────────────
@@ -340,7 +345,7 @@ type Checklist struct {
 // ─── CoordinationCommand ─────────────────────────────────────────────────────
 
 // CoordinationCommand is a coordination command for inter-agent communication
-// via Beads.
+// via Pasture.
 type CoordinationCommand struct {
 	Id       string
 	Action   string
@@ -411,7 +416,7 @@ type ProcedureStep struct {
 	Id          string
 	Order       int
 	Instruction string
-	Command     string           // optional exact shell/bd command
+	Command     string           // optional exact shell/task command
 	Context     string           // optional situational context
 	NextState   protocol.PhaseId // optional phase transition
 	Examples    []Example

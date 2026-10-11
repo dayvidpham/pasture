@@ -40,7 +40,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: bd dep add parent --blocked-by child
+- Then: chain dependency: pasture task dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
 **[C-audit-never-delete]**
@@ -56,9 +56,9 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; hardcode the budget; proceed past the chosen budget without surfacing to the user; batch review across multiple slices
 
 **[C-dep-direction]**
-- Given: adding a Beads dependency
+- Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first
+- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 **[C-followup-leaf-adoption]**
@@ -83,7 +83,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - Given: cross-task references (URD, request, etc.)
 - When: linking tasks
 - Then: use description frontmatter references: block
-- Should not: use bd dep relate (buggy) or blocking dependencies for reference docs
+- Should not: invent relationship commands or use blocking dependencies for reference documents
 
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
@@ -112,13 +112,13 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-slice-leaf-tasks]**
 - Given: vertical slice created
 - When: decomposing slice into implementation units
-- Then: create one or more Beads leaf tasks per slice, named after the real work units they represent, with bd dep add slice-id --blocked-by leaf-task-id; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)
+- Then: create one or more Pasture leaf tasks per slice, named after the real work units they represent, with pasture task dep add "${SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)
 - Should not: create slices without leaf tasks — a slice with no children is undecomposed and cannot be tracked; force every slice into a fixed L1/L2/L3 triple when the real work units differ
 
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices
 - When: slice implementation is done
-- Then: workers notify supervisor with bd comments add (not bd close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
+- Then: workers notify supervisor with pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
 - Should not: close slices immediately upon worker completion; allow workers to close their own slices
 
 **[C-supervisor-explore-ephemeral]**
@@ -182,7 +182,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - [ ] Eligible to close only after review by independent agents with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings
 
 **review-ready gates:**
-- [ ] All workers have notified completion via bd comments add
+- [ ] All workers have notified completion via pasture task comment add
 - [ ] Ephemeral reviewers spawned for all slices
 - [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice
 
@@ -194,13 +194,13 @@ Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full c
 
 **Stage 1: Plan** _(sequential)_
 
-- Read RATIFIED_PLAN and URD via bd show (`bd show <ratified-plan-id> && bd show <urd-id>`)
+- Read RATIFIED_PLAN and URD via pasture task show (`pasture task show "${RATIFIED_PLAN_ID_URI}" && pasture task show "${URD_ID_URI}"`)
 
 - Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams
 
 - Use Explore findings to decompose into vertical slices with integration points
 
-- Create leaf tasks (L1/L2/L3) for every slice (`bd dep add <slice-id> --blocked-by <leaf-task-id>`)
+- Create leaf tasks (L1/L2/L3) for every slice (`pasture task dep add "${SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"`)
 
 Exit conditions:
 - **proceed**: All slices created with leaf tasks, dependency-chained, assigned
@@ -209,12 +209,12 @@ Exit conditions:
 
 - Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
 
-- Monitor worker progress via bd list and bd show (`bd list --labels="pasture:p9-impl:s9-slice" --status=in_progress`)
+- Monitor worker progress via pasture task list --namespace "$PASTURE_NAMESPACE" and pasture task show (`pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress`)
 
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 
 Exit conditions:
-- **proceed**: All workers have notified completion via bd comments add
+- **proceed**: All workers have notified completion via pasture task comment add
 
 **Stage 3: Review + Fix Cycles** _(conditional-loop)_
 

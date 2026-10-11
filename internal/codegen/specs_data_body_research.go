@@ -47,12 +47,14 @@ var researchBody = SkillBody{
 			Id:        "research-phase1-recording",
 			Given:     "Phase 1 context",
 			When:      "recording findings",
-			Then:      "ALSO add a summary comment on the REQUEST task via `bd comments add`",
+			Then:      "ALSO add a summary comment on the REQUEST task via `pasture task comment add`",
 			ShouldNot: "only write the file without updating the REQUEST task",
 		},
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:    "research-when-to-use",
 			Title: "When to Use",
@@ -60,13 +62,9 @@ var researchBody = SkillBody{
 				"- **Standalone:** Any agent needing domain research outside the 12-phase workflow. Invoke directly with a topic and depth.",
 		},
 		{
-			Id:    "research-inputs",
-			Title: "Inputs",
-			Content: "| Parameter | Required | Description |\n" +
-				"|-----------|----------|--------------|\n" +
-				"| `topic` | Yes | The research subject (e.g., \"CEL policy engines\", \"HTTP proxy patterns\") |\n" +
-				"| `depth` | Yes | One of: `quick-scan`, `standard-research`, `deep-dive` |\n" +
-				"| `request-task-id` | Phase 1 only | Beads task ID to record findings as comment |",
+			Id:      "research-inputs",
+			Title:   "Inputs",
+			Content: "| Parameter | Required | Description |\n|-----------|----------|--------------|\n| `topic` | Yes | The research subject (e.g., \"CEL policy engines\", \"HTTP proxy patterns\") |\n| `depth` | Yes | One of: `quick-scan`, `standard-research`, `deep-dive` |\n| `request-task-id` | Phase 1 only | Pasture task ID to record findings as comment |",
 		},
 		{
 			Id:      "research-checklist",
@@ -202,16 +200,17 @@ code snippet here
 		{
 			Id:    "research-phase1-integration",
 			Title: "Phase 1 Integration",
-			Content: "When invoked as part of Phase 1 (s1_2-research), record a summary on the REQUEST task in addition to writing the full report:\n\n" +
-				"```" + `bash
-bd comments add {{request-task-id}} \
+			Content: `When invoked as part of Phase 1 (s1_2-research), record a summary on the REQUEST task in addition to writing the full report:
+
+` + "```" + `bash
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}
   - Patterns: {{established approaches}}
   - Recommendation: {{brief direction}}
   - Full report: llm/research/{{topic}}.md"
-` + "```",
+` + "```" + ``,
 		},
 	},
 }

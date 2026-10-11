@@ -4,6 +4,8 @@ package codegen
 var workerBody = SkillBody{
 	Preamble: `**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9`,
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:    "wrk-what-you-own",
 			Title: "Vertical Slice Ownership in Practice",
@@ -23,8 +25,8 @@ var workerBody = SkillBody{
 			Content: `**Start from the end, plan backwards:**
 
 1. **Identify your production code path:**
-   ` + "```bash" + `
-   bd show <task-id>  # Look for "productionCodePath" field
+   ` + "```" + `bash
+   pasture task show "${TASK_ID_URI}"  # Look for "productionCodePath" field
    # Example: "cli-tool command list"
    # This is what end users will actually run
    ` + "```" + `
@@ -157,28 +159,28 @@ Per [wrk-no-stubs], deliver fully wired production code.`,
 **Key insight:** A failing test for unimplemented code is NOT a blocker - it's the specification you're implementing against.`,
 		},
 		{
-			Id:    "wrk-reading-from-beads",
-			Title: "Reading from Beads",
+			Id:    "wrk-reading-from-task",
+			Title: "Reading from Pasture",
 			Content: `Get your task details:
-` + "```bash" + `
-bd show <task-id>
+` + "```" + `bash
+pasture task show "${TASK_ID_URI}"
 ` + "```" + `
 
 Look for:
-- ` + "`productionCodePath`" + `: What end users will run (e.g., "cli-tool command list")
-- ` + "`validation_checklist`" + `: Items you must satisfy
-- ` + "`acceptance_criteria`" + `: BDD criteria (Given/When/Then/Should Not)
-- ` + "`workerOwns`" + `: What parts of which files you own
-- ` + "`ratified_plan`" + `: Link to parent RATIFIED_PLAN task
+- ` + "`" + `productionCodePath` + "`" + `: What end users will run (e.g., "cli-tool command list")
+- ` + "`" + `validation_checklist` + "`" + `: Items you must satisfy
+- ` + "`" + `acceptance_criteria` + "`" + `: BDD criteria (Given/When/Then/Should Not)
+- ` + "`" + `workerOwns` + "`" + `: What parts of which files you own
+- ` + "`" + `ratified_plan` + "`" + `: Link to parent RATIFIED_PLAN task
 
 Update status on start:
-` + "```bash" + `
-bd update <task-id> --status=in_progress
-` + "```",
+` + "```" + `bash
+pasture task update "${TASK_ID_URI}" --status=in_progress
+` + "```" + ``,
 		},
 		{
 			Id:    "wrk-vertical-slice-fields",
-			Title: "Vertical Slice Fields (From Beads Task)",
+			Title: "Vertical Slice Fields (From Pasture Task)",
 			Content: `- ` + "`slice`" + `: Your slice identifier (e.g., "feature-list")
 - ` + "`productionCodePath`" + `: What users run (e.g., "cli-tool command list")
 - ` + "`workerOwns.types`" + `: Which types you create
@@ -191,36 +193,35 @@ bd update <task-id> --status=in_progress
 		{
 			Id:    "wrk-followup-slices",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
-			Content: `You may be assigned a ` + "`FOLLOWUP_SLICE-N`" + ` task instead of a ` + "`SLICE-N`" + ` task. The implementation procedure is identical, with these additions:
+			Content: `You may be assigned a ` + "`" + `FOLLOWUP_SLICE-N` + "`" + ` task instead of a ` + "`" + `SLICE-N` + "`" + ` task. The implementation procedure is identical, with these additions:
 
-- **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check ` + "`bd show <task-id>`" + ` for a "DEFER'd-Item Leaf Tasks" section.
+- **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check ` + "`" + `pasture task show "${TASK_ID_URI}"` + "`" + ` for a "DEFER'd-Item Leaf Tasks" section.
 - **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
 - **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which DEFER'd-item leaf tasks were resolved.
 
-` + "```bash" + `
+` + "```" + `bash
 # Completion comment for follow-up slices should include:
-bd comments add <task-id> "Implementation complete. Resolved DEFER'd-item leaf tasks: <leaf-task-id-1>, <leaf-task-id-2>"
-` + "```",
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved DEFER'd-item leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
+` + "```" + ``,
 		},
 		{
-			Id:    "wrk-updating-beads-status",
-			Title: "Updating Beads Status",
+			Id:    "wrk-updating-task-status",
+			Title: "Updating Pasture Status",
 			Content: `On start:
-` + "```bash" + `
-bd update <task-id> --status=in_progress
+` + "```" + `bash
+pasture task update "${TASK_ID_URI}" --status=in_progress
 ` + "```" + `
 
 On complete:
-` + "```bash" + `
-bd update <task-id> --status=done
-bd update <task-id> --notes="Implementation complete. Production code verified working via code inspection."
+` + "```" + `bash
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
+pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working via code inspection."
 ` + "```" + `
 
 On blocked:
-` + "```bash" + `
-bd update <task-id> --status=blocked
-bd update <task-id> --notes="Blocked: <reason>. Need: <dependency or clarification>"
-` + "```",
+` + "```" + `bash
+pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>. Need: <dependency or clarification>"
+` + "```" + ``,
 		},
 	},
 	Behaviors: []BehaviorSpec{

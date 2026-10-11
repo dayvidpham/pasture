@@ -63,13 +63,13 @@ Cycle Exit Conditions:
 **[sup-spawn-worker-context]**
 - Given: worker assignment
 - When: providing context
-- Then: include Beads task ID, full context, and handoff document
+- Then: include Pasture task ID, full context, and handoff document
 - Should not: omit checklist or criteria
 
 **[sup-spawn-handoff-doc]**
 - Given: worker handoff
 - When: creating
-- Then: author the supervisor→worker handoff in the slice (or a dedicated handoff) Beads task body
+- Then: author the supervisor→worker handoff in the slice (or a dedicated handoff) Pasture task body
 - Should not: skip the handoff or store it as a filesystem path
 
 **[sup-spawn-no-close-before-review]**
@@ -102,6 +102,26 @@ Cycle Exit Conditions:
 - Then: iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision
 - Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
+## Task Recovery
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+## Task Attribution
+
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
 ## When to Use
 
 Implementation tasks ready. Ephemeral reviewers will be spawned per-slice during review phase.
@@ -130,22 +150,22 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 
 ## Handoff Template (Supervisor → Worker)
 
-Before spawning each worker, author its handoff in the slice (or a dedicated handoff) Beads task body:
+Before spawning each worker, author its handoff in the slice (or a dedicated handoff) Pasture task body:
 
-**Storage:** the Beads task body IS the handoff — no filesystem path.
+**Storage:** the Pasture task body IS the handoff — no filesystem path.
 
 ```markdown
 # Handoff: Supervisor → Worker <N>
 
 ## Context
-- Request: <request-task-id>
-- URD: <urd-task-id>
-- IMPL_PLAN: <impl-plan-task-id>
-- Ratified Proposal: <proposal-task-id>
+- Request: ${REQUEST_ID_URI}
+- URD: ${URD_ID_URI}
+- IMPL_PLAN: ${IMPL_PLAN_ID_URI}
+- Ratified Proposal: ${PROPOSAL_ID_URI}
 
 ## Your Slice
 - Slice: SLICE-<N>
-- Task ID: <slice-task-id>
+- Task ID: ${SLICE_TASK_ID_URI}
 - Production Code Path: <what end users run>
 
 ## Key Files
@@ -181,8 +201,8 @@ Task({
   description: "Worker: implement SLICE-N",
   prompt: `Call Skill(/pasture:worker) and implement the assigned slice.
 
-Beads Task ID: <task-id>
-Read full requirements + handoff: bd show <task-id>
+Pasture Task ID: "${TASK_ID_URI}"
+Read full requirements + handoff: pasture task show "${TASK_ID_URI}"
 
 Do NOT shut down after implementation. You will receive review feedback and may need to fix issues.`,
   subagent_type: "general-purpose",
@@ -202,25 +222,25 @@ SendMessage({
   recipient: "worker-1",
   content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
 
-Your Beads task ID: <slice-task-id>
-Run this to get full requirements + handoff: bd show <slice-task-id>
+Your Pasture task ID: "${SLICE_TASK_ID_URI}"
+Run this to get full requirements + handoff: pasture task show "${SLICE_TASK_ID_URI}"
 
-Key references (run bd show on each for full context):
-- Request: <request-task-id>
-- URD: <urd-task-id>
-- IMPL_PLAN: <impl-plan-task-id>
-- Ratified Proposal: <proposal-task-id>
+Key references (run pasture task show on each for full context):
+- Request: "${REQUEST_ID_URI}"
+- URD: "${URD_ID_URI}"
+- IMPL_PLAN: "${IMPL_PLAN_ID_URI}"
+- Ratified Proposal: "${PROPOSAL_ID_URI}"
 
-Read the handoff doc and your Beads task before starting implementation.
+Read the handoff doc and your Pasture task before starting implementation.
 
 IMPORTANT: Do NOT shut down after completing implementation. You will receive
 review feedback from ephemeral reviewers and may need to fix BLOCKERs and IMPORTANT
 findings. Stay alive for the full Ride the Wave cycle.`,
-  summary: "SLICE-1 assignment with Beads context"
+  summary: "SLICE-1 assignment with Pasture context"
 })
 ```
 
-Per [sup-teamcreate-msg], include Beads task IDs and `bd show` commands in every assignment. Teammates cannot see your conversation or task tree.
+Per [sup-teamcreate-msg], include Pasture task IDs and `pasture task show` commands in every assignment. Teammates cannot see your conversation or task tree.
 
 ## Worker Persistence (Ride the Wave)
 
@@ -244,61 +264,61 @@ SendMessage({
   content: `Review cycle <N> found issues in your slice (SLICE-1).
 
 BLOCKERs (must fix — blocks slice closure):
-- <finding-id>: <description> (bd show <finding-id>)
+- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
 IMPORTANT (must fix — must reach 0 before wave close):
-- <finding-id>: <description> (bd show <finding-id>)
+- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
 MINOR (must fix — must reach 0 before wave close):
-- <finding-id>: <description> (bd show <finding-id>)
+- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
 After fixing all items:
-  bd comments add <slice-id> "Fixes applied for review cycle <N>"
+  pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
 
 Do NOT shut down. Ephemeral reviewers will re-review.`,
   summary: "Review cycle <N> fixes for SLICE-1"
 })
 ```
 
-## Worker Should Update Beads Status
+## Worker Should Update Pasture Status
 
-- On start: `bd update <task-id> --status=in_progress`
-- On implementation complete (NOT slice close): `bd comments add <task-id> "Implementation complete, awaiting review"`
-- On blocked: `bd update <task-id> --notes="Blocked: <reason>"`
+- On start: `pasture task update "${TASK_ID_URI}" --status=in_progress`
+- On implementation complete (NOT slice close): `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"`
+- On blocked: `pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>"`
 - Slice closure: **only the supervisor** closes slices after review passes
 
-## Assign via Beads
+## Assign via Pasture
 
 ```bash
-bd update <task-id> --assignee="<worker-agent-name>"
-bd update <task-id> --status=in_progress
+pasture task assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
+pasture task update "${TASK_ID_URI}" --status=in_progress
 ```
 
 ## Follow-up Slice Handoff (FOLLOWUP_SLICE-N)
 
-For follow-up slices, the handoff (authored in the Beads task body — no filesystem path) extends with additional fields:
+For follow-up slices, the handoff (authored in the Pasture task body — no filesystem path) extends with additional fields:
 
 ```markdown
 # Handoff: Supervisor → Worker <N> (Follow-up)
 
 ## Context
-- Original Request: <request-task-id>
-- Follow-up Epic: <followup-epic-id>
-- FOLLOWUP_URD: <followup-urd-id>
-- FOLLOWUP_IMPL_PLAN: <followup-impl-plan-id>
+- Original Request: "${REQUEST_ID_URI}"
+- Follow-up Epic: "${FOLLOWUP_EPIC_ID_URI}"
+- FOLLOWUP_URD: "${FOLLOWUP_URD_ID_URI}"
+- FOLLOWUP_IMPL_PLAN: "${FOLLOWUP_IMPL_PLAN_ID_URI}"
 
 ## Your Slice
 - Slice: FOLLOWUP_SLICE-<N>
-- Task ID: <slice-task-id>
+- Task ID: "${SLICE_TASK_ID_URI}"
 
 ## DEFER'd Items (from UAT)
 | Item Task ID | Source UAT | Description |
 |---|---|---|
-| <item-id-1> | <uat-id> | <user-DEFER'd item description> |
-| <item-id-2> | <uat-id> | <user-DEFER'd item description> |
+| "${ITEM_ID_1_URI}" | "${UAT_ID_URI}" | <user-DEFER'd item description> |
+| "${ITEM_ID_2_URI}" | "${UAT_ID_URI}" | <user-DEFER'd item description> |
 
 ## Acceptance Criteria
 - All DEFER'd items in this slice resolved (tests pass, production code path verified)
-- See bd task <slice-task-id> for full validation_checklist
+- See pasture task show "${SLICE_TASK_ID_URI}" for full validation_checklist
 ```
 <!-- END GENERATED FROM pasture schema -->

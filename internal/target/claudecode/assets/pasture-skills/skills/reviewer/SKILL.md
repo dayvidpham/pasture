@@ -23,7 +23,7 @@ skills: pasture:reviewer-comment, pasture:reviewer-review-code, pasture:reviewer
 | Command | Description | Phases |
 |---------|-------------|--------|
 | `pasture:reviewer` | End-user alignment reviewer for plans and code | p4-review, p10-code-review |
-| `pasture:reviewer:comment` | Leave structured review comment via Beads | p4-review, p10-code-review |
+| `pasture:reviewer:comment` | Leave structured review comment via Pasture | p4-review, p10-code-review |
 | `pasture:reviewer:review-code` | Review implementation slices with EAGER severity tree | p10-code-review |
 | `pasture:reviewer:review-plan` | Evaluate proposal against one axis (binary ACCEPT/REVISE) | p4-review |
 | `pasture:reviewer:vote` | Cast ACCEPT or REVISE vote (binary only) | p4-review, p10-code-review |
@@ -39,18 +39,18 @@ skills: pasture:reviewer-comment, pasture:reviewer-review-code, pasture:reviewer
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: bd dep add parent --blocked-by child
+- Then: chain dependency: pasture task dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
 _Example (correct)_
 
 ```bash
 # Full dependency chain: work flows bottom-up, closure flows top-down
-bd dep add request-id --blocked-by ure-id
-bd dep add ure-id --blocked-by proposal-id
-bd dep add proposal-id --blocked-by impl-plan-id
-bd dep add impl-plan-id --blocked-by slice-1-id
-bd dep add slice-1-id --blocked-by leaf-task-a-id
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
+pasture task dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
+pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
 ```
 
 **[C-audit-never-delete]**
@@ -66,28 +66,28 @@ bd dep add slice-1-id --blocked-by leaf-task-a-id
 - Should not: add to severity group only
 
 **[C-dep-direction]**
-- Given: adding a Beads dependency
+- Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: bd dep add stays-open --blocked-by must-finish-first
+- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 _Example (correct)_ — also illustrates: C-audit-dep-chain
 
 ```bash
-bd dep add request-id --blocked-by ure-id
+pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
 ```
 
 _Example (anti-pattern)_
 
 ```bash
-bd dep add ure-id --blocked-by request-id
+pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 ```
 
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
 - When: linking tasks
 - Then: use description frontmatter references: block
-- Should not: use bd dep relate (buggy) or blocking dependencies for reference docs
+- Should not: invent relationship commands or use blocking dependencies for reference documents
 
 **[C-review-binary]**
 - Given: a reviewer
@@ -123,16 +123,19 @@ _Example (correct)_
 
 ```bash
 # Create all 3 severity groups immediately (even if empty)
-bd create --title "SLICE-1-REVIEW-A-1 BLOCKER" \
-  --labels "pasture:severity:blocker,pasture:p10-impl:s10-review"
-bd create --title "SLICE-1-REVIEW-A-1 IMPORTANT" \
-  --labels "pasture:severity:important,pasture:p10-impl:s10-review"
-bd create --title "SLICE-1-REVIEW-A-1 MINOR" \
-  --labels "pasture:severity:minor,pasture:p10-impl:s10-review"
+BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
+pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
+pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+pasture task label add "$MINOR_ID_URI" pasture:severity:minor
+pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Close empty groups immediately
-bd close <empty-important-id>
-bd close <empty-minor-id>
+pasture task close "${IMPORTANT_ID_URI}"
+pasture task close "${MINOR_ID_URI}"
 ```
 
 _Example (anti-pattern)_
@@ -140,8 +143,9 @@ _Example (anti-pattern)_
 ```bash
 # WRONG: only creating groups when findings exist
 # This skips empty groups and breaks the audit trail
-if blocker_findings:
-    bd create --title "BLOCKER" ...
+if [ -n "$BLOCKER_FINDINGS" ]; then
+    BLOCKER_ID_URI=$(pasture task create "BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+fi
 ```
 
 **[C-severity-not-plan]**
@@ -202,11 +206,11 @@ Agents coordinate through **beads** tasks and comments:
 
 | Action | Command |
 |--------|---------|
-| List blocked | `bd blocked` |
-| Add progress note | `bd comments add <task-id> "Progress: ..."` |
-| List in-progress | `bd list --pretty --status=in_progress` |
-| Check task details | `bd show <task-id>` |
-| Update status | `bd update <task-id> --status=in_progress` |
+| List blocked | `pasture task blocked` |
+| Add progress note | `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
+| List in-progress | `pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
+| Check task details | `pasture task show "${TASK_ID_URI}"` |
+| Update status | `pasture task update "${TASK_ID_URI}" --status=in_progress` |
 
 ### Review Axes
 
@@ -223,6 +227,26 @@ Agents coordinate through **beads** tasks and comments:
 - When: documenting findings
 - Then: create review task with dependency chain linking findings to the reviewed artifact
 - Should not: vote without creating a review task
+
+## Task Recovery
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+
+Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. Explicit --namespace overrides the git-remote-derived namespace, then file:// of the working directory. List requires an explicit namespace to avoid mixing repositories. ready/blocked have only an exact --label filter, not namespace filtering; inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run pasture task ready, pasture task blocked, and pasture task list --namespace "$PASTURE_NAMESPACE" --status in_progress. For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+
+Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+## Task Attribution
+
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Plan Review vs Code Review
 
@@ -259,8 +283,8 @@ Binary only. No intermediate levels.
 | Severity | When to Use | Blocks Slice? |
 |----------|-------------|---------------|
 | BLOCKER | Security, type errors, test failures, broken production code paths | Yes |
-| IMPORTANT | Performance, missing validation, architectural concerns | No (follow-up epic) |
-| MINOR | Style, optional optimizations, naming improvements | No (follow-up epic) |
+| IMPORTANT | Performance, missing validation, architectural concerns | Must reach 0 before review wave closes |
+| MINOR | Style, optional optimizations, naming improvements | Must reach 0 before review wave closes |
 
 ## Follow-up Lifecycle Reviews
 
@@ -270,21 +294,21 @@ Reviewers also participate in the follow-up lifecycle:
 - **FOLLOWUP_SLICE code review (Phase 10):** Same procedure as standard code review. Task naming: `FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
 - **All severities reach 0 (no followup-of-followup):** ALL findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review must reach 0 before the follow-up wave closes — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.
 
-## Beads Review Process
+## Pasture Review Process
 
 Read the plan and URD:
 ```bash
-bd show <task-id>
-bd show <urd-id>   # Read URD for user requirements context
+pasture task show "${TASK_ID_URI}"
+pasture task show "${URD_ID_URI}"   # Read URD for user requirements context
 ```
 
 Add review comment with vote:
 ```bash
 # If accepting:
-bd comments add <task-id> "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
 
 # If requesting revision:
-bd comments add <task-id> "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
 ```
 
 ## Consensus

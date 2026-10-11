@@ -46,12 +46,14 @@ var exploreBody = SkillBody{
 			Id:        "explore-phase1-recording",
 			Given:     "Phase 1 context",
 			When:      "recording findings",
-			Then:      "add a structured comment on the REQUEST task via `bd comments add`",
+			Then:      "add a structured comment on the REQUEST task via `pasture task comment add`",
 			ShouldNot: "only produce output without updating the REQUEST task",
 		},
 	},
 
 	Sections: []ProseSection{
+		fragRef(FragTaskRecovery),
+		fragRef(FragTaskAuthor),
 		{
 			Id:    "explore-when-to-use",
 			Title: "When to Use",
@@ -59,13 +61,9 @@ var exploreBody = SkillBody{
 				"- **Standalone:** Any agent needing to understand codebase structure for a topic. Invoke directly with a topic and depth.",
 		},
 		{
-			Id:    "explore-inputs",
-			Title: "Inputs",
-			Content: "| Parameter | Required | Description |\n" +
-				"|-----------|----------|--------------|\n" +
-				"| `topic` | Yes | The feature or concept to explore (e.g., \"session management\", \"CLI command registration\") |\n" +
-				"| `depth` | Yes | One of: `quick-scan`, `standard-research`, `deep-dive` |\n" +
-				"| `request-task-id` | Phase 1 only | Beads task ID to record findings as comment |",
+			Id:      "explore-inputs",
+			Title:   "Inputs",
+			Content: "| Parameter | Required | Description |\n|-----------|----------|--------------|\n| `topic` | Yes | The feature or concept to explore (e.g., \"session management\", \"CLI command registration\") |\n| `depth` | Yes | One of: `quick-scan`, `standard-research`, `deep-dive` |\n| `request-task-id` | Phase 1 only | Pasture task ID to record findings as comment |",
 		},
 		{
 			Id:    "explore-checklist",
@@ -194,28 +192,22 @@ User input → CLI parser (src/cli/parse.ts:30)
 		{
 			Id:    "explore-phase1-integration",
 			Title: "Phase 1 Integration",
-			Content: "When invoked as part of Phase 1 (s1_3-explore), record findings on the REQUEST task:\n\n" +
-				"```" + `bash
-bd comments add {{request-task-id}} \
+			Content: `When invoked as part of Phase 1 (s1_3-explore), record findings on the REQUEST task:
+
+` + "```" + `bash
+pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions with line numbers}}
   - Related types: {{existing types/schemas with locations}}
   - Dependencies: {{modules this would use}}
   - Patterns: {{how similar features work here}}
   - Conflicts: {{potential issues or 'none'}}"
-` + "```",
+` + "```" + ``,
 		},
 		{
-			Id:    "explore-standalone",
-			Title: "Standalone Use",
-			Content: "When used outside Phase 1, produce the structured findings directly as output. No beads comment is needed unless a task ID is provided.\n\n" +
-				"```" + `
-/pasture:explore
-Topic: "Nix flake module system"
-Depth: deep-dive
-` + "```" + `
-
-This produces the full architectural map without requiring a REQUEST task context.`,
+			Id:      "explore-standalone",
+			Title:   "Standalone Use",
+			Content: "When used outside Phase 1, produce the structured findings directly as output. No pasture comment is needed unless a task ID is provided.\n\n```\n/pasture:explore\nTopic: \"Nix flake module system\"\nDepth: deep-dive\n```\n\nThis produces the full architectural map without requiring a REQUEST task context.",
 		},
 	},
 }
