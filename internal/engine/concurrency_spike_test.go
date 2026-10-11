@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"log/slog"
 	"strings"
@@ -289,21 +292,11 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 	const generousLockHold = 200 * time.Millisecond
 	generous := spikeTimeoutProfile(t)
 	tight := timeouts.DeadlineTestProfile()
-	// tightWaitCeiling is the longest the write may take to report the lock.
-	//
-	// It sits between the two budgets in this test AND below the production
-	// budget of 500 ms, so it separates the configured 25 ms from the generous
-	// 4 s and from a silent fall back to production. cmd/pastured's
-	// TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget bounds the
-	// same kind of write by the same rule, at half the production budget.
-	//
-	// The warm-up above is what makes so tight a ceiling honest. Measured at
-	// engine -race -count=3, three times, on a busy 32-core machine: nine
-	// samples between 25.5 ms and 33.7 ms, one budget plus scheduling. Without
-	// the warm-up the same runs gave 82 ms to 322 ms, because the first write
-	// for a role issues several statements and each waits its own budget. The
-	// ceiling therefore has about twelve times the observed maximum in hand.
-	const tightWaitCeiling = 400 * time.Millisecond
+	// A busy tier bounds one attempt, not the whole write's retry budget.
+	// The short caller deadline tests cancellation; the supplier guard below
+	// separately pins the configured profile instead of conflating the two.
+	const schedulingTolerance = 75 * time.Millisecond
+	tightWaitCeiling := tight.SQLiteBusy() + schedulingTolerance
 
 	cases := []struct {
 		name       string
@@ -316,7 +309,7 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 			wantLocked: false,
 		},
 		{
-			name:       "budget below the lock hold: the write gives up and reports the lock",
+			name:       "caller deadline below the lock hold: the write cancels",
 			profile:    tight,
 			wantLocked: true,
 		},
@@ -344,12 +337,8 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 				t.Fatalf("engine SQLite lock budget = %s, want the configured %s", got, tc.profile.SQLiteBusy())
 			}
 
-			// Warm the write path before the lock is taken. The FIRST forensic
-			// write for a role also finds or creates that role's agent rows, so
-			// it issues several statements in turn and each one can wait its own
-			// budget. Warming leaves the measured write below as a single
-			// blocked insert, so the wait it reports is one budget rather than a
-			// sum of them.
+			// Warm the role cache before testing the warm writer's cancellation.
+			// Cold-role and whole-transaction retry evidence lives in audit tests.
 			if err := e.Trail().RecordEvent(t.Context(), spikeAuditEvent("supervisor")); err != nil {
 				t.Fatalf("warm the forensic write path before taking the lock: %v", err)
 			}
@@ -364,16 +353,22 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 			}
 
 			start := time.Now()
-			err = e.Trail().RecordEvent(t.Context(), spikeAuditEvent("supervisor"))
+			writeCtx := t.Context()
+			if tc.wantLocked {
+				var cancel context.CancelFunc
+				writeCtx, cancel = context.WithTimeout(writeCtx, tight.SQLiteBusy())
+				defer cancel()
+			}
+			err = e.Trail().RecordEvent(writeCtx, spikeAuditEvent("supervisor"))
 			waited := time.Since(start)
 			// The tight half holds the lock for the whole write, so releasing
 			// here cannot have helped the write that already returned.
 			release()
 
-			locked := err != nil && strings.Contains(err.Error(), "database is locked")
+			locked := errors.Is(err, context.DeadlineExceeded)
 			switch {
 			case tc.wantLocked && !locked:
-				t.Fatalf("recording an audit event with a %s lock budget succeeded (err=%v) while another writer held the lock for the whole call; want a database-is-locked failure, which is what proves the configured budget is the one in force",
+				t.Fatalf("recording an audit event with a %s caller deadline returned err=%v while another writer held the lock for the whole call; want errors.Is DeadlineExceeded",
 					tc.profile.SQLiteBusy(), err)
 			case !tc.wantLocked && err != nil:
 				t.Fatalf("recording an audit event with a %s lock budget failed while the lock was held for only %s: %v; the budget is far above the hold, so the write had to wait and then succeed",
@@ -381,7 +376,7 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 			}
 			if tc.wantLocked {
 				if waited > tightWaitCeiling {
-					t.Errorf("the write waited %s before reporting the lock, above the ceiling of %s; it was configured with a budget of %s, so a wait this long means that budget is not the one in force",
+					t.Errorf("the write waited %s before cancellation, above caller budget plus scheduler allowance %s; caller deadline was %s",
 						waited, tightWaitCeiling, tc.profile.SQLiteBusy())
 				}
 				var structured *pasterrors.StructuredError
@@ -394,5 +389,59 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A caller deadline can clamp a wrongly configured tier too, so cancellation
+// alone cannot prove profile propagation. Pin both real constructor suppliers.
+func TestEngineAuditTrailPinsConfiguredProfileSupplier(t *testing.T) {
+	t.Parallel()
+	file, err := parser.ParseFile(token.NewFileSet(), "engine.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		owner, ok := selector.X.(*ast.Ident)
+		if !ok || owner.Name != "audit" || !strings.HasPrefix(selector.Sel.Name, "NewSqliteAuditTrail") {
+			return true
+		}
+		count++
+		found := false
+		for _, arg := range call.Args {
+			option, ok := arg.(*ast.CallExpr)
+			if !ok || len(option.Args) != 1 {
+				continue
+			}
+			fun, ok := option.Fun.(*ast.SelectorExpr)
+			if !ok || fun.Sel.Name != "WithTimeoutProfile" {
+				continue
+			}
+			pkg, ok := fun.X.(*ast.Ident)
+			if !ok || pkg.Name != "audit" {
+				continue
+			}
+			value, ok := option.Args[0].(*ast.SelectorExpr)
+			if !ok || value.Sel.Name != "Timeouts" {
+				continue
+			}
+			cfg, ok := value.X.(*ast.Ident)
+			found = ok && cfg.Name == "cfg"
+		}
+		if !found {
+			t.Errorf("%s drops cfg.Timeouts from forensic trail construction", selector.Sel.Name)
+		}
+		return true
+	})
+	if count != 2 {
+		t.Fatalf("constructor suppliers %d, want both migrated and skip-migration branches", count)
 	}
 }

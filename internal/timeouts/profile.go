@@ -45,10 +45,14 @@
 // use of the retired DefaultIngressDeadline identifier and a string literal
 // carrying the retired five-second busy_timeout pragma, and nothing else.
 //
-// Two longer retry ceilings live outside this profile on purpose, because they
+// Two bootstrap retry ceilings live outside this profile on purpose, because they
 // bound a retry loop rather than a single wait: busyRetryCeiling in
 // internal/audit/migrate.go and dbosRaceRetryCeiling in
 // internal/engine/dbosinit.go, both 30s.
+// The forensic writer's private policy in internal/audit/write_retry.go instead
+// derives one 30s operation context (or the earlier caller deadline), including
+// pool acquisition, every transaction attempt and backoff. These retry/backoff
+// and bounded cleanup policies are not replacements for the configured tiers.
 //
 // The durable schema gate in internal/engine/schema_gate.go waits on two tiers
 // of this profile when it finds a layout below the floor it reads: SQLiteBusy

@@ -1,0 +1,4 @@
+- mode: warm
+- mode: well-known
+- mode: dedup
+- mode: batch
