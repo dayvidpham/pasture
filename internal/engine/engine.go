@@ -300,7 +300,7 @@ func newEngine(ctx context.Context, cfg Config, beforeAudit func(*sql.DB)) (*Eng
 		trailCloser = st
 	}
 
-	if err := ensureProjectionTable(db); err != nil {
+	if err := ensureProjectionTableContext(ctx, db); err != nil {
 		_ = db.Close()
 		if trailCloser != nil {
 			_ = trailCloser.Close()

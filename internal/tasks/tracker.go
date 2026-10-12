@@ -85,8 +85,8 @@ type trackerImpl struct {
 	// unified-DB race test (tracker_race_test.go) anticipates. Reads stay
 	// unsynchronized (WAL concurrent readers). The bootstrap path (system_identity.go)
 	// writes through t.prov directly, so a guarded verb that triggers bootstrap does
-	// not re-enter this mutex.
-	writeMu sync.Mutex
+	// not re-enter this gate.
+	writeMu writeGate
 
 	// pastureTablesOnce ensures ensurePastureTables runs at most once for the
 	// lifetime of this trackerImpl, even when test helpers construct the struct
@@ -238,8 +238,8 @@ func (t *trackerImpl) Journal() provenance.Journal {
 	return t.prov.Journal()
 }
 
-// lockWrite acquires the single cross-connection write mutex and returns the
-// paired unlock, for `defer t.lockWrite()()` at the top of every write method.
+// lockWrite is the compatibility acquisition for methods with no context.
+// Context-bearing methods use lockWriteContext on the identical writer gate.
 func (t *trackerImpl) lockWrite() func() {
 	t.writeMu.Lock()
 	return t.writeMu.Unlock
@@ -431,7 +431,11 @@ func (t *trackerImpl) Activities(agentId *provenance.AgentID) ([]provenance.Acti
 // ─── Audit Trail surface (4 methods, signature-identical to audit.Trail) ─────
 
 func (t *trackerImpl) RecordEvent(ctx context.Context, event protocol.AuditEvent) error {
-	defer t.lockWrite()()
+	unlock, err := t.lockWriteContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return t.trail.RecordEvent(ctx, event)
 }
 
@@ -453,14 +457,22 @@ func (t *trackerImpl) RecordEvent(ctx context.Context, event protocol.AuditEvent
 // What field — the audit-side messages name the SqliteAuditTrail receiver
 // directly so the origin is clear without re-wrapping.
 func (t *trackerImpl) RecordEventReturningId(ctx context.Context, event protocol.AuditEvent) (int64, error) {
-	defer t.lockWrite()()
+	unlock, err := t.lockWriteContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
 	return t.trail.RecordEventReturningId(ctx, event)
 }
 func (t *trackerImpl) QueryEvents(ctx context.Context, epochId string, phase *protocol.PhaseId, role *string) ([]protocol.AuditEvent, error) {
 	return t.trail.QueryEvents(ctx, epochId, phase, role)
 }
 func (t *trackerImpl) RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
-	defer t.lockWrite()()
+	unlock, err := t.lockWriteContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return t.trail.RecordSessionEntries(ctx, entries)
 }
 func (t *trackerImpl) QuerySessionEntries(ctx context.Context, sessionId string) ([]protocol.SessionEntry, error) {
@@ -579,7 +591,11 @@ func (t *trackerImpl) AgentCategories(id provenance.AgentID) (protocol.Automaton
 // kind MUST be valid; contextId MUST be non-empty (a zero-length context_id
 // is meaningless and would silently break Timeline lookups).
 func (t *trackerImpl) AttachContext(ctx context.Context, eventId int64, kind protocol.ContextKind, contextId string) error {
-	defer t.lockWrite()()
+	unlock, err := t.lockWriteContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if !kind.IsValid() {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
@@ -633,7 +649,7 @@ func (t *trackerImpl) AttachContext(ctx context.Context, eventId int64, kind pro
 
 	// INSERT OR IGNORE preserves the BCNF idempotency guarantee: re-issuing
 	// the same (event_id, context_kind, context_id) triple is a no-op.
-	_, err := t.auditDB.ExecContext(ctx,
+	_, err = t.auditDB.ExecContext(ctx,
 		`INSERT OR IGNORE INTO context_edges (event_id, context_kind, context_id)
 		 VALUES (?, ?, ?)`,
 		eventId, string(kind), contextId,

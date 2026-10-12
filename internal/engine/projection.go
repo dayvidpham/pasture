@@ -26,7 +26,11 @@ CREATE TABLE IF NOT EXISTS epoch_state_projection (
 
 // ensureProjectionTable creates the projection table if it does not exist.
 func ensureProjectionTable(db *sql.DB) error {
-	if _, err := db.Exec(projectionDDL); err != nil {
+	return ensureProjectionTableContext(context.Background(), db)
+}
+
+func ensureProjectionTableContext(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, projectionDDL); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Couldn't create the epoch-state projection table.",

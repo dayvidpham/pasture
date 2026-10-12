@@ -33,7 +33,12 @@ func TestEngineContextFirstConnection(t *testing.T) {
 	e, err := New(ctx, Config{DBPath: path, ApplicationVersion: "context-test"})
 	require.Nil(t, e)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	const schedulingTolerance = 75 * time.Millisecond
+	// A full race suite schedules many SQLite workers at once. This tolerance
+	// covers delayed timer/worker scheduling, not another SQLite wait: the
+	// shared-opener ctx delivery is independently AST-pinned below. Keep this
+	// well below the 500 ms production busy tier and the 438 ms lost-budget
+	// regression; the separate audit short-write proof is not relaxed here.
+	const schedulingTolerance = 150 * time.Millisecond
 	require.Less(t, time.Since(start), 25*time.Millisecond+schedulingTolerance)
 }
 
@@ -111,10 +116,15 @@ func TestEnginePublicConstructorPinsContextAndObserver(t *testing.T) {
 	require.NoError(t, err)
 	var delegation *ast.CallExpr
 	var sharedOpen *ast.CallExpr
+	var projectionSetup *ast.CallExpr
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
+		}
+		if name, ok := call.Fun.(*ast.Ident); ok && (name.Name == "ensureProjectionTable" || name.Name == "ensureProjectionTableContext") {
+			require.Nil(t, projectionSetup)
+			projectionSetup = call
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok {
@@ -131,6 +141,10 @@ func TestEnginePublicConstructorPinsContextAndObserver(t *testing.T) {
 	require.Equal(t, "OpenSharedDBContextWithProfile", sharedOpen.Fun.(*ast.SelectorExpr).Sel.Name)
 	require.Len(t, sharedOpen.Args, 3)
 	require.Equal(t, "ctx", sharedOpen.Args[0].(*ast.Ident).Name)
+	require.NotNil(t, projectionSetup)
+	require.Equal(t, "ensureProjectionTableContext", projectionSetup.Fun.(*ast.Ident).Name)
+	require.Len(t, projectionSetup.Args, 2)
+	require.Equal(t, "ctx", projectionSetup.Args[0].(*ast.Ident).Name)
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "New" {
