@@ -30,7 +30,7 @@ func TestTrackerWaitingCallerWriteGateCounterexample(t *testing.T) {
 		if !released {
 			tracker.writeMu.Unlock()
 		}
-		<-done
+		joinWriteGateWorker(t, done)
 		_ = tracker.Close()
 	})
 	cancel()
@@ -38,13 +38,13 @@ func TestTrackerWaitingCallerWriteGateCounterexample(t *testing.T) {
 		defer close(done)
 		attachErr = tracker.AttachContext(ctx, 1, protocol.ContextKind("epoch"), "context")
 	}()
-	const schedulingTolerance = 75 * time.Millisecond
+	const schedulingTolerance = 150 * time.Millisecond
 	select {
 	case <-done:
 	case <-time.After(schedulingTolerance):
 		tracker.writeMu.Unlock()
 		released = true
-		<-done
+		joinWriteGateWorker(t, done)
 		t.Fatal("AttachContext(ctx) stayed blocked on tracker write gate despite cancelled caller")
 	}
 	require.ErrorIs(t, attachErr, context.Canceled)
@@ -83,6 +83,7 @@ func TestTrackerContextMethodsCancelAtWriteGateWithoutDelegation(t *testing.T) {
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
 	require.NoError(t, decoder.Decode(&cases), "decode write-gate context fixture")
+	require.NotEmpty(t, cases, "write-gate fixture must exercise context-bearing methods")
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			t.Parallel()
@@ -99,7 +100,7 @@ func TestTrackerContextMethodsCancelAtWriteGateWithoutDelegation(t *testing.T) {
 				if !released {
 					tracker.writeMu.Unlock()
 				}
-				<-done
+				joinWriteGateWorker(t, done)
 			})
 			go func() {
 				defer close(done)
@@ -131,7 +132,7 @@ func TestTrackerContextMethodsCancelAtWriteGateWithoutDelegation(t *testing.T) {
 			case <-time.After(schedulingTolerance):
 				tracker.writeMu.Unlock()
 				released = true
-				<-done
+				joinWriteGateWorker(t, done)
 				t.Fatal("cancelled context method waited for the active writer to release the gate")
 			}
 			require.ErrorIs(t, callErr, context.Canceled)
@@ -168,30 +169,42 @@ func TestWriteGateDeadlineWhileAnotherWriterRetainsOwnership(t *testing.T) {
 	t.Parallel()
 	tracker := &trackerImpl{}
 	tracker.writeMu.Lock()
-	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	var gateErr error
 	var unlock func()
+	var elapsed time.Duration
 	released := false
 	t.Cleanup(func() {
 		cancel()
 		if !released {
 			tracker.writeMu.Unlock()
 		}
-		<-done
+		joinWriteGateWorker(t, done)
 	})
-	go func() { defer close(done); unlock, gateErr = tracker.lockWriteContext(ctx) }()
+	go func() {
+		defer close(done)
+		started := time.Now()
+		waitCtx, stop := context.WithTimeout(ctx, 25*time.Millisecond)
+		defer stop()
+		unlock, gateErr = tracker.lockWriteContext(waitCtx)
+		elapsed = time.Since(started)
+	}()
 	const schedulingTolerance = 150 * time.Millisecond
 	select {
 	case <-done:
 	case <-time.After(25*time.Millisecond + schedulingTolerance):
 		tracker.writeMu.Unlock()
 		released = true
-		<-done
+		joinWriteGateWorker(t, done)
 		t.Fatal("write gate did not observe the caller deadline while its owner remained active")
 	}
 	require.Nil(t, unlock)
 	require.ErrorIs(t, gateErr, context.DeadlineExceeded)
+	// A small lower-bound measurement allowance does not admit an immediate
+	// fast-path return; the actual waiter deadline remains exactly 25 ms.
+	const deadlineObservationTolerance = time.Millisecond
+	require.GreaterOrEqual(t, elapsed, 25*time.Millisecond-deadlineObservationTolerance, "waiter must remain blocked for its own deadline, not inherit an expired startup budget")
 	tracker.writeMu.Unlock()
 	released = true
 	live, stop := context.WithTimeout(t.Context(), time.Second)
@@ -199,4 +212,28 @@ func TestWriteGateDeadlineWhileAnotherWriterRetainsOwnership(t *testing.T) {
 	unlock, gateErr = tracker.lockWriteContext(live)
 	require.NoError(t, gateErr)
 	unlock()
+}
+
+func TestWriteGateRejectsUnpairedUnlock(t *testing.T) {
+	t.Parallel()
+	var gate writeGate
+	const want = "tasks: writeGate.Unlock called without a matching acquire"
+	require.PanicsWithValue(t, want, gate.Unlock)
+	gate.Lock()
+	gate.Unlock()
+	require.PanicsWithValue(t, want, gate.Unlock)
+}
+
+func joinWriteGateWorker(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	const joinDiagnosticCeiling = 5 * time.Second
+	select {
+	case <-done:
+		return
+	case <-time.After(joinDiagnosticCeiling):
+		t.Errorf("write-gate worker failed to join within %s after cancellation and owner release; retaining resources until it stops", joinDiagnosticCeiling)
+		// A diagnostic ceiling must not remove a store while its worker lives.
+		// The package's test-process timeout is the final catastrophic guard.
+		<-done
+	}
 }

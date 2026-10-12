@@ -36,8 +36,9 @@ func TestEngineContextFirstConnection(t *testing.T) {
 	// A full race suite schedules many SQLite workers at once. This tolerance
 	// covers delayed timer/worker scheduling, not another SQLite wait: the
 	// shared-opener ctx delivery is independently AST-pinned below. Keep this
-	// well below the 500 ms production busy tier and the 438 ms lost-budget
-	// regression; the separate audit short-write proof is not relaxed here.
+	// well below the 500 ms production busy tier and the lost-budget example
+	// recorded at https://github.com/dayvidpham/pasture/issues/162. This does
+	// not change SQLiteBusy or the audit writer budgets.
 	const schedulingTolerance = 150 * time.Millisecond
 	require.Less(t, time.Since(start), 25*time.Millisecond+schedulingTolerance)
 }

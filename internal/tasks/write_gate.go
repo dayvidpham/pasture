@@ -10,6 +10,7 @@ import (
 // writeGate is a zero-value-ready single-writer semaphore. Both compatibility
 // methods and context-bearing methods acquire the same token; cancellation does
 // not detach a waiter or leave a goroutine acquiring the gate later.
+// Unlock must be called exactly once after each successful acquisition.
 type writeGate struct {
 	once  sync.Once
 	token chan struct{}
@@ -34,8 +35,17 @@ func (g *writeGate) acquire(ctx context.Context) error {
 	}
 }
 
-func (g *writeGate) Lock()   { _ = g.acquire(context.Background()) }
-func (g *writeGate) Unlock() { <-g.token }
+func (g *writeGate) Lock() { _ = g.acquire(context.Background()) }
+func (g *writeGate) Unlock() {
+	// Synchronize even a mistaken first unlock against token initialization,
+	// and retain the old mutex's loud failure instead of deadlocking on misuse.
+	g.once.Do(func() { g.token = make(chan struct{}, 1) })
+	select {
+	case <-g.token:
+	default:
+		panic("tasks: writeGate.Unlock called without a matching acquire")
+	}
+}
 
 func (t *trackerImpl) lockWriteContext(ctx context.Context) (func(), error) {
 	if ctx == nil {

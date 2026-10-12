@@ -239,7 +239,7 @@ func (t *trackerImpl) Journal() provenance.Journal {
 }
 
 // lockWrite is the compatibility acquisition for methods with no context.
-// Context-bearing methods use lockWriteContext on the identical writer gate.
+// Gate-holding methods with a caller context use lockWriteContext on the same write gate.
 func (t *trackerImpl) lockWrite() func() {
 	t.writeMu.Lock()
 	return t.writeMu.Unlock
