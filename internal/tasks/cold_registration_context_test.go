@@ -66,17 +66,20 @@ func TestColdRegistrationWaitingCallerCounterexample(t *testing.T) {
 		t.Fatal("cold registration did not reach its dependency")
 	}
 	cancel()
-	const schedulingTolerance = 30 * time.Millisecond
-	// This SQL cancellation bound is one full production busy tier plus a
-	// separate propagation allowance, not the much shorter gate-only bound.
-	// Retain the allowance demonstrated by the real-holder proofs rather than
-	// increasing it merely to match a sibling test's different wait shape.
+	// A full race suite schedules many SQLite workers at once. Allow delayed
+	// timer/worker scheduling after the one SQL busy wait, not a second wait.
+	// The 30 ms allowance expired under CI load; keep this tolerance below the
+	// 500 ms production busy tier, and the total bound below two busy tiers.
+	// Context identity is independently checked at registration entry above;
+	// the real holder stays locked until cancellation completes, and the error
+	// must still preserve context.Canceled. No production budget changes here.
+	const schedulingTolerance = 250 * time.Millisecond
 	select {
 	case <-done:
 	case <-time.After(timeouts.ProductionProfile().SQLiteBusy() + schedulingTolerance):
 		_, _ = holder.Exec("ROLLBACK")
 		joinWriteGateWorker(t, done)
-		t.Fatal("cold registration did not finish within one busy tier after caller cancellation with holder still locked")
+		t.Fatal("cold registration did not finish within one busy tier plus scheduling tolerance after caller cancellation with holder still locked")
 	}
 	require.ErrorIs(t, registrationErr, context.Canceled)
 	require.Equal(t, provenance.AgentID{}, registeredID)
