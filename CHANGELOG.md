@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.0.19] - 2026-10-13
+
+### Added
+- feat(codegen): reject executable legacy tracker recipes before publication
+- feat(tasks): thread caller context through cold well-known registration
+
+### Fixed
+- fix(codegen): scope table heading exemption to matched cell
+- fix(codegen): validate active root and documentation instructions
+- fix(codegen): scope pinned history checks to every swept root
+- fix(storage): harden cancellation gate pairing and regression cleanup
+- fix(storage): cancel tracker write-gate and projection waits
+- fix(audit): bound atomic forensic writes by caller context
+- fix(engine): preserve caller context during SQLite opening
+
+### Documentation
+- docs(tasks): align registration comments with the context capability
+- docs(tasks): clarify context registration compatibility and evidence
+
+### Other
+- Merge pull request #192 from dayvidpham/pasture-43--feat--strict-operational-gate
+- Merge pull request #190 from dayvidpham/pasture-162--feat--peer-completion
+- Merge pull request #187 from dayvidpham/pasture-162--feat--bounded-audit-writes
+
 ## [0.0.18] - 2026-10-13
 
 ### Fixed
