@@ -120,6 +120,8 @@ func TestTrackerContextMethodsCancelAtWriteGateWithoutDelegation(t *testing.T) {
 					callErr = tracker.AttachContext(ctx, 1, protocol.ContextKind("epoch"), "context")
 				case "transfer":
 					_, callErr = tracker.TransferTaskAssignment(ctx, protocol.TransferTaskAssignmentRequest{})
+				case "registration":
+					_, callErr = tracker.RegisterSoftwareAgentContext(ctx, "test", "cancelled", "1", "test")
 				default:
 					callErr = errors.New("unknown write gate fixture method")
 				}

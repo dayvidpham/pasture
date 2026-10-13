@@ -8,3 +8,5 @@
   method: attach
 - name: assignment transfer
   method: transfer
+- name: software registration
+  method: registration

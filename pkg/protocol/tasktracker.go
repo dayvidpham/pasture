@@ -50,6 +50,10 @@ type TaskTracker interface {
 	// See provenance.Tracker. ───
 	provenance.Tracker
 
+	// Context-aware software registration controls the writer gate, pool
+	// acquisition and registration transaction without retaining the context.
+	provenance.SoftwareAgentRegistrarContext
+
 	// ─── Journaled mutation verbs (Tracker.As → Session) ────────────────
 	//
 	// Task/edge/label/comment mutations moved off the direct-write Tracker

@@ -390,8 +390,27 @@ func (t *trackerImpl) RegisterMLAgent(namespace string, role provenance.Role, pr
 	return t.prov.RegisterMLAgent(namespace, role, provider, modelName)
 }
 func (t *trackerImpl) RegisterSoftwareAgent(namespace, name, version, source string) (provenance.SoftwareAgent, error) {
-	defer t.lockWrite()()
-	return t.prov.RegisterSoftwareAgent(namespace, name, version, source)
+	return t.RegisterSoftwareAgentContext(context.Background(), namespace, name, version, source)
+}
+
+func (t *trackerImpl) RegisterSoftwareAgentContext(ctx context.Context, namespace, name, version, source string) (provenance.SoftwareAgent, error) {
+	unlock, err := t.lockWriteContext(ctx)
+	if err != nil {
+		return provenance.SoftwareAgent{}, err
+	}
+	defer unlock()
+	registrar, ok := t.prov.(provenance.SoftwareAgentRegistrarContext)
+	if !ok {
+		return provenance.SoftwareAgent{}, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConfig,
+			What:     "Couldn't register a software agent with the caller's context.",
+			Why:      "The configured task backend lacks context-aware software registration.",
+			Where:    "Registering a software agent (internal/tasks/tracker.go in RegisterSoftwareAgentContext).",
+			Impact:   "No registration was delegated; cancellation cannot safely be honored by this backend.",
+			Fix:      "Use a Provenance backend implementing SoftwareAgentRegistrarContext; built-in backends in v0.5.0 or later support it.",
+		}
+	}
+	return registrar.RegisterSoftwareAgentContext(ctx, namespace, name, version, source)
 }
 func (t *trackerImpl) RegisterFixedSoftwareAgent(reg provenance.FixedSoftwareAgentRegistration) (provenance.SoftwareAgent, error) {
 	defer t.lockWrite()()

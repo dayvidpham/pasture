@@ -8,9 +8,9 @@
 //  1. Lookup-by-name in `pasture_well_known_agents` (O(1) via the UNIQUE index
 //     on `name`). If found, recover the AgentId and skip steps 2-3 (idempotent
 //     fast path; second-and-subsequent opens hit only this branch).
-//  2. If absent: call `provenance.Tracker.RegisterSoftwareAgent("pasture",
-//     name, version, source)` — this mints one fresh UUIDv7 in the
-//     Provenance subsystem (separate `*sql.DB` handle on the same file).
+//  2. If absent: call TaskTracker.RegisterSoftwareAgentContext with the caller's
+//     context — this mints one fresh UUIDv7 through Provenance using the
+//     same borrowed pool as the audit subsystem.
 //  3. INSERT into `pasture_well_known_agents` (agent_id, name), doing nothing
 //     on a name conflict, read back the id the name is bound to, and — only
 //     when it is the id minted in step 2 — INSERT `pasture_agent_categories`
@@ -246,9 +246,8 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 // minted on a miss) and a *StructuredError if any step fails.
 //
 // auditDB is the audit subsystem's *sql.DB; provTracker is the provenance
-// surface (we accept it via the protocol.TaskTracker because the only
-// Provenance call we need is RegisterSoftwareAgent, which is in the
-// embedded interface). The split keeps this helper unit-testable: tests
+// surface, accepted via protocol.TaskTracker's context registration capability.
+// The split keeps this helper unit-testable: tests
 // can provide a real auditDB (file-backed t.TempDir()) and a real
 // protocol.TaskTracker, no mocks needed.
 //
@@ -341,11 +340,12 @@ func ensureWellKnownAgent(
 	}
 
 	// 2. Mint a fresh SoftwareAgent through Provenance. This call writes to
-	//    Provenance's *sql.DB (separate handle from auditDB on the same file).
+	//    the shared pool borrowed by Provenance, using this caller's context.
 	//    On success we get an AgentId; on failure we abort without touching
 	//    the audit-side tables (so the next startup retries cleanly via the
 	//    fast-path miss).
-	sa, err := provTracker.RegisterSoftwareAgent(
+	sa, err := provTracker.RegisterSoftwareAgentContext(
+		ctx,
 		WellKnownAgentNamespace,
 		spec.Name,
 		WellKnownAgentVersion,
