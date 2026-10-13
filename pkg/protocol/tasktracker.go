@@ -1,20 +1,18 @@
 // tasktracker.go — Public TaskTracker façade.
 //
-// PROPOSAL-2 §7.4 (R2; UAT-1 placement direction): the unified façade composes
-// the upstream Provenance task tracker (28 methods) with pasture's audit Trail
-// (4 methods) and adds 6 pasture-only methods. The interface lives in
+// The unified façade composes the upstream Provenance task tracker, its
+// context-aware software registration capability, pasture's audit surface,
+// and pasture-specific operations. The interface lives in
 // pkg/protocol so external dayvidpham-org modules can program against the
 // façade; the implementation lives in internal/tasks (private to pasture).
 //
-// Implementation detail: PROPOSAL-2's pseudocode embeds `audit.Trail` directly,
-// but the audit package already imports pkg/protocol (for AuditEvent /
+// The audit package already imports pkg/protocol (for AuditEvent /
 // SessionEntry / PhaseId), so a literal embedding would create an import
-// cycle. We resolve by re-declaring the 4 audit method signatures inline here;
+// cycle. We resolve by declaring the audit method signatures inline here;
 // any audit.Trail implementation satisfies them automatically because the
-// signatures match exactly. Context-aware software registration is composed
-// as an additional one-method Provenance capability alongside the audit surface.
-//
-// See bd comment on aura-plugins-mbkfi for the full design rationale.
+// signatures match exactly. The additive software registration capability
+// requires RegisterSoftwareAgentContext from every façade implementation;
+// legacy RegisterSoftwareAgent callers retain their existing signature.
 
 package protocol
 
@@ -29,7 +27,7 @@ import (
 // activities) and an audit.Trail (event recording, query, session entries),
 // both opened against the same SQLite file at ~/.local/share/pasture/pasture.db.
 //
-// The interface adds 7 pasture-only methods on top of the 28 + 4 inherited:
+// Pasture-specific operations include:
 //
 //   - Agent categorisation (R8): SetAgentCategories, AgentCategories
 //   - Context attachment (R9): AttachContext, EventContexts, Timeline

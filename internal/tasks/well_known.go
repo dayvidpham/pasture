@@ -105,9 +105,9 @@ type auditDBHolder interface {
 //   - CategoryWorkflow (exit 3): Provenance RegisterSoftwareAgentContext failure.
 //
 // The function takes ctx for cancellation. Context-aware durable construction
-// supplies its caller's context; compatibility openers supply Background.
-// Fresh opens mint every missing entry;
-// warm opens recover IDs without sequential identity growth. Defensive
+// supplies its caller's context through cold software registration and binding;
+// only compatibility openers supply Background. Fresh opens mint every missing
+// entry; warm opens recover IDs without sequential identity growth. Defensive
 // table DDL still runs, so a warm call is not a strictly read-only operation.
 func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, cache *WellKnownAgentCache) error {
 	if cache == nil {
