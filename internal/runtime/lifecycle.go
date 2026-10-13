@@ -239,7 +239,7 @@ func (m FailureMode) BlocksByExitCode() bool {
 // blocking exit code: it runs as report-and-continue until its harness supplies
 // the citation.
 type FailureEvidence struct {
-	Source string
+	Source string `json:"Source"`
 }
 
 // IsPresent reports whether the evidence cites a source. Whitespace alone is

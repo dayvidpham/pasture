@@ -189,7 +189,11 @@ func EnsureActiveDefinition(ctx context.Context, s Service, document definitions
 
 // The indexed lookup cannot distinguish first activation from a renamed
 // operation index. Before admitting an absent coordinate, inspect a bounded,
-// snapshot-pinned evidence inventory. Exhaustion is a refusal, not absence.
+// snapshot-pinned evidence inventory across ALL v2 definition/state coordinates,
+// not just the target. An unrelated damaged row can therefore refuse a fresh
+// activation. At most eight MaxFactPageSize pages are inspected; exhaustion is
+// a refusal, not absence. This store-wide availability limit must be replaced
+// by an owner-provided coordinate index before hook-path integration.
 // Identical concurrent writers may already have published the correct operation;
 // their subsequent Apply remains the journal's atomic conflict/replay boundary.
 const definitionAbsenceProbePages = 8
@@ -228,7 +232,7 @@ func rejectDisplacedDefinition(ctx context.Context, reader DefinitionReader, doc
 		query.Page.SnapshotMaxJournalID = page.SnapshotMaxJournalID
 		query.Page.AfterJournalID = page.Next.AfterJournalID
 	}
-	return definitionError("rejectDisplacedDefinition", "The bounded evidence inventory was exhausted before absence could be established; no activation was appended.", nil)
+	return definitionError("rejectDisplacedDefinition", fmt.Sprintf("The store-wide v2 definition/state inventory exceeded %d pages of %d rows (%d rows total) before absence could be established; no activation was appended. A coordinate-indexed owner lookup is required for larger inventories.", definitionAbsenceProbePages, provenance.MaxFactPageSize, definitionAbsenceProbePages*provenance.MaxFactPageSize), nil)
 }
 
 // ResolveDefinition first captures an enclosing evidence watermark. Exact-ID

@@ -259,9 +259,18 @@ func validateRuntimeSpecification(spec RuntimeSpecification) error {
 			return fmt.Errorf("invalid or duplicate capability %q", capability.ID)
 		}
 		seenCapabilities[capability.ID] = true
-		min, _ := pastureruntime.ParseHostVersion(string(capability.Minimum))
-		max, _ := pastureruntime.ParseHostVersion(string(capability.Maximum))
-		version, _ := pastureruntime.ParseHostVersion(string(capability.Version))
+		min, err := pastureruntime.ParseHostVersion(string(capability.Minimum))
+		if err != nil {
+			return fmt.Errorf("capability %q minimum: %w", capability.ID, err)
+		}
+		max, err := pastureruntime.ParseHostVersion(string(capability.Maximum))
+		if err != nil {
+			return fmt.Errorf("capability %q maximum: %w", capability.ID, err)
+		}
+		version, err := pastureruntime.ParseHostVersion(string(capability.Version))
+		if err != nil {
+			return fmt.Errorf("capability %q version: %w", capability.ID, err)
+		}
 		if pastureruntime.ComparePrecedence(min, version) > 0 || pastureruntime.ComparePrecedence(version, max) > 0 {
 			return fmt.Errorf("capability %q has an inverted or out-of-range version", capability.ID)
 		}

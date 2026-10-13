@@ -150,14 +150,30 @@ func TestRuntimeOwnerRejectsUnknownFieldsAndUnsupportedCoordinate(t *testing.T) 
 			case "registration-contract":
 				fields["specification"].(map[string]any)["registration"].(map[string]any)["Contract"] = "claude-code/tampered"
 			case "capability":
-				fields["specification"].(map[string]any)["capabilities"] = []any{map[string]any{"ID": "bad", "Minimum": "99.0.0", "Maximum": "1.0.0", "Version": "1.0.0", "Binding": map[string]any{}}}
+				binding := make(map[string]any)
+				for key, value := range fields["specification"].(map[string]any)["operations"].([]any)[0].(map[string]any) {
+					binding[key] = value
+				}
+				binding["ID"] = "synthetic.inverted-capability"
+				fields["specification"].(map[string]any)["capabilities"] = []any{map[string]any{"ID": "synthetic.inverted-capability", "Minimum": "99.0.0", "Maximum": "1.0.0", "Version": "1.0.0", "Binding": binding}}
 			case "effect":
-				fields["specification"].(map[string]any)["effects"] = []any{map[string]any{"ID": "bad", "Class": "native"}}
+				binding := make(map[string]any)
+				for key, value := range fields["specification"].(map[string]any)["operations"].([]any)[0].(map[string]any) {
+					binding[key] = value
+				}
+				binding["ID"], binding["Class"], binding["NativeCall"] = "synthetic.broken-native-effect", "native", ""
+				fields["specification"].(map[string]any)["effects"] = []any{binding}
 			}
 			raw, err := json.Marshal(fields)
 			require.NoError(t, err)
 			_, err = definitions.Decode(raw)
 			require.Error(t, err)
+			if name == "capability" {
+				require.ErrorContains(t, err, "inverted or out-of-range version")
+			}
+			if name == "effect" {
+				require.ErrorContains(t, err, "empty call name")
+			}
 		})
 	}
 }

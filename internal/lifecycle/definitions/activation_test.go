@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -347,4 +348,42 @@ func TestDefinitionStateRejectsUnconstructedSnapshot(t *testing.T) {
 	require.Error(t, err)
 	_, err = model.NewDefinitionStateRecord(model.DefinitionSnapshot{Ref: ref, ID: "forged", Version: 1, Codec: model.DefinitionCanonicalJSON}, fact, 2)
 	require.Error(t, err)
+}
+
+func TestAbsentDefinitionRejectsDifferentContentUnderSameCoordinate(t *testing.T) {
+	t.Parallel()
+	_, tracker, service := activatedStore(t)
+	doc, err := definitions.NewRuntimeContract(definitions.RuntimeContracts()[0])
+	require.NoError(t, err)
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(doc.Body(), &wire))
+	wire["specification"].(map[string]any)["native_transport"] = "plugin-events"
+	raw, err := json.Marshal(wire)
+	require.NoError(t, err)
+	body, err := definitions.NormalizePayload(definitions.EvidenceKind, raw)
+	require.NoError(t, err)
+	sum := sha256.Sum256(body)
+	require.NotEqual(t, doc.Content(), model.ContentIdentity(sum))
+	other, err := definitions.Decode(body)
+	require.NoError(t, err, "independent valid body with the same owner coordinate")
+	require.Equal(t, doc.ID(), other.ID())
+	require.Equal(t, doc.Kind(), other.Kind())
+	require.Equal(t, doc.Version(), other.Version())
+	id, err := service.Identity.ResolveLifecycleIdentity(context.Background())
+	require.NoError(t, err)
+	// Adversarial evidence is emitted through the real journal, with a different
+	// body and digest but the same logical coordinate. This is not a live capture
+	// or a valid definition-owner writer and supplies no Document bypass.
+	_, err = tracker.Journal().Apply(provenance.OperationInput{OperationID: "synthetic-other-coordinate-producer", ActorID: id.Actor, AuthorityJournalID: &id.Authority, CommandDigest: []byte("synthetic-conflicting-coordinate"), RecordedAt: clock{}.Now().UnixNano(), Effects: []provenance.Effect{{Sort: provenance.EffectEvidence, EvidenceKind: definitions.EvidenceKind, ResultSlot: "definition", Payload: body, ContentDigest: sum[:]}}})
+	require.NoError(t, err)
+	r, err := receipt.NewDefinitionReader(tracker.Journal())
+	require.NoError(t, err)
+	before := evidenceCount(t, r)
+	_, err = receipt.EnsureActiveDefinition(context.Background(), service, doc)
+	require.Error(t, err)
+	var refused *pasterrors.StructuredError
+	require.ErrorAs(t, err, &refused)
+	require.Contains(t, refused.Why, "unexpected operation")
+	require.Equal(t, before, evidenceCount(t, r))
+	require.NoError(t, tracker.Journal().VerifyIntegrity())
 }
