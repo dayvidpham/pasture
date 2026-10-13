@@ -108,14 +108,14 @@ func CheckOperationalTree(root string, roots []string, step string) (Operational
 	if err != nil {
 		return report, err
 	}
-	for _, dir := range roots {
-		if dir != "skills" {
-			continue
-		}
-		if _, err := os.Lstat(filepath.Join(root, "skills")); os.IsNotExist(err) {
-			continue // Native source-root validation diagnoses an absent root.
-		}
-		for _, entry := range history {
+	for _, entry := range history {
+		for _, dir := range roots {
+			if entry.Owner != dir && !strings.HasPrefix(entry.Owner, dir+"/") {
+				continue // A partial asset sweep does not own canonical sources.
+			}
+			if _, err := os.Lstat(filepath.Join(root, dir)); os.IsNotExist(err) {
+				continue // Native source-root validation diagnoses an absent root.
+			}
 			if !files[entry.Owner] {
 				return report, fmt.Errorf("operational tracker pinned historical owner %s was not discovered during %s; outputs withheld; restore the exact owner or review its retirement in internal/codegen/scan/manifest/operational_history.json and regenerate", entry.Owner, step)
 			}

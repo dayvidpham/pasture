@@ -18,6 +18,10 @@ import (
 // Lexical candidates are deliberately not a verb allowlist: an unknown command
 // is rejected as ambiguous. Escapes, split shell words and argv strings retain
 // their original coordinates; the gate never rewrites an emitted byte.
+// The invisible spelling candidates cover zero-width space, non-joiner,
+// joiner and BOM: common copy/paste ambiguity, not Unicode normalization.
+// Other format characters remain literal shell-token characters; this is not
+// a promise to detect every visually confusable spelling.
 var trackerWord = regexp.MustCompile(`b(?:\\\r?\n|\\|["'\x{200B}\x{200C}\x{200D}\x{FEFF}])*d`)
 var trackerArgument = regexp.MustCompile(`^[\s"'` + "`" + `,\\]*(--?[^\s"'` + "`" + `,]+|[A-Za-z][A-Za-z0-9_-]*)`)
 var trackerHeredoc = regexp.MustCompile(`<<-?\s*['"]?([A-Za-z_][A-Za-z_0-9]*)`)
@@ -39,6 +43,8 @@ func TrackerCandidates(doc OperationalDocument) ([]TrackerCandidate, error) {
 		windowStart, windowStop := lineWindow(doc.Content, start, stop)
 		prefix := string(doc.Content[windowStart:start])
 		shell := filepath.Ext(doc.File) == ".sh"
+		// The suffix starts at the token, not its end, so it includes any
+		// token-internal quotes when proving an isolated shell literal inert.
 		if shell && !inTrackerHeredoc(doc.Content[:windowStart]) && shellNonExecutable(prefix, string(doc.Content[start:windowStop])) {
 			continue
 		}
