@@ -176,7 +176,7 @@ func TestStrictLifecycleRowGateRunsBeforeAnyWrite(t *testing.T) {
 	for _, site := range calls[gate+1:] {
 		after[site.Name] = true
 	}
-	for _, write := range []string{"GenerateSchemaToFile", "EmitHarness", "emitInventoryRows"} {
+	for _, write := range []string{"GenerateSchemaToFile", "EmitHarness", "renderInventoryFiles", "publishGeneratedFiles"} {
 		assert.True(t, after[write],
 			"Generate no longer calls %s after the strict lifecycle-row gate; the pipeline's three "+
 				"writes are named here so that one moved above the gate, or removed, fails by name", write)

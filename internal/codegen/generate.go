@@ -5,12 +5,13 @@ import (
 	"path/filepath"
 )
 
-// GenerateResult is the outcome of a full generation run: the schema.xml path
-// (empty if the schema step failed) and every harness file emitted, in target
-// order.
+// GenerateResult accounts for every published file: schema.xml, harness files
+// in target order, and authoring-side inventory projections separately. A
+// validation failure returns an empty result because nothing was published.
 type GenerateResult struct {
-	SchemaPath string
-	Files      []GeneratedFile
+	SchemaPath     string
+	Files          []GeneratedFile
+	InventoryFiles []GeneratedFile
 }
 
 // Generate runs the complete Pasture code-generation pipeline against root
@@ -24,10 +25,11 @@ type GenerateResult struct {
 //     refuses a pinned lifecycle row that claims a blocking exit code without
 //     citing the host evidence for it. It aborts before any write for the same
 //     reason.
-//  3. schema.xml generation.
-//  4. Every requested harness target's skills, agents, verbatim copies, and
-//     manifest.
-//  5. Global-ID uniqueness enforcement across the assembled registry.
+//  3. In-memory staging of schema.xml and every requested harness target's
+//     skills, agents, verbatim copies and manifest.
+//  4. Global-ID uniqueness enforcement and in-memory inventory staging.
+//  5. Operational validation of the complete candidate stage, then publication
+//     of those exact bytes. Rejection leaves every stage output untouched.
 //
 // Steps 3–5 accumulate their errors so a single run reports every generation
 // problem at once; the returned []error is nil only when the whole pipeline
@@ -49,7 +51,8 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 
 	// ── 3. schema.xml ────────────────────────────────────────────────────────
 	schemaPath := filepath.Join(root, "schema.xml")
-	if _, err := GenerateSchemaToFile(schemaPath, opts); err != nil {
+	content, err := GenerateSchemaToFile(schemaPath, GenerateOptions{})
+	if err != nil {
 		errs = append(errs, fmt.Errorf("schema: %w", err))
 	} else {
 		result.SchemaPath = schemaPath
@@ -57,7 +60,7 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 
 	// ── 4. Harness-specific skills, agents, verbatim copies, and manifests ───
 	for _, target := range targets {
-		files, err := EmitHarness(RepoRoots(root), target, opts)
+		files, err := EmitHarness(RepoRoots(root), target, GenerateOptions{})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("target %s: %w", target.Name, err))
 			continue
@@ -76,9 +79,22 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 	// names are projected into internal/inventory as committed generated rows.
 	// (The lifecycle-event axis is emitted by hostcontractgen in its manifest
 	// walk.) Emitted as text; no production package imports the table.
-	if err := emitInventoryRows(root, opts); err != nil {
+	inventory, err := renderInventoryFiles(root)
+	if err != nil {
 		errs = append(errs, fmt.Errorf("inventory: %w", err))
 	}
+	if len(errs) > 0 {
+		return GenerateResult{}, errs
+	}
+	stage := append([]GeneratedFile{{Path: schemaPath, Content: content}}, result.Files...)
+	stage = append(stage, inventory...)
+	if err := ValidateOperationalFiles(root, stage, "complete generation candidate validation"); err != nil {
+		return GenerateResult{}, []error{err}
+	}
+	if err := publishGeneratedFiles(stage, opts); err != nil {
+		return GenerateResult{}, []error{err}
+	}
+	result.InventoryFiles = inventory
 
 	return result, errs
 }

@@ -145,6 +145,16 @@ func RenderGeneratedAssets(repoRoot string) (map[string][]byte, error) {
 		return nil, fmt.Errorf("%s: read canonical git discipline payload during embedded asset generation: %w; restore hooks/scripts/git-discipline.sh and run make generate", where, err)
 	}
 	out[hooksPackageDir+"/hooks/scripts/git-discipline.sh"] = content
+	var candidates []codegen.GeneratedFile
+	for _, key := range SortedAssetKeys(out) {
+		candidates = append(candidates, codegen.GeneratedFile{
+			Path:    filepath.Join(repoRoot, "internal/target/claudecode/assets", filepath.FromSlash(key)),
+			Content: string(out[key]),
+		})
+	}
+	if err := codegen.ValidateOperationalFiles(repoRoot, candidates, "Claude Code asset candidate validation"); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 

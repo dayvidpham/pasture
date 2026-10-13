@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/dayvidpham/pasture/internal/codegen/scan"
 	"github.com/dayvidpham/pasture/internal/target/claudecode"
 )
 
@@ -57,6 +58,11 @@ func run() error {
 	generated, err := claudecode.RenderGeneratedAssets(repoRoot)
 	if err != nil {
 		return fmt.Errorf("claudecode-assets: %w", err)
+	}
+	// Independently authored scaffolding is not replaced by the renderer, but
+	// is still shipped operational content. Validate it before the first write.
+	if _, err := scan.CheckOperationalTree(repoRoot, []string{"internal/target/claudecode/assets"}, "Claude Code asset publication"); err != nil {
+		return err
 	}
 
 	written := 0
