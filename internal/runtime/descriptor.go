@@ -9,29 +9,31 @@ import (
 
 // BindingDescriptor is a detached, read-only description of a compiled binding,
 // including unsupported bindings which executable lookup intentionally refuses.
+// Explicit JSON member names retain the initial persisted spelling independent
+// of Go field renames; changes to wire names require a document codec revision.
 type BindingDescriptor struct {
-	ID                 string
-	Class              effects.RuntimeClass
-	InputSchema        ir.SchemaID
-	OutputSchema       ir.SchemaID
-	Semantics          ir.DescriptorSemantics
-	Effects            []string
-	NativeCall         string
-	Arguments          []string
-	ResultSemantics    string
-	ContextInheritance string
-	Mediator           string
-	Instruction        string
-	Template           string
-	UnsupportedReason  string
+	ID                 string                 `json:"ID"`
+	Class              effects.RuntimeClass   `json:"Class"`
+	InputSchema        ir.SchemaID            `json:"InputSchema"`
+	OutputSchema       ir.SchemaID            `json:"OutputSchema"`
+	Semantics          ir.DescriptorSemantics `json:"Semantics"`
+	Effects            []string               `json:"Effects"`
+	NativeCall         string                 `json:"NativeCall"`
+	Arguments          []string               `json:"Arguments"`
+	ResultSemantics    string                 `json:"ResultSemantics"`
+	ContextInheritance string                 `json:"ContextInheritance"`
+	Mediator           string                 `json:"Mediator"`
+	Instruction        string                 `json:"Instruction"`
+	Template           string                 `json:"Template"`
+	UnsupportedReason  string                 `json:"UnsupportedReason"`
 }
 
 type CapabilityDescriptor struct {
-	ID      ir.CapabilityID
-	Version ir.CapabilityContractVersion
-	Minimum ir.CapabilityContractVersion
-	Maximum ir.CapabilityContractVersion
-	Binding BindingDescriptor
+	ID      ir.CapabilityID              `json:"ID"`
+	Version ir.CapabilityContractVersion `json:"Version"`
+	Minimum ir.CapabilityContractVersion `json:"Minimum"`
+	Maximum ir.CapabilityContractVersion `json:"Maximum"`
+	Binding BindingDescriptor            `json:"Binding"`
 }
 
 func describeBindings(entries map[string]boundEntry) []BindingDescriptor {

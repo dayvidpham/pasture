@@ -150,6 +150,9 @@ func EnsureActiveDefinition(ctx context.Context, s Service, document definitions
 	}
 	switch result.Kind {
 	case provenance.CommittedAbsent:
+		if err := rejectDisplacedDefinition(ctx, reader, document); err != nil {
+			return model.DefinitionRef{}, err
+		}
 		intent, refusal := gate.NewEnvelopeDefinitionActivationIntent(document.Kind(), document.Content())
 		if refusal != nil {
 			return model.DefinitionRef{}, refusal
@@ -182,6 +185,50 @@ func EnsureActiveDefinition(ctx context.Context, s Service, document definitions
 		return model.DefinitionRef{}, definitionError("EnsureActiveDefinition", "The committed body does not match the requested owner document.", nil)
 	}
 	return ref, nil
+}
+
+// The indexed lookup cannot distinguish first activation from a renamed
+// operation index. Before admitting an absent coordinate, inspect a bounded,
+// snapshot-pinned evidence inventory. Exhaustion is a refusal, not absence.
+// Identical concurrent writers may already have published the correct operation;
+// their subsequent Apply remains the journal's atomic conflict/replay boundary.
+const definitionAbsenceProbePages = 8
+
+func rejectDisplacedDefinition(ctx context.Context, reader DefinitionReader, document definitions.Document) error {
+	query := provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitions.EvidenceKind, envelopeStateKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
+	for range definitionAbsenceProbePages {
+		if err := ctx.Err(); err != nil {
+			return definitionError("rejectDisplacedDefinition", "Activation was canceled before absence could be verified.", err)
+		}
+		page, err := reader.QueryEvidence(query)
+		if err != nil {
+			return definitionError("rejectDisplacedDefinition", "The bounded definition absence inventory could not be read.", err)
+		}
+		for _, row := range page.Rows {
+			var coordinate struct {
+				Kind    model.DefinitionKind  `json:"kind"`
+				ID      model.DefinitionID    `json:"id"`
+				Version uint32                `json:"version"`
+				Codec   model.DefinitionCodec `json:"codec"`
+				Content model.ContentIdentity `json:"content"`
+			}
+			if err := json.Unmarshal(row.Payload, &coordinate); err != nil {
+				return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition evidence row %d is unreadable; absence is not established.", row.JournalID), err)
+			}
+			sum := sha256.Sum256(row.Payload)
+			content := document.Content()
+			matches := bytes.Equal(row.ContentDigest, content[:]) || sum == [32]byte(content) || coordinate.Content == content || (coordinate.Kind == document.Kind() && coordinate.ID == document.ID() && coordinate.Version == document.Version() && coordinate.Codec == document.Codec())
+			if matches && row.ProducingOperationID != definitionOperationID(document) {
+				return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition coordinate already has evidence at row %d under unexpected operation %q; the indexed absence is damaged journal truth, not first activation.", row.JournalID, row.ProducingOperationID), nil)
+			}
+		}
+		if page.Next == nil {
+			return nil
+		}
+		query.Page.SnapshotMaxJournalID = page.SnapshotMaxJournalID
+		query.Page.AfterJournalID = page.Next.AfterJournalID
+	}
+	return definitionError("rejectDisplacedDefinition", "The bounded evidence inventory was exhausted before absence could be established; no activation was appended.", nil)
 }
 
 // ResolveDefinition first captures an enclosing evidence watermark. Exact-ID

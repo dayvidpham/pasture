@@ -43,7 +43,7 @@ func NewDefinitionSnapshot(ref DefinitionRef, id DefinitionID, version uint32, c
 	if ref.Definition <= 0 || (!IsEnvelopeDefinitionKind(ref.Kind) && ref.Kind != DefinitionMetamodel) || id == "" || version == 0 || codec != DefinitionCanonicalJSON || len(body) == 0 || ref.Content != ContentIdentity(sha256.Sum256(body)) {
 		return DefinitionSnapshot{}, definitionConstructionError("NewDefinitionSnapshot", "The resolved journal coordinate, owner metadata or content digest is invalid.")
 	}
-	return DefinitionSnapshot{Ref: ref, ID: id, Version: version, Codec: codec, body: append([]byte(nil), body...)}, nil
+	return DefinitionSnapshot{Ref: ref, ID: id, Version: version, Codec: codec, body: append([]byte(nil), body...), constructed: true}, nil
 }
 
 type DefinitionRef struct {
@@ -54,11 +54,12 @@ type DefinitionRef struct {
 }
 
 type DefinitionSnapshot struct {
-	Ref     DefinitionRef
-	ID      DefinitionID
-	Version uint32
-	Codec   DefinitionCodec
-	body    []byte
+	Ref         DefinitionRef
+	ID          DefinitionID
+	Version     uint32
+	Codec       DefinitionCodec
+	body        []byte
+	constructed bool
 }
 
 func (s DefinitionSnapshot) Body() []byte { return append([]byte(nil), s.body...) }
@@ -95,7 +96,7 @@ type DefinitionStateRecord struct {
 }
 
 func NewDefinitionStateRecord(snapshot DefinitionSnapshot, fact DefinitionStateFact, watermark provenance.JournalID) (DefinitionStateRecord, error) {
-	if snapshot.Ref.Definition <= 0 || fact.Definition != snapshot.Ref.Definition || fact.StateID <= DefinitionStateID(fact.Definition) || provenance.JournalID(fact.StateID) > watermark || fact.Event != DefinitionActivated || fact.RecordedAt.IsZero() {
+	if !snapshot.constructed || snapshot.Ref.Definition <= 0 || (!IsEnvelopeDefinitionKind(snapshot.Ref.Kind) && snapshot.Ref.Kind != DefinitionMetamodel) || snapshot.ID == "" || snapshot.Version == 0 || snapshot.Codec != DefinitionCanonicalJSON || len(snapshot.body) == 0 || snapshot.Ref.Content != ContentIdentity(sha256.Sum256(snapshot.body)) || fact.Definition != snapshot.Ref.Definition || fact.StateID <= DefinitionStateID(fact.Definition) || provenance.JournalID(fact.StateID) > watermark || fact.Event != DefinitionActivated || fact.RecordedAt.IsZero() {
 		return DefinitionStateRecord{}, definitionConstructionError("NewDefinitionStateRecord", "The resolved activation coordinate, event, timestamp or snapshot watermark is invalid.")
 	}
 	return DefinitionStateRecord{Ref: snapshot.Ref, ID: snapshot.ID, Version: snapshot.Version, Status: DefinitionStatusActive, LatestState: fact.StateID, LatestFact: fact, SnapshotJournalID: watermark}, nil

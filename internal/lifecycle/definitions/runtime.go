@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/effects"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
@@ -170,6 +171,13 @@ func decodeRuntime(payload []byte) (Document, error) {
 	if err := strictDecode(payload, &wire); err != nil {
 		return Document{}, failure("decodeRuntime", "The typed runtime document contains malformed, duplicate or unknown fields.", err)
 	}
+	// Version 1 is a historical codec arm, independent of the version emitted
+	// by today's generator. Add a new arm rather than replacing this decoder.
+	switch wire.Version {
+	case 1:
+	default:
+		return Document{}, failure("decodeRuntime", "The runtime document version has no supported historical codec.", nil)
+	}
 	if wire.Kind != model.DefinitionRuntimeContract || wire.Version != 1 || wire.Codec != model.DefinitionCanonicalJSON || !wire.Specification.Contract.IsValid() || wire.ID != runtimeID(wire.Specification.Contract) || wire.Specification.Harness != wire.Specification.Contract.Harness() || wire.Specification.Registration.Harness != wire.Specification.Harness || wire.Specification.Registration.Version != wire.Specification.Minimum || len(wire.Specification.Operations) != len(ir.AllOperationKinds()) || len(wire.Specification.Lifecycle) == 0 {
 		return Document{}, failure("decodeRuntime", "Runtime document kind, owner identity, codec, version or full catalog is invalid.", fmt.Errorf("kind=%d version=%d codec=%d id=%q want=%q contract=%q valid=%t harness=%q registration=%q operations=%d expected=%d lifecycle=%d", wire.Kind, wire.Version, wire.Codec, wire.ID, runtimeID(wire.Specification.Contract), wire.Specification.Contract, wire.Specification.Contract.IsValid(), wire.Specification.Harness, wire.Specification.Registration.Contract, len(wire.Specification.Operations), len(ir.AllOperationKinds()), len(wire.Specification.Lifecycle)))
 	}
@@ -188,6 +196,22 @@ func decodeRuntime(payload []byte) (Document, error) {
 }
 
 func validateRuntimeSpecification(spec RuntimeSpecification) error {
+	known := false
+	for _, contract := range RuntimeContracts() {
+		known = known || spec.Contract == contract
+	}
+	if !known {
+		return fmt.Errorf("runtime contract %q is not owned by the versioned runtime codec", spec.Contract)
+	}
+	// The registration coordinate is versioned profile metadata, not a body
+	// comparison with today's compiled content; historical bodies stay readable.
+	owner, err := RuntimeSpecificationForContract(spec.Contract)
+	if err != nil {
+		return err
+	}
+	if spec.Registration.Contract != owner.Registration.Contract {
+		return fmt.Errorf("registration coordinate does not identify runtime %q", spec.Contract)
+	}
 	minimum, err := pastureruntime.ParseHostVersion(spec.Minimum)
 	if err != nil {
 		return err
@@ -208,10 +232,42 @@ func validateRuntimeSpecification(spec RuntimeSpecification) error {
 	}
 	ops := make(map[string]bool)
 	for _, op := range spec.Operations {
+		if err := validateBinding(op); err != nil {
+			return err
+		}
 		if ops[op.ID] || !op.Class.IsValid() || op.InputSchema == "" || op.OutputSchema == "" || strings.TrimSpace(op.Semantics.Summary) == "" {
 			return fmt.Errorf("invalid or duplicate operation descriptor %q", op.ID)
 		}
 		ops[op.ID] = true
+	}
+	seenEffects := make(map[string]bool)
+	for _, effect := range spec.Effects {
+		if _, err := ir.NewEffectID(effect.ID); err != nil {
+			return err
+		}
+		if seenEffects[effect.ID] {
+			return fmt.Errorf("duplicate effect %q", effect.ID)
+		}
+		seenEffects[effect.ID] = true
+		if err := validateBinding(effect); err != nil {
+			return err
+		}
+	}
+	seenCapabilities := make(map[ir.CapabilityID]bool)
+	for _, capability := range spec.Capabilities {
+		if !capability.ID.IsValid() || !capability.Version.IsValid() || !capability.Minimum.IsValid() || !capability.Maximum.IsValid() || seenCapabilities[capability.ID] || capability.Binding.ID != string(capability.ID) {
+			return fmt.Errorf("invalid or duplicate capability %q", capability.ID)
+		}
+		seenCapabilities[capability.ID] = true
+		min, _ := pastureruntime.ParseHostVersion(string(capability.Minimum))
+		max, _ := pastureruntime.ParseHostVersion(string(capability.Maximum))
+		version, _ := pastureruntime.ParseHostVersion(string(capability.Version))
+		if pastureruntime.ComparePrecedence(min, version) > 0 || pastureruntime.ComparePrecedence(version, max) > 0 {
+			return fmt.Errorf("capability %q has an inverted or out-of-range version", capability.ID)
+		}
+		if err := validateBinding(capability.Binding); err != nil {
+			return err
+		}
 	}
 	for _, kind := range ir.AllOperationKinds() {
 		id, _ := ir.CoreOperationID(kind)
@@ -247,6 +303,40 @@ func validateRuntimeSpecification(spec RuntimeSpecification) error {
 	}
 	if len(registered) != len(seen) {
 		return fmt.Errorf("registration and lifecycle catalogs are incomplete")
+	}
+	return nil
+}
+
+func validateBinding(binding pastureruntime.BindingDescriptor) error {
+	if binding.ID == "" || !binding.Class.IsValid() || binding.InputSchema == "" || binding.OutputSchema == "" || strings.TrimSpace(binding.Semantics.Summary) == "" || strings.TrimSpace(binding.Semantics.Result) == "" {
+		return fmt.Errorf("incomplete binding %q", binding.ID)
+	}
+	seen := make(map[string]bool)
+	for _, id := range binding.Effects {
+		if _, err := ir.NewEffectID(id); err != nil {
+			return err
+		}
+		if seen[id] {
+			return fmt.Errorf("duplicate bound effect %q", id)
+		}
+		seen[id] = true
+	}
+	switch binding.Class {
+	case effects.RuntimeClassNative:
+		_, err := pastureruntime.NewNativeCall(binding.NativeCall, binding.Arguments, binding.ResultSemantics, binding.ContextInheritance)
+		return err
+	case effects.RuntimeClassParentMediated:
+		if strings.TrimSpace(binding.Mediator) == "" || strings.TrimSpace(binding.Instruction) == "" {
+			return fmt.Errorf("incomplete mediated binding %q", binding.ID)
+		}
+	case effects.RuntimeClassSemanticInstruction:
+		if strings.TrimSpace(binding.Template) == "" {
+			return fmt.Errorf("incomplete semantic binding %q", binding.ID)
+		}
+	case effects.RuntimeClassUnsupported:
+		if strings.TrimSpace(binding.UnsupportedReason) == "" {
+			return fmt.Errorf("unsupported binding %q has no reason", binding.ID)
+		}
 	}
 	return nil
 }

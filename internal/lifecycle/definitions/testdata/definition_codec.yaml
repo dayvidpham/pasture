@@ -30,3 +30,7 @@ document_mutations:
   - codec
   - kind
   - contract
+  - unknown-self-consistent-contract
+  - registration-contract
+  - capability
+  - effect

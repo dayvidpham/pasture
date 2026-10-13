@@ -144,6 +144,15 @@ func TestRuntimeOwnerRejectsUnknownFieldsAndUnsupportedCoordinate(t *testing.T) 
 				fields["kind"] = 3
 			case "contract":
 				fields["specification"].(map[string]any)["contract"] = "codex/codex@0.153.0"
+			case "unknown-self-consistent-contract":
+				fields["id"] = "pasture.lifecycle.runtime-contract.claude-code/evil@9.9.9"
+				fields["specification"].(map[string]any)["contract"] = "claude-code/evil@9.9.9"
+			case "registration-contract":
+				fields["specification"].(map[string]any)["registration"].(map[string]any)["Contract"] = "claude-code/tampered"
+			case "capability":
+				fields["specification"].(map[string]any)["capabilities"] = []any{map[string]any{"ID": "bad", "Minimum": "99.0.0", "Maximum": "1.0.0", "Version": "1.0.0", "Binding": map[string]any{}}}
+			case "effect":
+				fields["specification"].(map[string]any)["effects"] = []any{map[string]any{"ID": "bad", "Class": "native"}}
 			}
 			raw, err := json.Marshal(fields)
 			require.NoError(t, err)

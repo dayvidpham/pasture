@@ -282,7 +282,7 @@ func TestDefinitionCorruptionFailsClosedWithoutRepair(t *testing.T) {
 			require.NotEmpty(t, structured.Why)
 			require.NotEmpty(t, structured.Impact)
 			require.NotEmpty(t, structured.Fix)
-			if tc.SQL != "" && tc.Name != "producing operation identity damaged" {
+			if tc.SQL != "" {
 				_, err := receipt.EnsureActiveDefinition(context.Background(), service, doc)
 				require.Error(t, err, "corrupt committed activation must not be treated as absence")
 			}
@@ -337,4 +337,14 @@ func TestDefinitionCommitConflictingActorIsNotAReplayException(t *testing.T) {
 	r, err := receipt.NewDefinitionReader(tracker.Journal())
 	require.NoError(t, err)
 	require.Equal(t, 2, evidenceCount(t, r))
+}
+
+func TestDefinitionStateRejectsUnconstructedSnapshot(t *testing.T) {
+	t.Parallel()
+	ref := model.DefinitionRef{Definition: 1, Kind: model.DefinitionRuntimeContract, Content: model.ContentIdentity{1}}
+	fact := model.DefinitionStateFact{StateID: 2, Definition: 1, Event: model.DefinitionActivated, RecordedAt: clock{}.Now()}
+	_, err := model.NewDefinitionStateRecord(model.DefinitionSnapshot{Ref: ref}, fact, 2)
+	require.Error(t, err)
+	_, err = model.NewDefinitionStateRecord(model.DefinitionSnapshot{Ref: ref, ID: "forged", Version: 1, Codec: model.DefinitionCanonicalJSON}, fact, 2)
+	require.Error(t, err)
 }
