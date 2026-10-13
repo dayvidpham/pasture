@@ -1,0 +1,12 @@
+- name: event
+  method: event
+- name: event id
+  method: event_id
+- name: session batch
+  method: sessions
+- name: context attachment
+  method: attach
+- name: assignment transfer
+  method: transfer
+- name: software registration
+  method: registration

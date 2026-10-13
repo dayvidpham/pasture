@@ -26,7 +26,11 @@ func (t *trackerImpl) TransferTaskAssignment(ctx context.Context, request protoc
 	if ctx == nil {
 		return protocol.TransferTaskAssignmentResult{}, taskAssignmentTransferError(protocol.TaskAssignmentTransferInvalidRequest, nil)
 	}
-	defer t.lockWrite()()
+	unlock, err := t.lockWriteContext(ctx)
+	if err != nil {
+		return protocol.TransferTaskAssignmentResult{}, taskAssignmentTransferError(protocol.TaskAssignmentTransferUnavailable, err)
+	}
+	defer unlock()
 
 	operationID := taskAssignmentTransferOperationID(request)
 	committed, err := t.prov.Journal().LookupCommitted(operationID)

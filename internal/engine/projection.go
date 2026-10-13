@@ -24,14 +24,15 @@ CREATE TABLE IF NOT EXISTS epoch_state_projection (
 	updated_at    INTEGER NOT NULL
 )`
 
-// ensureProjectionTable creates the projection table if it does not exist.
-func ensureProjectionTable(db *sql.DB) error {
-	if _, err := db.Exec(projectionDDL); err != nil {
+// ensureProjectionTableContext creates the projection table using the caller's
+// context for both pool acquisition and SQL execution.
+func ensureProjectionTableContext(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(ctx, projectionDDL); err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
 			What:     "Couldn't create the epoch-state projection table.",
 			Why:      "The database refused the CREATE TABLE for the engine's state projection.",
-			Where:    "Setting up the engine projection (internal/engine/projection.go in engine.ensureProjectionTable).",
+			Where:    "Setting up the engine projection (internal/engine/projection.go in engine.ensureProjectionTableContext).",
 			Impact:   "The engine can't persist epoch state, so status and query surfaces have nothing to read.",
 			Fix: "1. Confirm the database file is writable and the disk has free space.\n" +
 				"2. Retry once the database is healthy.",

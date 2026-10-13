@@ -1,0 +1,4 @@
+- name: migrate fallback
+  skip_migrations: false
+- name: current-schema fallback
+  skip_migrations: true
