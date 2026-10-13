@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.0.20] - 2026-10-13
+
+### Fixed
+- fix(flake): update vendorHash for the v0.0.19 module graph
+
+### Other
+- Merge pull request #195 from dayvidpham/pasture-43--test--cold-registration-tolerance
+- Merge pull request #194 from dayvidpham/pasture-43--fix--flake-vendor-hash-2
+- test(tasks): harden cold-registration cancellation tolerance under load
+
 ## [0.0.19] - 2026-10-13
 
 ### Added
