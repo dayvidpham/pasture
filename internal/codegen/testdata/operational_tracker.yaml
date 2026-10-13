@@ -1,0 +1,76 @@
+- name: canonical body
+  owner: body
+  text: "\nRun `bd ready`.\n"
+- name: shared fragment
+  owner: fragment
+  text: "\nRun `env bd ready`.\n"
+- name: raw document old classified owner
+  owner: raw
+  file: skills/protocol/UAT_EXAMPLE.md
+  text: "\n## Current operations\nRun `bd ready`.\n"
+- name: new operational file
+  owner: raw
+  file: skills/protocol/new-operational.md
+  text: "## Work\nRun `bd ready`.\n"
+- name: hook
+  owner: hook
+  file: hooks/scripts/git-discipline.sh
+  text: "\ncommand bd ready\n"
+- name: newly rendered candidate
+  owner: candidate
+  text: "bd ready\n"
+- name: role metadata
+  owner: role
+  text: "\nRun bd ready\n"
+- name: constraint metadata
+  owner: constraint
+  text: "\nRun bd ready\n"
+- name: procedure metadata
+  owner: procedure
+  text: "\nRun bd ready\n"
+- name: active agent instructions
+  owner: raw
+  file: AGENTS.md
+  text: "\nRun `bd ready`.\n"
+- name: active readme
+  owner: raw
+  file: README.md
+  text: "\nRun `bd ready`.\n"
+- name: active contribution instructions
+  owner: raw
+  file: CONTRIBUTING.md
+  text: "\nRun `bd ready`.\n"
+- name: active codegen documentation
+  owner: raw
+  file: docs/codegen.md
+  text: "\nRun `bd ready`.\n"
+- name: newly added active documentation
+  owner: raw
+  file: docs/operations/new-recipe.md
+  text: "\nRun `bd ready`.\n"
+- name: executable table sibling in active doc
+  owner: raw
+  file: docs/operations/table-recipe.md
+  text: "\n| bd task | Run bd task create new |\n|---|---|\n"
+- name: executable table sibling in canonical body
+  owner: body
+  text: "\n| bd task | Run bd task create new |\n|---|---|\n"
+- name: table-like command in active config
+  owner: raw
+  file: docs/operations/table-hook.json
+  text: '{"command":"| bd task | Run bd task create new |\n|---|---|\n"}'
+- name: Claude Code standalone asset generator
+  owner: asset
+  file: hooks/scripts/git-discipline.sh
+  text: "\nbd ready\n"
+  generator: ./internal/target/claudecode/...
+- name: OpenCode standalone asset generator
+  owner: asset
+  file: hooks/scripts/git-discipline.sh
+  text: "\nbd ready\n"
+  generator: ./internal/target/opencode/...
+- name: Codex standalone asset generator
+  owner: asset
+  file: hooks/scripts/git-discipline.sh
+  text: "\nbd ready\n"
+  generator: ./internal/target/codex/...

@@ -189,3 +189,43 @@ committed outputs are the contract.
 - [AGENTS.md](../AGENTS.md) — coding standards, including the
   References & Internal Identifiers rule (the codegen pipeline is one of its
   explicit exceptions, since the protocol *is* its subject matter).
+## Operational tracker publication gate
+
+`make check-operational-tracker` performs the independent, read-only sweep of
+all harness trees (`skills/`, `agents/`, `hooks/`, `.opencode/`, `.agents/`,
+`.codex/`) and embedded target assets, including the decoded Codex snapshot.
+The same discovery authority also checks active root instructions (`AGENTS.md`,
+`README.md`, `CONTRIBUTING.md`, `ROADMAP.md`, `TESTING.md`) and all active `docs/`
+files before publication and during the independent sweep. New nested docs join
+automatically. `CLAUDE.md` and `GEMINI.md` are aliases of canonical `AGENTS.md`;
+release history (`CHANGELOG.md`) and retained design/evidence archives
+(`docs/adr/`, `docs/proposals/`, `docs/audits/`) are not operational owners.
+It reports the traversed file count, exact content/path tree digest, and counted
+historical quotations. New files join the scope without a manifest edit.
+
+Generation composes this prohibition with the native-call classification gate.
+It inspects assembled body/fragment/metadata strings and hand-authored inputs,
+renders candidate schema and all requested harnesses in memory, validates them,
+then publishes the exact validated bytes. Rejection writes nothing from that
+codegen stage; it does not roll back earlier lifecycle generators in
+`make generate` or promise transactional recovery from filesystem write faults.
+Separate asset generators use the same validated emitter; Claude's extra raw
+assets and independently authored scaffolding are validated before publication.
+
+Executable or ambiguous command-shaped legacy tracker usage is rejected, even
+when a native-call manifest labels the owner dead or a runtime literal. Retained
+history requires visible non-operational framing and a separate exact
+owner/section/Goldmark-node/byte-range/content-window/document-digest identity in
+`internal/codegen/scan/manifest/operational_history.json`. The inventory pins
+13 canonical quotations across four historical documents; byte-verbatim copies
+inherit canonical identities, never whole-file exemptions. Changed windows,
+framing, added commands and missing pinned quotations fail closed. Review each
+changed identity explicitly rather than regenerating a permissive baseline.
+
+The gate is unconditional in `make generate` (therefore Codegen Drift CI) and
+`TestOperationalTrackerShippedTree` (therefore normal race CI). Focused tests:
+
+```sh
+go test -race ./internal/codegen/...
+make check-operational-tracker
+```

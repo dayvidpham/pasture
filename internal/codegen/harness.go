@@ -269,6 +269,25 @@ func EmitHarness(roots HarnessRoots, h TargetHarness, opts GenerateOptions) ([]G
 	if err := roots.validateSource(h.Name); err != nil {
 		return nil, err
 	}
+	if err := RequireOperationalSource(roots.Source); err != nil {
+		return nil, err
+	}
+	files, err := renderHarness(roots, h, GenerateOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateOperationalFiles(roots.Output, files, "harness candidate validation"); err != nil {
+		return nil, err
+	}
+	if err := publishGeneratedFiles(files, opts); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// renderHarness stages every candidate in memory. Only EmitHarness and the
+// complete Generate stage may publish, after validating all candidate bytes.
+func renderHarness(roots HarnessRoots, h TargetHarness, opts GenerateOptions) ([]GeneratedFile, error) {
 	root := roots.Output
 	figuresDir := roots.figuresDir()
 	var out []GeneratedFile

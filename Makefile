@@ -1,4 +1,4 @@
-.PHONY: build test test-recovery test-race test-race-ci lint fmt clean release-local release-all generate
+.PHONY: build test test-recovery test-race test-race-ci lint fmt clean release-local release-all generate check-operational-tracker
 
 VERSION ?= devel
 
@@ -25,6 +25,12 @@ generate:
 	go generate ./internal/target/claudecode/...
 	go generate ./internal/target/codex/...
 	go generate ./internal/lifecycle/metamodel/...
+	$(MAKE) check-operational-tracker
+
+# Unconditional read-only sweep; also runs through Codegen Drift's make generate
+# and the race suite's shipped-tree test. No environment bypass or baseline.
+check-operational-tracker:
+	go run ./tools/operational-check
 
 # --------------------------------------------------------------------------
 # Build
