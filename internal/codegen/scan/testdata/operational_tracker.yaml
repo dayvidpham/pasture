@@ -333,3 +333,19 @@
   file: docs/design.md
   content: 'The `activities` store precedes the bd→`pasture task` migration.'
   reject: false
+- name: task identifier heading cannot exempt executable sibling cell
+  file: docs/operations.md
+  content: "| bd task | Run bd task create new |\n|---|---|\n"
+  reject: true
+- name: task identifier heading cannot exempt earlier executable cell
+  file: docs/operations.md
+  content: "| Run bd task create new | bd task |\n|---|---|\n"
+  reject: true
+- name: task identifier heading cannot exempt bare executable sibling cell
+  file: docs/operations.md
+  content: "| bd task | bd task create new |\n|---|---|\n"
+  reject: true
+- name: table-like config command payload cannot borrow identifier exemption
+  file: docs/hooks.json
+  content: '{"command":"| bd task | Run bd task create new |\n|---|---|\n"}'
+  reject: true

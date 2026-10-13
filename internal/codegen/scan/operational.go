@@ -64,7 +64,7 @@ func TrackerCandidates(doc OperationalDocument) ([]TrackerCandidate, error) {
 			// A plain table column named "bd task" labels historical task
 			// identifiers, not an executable recipe. Code spans, arguments and
 			// every other command spelling still pass through the strict gate.
-			if markdown && node == "Paragraph" && word == "task" && trackerTaskColumn(doc.Content, windowStart, windowStop) {
+			if markdown && node == "Paragraph" && word == "task" && trackerTaskColumn(doc.Content, windowStart, windowStop, start) {
 				continue
 			}
 			// Bare mentions of a binary in prose are not command recipes. This
@@ -104,18 +104,16 @@ func commandCue(prefix string) bool {
 	return false
 }
 
-func trackerTaskColumn(content []byte, start, stop int) bool {
+func trackerTaskColumn(content []byte, start, stop, token int) bool {
 	line := strings.TrimSpace(string(content[start:stop]))
 	if !strings.HasPrefix(line, "|") || strings.ContainsAny(line, "`\\") {
 		return false
 	}
-	found := false
-	for _, cell := range strings.Split(line, "|") {
-		if strings.TrimSpace(cell) == "bd task" {
-			found = true
-		}
-	}
-	if !found || stop >= len(content) {
+	// Only the cell containing this candidate may prove it is an identifier
+	// heading. An inert neighbouring heading never exempts another command.
+	left := strings.LastIndexByte(string(content[start:token]), '|')
+	right := strings.IndexByte(string(content[token:stop]), '|')
+	if left < 0 || right < 0 || strings.TrimSpace(string(content[start+left+1:token+right])) != "bd task" || stop >= len(content) {
 		return false
 	}
 	next := strings.TrimSpace(strings.SplitN(string(content[stop:]), "\n", 2)[0])

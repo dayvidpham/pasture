@@ -48,6 +48,17 @@
   owner: raw
   file: docs/operations/new-recipe.md
   text: "\nRun `bd ready`.\n"
+- name: executable table sibling in active doc
+  owner: raw
+  file: docs/operations/table-recipe.md
+  text: "\n| bd task | Run bd task create new |\n|---|---|\n"
+- name: executable table sibling in canonical body
+  owner: body
+  text: "\n| bd task | Run bd task create new |\n|---|---|\n"
+- name: table-like command in active config
+  owner: raw
+  file: docs/operations/table-hook.json
+  text: '{"command":"| bd task | Run bd task create new |\n|---|---|\n"}'
 - name: Claude Code standalone asset generator
   owner: asset
   file: hooks/scripts/git-discipline.sh
