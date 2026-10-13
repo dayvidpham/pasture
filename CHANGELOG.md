@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.18] - 2026-10-13
+
+### Fixed
+- fix(flake): update vendorHash for the current module graph
+
+### Other
+- Merge pull request #188 from dayvidpham/pasture-43--fix--flake-vendor-hash
+
 ## [0.0.17] - 2026-10-11
 
 ### Added
