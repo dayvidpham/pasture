@@ -52,8 +52,8 @@ upstream compatibility gate green (see Integration disposition).
 | 6: post-audit activation lock | Tagged `TestUnifiedPostAuditActivationCancellation` runs both WithCancel and deadline through the real post-audit/post-defensive-setup barrier and real Provenance activation; observes contended BEGIN, cancels while the holder stays locked, requires nil tracker/reachable cause and completion including cleanup inside **500 ms + 30 ms scheduling tolerance**. It verifies prior audit migration remains, no new journal/schema seeds or false receipt. Upstream tagged public activation, cancellation-phase, cleanup/ownership and PRAGMA tests prove retained borrowed-pool liveness, verified restoration or discard, no retained opening context, and unchanged prior data. |
 | 7: first/replacement connections | `TestContextFirstConnectionLockedRollbackJournal`, `TestUnifiedContextOpenCancelledFirstUse`, and engine first-use start after real lock readiness but before the new connection. WAL first use is exercised by the native hook opener with an existing locked WAL store. `TestContextConnectRejectsCancelledAndNil`, `TestContextPoolSettingsAndReplacement`, `TestContextPoolExpansionPreservesImmediateTransactions`, and writer replacement/clamp/restoration tests cover fresh acquisition contexts, escaped URI filenames, settings on every connection and `_txlock=immediate`. Expansion runs while another real transaction owns the write lock. Raw Driver.Open/Close remain synchronous local-file operations without a context API: these tests include their completion on supported local stores, **not a guarantee against a stalled filesystem syscall**. |
 
-Combined short cold-role measurements were **25.206464 ms** (DeadlineTestProfile)
-and **26.103235 ms** (production), against the unchanged 25 ms caller deadline
+Combined short cold-role measurements were **25.206464 ms** (production)
+and **26.103235 ms** (DeadlineTestProfile), against the unchanged 25 ms caller deadline
 and separately reported 75 ms scheduling allowance.
 
 ## Waiting-caller matrix on the combined source
