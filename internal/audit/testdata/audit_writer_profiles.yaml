@@ -1,0 +1,4 @@
+- name: production
+  production: true
+- name: deadline-test
+  production: false

@@ -195,12 +195,20 @@ select at the hook boundary still permit pre-fence abandonment without joining
 worker cleanup. Once receipt commit is in flight the command instead waits for
 settlement as described above.
 
-Two longer retry ceilings sit **above** the profile and are not part of it.
+Two bootstrap retry ceilings sit **above** the profile and are not part of it.
 Both bound a retry loop, not a single wait, and both are 30 s:
 `busyRetryCeiling` (`internal/audit/migrate.go`) bounds retrying a schema
 migration that lost the file lock to another process, and `dbosRaceRetryCeiling`
 (`internal/engine/dbosinit.go`) bounds re-attempting durable start-up after a
 lost schema-bootstrap race.
+
+The forensic writer has a separate private operation policy in
+`internal/audit/write_retry.go`: one 30 s context budget, or the earlier caller
+deadline, shared by pool acquisition, every transaction attempt and backoff.
+Unlike the bootstrap ceilings, it bounds the whole write operation, not the
+start of its final attempt. Its backoff and bounded connection-cleanup policy
+are not substitutes for the configured profile tiers; the reserved connection's
+lock wait is clamped within that profile and the remaining operation budget.
 
 The durable schema gate (`RequireSupportedDurableSchema` in
 `internal/engine/schema_gate.go`) uses two tiers of the profile when it finds a

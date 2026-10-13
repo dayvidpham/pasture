@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -61,6 +62,8 @@ type SqliteAuditTrail struct {
 	// RecordEvent for each distinct role (cache hit on subsequent writes).
 	roleMu        sync.Mutex
 	roleToAgentId map[string]string
+	busyTier      time.Duration
+	writerPolicy  auditWriterPolicy
 }
 
 type sqliteAuditTrailOptions struct {
@@ -188,6 +191,7 @@ func NewSqliteAuditTrailContextWithOptions(ctx context.Context, dbPath string, o
 		return &SqliteAuditTrail{
 			db:            db,
 			roleToAgentId: make(map[string]string),
+			busyTier:      cfg.timeouts.SQLiteBusy(),
 		}, nil
 	}
 
@@ -265,6 +269,7 @@ func NewSqliteAuditTrailContextWithOptions(ctx context.Context, dbPath string, o
 	return &SqliteAuditTrail{
 		db:            db,
 		roleToAgentId: make(map[string]string),
+		busyTier:      cfg.timeouts.SQLiteBusy(),
 	}, nil
 }
 
@@ -316,26 +321,27 @@ func (s *SqliteAuditTrail) RecordEvent(ctx context.Context, event protocol.Audit
 // race-free under any level of write contention — the driver tracks the rowid
 // per-statement, not per-connection — and replaces the older "RecordEvent
 // then SELECT MAX(id)" workaround that could return a row id belonging to a
-// concurrent writer (PROPOSAL-2 §7.11 future-work, realised in Phase 11 R1-B).
+// concurrent writer.
 //
 // Timestamp is stored as Unix nanoseconds (INTEGER) for exact round-trip
 // without format parsing overhead.
 //
-// Legacy-role compatibility (PROPOSAL-2 §7.10.2 + this file's type doc):
-// the v3 schema dropped audit_events.role and replaced it with agent_id.
-// Until S8 wires TaskTracker.RecordEvent(agent_id) at the workflow
-// boundary, callers continue to set event.Role on protocol.AuditEvent.
-// This method bridges by resolving Role to a SoftwareAgent named
-// "pasture/legacy-role/<role>" via raw SQL on agents_software (find or
-// create) — the same shape the v3 migration uses — and writes that
-// agent_id into the new column. The role→agent_id mapping is cached in
-// s.roleToAgentId for write-amortised cost.
+// Legacy-role compatibility: the v3 schema dropped audit_events.role and
+// replaced it with agent_id. Until callers are wired to pass agent_id
+// directly, this method bridges by resolving Role to a SoftwareAgent named
+// "pasture/legacy-role/<role>" via raw SQL (find or create) and writes that
+// agent_id into the new column. The role→agent_id mapping is cached AFTER a
+// successful commit so that a rolled-back write never populates the cache.
+//
+// All DB work (agent lookup/insert + event insert + context_edges insert) runs
+// inside a single atomic BEGIN IMMEDIATE transaction via withAuditWrite, which
+// retries on SQLite contention and honours the caller's context deadline.
 //
 // An empty event.Role is rejected with CategoryValidation; the v3 schema
 // requires a non-NULL agent_id and there is no sensible default.
 //
-// Returns (id, nil) on success or (0, *pasterrors.StructuredError) on failure.
-func (s *SqliteAuditTrail) RecordEventReturningId(_ context.Context, event protocol.AuditEvent) (int64, error) {
+// Returns (id, nil) on success or (0, error) on failure.
+func (s *SqliteAuditTrail) RecordEventReturningId(ctx context.Context, event protocol.AuditEvent) (int64, error) {
 	if event.Role == "" {
 		return 0, &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
@@ -377,244 +383,225 @@ func (s *SqliteAuditTrail) RecordEventReturningId(_ context.Context, event proto
 		}
 	}
 
-	agentId, err := s.resolveLegacyRoleAgentId(event.Role)
-	if err != nil {
-		return 0, err
-	}
-
-	// Post-v4 schema: audit_events.epoch_id is gone (dropped by S4's
-	// migrate_v3_v4.go). Epoch attachment is now expressed as a
-	// context_edges (event_id, 'EpochContext', epoch_id) row written
-	// inside the same transaction so a crash between INSERT and
-	// AttachContext cannot leave a row without its epoch correlation.
-	//
-	// Caller-side compatibility: protocol.AuditEvent still carries an
-	// EpochId field for the existing public API. SqliteAuditTrail
-	// bridges the two by writing the audit_events row first, then the
-	// context_edges row if EpochId is non-empty. QueryEvents recovers
-	// EpochId by joining context_edges with kind='EpochContext'.
-	tx, err := s.db.Begin()
-	if err != nil {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Couldn't start the database write that would record this audit event (epoch %q, event type %q).",
-				event.EpochId, event.EventType,
-			),
-			Why:   "The database refused to start the write transaction.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
-			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
-				"until the underlying database problem is fixed and the caller retries.",
-			Fix: "1. Confirm the audit database file is accessible and not locked by another writer:\n" +
-				"     ls -l <path-to-audit.db>\n" +
-				"     lsof <path-to-audit.db>\n" +
-				"2. Check the file isn't corrupted:\n" +
-				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
-				"3. Retry the operation once the file is healthy and unlocked.",
-			Cause: err,
-		}
-	}
-	defer func() { _ = tx.Rollback() }()
+	// Closure-scoped state shared between the callback and post-commit work.
+	// The callback saves agent/event IDs here; they are consumed only after
+	// withAuditWrite returns nil (i.e. the commit succeeded), so a rollback
+	// never publishes stale values.
+	var (
+		resolvedAgentId string
+		resolvedEventId int64
+	)
 
 	// dedup_key is NULL for ordinary callers (the partial unique index ignores
 	// NULLs, so every legacy write inserts a fresh row as before). The durable
 	// engine supplies a deterministic key; the ON CONFLICT clause targets the
-	// partial index (matched by repeating its WHERE predicate) so a replayed
-	// emission is a silent no-op instead of a duplicate row.
+	// partial index so a replayed emission is a silent no-op instead of a
+	// duplicate row.
 	var dedupKey any
 	if event.DedupKey != "" {
 		dedupKey = event.DedupKey
 	}
-	res, err := tx.Exec(
-		`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp, dedup_key)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING`,
-		string(event.Phase),
-		agentId,
-		string(event.EventType),
-		string(payload),
-		event.Timestamp.UTC().UnixNano(),
-		dedupKey,
-	)
-	if err != nil {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Couldn't write this audit event into the database (epoch %q, event type %q).",
-				event.EpochId, event.EventType,
-			),
-			Why:   "The database refused the write into the audit-events table.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
-			Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
-				"until the underlying database problem is fixed and the caller retries.",
-			Fix: "1. Confirm the audit database file is accessible and not locked by another writer:\n" +
-				"     ls -l <path-to-audit.db>\n" +
-				"     lsof <path-to-audit.db>\n" +
-				"2. Check the file isn't corrupted:\n" +
-				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
-				"3. Retry the operation once the file is healthy and unlocked.",
-			Cause: err,
-		}
-	}
 
-	// Exactly-once dedup path: when the engine supplied a dedup_key and the
-	// ON CONFLICT clause skipped the insert (a replay), no new row was written.
-	// LastInsertId would then report a stale rowid, so recover the canonical
-	// id from the already-present row by its dedup_key and commit without
-	// re-attaching context (the original write already linked the epoch).
-	if dedupKey != nil {
-		if affected, aerr := res.RowsAffected(); aerr == nil && affected == 0 {
-			var existingId int64
-			if serr := tx.QueryRow(
-				`SELECT id FROM audit_events WHERE dedup_key = ?`, event.DedupKey,
-			).Scan(&existingId); serr != nil {
-				return 0, &pasterrors.StructuredError{
-					Category: pasterrors.CategoryStorage,
-					What: fmt.Sprintf(
-						"An audit event was deduplicated but its existing row couldn't be found (epoch %q, event type %q).",
-						event.EpochId, event.EventType,
-					),
-					Why: "The durable engine re-emitted an event whose deduplication key already exists, so the\n" +
-						"insert was skipped, but the lookup for the original row then failed.",
-					Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
-					Impact: "The replayed emission can't return the original row id, so the caller can't correlate it.",
-					Fix: "1. Confirm the partial unique index exists (added by the version 4 → 5 upgrade):\n" +
-						"     sqlite3 <path-to-pasture.db> '.indexes audit_events'\n" +
-						"2. Re-run the migration if it is missing:\n" +
-						"     pasture migrate",
-					Cause: serr,
-				}
-			}
-			if err := tx.Commit(); err != nil {
-				return 0, &pasterrors.StructuredError{
-					Category: pasterrors.CategoryStorage,
-					What: fmt.Sprintf(
-						"Couldn't finalize a deduplicated audit event (epoch %q, event type %q).",
-						event.EpochId, event.EventType,
-					),
-					Why:    "The database refused to commit the read-only transaction that resolved the existing row.",
-					Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
-					Impact: "The original row is intact; only this replayed call could not complete cleanly.",
-					Fix:    "Retry the operation once the database is healthy.",
-					Cause:  err,
-				}
-			}
-			return existingId, nil
+	writeErr := s.withAuditWrite(ctx, "RecordEvent", func(ctx context.Context, tx *sql.Tx) error {
+		// Resolve (or mint) the agent_id inside the transaction so the
+		// agent registration and the event row are atomic. roleMu is NOT
+		// held across this call — see resolveLegacyRoleAgentId for details.
+		agentId, err := s.resolveLegacyRoleAgentId(ctx, tx, event.Role)
+		if err != nil {
+			return err
 		}
-	}
+		resolvedAgentId = agentId
 
-	// Recover the just-inserted row id from THIS INSERT statement's result.
-	// LastInsertId is per-statement on modernc.org/sqlite, so the returned
-	// value is always the rowid of the row this Exec wrote — independent of
-	// any concurrent INSERTs on the same connection. This is the property
-	// that makes RecordEventReturningId race-safe and allows it to replace
-	// the older SELECT MAX(id) workaround in trackerImpl + free_floating.
-	eventId, err := res.LastInsertId()
-	if err != nil {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"The audit event was written but we couldn't read back its row ID (epoch %q, event type %q).",
-				event.EpochId, event.EventType,
-			),
-			Why:   "The database refused to report the last inserted row ID.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
-			Impact: "The event itself was recorded, but anything that needs to attach extra context to it\n" +
-				"(linking it to a session, a workflow, or another event) can't proceed because that\n" +
-				"link requires the row ID.",
-			Fix: "1. SQLite normally always reports the last-inserted row ID, so this is unexpected.\n" +
-				"   Confirm the SQLite driver version is current:\n" +
-				"     pasture --version\n" +
-				"2. Retry the operation. If the error persists, please file a bug.",
-			Cause: err,
-		}
-	}
-	if eventId <= 0 {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"The audit event was written but came back with an invalid row ID (%d) for epoch %q, event type %q.",
-				eventId, event.EpochId, event.EventType,
-			),
-			Why: "Row IDs in the audit-events table count up from 1. A value of zero or below means\n" +
-				"the table's auto-numbering has been reset or the table is corrupted.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
-			Impact: "Anything that needs to link extra context to this event (sessions, workflow attachments,\n" +
-				"related events) can't proceed because the link requires a valid row ID.",
-			Fix: "1. Look at the most recent rows in the audit-events table to confirm the corruption:\n" +
-				"     sqlite3 <path-to-audit.db> 'SELECT id FROM audit_events ORDER BY id DESC LIMIT 5'\n" +
-				"2. If the IDs really are non-positive, restore from a backup and please file a bug.",
-		}
-	}
-
-	if event.EpochId != "" {
-		// INSERT OR IGNORE: a duplicate triple (event_id, 'EpochContext',
-		// epochId) is a no-op. Production never produces duplicates here
-		// because event_id is freshly minted; the OR IGNORE defends
-		// against future callers that may write multi-context events
-		// idempotently and still expect this method to succeed.
-		if _, err := tx.Exec(
-			`INSERT OR IGNORE INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
-			eventId, "EpochContext", event.EpochId,
-		); err != nil {
-			return 0, &pasterrors.StructuredError{
+		// Post-v4 schema: audit_events.epoch_id is gone. Epoch attachment is
+		// expressed as a context_edges (event_id, 'EpochContext', epoch_id)
+		// row written inside the same transaction so a crash between INSERT
+		// and AttachContext cannot leave a row without its epoch correlation.
+		res, err := tx.ExecContext(ctx,
+			`INSERT INTO audit_events (phase, agent_id, event_type, payload, timestamp, dedup_key)
+			 VALUES (?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING`,
+			string(event.Phase),
+			agentId,
+			string(event.EventType),
+			string(payload),
+			event.Timestamp.UTC().UnixNano(),
+			dedupKey,
+		)
+		if err != nil {
+			return &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What: fmt.Sprintf(
-					"Couldn't link the audit event to its epoch (epoch %q, event type %q, event row %d).",
-					event.EpochId, event.EventType, eventId,
+					"Couldn't write this audit event into the database (epoch %q, event type %q).",
+					event.EpochId, event.EventType,
 				),
-				Why:   "The database refused the insert that links the event to its epoch.",
+				Why:   "The database refused the write into the audit-events table.",
 				Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
-				Impact: "The event itself was written, but it can't be found by queries that filter by epoch.\n" +
-					"The audit trail for this epoch will be missing this entry.",
-				Fix: "1. Confirm the event-to-context table exists (it's created by the version 2 → 3\n" +
-					"   audit-database upgrade):\n" +
-					"     sqlite3 <path-to-audit.db> '.schema context_edges'\n" +
-					"2. If it's missing, the database is older than version 3 — upgrade it:\n" +
-					"     pasture migrate",
+				Impact: "The event was not recorded. The audit trail for this epoch will be missing this entry\n" +
+					"until the underlying database problem is fixed and the caller retries.",
+				Fix: "1. Confirm the audit database file is accessible:\n" +
+					"     ls -l <path-to-audit.db>\n" +
+					"2. Check the file isn't corrupted:\n" +
+					"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
+					"3. Retry the operation once the file is healthy.",
 				Cause: err,
 			}
 		}
+
+		// Exactly-once dedup path: when the engine supplied a dedup_key and
+		// the ON CONFLICT clause skipped the insert (a replay), no new row
+		// was written. Recover the canonical id from the existing row by its
+		// dedup_key. Do NOT insert another context_edges row — the original
+		// write already linked the epoch.
+		if dedupKey != nil {
+			affected, aerr := res.RowsAffected()
+			if aerr != nil {
+				return &pasterrors.StructuredError{
+					Category: pasterrors.CategoryStorage,
+					What: fmt.Sprintf(
+						"Couldn't determine whether the audit event was a dedup replay (epoch %q, event type %q).",
+						event.EpochId, event.EventType,
+					),
+					Why:    "The database driver returned an error when querying the affected row count.",
+					Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+					Impact: "The write cannot proceed safely without knowing whether to skip context attachment.",
+					Fix:    "Retry the operation. If the error persists, check the database integrity.",
+					Cause:  aerr,
+				}
+			}
+			if affected == 0 {
+				// Replay: recover the existing row id.
+				var existingId int64
+				if serr := tx.QueryRowContext(ctx,
+					`SELECT id FROM audit_events WHERE dedup_key = ?`, event.DedupKey,
+				).Scan(&existingId); serr != nil {
+					return &pasterrors.StructuredError{
+						Category: pasterrors.CategoryStorage,
+						What: fmt.Sprintf(
+							"An audit event was deduplicated but its existing row couldn't be found (epoch %q, event type %q).",
+							event.EpochId, event.EventType,
+						),
+						Why: "The durable engine re-emitted an event whose deduplication key already exists, so the\n" +
+							"insert was skipped, but the lookup for the original row then failed.",
+						Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+						Impact: "The replayed emission can't return the original row id, so the caller can't correlate it.",
+						Fix: "1. Confirm the partial unique index exists (added by the version 4 → 5 upgrade):\n" +
+							"     sqlite3 <path-to-pasture.db> '.indexes audit_events'\n" +
+							"2. Re-run the migration if it is missing:\n" +
+							"     pasture migrate",
+						Cause: serr,
+					}
+				}
+				resolvedEventId = existingId
+				return nil
+			}
+		}
+
+		// Recover the just-inserted row id from THIS INSERT statement's
+		// result. LastInsertId is per-statement on modernc.org/sqlite, so the
+		// returned value is always the rowid of the row this Exec wrote —
+		// independent of any concurrent INSERTs on the same connection.
+		eventId, err := res.LastInsertId()
+		if err != nil {
+			return &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What: fmt.Sprintf(
+					"Couldn't recover the uncommitted audit event's row ID (epoch %q, event type %q).",
+					event.EpochId, event.EventType,
+				),
+				Why:    "The database refused to report the last inserted row ID.",
+				Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+				Impact: "This transaction cannot complete; the event and any new agent registration will be rolled back.",
+				Fix: "1. SQLite normally always reports the last-inserted row ID, so this is unexpected.\n" +
+					"   Confirm the SQLite driver version is current:\n" +
+					"     pasture --version\n" +
+					"2. Retry the operation. If the error persists, please file a bug.",
+				Cause: err,
+			}
+		}
+		if eventId <= 0 {
+			return &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What: fmt.Sprintf(
+					"The uncommitted audit event has an invalid row ID (%d) for epoch %q, event type %q.",
+					eventId, event.EpochId, event.EventType,
+				),
+				Why: "Row IDs in the audit-events table count up from 1. A value of zero or below means\n" +
+					"the table's auto-numbering has been reset or the table is corrupted.",
+				Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+				Impact: "The transaction cannot safely attach context or commit; its event and any new agent registration will be rolled back.",
+				Fix: "1. Look at the most recent rows in the audit-events table to confirm the corruption:\n" +
+					"     sqlite3 <path-to-audit.db> 'SELECT id FROM audit_events ORDER BY id DESC LIMIT 5'\n" +
+					"2. If the IDs really are non-positive, restore from a backup and please file a bug.",
+			}
+		}
+		resolvedEventId = eventId
+
+		if event.EpochId != "" {
+			// INSERT OR IGNORE: a duplicate triple (event_id, 'EpochContext',
+			// epochId) is a no-op. Production never produces duplicates here
+			// because event_id is freshly minted; the OR IGNORE defends
+			// against future callers that may write multi-context events
+			// idempotently and still expect this method to succeed.
+			if _, err := tx.ExecContext(ctx,
+				`INSERT OR IGNORE INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
+				eventId, "EpochContext", event.EpochId,
+			); err != nil {
+				return &pasterrors.StructuredError{
+					Category: pasterrors.CategoryStorage,
+					What: fmt.Sprintf(
+						"Couldn't link the audit event to its epoch (epoch %q, event type %q, event row %d).",
+						event.EpochId, event.EventType, eventId,
+					),
+					Why:    "The database refused the insert that links the event to its epoch.",
+					Where:  "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
+					Impact: "The event, its epoch link and any new agent registration will be rolled back together; no partial event will be published.",
+					Fix: "1. Confirm the event-to-context table exists (it's created by the version 2 → 3\n" +
+						"   audit-database upgrade):\n" +
+						"     sqlite3 <path-to-audit.db> '.schema context_edges'\n" +
+						"2. If it's missing, the database is older than version 3 — upgrade it:\n" +
+						"     pasture migrate",
+					Cause: err,
+				}
+			}
+		}
+		return nil
+	})
+
+	if writeErr != nil {
+		return 0, writeErr
 	}
 
-	if err := tx.Commit(); err != nil {
-		return 0, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What: fmt.Sprintf(
-				"Couldn't save this audit event (epoch %q, event type %q).",
-				event.EpochId, event.EventType,
-			),
-			Why:   "The database refused to commit the write transaction.",
-			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.RecordEventReturningId).",
-			Impact: "The event was not recorded (everything was rolled back). The audit trail for this\n" +
-				"epoch will be missing this entry until the caller retries.",
-			Fix: "1. Confirm the audit database file is writable and not corrupted:\n" +
-				"     ls -l <path-to-audit.db>\n" +
-				"     sqlite3 <path-to-audit.db> 'PRAGMA integrity_check'\n" +
-				"2. Retry the operation once the file is healthy.",
-			Cause: err,
-		}
+	// The commit succeeded. Publish the role→agent_id mapping to the cache
+	// so subsequent writes for the same role skip the DB lookup. We do this
+	// AFTER the commit (never inside the callback) so a rolled-back write
+	// never populates the cache with a stale or partial registration.
+	if resolvedAgentId != "" {
+		s.roleMu.Lock()
+		s.roleToAgentId[event.Role] = resolvedAgentId
+		s.roleMu.Unlock()
 	}
-	return eventId, nil
+	return resolvedEventId, nil
 }
 
 // resolveLegacyRoleAgentId returns the agent_id for a given role, minting a
-// SoftwareAgent on first use. The mapping is cached in s.roleToAgentId so
-// subsequent RecordEvent calls for the same role pay no DB lookup cost.
+// SoftwareAgent on first use. All DB operations run inside the provided
+// transaction (tx) so agent registration and the parent event INSERT are
+// fully atomic — a rollback of the parent transaction also rolls back any
+// newly-minted agent rows.
 //
-// Find-or-create semantics match the v3 migration's
-// findOrCreateLegacyRoleAgent (migrate_v3_backfill.go): we reuse any
-// existing pasture/legacy-role/<role> agent (e.g. one minted by the
-// migration when promoting v1 data) so the cache is consistent with the
-// on-disk state across restarts.
+// Cache lookup happens under the transaction's write lock to
+// amortise the DB cost on repeated writes. When a cache hit is found, no
+// DB work is done at all. When there is no cache hit, the function queries
+// and (if necessary) inserts INSIDE tx without holding roleMu — the tx
+// serialises the DB work, and the caller publishes to the cache only after
+// the parent withAuditWrite commit succeeds.
 //
-// The cache + DB lookup sequence is split: we hold s.roleMu only across
-// map operations, dropping it for the DB query so concurrent RecordEvent
-// calls for OTHER roles don't queue behind a slow lookup. The first writer
-// for a given role pays the DB cost; subsequent writers race to populate
-// the cache and benefit from idempotent behaviour (find branch returns the
-// same id every time).
-func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error) {
+// The well-known direct-lookup path (pasture/automaton/ prefix) also runs
+// inside tx so it participates in the same atomicity contract. If the lookup
+// misses (agent not yet registered), it falls through to the legacy-role
+// find-or-create path.
+func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(ctx context.Context, tx *sql.Tx, role string) (string, error) {
+	// Fast path: cache hit avoids any DB work.
 	s.roleMu.Lock()
 	if cached, ok := s.roleToAgentId[role]; ok {
 		s.roleMu.Unlock()
@@ -622,38 +609,26 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error)
 	}
 	s.roleMu.Unlock()
 
-	// Well-known direct lookup (PROPOSAL-2 §7.7.2 + S8 wiring): if the role
-	// string already names a registered well-known automaton (prefix
-	// "pasture/automaton/..." per the canonical registry in
-	// internal/tasks/well_known_registry.go), skip the legacy-role prefix
-	// dance and bind directly to the existing agents_software row. S7
-	// registered the well-known agent at daemon startup; S8's
-	// Activities.RecordTransition / RecordAuditEvent set
-	// event.Role = <well-known-name> so this branch fires for every workflow
-	// event from S8 onward, without producing the SHADOW
-	// "pasture/legacy-role/pasture/automaton/.." rows that would otherwise
-	// pollute agents_software and break the §11 Scenario 8a–8e attribution
-	// JOINs (which assert agents_software.name == "pasture/automaton/..").
+	// Well-known direct lookup: if the role names a registered well-known
+	// automaton (prefix "pasture/automaton/..."), bind directly to the
+	// existing agents_software row without the legacy-role prefix dance.
+	// This prevents shadow "pasture/legacy-role/pasture/automaton/.." rows.
 	//
-	// If the direct lookup misses (the role looks well-known but no row
-	// exists, e.g. tests with an unpopulated cache) we fall through to the
-	// legacy-role find-or-create path so the call still succeeds.
+	// If the lookup misses (not yet registered, e.g. test context without
+	// daemon startup), fall through to legacy-role find-or-create.
 	if strings.HasPrefix(role, "pasture/automaton/") {
 		var directExisting string
-		derr := s.db.QueryRow(
+		derr := tx.QueryRowContext(ctx,
 			`SELECT a.id FROM agents a JOIN agents_software s ON a.id = s.agent_id
 			 WHERE a.kind_id = 2 AND s.name = ? LIMIT 1`,
 			role,
 		).Scan(&directExisting)
 		switch {
 		case derr == nil:
-			s.roleMu.Lock()
-			s.roleToAgentId[role] = directExisting
-			s.roleMu.Unlock()
+			// Found — return without publishing to cache; the caller
+			// publishes after a successful commit.
 			return directExisting, nil
 		case derr != sql.ErrNoRows:
-			// Real DB error — surface it; do not silently fall through to
-			// the legacy-role path because that would mask storage problems.
 			return "", &pasterrors.StructuredError{
 				Category: pasterrors.CategoryStorage,
 				What: fmt.Sprintf(
@@ -677,28 +652,20 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error)
 				Cause: derr,
 			}
 		}
-		// derr == sql.ErrNoRows: well-known name not in agents_software
-		// (e.g. tests that build Activities with WellKnownAgents but never
-		// run S7's RegisterWellKnownAgents against the same DB). Fall
-		// through to the legacy-role find-or-create — the resulting SHADOW
-		// agent is tagged by the prefix and is harmless in test contexts.
+		// derr == sql.ErrNoRows: fall through to legacy-role find-or-create.
 	}
 
 	name := legacyRoleAgentNamePrefix + role
 
-	// Find branch — common case after the first write for this role across
-	// the lifetime of the process or after a v3 migration.
+	// Find branch — common case after the first write for this role.
 	var existing string
-	err := s.db.QueryRow(
+	err := tx.QueryRowContext(ctx,
 		`SELECT a.id FROM agents a JOIN agents_software s ON a.id = s.agent_id
 		 WHERE a.kind_id = 2 AND s.name = ? LIMIT 1`,
 		name,
 	).Scan(&existing)
 	switch {
 	case err == nil:
-		s.roleMu.Lock()
-		s.roleToAgentId[role] = existing
-		s.roleMu.Unlock()
 		return existing, nil
 	case err != sql.ErrNoRows:
 		return "", &pasterrors.StructuredError{
@@ -751,7 +718,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error)
 	}
 	agentId := legacyRoleAgentNamespace + "--" + newUUID.String()
 
-	if _, err := s.db.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO agents (id, kind_id) VALUES (?, 2)`,
 		agentId,
 	); err != nil {
@@ -770,14 +737,13 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error)
 				"2. Confirm the agent registry table still exists and is intact:\n" +
 				"     sqlite3 <path-to-audit.db> '.schema agents'\n" +
 				"     pasture migrate\n" +
-				"3. If the underlying error mentions a uniqueness conflict, another writer beat us to\n" +
-				"   creating this agent. Retry — the second attempt will find the existing agent and\n" +
-				"   succeed.",
+				"3. Check uniqueness and foreign-key failures before retrying; they are not transient\n" +
+				"   lock contention and must be repaired first.",
 			Cause: err,
 		}
 	}
 
-	if _, err := s.db.Exec(
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO agents_software (agent_id, name, version, source) VALUES (?, ?, ?, ?)`,
 		agentId, name, legacyRoleAgentVersion, legacyRoleAgentSource,
 	); err != nil {
@@ -789,22 +755,19 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(role string) (string, error)
 			),
 			Why:   "The database refused the insert into the agent details table.",
 			Where: "Recording an audit event (internal/audit/sqlite.go in audit.SqliteAuditTrail.resolveLegacyRoleAgentId).",
-			Impact: "The agent registration is half-complete: the agent exists in the registry but has no\n" +
-				"name, so subsequent lookups by role won't find it. Recording events for this role\n" +
-				"will keep failing.",
+			Impact: "The agent registration is within the transaction: if the parent write rolls back, the\n" +
+				"agent row rolls back with it. No orphan will remain.",
 			Fix: "1. Confirm the audit database file is writable:\n" +
 				"     ls -l <path-to-audit.db>\n" +
 				"2. Confirm the agent details table still exists and is intact:\n" +
 				"     sqlite3 <path-to-audit.db> '.schema agents_software'\n" +
-				"3. The orphan agent row is harmless, but if you want to clean it up:\n" +
-				"     sqlite3 <path-to-audit.db> 'DELETE FROM agents WHERE id NOT IN (SELECT agent_id FROM agents_software)'",
+				"3. Retry the operation once the file is healthy.",
 			Cause: err,
 		}
 	}
 
-	s.roleMu.Lock()
-	s.roleToAgentId[role] = agentId
-	s.roleMu.Unlock()
+	// Return the newly-minted agent_id. The caller (RecordEventReturningId)
+	// will publish it to the cache only after withAuditWrite commits.
 	return agentId, nil
 }
 
@@ -836,80 +799,63 @@ func stripLegacyRolePrefix(name string) string {
 }
 
 // RecordSessionEntries persists a batch of SessionEntry records to the SQLite
-// database in a single transaction. Nil or empty slices are accepted as no-ops.
+// database in a single atomic transaction via withAuditWrite. Nil or empty
+// slices are accepted as no-ops.
 //
-// All entries are written atomically; if any INSERT fails the entire batch is
-// rolled back so callers can retry safely.
-func (s *SqliteAuditTrail) RecordSessionEntries(_ context.Context, entries []protocol.SessionEntry) error {
+// All entries are prepared once with tx.PrepareContext and executed with
+// stmt.ExecContext so the caller's context governs each row write. If any
+// INSERT fails the entire batch is rolled back (withAuditWrite owns the
+// transaction boundary; the callback must not commit or rollback).
+func (s *SqliteAuditTrail) RecordSessionEntries(ctx context.Context, entries []protocol.SessionEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
 
-	tx, err := s.db.Begin()
-	if err != nil {
-		return fmt.Errorf(
-			"audit.SqliteAuditTrail.RecordSessionEntries: failed to begin transaction: %w — "+
-				"check that the database file is still accessible and not locked",
-			err,
-		)
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	stmt, err := tx.Prepare(`
-		INSERT INTO session_entries (
-			session_id, entry_index, provider, entry_type, role,
-			timestamp_ms, content_preview, tokens_in, tokens_out,
-			has_tool_use, tool_kind, tool_names_csv,
-			has_thinking, is_error, stop_reason, raw_byte_length,
-			tool_call_id, entry_id, parent_entry_id, depth,
-			parent_index, tool_input, tool_output, extra
-		) VALUES (
-			?, ?, ?, ?, ?,
-			?, ?, ?, ?,
-			?, ?, ?,
-			?, ?, ?, ?,
-			?, ?, ?, ?,
-			?, ?, ?, ?
-		)
-	`)
-	if err != nil {
-		return fmt.Errorf(
-			"audit.SqliteAuditTrail.RecordSessionEntries: failed to prepare statement: %w",
-			err,
-		)
-	}
-	defer stmt.Close()
-
-	for i, e := range entries {
-		_, err = stmt.Exec(
-			e.SessionId, e.EntryIndex, e.Provider, e.EntryType, e.Role,
-			e.TimestampMs, e.ContentPreview, e.TokensIn, e.TokensOut,
-			boolToInt(e.HasToolUse), e.ToolKind, e.ToolNamesCsv,
-			boolToInt(e.HasThinking), boolToInt(e.IsError), e.StopReason, e.RawByteLength,
-			e.ToolCallId, e.EntryId, e.ParentEntryId, e.Depth,
-			e.ParentIndex, e.ToolInput, e.ToolOutput, e.Extra,
-		)
+	return s.withAuditWrite(ctx, "RecordSessionEntries", func(ctx context.Context, tx *sql.Tx) error {
+		stmt, err := tx.PrepareContext(ctx, `
+			INSERT INTO session_entries (
+				session_id, entry_index, provider, entry_type, role,
+				timestamp_ms, content_preview, tokens_in, tokens_out,
+				has_tool_use, tool_kind, tool_names_csv,
+				has_thinking, is_error, stop_reason, raw_byte_length,
+				tool_call_id, entry_id, parent_entry_id, depth,
+				parent_index, tool_input, tool_output, extra
+			) VALUES (
+				?, ?, ?, ?, ?,
+				?, ?, ?, ?,
+				?, ?, ?,
+				?, ?, ?, ?,
+				?, ?, ?, ?,
+				?, ?, ?, ?
+			)
+		`)
 		if err != nil {
 			return fmt.Errorf(
-				"audit.SqliteAuditTrail.RecordSessionEntries: INSERT failed for entry[%d] "+
-					"(sessionId=%q, entryIndex=%d): %w — "+
-					"check that the database file is still accessible",
-				i, e.SessionId, e.EntryIndex, err,
+				"audit.SqliteAuditTrail.RecordSessionEntries: failed to prepare statement: %w",
+				err,
 			)
 		}
-	}
+		defer stmt.Close()
 
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf(
-			"audit.SqliteAuditTrail.RecordSessionEntries: commit failed: %w",
-			err,
-		)
-	}
-	return nil
+		for i, e := range entries {
+			if _, err := stmt.ExecContext(ctx,
+				e.SessionId, e.EntryIndex, e.Provider, e.EntryType, e.Role,
+				e.TimestampMs, e.ContentPreview, e.TokensIn, e.TokensOut,
+				boolToInt(e.HasToolUse), e.ToolKind, e.ToolNamesCsv,
+				boolToInt(e.HasThinking), boolToInt(e.IsError), e.StopReason, e.RawByteLength,
+				e.ToolCallId, e.EntryId, e.ParentEntryId, e.Depth,
+				e.ParentIndex, e.ToolInput, e.ToolOutput, e.Extra,
+			); err != nil {
+				return fmt.Errorf(
+					"audit.SqliteAuditTrail.RecordSessionEntries: INSERT failed for entry[%d] "+
+						"(sessionId=%q, entryIndex=%d): %w — "+
+						"check that the database file is still accessible",
+					i, e.SessionId, e.EntryIndex, err,
+				)
+			}
+		}
+		return nil
+	})
 }
 
 // boolToInt converts a bool to its SQLite integer representation (0 or 1).
@@ -924,8 +870,11 @@ func boolToInt(b bool) int {
 // ascending entry_index order (matching insertion order for well-formed data).
 //
 // Returns an empty (non-nil) slice when no entries exist for sessionId.
-func (s *SqliteAuditTrail) QuerySessionEntries(_ context.Context, sessionId string) ([]protocol.SessionEntry, error) {
-	rows, err := s.db.Query(`
+func (s *SqliteAuditTrail) QuerySessionEntries(ctx context.Context, sessionId string) ([]protocol.SessionEntry, error) {
+	if ctx == nil {
+		return nil, contextValidationError("QuerySessionEntries")
+	}
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT
 			session_id, entry_index, provider, entry_type, role,
 			timestamp_ms, content_preview, tokens_in, tokens_out,

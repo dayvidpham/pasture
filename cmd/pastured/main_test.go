@@ -1012,24 +1012,17 @@ func TestAbandonedStartupEndsWithoutFault(t *testing.T) {
 // and that party is this function. See
 // https://github.com/dayvidpham/pasture/issues/104.
 //
-// The proof is behaviour, and it does not depend on winning a race. Another
-// writer holds the file lock for the WHOLE call, so the write is certain to
-// fail; what the test reads is HOW LONG it waited before giving up. A trail
-// opened with the tight profile gives up after tens of milliseconds. A trail
-// that silently fell back to the production profile would wait half a second,
-// which is far outside the ceiling below.
-//
-// What this test does NOT do: it does not re-prove that the budget controls the
-// wait. That is proven once, in both directions, in
-// internal/engine/concurrency_spike_test.go.
+// Another writer holds the lock for the whole call. The write's caller deadline
+// bounds retries, not the profile's per-attempt busy tier. A structural supplier
+// pin separately protects profile propagation: a deadline clamp would also
+// cancel quickly on an incorrectly configured standing tier.
 func TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget(t *testing.T) {
 	t.Parallel()
 
 	tight := timeouts.DeadlineTestProfile()
 	production := timeouts.ProductionProfile()
-	// Half the production budget: far above the tight budget the daemon was
-	// given, and far below the budget it would use if the profile were dropped.
-	ceiling := production.SQLiteBusy() / 2
+	const schedulingTolerance = 75 * time.Millisecond
+	ceiling := tight.SQLiteBusy() + schedulingTolerance
 
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
 	cfg := config.PasturedConfig{AuditTrail: types.BackendSqlite, AuditDBPath: dbPath}
@@ -1058,7 +1051,9 @@ func TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget(t *testing.T)
 	}
 
 	start := time.Now()
-	writeErr := trail.RecordEvent(t.Context(), protocol.AuditEvent{
+	ctx, cancel := context.WithTimeout(t.Context(), tight.SQLiteBusy())
+	defer cancel()
+	writeErr := trail.RecordEvent(ctx, protocol.AuditEvent{
 		EpochId:   "daemon-lock-budget",
 		Phase:     protocol.PhaseElicit,
 		Role:      "supervisor",
@@ -1075,11 +1070,64 @@ func TestInitAuditTrail_GivesTheDaemonTrailTheConfiguredLockBudget(t *testing.T)
 		t.Errorf("close the blocking writer: %v", cerr)
 	}
 
-	if writeErr == nil || !strings.Contains(writeErr.Error(), "database is locked") {
-		t.Fatalf("the forensic write returned %v while another writer held the lock for the whole call; want a database-is-locked failure", writeErr)
+	if !errors.Is(writeErr, context.DeadlineExceeded) {
+		t.Fatalf("the forensic write returned %v while another writer held the lock for the whole call; want errors.Is DeadlineExceeded", writeErr)
 	}
 	if waited > ceiling {
-		t.Errorf("the daemon trail waited %s for the file lock, above the ceiling of %s; it was opened with a budget of %s, so a wait this long means the daemon's profile did not reach the trail and it fell back to the production budget of %s",
-			waited, ceiling, tight.SQLiteBusy(), production.SQLiteBusy())
+		t.Errorf("the daemon trail waited %s, above caller budget %s plus scheduling allowance %s (total %s)", waited, tight.SQLiteBusy(), schedulingTolerance, ceiling)
+	}
+}
+
+func TestInitAuditTrailPinsConfiguredProfileSupplier(t *testing.T) {
+	t.Parallel()
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "initAuditTrail" {
+			continue
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			owner, ok := selector.X.(*ast.Ident)
+			if !ok || owner.Name != "tasks" || !strings.HasPrefix(selector.Sel.Name, "OpenTaskTracker") {
+				return true
+			}
+			count++
+			found := false
+			for _, arg := range call.Args {
+				option, ok := arg.(*ast.CallExpr)
+				if !ok || len(option.Args) != 1 {
+					continue
+				}
+				fun, ok := option.Fun.(*ast.SelectorExpr)
+				if !ok || fun.Sel.Name != "WithTimeoutProfile" {
+					continue
+				}
+				pkg, ok := fun.X.(*ast.Ident)
+				if !ok || pkg.Name != "tasks" {
+					continue
+				}
+				value, ok := option.Args[0].(*ast.Ident)
+				found = ok && value.Name == "profile"
+			}
+			if !found {
+				t.Error("initAuditTrail drops profile from the real tracker constructor")
+			}
+			return true
+		})
+	}
+	if count != 1 {
+		t.Fatalf("tracker suppliers %d, want the single daemon audit constructor", count)
 	}
 }
