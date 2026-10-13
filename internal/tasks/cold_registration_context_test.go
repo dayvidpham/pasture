@@ -18,11 +18,12 @@ type observedColdRegistration struct {
 	protocol.TaskTracker
 	entered chan struct{}
 	wantCtx context.Context
+	t       *testing.T
 }
 
 func (o observedColdRegistration) RegisterSoftwareAgentContext(ctx context.Context, ns, name, version, source string) (provenance.SoftwareAgent, error) {
 	if ctx != o.wantCtx {
-		panic("cold registration replaced the caller's context")
+		o.t.Error("cold registration replaced the caller's context")
 	}
 	close(o.entered)
 	return o.TaskTracker.RegisterSoftwareAgentContext(ctx, ns, name, version, source)
@@ -55,7 +56,7 @@ func TestColdRegistrationWaitingCallerCounterexample(t *testing.T) {
 	t.Cleanup(func() { cancel(); _, _ = holder.Exec("ROLLBACK"); joinWriteGateWorker(t, done) })
 	go func() {
 		defer close(done)
-		registeredID, registrationErr = ensureWellKnownAgent(ctx, db, observedColdRegistration{tracker, entered, ctx}, spec)
+		registeredID, registrationErr = ensureWellKnownAgent(ctx, db, observedColdRegistration{tracker, entered, ctx, t}, spec)
 	}()
 	select {
 	case <-entered: // completed lookup miss and actual registration call entry
@@ -66,6 +67,10 @@ func TestColdRegistrationWaitingCallerCounterexample(t *testing.T) {
 	}
 	cancel()
 	const schedulingTolerance = 30 * time.Millisecond
+	// This SQL cancellation bound is one full production busy tier plus a
+	// separate propagation allowance, not the much shorter gate-only bound.
+	// Retain the allowance demonstrated by the real-holder proofs rather than
+	// increasing it merely to match a sibling test's different wait shape.
 	select {
 	case <-done:
 	case <-time.After(timeouts.ProductionProfile().SQLiteBusy() + schedulingTolerance):

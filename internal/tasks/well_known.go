@@ -102,11 +102,11 @@ type auditDBHolder interface {
 //   - CategoryConfig (exit 4): tracker is nil, does not implement auditDBHolder,
 //     or its auditDBHandle() returns nil; cache is nil.
 //   - CategoryStorage (exit 5): SQLite read/write or transaction failure.
-//   - CategoryWorkflow (exit 3): Provenance RegisterSoftwareAgent failure.
+//   - CategoryWorkflow (exit 3): Provenance RegisterSoftwareAgentContext failure.
 //
-// The function takes ctx for cancellation. Durable construction supplies a
-// background context (the opener has no context parameter); explicit callers
-// can supply cancellation through ctx. Fresh opens mint every missing entry;
+// The function takes ctx for cancellation. Context-aware durable construction
+// supplies its caller's context; compatibility openers supply Background.
+// Fresh opens mint every missing entry;
 // warm opens recover IDs without sequential identity growth. Defensive
 // table DDL still runs, so a warm call is not a strictly read-only operation.
 func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, cache *WellKnownAgentCache) error {
@@ -254,7 +254,7 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 // Error categorisation:
 //
 //   - CategoryStorage: SELECT, BEGIN, INSERT, COMMIT failures.
-//   - CategoryWorkflow: Provenance RegisterSoftwareAgent failures (treated as
+//   - CategoryWorkflow: Provenance RegisterSoftwareAgentContext failures (treated as
 //     workflow because Provenance's surface is part of pasture's task-tracker
 //     workflow façade).
 func ensureWellKnownAgent(

@@ -11,8 +11,8 @@
 // SessionEntry / PhaseId), so a literal embedding would create an import
 // cycle. We resolve by re-declaring the 4 audit method signatures inline here;
 // any audit.Trail implementation satisfies them automatically because the
-// signatures match exactly. The net public surface is identical (28 + 4 + 7 +
-// Close + OpenTaskTracker) — only the Go-level composition differs.
+// signatures match exactly. Context-aware software registration is composed
+// as an additional one-method Provenance capability alongside the audit surface.
 //
 // See bd comment on aura-plugins-mbkfi for the full design rationale.
 
@@ -39,6 +39,10 @@ import (
 // The constructor OpenTaskTracker is the supported way to obtain an instance;
 // see its doc comment for error semantics. Callers MUST call Close on the
 // returned tracker.
+//
+// Implementers of this facade must also provide RegisterSoftwareAgentContext.
+// Existing callers of RegisterSoftwareAgent remain supported; custom external
+// facade implementations must add the context method when adopting this interface.
 //
 // All methods are safe for concurrent use; the SQLite file is opened in WAL
 // mode with a busy_timeout taken from the shared timeout profile. The

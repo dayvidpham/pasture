@@ -407,7 +407,7 @@ func (t *trackerImpl) RegisterSoftwareAgentContext(ctx context.Context, namespac
 			Why:      "The configured task backend lacks context-aware software registration.",
 			Where:    "Registering a software agent (internal/tasks/tracker.go in RegisterSoftwareAgentContext).",
 			Impact:   "No registration was delegated; cancellation cannot safely be honored by this backend.",
-			Fix:      "Use a Provenance backend implementing SoftwareAgentRegistrarContext; built-in backends in v0.5.0 or later support it.",
+			Fix:      "Use a Provenance release and backend providing SoftwareAgentRegistrarContext; built-in backends support this capability.",
 		}
 	}
 	return registrar.RegisterSoftwareAgentContext(ctx, namespace, name, version, source)
