@@ -22,11 +22,21 @@ type OperationalReport struct {
 	TreeHash   string
 }
 
-// OperationalOutputRoots is the complete independent sweep boundary. Unlike
-// the native Markdown scanner it includes dot trees and all embedded assets.
+// OperationalSourceRoots owns active instructions as well as harness inputs.
+// CLAUDE.md and GEMINI.md are aliases of the canonical AGENTS.md, not separate
+// owners. CHANGELOG.md is release history. Under docs, only the named design
+// and evidence archives below are historical; new documentation is active.
+func OperationalSourceRoots() []string {
+	return []string{"skills", "agents", "hooks", "AGENTS.md", "README.md",
+		"CONTRIBUTING.md", "ROADMAP.md", "TESTING.md", "docs"}
+}
+
+// OperationalOutputRoots is the complete independent sweep boundary, sharing
+// active-document discovery with publication validation and adding dot trees
+// and all embedded assets. CheckOperationalTree deduplicates overlapping roots.
 func OperationalOutputRoots() []string {
-	return []string{"skills", "agents", "hooks", ".opencode", ".agents", ".codex",
-		"internal/target/claudecode/assets", "internal/target/opencode/assets", "internal/target/codex/assets"}
+	return append(OperationalSourceRoots(), ".opencode", ".agents", ".codex",
+		"internal/target/claudecode/assets", "internal/target/opencode/assets", "internal/target/codex/assets")
 }
 
 // OperationalOwner maps only known byte-verbatim projections back to source.
@@ -58,12 +68,19 @@ func CheckOperationalTree(root string, roots []string, step string) (Operational
 			if entry.Type()&os.ModeSymlink != 0 {
 				return fmt.Errorf("symlink %q can conceal operational content", path)
 			}
-			if entry.IsDir() {
-				return nil
-			}
+			// Retained architecture decisions, proposals and audit transcripts
+			// describe prior designs; they are not current operational guidance.
 			rel, err := filepath.Rel(root, path)
 			if err != nil {
 				return err
+			}
+			for _, archive := range []string{"docs/adr", "docs/proposals", "docs/audits"} {
+				if filepath.ToSlash(rel) == archive && entry.IsDir() {
+					return filepath.SkipDir
+				}
+			}
+			if entry.IsDir() {
+				return nil
 			}
 			files[filepath.ToSlash(rel)] = true
 			return nil

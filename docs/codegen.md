@@ -194,6 +194,12 @@ committed outputs are the contract.
 `make check-operational-tracker` performs the independent, read-only sweep of
 all harness trees (`skills/`, `agents/`, `hooks/`, `.opencode/`, `.agents/`,
 `.codex/`) and embedded target assets, including the decoded Codex snapshot.
+The same discovery authority also checks active root instructions (`AGENTS.md`,
+`README.md`, `CONTRIBUTING.md`, `ROADMAP.md`, `TESTING.md`) and all active `docs/`
+files before publication and during the independent sweep. New nested docs join
+automatically. `CLAUDE.md` and `GEMINI.md` are aliases of canonical `AGENTS.md`;
+release history (`CHANGELOG.md`) and retained design/evidence archives
+(`docs/adr/`, `docs/proposals/`, `docs/audits/`) are not operational owners.
 It reports the traversed file count, exact content/path tree digest, and counted
 historical quotations. New files join the scope without a manifest edit.
 

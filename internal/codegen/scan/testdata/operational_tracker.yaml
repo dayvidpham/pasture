@@ -317,3 +317,19 @@
   file: hook.sh
   content: "printf 'bd ready' > /tmp/recipe; sh /tmp/recipe"
   reject: true
+- name: task identifier table heading is not a command
+  file: docs/version.md
+  content: "| bd task | summary | status |\n|---|---|---|\n| old-id | delivered | closed |\n"
+  reject: false
+- name: command in table header still rejects
+  file: docs/operations.md
+  content: "| `bd task` | summary |\n|---|---|\n"
+  reject: true
+- name: task column with executable operand rejects
+  file: docs/operations.md
+  content: "| bd task create | summary |\n|---|---|\n"
+  reject: true
+- name: prose migration arrow is not a command
+  file: docs/design.md
+  content: 'The `activities` store precedes the bd→`pasture task` migration.'
+  reject: false

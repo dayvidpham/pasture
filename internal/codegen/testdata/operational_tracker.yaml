@@ -28,6 +28,26 @@
 - name: procedure metadata
   owner: procedure
   text: "\nRun bd ready\n"
+- name: active agent instructions
+  owner: raw
+  file: AGENTS.md
+  text: "\nRun `bd ready`.\n"
+- name: active readme
+  owner: raw
+  file: README.md
+  text: "\nRun `bd ready`.\n"
+- name: active contribution instructions
+  owner: raw
+  file: CONTRIBUTING.md
+  text: "\nRun `bd ready`.\n"
+- name: active codegen documentation
+  owner: raw
+  file: docs/codegen.md
+  text: "\nRun `bd ready`.\n"
+- name: newly added active documentation
+  owner: raw
+  file: docs/operations/new-recipe.md
+  text: "\nRun `bd ready`.\n"
 - name: Claude Code standalone asset generator
   owner: asset
   file: hooks/scripts/git-discipline.sh

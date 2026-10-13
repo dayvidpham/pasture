@@ -46,7 +46,7 @@ func RequireOperationalSource(root string) error {
 	if err := scan.ValidateOperationalDocuments(docs, nil, "canonical registry validation"); err != nil {
 		return err
 	}
-	_, err := scan.CheckOperationalTree(root, []string{"skills", "agents", "hooks"}, "canonical input validation")
+	_, err := scan.CheckOperationalTree(root, scan.OperationalSourceRoots(), "canonical input validation")
 	return err
 }
 

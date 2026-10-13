@@ -53,9 +53,20 @@ func TrackerCandidates(doc OperationalDocument) ([]TrackerCandidate, error) {
 		if markdown {
 			section, node = trackerMarkdownContext(doc.Content, start)
 		}
+		// An adjacent arrow in prose describes a migration between tools,
+		// rather than supplying a command token or an executable operand.
+		if markdown && node == "Paragraph" && strings.HasPrefix(string(doc.Content[stop:]), "→") {
+			continue
+		}
 		argument := trackerArgument.FindSubmatchIndex(doc.Content[stop:])
 		if argument != nil {
 			word := string(doc.Content[stop+argument[2] : stop+argument[3]])
+			// A plain table column named "bd task" labels historical task
+			// identifiers, not an executable recipe. Code spans, arguments and
+			// every other command spelling still pass through the strict gate.
+			if markdown && node == "Paragraph" && word == "task" && trackerTaskColumn(doc.Content, windowStart, windowStop) {
+				continue
+			}
 			// Bare mentions of a binary in prose are not command recipes. This
 			// narrow syntactic distinction is unavailable inside shell/config.
 			if filepath.Ext(doc.File) == ".md" && (node == "Paragraph" || node == "ListItem" || node == "Heading") && proseTrackerMention(prefix, word) {
@@ -91,6 +102,38 @@ func commandCue(prefix string) bool {
 		}
 	}
 	return false
+}
+
+func trackerTaskColumn(content []byte, start, stop int) bool {
+	line := strings.TrimSpace(string(content[start:stop]))
+	if !strings.HasPrefix(line, "|") || strings.ContainsAny(line, "`\\") {
+		return false
+	}
+	found := false
+	for _, cell := range strings.Split(line, "|") {
+		if strings.TrimSpace(cell) == "bd task" {
+			found = true
+		}
+	}
+	if !found || stop >= len(content) {
+		return false
+	}
+	next := strings.TrimSpace(strings.SplitN(string(content[stop:]), "\n", 2)[0])
+	// lineWindow stops before the newline; read the following line instead.
+	if next == "" {
+		next = strings.SplitN(string(content[stop+1:]), "\n", 2)[0]
+	}
+	for _, cell := range strings.Split(strings.TrimSpace(next), "|") {
+		cell = strings.TrimSpace(cell)
+		if cell == "" {
+			continue
+		}
+		cell = strings.Trim(cell, ":")
+		if len(cell) < 3 || strings.Trim(cell, "-") != "" {
+			return false
+		}
+	}
+	return strings.Contains(next, "---")
 }
 
 func proseTrackerMention(prefix, next string) bool {

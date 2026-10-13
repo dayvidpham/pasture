@@ -31,8 +31,17 @@ func TestOperationalMutationsWithholdAllGenerationWrites(t *testing.T) {
 		}
 		t.Run(fixture.Name, func(t *testing.T) {
 			root := t.TempDir()
-			for _, dir := range []string{"skills", "agents", "hooks"} {
-				require.NoError(t, os.CopyFS(filepath.Join(root, dir), os.DirFS(filepath.Join(realRoot, dir))))
+			for _, source := range scan.OperationalSourceRoots() {
+				path := filepath.Join(realRoot, source)
+				info, err := os.Stat(path)
+				require.NoError(t, err)
+				if info.IsDir() {
+					require.NoError(t, os.CopyFS(filepath.Join(root, source), os.DirFS(path)))
+				} else {
+					content, err := os.ReadFile(path)
+					require.NoError(t, err)
+					require.NoError(t, os.WriteFile(filepath.Join(root, source), content, 0o644))
+				}
 			}
 			undo := mutateTrackerSource(t, root, fixture)
 			defer undo()
@@ -50,6 +59,11 @@ func TestOperationalMutationsWithholdAllGenerationWrites(t *testing.T) {
 			after, err := trackerTreeBytes(root)
 			require.NoError(t, err)
 			require.Equal(t, before, after, "schema/harness files, new directories and inventory must remain untouched")
+			if fixture.Owner == "raw" {
+				_, err := scan.CheckOperationalTree(root, scan.OperationalOutputRoots(), "independent mutation sweep")
+				require.Error(t, err, "independent sweep must share canonical document discovery")
+				require.Contains(t, err.Error(), fixture.File)
+			}
 		})
 	}
 }
@@ -168,10 +182,7 @@ func TestOperationalTrackerShippedTree(t *testing.T) {
 	root, err := scan.ModuleRoot()
 	require.NoError(t, err)
 	require.NoError(t, RequireOperationalSource(root))
-	report, err := scan.CheckOperationalTree(root, []string{
-		"skills", "agents", "hooks", ".opencode", ".agents", ".codex",
-		"internal/target/claudecode/assets", "internal/target/opencode/assets", "internal/target/codex/assets",
-	}, "CI operational output sweep")
+	report, err := scan.CheckOperationalTree(root, scan.OperationalOutputRoots(), "CI operational output sweep")
 	require.NoError(t, err)
 	require.Greater(t, report.Files, 0)
 	t.Logf("operational output sweep: files=%d historical=%d executable=0 tree_sha256=%s", report.Files, report.Historical, report.TreeHash)
