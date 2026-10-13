@@ -5,9 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/definitions"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
@@ -129,11 +129,8 @@ type CommitReceipt struct {
 type gatedCommitSurface struct {
 	// expected is the write class this surface authorizes against (gate.Authorize
 	// runs FIRST, before any I/O) and matches the constructed write against. The
-	// definition surface passes write.class so an unconstructed write is refused
-	// EXACTLY as before (a zero class is an unenumerated expected class that
-	// gate.Authorize rejects with a typed *gate.Refusal); the lineage and
-	// disclosure surfaces pass their fixed class, so a constructed write of the
-	// wrong class is refused as not-constructed.
+	// Each public commit surface passes its fixed class. A constructor from a
+	// different class cannot enter the surface even with its own valid warrant.
 	expected gate.WriteClass
 	// requireOperations is true only for the disclosure surface, whose write
 	// carries no deterministic operation identity and must mint a fresh one from
@@ -171,6 +168,9 @@ func (s Service) commitGated(ctx context.Context, warrant gate.Warrant, write Ga
 	}
 	if !write.constructed || write.class != surface.expected {
 		return provenance.CommittedResult{}, "", invalidCommit(surface.notConstructed.what, surface.notConstructed.why, surface.notConstructed.fix)
+	}
+	if surface.expected == gate.WriteDefinitionActivation && !write.validDefinitionShape() {
+		return provenance.CommittedResult{}, "", invalidCommit("The definition activation shape is incomplete.", "The fixed activation surface requires one snapshot and one state evidence effect, with both ordered result slots and a versioned command.", "Use a definition activation constructor; do not route another write class through Commit.")
 	}
 	if s.Identity == nil || s.Clock == nil || s.Appender.Journal == nil || (surface.requireOperations && s.Operations == nil) {
 		return provenance.CommittedResult{}, "", invalidCommit(surface.incompleteWiring.what, surface.incompleteWiring.why, surface.incompleteWiring.fix)
@@ -235,11 +235,26 @@ func (s Service) commitGated(ctx context.Context, warrant gate.Warrant, write Ga
 	return result, operationID, nil
 }
 
+func (w GatedWrite) validDefinitionShape() bool {
+	if w.operationID == "" || len(w.commandDigest) != sha256.Size || len(w.effects) != 2 {
+		return false
+	}
+	snapshot, state := w.effects[0], w.effects[1]
+	if snapshot.Sort != provenance.EffectEvidence || state.Sort != provenance.EffectEvidence || snapshot.ResultSlot != definitionSlot || state.ResultSlot != definitionStateSlot {
+		return false
+	}
+	switch w.command {
+	case definitionCommand:
+		return snapshot.EvidenceKind == definitionKind && state.EvidenceKind == definitionStateKind
+	case envelopeDefinitionCommand:
+		return snapshot.EvidenceKind == definitions.EvidenceKind && state.EvidenceKind == envelopeStateKind
+	default:
+		return false
+	}
+}
+
 // definitionCommitSurface is the per-class specialization the definition-
-// activation write presents to commitGated. It authorizes against write.class
-// (preserving the pre-consolidation behavior where an unconstructed definition
-// write is refused with a typed *gate.Refusal for an unenumerated class) and
-// carries the definition surface's actionable refusal text verbatim.
+// activation write presents to commitGated with fixed-class authorization.
 func definitionCommitSurface(class gate.WriteClass) gatedCommitSurface {
 	return gatedCommitSurface{
 		expected: class,
@@ -272,8 +287,8 @@ func definitionCommitSurface(class gate.WriteClass) gatedCommitSurface {
 
 // Commit is the non-delivery commit surface of the normative write gate for the
 // definition-activation write class. It is a thin typed wrapper over the shared
-// commitGated pipeline: it authorizes the presented warrant against the write's
-// class (typed *gate.Refusal before any I/O), commits the deterministic
+// commitGated pipeline: it authorizes the presented warrant against the fixed
+// activation class (typed *gate.Refusal before any I/O), commits the deterministic
 // operation through the bounded context journal, and resolves the definition and
 // definition-state result slots. Because the operation identity and effects are
 // deterministic, a concurrent duplicate is admitted as CommittedExact/
@@ -281,23 +296,15 @@ func definitionCommitSurface(class gate.WriteClass) gatedCommitSurface {
 // genuine identity reuse with differing content surfaces as an
 // ErrOperationConflict.
 func (s Service) Commit(ctx context.Context, warrant gate.Warrant, write GatedWrite) (CommitReceipt, error) {
-	result, operationID, err := s.commitGated(ctx, warrant, write, definitionCommitSurface(write.class))
+	result, operationID, err := s.commitGated(ctx, warrant, write, definitionCommitSurface(gate.WriteDefinitionActivation))
 	if err != nil {
 		return CommitReceipt{}, err
 	}
-	receipt := CommitReceipt{Operation: operationID, ShortCircuited: result.ShortCircuited}
-	for _, slot := range result.ResultSlots {
-		switch slot.Slot {
-		case definitionSlot:
-			receipt.Definition = slot.ProducedJournalID
-		case definitionStateSlot:
-			receipt.DefinitionState = slot.ProducedJournalID
-		}
+	definition, state, err := definitionSlots(result)
+	if err != nil {
+		return CommitReceipt{}, err
 	}
-	if receipt.Definition == 0 {
-		return CommitReceipt{}, structured(pasterrors.CategoryStorage, "The gated lifecycle write committed without its definition identity.", "The journal result did not contain the mandatory definition result slot.", "Committing a gated lifecycle write (internal/lifecycle/receipt/write.go in receipt.Service.Commit).", "The caller cannot resolve the journaled definition.", "Use a compatible provenance journal and inspect the committed operation.", fmt.Errorf("missing result slot %q", definitionSlot))
-	}
-	return receipt, nil
+	return CommitReceipt{Operation: operationID, ShortCircuited: result.ShortCircuited, Definition: definition, DefinitionState: state}, nil
 }
 
 func invalidCommit(what, why, fix string) error {

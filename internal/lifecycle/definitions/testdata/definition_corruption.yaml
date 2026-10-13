@@ -1,0 +1,41 @@
+cases:
+  - {name: zero reference, change: zero-ref}
+  - {name: dangling reference, change: dangling-ref}
+  - {name: admitted wrong kind, change: wrong-ref-kind}
+  - {name: content mismatch, change: wrong-ref-content}
+  - name: snapshot payload damaged
+    change: snapshot
+    sql: "UPDATE journal_evidence SET payload='{}' WHERE journal_id=?"
+  - name: snapshot digest damaged
+    change: snapshot
+    sql: "UPDATE journal_evidence SET content_digest=x'00' WHERE journal_id=?"
+  - name: snapshot evidence wrong kind
+    change: snapshot
+    sql: "UPDATE journal_evidence SET evidence_kind='pasture.lifecycle.definition-state.v2' WHERE journal_id=?"
+  - name: valid JSON wrong body kind with matching digest
+    change: snapshot
+    sql: "UPDATE journal_evidence SET payload=json_set(payload,'$.kind',4) WHERE journal_id=?"
+    redigest: true
+  - name: state missing
+    change: state
+    sql: "DELETE FROM journal_evidence WHERE journal_id=?"
+  - name: state coordinate wrong with matching digest
+    change: state
+    sql: "UPDATE journal_evidence SET payload=json_set(payload,'$.version',99) WHERE journal_id=?"
+    redigest: true
+  - name: state definition slot wrong with matching digest
+    change: state
+    sql: "UPDATE journal_evidence SET payload=json_set(payload,'$.definition_slot','wrong') WHERE journal_id=?"
+    redigest: true
+  - name: state digest damaged
+    change: state
+    sql: "UPDATE journal_evidence SET content_digest=x'00' WHERE journal_id=?"
+  - name: activation state result missing
+    change: operation
+    sql: "DELETE FROM journal_operation_result_slots WHERE journal_id=? AND result_slot_id='definition-state'"
+  - name: definition result missing
+    change: operation
+    sql: "DELETE FROM journal_operation_result_slots WHERE journal_id=? AND result_slot_id='definition'"
+  - name: producing operation identity damaged
+    change: operation
+    sql: "UPDATE journal_operations SET operation_id='tampered-operation' WHERE journal_id=?"

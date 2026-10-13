@@ -1,0 +1,32 @@
+cases:
+  - name: member order
+    input: '{"b":2,"a":1}'
+    equivalent: '{ "a": 1, "b": 2 }'
+  - name: numeric forms
+    input: '{"n":1.0}'
+    equivalent: '{"n":1}'
+    distinct: true
+  - name: empty arrays and null
+    input: '{"items":[]}'
+    equivalent: '{"items":null}'
+  - name: unicode and html
+    input: '{"text":"λ<>&"}'
+    equivalent: '{"text":"\u03bb\u003c\u003e\u0026"}'
+  - name: duplicate members
+    input: '{"a":1,"a":2}'
+    invalid: true
+  - name: nested duplicate members
+    input: '{"nested":[{"a":1,"a":2}]}'
+    invalid: true
+  - name: trailing value
+    input: '{}{}'
+    invalid: true
+  - name: malformed input
+    input: '{'
+    invalid: true
+document_mutations:
+  - unknown
+  - version
+  - codec
+  - kind
+  - contract

@@ -1,9 +1,11 @@
 package model
 
 import (
+	"crypto/sha256"
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/provenance"
 )
 
@@ -24,6 +26,25 @@ type DefinitionID string
 type DefinitionCodec uint8
 
 const DefinitionCanonicalJSON DefinitionCodec = 1
+
+// IsEnvelopeDefinitionKind is the closed new-writer admission set. Metamodel
+// activation retains its separate legacy owner and operation recipe.
+func IsEnvelopeDefinitionKind(kind DefinitionKind) bool {
+	switch kind {
+	case DefinitionRuntimeContract, DefinitionLifecycleSchema, DefinitionInterpreter, DefinitionEpochImplementation, DefinitionRetentionPolicy:
+		return true
+	default:
+		return false
+	}
+}
+
+// NewDefinitionSnapshot owns defensive body construction after evidence resolution.
+func NewDefinitionSnapshot(ref DefinitionRef, id DefinitionID, version uint32, codec DefinitionCodec, body []byte) (DefinitionSnapshot, error) {
+	if ref.Definition <= 0 || (!IsEnvelopeDefinitionKind(ref.Kind) && ref.Kind != DefinitionMetamodel) || id == "" || version == 0 || codec != DefinitionCanonicalJSON || len(body) == 0 || ref.Content != ContentIdentity(sha256.Sum256(body)) {
+		return DefinitionSnapshot{}, definitionConstructionError("NewDefinitionSnapshot", "The resolved journal coordinate, owner metadata or content digest is invalid.")
+	}
+	return DefinitionSnapshot{Ref: ref, ID: id, Version: version, Codec: codec, body: append([]byte(nil), body...)}, nil
+}
 
 type DefinitionRef struct {
 	nonJournalValue
@@ -69,7 +90,23 @@ type DefinitionStateRecord struct {
 	Version           uint32
 	Status            DefinitionStatus
 	LatestState       DefinitionStateID
+	LatestFact        DefinitionStateFact
 	SnapshotJournalID provenance.JournalID
+}
+
+func NewDefinitionStateRecord(snapshot DefinitionSnapshot, fact DefinitionStateFact, watermark provenance.JournalID) (DefinitionStateRecord, error) {
+	if snapshot.Ref.Definition <= 0 || fact.Definition != snapshot.Ref.Definition || fact.StateID <= DefinitionStateID(fact.Definition) || provenance.JournalID(fact.StateID) > watermark || fact.Event != DefinitionActivated || fact.RecordedAt.IsZero() {
+		return DefinitionStateRecord{}, definitionConstructionError("NewDefinitionStateRecord", "The resolved activation coordinate, event, timestamp or snapshot watermark is invalid.")
+	}
+	return DefinitionStateRecord{Ref: snapshot.Ref, ID: snapshot.ID, Version: snapshot.Version, Status: DefinitionStatusActive, LatestState: fact.StateID, LatestFact: fact, SnapshotJournalID: watermark}, nil
+}
+
+func definitionConstructionError(owner, reason string) error {
+	return &pasterrors.StructuredError{Category: pasterrors.CategoryValidation,
+		What: "The resolved definition could not be constructed.", Why: reason,
+		Where:  "internal/lifecycle/model/definition.go in model." + owner + " during resolved model construction",
+		Impact: "No definition snapshot or state was returned; the journal was not changed.",
+		Fix:    "Resolve the matching snapshot/state through the definition owner; restore damaged evidence from a verified backup."}
 }
 
 type RuntimeContractDefinitionRef struct {
