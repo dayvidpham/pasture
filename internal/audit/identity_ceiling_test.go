@@ -3,7 +3,10 @@ package audit_test
 import (
 	"context"
 	"database/sql"
+	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 )
@@ -35,4 +38,44 @@ func openCutoverTargetStore(t *testing.T, dbPath string) *audit.SqliteAuditTrail
 		t.Fatalf("audit.NewSqliteAuditTrailWithOptions: %v", err)
 	}
 	return trail
+}
+
+// TestTheDeferredCeilingStopsAPopulatedStoreAtTheCutoverTarget pins the first
+// half of the ceiling deferral: a populated, unmarked store's catch-up stops at
+// the cutover target instead of being refused at the ceiling, because the
+// identity-format ceiling step is deferred out of the ordinary migrator. The
+// next test shows the same step applied directly IS refused, which is what makes
+// the deferral load-bearing rather than cosmetic.
+func TestTheDeferredCeilingStopsAPopulatedStoreAtTheCutoverTarget(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "deferred.db")
+	seedLegacyV1DB(t, dbPath)
+
+	trail, err := audit.NewSqliteAuditTrailWithOptions(dbPath, audit.WithDeferredCeiling(cutoverTarget))
+	require.NoError(t, err)
+	require.NoError(t, trail.Close())
+
+	db := openDB(t, dbPath)
+	defer db.Close()
+	var version int
+	require.NoError(t, db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version))
+	require.Equal(t, cutoverTarget, version, "the deferred catch-up must stop at the cutover target")
+}
+
+// TestTheCeilingStepRefusesAPopulatedUnmarkedStore pins the second half of the
+// ceiling deferral: applying the identity-format ceiling step without the slash
+// marker is refused on a populated store, so no path can raise the floor without
+// the marker.
+func TestTheCeilingStepRefusesAPopulatedUnmarkedStore(t *testing.T) {
+	t.Parallel()
+	dbPath := filepath.Join(t.TempDir(), "unmarked.db")
+	seedLegacyV1DB(t, dbPath)
+
+	db := openDB(t, dbPath)
+	defer db.Close()
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, cutoverTarget))
+
+	err := audit.MigrateContextToCeiling(context.Background(), db, audit.MaxKnownSchemaVersion)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot be raised to the identity-format schema ceiling")
 }

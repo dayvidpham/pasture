@@ -116,10 +116,18 @@ func blobExists(t *testing.T, db *sql.DB, ref digest.Digest) bool {
 	return count == 1
 }
 
-// commitOccurrenceNaming appends one occurrence to the real journal that
-// names the blob, through the production journal and identity, so the
-// projection rebuild will project it.
+// commitOccurrenceNaming appends one binding-free occurrence naming the blob.
 func commitOccurrenceNaming(t *testing.T, tracker protocol.TaskTracker, ref digest.Digest, operation string) {
+	t.Helper()
+	commitOccurrenceWithBindings(t, tracker, ref, operation, nil)
+}
+
+// commitOccurrenceWithBindings appends one occurrence to the real journal that
+// names the blob, through the production journal and identity, so the
+// projection rebuild will project it. bindings are recorded in the occurrence
+// envelope, so the rebuilt projection carries one binding row per entry — the
+// state the FK-paused replay must replace without a UNIQUE collision.
+func commitOccurrenceWithBindings(t *testing.T, tracker protocol.TaskTracker, ref digest.Digest, operation string, bindings []model.NativeBinding) {
 	t.Helper()
 	ctx := context.Background()
 	resolver, ok := tracker.(receipt.IdentityResolver)
@@ -135,7 +143,7 @@ func commitOccurrenceNaming(t *testing.T, tracker protocol.TaskTracker, ref dige
 		Bindings []model.NativeBinding       `json:"bindings"`
 		Capture  model.CaptureDisposition    `json:"capture"`
 		Body     string                      `json:"body_digest"`
-	}{Contract: contract.String(), Event: model.ContractEventKind(1), Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: contract}}, Capture: model.CaptureValid, Body: ref.String()})
+	}{Contract: contract.String(), Event: model.ContractEventKind(1), Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: contract}}, Bindings: bindings, Capture: model.CaptureValid, Body: ref.String()})
 	require.NoError(t, err)
 	sum := sha256.Sum256(payload)
 	command := sha256.Sum256(append([]byte("pasture.lifecycle.receipt.append/v1\x00"), payload...))

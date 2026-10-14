@@ -74,8 +74,17 @@ func readOccurrenceRows(reader EvidencePageReader) ([]occurrenceRow, error) {
 // supplied journal-truth rows inside tx. It never begins, commits or rolls
 // back, and it never reclaims: transaction ownership belongs to the caller.
 func writeOccurrenceRows(ctx context.Context, tx *sql.Tx, rows []occurrenceRow) error {
+	// DELETE THE CHILD ROWS FIRST, EXPLICITLY. The bindings reference the
+	// occurrence with ON DELETE CASCADE, but the conversion runs inside
+	// provenance.PauseForeignKeys: with enforcement paused the cascade does NOT
+	// fire, so deleting only the parent leaves the old binding rows behind and
+	// re-inserting them collides on (journal_id, binding_index). Deleting the
+	// child first is correct with enforcement both paused and on.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM lifecycle_occurrence_bindings`); err != nil {
+		return projectionError("The old lifecycle occurrence bindings could not be cleared.", "SQLite rejected the binding delete that precedes the atomic rebuild.", "The rebuild transaction will roll back, preserving the old projection.", "Confirm the database is writable and retry.", err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM lifecycle_occurrences`); err != nil {
-		return projectionError("The old lifecycle occurrence projection could not be cleared.", "SQLite rejected the first statement of the atomic rebuild.", "The rebuild transaction will roll back, preserving the old projection.", "Confirm the database is writable and retry.", err)
+		return projectionError("The old lifecycle occurrence projection could not be cleared.", "SQLite rejected an early statement of the atomic rebuild.", "The rebuild transaction will roll back, preserving the old projection.", "Confirm the database is writable and retry.", err)
 	}
 	snapshot := provenance.JournalID(0)
 	if len(rows) > 0 {

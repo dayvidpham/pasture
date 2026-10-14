@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	stderrors "errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -152,6 +153,24 @@ func TestRefuseUnbackedMarkClassRows(t *testing.T) {
 				require.Contains(t, fix, "(a) If you hold an independent pre-marking copy")
 				require.Contains(t, fix, "(c) If you do not need its history")
 			}
+
+			// EVERY arm is also driven through the conversion's P3a verdict, so
+			// the under-lock classification is pinned, not only the read-only one:
+			// the same refuse arms fire the SCOPED P3a refusal under the fence and
+			// write nothing, and the complete-triple arm is the no-op.
+			report, convErr := Convert(context.Background(), db, ConvertOptions{StorePath: path})
+			if tc.want == OutcomeNormal {
+				require.NoError(t, convErr)
+				require.True(t, report.AlreadyCurrent, "the complete triple is the conversion no-op")
+			} else {
+				require.Error(t, convErr)
+				scopedFix := structuredFix(t, convErr)
+				require.Contains(t, scopedFix, "(a) If you hold an independent pre-marking copy", "the P3a refusal carries the scoped block")
+			}
+			// The conversion wrote no new fence evidence: the verdict is unchanged.
+			after, err := EvaluateCutoverOnHandle(context.Background(), db, path, true)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, after.Outcome, "the P3a refusal must not add evidence that flips the verdict")
 		})
 	}
 }
@@ -296,4 +315,161 @@ func TestP2ToP3BoundaryResumesToCompletion(t *testing.T) {
 	second, err := Convert(context.Background(), resumed, ConvertOptions{StorePath: path, Archive: archive})
 	require.NoError(t, err)
 	require.True(t, second.AlreadyCurrent)
+}
+
+// probeTableExists reports whether the injection probe table survived.
+func probeTableExists(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	var exists bool
+	require.NoError(t, db.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='cutover_injection_probe')`).Scan(&exists))
+	return exists
+}
+
+// injectionSeam writes a probe table and one row through the live conversion
+// transaction at the named checkpoint, then returns sentinel so the whole
+// transaction must roll back. It fires only at point.
+func injectionSeam(point InjectPoint, sentinel error) func(InjectPoint, *sql.Tx) error {
+	return func(got InjectPoint, tx *sql.Tx) error {
+		if got != point {
+			return nil
+		}
+		if _, err := tx.Exec(`CREATE TABLE cutover_injection_probe (point TEXT NOT NULL)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO cutover_injection_probe(point) VALUES(?)`, string(got)); err != nil {
+			return err
+		}
+		return sentinel
+	}
+}
+
+// TestConversionInTransactionInjectionsRollBackTheWholeTransaction pins the
+// rollback/atomicity claims at the three in-transaction checkpoints the
+// pre-BEGIN seam cannot reach: marker->receipt (R5.9), the replay boundary
+// (R6.9), and the final boundary (everything written, not committed). At each,
+// the injection writes through the live transaction and returns an error, and
+// the test proves the marker, the receipt, the deferred ceiling and the
+// injection's own write all rolled back together — so "any failure rolls the
+// entire transaction back" is exercised, not merely asserted.
+func TestConversionInTransactionInjectionsRollBackTheWholeTransaction(t *testing.T) {
+	cases := []struct {
+		name  string
+		point InjectPoint
+	}{
+		{"marker->receipt", injectAfterMarker},
+		{"replay boundary", injectAfterReplay},
+		{"final boundary", injectFinal},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path, db := markerlessStore(t)
+			sentinel := fmt.Errorf("injected fault at %s", tc.point)
+			opts := ConvertOptions{StorePath: path}
+			opts.injectInTx = injectionSeam(tc.point, sentinel)
+
+			_, err := Convert(context.Background(), db, opts)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), sentinel.Error())
+
+			require.False(t, probeTableExists(t, db), "the injection's own write must roll back with the conversion")
+			state, stateErr := EvaluateCutoverOnHandle(context.Background(), db, path, true)
+			require.NoError(t, stateErr)
+			require.False(t, state.MarkerPresent, "the marker must roll back")
+			require.False(t, state.ReceiptPresent, "the receipt must roll back")
+			require.Equal(t, audit.MaxKnownSchemaVersion-1, state.RecordedVersion, "the deferred ceiling must roll back")
+		})
+	}
+}
+
+// TestScopedP3aMarkedArchiveBranchIsRefused pins the MARKED-ARCHIVE branch of the
+// scoped P3a refusal: this run's P1 archive was taken AFTER a bare mark, so it
+// carries the mark and post-dates it, and the refusal must say it is NOT the
+// independent pre-marking copy option (a) names.
+func TestScopedP3aMarkedArchiveBranchIsRefused(t *testing.T) {
+	path, db := markerlessStore(t)
+	insertMarker(t, path)
+
+	archive, err := ArchiveStore(context.Background(), path, t.TempDir(), time.Now())
+	require.NoError(t, err)
+	require.True(t, archive.Marker.Present, "the archived store already carries the mark")
+
+	_, err = Convert(context.Background(), db, ConvertOptions{StorePath: path, Archive: archive, AppliedCatchUpSteps: 3})
+	require.Error(t, err)
+	fix := structuredFix(t, err)
+	require.Contains(t, fix, archive.Path)
+	require.Contains(t, fix, "carries the mark and post-dates it")
+	require.Contains(t, fix, "it is NOT the independent pre-marking copy")
+}
+
+// TestBelowTargetPreBeginDigestEquality pins the digest seam for a store BELOW
+// the cutover target (not only at it): with the deferred catch-up pending, the
+// store's digest at the seam — after the foreign-key bracket, before BEGIN
+// IMMEDIATE — still equals the digest before Convert was called, and the
+// committed conversion changes the store.
+func TestBelowTargetPreBeginDigestEquality(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pasture.db")
+	db, err := dbconn.OpenDefaultDB(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.MaxKnownSchemaVersion-2))
+	before := fileDigest(t, path)
+
+	var seamDigest string
+	seamSeen := false
+	opts := ConvertOptions{StorePath: path}
+	opts.beforeBegin = func() {
+		seamSeen = true
+		seamDigest = fileDigest(t, path)
+	}
+	_, err = Convert(context.Background(), db, opts)
+	require.NoError(t, err)
+	require.True(t, seamSeen)
+	require.Equal(t, before, seamDigest, "nothing may write before BEGIN IMMEDIATE for a below-target store either")
+	require.NotEqual(t, before, fileDigest(t, path), "the committed conversion changes the store")
+}
+
+// TestForeignKeyBracketRestoresEnforcementOnAFailedConversion pins the ABORT
+// half of the FK bracket: when the conversion fails and rolls back, the pinned
+// connection must still hand back foreign-key enforcement ON, so a failed
+// bracket can never leak a connection with enforcement silently disabled.
+func TestForeignKeyBracketRestoresEnforcementOnAFailedConversion(t *testing.T) {
+	path, db := markerlessStore(t)
+	db.SetMaxOpenConns(1)
+
+	opts := ConvertOptions{StorePath: path}
+	opts.injectInTx = injectionSeam(injectFinal, fmt.Errorf("injected fault"))
+	_, err := Convert(context.Background(), db, opts)
+	require.Error(t, err)
+
+	var fk int
+	require.NoError(t, db.QueryRow(`PRAGMA foreign_keys`).Scan(&fk))
+	require.Equal(t, 1, fk, "the bracket must restore enforcement even when the conversion aborts")
+}
+
+// TestConvertSucceedsOnAWALModeStore pins the production journal mode: the
+// checked-in fixtures are rollback-journal, so a conversion is exercised in WAL
+// mode here too. The conversion must publish the receipt and reach NORMAL.
+func TestConvertSucceedsOnAWALModeStore(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pasture.db")
+	seed, err := dbconn.OpenDefaultDB(path)
+	require.NoError(t, err)
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), seed, audit.MaxKnownSchemaVersion-1))
+	require.NoError(t, seed.Close())
+
+	wal, err := dbconn.OpenSharedDB(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = wal.Close() })
+	var mode string
+	require.NoError(t, wal.QueryRow(`PRAGMA journal_mode`).Scan(&mode))
+	require.Equal(t, "wal", mode, "the WAL case must actually run in WAL mode")
+
+	report, err := Convert(context.Background(), wal, ConvertOptions{StorePath: path})
+	require.NoError(t, err)
+	require.True(t, report.ReceiptWritten)
+
+	final, err := EvaluateCutoverOnHandle(context.Background(), wal, path, true)
+	require.NoError(t, err)
+	require.Equal(t, OutcomeNormal, final.Outcome)
+	require.Equal(t, audit.MaxKnownSchemaVersion, final.RecordedVersion)
 }

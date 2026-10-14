@@ -96,7 +96,30 @@ type ConvertOptions struct {
 	// wrote nothing. Production never sets it (every production construction
 	// site leaves the zero value).
 	beforeBegin func()
+	// injectInTx is a TEST-ONLY seam invoked INSIDE the conversion transaction at
+	// the named checkpoints. It is how the rollback/atomicity claims are
+	// exercised: an injection writes through the live tx and returns an error,
+	// and the test then proves the whole transaction — the marker, the receipt,
+	// the ceiling, the replayed projection and the injection's own write — rolled
+	// back together. Production never sets it.
+	injectInTx func(point InjectPoint, tx *sql.Tx) error
 }
+
+// InjectPoint names an in-transaction checkpoint the test-only injection seam
+// fires at. It is unexported surface: no production path constructs one.
+type InjectPoint string
+
+const (
+	// injectAfterMarker fires in P3i->P3j: the slash marker is written and the
+	// cutover receipt is not yet.
+	injectAfterMarker InjectPoint = "after-marker"
+	// injectAfterReplay fires in P3g->P3h: the replay and its comparison are
+	// complete and the raw inventory equality check has not run.
+	injectAfterReplay InjectPoint = "after-replay"
+	// injectFinal fires after P3k, once every conversion effect and the deferred
+	// ceiling are written and the transaction has not committed.
+	injectFinal InjectPoint = "final"
+)
 
 // Report is what one conversion did. It is returned even for the no-op path
 // (already current).
@@ -245,6 +268,12 @@ func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now fun
 		return err
 	}
 
+	// In-transaction test checkpoint (replay boundary): the replay and its
+	// comparison are complete, the inventory check has not run.
+	if err := injectAt(opts, injectAfterReplay, tx); err != nil {
+		return err
+	}
+
 	// P3h: raw inventory equality. Conversion must not delete, rewrite or
 	// reclaim any raw payload body.
 	after, err := captureBlobInventory(ctx, tx)
@@ -260,6 +289,13 @@ func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now fun
 	// integrity and SQLite constraint checks before writing.
 	if err := provenance.PublishIDFormatInTx(ctx, tx); err != nil {
 		return conversionError("Publishing the identity-format marker failed.", err.Error(), "The whole conversion transaction rolls back; no partial marker is published and the store keeps its retired identities.", "Restore the archive and retry.", err)
+	}
+
+	// In-transaction test checkpoint (marker boundary): the marker is written and
+	// the receipt is not yet, so an injection here proves the two fence rows are
+	// one atomic unit.
+	if err := injectAt(opts, injectAfterMarker, tx); err != nil {
+		return err
 	}
 
 	// P3j: the cutover receipt, in the SAME transaction as the marker and the
@@ -280,7 +316,22 @@ func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now fun
 	if err := audit.RaiseIDFormatCeilingInTx(tx, opts.StorePath, now().UTC().UnixNano()); err != nil {
 		return err
 	}
+
+	// In-transaction test checkpoint (final boundary): every conversion effect
+	// and the deferred ceiling are written and the transaction has not committed.
+	if err := injectAt(opts, injectFinal, tx); err != nil {
+		return err
+	}
 	return nil
+}
+
+// injectAt runs the test-only in-transaction injection seam at one checkpoint.
+// A nil seam (every production site) is a no-op.
+func injectAt(opts ConvertOptions, point InjectPoint, tx *sql.Tx) error {
+	if opts.injectInTx == nil {
+		return nil
+	}
+	return opts.injectInTx(point, tx)
 }
 
 // rewritePastureEffect and rewritePastureContext translate the declared

@@ -634,6 +634,13 @@ type safeLoss struct {
 //     archive because the other process was rewriting the file underneath it;
 //     the archive is taken before any write, so this is a safe loss
 //     (internal/idmigrate/backup.go);
+//   - the identity-format guard refused the store because the winner had already
+//     populated it while it was still unmarked, so the loser names the retired
+//     two-dash format and points at the cutover
+//     (internal/idmigrate/refusal.go in idmigrate.RefusePopulatedRefusal);
+//   - the identity conversion could not take the exclusive write transaction
+//     because the winner held the file across the loser's BEGIN IMMEDIATE
+//     (internal/idmigrate/idmigrate.go in idmigrate.Convert);
 //   - the shared connection could not be initialised while the other process
 //     held the file (internal/dbconn/connector.go);
 //   - provenance activation gave up acquiring the schema write lock within its
@@ -658,6 +665,8 @@ var safeLoserDiagnostics = []safeLoss{
 	{"Couldn't initialize the shared SQLite connection.", 2},
 	{"activate SQLite schema on ", 2},
 	{"Pasture couldn't make the consistent archive of", 5},
+	{"still uses the retired two-dash task identity format", 5},
+	{"The identity conversion transaction could not start.", 5},
 }
 
 // safeLossSentences lists the accepted sentences for a failure message.
