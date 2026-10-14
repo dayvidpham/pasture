@@ -772,20 +772,30 @@ const (
 // It is the built /deadline settlement proof.
 //
 // WHICH DEADLINE IT PROVES, AND WHY IT IS NO LONGER THE HOOK-INVOCATION ONE. The
-// row was written against a Provenance whose activation ran on every open and
-// took the write lock, so a held writer made the OPEN wait: the invocation
+// row was written against Provenance v0.5.0, whose activation ran on every open
+// and took the write lock, so a held writer made the OPEN wait: the invocation
 // reached its 5s hook-invocation deadline with the ownership read unanswerable,
-// and the assertion pinned that open-time budget. Provenance's store-currency
-// fast path (present in the pinned release) lets an already-current store open
-// through a read-only probe and take NO activation write lock, so the open
-// completes under the held writer and the ownership read — a WAL read snapshot —
-// is answerable too. The contention therefore surfaces LATER, at the first gated
-// lifecycle WRITE (the active-metamodel definition activation that precedes the
-// receipt append), which is bounded by the 1s ingress window rather than the 5s
-// hook-invocation window. The row is kept, not deleted: it still proves a
-// DEADLINE fault — now the gated-write caller deadline — and the two tokens
-// prove that fault by naming both the gated write and the expired
-// write-ownership acquisition.
+// and the assertion pinned that open-time budget. The pinned Provenance release
+// adds the store-currency fast path: an already-current store gets a read-only
+// probe and takes NO activation write lock, so the open completes under the held
+// writer and the ownership read — a WAL read snapshot — is answerable too. The
+// contention therefore surfaces LATER, at the first gated lifecycle WRITE (the
+// active-metamodel definition activation that precedes the receipt append),
+// which is bounded by the 1s ingress window rather than the 5s hook-invocation
+// window. The row is kept, not deleted: it still proves a DEADLINE fault — now
+// the gated-write caller deadline — and readerGatedWriteFaultToken plus
+// readerGatedWriteDeadlineToken prove that fault by naming both the gated write
+// and the expired write-ownership acquisition.
+//
+// WHAT PINS THE OPEN-TIME BUDGET NOW. The skip itself — a current store opening
+// without the activation write lock, under a real held writer — is pinned by
+// Provenance's own TestCurrentSchemaBorrowedOpenSkipsActivationWriteLock
+// (internal/sqlite/activation_contention_test.go), which holds BEGIN IMMEDIATE
+// for the whole call and fails if the open waits for it. On the pasture side the
+// whole host-visible budget is still pinned end-to-end by
+// TestLifecycleHookReturnsInsideItsDeadlineWhileTheDatabaseIsLocked, which holds
+// the same write lock and asserts the built hook returns inside the
+// hook-invocation tier.
 //
 // closed and expectBlock are SEPARATE because they answer different questions:
 // closed sets PASTURE_HOOK_FAIL_CLOSED in the child, and expectBlock is what the
@@ -851,7 +861,7 @@ func runReaderDeadlineRow(t *testing.T, binary string, harness readerHarnessCase
 	assert.Equal(t, "fault", records[0]["outcomeClass"])
 	assert.Contains(t, fmt.Sprint(records[0]["cause"]), readerGatedWriteFaultToken, "the durable record must agree with the host-facing diagnostic")
 	assert.Contains(t, fmt.Sprint(records[0]["cause"]), readerGatedWriteDeadlineToken)
-	assert.Empty(t, readerConsultation(t, dbPath), "an abandoned invocation commits no consultation")
+	assert.Empty(t, readerConsultation(t, dbPath), "a faulted invocation commits no consultation")
 }
 
 // TestReaderIntegrityRowsAreHandlerOnlyBecauseTheStoreRefusesTheDamage pins WHY

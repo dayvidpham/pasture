@@ -35,6 +35,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -838,6 +839,90 @@ func TestControl(t *testing.T) {
 		assert.Contains(t, controlViolations[0], control.Reason,
 			"the control for %s must be reported with its reason", control.Rule)
 	}
+}
+
+// TestTheLifecycleStoreAndFaultRecordResolveInsideTheTestSandbox pins where the
+// lifecycle command's DEFAULT state lands while the package's tests run.
+//
+// WHY IT EXISTS. The hook derives its fault record from the store path THIS
+// invocation would use (lifecycleFaultRecordPath calls lifecycleStorePath), and
+// with no --db flag that is tasks.DefaultDBPath — which reads PASTURE_DB_PATH
+// BEFORE XDG_DATA_HOME and HOME. The package redirects HOME and XDG_DATA_HOME
+// once, in TestMain, so a store path that resolved the operator's live
+// ~/.local/share/pasture would place and append the operator's live
+// lifecycle-faults.jsonl as well. A test run that inherited an exported
+// PASTURE_DB_PATH therefore wrote the operator's own state: that is the route
+// this guard closes.
+//
+// The two spellings below are pinned to the packages that own them, because a
+// neutralized name that is not the name the product reads would leave the
+// override in place while this guard stayed green — each built-binary subject
+// passes its own t.TempDir store and asserts on it there.
+//
+// WHAT IT VISITS: the one default resolution the lifecycle command performs —
+// lifecycleStorePath with an empty flag, and the fault-record path derived from
+// it — plus the two overrides the sandbox removes and the two variables it
+// redirects.
+// WHAT IT DOES NOT READ: a store path a test builds itself and hands to a child
+// as --db; those are asserted at the site that writes them. It also does not
+// read the capture directory's own consumers.
+//
+// SERIAL: it writes the package-level flagDBPath, which the whole process
+// shares.
+func TestTheLifecycleStoreAndFaultRecordResolveInsideTheTestSandbox(t *testing.T) {
+	require.Equal(t, tasks.DBPathEnv, testutil.DBPathEnv,
+		"the sandbox removes testutil.DBPathEnv and the store resolves tasks.DBPathEnv; a drift "+
+			"between the two spellings would let the operator's store override survive the sandbox "+
+			"unnoticed")
+	require.Equal(t, hookCaptureDirEnv, testutil.CaptureDirEnv,
+		"the sandbox removes testutil.CaptureDirEnv and the hook reads hookCaptureDirEnv")
+
+	previous := flagDBPath
+	flagDBPath = ""
+	t.Cleanup(func() { flagDBPath = previous })
+
+	for _, override := range []string{tasks.DBPathEnv, hookCaptureDirEnv} {
+		require.NotContains(t, os.Environ(), override+"=",
+			"%s must not be inherited into this test process: it outranks the sandbox's HOME and "+
+				"XDG_DATA_HOME, so the default store these tests fall back to — and the lifecycle "+
+				"fault record derived from it — would be the operator's own", override)
+	}
+
+	store := lifecycleStorePath()
+	record := lifecycleFaultRecordPath()
+	require.NotEmpty(t, record,
+		"a store path inside the sandbox must still place a fault record beside it")
+
+	sandbox := os.Getenv("XDG_DATA_HOME")
+	require.NotEmpty(t, sandbox,
+		"XDG_DATA_HOME must point at the sandbox; an empty value means TestMain never ran "+
+			"testutil.SetHermeticEnv and every assertion below would be vacuous")
+
+	for _, resolved := range []struct{ what, path string }{
+		{"the default store", store},
+		{"the fault record", record},
+	} {
+		assertPathIsInside(t, sandbox, resolved.path,
+			resolved.what+" must resolve inside the sandbox the package redirected its state to")
+		assertPathIsInside(t, os.TempDir(), resolved.path,
+			resolved.what+" must resolve under the system temporary directory, because the "+
+				"operator's live store sits under their home: a default path outside the temporary "+
+				"directory is the live-state reach this guard exists to refuse")
+	}
+	assert.Equal(t, filepath.Dir(store), filepath.Dir(record),
+		"the record sits BESIDE the store, so the store path alone decides where a fault is recorded")
+}
+
+// assertPathIsInside fails when path is not strictly below root, so a path that
+// merely shares a prefix with root, or climbs out of it, is reported.
+func assertPathIsInside(t *testing.T, root, path, message string) {
+	t.Helper()
+	relative, err := filepath.Rel(root, path)
+	require.NoError(t, err, "%s: %q and %q are not comparable", message, path, root)
+	inside := relative != ".." &&
+		!strings.HasPrefix(relative, ".."+string(filepath.Separator)) &&
+		!filepath.IsAbs(relative)
+	assert.True(t, inside, "%s: %q is outside %q", message, path, root)
 }
 
 // reachRecord is what sharedStateReach knows about one function or method
@@ -4405,10 +4490,12 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 		// ends were found by enumerating from the source, which is what the
 		// reason had claimed to do. The current routes are below.
 		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
-			"returned an error and committed nothing. Four routes pass it directly — the environment refusal and " +
-			"the argument refusal, neither of which opens a store, and the flag-parse refusal inside " +
-			"SetFlagErrorFunc, which runs before the command body, plus the host-version resolution refusal " +
-			"before the work goroutine starts — and it is also the default of the computed " +
+			"returned an error and committed nothing. Five routes pass it directly — the environment refusal and " +
+			"the argument refusal, neither of which opens a store, the flag-parse refusal inside " +
+			"SetFlagErrorFunc, which runs before the command body, the host-version resolution refusal " +
+			"before the work goroutine starts, and the operator time-budget refusal, which is raised when an " +
+			"environment-supplied override inverts the timeout hierarchy and stops before the event is read — " +
+			"and it is also the default of the computed " +
 			"stage below. The multiple-decision input refusal that used to be listed here is RETIRED: the " +
 			"command no longer accepts a verdict, so there is no input that could be refused for carrying one, " +
 			"and the gate's own refusals arrive through the handler-error route below",
@@ -4502,12 +4589,12 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	for _, count := range found {
 		total += count
 	}
-	assert.Equal(t, 4, found["hostexit.FaultStageNotRecorded"],
-		"exactly four routes refuse directly before durable work; each must preserve the no-write stage")
-	assert.Equal(t, 7, total,
-		"this command has seven fault routes: the panic recovery, the environment refusal, the argument "+
-			"refusal, the host-version resolution refusal, the deadline fault, the handler error (which now carries "+
-			"the gate's own read faults), and the flag-parse refusal inside "+
+	assert.Equal(t, 5, found["hostexit.FaultStageNotRecorded"],
+		"exactly five routes refuse directly before durable work; each must preserve the no-write stage")
+	assert.Equal(t, 8, total,
+		"this command has eight fault routes: the panic recovery, the environment refusal, the argument "+
+			"refusal, the host-version resolution refusal, the operator time-budget refusal, the deadline fault, "+
+			"the handler error (which now carries the gate's own read faults), and the flag-parse refusal inside "+
 			"SetFlagErrorFunc. A route added or removed without updating the judged reasons above leaves "+
 			"the prose describing a command that does not exist, which has happened once already")
 }
@@ -4515,7 +4602,7 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 // TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded drives, on the
 // built binary, flag, argument and host-version resolution refusals.
 //
-// WHY THESE TWO. Four of the six routes are measured on host bytes somewhere in
+// WHY THESE TWO. Four of the eight routes are measured on host bytes somewhere in
 // this file. The FLAG-PARSE refusal inside SetFlagErrorFunc and the ARGUMENT
 // refusal were not, and both declare not-recorded. Mutating either to declare
 // "recorded" left the whole cmd/pasture package GREEN — over 208 seconds each —
@@ -5562,7 +5649,16 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 		// BOTH BINDING FORMS. The reader followed `svc := service` and not
 		// `var svc = service`, which is the same binding written the other way.
 		bind := func(targets []ast.Expr, value ast.Expr) {
-			holds := strings.Contains(sourceOf(value), "NewLifecycleReceiptService") || holdsService(value)
+			// EVERY PRODUCTION CONSTRUCTOR OF THE SERVICE, not one spelling.
+			// The receipt service is built either directly through
+			// tasks.NewLifecycleReceiptService (the untuned default) or through
+			// lifecycleReceiptServiceFor, the local wrapper that selects the tuned
+			// profile when one is supplied; a reader that named only the direct
+			// constructor would go blind to the path the operator-tuned profile
+			// takes and report the durable region as empty.
+			holds := strings.Contains(sourceOf(value), "NewLifecycleReceiptService") ||
+				strings.Contains(sourceOf(value), "lifecycleReceiptServiceFor") ||
+				holdsService(value)
 			// A CONTAINER BUILT FROM THE SERVICE holds it: a struct, map or
 			// slice literal with the service, or a name that holds it, among
 			// its elements.
@@ -5916,11 +6012,13 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 var guardSweepOwned = []string{
 	"hook_environment_test.go",
 	"hook_lifecycle_additive_test.go",
+	"hook_lifecycle_budget_test.go",
 	"hook_lifecycle_capture_test.go",
 	"hook_lifecycle_codex_test.go",
 	"hook_lifecycle_diagnostic_production_test.go",
 	"hook_lifecycle_docs_test.go",
 	"hook_lifecycle_failuremode_test.go",
+	"hook_lifecycle_fault_record_cap_test.go",
 	"hook_lifecycle_first_session_test.go",
 	"hook_lifecycle_host_version_test.go",
 	"hook_lifecycle_host_version_unix_test.go",

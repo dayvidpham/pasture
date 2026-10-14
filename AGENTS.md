@@ -239,6 +239,39 @@ Rules:
 - A change to a tier is a change to observable behaviour under load. State the
   measurement that justifies it, and keep the ordering strict.
 
+**Operator overrides.** Three production tiers can be tuned at run time through
+the lifecycle hook's environment, read in `cmd/pasture/hook_environment.go` and
+validated by `internal/timeouts`:
+
+| Variable | Tier | Default | Meaning |
+|---|---|---|---|
+| `PASTURE_HOOK_INVOCATION_TIMEOUT` | `HookInvocation` | 5 s | how long ONE whole lifecycle hook invocation may run before it reports a fault |
+| `PASTURE_INGRESS_TIMEOUT` | `Ingress` | 1 s | one lifecycle receipt append, including its lock retries |
+| `PASTURE_START_SLICE_TIMEOUT` | `StartSlice` | 2 s | how long a slice sub-workflow waits for its `start_slice` signal |
+
+Each accepts a Go duration (`750ms`, `3s`). An unset or empty variable keeps the
+production value, so the default behaviour is unchanged. The three are applied
+together through `Profile.WithOverride`, which re-runs the constructor, so the
+ordering invariant above still holds and an inverted combination is refused with
+the same inversion error rather than silently clamped; a refused configuration
+reaches the host as a fail-open fault (the reason is on standard error and in the
+fault record) exactly as a malformed environment does.
+
+THE LIFECYCLE COMMAND CONSUMES TWO OF THE THREE. `HookInvocation` is the work
+deadline and `Ingress` is the receipt appender's deadline, so both take effect on
+the hook path. `StartSlice` is the slice sub-workflow's signal wait, which the
+hook command never reaches: it is read and validated with its siblings under the
+same mechanism (so a combination that inverts it is still refused), and its
+consumer is the slice workflow.
+
+The trade-off is the operator's to own. LOWERING the hook-invocation deadline
+makes the lifecycle hook fail fast: it abandons the work, reports a fault and
+answers the host fail-open, so the gate is left unevaluated while the host stops
+waiting at once instead of stalling for the whole window. RAISING it only helps
+on a fast store — a hook that outruns the host's own budget freezes the session
+it was meant to protect, and the default 5 s is already sized below the smallest
+host budget this tree has evidence for.
+
 ### The lifecycle fault record
 
 A lifecycle hook that cannot evaluate its event appends one JSON line to
@@ -315,15 +348,23 @@ points here rather than restating it, and
 end of that pointer is removed, if this paragraph is moved OUT of this section,
 or if that test is renamed while these two documents go on citing it.
 
-THE FILE HAS NO RETENTION. One line of roughly 500 bytes is appended per
-faulting invocation; nothing rotates, trims or removes a line, and no command
-reads or clears it. A hook runs on every wired event, so a database that stays
-broken accumulates one line per event, silently, because a fail-open fault exits
-0 and most hosts do not show the standard error of an exit-0 hook. Delete the
-file to clear it. Retention and reclaim are deferred, and this file is one of
-the surfaces that work inherits.
+THE FILE IS BOUNDED BY ROTATION, AND THE NEWEST RECORD IS NEVER THE ONE
+DROPPED. The live record is rotated onto a single backup
+(`lifecycle-faults.jsonl.1`) once it reaches `lifecycleFaultRecordMaxBytes`, so
+the pair is bounded at roughly twice that constant however long a store stays
+broken. The rotation is best-effort and lock-free, because many short-lived hook
+processes append concurrently beside the contended store: it costs one `stat(2)`
+on the common route and one `rename(2)` on the over-cap route, and a lost rename
+race simply leaves the record in place. It runs BEFORE the record for the current
+fault is composed, and that record is always appended to the live file
+afterwards, so bounding can never drop the newest record. Deleting the live file
+(and its backup) still clears the record. If rotation cannot run — the file is
+absent, the directory is unwritable, or a race is lost — the writer appends
+exactly as it did before, and the loss routes below are unchanged: a rotating
+store never silently swallows the record, because the record is only ever lost
+through one of those routes, each of which says so on standard error.
 
-A second unreclaimed surface comes from the same failure class. A lifecycle
+A DIFFERENT unreclaimed surface comes from the same failure class. A lifecycle
 invocation abandoned before commit entry, or whose append fails, can leave a committed payload blob with no
 occurrence — one orphan per abandoned invocation, holding that invocation's raw
 host payload, bounded by the 1 MiB ingress payload cap. The write order is
@@ -589,7 +630,7 @@ do not promise a snapshot under concurrent writers.
 | `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
 | `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
 | `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `github.com/dayvidpham/provenance` | v0.7.0 | Task, edge and receipt store; context-aware borrowed activation and software registration; in-transaction schema completion and a verified foreign-key bracket for the offline identity cutover; built on the same DBOS version |
+| `github.com/dayvidpham/provenance` | v0.7.0 | Task, edge and receipt store; context-aware borrowed activation and software registration; store-currency fast path; in-transaction schema completion and a verified foreign-key bracket for the offline identity cutover; built on the same DBOS version |
 | `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
 | `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |
