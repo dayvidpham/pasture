@@ -315,15 +315,23 @@ points here rather than restating it, and
 end of that pointer is removed, if this paragraph is moved OUT of this section,
 or if that test is renamed while these two documents go on citing it.
 
-THE FILE HAS NO RETENTION. One line of roughly 500 bytes is appended per
-faulting invocation; nothing rotates, trims or removes a line, and no command
-reads or clears it. A hook runs on every wired event, so a database that stays
-broken accumulates one line per event, silently, because a fail-open fault exits
-0 and most hosts do not show the standard error of an exit-0 hook. Delete the
-file to clear it. Retention and reclaim are deferred, and this file is one of
-the surfaces that work inherits.
+THE FILE IS BOUNDED BY ROTATION, AND THE NEWEST RECORD IS NEVER THE ONE
+DROPPED. The live record is rotated onto a single backup
+(`lifecycle-faults.jsonl.1`) once it reaches `lifecycleFaultRecordMaxBytes`, so
+the pair is bounded at roughly twice that constant however long a store stays
+broken. The rotation is best-effort and lock-free, because many short-lived hook
+processes append concurrently beside the contended store: it costs one `stat(2)`
+on the common route and one `rename(2)` on the over-cap route, and a lost rename
+race simply leaves the record in place. It runs BEFORE the record for the current
+fault is composed, and that record is always appended to the live file
+afterwards, so bounding can never drop the newest record. Deleting the live file
+(and its backup) still clears the record. If rotation cannot run — the file is
+absent, the directory is unwritable, or a race is lost — the writer appends
+exactly as it did before, and the loss routes below are unchanged: a rotating
+store never silently swallows the record, because the record is only ever lost
+through one of those routes, each of which says so on standard error.
 
-A second unreclaimed surface comes from the same failure class. A lifecycle
+A DIFFERENT unreclaimed surface comes from the same failure class. A lifecycle
 invocation abandoned before commit entry, or whose append fails, can leave a committed payload blob with no
 occurrence — one orphan per abandoned invocation, holding that invocation's raw
 host payload, bounded by the 1 MiB ingress payload cap. The write order is

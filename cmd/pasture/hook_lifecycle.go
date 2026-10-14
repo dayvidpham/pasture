@@ -47,6 +47,31 @@ func (lifecycleCLIOperations) NewOperationID() (string, error) {
 // needs the failing store would be lost exactly when it is needed.
 const lifecycleFaultRecordFile = "lifecycle-faults.jsonl"
 
+// lifecycleFaultRecordMaxBytes is the size at which the live record is ROTATED
+// to its single bounded backup, and lifecycleFaultRecordBackupSuffix names that
+// backup. The pair bounds the record at about twice this constant — the live
+// file and one backup, each at most this large — no matter how long a store
+// stays broken.
+//
+// THE FILE WAS UNBOUNDED AND THAT WAS THE DEFECT. It grew one line per faulting
+// invocation with nothing rotating, trimming or removing a line; measured at
+// 581 MiB and 528,562 lines on the default store, at roughly 165 MiB a day. A
+// hook runs on every wired event, so a store that stays broken accumulated the
+// whole of its own history on disk. The bound is chosen so the operator keeps a
+// usable recent window — at the observed ~1.1 KiB a line this is on the order
+// of fifty thousand faults, hours of the highest rate seen — while a runaway
+// store can no longer fill the filesystem. Raising or lowering the knob is a
+// one-line change here; it is not a policy read from the store, because the
+// record must be placeable exactly when the store could not be opened.
+const lifecycleFaultRecordMaxBytes = 32 << 20
+
+// lifecycleFaultRecordBackupSuffix is appended to the record path to name the
+// one rotated copy that sits beside it. A single, fixed name is deliberate:
+// rotation renames the live record onto it, so the pair is bounded and the
+// OLDEST history is the only thing ever dropped. A count or a timestamp here
+// would be a second unbounded surface, which is the defect this bound removes.
+const lifecycleFaultRecordBackupSuffix = ".1"
+
 // lifecycleFaultOutcomeClass is the value of the outcomeClass member of every
 // fault record line. The file records FAULTS only: an invocation that emitted
 // the host's continue bytes still failed to evaluate the event, and the class
@@ -1033,19 +1058,67 @@ func recordLifecycleFault(
 // record written somewhere else is evidence nobody finds. A generated host hook
 // passes no --db flag, so this is the path a real hook takes.
 //
-// THE FILE GROWS WITHOUT A BOUND. One line is appended per faulting invocation,
-// about 500 bytes, and nothing rotates, trims or removes a line. A hook runs on
-// every wired event, so a database that stays broken accumulates one line per
-// event, silently, because a fail-open fault exits 0 and most hosts do not show
-// the standard error of an exit-0 hook. Retention and reclaim are deliberately
-// out of scope here; the file is named in AGENTS.md with the command to clear
-// it so that somebody who never sees the diagnostic can still find it.
+// IT ALSO KEEPS THAT RECORD BOUNDED. Before it hands the path back it calls
+// boundLifecycleFaultRecord, which rotates an over-large live record onto its
+// single backup. The rotation lives on the PATH RESOLUTION and not in
+// recordLifecycleFault on purpose: recordLifecycleFault is the subject of a
+// structural guard that reads every one of its branches as a way the record can
+// be lost, and a rotation is not a loss — it runs BEFORE the record for THIS
+// fault is composed, and that record is always appended to the (freshly
+// reopened) live file afterwards, so the newest record is never the one
+// dropped. Folding rotation into the resolver keeps that guard's population
+// exactly the loss routes it was written to enumerate.
 func lifecycleFaultRecordPath() string {
 	directory := filepath.Dir(lifecycleStorePath())
 	if directory == "" || directory == "." {
 		return ""
 	}
-	return filepath.Join(directory, lifecycleFaultRecordFile)
+	path := filepath.Join(directory, lifecycleFaultRecordFile)
+	boundLifecycleFaultRecord(path, lifecycleFaultRecordMaxBytes)
+	return path
+}
+
+// boundLifecycleFaultRecord rotates an over-large live record onto its single
+// bounded backup and is deliberately FAIL-SAFE: it never fails the caller, it
+// never returns an error, and it never touches the newest record.
+//
+// IT IS BEST-EFFORT BY DESIGN, BECAUSE MANY SHORT-LIVED HOOK PROCESSES APPEND
+// CONCURRENTLY AND THE RECORD SITS BESIDE THE CONTENDED STORE. The decision
+// adds NO lock and NO new failure mode to the hot path: it is one stat(2) on
+// the common (under-cap) route, and a single rename(2) on the rare over-cap
+// route. Two processes that choose to rotate at once are safe because rename is
+// atomic and its destination is replaced: the loser's rename fails with ENOENT
+// once the winner has moved the source, this returns without a word, and both
+// processes then append their own newest record to the live path. No path can
+// corrupt the record. A writer that had already opened the live inode across a
+// rotation appends into the file now named as the backup — retained, not
+// dropped — and only a second rotation racing that same stale descriptor can
+// outlive a copy, which is the rare, accepted cost of bounding without a lock.
+//
+// THE FAILURE CONTRACT IS UNCHANGED. If rotation cannot run — the record does
+// not exist yet, the directory is not writable, the rename loses a race — this
+// returns and the caller proceeds to open and append exactly as before, so the
+// existing arms of recordLifecycleFault still report a lost record on standard
+// error. This function swallows its own errors precisely because there is
+// nothing to report: a rotation that did not happen costs only the bound, never
+// the incoming record.
+func boundLifecycleFaultRecord(path string, maxBytes int64) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	// ONLY A REGULAR FILE IS ROTATED. A directory, a device or a symlink target
+	// that is not a regular file is not this record, and renaming it would move
+	// something the operator put there.
+	if !info.Mode().IsRegular() || info.Size() < maxBytes {
+		return
+	}
+	// The rename replaces any earlier backup, which is what keeps the bound at
+	// two files. Its error is ignored ON PURPOSE and not merely unchecked: a
+	// lost race or an unwritable directory leaves the record in place for the
+	// caller to append to, which is the whole contract, so there is nothing to
+	// report and no reason to fail the caller.
+	_ = os.Rename(path, path+lifecycleFaultRecordBackupSuffix)
 }
 
 // lifecycleStorePath resolves the store path THIS invocation would use, by the
