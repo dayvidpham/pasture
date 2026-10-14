@@ -323,7 +323,9 @@ func convertEpochState(state *protocol.EpochState) (bool, error) {
 // string values are declared identities in an audit payload. A key is listed
 // because an event contract declares it as a task or actor reference; the
 // payload's remaining keys are prose, opaque ids or free text and are left
-// byte-exact.
+// byte-exact. An opaque, equality-only key is deliberately absent: claimantId
+// (actor_namespace_claims.claimant_id) holds a bare namespace label, not an
+// identity, and must never be parsed or rewritten.
 var auditPayloadIdentityKeys = map[string]struct{}{
 	"taskid":       {},
 	"actorid":      {},
@@ -337,7 +339,6 @@ var auditPayloadIdentityKeys = map[string]struct{}{
 	"childtaskid":  {},
 	"parenttaskid": {},
 	"occupantid":   {},
-	"claimantid":   {},
 	"targetid":     {},
 	"sourceid":     {},
 }

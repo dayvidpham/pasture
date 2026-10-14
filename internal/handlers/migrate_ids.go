@@ -69,6 +69,7 @@ type migrateIDsReport struct {
 	EpochIDLowerBound   int            `json:"epoch_id_lower_bound,omitempty"`
 	NoScan              bool           `json:"no_scan,omitempty"`
 	Blockers            []string       `json:"blockers,omitempty"`
+	Preserved           []string       `json:"preserved,omitempty"`
 	BackupPath          string         `json:"backup_path,omitempty"`
 	BackupSHA256        string         `json:"backup_sha256,omitempty"`
 	CutoverAt           int64          `json:"cutover_at,omitempty"`
@@ -152,6 +153,7 @@ func runMigrateIDsDryRun(ctx context.Context, w io.Writer, dbPath, backupDir str
 		PendingCatchUpSteps: preview.PendingCatchUpSteps,
 		EpochIDLowerBound:   preview.EpochIDLowerBound,
 		Blockers:            preview.Blockers,
+		Preserved:           preview.Preserved,
 		BackupPath:          backupPreview(dbPath, backupDir),
 	}
 	if state.Outcome == idmigrate.OutcomeNormal {
@@ -476,6 +478,12 @@ func renderMigrateIDsText(report migrateIDsReport) string {
 			b = append(b, "blockers (conversion will refuse until these are drained):\n"...)
 			for _, blocker := range report.Blockers {
 				b = append(b, fmt.Sprintf("  - %s\n", blocker)...)
+			}
+		}
+		if len(report.Preserved) > 0 {
+			b = append(b, "preserved (opaque labels kept byte-exact, never converted):\n"...)
+			for _, col := range report.Preserved {
+				b = append(b, fmt.Sprintf("  - %s\n", col)...)
 			}
 		}
 		b = append(b, fmt.Sprintf("archive would be written to: %s\n", report.BackupPath)...)

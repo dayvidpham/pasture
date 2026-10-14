@@ -42,6 +42,12 @@ type Preview struct {
 	// Blockers names runtime-state tables that hold rows and would refuse the
 	// conversion.
 	Blockers []string
+	// Preserved names "table.column" pairs the conversion deliberately preserves
+	// byte-exact: opaque, equality-only labels that are outside the dependency's
+	// owned identity set (see preservedDependencyColumns). Reporting them keeps
+	// the dry run's plan and the real conversion in agreement — a column
+	// excluded from conversion is named as preserved, not silently dropped.
+	Preserved []string
 }
 
 // WouldChange reports whether conversion has any work to do on this store.
@@ -54,10 +60,13 @@ func (p Preview) WouldChange() bool {
 	return p.EpochProjectionRows > 0 || p.AuditPayloadRows > 0
 }
 
-// previewDependencyColumns mirrors the dependency's own closed set of
-// namespaced-identity columns. The dry run reports them so the operator sees the
+// previewDependencyColumns mirrors the dependency's own declared owned-identity
+// set (provenance internal/sqlite/id_conversion.go ownedIdentityColumns plus
+// ownedContextIdentityColumns). The dry run reports them so the operator sees the
 // FULL affected count: ConvertIDsInTx rewrites these, and the dry run must not
-// under-report by listing only pasture-owned tables.
+// under-report by listing only pasture-owned tables. A column belongs here only
+// if the dependency declares it an owned identity; an opaque, equality-only
+// label belongs in preservedDependencyColumns instead.
 var previewDependencyColumns = []struct{ table, column string }{
 	{"tasks", "id"}, {"tasks", "owner_id"}, {"agents", "id"},
 	{"agents_human", "agent_id"}, {"agents_ml", "agent_id"}, {"agents_software", "agent_id"},
@@ -65,11 +74,36 @@ var previewDependencyColumns = []struct{ table, column string }{
 	{"comments", "id"}, {"comments", "task_id"}, {"comments", "author_id"},
 	{"labels", "task_id"}, {"edges", "source_id"}, {"edges", "target_id"},
 	{"task_attributions", "task_id"}, {"task_attributions", "actor_id"},
-	{"actor_namespace_claims", "claimant_id"}, {"fixed_actor_manifest_entries", "actor_id"},
+	{"fixed_actor_manifest_entries", "actor_id"},
 	{"journal", "actor_id"}, {"journal_activity_creations", "activity_id"},
 	{"journal_authority_assignment_episodes", "task_id"}, {"journal_authority_assignment_episodes", "actor_id"},
 	{"journal_decisions", "task_id"}, {"journal_evidence", "task_id"}, {"journal_task_events", "task_id"},
 	{"governed_allocation_operations", "actor_id"},
+}
+
+// preservedDependencyColumns mirrors the dependency's declared OUT set
+// (provenance internal/sqlite/id_conversion.go preservedOpaqueColumns): opaque,
+// equality-only labels conversion preserves byte-exact and never parses. The dry
+// run names the ones present in the store as PRESERVED, so it agrees with the
+// conversion. actor_namespace_claims.claimant_id is the motivating case — the
+// contract's claimant example is a bare namespace ("pasture-system"), and the
+// dependency removed it from the owned set precisely because parsing it refused
+// every store a real writer produces. Keep this list in lockstep with the
+// dependency's preservedOpaqueColumns; a change on either side is a lockstep
+// change.
+var preservedDependencyColumns = []struct{ table, column string }{
+	{"actor_namespace_claims", "claimant_id"},
+	{"journal_operations", "operation_id"},
+	{"journal_operation_result_slots", "result_slot_id"},
+	{"journal_authorities", "operation_authority_id"},
+	{"journal_authority_assignment_episodes", "assignment_id"},
+	{"journal_authority_assignment_episodes", "predecessor_assignment_id"},
+	{"journal_authority_assignment_episodes", "parent_assignment_id"},
+	{"journal_authority_assignment_transitions", "assignment_id"},
+	{"governed_allocation_operations", "operation_id"},
+	{"governed_allocation_genesis", "operation_id"},
+	{"governed_composed_supplement_owners", "supplement_operation_id"},
+	{"governed_composed_supplement_owners", "governed_operation_id"},
 }
 
 // DryRun runs the read-only dry run. It never writes and never begins a
@@ -85,6 +119,11 @@ func preview(ctx context.Context, db *sql.DB, storePath string) (Preview, error)
 	}
 	out := Preview{Inspection: inspection, Columns: map[string]int{}}
 	if out.RecordedVersion, err = readRecordedVersion(ctx, db); err != nil {
+		return Preview{}, err
+	}
+	// Preserved columns are named whenever their table exists, for every verdict:
+	// the operator always sees which opaque labels conversion leaves byte-exact.
+	if out.Preserved, err = preservedColumnsPresent(ctx, db); err != nil {
 		return Preview{}, err
 	}
 	if target := audit.MaxKnownSchemaVersion - 1; out.RecordedVersion < target {
@@ -126,6 +165,24 @@ func preview(ctx context.Context, db *sql.DB, storePath string) (Preview, error)
 	}
 	out.Blockers = blockers
 	sort.Strings(out.Blockers)
+	return out, nil
+}
+
+// preservedColumnsPresent lists the dependency-preserved (opaque) columns whose
+// table exists in this store, as sorted "table.column" strings.
+func preservedColumnsPresent(ctx context.Context, q reader) ([]string, error) {
+	var out []string
+	for _, col := range preservedDependencyColumns {
+		exists, err := tableExistsReader(ctx, q, col.table)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			continue
+		}
+		out = append(out, col.table+"."+col.column)
+	}
+	sort.Strings(out)
 	return out, nil
 }
 
