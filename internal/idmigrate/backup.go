@@ -147,7 +147,7 @@ func verifyArchive(ctx context.Context, path string) (ArchiveMarker, error) {
 			Fix:      "1. Repair the reported foreign-key violation on the source store, then retry.\n2. Report the violation if the source passes its own checks.",
 		}
 	}
-	return ReadArchiveMarker(ctx, db)
+	return readArchiveMarker(ctx, db)
 }
 
 // uniqueBackupPath returns an archive path that does not exist yet. The name

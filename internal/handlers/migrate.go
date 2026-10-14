@@ -120,18 +120,15 @@ func Migrate(w io.Writer, in MigrateInput, format types.OutputFormat) (int, erro
 }
 
 // plainMigrateRefusal maps a non-NORMAL state verdict to the plain-migrate
-// refusal, which names the identity cutover as the way forward.
+// refusal, which names the identity cutover as the way forward. The refusing
+// verdicts come from the ONE shared mapping (idmigrate.OutcomeRefusal); only the
+// CUTOVER verdict gets the plain-migrate guidance, because a plain migrate must
+// not raise the schema floor on a store whose fence evidence is incomplete.
 func plainMigrateRefusal(state idmigrate.CutoverState) error {
-	switch state.Outcome {
-	case idmigrate.OutcomeRefusePopulated:
-		return idmigrate.RefusePopulatedRefusal(state.StorePath)
-	case idmigrate.OutcomeRefuseUnbackedMark:
-		return idmigrate.UnbackedMarkRefusal(state.StorePath)
-	case idmigrate.OutcomeNewerSchema:
-		return audit.NewerSchemaError(state.RecordedVersion, audit.MaxKnownSchemaVersion)
-	default:
-		return idmigrate.CutoverGuidanceRefusal(state.StorePath)
+	if refusal := idmigrate.OutcomeRefusal(state, false); refusal != nil {
+		return refusal
 	}
+	return idmigrate.CutoverGuidanceRefusal(state.StorePath)
 }
 
 // runMigrateDryRun opens the file, probes the version + plan, and prints the

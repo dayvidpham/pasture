@@ -83,8 +83,8 @@ const receiptTableDDL = `CREATE TABLE IF NOT EXISTS pasture_id_cutover (
 	cutover_at      INTEGER NOT NULL
 )`
 
-// EnsureReceiptTable creates the receipt table inside the caller's transaction.
-func EnsureReceiptTable(ctx context.Context, tx *sql.Tx) error {
+// ensureReceiptTable creates the receipt table inside the caller's transaction.
+func ensureReceiptTable(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, receiptTableDDL); err != nil {
 		return conversionError("Pasture couldn't create the cutover receipt record.", err.Error(), "The whole conversion transaction rolls back; the store keeps its retired identities.", "Confirm the store is writable and retry.", err)
 	}
@@ -119,7 +119,7 @@ func readReceipt(ctx context.Context, q ReceiptReader) (Receipt, bool, error) {
 // writeReceipt writes the singleton cutover record inside the caller's
 // transaction. It is written once, never overwritten.
 func writeReceipt(ctx context.Context, tx *sql.Tx, r Receipt) error {
-	if err := EnsureReceiptTable(ctx, tx); err != nil {
+	if err := ensureReceiptTable(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,
@@ -276,9 +276,9 @@ func (s CutoverState) EvidenceVerdict() EvidenceVerdict {
 	}
 }
 
-// EvaluateEvidenceInTx evaluates the P3a verdict inside the caller's conversion
+// evaluateEvidenceInTx evaluates the P3a verdict inside the caller's conversion
 // transaction. It is the same evidence read as the P0 state machine.
-func EvaluateEvidenceInTx(ctx context.Context, tx *sql.Tx, storePath string) (CutoverState, error) {
+func evaluateEvidenceInTx(ctx context.Context, tx *sql.Tx, storePath string) (CutoverState, error) {
 	return evaluateCutover(ctx, tx, storePath, true)
 }
 
@@ -329,18 +329,17 @@ func readRecordedVersion(ctx context.Context, q ReceiptReader) (int, error) {
 // archive. It is the observed fact the scoped P3a refusal states.
 type ArchiveMarker struct {
 	Present bool
-	Format  string
 }
 
-// ReadArchiveMarker reads the provenance_id_format singleton from an already
+// readArchiveMarker reads the provenance_id_format singleton from an already
 // open reader on the staged archive. It is the same fact the guard's inspection
 // reads; it is present/absent, and it is never inferred from timing.
-func ReadArchiveMarker(ctx context.Context, q ReceiptReader) (ArchiveMarker, error) {
+func readArchiveMarker(ctx context.Context, q ReceiptReader) (ArchiveMarker, error) {
 	inspection, err := provenance.InspectIDFormat(ctx, q)
 	if err != nil {
 		return ArchiveMarker{}, formatInspectionError("the staged archive", err)
 	}
-	return ArchiveMarker{Present: inspection.Format == provenance.IDFormatSlash, Format: string(inspection.Format)}, nil
+	return ArchiveMarker{Present: inspection.Format == provenance.IDFormatSlash}, nil
 }
 
 func formatInspectionError(storePath string, cause error) error {

@@ -34,7 +34,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/idmigrate"
@@ -130,12 +129,9 @@ func runMigrateIDsDryRun(ctx context.Context, w io.Writer, dbPath, backupDir str
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
-	switch state.Outcome {
-	case idmigrate.OutcomeRefuseUnbackedMark:
-		se := idmigrate.UnbackedMarkRefusal(dbPath)
-		return pasterrors.ExitCode(se), se
-	case idmigrate.OutcomeNewerSchema:
-		se := audit.NewerSchemaError(state.RecordedVersion, audit.MaxKnownSchemaVersion)
+	// The dry run converts both CUTOVER and REFUSE-POPULATED states, so it asks
+	// the shared mapping to treat a populated markerless store as convertible.
+	if se := idmigrate.OutcomeRefusal(state, true); se != nil {
 		return pasterrors.ExitCode(se), se
 	}
 
@@ -201,8 +197,7 @@ func runMigrateIDsApply(ctx context.Context, w io.Writer, dbPath, backupDir stri
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
-	switch state.Outcome {
-	case idmigrate.OutcomeNormal:
+	if state.Outcome == idmigrate.OutcomeNormal {
 		return emitMigrateIDsReport(w, format, migrateIDsReport{
 			StorePath:       dbPath,
 			Format:          string(state.Format),
@@ -213,33 +208,28 @@ func runMigrateIDsApply(ctx context.Context, w io.Writer, dbPath, backupDir stri
 			CutoverAt:       state.Receipt.CutoverAt,
 			RecordedVersion: state.RecordedVersion,
 		})
-	case idmigrate.OutcomeRefuseUnbackedMark:
-		se := idmigrate.UnbackedMarkRefusal(dbPath)
-		return pasterrors.ExitCode(se), se
-	case idmigrate.OutcomeNewerSchema:
-		se := audit.NewerSchemaError(state.RecordedVersion, audit.MaxKnownSchemaVersion)
+	}
+	// The command CONVERTS a populated markerless store, so it asks the shared
+	// mapping to treat REFUSE-POPULATED as convertible; the only refusals left
+	// are the unbacked mark and the newer schema.
+	if se := idmigrate.OutcomeRefusal(state, true); se != nil {
 		return pasterrors.ExitCode(se), se
 	}
 	// CUTOVER or REFUSE-POPULATED: the command converts both.
 
-	// P1: archive.
-	archive, err := idmigrate.ArchiveStore(ctx, dbPath, backupDir, time.Now())
+	// P1: archive, then P2: audit catch-up with the deferred ceiling. Both come
+	// from the shared pipeline core (idmigrate.RunCatchUp), so the command and
+	// the first-open auto cutover cannot diverge on the order or the count.
+	catchUp, err := idmigrate.RunCatchUp(ctx, idmigrate.CatchUpOptions{
+		StorePath: dbPath,
+		BackupDir: backupDir,
+		Now:       time.Now,
+	})
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
-
-	// P2: audit catch-up with the deferred ceiling.
-	beforeVersion := idmigrate.RecordedSchemaVersionPath(dbPath)
-	trail, err := audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithDeferredCeiling(audit.MaxKnownSchemaVersion-1))
-	if err != nil {
+	if err := catchUp.Trail.Close(); err != nil {
 		return pasterrors.ExitCode(err), err
-	}
-	if err := trail.Close(); err != nil {
-		return pasterrors.ExitCode(err), err
-	}
-	applied := idmigrate.RecordedSchemaVersionPath(dbPath) - beforeVersion
-	if applied < 0 {
-		applied = 0
 	}
 
 	// The count baseline is captured AFTER catch-up and BEFORE the conversion
@@ -257,8 +247,8 @@ func runMigrateIDsApply(ctx context.Context, w io.Writer, dbPath, backupDir stri
 	}
 	report, convErr := idmigrate.Convert(ctx, db, idmigrate.ConvertOptions{
 		StorePath:           dbPath,
-		Archive:             archive,
-		AppliedCatchUpSteps: applied,
+		Archive:             catchUp.Archive,
+		AppliedCatchUpSteps: catchUp.AppliedCatchUpSteps,
 		Now:                 time.Now,
 	})
 	closeErr := db.Close()
@@ -280,7 +270,7 @@ func runMigrateIDsApply(ctx context.Context, w io.Writer, dbPath, backupDir stri
 
 	out := migrateIDsReport{
 		StorePath:          dbPath,
-		Format:             "namespace-slash-uuid.v1",
+		Format:             string(provenance.IDFormatSlash),
 		AlreadyCurrent:     report.AlreadyCurrent,
 		BackupPath:         report.ArchivePath,
 		BackupSHA256:       report.ArchiveSHA256,

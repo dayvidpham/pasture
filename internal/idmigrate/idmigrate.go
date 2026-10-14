@@ -196,7 +196,7 @@ func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now fun
 	// P3a: the under-lock EVIDENCE verdict. This is the evidence subset only
 	// (marker, receipt, marker_format match, recorded version vs floor, version
 	// vs MaxKnown). The populated column is P0 routing and is NOT consulted.
-	state, err := EvaluateEvidenceInTx(ctx, tx, opts.StorePath)
+	state, err := evaluateEvidenceInTx(ctx, tx, opts.StorePath)
 	if err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now fun
 		report.AlreadyCurrent = true
 		return nil
 	case EvidenceRefuseUnbackedMark:
-		return ScopedP3aRefusal(opts.StorePath, !opts.Archive.Skipped, opts.Archive.Marker, opts.Archive.Path, opts.AppliedCatchUpSteps)
+		return scopedP3aRefusal(opts.StorePath, !opts.Archive.Skipped, opts.Archive.Marker, opts.Archive.Path, opts.AppliedCatchUpSteps)
 	case EvidenceNewerSchema:
 		return audit.NewerSchemaError(state.RecordedVersion, audit.MaxKnownSchemaVersion)
 	}

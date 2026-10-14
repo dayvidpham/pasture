@@ -377,31 +377,25 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 // activation ran before the trail; that order could not admit a legacy store
 // because the activation guard refused the store the trail had just populated.
 func runAutoCutover(ctx context.Context, dbPath string, poolSize int, cfg openTaskTrackerOptions) (*audit.SqliteAuditTrail, *sql.DB, error) {
-	archive, err := idmigrate.ArchiveStore(ctx, dbPath, "", time.Now())
+	catchUp, err := idmigrate.RunCatchUp(ctx, idmigrate.CatchUpOptions{
+		StorePath:      dbPath,
+		Now:            time.Now,
+		TimeoutProfile: cfg.timeouts,
+	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, wrapOpenError(dbPath, "archive/catch-up", err)
 	}
 
-	beforeVersion := idmigrate.RecordedSchemaVersionPath(dbPath)
-	trail, err := audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath,
-		audit.WithTimeoutProfile(cfg.timeouts),
-		audit.WithDeferredCeiling(audit.MaxKnownSchemaVersion-1))
-	if err != nil {
-		return nil, nil, wrapOpenError(dbPath, "audit catch-up", err)
-	}
+	trail := catchUp.Trail
 	auditDB, err := openAuditHandleContext(ctx, dbPath, poolSize, cfg.timeouts)
 	if err != nil {
 		_ = trail.Close()
 		return nil, nil, err
 	}
-	applied := idmigrate.RecordedSchemaVersionPath(dbPath) - beforeVersion
-	if applied < 0 {
-		applied = 0
-	}
 	if _, err := idmigrate.Convert(ctx, auditDB, idmigrate.ConvertOptions{
 		StorePath:           dbPath,
-		Archive:             archive,
-		AppliedCatchUpSteps: applied,
+		Archive:             catchUp.Archive,
+		AppliedCatchUpSteps: catchUp.AppliedCatchUpSteps,
 		Now:                 time.Now,
 	}); err != nil {
 		_ = auditDB.Close()

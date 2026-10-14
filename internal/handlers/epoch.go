@@ -12,7 +12,7 @@ import (
 )
 
 // validateEpochID enforces that an --epoch-id parses as a Provenance TaskId
-// ("<namespace>--<uuid>"). A free-string epoch id is rejected so an epoch never
+// ("<namespace>/<uuid>"). A free-string epoch id is rejected so an epoch never
 // runs against an id that cannot align the task, audit, and durable subsystems
 // (they all key on the same id).
 //

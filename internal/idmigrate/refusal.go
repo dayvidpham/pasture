@@ -3,6 +3,7 @@ package idmigrate
 import (
 	"fmt"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 )
 
@@ -11,6 +12,31 @@ import (
 // and the command (internal/handlers/migrate_ids.go) render these verbatim;
 // neither carries a second literal, so the populated and unbacked-mark refusals
 // can never drift apart between the two frontends.
+
+// OutcomeRefusal is the ONE Outcome->refusal mapping every frontend consumes —
+// the normal-open guard, the plain-migrate precheck and both identity-cutover
+// command paths — so they can never disagree about which refusal a verdict
+// earns. populatedConvertible records whether the caller CONVERTS a populated
+// markerless store (REFUSE-POPULATED): the conversion command does, so it passes
+// true and the verdict falls through to the pipeline; the guard and the plain
+// migrate precheck do not, so they pass false and refuse it. Every other refusal
+// text is shared unconditionally, and the non-refusing verdicts (Normal,
+// Cutover) return nil.
+func OutcomeRefusal(state CutoverState, populatedConvertible bool) error {
+	switch state.Outcome {
+	case OutcomeRefusePopulated:
+		if populatedConvertible {
+			return nil
+		}
+		return RefusePopulatedRefusal(state.StorePath)
+	case OutcomeRefuseUnbackedMark:
+		return UnbackedMarkRefusal(state.StorePath)
+	case OutcomeNewerSchema:
+		return audit.NewerSchemaError(state.RecordedVersion, audit.MaxKnownSchemaVersion)
+	default:
+		return nil
+	}
+}
 
 // RefusePopulatedRefusal is the storage refusal a populated, markerless store
 // earns on a normal open. It names the path, the converting command, the
@@ -66,13 +92,13 @@ func unbackedMarkOptionsBlock() string {
 		"  (c) If you do not need its history: move it aside and let pasture create a fresh store, which is cut over on first open.\n"
 }
 
-// ScopedP3aRefusal is the REFUSE-UNBACKED-MARK refusal that fires inside the
+// scopedP3aRefusal is the REFUSE-UNBACKED-MARK refusal that fires inside the
 // cutover, after P1's archive and P2's committed catch-up. It names this run's
 // archive and the applied catch-up, and it states the archive's OBSERVED marker
 // fact: a markerless archive is a usable pre-marking copy, a marked archive
 // post-dates the mark. archivePresent is false when this run made no archive
 // (the store did not exist at P1's own check).
-func ScopedP3aRefusal(storePath string, archivePresent bool, archive ArchiveMarker, archivePath string, appliedCatchUpSteps int) error {
+func scopedP3aRefusal(storePath string, archivePresent bool, archive ArchiveMarker, archivePath string, appliedCatchUpSteps int) error {
 	branch := "This run made no archive: P1 skipped it because the store path did not exist at P1's own check. A store created at that path after that check is neither archived nor covered by this run, and the offered paths are discard-and-recreate, or export out-of-band."
 	if archivePresent {
 		if archive.Present {
@@ -87,7 +113,7 @@ func ScopedP3aRefusal(storePath string, archivePresent bool, archive ArchiveMark
 		Why: "This refusal fired inside the cutover: this run already archived the store at P1, and its audit catch-up " +
 			"(P2) is committed. A concurrent writer or an out-of-band mark produced a marker-bearing state this " +
 			"pipeline will not convert around.",
-		Where: "Converting the store identity format under the fence (internal/idmigrate/refusal.go in idmigrate.ScopedP3aRefusal).",
+		Where: "Converting the store identity format under the fence (internal/idmigrate/refusal.go in idmigrate.scopedP3aRefusal).",
 		Impact: fmt.Sprintf("The conversion transaction wrote nothing and was rolled back; the committed catch-up remains "+
 			"(%d step(s) applied this run; zero when the store was already current). The store keeps its fence state "+
 			"and the marker is unchanged.", appliedCatchUpSteps),
@@ -112,5 +138,35 @@ func CutoverGuidanceRefusal(storePath string) error {
 			"     pasture migrate ids --dry-run --db %q\n"+
 			"     pasture migrate ids --db %q\n"+
 			"A normal pasture command also cuts the store over on first open.", storePath, storePath),
+	}
+}
+
+// IsRetiredIdentity reports whether raw is a recognizable retired
+// "<namespace>--<uuid>" identity: a final two-dash separator with a non-empty
+// namespace before it and a canonical 36-character hyphenated UUID after it.
+// Arbitrary text, Git SHAs and session names are not retired identities. It is
+// the read-path detector: after the cutover the retired form never resolves, so
+// a command that accepts a free string must refuse a retired identity by name
+// rather than treat it as an unknown free context and return an empty result.
+func IsRetiredIdentity(raw string) bool { return looksRetired(raw) }
+
+// RetiredIdentityRefusal is the validation refusal a read command returns when
+// its argument is a recognizable retired two-dash identity. It names the slash
+// form of the same identity so the caller can retry with the resolved value.
+func RetiredIdentityRefusal(raw string) error {
+	fix := "Use the slash form of the same identity."
+	if converted, err := convertRetiredIdentity(raw); err == nil {
+		fix = fmt.Sprintf("Use the slash form of the same identity:\n     %s", converted)
+	}
+	return &pasterrors.StructuredError{
+		Category: pasterrors.CategoryValidation,
+		What:     fmt.Sprintf("%q is a retired two-dash identity.", raw),
+		Why: "This build reads only the slash form \"<namespace>/<uuid>\". The value joins its namespace and " +
+			"UUID with the retired \"--\" separator, so no task, event or context can resolve it. Returning an " +
+			"empty result would hide the mismatch instead of reporting it.",
+		Where:  "Resolving a task or context argument (internal/idmigrate/refusal.go in idmigrate.RetiredIdentityRefusal).",
+		Impact: "Nothing was read: the command stopped before it queried the store.",
+		Fix: fix + "\nIf the store has not been cut over to the slash format yet, run `pasture migrate ids` " +
+			"(or open a normal pasture command) first.",
 	}
 }

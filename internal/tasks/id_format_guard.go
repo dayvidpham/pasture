@@ -25,37 +25,13 @@
 package tasks
 
 import (
-	"context"
-
-	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/idmigrate"
 )
 
-// refuseIncompleteFence inspects dbPath read-only and returns the storage
-// refusal when the store's fence evidence is incomplete (a populated markerless
-// store, or a marker/receipt inconsistency). A store that does not exist yet, an
-// empty unmarked store, and a store already carrying the complete cutover
-// evidence are allowed through.
-func refuseIncompleteFence(ctx context.Context, dbPath string) error {
-	state, err := idmigrate.InspectOpenState(ctx, dbPath)
-	if err != nil {
-		return err
-	}
-	return refuseIncompleteFenceOnState(state)
-}
-
 // refuseIncompleteFenceOnState maps a state-machine verdict to the guard's
-// refusal. It is the testable core: only the two REFUSE outcomes and the
-// newer-schema outcome produce an error.
+// refusal. It is the testable core: it renders the ONE shared Outcome->refusal
+// mapping (idmigrate.OutcomeRefusal), so the guard and both command frontends
+// can never disagree about a store's verdict.
 func refuseIncompleteFenceOnState(state idmigrate.CutoverState) error {
-	switch state.Outcome {
-	case idmigrate.OutcomeRefusePopulated:
-		return idmigrate.RefusePopulatedRefusal(state.StorePath)
-	case idmigrate.OutcomeRefuseUnbackedMark:
-		return idmigrate.UnbackedMarkRefusal(state.StorePath)
-	case idmigrate.OutcomeNewerSchema:
-		return audit.NewerSchemaError(state.RecordedVersion, audit.MaxKnownSchemaVersion)
-	default:
-		return nil
-	}
+	return idmigrate.OutcomeRefusal(state, false)
 }

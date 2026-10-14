@@ -138,7 +138,7 @@ func openController(t *testing.T, epochId string, seedPhases []protocol.PhaseId)
 // TestHandler_EpochStart_LaunchesControlWorkflow verifies that EpochStart
 // invokes RunWorkflow so the epoch's control workflow becomes addressable.
 // This proves the spec invariant: "epoch start → RunWorkflow".
-// The epoch id must have the "<namespace>--<uuid>" shape required by the
+// The epoch id must have the "<namespace>/<uuid>" shape required by the
 // validator (provenance.ParseTaskID).
 func TestHandler_EpochStart_LaunchesControlWorkflow(t *testing.T) {
 	t.Parallel()
@@ -323,7 +323,7 @@ func TestHandler_EpochStart_RejectsEmptyEpochId(t *testing.T) {
 }
 
 // TestHandler_EpochStart_RejectsMalformedEpochId verifies that an epoch id
-// without the "<namespace>--<uuid>" shape is rejected with exit 1.
+// without the "<namespace>/<uuid>" shape is rejected with exit 1.
 func TestHandler_EpochStart_RejectsMalformedEpochId(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
@@ -837,7 +837,7 @@ func TestHandler_EpochTerminate_RejectsMalformedEpochId(t *testing.T) {
 // workflow_status row, so Send to those ids returns nil — the error only fires
 // for ids that were never registered in workflow_status at all.
 //
-// Use only never-started ids in these tests (e.g. "demo--ffffffff-..."). Do
+// Use only never-started ids in these tests (e.g. "demo/ffffffff-..."). Do
 // not reuse ids from tests that started and then cancelled a workflow; the
 // cancelled workflow's status row still exists and Send would return nil.
 //

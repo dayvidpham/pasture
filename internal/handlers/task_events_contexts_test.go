@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -366,5 +367,62 @@ func TestParseFlags_RejectsUnknownValues(t *testing.T) {
 	}
 	if _, err := handlers.ParseSinceFlag(""); err == nil {
 		t.Fatal("ParseSinceFlag accepted an empty timestamp")
+	}
+}
+
+// retiredIdentity is a recognizable retired "<namespace>--<uuid>" value; its
+// slash form is what a read command must name in the refusal.
+const (
+	retiredIdentity      = "file://project--01968a3c-9d4f-7c8a-bc12-feedfacecafe"
+	retiredIdentitySlash = "file://project/01968a3c-9d4f-7c8a-bc12-feedfacecafe"
+)
+
+// requireRetiredRefusal asserts code/err is the validation refusal for a retired
+// two-dash identity and that it names the slash form of the same value.
+func requireRetiredRefusal(t *testing.T, code int, err error) {
+	t.Helper()
+	require.Error(t, err)
+	require.Equal(t, 1, code)
+	var se *pasterrors.StructuredError
+	require.ErrorAs(t, err, &se)
+	require.Equal(t, pasterrors.CategoryValidation, se.Category)
+	require.Contains(t, se.What, "retired two-dash identity")
+	require.Contains(t, se.Fix, retiredIdentitySlash)
+}
+
+// TestTaskTimelineRefusesARetiredIdentity pins that the timeline read path
+// reports a retired two-dash task id by name instead of returning a silent empty
+// timeline.
+func TestTaskTimelineRefusesARetiredIdentity(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	code, err := handlers.TaskTimeline(&out, handlers.TaskTimelineInput{
+		DBPath:    filepath.Join(t.TempDir(), "pasture.db"),
+		TaskIDStr: retiredIdentity,
+	}, types.OutputJSON)
+	requireRetiredRefusal(t, code, err)
+	require.Empty(t, out.String())
+}
+
+// TestTaskEventsRefusesARetiredIdentity pins the same for the events verb's
+// epoch-id and context-id filters.
+func TestTaskEventsRefusesARetiredIdentity(t *testing.T) {
+	t.Parallel()
+	kind := protocol.ContextEpoch
+	cases := []struct {
+		name string
+		in   handlers.TaskEventsInput
+	}{
+		{"epoch id", handlers.TaskEventsInput{EpochId: retiredIdentity}},
+		{"context id", handlers.TaskEventsInput{ContextKind: &kind, ContextId: retiredIdentity}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.in.DBPath = filepath.Join(t.TempDir(), "pasture.db")
+			var out bytes.Buffer
+			code, err := handlers.TaskEvents(&out, tc.in, types.OutputJSON)
+			requireRetiredRefusal(t, code, err)
+			require.Empty(t, out.String())
+		})
 	}
 }
