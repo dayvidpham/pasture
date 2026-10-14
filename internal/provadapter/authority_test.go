@@ -16,10 +16,10 @@ import (
 // different kinds, slots, tasks, or assignment episodes never collapse to one
 // OperationAuthorityID. Each distinct logical authority must map to a distinct key.
 func TestAuthorityID_NonAliasing(t *testing.T) {
-	agent := mustAgentRef(t, "aura-plugins--"+uuid.Must(uuid.NewV7()).String())
+	agent := mustAgentRef(t, "aura-plugins/"+uuid.Must(uuid.NewV7()).String())
 
-	taskA := mustTaskRef(t, "aura-plugins--"+uuid.Must(uuid.NewV7()).String())
-	taskB := mustTaskRef(t, "aura-plugins--"+uuid.Must(uuid.NewV7()).String())
+	taskA := mustTaskRef(t, "aura-plugins/"+uuid.Must(uuid.NewV7()).String())
+	taskB := mustTaskRef(t, "aura-plugins/"+uuid.Must(uuid.NewV7()).String())
 	slotOwner := mustRoleID(t, "owner-responsibility")
 	slotReview := mustRoleID(t, "review-responsibility")
 	asgP := mustAssignmentRef(t, "assignment-predecessor")
@@ -69,7 +69,7 @@ func TestAuthorityID_NonAliasing(t *testing.T) {
 // injective: values whose naive concatenation would collide produce distinct keys.
 func TestAuthorityID_NoDelimiterAliasing(t *testing.T) {
 	slot := mustRoleID(t, "s")
-	task := mustTaskRef(t, "aura-plugins--"+uuid.Must(uuid.NewV7()).String())
+	task := mustTaskRef(t, "aura-plugins/"+uuid.Must(uuid.NewV7()).String())
 
 	// "a:1" + "b" vs "a" + "1:b" style boundary ambiguity.
 	x, err := AssignmentAuthorityID(mustAssignmentRef(t, "a:1"), slot, task)
@@ -89,7 +89,7 @@ func TestAuthorityID_RejectsInvalid(t *testing.T) {
 	if _, err := BootstrapAuthorityID(portable.AgentRef{}); err == nil {
 		t.Fatalf("expected zero AgentRef rejection")
 	}
-	task := mustTaskRef(t, "aura-plugins--"+uuid.Must(uuid.NewV7()).String())
+	task := mustTaskRef(t, "aura-plugins/"+uuid.Must(uuid.NewV7()).String())
 	if _, err := AssignmentAuthorityID(portable.AssignmentRef{}, mustRoleID(t, "s"), task); err == nil {
 		t.Fatalf("expected zero AssignmentRef rejection")
 	}

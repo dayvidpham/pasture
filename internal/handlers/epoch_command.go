@@ -830,7 +830,7 @@ func parseEpochCommandEpoch(command, value string) (tasks.EpochRootID, error) {
 func parseEpochCommandTask(command, field, value string) (provenance.TaskID, error) {
 	id, err := provenance.ParseTaskID(value)
 	if err != nil || id.String() != value {
-		return provenance.TaskID{}, epochCommandFieldError(command, field, value, "supply the canonical namespace--UUID task identity", err)
+		return provenance.TaskID{}, epochCommandFieldError(command, field, value, "supply the canonical namespace/UUID task identity", err)
 	}
 	return id, nil
 }
@@ -838,7 +838,7 @@ func parseEpochCommandTask(command, field, value string) (provenance.TaskID, err
 func parseEpochCommandActor(command, value string) (provenance.ActorID, error) {
 	id, err := provenance.ParseActorID(value)
 	if err != nil || id.String() != value {
-		return provenance.ActorID{}, epochCommandFieldError(command, "actor", value, "supply the canonical namespace--UUID registered actor identity", err)
+		return provenance.ActorID{}, epochCommandFieldError(command, "actor", value, "supply the canonical namespace/UUID registered actor identity", err)
 	}
 	return id, nil
 }

@@ -112,7 +112,7 @@ func TestStructuredError_Report_HeaderDoesNotDuplicateProblem(t *testing.T) {
 		What:     `The task ID "bad-id-format" isn't in the expected format.`,
 		Why:      "It's missing the required separator.",
 		Impact:   "We can't look up the task.",
-		Fix:      "Pass an ID that includes a '--' separator.",
+		Fix:      "Pass an ID that includes a '/' separator.",
 	}
 
 	var buf bytes.Buffer
@@ -307,7 +307,7 @@ func TestStructuredError_Report_LabelsAreVerticallyAligned(t *testing.T) {
 	se := &errors.StructuredError{
 		Category: errors.CategoryValidation,
 		What:     "The ID you provided is not valid.",
-		Why:      "It is missing the required separator.\nWe expect IDs of the form \"project--uuid\".",
+		Why:      "It is missing the required separator.\nWe expect IDs of the form \"project/uuid\".",
 		Impact:   "The epoch can't be started.",
 		Fix:      "1. Generate a fresh ID:\n     pasture task create REQUEST --type=feature \"<title>\"",
 	}

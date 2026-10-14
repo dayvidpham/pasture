@@ -2564,3 +2564,18 @@ No lifecycle response or registration surface changed. The preceding digest
 identifies the initial recovery revision; neither revision participated in the
 historical captures above. All prior fixture bytes, sidecars, historical digests
 and user acceptance remain unchanged. No new live verification is claimed.
+
+### Identity-format slash cutover — 2026-10-14
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`71b6a0ff0796a075cedcd702528064048d60403433d0c4d4306e6e813c00032a`.
+This later generated revision replaces the retired two-dash actor spelling in
+the static recovery prose with the slash form (`pasture-system/<uuid>`), so the
+recovery text no longer authors the retired identity format. Lifecycle
+transport, activation, version guards, decision handling and the injection
+contract are unchanged; no runtime task query, file read or cached task state
+is added. The generated plugin and embedded hook asset still have identical
+bytes. The preceding digest identifies the prior recovery revision; neither
+revision participated in the historical captures above, and no capture payload,
+capture kit, fixture identity, activation state or acceptance record changes.
+No new live session, capture or host capability is claimed.

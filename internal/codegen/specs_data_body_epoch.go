@@ -155,8 +155,8 @@ pasture task dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"   # EL
 #     elicit: "${ELICIT_ID_URI}"
 
 # After Phase 5 (UAT) and Phase 6 (ratify), update URD
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: {{summary}}"
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as {{summary}}"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: {{summary}}"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as {{summary}}"
 ` + "```" + ``,
 		},
 		{
@@ -257,7 +257,7 @@ pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-s
 ` + "```" + `bash
 # Correct: Add ratify label
 pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All reviewers ACCEPT"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All reviewers ACCEPT"
 
 # Wrong: Don't close
 # pasture task close "${PROPOSAL_ID_URI}"  # NEVER DO THIS

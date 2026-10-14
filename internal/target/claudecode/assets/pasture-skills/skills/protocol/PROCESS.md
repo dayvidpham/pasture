@@ -24,7 +24,7 @@ Use the same store for every step; a failing read is not an empty work queue.
 by the handoff, never legacy short IDs. Frontmatter references also use full
 URIs. Select `AUTHOR` from `pasture task agents list`; it must already be
 registered. Automation may use the registered
-`pasture-system--00000000-0000-0000-0000-000000000000` actor. Never invent an
+`pasture-system/00000000-0000-0000-0000-000000000000` actor. Never invent an
 author or attribute a user's quotation to an unregistered identity.
 
 Every create uses a positional title and JSON `.id` capture, followed by a

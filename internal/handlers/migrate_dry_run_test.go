@@ -98,7 +98,7 @@ func TestMigrateDryRunLeavesAVersionEightFileUnchanged(t *testing.T) {
 	require.Contains(t, printed, "an older pasture binary will then refuse this database for every command until it is upgraded",
 		"the plan must name the consequence of the new floor, because the migrator runs on every open "+
 			"and the operator is not shown this output before the upgrade happens:\n%s", printed)
-	require.Contains(t, printed, "(v8 -> v9)", "the plan must span v8 to v9:\n%s", printed)
+	require.Contains(t, printed, "(v8 -> v10)", "the plan must span v8 to v10:\n%s", printed)
 	require.Contains(t, printed, "Dry run:", "the output must be marked as a dry run:\n%s", printed)
 
 	require.Equal(t, before, sha256Of(t, dbPath), "a dry run must not write a single byte to the file")
@@ -145,9 +145,10 @@ func TestMigrateDryRunOnAVersionEightFileLeavesTheRetiredRelationsInPlace(t *tes
 }
 
 // TestMigrateApplyUpgradesAVersionEightFile is the apply half, through the
-// handler the CLI delegates to. The first run reports v8 → v9, the second
-// reports v9 → v9 because an up-to-date file is a no-op, and the retired
-// relations are gone after the first.
+// handler the CLI delegates to. The first run reports v8 → v10 (the v8 → v9
+// assignment-index removal and the v9 → v10 identity-format ceiling in one
+// open), the second reports v10 → v10 because an up-to-date file is a no-op,
+// and the retired relations are gone after the first.
 func TestMigrateApplyUpgradesAVersionEightFile(t *testing.T) {
 	t.Parallel()
 	dbPath := makeVersionEightFile(t)
@@ -156,13 +157,13 @@ func TestMigrateApplyUpgradesAVersionEightFile(t *testing.T) {
 	code, err := handlers.Migrate(&first, handlers.MigrateInput{DBPath: dbPath}, types.OutputText)
 	require.NoError(t, err)
 	require.Equal(t, 0, code)
-	require.Equal(t, "migrated "+dbPath+" from v8 to v9", strings.TrimSpace(first.String()))
+	require.Equal(t, "migrated "+dbPath+" from v8 to v10", strings.TrimSpace(first.String()))
 
 	var second bytes.Buffer
 	code, err = handlers.Migrate(&second, handlers.MigrateInput{DBPath: dbPath}, types.OutputText)
 	require.NoError(t, err)
 	require.Equal(t, 0, code)
-	require.Equal(t, "migrated "+dbPath+" from v9 to v9", strings.TrimSpace(second.String()),
+	require.Equal(t, "migrated "+dbPath+" from v10 to v10", strings.TrimSpace(second.String()),
 		"a second run on an up-to-date file is a no-op that reports the same version twice")
 
 	db, err := sql.Open("sqlite", dbPath)

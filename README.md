@@ -82,7 +82,7 @@ In another terminal, use the CLI against the same database:
 ```bash
 $ pasture --db "$PASTURE_DB_PATH" task create "Demo DBOS epoch" --type task --priority high --phase request --format json
 {
-  "id": "https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392",
+  "id": "https://github.com/dayvidpham/pasture/019ebe5f-8047-7f26-b00a-89a1ce877392",
   "title": "Demo DBOS epoch",
   "status": "open",
   "priority": "high",
@@ -92,17 +92,17 @@ $ pasture --db "$PASTURE_DB_PATH" task create "Demo DBOS epoch" --type task --pr
   "updatedAt": "2026-06-13T00:26:30Z"
 }
 
-$ pasture --db "$PASTURE_DB_PATH" epoch start --epoch-id https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392
+$ pasture --db "$PASTURE_DB_PATH" epoch start --epoch-id https://github.com/dayvidpham/pasture/019ebe5f-8047-7f26-b00a-89a1ce877392
 2026/06/12 17:26:35 INFO Initializing DBOS context app_name=dbos-client dbos_version=v0.16.0
 2026/06/12 17:26:35 INFO Using custom SQLite system database handle
-Started epoch: workflow_id=https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392
+Started epoch: workflow_id=https://github.com/dayvidpham/pasture/019ebe5f-8047-7f26-b00a-89a1ce877392
 
-$ pasture --db "$PASTURE_DB_PATH" phase advance --epoch-id https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392 --to elicit --triggered-by worker --condition "request classified"
+$ pasture --db "$PASTURE_DB_PATH" phase advance --epoch-id https://github.com/dayvidpham/pasture/019ebe5f-8047-7f26-b00a-89a1ce877392 --to elicit --triggered-by worker --condition "request classified"
 2026/06/12 17:26:37 INFO Initializing DBOS context app_name=dbos-client dbos_version=v0.16.0
 2026/06/12 17:26:37 INFO Using custom SQLite system database handle
 Signal delivered successfully
 
-$ pasture --db "$PASTURE_DB_PATH" query current --epoch-id https://github.com/dayvidpham/pasture--019ebe5f-8047-7f26-b00a-89a1ce877392
+$ pasture --db "$PASTURE_DB_PATH" query current --epoch-id https://github.com/dayvidpham/pasture/019ebe5f-8047-7f26-b00a-89a1ce877392
 Phase: elicit
 Role:  user
 ```

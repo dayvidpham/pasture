@@ -69,7 +69,7 @@ pasture task comments "${PROPOSAL_ID_URI}"
 					Content: `Do NOT create a new task — add label to the existing proposal:
 ` + "```" + `bash
 pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
 ` + "```" + ``,
 				},
 				{
@@ -77,14 +77,14 @@ pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000
 					Title: "Step 4: Mark all previous proposals as superseded",
 					Content: `` + "```" + `bash
 pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
 ` + "```" + ``,
 				},
 				{
 					Id:    "arch-ratify-step5-urd",
 					Title: "Step 5: Update URD with ratification",
 					Content: `` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed. Ratified proposal: ${RATIFIED_PROPOSAL_ID_URI}"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed. Ratified proposal: ${RATIFIED_PROPOSAL_ID_URI}"
 ` + "```" + ``,
 				},
 			},

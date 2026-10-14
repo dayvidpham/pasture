@@ -170,7 +170,7 @@ NOT: A single file or horizontal layer (e.g., 'all types' or 'all tests'). YES: 
 - [ ] Production code path verified end-to-end via code inspection
 
 **slice-closure gates:**
-- [ ] Supervisor notified via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close)
+- [ ] Supervisor notified via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close)
 - [ ] All completion-gate items passed
 - [ ] Can only close on a review wave, not a worker wave
 - [ ] Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings
@@ -182,8 +182,8 @@ Agents coordinate through **beads** tasks and comments:
 | Action | Command |
 |--------|---------|
 | List blocked | `pasture task blocked` |
-| Report completion without closing | `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."` |
-| Add progress note | `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
+| Report completion without closing | `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."` |
+| Add progress note | `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
 | List in-progress | `pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
 | Check task details | `pasture task show "${TASK_ID_URI}"` |
 | Update status | `pasture task update "${TASK_ID_URI}" --status=in_progress` |
@@ -214,7 +214,7 @@ Exit conditions:
 - Wire with real dependencies (not mocks in production code)
 - Run tests — all Layer 2 tests must pass
 - Commit completed work (`git agent-commit -m ...`)
-- Notify supervisor of completion via pasture task comment add (`pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Implementation complete"`)
+- Notify supervisor of completion via pasture task comment add (`pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Implementation complete"`)
 
 Exit conditions:
 - **success**: All tests pass; no TODO placeholders; real deps wired; production code path verified via code inspection
@@ -278,7 +278,7 @@ Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Vertical Slice Ownership in Practice
 
@@ -468,7 +468,7 @@ You may be assigned a `FOLLOWUP_SLICE-N` task instead of a `SLICE-N` task. The i
 
 ```bash
 # Completion comment for follow-up slices should include:
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved DEFER'd-item leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved DEFER'd-item leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
 ```
 
 ## Updating Pasture Status
@@ -480,7 +480,7 @@ pasture task update "${TASK_ID_URI}" --status=in_progress
 
 On complete:
 ```bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
 pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working via code inspection."
 ```
 

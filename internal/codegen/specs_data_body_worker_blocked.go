@@ -42,7 +42,7 @@ var workerBlockedBody = SkillBody{
 
 3. Document the blocker in the task:
    ` + "```" + `bash
-   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "BLOCKED: <reason>. Need: <dependency or clarification>"
+   pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "BLOCKED: <reason>. Need: <dependency or clarification>"
    ` + "```" + `
 
 4. Wait for supervisor or dependency resolution — check with ` + "`" + `pasture task show "${TASK_ID_URI}"` + "`" + ``,

@@ -101,7 +101,7 @@ func TestFormatTask_RejectsUnknownFormat(t *testing.T) {
 }
 
 func TestFormatLabels_JSON(t *testing.T) {
-	out, err := formatters.FormatLabels("test--abc", []string{"a", "b"}, types.OutputJSON)
+	out, err := formatters.FormatLabels("test/abc", []string{"a", "b"}, types.OutputJSON)
 	if err != nil {
 		t.Fatalf("FormatLabels json: %v", err)
 	}
@@ -112,13 +112,13 @@ func TestFormatLabels_JSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.TaskId != "test--abc" || len(got.Labels) != 2 {
+	if got.TaskId != "test/abc" || len(got.Labels) != 2 {
 		t.Errorf("unexpected: %+v", got)
 	}
 }
 
 func TestFormatLabels_TextEmpty(t *testing.T) {
-	out, err := formatters.FormatLabels("test--abc", nil, types.OutputText)
+	out, err := formatters.FormatLabels("test/abc", nil, types.OutputText)
 	if err != nil {
 		t.Fatalf("FormatLabels empty: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestFormatComment_JSON(t *testing.T) {
 }
 
 func TestFormatEdge_JSON(t *testing.T) {
-	e := provenance.Edge{SourceID: "test--a", TargetID: "test--b", Kind: provenance.EdgeBlockedBy}
+	e := provenance.Edge{SourceID: "test/a", TargetID: "test/b", Kind: provenance.EdgeBlockedBy}
 	out, err := formatters.FormatEdge(e, types.OutputJSON)
 	if err != nil {
 		t.Fatalf("FormatEdge json: %v", err)
@@ -164,16 +164,16 @@ func TestFormatEdge_JSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.SourceId != "test--a" || got.TargetId != "test--b" || got.Kind != "blocked_by" {
+	if got.SourceId != "test/a" || got.TargetId != "test/b" || got.Kind != "blocked_by" {
 		t.Errorf("unexpected: %+v", got)
 	}
 }
 
 func TestFormatDepTree_JSONShape(t *testing.T) {
 	edges := []provenance.Edge{
-		{SourceID: "test--a", TargetID: "test--b", Kind: provenance.EdgeBlockedBy},
+		{SourceID: "test/a", TargetID: "test/b", Kind: provenance.EdgeBlockedBy},
 	}
-	out, err := formatters.FormatDepTree("test--a", edges, types.OutputJSON)
+	out, err := formatters.FormatDepTree("test/a", edges, types.OutputJSON)
 	if err != nil {
 		t.Fatalf("FormatDepTree json: %v", err)
 	}
@@ -188,8 +188,8 @@ func TestFormatDepTree_JSONShape(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got.Root != "test--a" {
-		t.Errorf("root: got %q, want %q", got.Root, "test--a")
+	if got.Root != "test/a" {
+		t.Errorf("root: got %q, want %q", got.Root, "test/a")
 	}
 	if len(got.Edges) != 1 || got.Edges[0].Kind != "blocked_by" {
 		t.Errorf("edges shape unexpected: %+v", got.Edges)
@@ -197,11 +197,11 @@ func TestFormatDepTree_JSONShape(t *testing.T) {
 }
 
 func TestFormatDepTree_TextEmpty(t *testing.T) {
-	out, err := formatters.FormatDepTree("test--a", nil, types.OutputText)
+	out, err := formatters.FormatDepTree("test/a", nil, types.OutputText)
 	if err != nil {
 		t.Fatalf("FormatDepTree empty: %v", err)
 	}
-	if !strings.Contains(out, "test--a") {
+	if !strings.Contains(out, "test/a") {
 		t.Errorf("expected root id in empty output, got %q", out)
 	}
 }
