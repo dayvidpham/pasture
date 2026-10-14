@@ -218,6 +218,12 @@ func TestSessionStartStoresClaimAndKeepsSystemReceiptAuthor(t *testing.T) {
 // RED: remove ActorClaim from the command's input literal, duplicate the claim
 // call, or put that call in a loop. This check reads all non-test Go files in
 // cmd/pasture and internal/handlers, not transports or the later gate reader.
+//
+// TWO CLAIM CALLS, ONE PER NATIVE RECEIPT PATH. The direct in-process path and
+// the daemon's served path each commit one claim for one receipt, and they are
+// the same two paths that call evaluateGate; a third would be a third gate
+// path. The count is pinned so a new surface cannot quietly add a claim write
+// outside this enumeration.
 func TestSessionClaimCommandWiringAndSingleCall(t *testing.T) {
 	fset := token.NewFileSet()
 	inputs, calls := 0, 0
@@ -272,7 +278,7 @@ func TestSessionClaimCommandWiringAndSingleCall(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, inputs, "one production command input must be checked")
-	require.Equal(t, 1, calls, "one claim API call per native receipt path")
+	require.Equal(t, 2, calls, "one claim API call per native receipt path: the direct path and the served path")
 }
 
 // RED: drop the v2 claim write, or let a later v2 coordinate add a second

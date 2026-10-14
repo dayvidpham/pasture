@@ -173,6 +173,7 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 
 	captureCalls := 0
 	stdinReads := 0
+	laneReads := 0
 	versionPipeReads := 0
 	upgradeHTTPReads := 0
 	for _, name := range sources {
@@ -202,6 +203,11 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 				case "captureHostPayload":
 					stdinReads++
 					assert.Equal(t, "io.LimitReader(input, model.MaxNativePayloadBytes+1)", sourceOf(call.Args[0]))
+				case "lifecycleLaneAttempt":
+					laneReads++
+					assert.Equal(t, "io.LimitReader(input, model.MaxNativePayloadBytes+1)", sourceOf(call.Args[0]),
+						"the lane forward reads the SAME bounded stdin expression as the capture read, so a payload "+
+							"too large for ingress is refused identically whichever path takes it")
 				case "queryLifecycleHostVersion":
 					versionPipeReads++
 					assertVersionQueryReadUsesPrivatePipes(t, owner, call)
@@ -223,6 +229,29 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 			if function.Name.Name == "captureHostPayload" {
 				continue
 			}
+			// The lane forward must run inside the work goroutine too: it reads
+			// stdin, and a read outside that goroutine would not be bounded by the
+			// invocation deadline.
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, isCall := node.(*ast.CallExpr)
+				if !isCall || sourceOf(call.Fun) != "lifecycleLaneAttempt" {
+					return true
+				}
+				insideGoroutine := false
+				for _, ancestor := range enclosingChain(function.Body, call) {
+					if _, ok := ancestor.(*ast.GoStmt); ok {
+						insideGoroutine = true
+					}
+					if _, ok := ancestor.(*ast.FuncLit); ok && !insideGoroutine {
+						// A function literal that is not the goroutine's own body
+						// does not bound the read by the deadline.
+					}
+				}
+				assert.True(t, insideGoroutine,
+					"the lane forward must be reached from the work goroutine's body, so its stdin read shares "+
+						"the invocation deadline")
+				return true
+			})
 			ast.Inspect(function.Body, func(node ast.Node) bool {
 				call, isCall := node.(*ast.CallExpr)
 				if !isCall || sourceOf(call.Fun) != "captureHostPayload" {
@@ -285,6 +314,9 @@ func TestTheCaptureReadIsGatedOnTheVariableAndSitsInsideTheWork(t *testing.T) {
 	}
 	assert.Equal(t, 1, captureCalls, "exactly one capture call site exists on the host-facing path")
 	assert.Equal(t, 1, stdinReads, "exactly one native stdin capture read exists, inside captureHostPayload")
+	assert.Equal(t, 1, laneReads,
+		"exactly one lane-forward stdin read exists, and it must run inside the same worker so a stalled stdin "+
+			"is bounded by the invocation deadline exactly as the capture read is")
 	assert.Equal(t, 1, versionPipeReads, "exactly one bounded private-pipe read site exists, shared by version stdout and stderr")
 	assert.Equal(t, 3, upgradeHTTPReads, "the upgrade command reads three bounded HTTP response bodies and nothing else")
 }

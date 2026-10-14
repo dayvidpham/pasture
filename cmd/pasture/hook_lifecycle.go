@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -387,6 +388,12 @@ func lifecycleOutcomeWithCompletion(
 		budget = adjusted
 	}
 	tier := budget.HookInvocation()
+	connectTimeout := lifecycleLaneConnectTimeout(budget)
+	// ONE fallback diagnostic per invocation. A hook process handles one event,
+	// so this is one line per process; it is created here rather than held in a
+	// package variable so an in-process owner that drives several invocations
+	// still gets one line for each.
+	fallbackOnce := &sync.Once{}
 	ctx, cancel := deadline(cmd.Context(), tier)
 	defer cancel()
 	// Resolve before starting the worker. Capture, admission, the deadline arm
@@ -445,6 +452,15 @@ func lifecycleOutcomeWithCompletion(
 		if env.CaptureDir != "" {
 			input = captureHostPayload(cmd, coords, env.CaptureDir, input)
 		}
+		// CLIENT-FIRST, WITH THE DIRECT PATH AS THE FALLBACK. The lane branch
+		// settles the host answer whenever the request reached the daemon; only a
+		// provably nothing-sent outcome hands the bytes on to the direct path.
+		laneWork, fallback, decided := lifecycleLaneAttempt(cmd, ctx, coords, env, connectTimeout, fallbackOnce, input)
+		if decided {
+			completed <- *laneWork
+			return
+		}
+		input = fallback
 		committed, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
 			DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
 			HostVersion:       coords.HostVersion,
@@ -490,8 +506,12 @@ func lifecycleOutcomeWithCompletion(
 	if work.err != nil {
 		// A fault raised AFTER the durable commit leaves an occurrence behind.
 		// Saying "not recorded" there would send a maintainer to look in the
-		// wrong place, so the stage follows the error and not the position.
-		stage := faultStageForWorkError(work.err)
+		// wrong place, so the stage follows the error and not the position. An
+		// error that ARRIVED with a stage (the write lane's answer) keeps it.
+		stage := work.stage
+		if !stage.IsValid() {
+			stage = faultStageForWorkError(work.err)
+		}
 		return lifecycleFault(cmd, coords, failure, policy, continuation, stage, fmt.Errorf(
 			"the hook could not evaluate event %q of harness %q at host version %q: %w",
 			coords.Event, coords.Harness, coords.HostVersion, work.err))
@@ -576,9 +596,16 @@ func lifecycleContinuation(
 
 // lifecycleWork is what one hook evaluation produced: the native continuation
 // bytes, or the error that stopped it.
+//
+// stage is EMPTY for every error this package raises itself, and the stage table
+// below decides from the error's sentinel. It is set only by the write-lane
+// branch, whose error text comes from another PROCESS: that process knows which
+// sentinel it raised, and this one cannot see it, so the daemon states the stage
+// outright rather than having the hook infer it from a string.
 type lifecycleWork struct {
 	outcome hostexit.Outcome
 	err     error
+	stage   hostexit.FaultStage
 }
 
 // errLifecycleWorkPanicked marks a panic raised INSIDE the work goroutine. It
@@ -992,8 +1019,14 @@ func recordLifecycleFault(
 		"unusableFaultInputs": unusable,
 		"failureCitedBy":      failure.Evidence.Source,
 		"faultPolicy":         policy.String(),
-		"faultStage":          stage.String(),
-		"hostExit":            outcome.Exit.String(),
+		// writer names WHICH writer this invocation attempted: "daemon" when the
+		// event was sent to the pastured write lane, "direct" when the hook wrote
+		// in-process (the default, and what a hook does when no lane is there).
+		// Without it a fault on a healthy daemon and the same fault on a machine
+		// with no daemon are byte-identical in the record.
+		"writer":     lifecycleWriter(),
+		"faultStage": stage.String(),
+		"hostExit":   outcome.Exit.String(),
 		// hostContinuation is the exact byte body the host was given so that
 		// it could carry on. It is recorded because on OpenCode and Codex the
 		// proceed is a byte shape, and a reader must be able to see that these

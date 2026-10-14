@@ -4870,6 +4870,10 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 //	fmt.Errorf(...)           that arm's message
 //	ctx.Err()                 wrapped into it
 //	settlement.CommittedOutcome() preserves commit on normal completion too
+//	stage.IsValid()           a value-receiver predicate on the stage carried
+//	                          by the work struct; it reads a uint8 and cannot
+//	                          panic, and it exists so an error that ARRIVED with
+//	                          a stage (the write lane's answer) keeps it
 //	faultStageForWorkError()  the handler-error arm
 //	lifecycleFault(...)       that arm
 //	fmt.Errorf(...)           its message
@@ -5028,7 +5032,7 @@ func TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport(t *testing.
 	assert.Equal(t, []string{
 		"ctx.Done", "cancel", "settlement.Expire", "settlement.CommittedOutcome",
 		"lifecycleFault", "fmt.Errorf", "ctx.Err", "settlement.CommittedOutcome",
-		"faultStageForWorkError", "lifecycleFault", "fmt.Errorf",
+		"stage.IsValid", "faultStageForWorkError", "lifecycleFault", "fmt.Errorf",
 	}, calls,
 		"the calls after the go statement differ from the source-audited enumeration. The "+
 			"conclusion that none of them can panic was checked against THAT list, so a call added "+
@@ -6022,6 +6026,7 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_first_session_test.go",
 	"hook_lifecycle_host_version_test.go",
 	"hook_lifecycle_host_version_unix_test.go",
+	"hook_lifecycle_lane_test.go",
 	"hook_lifecycle_orphans_test.go",
 	"hook_lifecycle_production_test.go",
 	"hook_lifecycle_raw_test.go",

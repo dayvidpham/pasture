@@ -329,7 +329,10 @@ type daemonRuntime struct {
 	DBPath              string
 	SliceConcurrency    int
 	RegisteredRecorders int
-	closeDeps           []func() error
+	// Lane is the hosted lifecycle write lane, or nil when no unified store
+	// handle was available to serve from.
+	Lane      *daemonLane
+	closeDeps []func() error
 }
 
 // Close stops the engine and releases the daemon's remaining handles. It
@@ -348,6 +351,15 @@ func (r *daemonRuntime) Close(logger *slog.Logger) error {
 	var shutdownErr error
 	if r.Engine != nil {
 		shutdownErr = r.Engine.Shutdown(perComponentShutdownTimeout)
+	}
+	// The lane stops BEFORE the dependency handles, because its in-flight
+	// requests still read and write through the store those handles own.
+	if r.Lane != nil {
+		laneCtx, cancel := context.WithTimeout(context.Background(), perComponentShutdownTimeout)
+		if err := r.Lane.Close(laneCtx, logger); err != nil && shutdownErr == nil {
+			shutdownErr = err
+		}
+		cancel()
 	}
 	for _, closeFn := range r.closeDeps {
 		if closeFn == nil {
@@ -400,11 +412,25 @@ func buildDaemonRuntime(ctx context.Context, cfg config.PasturedConfig, sliceCon
 		return nil, err
 	}
 
+	// The lifecycle write lane is hosted beside the engine, on the SAME
+	// long-lived store handle the engine was given. Starting it here and not
+	// after Launch means a hook that fires while the engine is still recovering
+	// is served instead of falling back to the direct path.
+	lane, err := startDaemonLane(ctx, tracker, cfg.AuditDBPath, profile, logger)
+	if err != nil {
+		if shutdownErr := eng.Shutdown(perComponentShutdownTimeout); shutdownErr != nil {
+			logger.Error("the engine also did not stop cleanly after the lifecycle write lane failed to start", "err", shutdownErr)
+		}
+		closeAll(logger, closeDeps)
+		return nil, err
+	}
+
 	logger.Info("daemon runtime ready",
 		"dbPath", cfg.AuditDBPath,
 		"wellKnownAgents", wellKnownCache.Len(),
 		"hookRecorders", registeredRecorders,
 		"hasTracker", tracker != nil,
+		"lifecycleLane", lane != nil,
 	)
 
 	return &daemonRuntime{
@@ -413,6 +439,7 @@ func buildDaemonRuntime(ctx context.Context, cfg config.PasturedConfig, sliceCon
 		DBPath:              cfg.AuditDBPath,
 		SliceConcurrency:    sliceConcurrency,
 		RegisteredRecorders: registeredRecorders,
+		Lane:                lane,
 		closeDeps:           closeDeps,
 	}, nil
 }

@@ -299,7 +299,7 @@ func gateOwnedEpisode(t *testing.T, wire string, phase gateauthority.TaskPhase) 
 
 // ─── the production wiring, read from the source ──────────────────────────────
 
-// TestTheLifecycleEntryPointsWireTheGateReader pins BOTH committing surfaces to
+// TestTheLifecycleEntryPointsWireTheGateReader pins EVERY committing surface to
 // the real reader, and pins the shape of the gate call so a second core cannot
 // grow beside the first.
 //
@@ -310,6 +310,12 @@ func gateOwnedEpisode(t *testing.T, wire string, phase gateauthority.TaskPhase) 
 // unevaluated — which is the exact state this change exists to end. So the pin
 // reads the non-test sources and names the constructor, the opener, the parameter
 // and the number of callers.
+//
+// THERE ARE THREE SURFACES NOW, and the third is the daemon's served path: the
+// direct native core, the raw committing path, and the write-lane server. Each
+// consults the SAME reader over the SAME store; the server reaches it through
+// the factory it was constructed with, which defaults to tasks.NewGateReader
+// and is named in its own constructor.
 func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 	t.Parallel()
 
@@ -318,6 +324,7 @@ func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 
 	nativeReaders, rawReaders := 0, 0
 	coreCallers, gateCalls := 0, 0
+	serverReaders := 0
 	for _, name := range sources {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
@@ -373,12 +380,18 @@ func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 				gateCalls++
 				require.Len(t, call.Args, 7, "%s calls evaluateGate with the wrong shape", name)
 				supplied := gateSourceOf(call.Args[2])
-				if name == "hook_lifecycle_raw.go" {
+				switch name {
+				case "hook_lifecycle_raw.go":
 					require.Equal(t, "tasks.NewGateReader", supplied,
 						"the raw surface is a second copy of the committing path, and the one thing it may not do "+
 							"is evaluate the same payload by a weaker rule than the native path")
 					rawReaders++
-				} else {
+				case "hook_lifecycle_server.go":
+					require.Equal(t, "s.readers", supplied,
+						"the served path must consult the reader through the factory its constructor resolved, which "+
+							"defaults to tasks.NewGateReader and is the only production value")
+					serverReaders++
+				default:
 					require.Equal(t, "readers", supplied,
 						"the native path consults the reader through the factory it was given, so an in-process proof "+
 							"can drive the gate without a second core")
@@ -393,8 +406,12 @@ func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 			"free to disagree about when the gate runs")
 	require.Equal(t, 1, rawReaders,
 		"the raw committing path must run the same evaluateGate, or the two surfaces would judge one payload differently")
+	require.Equal(t, 1, serverReaders,
+		"the daemon's served path is the third committing surface and must be pinned by name, or a future edit "+
+			"could evaluate it with a reader the store does not back")
 	require.Equal(t, 1, coreCallers, "hookLifecycle must have exactly one non-test caller")
-	require.Equal(t, 2, gateCalls, "evaluateGate must be called from exactly two places: the native core and the raw commit")
+	require.Equal(t, 3, gateCalls,
+		"evaluateGate must be called from exactly three places: the native core, the raw commit, and the write-lane server")
 
 	// THE FACTORY TYPE LIVES HERE, NOT IN THE AUTHORITY PACKAGE. That package
 	// sits at the bottom of the import graph and must not name a Pasture store,

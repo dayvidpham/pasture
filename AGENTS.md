@@ -364,6 +364,76 @@ exactly as it did before, and the loss routes below are unchanged: a rotating
 store never silently swallows the record, because the record is only ever lost
 through one of those routes, each of which says so on standard error.
 
+### The lifecycle write lane
+
+`pastured` fronts `pasture.db` as the SINGLE WRITER for the lifecycle hook
+firehose. Every hook sends one consult-and-record request to the daemon over a
+Unix-domain socket; the daemon re-validates the delivery, reads the gate and
+takes the decision from its ONE long-lived store handle, encodes the answer, and
+admits the record to a bounded in-memory queue. ONE lane goroutine commits
+admitted records; the hook is answered only after the commit, so "proceed" keeps
+exactly the meaning it has always had.
+
+Rules that must hold for any change to the lane:
+
+- **One lane, one splitter.** `internal/writelane` owns the budget
+  (`WriteLaneBudget`) and the ONE count/byte splitter (`ExceedsWriteBatch`).
+  Every grouping site asks the splitter; no site re-derives a bound. The lane is
+  the only writer for hook records, and it is what makes the property true — not
+  a connection or pool limit.
+- **The hold bound protects the other writers.** `HoldTarget` (400 ms, derived
+  as 4/5 of the SQLite busy tier and capped) bounds one lane turn, so the DBOS
+  engine's own writes and every CLI writer keep their measured wait.
+  `writelane.BudgetFromProfile` derives every bound from the validated timeout
+  profile and refuses a profile that cannot contain the hold.
+- **`proceed` means committed, and nothing is acknowledged early.** The lane's
+  `Submit` returns only after the commit closure ran and reported its result.
+  A pre-admission refusal (`ErrNotAdmitted`, or any refusal raised before the
+  first write attempt) is provably NOT-RECORDED; anything after a request was
+  sent and not answered is RECORD-UNKNOWN. Never claim durability the lane does
+  not have.
+- **Fallback never follows a send.** A daemon that is absent, refusing, or
+  speaking another protocol version makes the hook write directly, exactly as a
+  build without a lane does, with ONE diagnostic line per invocation WHEN A LANE
+  WAS EXPECTED (the socket exists but could not be used). On a machine that has
+  never run `pastured` the hook is byte-identical to a build without a lane on
+  both streams, and the only trace is the fault record's `writer=direct`. A
+  request that WAS sent and whose answer never came is reported record-unknown
+  and never re-written directly, because the daemon may already have committed
+  it.
+- **Two daemons cannot share a lane.** The daemon takes an exclusive `flock` on
+  `<socket>.lock`. A second daemon on the same store is refused the LANE ROLE
+  and keeps serving everything else, so a handover or the concurrent-open race
+  the audit migrator already handles does not take the durable engine down; the
+  holder serves that store's hooks through the one socket, so there is still
+  exactly one lane writer. A stale socket is reclaimed only through that
+  election.
+- **One request per event, one commit per record (phase 1).** Provenance v0.5.3
+  has no public multi-operation batch apply, so the lane groups records into
+  bounded batches but still commits each record in its own transaction. Batching
+  that commits a whole batch in one transaction is phase 2 and needs a
+  provenance batch API plus a pin bump.
+- **Windows runs direct-only in phase 1.** There is no Unix-domain-socket
+  transport there, and the hook says so rather than failing.
+
+Operator knobs. The HOOK reads two variables, parsed in
+`cmd/pasture/hook_environment.go` with the same "set-but-empty is not an opt-in"
+rule as every other knob:
+
+| Variable | Values | Effect |
+|---|---|---|
+| `PASTURE_WRITE_LANE` | `auto` (default), `direct` | ask the daemon and fall back when it is unreachable, or never ask |
+| `PASTURE_WRITE_LANE_SOCKET` | an exact socket path | override the path derived from the store path |
+
+The DAEMON derives its socket from the store path
+(`$XDG_RUNTIME_DIR/pasture/lane-<sha256(dbPath)[:12]>.sock`, 0600 inside a 0700
+directory; beside the database when `XDG_RUNTIME_DIR` is unset) and derives its
+lane budget from the timeout profile. A fresh store must be initialised before
+any hook can be recorded against it: the persisted system identity is written by
+a normal Pasture command and the served receipt resolves it read-only.
+
+Measurement record: `docs/audits/lifecycle-write-lane.md`.
+
 A DIFFERENT unreclaimed surface comes from the same failure class. A lifecycle
 invocation abandoned before commit entry, or whose append fails, can leave a committed payload blob with no
 occurrence — one orphan per abandoned invocation, holding that invocation's raw

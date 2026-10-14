@@ -13,7 +13,7 @@ func TestCaptureDiagnosticDoesNotInventAnUnknownCause(t *testing.T) {
 	dispatch := frontendRegistry[ir.HarnessCodex]
 	event, err := ingress.EventByNativeName(dispatch.manifest, "PreToolUse")
 	require.NoError(t, err)
-	err = unbindableCaptureError(dispatch, event, HookLifecycleInput{HostVersion: "0.153.0"}, lifecycleCapture{
+	err = unbindableCaptureError(dispatch, event, "0.153.0", lifecycleCapture{
 		disposition: model.CaptureUnsupportedSchema,
 	})
 	require.Contains(t, err.Error(), "adapter supplied no specific cause")
@@ -28,7 +28,7 @@ func TestCaptureDiagnosticRejectsMismatchedCause(t *testing.T) {
 	event, err := ingress.EventByNativeName(dispatch.manifest, "SessionStart")
 	require.NoError(t, err)
 	cause := model.NewCaptureCause(model.CauseMissingMember, "session_id", model.JSONString, model.CaptureUnsupportedSchema)
-	err = unbindableCaptureError(dispatch, event, HookLifecycleInput{}, lifecycleCapture{
+	err = unbindableCaptureError(dispatch, event, "", lifecycleCapture{
 		disposition: model.CaptureMalformed,
 		cause:       cause,
 	})
