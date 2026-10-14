@@ -5932,6 +5932,9 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_worker_lifetime_test.go",
 	"hook_lifecycle_writers_test.go",
 	"opencode_plugin_load_test.go",
+	// The operator prune's CLI proof is owned by the change that added the
+	// verb; it is swept here like every other file this package's change owns.
+	"prune_test.go",
 }
 
 // guardSweepForeign are the package's other test files, which this slice did

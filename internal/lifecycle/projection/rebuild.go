@@ -111,14 +111,15 @@ func rebuildOccurrences(ctx context.Context, journal provenance.Journal, db *sql
 	// re-inserted and before the commit, in this same transaction, so the
 	// projection it reads is exactly the journal as of the snapshot.
 	outcome := ReclaimOutcome{}
-	deleted, reclaimErr, fatal := reclaimOrphanPayloads(ctx, tx, snapshotInstant, reclaim.Window)
+	result, reclaimErr, fatal := reclaimOrphanPayloads(ctx, tx, snapshotInstant, reclaim.Window, reclaim.Reclaim)
 	if fatal {
 		return ReclaimOutcome{}, projectionError("The orphan payload reclaim left the rebuild transaction in an unknown state.", reclaimErr.Error(), "The rebuild transaction will roll back; the prior projection remains authoritative and nothing was deleted.", "Confirm storage health and run a read command again.", reclaimErr)
 	}
 	if reclaimErr != nil {
 		outcome.Failure = reclaimErr
 	}
-	outcome.Reclaimed = deleted
+	outcome.Reclaimed = result.deleted
+	outcome.ReclaimedBytes = result.bytes
 	if err := tx.Commit(); err != nil {
 		return ReclaimOutcome{}, projectionError("The lifecycle occurrence projection could not be committed.", "SQLite rejected the atomic replacement after replay completed.", "The prior projection remains authoritative.", "Confirm storage health and retry.", err)
 	}
