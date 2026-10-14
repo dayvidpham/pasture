@@ -17,13 +17,10 @@
 package tasks
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"time"
-
-	"github.com/dayvidpham/provenance"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gateauthority"
@@ -52,24 +49,6 @@ func (LaneOperationIDs) NewOperationID() (string, error) {
 		return "", fmt.Errorf("create a served lifecycle operation identity from the operating system random source: %w", err)
 	}
 	return "pasture.lifecycle.lane." + hex.EncodeToString(value[:]), nil
-}
-
-// OpenLifecycleLaneTracker opens the daemon's one long-lived store handle for
-// the served lifecycle path.
-//
-// IT IS THE SAME HANDLE THE HOOK PATH USED TO OPEN PER EVENT. That per-event
-// open is what the container diagnosis measured as the convoy's amortised cost
-// and what the O(1) ledger relieved but did not remove; serving from one handle
-// removes it from the firehose entirely.
-func OpenLifecycleLaneTracker(ctx context.Context, dbPath string, profile timeouts.Profile) (protocol.TaskTracker, error) {
-	if err := profile.Validate(); err != nil {
-		return nil, fmt.Errorf("open the lifecycle lane store: the timeout profile is invalid, so the store's own lock budget cannot be chosen: %w", err)
-	}
-	tracker, err := OpenTaskTrackerContextWithOptions(ctx, dbPath, WithTimeoutProfile(profile))
-	if err != nil {
-		return nil, fmt.Errorf("open the lifecycle lane store at %q: %w", dbPath, err)
-	}
-	return tracker, nil
 }
 
 // LifecycleLaneHost is the validated task-side assembly of one daemon's served
@@ -112,13 +91,6 @@ func (h *LifecycleLaneHost) Operations() receipt.OperationIDSource { return h.op
 // Profile returns the ordered timeout profile the served path runs under.
 func (h *LifecycleLaneHost) Profile() timeouts.Profile { return h.profile }
 
-// ReceiptService builds the reusable receipt service. It is cheap and may be
-// called per request, exactly as the direct path does; every field is immutable
-// except the per-call Outcome the served path sets.
-func (h *LifecycleLaneHost) ReceiptService() (receipt.Service, error) {
-	return NewLifecycleReceiptServiceWithProfile(h.tracker, h.clock, h.operations, h.profile)
-}
-
 // NewGateReaderFactory returns the production gate reader factory, bound by
 // name so the daemon's wiring is the same constructor the direct path uses:
 // tasks.NewGateReader. A fresh reader is built per request because its session
@@ -126,7 +98,3 @@ func (h *LifecycleLaneHost) ReceiptService() (receipt.Service, error) {
 func (h *LifecycleLaneHost) NewGateReaderFactory() func(protocol.TaskTracker, ir.HarnessID, string) (gateauthority.Reader, error) {
 	return NewGateReader
 }
-
-// Journal returns the unified journal the served path writes through, exposed
-// so a daemon can report what it is serving without reaching into the tracker.
-func (h *LifecycleLaneHost) Journal() provenance.Journal { return h.tracker.Journal() }
