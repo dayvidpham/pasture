@@ -137,10 +137,10 @@ func TestCLI_Migrate_UpgradesAVersionEightFile_AndIsANoopAfterward(t *testing.T)
 	}
 }
 
-// TestCLI_Migrate_DryRun_LeavesTheFileUntouched is the built binary's dry run.
-// It must print the version 8 → version 9 plan, say what the step removes, what
-// it keeps and what the new floor costs an older binary, and change the file's
-// bytes not at all.
+// TestCLI_Migrate_DryRun_LeavesTheFileUntouched is the built binary's refusal
+// path for a non-NORMAL store: plain `pasture migrate` keeps its schema meaning
+// only for a NORMAL store, so a version-8 file (no slash marker, no cutover
+// receipt) is refused before any step writes and the file's bytes are untouched.
 func TestCLI_Migrate_DryRun_LeavesTheFileUntouched(t *testing.T) {
 	t.Parallel()
 	dbPath := makeVersionEightStore(t)
@@ -150,22 +150,22 @@ func TestCLI_Migrate_DryRun_LeavesTheFileUntouched(t *testing.T) {
 	}
 
 	out := runCLI(t, "migrate", "--dry-run", "--db", dbPath, "--format", "text")
-	if out.exitCode != 0 {
+	if out.exitCode != 5 {
 		t.Fatalf("migrate --dry-run exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
 	}
-	if !strings.Contains(out.stdout, "v8->v9: remove the retired gate assignment-index tables and triggers; session claims are kept; an older pasture binary will then refuse this database for every command until it is upgraded") {
-		t.Errorf("dry run must print the version 8 to 9 step, what it removes, what it keeps, and what the new floor costs; stdout=%q", out.stdout)
+	if !strings.Contains(out.stderr, "has not been cut over to the slash identity format") {
+		t.Errorf("the refusal must name the identity cutover; stderr=%q", out.stderr)
 	}
 	after, err := os.ReadFile(dbPath)
 	if err != nil {
 		t.Fatalf("re-read the fixture: %v", err)
 	}
 	if string(after) != string(raw) {
-		t.Error("a dry run must not change the database file")
+		t.Error("a refused dry run must not change the database file")
 	}
 	for _, name := range retiredAssignmentIndexRelations {
 		if got := relationCountOn(t, dbPath, name); got != 1 {
-			t.Errorf("a dry run left %d copies of %q, want 1", got, name)
+			t.Errorf("a refused dry run left %d copies of %q, want 1", got, name)
 		}
 	}
 }
@@ -175,21 +175,27 @@ func TestCLI_Migrate_DryRun_LeavesTheFileUntouched(t *testing.T) {
 // names the same file as the one-slash form, but "file:" + "//tmp/x" parses
 // "tmp" as the URI AUTHORITY, which modernc rejects with "invalid uri
 // authority"; before the normalisation this dry run exited non-zero and created
-// nothing. The normalisation runs before percent-encoding, so the "?" and "#"
-// in the file name are still escaped exactly once.
+// nothing. The store is seeded through a real command first, so the dry run has
+// a NORMAL store to read; the normalisation runs before percent-encoding, so the
+// "?" and "#" in the file name are still escaped exactly once.
 func TestCLI_Migrate_DryRun_NamesTheExactFileForALeadingSlashRun(t *testing.T) {
 	t.Parallel()
 	exact := filepath.Join(t.TempDir(), "slash?probe#db.db")
 	dbPath := "//" + strings.TrimPrefix(exact, "/")
 
-	out := runCLI(t, "migrate", "--dry-run", "--db", dbPath, "--format", "text")
-	if out.exitCode != 0 {
-		t.Fatalf("migrate --dry-run exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
+	seed := runCLI(t, "--db", dbPath, "task", "list", "--format", "json")
+	if seed.exitCode != 0 {
+		t.Fatalf("seeding the store exit %d; stdout=%q stderr=%q", seed.exitCode, seed.stdout, seed.stderr)
 	}
 	if _, err := os.Stat(exact); err != nil {
 		t.Fatalf("the // path must name the exact file %q: %v", exact, err)
 	}
-	want := fmt.Sprintf("Dry run: %s (v1 -> v%d)", dbPath, audit.MaxKnownSchemaVersion)
+
+	out := runCLI(t, "migrate", "--dry-run", "--db", dbPath, "--format", "text")
+	if out.exitCode != 0 {
+		t.Fatalf("migrate --dry-run exit %d; stdout=%q stderr=%q", out.exitCode, out.stdout, out.stderr)
+	}
+	want := fmt.Sprintf("Dry run: %s (v%d -> v%d)", dbPath, audit.MaxKnownSchemaVersion, audit.MaxKnownSchemaVersion)
 	if !strings.Contains(out.stdout, want) {
 		t.Errorf("dry run stdout=%q, want it to contain %q", out.stdout, want)
 	}

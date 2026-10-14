@@ -754,9 +754,38 @@ func TestReaderGateFaultRowsFailClosedOnlyWhereEvidenced(t *testing.T) {
 	}
 }
 
+// readerGatedWriteFaultToken and readerGatedWriteDeadlineToken together name the
+// fault a held writer now produces. The first is the pasture-owned surface of
+// the gated lifecycle write that could not be committed (the definition
+// activation of the active metamodel that precedes the receipt append); the
+// second is the caller deadline it expired on while acquiring SQLite write
+// ownership. Asserting BOTH keeps the row a DEADLINE proof: the first alone
+// would pass on any gated-write failure, so it is not a weakening of the old
+// single-token assertion.
+const (
+	readerGatedWriteFaultToken    = "The gated lifecycle write could not be committed."
+	readerGatedWriteDeadlineToken = "caller deadline expired while acquiring SQLite write ownership"
+)
+
 // runReaderDeadlineRow holds the SQLite write lock while the real transport runs
-// the gate, so the invocation reaches its hook-invocation deadline with the
-// ownership read unanswerable. It is the built /deadline settlement proof.
+// the gate, so a contended SQLite write acquisition fails at a caller deadline.
+// It is the built /deadline settlement proof.
+//
+// WHICH DEADLINE IT PROVES, AND WHY IT IS NO LONGER THE HOOK-INVOCATION ONE. The
+// row was written against a Provenance whose activation ran on every open and
+// took the write lock, so a held writer made the OPEN wait: the invocation
+// reached its 5s hook-invocation deadline with the ownership read unanswerable,
+// and the assertion pinned that open-time budget. Provenance's store-currency
+// fast path (present in the pinned release) lets an already-current store open
+// through a read-only probe and take NO activation write lock, so the open
+// completes under the held writer and the ownership read — a WAL read snapshot —
+// is answerable too. The contention therefore surfaces LATER, at the first gated
+// lifecycle WRITE (the active-metamodel definition activation that precedes the
+// receipt append), which is bounded by the 1s ingress window rather than the 5s
+// hook-invocation window. The row is kept, not deleted: it still proves a
+// DEADLINE fault — now the gated-write caller deadline — and the two tokens
+// prove that fault by naming both the gated write and the expired
+// write-ownership acquisition.
 //
 // closed and expectBlock are SEPARATE because they answer different questions:
 // closed sets PASTURE_HOOK_FAIL_CLOSED in the child, and expectBlock is what the
@@ -815,11 +844,13 @@ func runReaderDeadlineRow(t *testing.T, binary string, harness readerHarnessCase
 	}
 	assert.Equal(t, wantContinuation, run.Continuation)
 	assert.Equal(t, wantExit, run.ExitCode)
-	assert.Contains(t, run.Stderr, "hook-invocation deadline", "the diagnostic must name the deadline path")
+	assert.Contains(t, run.Stderr, readerGatedWriteFaultToken, "the diagnostic must name the gated write it could not commit")
+	assert.Contains(t, run.Stderr, readerGatedWriteDeadlineToken, "the diagnostic must name the expired caller deadline that was the contention")
 	records := readFaultRecords(t, run.FaultDir)
 	require.Len(t, records, 1, "the fault must be recorded durably")
 	assert.Equal(t, "fault", records[0]["outcomeClass"])
-	assert.Contains(t, fmt.Sprint(records[0]["cause"]), "hook-invocation deadline")
+	assert.Contains(t, fmt.Sprint(records[0]["cause"]), readerGatedWriteFaultToken, "the durable record must agree with the host-facing diagnostic")
+	assert.Contains(t, fmt.Sprint(records[0]["cause"]), readerGatedWriteDeadlineToken)
 	assert.Empty(t, readerConsultation(t, dbPath), "an abandoned invocation commits no consultation")
 }
 

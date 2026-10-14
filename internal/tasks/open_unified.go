@@ -368,6 +368,14 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 // transaction on the shared handle. It returns the trail and shared handle the
 // caller reuses for activation and the tracker. The archive is skipped only
 // when the store did not exist at P1's own read-only observation of the path.
+//
+// ORDER: the audit trail is opened BEFORE activation, and the cutover finishes
+// before activation runs. A legacy store's catch-up legitimately populates the
+// Provenance tables (the v2→v3 backfill mints the legacy-role agents), so
+// activation can only accept the store after the conversion has published the
+// slash marker and the receipt. This replaces the earlier order in which
+// activation ran before the trail; that order could not admit a legacy store
+// because the activation guard refused the store the trail had just populated.
 func runAutoCutover(ctx context.Context, dbPath string, poolSize int, cfg openTaskTrackerOptions) (*audit.SqliteAuditTrail, *sql.DB, error) {
 	archive, err := idmigrate.ArchiveStore(ctx, dbPath, "", time.Now())
 	if err != nil {

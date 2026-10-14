@@ -90,6 +90,12 @@ type ConvertOptions struct {
 	// Now is the timestamp source for the receipt and the ceiling. Nil means
 	// the wall clock.
 	Now func() time.Time
+	// beforeBegin is a TEST-ONLY seam invoked after the foreign-key bracket is
+	// established and immediately before BEGIN IMMEDIATE, so a test can capture
+	// the store's final on-disk digest and prove the conversion transaction
+	// wrote nothing. Production never sets it (every production construction
+	// site leaves the zero value).
+	beforeBegin func()
 }
 
 // Report is what one conversion did. It is returned even for the no-op path
@@ -134,6 +140,13 @@ func Convert(ctx context.Context, db *sql.DB, opts ConvertOptions) (Report, erro
 	restoreFK, err := provenance.PauseForeignKeys(ctx, conn)
 	if err != nil {
 		return report, conversionError("The identity conversion couldn't pause foreign-key enforcement.", err.Error(), "Nothing was converted; the store is unchanged.", "Confirm no transaction is open on this connection and retry.", err)
+	}
+
+	// TEST-ONLY seam: the store is now in its final journal mode and the FK
+	// bracket is established, immediately before BEGIN IMMEDIATE. A digest
+	// captured here isolates the conversion transaction.
+	if opts.beforeBegin != nil {
+		opts.beforeBegin()
 	}
 
 	tx, err := conn.BeginTx(ctx, nil)
