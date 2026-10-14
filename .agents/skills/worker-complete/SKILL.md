@@ -52,7 +52,7 @@ Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## When to Use
 
@@ -72,7 +72,7 @@ Implementation complete and all checks pass.
    ```
 4. Update Pasture task:
    ```bash
-   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
+   pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
    pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working."
    ```
 5. Author the worker→reviewer handoff in the Pasture task body (see template below)
@@ -117,7 +117,7 @@ Authored in the Pasture task body — the slice (or a dedicated handoff) task bo
 
 ```bash
 # Report completion; only the supervisor closes after independent review
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Quality gates pass. Production code verified."
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Quality gates pass. Production code verified."
 ```
 
 ## Follow-up Slice Completion (FOLLOWUP_SLICE-N)
@@ -125,7 +125,7 @@ pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000
 When completing a FOLLOWUP_SLICE-N, additionally report which original leaf tasks were resolved:
 
 ```bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
 ```
 
 The handoff to the reviewer (h4) must include which original leaf tasks were resolved so reviewers can verify.

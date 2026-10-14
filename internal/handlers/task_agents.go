@@ -35,7 +35,7 @@ func TaskAgentsList(w io.Writer, dbPath string, format types.OutputFormat) (int,
 func TaskAgentsShow(w io.Writer, dbPath, idStr string, format types.OutputFormat) (int, error) {
 	id, err := provenance.ParseAgentID(idStr)
 	if err != nil {
-		return agentLookupValidation(idStr, "The agent ID must have the form namespace--uuid.", err)
+		return agentLookupValidation(idStr, "The agent ID must have the form namespace/uuid.", err)
 	}
 	entries, err := readRegisteredAgents(dbPath, id.String())
 	if err != nil {

@@ -150,7 +150,7 @@ func TestHandler_EpochStart_LaunchesControlWorkflow(t *testing.T) {
 	defer ctrl.Close()
 
 	// Must be a valid provenance task id: "<namespace>--<uuidv7>".
-	const epochId = "demo--01960000-0000-7000-8000-000000000001"
+	const epochId = "demo/01960000-0000-7000-8000-000000000001"
 	code, hErr := handlers.EpochStart(ctrl, epochId, types.OutputJSON)
 	if hErr != nil {
 		t.Fatalf("EpochStart err = %v", hErr)
@@ -188,7 +188,7 @@ func TestHandler_EpochStart_EnqueuesForHostedEngine(t *testing.T) {
 		}
 	})
 
-	const epochId = "demo--01960000-0000-7000-8000-000000000002"
+	const epochId = "demo/01960000-0000-7000-8000-000000000002"
 	code, hErr := handlers.EpochStart(ctrl, epochId, types.OutputJSON)
 	if hErr != nil {
 		t.Fatalf("EpochStart err = %v", hErr)
@@ -253,7 +253,7 @@ func TestHandler_EpochStart_CloseDoesNotCancelHostedWorkflow(t *testing.T) {
 	}
 	t.Cleanup(func() { host.Shutdown(5 * time.Second) })
 
-	const epochId = "demo--01960000-0000-7000-8000-000000000003"
+	const epochId = "demo/01960000-0000-7000-8000-000000000003"
 	ctrl, err := handlers.OpenEpochController(dbPath)
 	if err != nil {
 		t.Fatalf("OpenEpochController(start): %v", err)
@@ -371,7 +371,7 @@ func TestHandler_EpochCancel_CancelsRunningWorkflow(t *testing.T) {
 	defer ctrl.Close()
 
 	// Must be a valid provenance task id.
-	const epochId = "demo--01960000-0000-7000-8000-000000000010"
+	const epochId = "demo/01960000-0000-7000-8000-000000000010"
 
 	// Start the epoch so there is something to cancel.
 	code, hErr := handlers.EpochStart(ctrl, epochId, types.OutputJSON)
@@ -418,7 +418,7 @@ func TestHandler_EpochCancel_CancelsRunningWorkflow(t *testing.T) {
 // (not a wrong type) for the projection to update.
 func TestHandler_PhaseAdvance_MutatesProjection(t *testing.T) {
 	t.Parallel()
-	const epochId = "demo--01960000-0000-7000-8000-000000000101"
+	const epochId = "demo/01960000-0000-7000-8000-000000000101"
 	rig := openController(t, epochId, nil) // no seed phases; start at request
 
 	// Deliver the advance to elicit via the handler under test.
@@ -448,7 +448,7 @@ func TestHandler_PhaseAdvance_RejectsUnknownPhase(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.PhaseAdvance(ctrl, "demo--01960000-0000-7000-8000-000000000102",
+	code, hErr := handlers.PhaseAdvance(ctrl, "demo/01960000-0000-7000-8000-000000000102",
 		protocol.PhaseId("not-a-phase"), "test", "ok", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an unknown phase")
@@ -476,7 +476,7 @@ func TestHandler_PhaseAdvance_UnknownPhase_IsErrorNotSilentNoOp(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.PhaseAdvance(ctrl, "demo--01960000-0000-7000-8000-000000000103",
+	code, hErr := handlers.PhaseAdvance(ctrl, "demo/01960000-0000-7000-8000-000000000103",
 		protocol.PhaseId("definitely-not-a-real-phase"), "test", "ok", types.OutputText)
 	if hErr == nil {
 		t.Fatal("bad phase must return a non-nil error, not a silent success")
@@ -495,7 +495,7 @@ func TestHandler_PhaseAdvance_UnknownPhase_IsErrorNotSilentNoOp(t *testing.T) {
 // wrong payload would leave the gate unsatisfied and the advance would stall.
 func TestHandler_SignalVote_MutatesProjection(t *testing.T) {
 	t.Parallel()
-	const epochId = "demo--01960000-0000-7000-8000-000000000111"
+	const epochId = "demo/01960000-0000-7000-8000-000000000111"
 	rig := openController(t, epochId, []protocol.PhaseId{
 		protocol.PhaseElicit,
 		protocol.PhasePropose,
@@ -545,7 +545,7 @@ func TestHandler_SignalVote_RejectsInvalidAxis(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SignalVote(ctrl, "demo--01960000-0000-7000-8000-000000000112",
+	code, hErr := handlers.SignalVote(ctrl, "demo/01960000-0000-7000-8000-000000000112",
 		protocol.ReviewAxis("bad_axis"), protocol.VoteAccept, "", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an invalid axis")
@@ -565,7 +565,7 @@ func TestHandler_SignalVote_RejectsInvalidVote(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SignalVote(ctrl, "demo--01960000-0000-7000-8000-000000000113",
+	code, hErr := handlers.SignalVote(ctrl, "demo/01960000-0000-7000-8000-000000000113",
 		protocol.AxisCorrectness, protocol.VoteType("MAYBE"), "", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an invalid vote")
@@ -584,7 +584,7 @@ func TestHandler_SignalVote_RejectsInvalidVote(t *testing.T) {
 // correct register_session topic with a well-formed RegisterSessionSignal.
 func TestHandler_SessionRegister_MutatesProjection(t *testing.T) {
 	t.Parallel()
-	const epochId = "demo--01960000-0000-7000-8000-000000000121"
+	const epochId = "demo/01960000-0000-7000-8000-000000000121"
 	rig := openController(t, epochId, nil)
 
 	code, err := handlers.SessionRegister(rig.ctrl, epochId, "sess-abc", "worker", "claude-code", "claude-sonnet", types.OutputJSON)
@@ -628,7 +628,7 @@ func TestHandler_SessionRegister_RejectsEmptySessionId(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SessionRegister(ctrl, "demo--01960000-0000-7000-8000-000000000122", "", "worker", "", "", types.OutputText)
+	code, hErr := handlers.SessionRegister(ctrl, "demo/01960000-0000-7000-8000-000000000122", "", "worker", "", "", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an empty session id")
 	}
@@ -647,7 +647,7 @@ func TestHandler_SessionRegister_RejectsEmptyRole(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.SessionRegister(ctrl, "demo--01960000-0000-7000-8000-000000000123", "sess-xyz", "", "", "", types.OutputText)
+	code, hErr := handlers.SessionRegister(ctrl, "demo/01960000-0000-7000-8000-000000000123", "sess-xyz", "", "", "", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for an empty role")
 	}
@@ -665,7 +665,7 @@ func TestHandler_SessionRegister_RejectsEmptyRole(t *testing.T) {
 // the correct slice_progress topic with a well-formed SliceProgressSignal.
 func TestHandler_SignalComplete_MutatesProjection(t *testing.T) {
 	t.Parallel()
-	const epochId = "demo--01960000-0000-7000-8000-000000000131"
+	const epochId = "demo/01960000-0000-7000-8000-000000000131"
 	rig := openController(t, epochId, nil)
 
 	output := "tests passed"
@@ -709,7 +709,7 @@ func TestHandler_SignalComplete_RejectsConflictingOutputAndError(t *testing.T) {
 
 	out := "done"
 	errMsg := "fail"
-	code, hErr := handlers.SignalComplete(ctrl, "demo--01960000-0000-7000-8000-000000000132", "slice-x", &out, &errMsg, types.OutputText)
+	code, hErr := handlers.SignalComplete(ctrl, "demo/01960000-0000-7000-8000-000000000132", "slice-x", &out, &errMsg, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a validation error for both --output and --error")
 	}
@@ -857,7 +857,7 @@ func TestHandler_EpochCancel_WorkflowError_NonexistentWorkflow(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	code, hErr := handlers.EpochCancel(ctrl, "demo--01960000-0000-7000-8000-000099999999", types.OutputText)
+	code, hErr := handlers.EpochCancel(ctrl, "demo/01960000-0000-7000-8000-000099999999", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for nonexistent epoch; got nil")
 	}
@@ -881,7 +881,7 @@ func TestHandler_PhaseAdvance_WorkflowError_NeverStartedEpoch(t *testing.T) {
 	defer ctrl.Close()
 
 	code, hErr := handlers.PhaseAdvance(ctrl,
-		"demo--ffffffff-ffff-7fff-8fff-ff0000000001",
+		"demo/ffffffff-ffff-7fff-8fff-ff0000000001",
 		protocol.PhaseElicit, "test", "probe", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for a never-started epoch; got nil")
@@ -904,7 +904,7 @@ func TestHandler_SignalVote_WorkflowError_NeverStartedEpoch(t *testing.T) {
 	defer ctrl.Close()
 
 	code, hErr := handlers.SignalVote(ctrl,
-		"demo--ffffffff-ffff-7fff-8fff-ff0000000002",
+		"demo/ffffffff-ffff-7fff-8fff-ff0000000002",
 		protocol.AxisCorrectness, protocol.VoteAccept, "r-test", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for a never-started epoch; got nil")
@@ -928,7 +928,7 @@ func TestHandler_SignalComplete_WorkflowError_NeverStartedEpoch(t *testing.T) {
 
 	out := "done"
 	code, hErr := handlers.SignalComplete(ctrl,
-		"demo--ffffffff-ffff-7fff-8fff-ff0000000003",
+		"demo/ffffffff-ffff-7fff-8fff-ff0000000003",
 		"slice-x", &out, nil, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for a never-started epoch; got nil")
@@ -951,7 +951,7 @@ func TestHandler_SessionRegister_WorkflowError_NeverStartedEpoch(t *testing.T) {
 	defer ctrl.Close()
 
 	code, hErr := handlers.SessionRegister(ctrl,
-		"demo--ffffffff-ffff-7fff-8fff-ff0000000004",
+		"demo/ffffffff-ffff-7fff-8fff-ff0000000004",
 		"sess-x", "worker", "claude-code", "claude-sonnet", types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for a never-started epoch; got nil")
@@ -974,7 +974,7 @@ func TestHandler_SliceStart_WorkflowError_NeverStartedSlice(t *testing.T) {
 	defer ctrl.Close()
 
 	code, hErr := handlers.SliceStart(ctrl,
-		"demo--ffffffff-ffff-7fff-8fff-ff0000000005",
+		"demo/ffffffff-ffff-7fff-8fff-ff0000000005",
 		protocol.SliceMock, "", 0, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for a never-started slice; got nil")
@@ -998,7 +998,7 @@ func TestHandler_SliceComplete_WorkflowError_NeverStartedSlice(t *testing.T) {
 
 	out := "done"
 	code, hErr := handlers.SliceComplete(ctrl,
-		"demo--ffffffff-ffff-7fff-8fff-ff0000000006",
+		"demo/ffffffff-ffff-7fff-8fff-ff0000000006",
 		&out, nil, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for a never-started slice; got nil")
@@ -1069,7 +1069,7 @@ func TestController_EnqueueStampsPinnedApplicationName(t *testing.T) {
 		}
 	})
 
-	const epochId = "demo--01960000-0000-7000-8000-000000000010"
+	const epochId = "demo/01960000-0000-7000-8000-000000000010"
 	if err := ctrl.StartEpoch(context.Background(), epochId); err != nil {
 		t.Fatalf("StartEpoch: %v", err)
 	}
@@ -1109,7 +1109,7 @@ func TestController_SharesOneApplicationScopeWithTheDaemon(t *testing.T) {
 		}
 	})
 
-	const epochId = "demo--01960000-0000-7000-8000-000000000011"
+	const epochId = "demo/01960000-0000-7000-8000-000000000011"
 	if err := ctrl.StartEpoch(context.Background(), epochId); err != nil {
 		t.Fatalf("StartEpoch: %v", err)
 	}
@@ -1163,7 +1163,7 @@ func TestController_Close_CleanShutdownIsSilentAndRepeatable(t *testing.T) {
 		t.Fatalf("OpenEpochController: %v", err)
 	}
 
-	const epochId = "demo--01960000-0000-7000-8000-000000000012"
+	const epochId = "demo/01960000-0000-7000-8000-000000000012"
 	if err := ctrl.StartEpoch(context.Background(), epochId); err != nil {
 		t.Fatalf("StartEpoch: %v", err)
 	}

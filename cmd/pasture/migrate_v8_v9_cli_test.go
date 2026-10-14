@@ -1,14 +1,16 @@
 // Package main_test — migrate_v8_v9_cli_test.go
 //
-// The built-binary proof for the version 8 → version 9 audit migration. The
-// audit-package tests drive the migrator through handles they open themselves;
-// this file drives it the way an operator does, by running the compiled
-// `pasture` binary against a real version-8 file and reading what it prints.
+// The built-binary proof for the version-8 forward audit migrations (the
+// v8 → v9 assignment-index removal and the v9 → v10 identity-format ceiling).
+// The audit-package tests drive the migrator through handles they open
+// themselves; this file drives it the way an operator does, by running the
+// compiled `pasture` binary against a real version-8 file and reading what it
+// prints.
 //
 // Two lines are the whole contract:
 //
-//	migrated <db-path> from v8 to v9   (first run, the upgrade happens)
-//	migrated <db-path> from v9 to v9   (second run, nothing left to do)
+//	migrated <db-path> from v8 to v10  (first run, the upgrade happens)
+//	migrated <db-path> from v10 to v10 (second run, nothing left to do)
 //
 // A user who upgrades pasture and never runs `pasture migrate` still gets the
 // upgrade on the next command that opens the store, so the no-op line matters
@@ -119,7 +121,7 @@ func TestCLI_Migrate_UpgradesAVersionEightFile_AndIsANoopAfterward(t *testing.T)
 	if first.exitCode != 0 {
 		t.Fatalf("migrate exit %d; stdout=%q stderr=%q", first.exitCode, first.stdout, first.stderr)
 	}
-	if want := "migrated " + dbPath + " from v8 to v9"; strings.TrimSpace(first.stdout) != want {
+	if want := "migrated " + dbPath + " from v8 to v10"; strings.TrimSpace(first.stdout) != want {
 		t.Errorf("first migrate printed %q, want %q", strings.TrimSpace(first.stdout), want)
 	}
 	for _, name := range retiredAssignmentIndexRelations {
@@ -132,7 +134,7 @@ func TestCLI_Migrate_UpgradesAVersionEightFile_AndIsANoopAfterward(t *testing.T)
 	if second.exitCode != 0 {
 		t.Fatalf("second migrate exit %d; stdout=%q stderr=%q", second.exitCode, second.stdout, second.stderr)
 	}
-	if want := "migrated " + dbPath + " from v9 to v9"; strings.TrimSpace(second.stdout) != want {
+	if want := "migrated " + dbPath + " from v10 to v10"; strings.TrimSpace(second.stdout) != want {
 		t.Errorf("second migrate printed %q, want %q", strings.TrimSpace(second.stdout), want)
 	}
 }
@@ -202,7 +204,7 @@ func TestCLI_Migrate_DryRun_NamesTheExactFileForALeadingSlashRun(t *testing.T) {
 }
 
 // TestCLI_AnyCommand_UpgradesAVersionEightFileOnOpen is the auto-on-open half.
-// An operator who never runs `pasture migrate` must still land on version 9
+// An operator who never runs `pasture migrate` must still land on version 10
 // the first time any command opens the store, because the audit migrator runs
 // inside the open.
 func TestCLI_AnyCommand_UpgradesAVersionEightFileOnOpen(t *testing.T) {
@@ -223,7 +225,7 @@ func TestCLI_AnyCommand_UpgradesAVersionEightFileOnOpen(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("read the recorded version: %v", err)
 	}
-	if version != 9 {
-		t.Errorf("recorded version=%d after an ordinary command opened the store, want 9", version)
+	if version != 10 {
+		t.Errorf("recorded version=%d after an ordinary command opened the store, want 10", version)
 	}
 }

@@ -124,7 +124,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices
 - When: slice implementation is done
-- Then: workers notify supervisor with pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
+- Then: workers notify supervisor with pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
 - Should not: close slices immediately upon worker completion; allow workers to close their own slices
 
 **[C-supervisor-explore-ephemeral]**

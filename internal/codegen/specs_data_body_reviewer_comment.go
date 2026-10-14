@@ -42,10 +42,10 @@ var reviewerCommentBody = SkillBody{
 			Title: "Comment via Pasture",
 			Content: `` + "```" + `bash
 # Plan review comment (no severity tree)
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user alignment confirmed. MVP scope achievable."
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user alignment confirmed. MVP scope achievable."
 
 # Code review comment (with severity references)
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - 1 BLOCKER found (see severity tree). Suggestion: fix type error in auth middleware."
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - 1 BLOCKER found (see severity tree). Suggestion: fix type error in auth middleware."
 ` + "```" + ``,
 		},
 		{

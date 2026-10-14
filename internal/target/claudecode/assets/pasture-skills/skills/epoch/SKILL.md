@@ -121,7 +121,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices
 - When: slice implementation is done
-- Then: workers notify supervisor with pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
+- Then: workers notify supervisor with pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
 - Should not: close slices immediately upon worker completion; allow workers to close their own slices
 
 **[C-supervisor-explore-ephemeral]**
@@ -159,7 +159,7 @@ Agents coordinate through **beads** tasks and comments:
 | Action | Command |
 |--------|---------|
 | List blocked | `pasture task blocked` |
-| Add progress note | `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
+| Add progress note | `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
 | List in-progress | `pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
 | Check task details | `pasture task show "${TASK_ID_URI}"` |
 | Update status | `pasture task update "${TASK_ID_URI}" --status=in_progress` |
@@ -244,7 +244,7 @@ Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Core Principles
 
@@ -318,8 +318,8 @@ pasture task dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"   # EL
 #     elicit: "${ELICIT_ID_URI}"
 
 # After Phase 5 (UAT) and Phase 6 (ratify), update URD
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: {{summary}}"
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as {{summary}}"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: {{summary}}"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as {{summary}}"
 ```
 
 ## Follow-up Epic
@@ -434,7 +434,7 @@ Each phase transition MUST include an explicit `Skill(...)` invocation directive
 ```bash
 # Correct: Add ratify label
 pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All reviewers ACCEPT"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All reviewers ACCEPT"
 
 # Wrong: Don't close
 # pasture task close "${PROPOSAL_ID_URI}"  # NEVER DO THIS

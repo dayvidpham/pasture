@@ -169,9 +169,9 @@ Call Skill(/pasture:reviewer-review-code) for the review procedure.` + "`" + `
 
 **Documentation (via Pasture comments):**
 ` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: ACCEPT - [reason]"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: ACCEPT - [reason]"
 # OR
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: REVISE - [specific issue]. Suggest: [fix]"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: REVISE - [specific issue]. Suggest: [fix]"
 ` + "```" + ``,
 		},
 		{
@@ -201,7 +201,7 @@ pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blo
 
 ` + "```" + `bash
 # Mark slice as needing revision
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "REVISION NEEDED: <specific issues>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "REVISION NEEDED: <specific issues>"
 
 # After worker fixes, start new review round
 # New severity groups are created fresh for the new round

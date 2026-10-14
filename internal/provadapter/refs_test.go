@@ -76,9 +76,9 @@ func TestTaskRefRoundTrip(t *testing.T) {
 }
 
 // TestTaskIDFromRef_WrongDomain proves a portable ref that is not a
-// namespace--uuid task identity is rejected instead of coerced.
+// namespace/uuid task identity is rejected instead of coerced.
 func TestTaskIDFromRef_WrongDomain(t *testing.T) {
-	// A syntactically valid portable ref that is NOT a namespace--uuid task id.
+	// A syntactically valid portable ref that is NOT a namespace/uuid task id.
 	ref := mustTaskRef(t, "not-a-task-identity")
 	if _, err := TaskIDFromRef(ref); err == nil {
 		t.Fatalf("expected wrong-domain rejection for %q", ref.String())
@@ -90,7 +90,7 @@ func TestTaskIDFromRef_WrongDomain(t *testing.T) {
 }
 
 func TestAssignmentRefRoundTrip(t *testing.T) {
-	cases := []string{"assignment.worker.s3-2", "ns--" + uuid.Must(uuid.NewV7()).String(), "any-opaque-episode"}
+	cases := []string{"assignment.worker.s3-2", "ns/" + uuid.Must(uuid.NewV7()).String(), "any-opaque-episode"}
 	for _, v := range cases {
 		ref := mustAssignmentRef(t, v)
 		id, err := AssignmentIDFromRef(ref)
@@ -175,7 +175,7 @@ func TestActorIDFromAgentRef(t *testing.T) {
 	if got != actor {
 		t.Fatalf("actor drift: got %+v want %+v", got, actor)
 	}
-	// A syntactically valid portable ref that is not namespace--uuid is rejected.
+	// A syntactically valid portable ref that is not namespace/uuid is rejected.
 	if _, err := ActorIDFromAgentRef(mustAgentRef(t, "bootstrap-without-uuid")); err == nil {
 		t.Fatalf("expected wrong-domain AgentRef rejection")
 	}

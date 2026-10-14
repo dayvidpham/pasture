@@ -55,7 +55,7 @@ description: User Acceptance Testing with demonstrative examples
 **[uat-update-urd]**
 - Given: UAT completes
 - When: results are captured
-- Then: update the URD with UAT results via `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT: <summary>"`
+- Then: update the URD with UAT results via `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT: <summary>"`
 - Should not: leave the URD out of date after UAT
 
 **[uat-feedback-disposition]**
@@ -94,7 +94,7 @@ Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## UAT Phases
 
@@ -335,7 +335,7 @@ pasture task label add "$UAT_ID_URI" pasture:p5-user:s5-uat
 pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
 
 # Update URD with plan UAT results
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
 ```
 
 ### Implementation UAT Task (Phase 11)
@@ -363,7 +363,7 @@ pasture task label add "$IMPL_UAT_ID_URI" pasture:p11-user:s11-uat
 pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${IMPL_UAT_ID_URI}"
 
 # Update URD with implementation UAT results
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
 ```
 
 ## Handling REVISE

@@ -228,14 +228,14 @@ func TaskList(w io.Writer, in TaskListInput, format types.OutputFormat) (int, er
 //
 // The Why field translates the underlying parser error into plain English
 // rather than surfacing the raw "provenance: invalid ID format: ParseTaskId
-// — no '--' separator found in ..." chain. The user only needs to know that
-// IDs need a "--" separator and that the value they passed didn't have one.
+// — no '/' separator found in ..." chain. The user only needs to know that
+// IDs need a "/" separator and that the value they passed didn't have one.
 func wrapInvalidId(op, id string, err error) (int, error) {
 	se := &pasterrors.StructuredError{
 		Category: pasterrors.CategoryValidation,
 		What:     fmt.Sprintf("The task ID %q isn't in the expected format.", id),
-		Why: "Task IDs look like \"yourproject--01968a3c-...\" (a project name, " +
-			"two dashes, and a UUID — e.g., yourproject--01968a3c-9d4f-7c8a-bc12-feedfacecafe).\n" +
+		Why: "Task IDs look like \"yourproject/01968a3c-...\" (a project name, " +
+			"a slash, and a UUID — e.g., yourproject/01968a3c-9d4f-7c8a-bc12-feedfacecafe).\n" +
 			"The value you passed couldn't be split into those two parts.",
 		Where:  fmt.Sprintf("Running %q (handlers/task_crud.go in handlers.wrapInvalidId).", op),
 		Impact: fmt.Sprintf("The %q command can't run because there's no way to know which task you meant.", op),

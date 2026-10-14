@@ -201,7 +201,7 @@ pasture task update "${TASK_ID_URI}" --status=in_progress
 
 ` + "```" + `bash
 # Completion comment for follow-up slices should include:
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved DEFER'd-item leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved DEFER'd-item leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
 ` + "```" + ``,
 		},
 		{
@@ -214,7 +214,7 @@ pasture task update "${TASK_ID_URI}" --status=in_progress
 
 On complete:
 ` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
 pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working via code inspection."
 ` + "```" + `
 
