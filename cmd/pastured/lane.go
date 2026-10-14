@@ -85,7 +85,7 @@ func startDaemonLane(parent context.Context, tracker protocol.TaskTracker, dbPat
 	listener, err := laneserve.Listen(socketPath, connServer)
 	if err != nil {
 		_ = lane.Close(context.Background())
-		if errors.Is(err, laneserve.ErrLaneHeld) {
+		if errors.Is(err, laneserve.ErrLaneHeld) || errors.Is(err, laneserve.ErrNoTransport) {
 			// TWO DAEMONS ON ONE STORE ARE LEGITIMATE (a handover, or the
 			// concurrent-open race the audit migrator already handles), and
 			// exactly one of them may hold the lane. The holder serves every
@@ -93,7 +93,10 @@ func startDaemonLane(parent context.Context, tracker protocol.TaskTracker, dbPat
 			// up the LANE ROLE and keeps serving everything else rather than
 			// refusing to start: exiting here would take the durable engine down
 			// with it, which is a larger loss than the role it lost.
-			logger.Warn("another pastured already holds the lifecycle write lane; this daemon runs without the lane and the holder serves this store's hooks",
+			// A platform with no lane transport is the same ending for the same
+			// reason: this daemon serves everything except the lane, and the hook
+			// writes directly.
+			logger.Warn("this daemon runs without the lifecycle write lane; the holder of this store's lane, or the direct write path, serves its hooks",
 				"socket", socketPath, "err", err)
 			return nil, nil
 		}

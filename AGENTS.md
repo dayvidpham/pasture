@@ -413,6 +413,16 @@ Rules that must hold for any change to the lane:
   bounded batches but still commits each record in its own transaction. Batching
   that commits a whole batch in one transaction is phase 2 and needs a
   provenance batch API plus a pin bump.
+- **A store the open-path guard refuses is never a lane error.** The URI
+  cutover's identity-format guard runs inside the store opener, so a refused
+  store makes `pastured` exit with the guard's own storage category and text and
+  the lane is never hosted (no socket exists). A hook's direct fallback then
+  meets the SAME refusal on its own open, and because that refusal is raised
+  before the first write attempt it is reported NOT-RECORDED — never
+  record-unknown. The served path never opens a store, so a guard refusal cannot
+  surface as a lane error. Pinned by
+  `cmd/pasture TestTheGuardRefusalOnTheDirectFallbackIsNotRecorded` and
+  `cmd/pastured TestTheDaemonRefusesARefusedStoreAndHostsNoLane`.
 - **Windows runs direct-only in phase 1.** There is no Unix-domain-socket
   transport there, and the hook says so rather than failing.
 
@@ -700,7 +710,7 @@ do not promise a snapshot under concurrent writers.
 | `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
 | `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
 | `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `github.com/dayvidpham/provenance` | v0.5.3 | Task, edge and receipt store; context-aware borrowed activation and software registration; store-currency fast path and the O(1) verified-as-of ledger open; built on the same DBOS version |
+| `github.com/dayvidpham/provenance` | v0.8.1 | Task, edge and receipt store; context-aware borrowed activation and software registration; store-currency fast path and the O(1) verified-as-of ledger open; in-transaction schema completion and a verified foreign-key bracket for the offline identity cutover; a declared membership for the identity-format conversion that preserves `actor_namespace_claims.claimant_id` byte-exact as an opaque namespace-valued label; built on the same DBOS version |
 | `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
 | `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |

@@ -9,13 +9,6 @@ import (
 	"time"
 )
 
-// ErrNoTransport is the platform boundary of phase 1: without a Unix domain
-// socket transport there is no lifecycle write lane, so the daemon refuses the
-// lane role and every hook writes directly. It is an error rather than a silent
-// no-op because an operator must be able to tell "the lane is not running here"
-// from "the lane is running and idle".
-var ErrNoTransport = fmt.Errorf("this platform has no Unix domain socket transport, so the lifecycle write lane is unavailable; hooks write directly, exactly as a build without a lane does")
-
 // Server is the connection server shape for a platform with no lane transport.
 // It exists so the daemon's wiring compiles everywhere; it never serves.
 type Server struct {

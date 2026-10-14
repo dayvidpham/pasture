@@ -189,7 +189,7 @@ func findEngineAgentID(db *sql.DB) (provenance.AgentID, bool, error) {
 			Why:      "The agent id in the registry could not be parsed.",
 			Where:    "Resolving the engine agent (internal/engine/activities.go in engine.findEngineAgentID).",
 			Impact:   "Activities can't be attributed to a valid agent.",
-			Fix:      "Inspect the agents table; the id should be in 'namespace--uuid' form.",
+			Fix:      "Inspect the agents table; the id should be in 'namespace/uuid' form.",
 			Cause:    perr,
 		}
 	}

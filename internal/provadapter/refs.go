@@ -23,11 +23,11 @@ import (
 //
 // Wire-form correspondence. A portable identity's exact spelling IS its
 // Provenance wire form:
-//   - TaskRef  <-> TaskID           via the "namespace--uuid" wire form.
+//   - TaskRef  <-> TaskID           via the "namespace/uuid" wire form.
 //   - AssignmentRef <-> AssignmentID (opaque episode identity string).
 //   - RoleID   <-> AssignmentSlotID  (responsibility-slot name string).
 //   - MutationRef <-> OperationID    (idempotency alternate-key string).
-//   - AgentRef  -> ActorID           via the "namespace--uuid" wire form.
+//   - AgentRef  -> ActorID           via the "namespace/uuid" wire form.
 //
 // NOTE (issue #14 text vs delivered surface): issue #14 names the role target
 // "AssignmentRoleID". The delivered Provenance surface at main@ecc7663 exposes
@@ -37,7 +37,7 @@ import (
 // role/slot domain. The mapping is 1:1 and lossless.
 
 // TaskIDFromRef converts a portable TaskRef to a Provenance TaskID. The TaskRef's
-// spelling must be a valid "namespace--uuid" wire form; a portable reference that
+// spelling must be a valid "namespace/uuid" wire form; a portable reference that
 // is not a task identity (wrong domain) is rejected.
 func TaskIDFromRef(ref portable.TaskRef) (provenance.TaskID, error) {
 	if !ref.IsValid() {
@@ -48,8 +48,8 @@ func TaskIDFromRef(ref portable.TaskRef) (provenance.TaskID, error) {
 	id, err := provenance.ParseTaskID(ref.String())
 	if err != nil {
 		return provenance.TaskID{}, refError("task", "TaskRef", ref.String(),
-			"the portable task reference is not a Provenance \"namespace--uuid\" task identity",
-			"supply a task reference in namespace--uuid form (e.g. from TaskRefFromID)")
+			"the portable task reference is not a Provenance \"namespace/uuid\" task identity",
+			"supply a task reference in namespace/uuid form (e.g. from TaskRefFromID)")
 	}
 	return id, nil
 }
@@ -138,7 +138,7 @@ func MutationRefFromID(op provenance.OperationID) (portable.MutationRef, error) 
 }
 
 // ActorIDFromAgentRef converts a portable bootstrap AgentRef to a Provenance
-// ActorID. The AgentRef's spelling must be a valid "namespace--uuid" wire form.
+// ActorID. The AgentRef's spelling must be a valid "namespace/uuid" wire form.
 // This is the one-directional bootstrap-actor resolution the authority and
 // continuation paths reuse; there is no reverse ActorID -> AgentRef helper
 // because a live ActorID is not, by itself, a portable bootstrap-agent identity.
@@ -151,8 +151,8 @@ func ActorIDFromAgentRef(agent portable.AgentRef) (provenance.ActorID, error) {
 	id, err := provenance.ParseActorID(agent.String())
 	if err != nil {
 		return provenance.ActorID{}, refError("agent", "AgentRef", agent.String(),
-			"the portable agent reference is not a Provenance \"namespace--uuid\" actor identity",
-			"supply a bootstrap agent reference in namespace--uuid form")
+			"the portable agent reference is not a Provenance \"namespace/uuid\" actor identity",
+			"supply a bootstrap agent reference in namespace/uuid form")
 	}
 	return id, nil
 }

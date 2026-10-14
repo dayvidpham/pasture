@@ -13,6 +13,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -29,31 +30,37 @@ func maxVersion() string {
 // "pasture" beside the real one and report a plan for a database the operator
 // never named.
 //
-// The apply half also exercises the version probe, which opens the file before
-// the migrator does; if only the probe were unescaped, it would create the
-// truncated file even though the migration itself landed on the right one.
+// The store is created through the production opener first (plain `pasture
+// migrate` now refuses or no-ops a non-NORMAL store and never creates one), so
+// the migrate handler is exercised against an already-cut-over file and the
+// escaping is still proven: the run must report the exact path and no truncated
+// file may appear.
 func TestMigrateNamesTheExactFileWhenThePathCarriesURIDelimiters(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "pasture?probe#db.db")
 	truncated := filepath.Join(dir, "pasture")
 
-	// Apply: probeVersionReadOnly opens/creates the named file, then
-	// NewSqliteAuditTrail migrates it to the current version.
+	seed, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	require.NoError(t, seed.Close())
+
+	// Apply: probeVersionReadOnly opens the named file, then
+	// NewSqliteAuditTrail runs the (no-op) migrator on it.
 	var applyOut bytes.Buffer
 	code, err := handlers.Migrate(&applyOut, handlers.MigrateInput{DBPath: dbPath}, types.OutputText)
 	require.NoError(t, err)
 	require.Equal(t, 0, code)
-	require.Equal(t, "migrated "+dbPath+" from v1 to "+maxVersion(), strings.TrimSpace(applyOut.String()))
+	require.Equal(t, fmt.Sprintf("migrated %s from %s to %s", dbPath, maxVersion(), maxVersion()), strings.TrimSpace(applyOut.String()))
 
 	info, err := os.Stat(dbPath)
 	require.NoError(t, err, "the exact requested path must be the database file")
-	require.NotZero(t, info.Size(), "the migrate apply must have written the exact file")
+	require.NotZero(t, info.Size(), "the exact file must be the database file")
 	_, err = os.Stat(truncated)
 	require.True(t, os.IsNotExist(err), "no database may appear at the truncated path %q", truncated)
 
 	// Dry run: opens the same file and must see it as already current. An
-	// unescaped open would land on a fresh truncated file and print v1 -> vN.
+	// unescaped open would land on the truncated path.
 	//
 	// The dry run's byte-identity promise is checked HERE as its own SHA-256
 	// before/after proof rather than inferred from the version line: a dry run
@@ -65,7 +72,7 @@ func TestMigrateNamesTheExactFileWhenThePathCarriesURIDelimiters(t *testing.T) {
 	code, err = handlers.Migrate(&dryOut, handlers.MigrateInput{DBPath: dbPath, DryRun: true}, types.OutputText)
 	require.NoError(t, err)
 	require.Equal(t, 0, code)
-	require.Contains(t, dryOut.String(), "Dry run: "+dbPath+" ("+maxVersion()+" -> "+maxVersion()+")",
+	require.Contains(t, dryOut.String(), fmt.Sprintf("Dry run: %s (%s -> %s)", dbPath, maxVersion(), maxVersion()),
 		"the dry run must read the exact file the apply upgraded")
 	require.Equal(t, before, sha256Of(t, dbPath), "a dry run must leave the exact file byte-identical")
 }
@@ -81,15 +88,19 @@ func TestMigrateNameTheExactFileForALeadingSlashRun(t *testing.T) {
 	exact := filepath.Join(t.TempDir(), "slash.db")
 	dbPath := "//" + strings.TrimPrefix(exact, "/")
 
+	seed, err := tasks.OpenTaskTracker(exact)
+	require.NoError(t, err)
+	require.NoError(t, seed.Close())
+
 	var applyOut bytes.Buffer
 	code, err := handlers.Migrate(&applyOut, handlers.MigrateInput{DBPath: dbPath}, types.OutputText)
 	require.NoError(t, err)
 	require.Equal(t, 0, code)
-	require.Equal(t, fmt.Sprintf("migrated %s from v1 to %s", dbPath, maxVersion()), strings.TrimSpace(applyOut.String()))
+	require.Equal(t, fmt.Sprintf("migrated %s from %s to %s", dbPath, maxVersion(), maxVersion()), strings.TrimSpace(applyOut.String()))
 
 	info, err := os.Stat(exact)
 	require.NoError(t, err, "the // path must name the exact file")
-	require.NotZero(t, info.Size(), "the migrate apply must have written the exact file")
+	require.NotZero(t, info.Size(), "the exact file must be the database file")
 
 	var dryOut bytes.Buffer
 	code, err = handlers.Migrate(&dryOut, handlers.MigrateInput{DBPath: dbPath, DryRun: true}, types.OutputText)

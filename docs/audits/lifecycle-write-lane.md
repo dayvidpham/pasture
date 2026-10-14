@@ -28,9 +28,10 @@ provenance v0.5.3, built with the Nix Go 1.26.3 shell. HARNESS:
 
 ## Acceptance row (daemon lane), measured
 
-Taken 2026-10-14 by the phase-1 implementer. REVISION: branch
-`pasture-01a13c08--feat--daemon-write-lane`, based on `origin/main` `1b5c7b0`,
-provenance v0.5.3. COMMAND:
+Taken 2026-10-14 by the phase-1 implementer, on the MERGED tree (the URI
+cutover is in). REVISION: branch `pasture-01a13c08--feat--daemon-write-lane`
+merged with `origin/main` `d78d02b` (the URI cutover, PR #204), provenance
+v0.5.3. COMMAND:
 
     CGO_ENABLED=1 go test -count=1 -v -run TestEighteenConcurrent ./cmd/pastured/
 
@@ -41,14 +42,28 @@ fresh sandbox store, starts the real `pastured` on it, waits for its
 --host-version 2.1.261 --db <sandbox>` invocations and a serial probe for 3 s,
 counting lines appended to `lifecycle-faults.jsonl` beside the sandbox store.
 
-Observed (this machine, one run):
+Observed (this machine, four runs on the merged tree):
 
-- `workers=18 probeRuns=89 probeP95=34.5 ms appendedFaults=0`
+| run | window | probe runs | probe p95 | faults/s | appended faults |
+|---|---|---|---|---|---|
+| 1 | 3.002 s | 87 | 34.9 ms | 0.000 | 0 |
+| 2 | 3.030 s | 80 | 52.0 ms | 0.000 | 0 |
+| 3 | 3.027 s | 83 | 43.9 ms | 0.000 | 0 |
+| 4 | 3.004 s | 72 | 51.7 ms | 0.000 | 0 |
 
-Against the recorded baseline (p95 2,003 ms, 12/15 probe faults, ~7.5
-committed events/s) the acceptance target of **faults/s = 0 and probe
-p95 ≤ 250 ms** is met with margin. This is ONE machine at ONE concurrency for a
-few seconds; it is not a scaling study and it does not replace the sandbox
+The PRE-MERGE run on the same harness (branch tip `3cd7f648`, before the URI
+cutover merged) measured `probeRuns=89 probeP95=34.5 ms appendedFaults=0`. It is
+recorded here only as the pre-merge comparison; the merged numbers above are the
+ones that describe the tree.
+
+Baseline for comparison (direct path, PROPOSAL-19, recorded 2026-10-14 at
+`1b5c7b0`): at C = 18 the serial probe faulted 12 of 15 runs (80%), p95
+2,003 ms, and the fault record gained 112 lines in 15 s — about **7.47
+faults/s**, with committed throughput ≈ 7.5 events/s.
+
+Against that baseline the acceptance target of **faults/s = 0 and probe
+p95 ≤ 250 ms** is met on every run. This is ONE machine at ONE concurrency for
+a few seconds; it is not a scaling study and it does not replace the sandbox
 harness above.
 
 ## Lane budget derivation (DERIVED)

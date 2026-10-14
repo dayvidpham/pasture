@@ -62,10 +62,12 @@ func CheckSchemaVersion(db *sql.DB, dbPath string) error {
 			Where:  "Checking database schema version (internal/tasks/open_ro.go in tasks.CheckSchemaVersion).",
 			Impact: "Status can't read audit events until the schema is upgraded.",
 			Fix: fmt.Sprintf(
-				"1. Run the migration to upgrade the schema:\n"+
-					"     pasture migrate\n"+
-					"2. Then retry the status command.\n"+
-					"   Database: %q", dbPath),
+				"1. Run the offline identity cutover, which archives the store and brings its schema to the latest version:\n"+
+					"     pasture migrate ids --dry-run --db %q\n"+
+					"     pasture migrate ids --db %q\n"+
+					"   A normal pasture command also cuts the store over on first open.\n"+
+					"2. Then retry the status command.",
+				dbPath, dbPath),
 		}
 	}
 	if version > audit.MaxKnownSchemaVersion {

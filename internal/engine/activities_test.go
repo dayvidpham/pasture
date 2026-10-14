@@ -84,12 +84,12 @@ func TestEngine_RecordsActivityPerTransition(t *testing.T) {
 		t.Errorf("keyed audit_events = %d, want 12", n)
 	}
 
-	// Every activity is namespaced to the engine ("pasture--<uuid>") and
+	// Every activity is namespaced to the engine ("pasture/<uuid>") and
 	// attributed to exactly one agent (the stable engine agent).
 	if n := countRows(t, db, `SELECT COUNT(DISTINCT agent_id) FROM activities`); n != 1 {
 		t.Errorf("distinct activity agents = %d, want 1 (stable engine agent)", n)
 	}
-	if n := countRows(t, db, `SELECT COUNT(*) FROM activities WHERE id LIKE 'pasture--%'`); n != 12 {
+	if n := countRows(t, db, `SELECT COUNT(*) FROM activities WHERE id LIKE 'pasture/%'`); n != 12 {
 		t.Errorf("namespaced activity ids = %d, want 12", n)
 	}
 }
@@ -144,8 +144,8 @@ func TestEngine_ActivityAndAuditDistinctKeys(t *testing.T) {
 		t.Fatalf("could not recover the step for audit key %q", auditKey)
 	}
 	wantUUID := protocol.DedupKey(epochId, string(protocol.PhaseElicit), engine.ActivityKindPhaseTransition, stepSeq)
-	if activityID != "pasture--"+wantUUID {
-		t.Errorf("activity id = %q, want %q (deterministic from the distinct activity kind at the same step)", activityID, "pasture--"+wantUUID)
+	if activityID != "pasture/"+wantUUID {
+		t.Errorf("activity id = %q, want %q (deterministic from the distinct activity kind at the same step)", activityID, "pasture/"+wantUUID)
 	}
 }
 

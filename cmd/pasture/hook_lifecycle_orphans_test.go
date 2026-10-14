@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -478,31 +480,21 @@ func seedLegacyOrphans(t *testing.T, dbPath string, count int) {
 	require.NoError(t, tx.Commit())
 }
 
-// downgradePayloadBlobsToV7 gives the store the shape a build without the
-// written_at column left behind: the column and every version row from 8
-// upward are removed, so the schema is the version 7 schema and the next open
-// runs the version 7 to 8 migration. The bound is `>= 8` rather than `= 8`
-// because the migrator's ceiling moves: a store this build made is at the
-// current ceiling, so deleting only the 8 row would leave a higher row behind
-// and the next open would see an up-to-date file and upgrade nothing. The given
-// bodies are inserted the way a version 7 Put wrote them, with no stamp. It
-// returns their digests.
-func downgradePayloadBlobsToV7(t *testing.T, dbPath string, bodies ...[]byte) []string {
+// buildV7AuditStoreWithUnstampedBlob builds a real version 7 audit-only store (a
+// complete audit schema through the v7 payload-blob shape) and inserts one
+// unstamped blob the way a version 7 Put wrote it. No Provenance identity rows
+// and no cutover evidence exist, so the first production open treats the store
+// as a cutover and the deferred catch-up runs the v7→v8 stamping step.
+func buildV7AuditStoreWithUnstampedBlob(t *testing.T, dbPath string, body []byte) string {
 	t.Helper()
-	db, closeStore := lifecycleStoreHandle(t, dbPath)
-	defer closeStore()
-	_, err := db.Exec(`ALTER TABLE lifecycle_payload_blobs DROP COLUMN written_at`)
+	db, err := dbconn.OpenDefaultDB(dbPath)
 	require.NoError(t, err)
-	_, err = db.Exec(`DELETE FROM audit_schema_meta WHERE version >= 8`)
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, 7))
+	ref := digest.FromBytes(body).String()
+	_, err = db.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, ref, body, len(body))
 	require.NoError(t, err)
-	digests := make([]string, 0, len(bodies))
-	for _, body := range bodies {
-		ref := digest.FromBytes(body).String()
-		_, err = db.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, ref, body, len(body))
-		require.NoError(t, err)
-		digests = append(digests, ref)
-	}
-	return digests
+	require.NoError(t, db.Close())
+	return ref
 }
 
 // TestTheFirstReadCommandAfterTheUpgradeReclaimsNothingWrittenBeforeIt is the
@@ -526,8 +518,8 @@ func TestTheFirstReadCommandAfterTheUpgradeReclaimsNothingWrittenBeforeIt(t *tes
 	t.Parallel()
 	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
-	initializeLifecycleTestDatabase(t, dbPath)
-	digests := downgradePayloadBlobsToV7(t, dbPath, []byte(`{"written":"moments before the upgrade, by the older build"}`))
+	ref := buildV7AuditStoreWithUnstampedBlob(t, dbPath, []byte(`{"written":"moments before the upgrade, by the older build"}`))
+	digests := []string{ref}
 
 	text := runLifecycleOrphans(t, binary, dbPath, "text")
 	assert.Contains(t, text, "orphan payload blobs reclaimed by this run: 0\n",

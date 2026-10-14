@@ -227,7 +227,7 @@ MINOR (must fix — must reach 0 before wave close):
 - "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
 After fixing all items:
-  pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
+  pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
 
 Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
   summary: "Review cycle <N> fixes for SLICE-1"
@@ -240,7 +240,7 @@ Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
 			Id:    "sup-spawn-task-status",
 			Title: "Worker Should Update Pasture Status",
 			Content: `- On start: ` + "`" + `pasture task update "${TASK_ID_URI}" --status=in_progress` + "`" + `
-- On implementation complete (NOT slice close): ` + "`" + `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"` + "`" + `
+- On implementation complete (NOT slice close): ` + "`" + `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"` + "`" + `
 - On blocked: ` + "`" + `pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>"` + "`" + `
 - Slice closure: **only the supervisor** closes slices after review passes`,
 		},
@@ -248,7 +248,7 @@ Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
 			Id:    "sup-spawn-assign-via-task",
 			Title: "Assign via Pasture",
 			Content: `` + "```" + `bash
-pasture task assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
+pasture task assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
 pasture task update "${TASK_ID_URI}" --status=in_progress
 ` + "```" + ``,
 		},

@@ -120,12 +120,6 @@ func (s *Server) refuse(conn net.Conn, stage hostexit.FaultStage, cause error) e
 	return nil
 }
 
-// ErrLaneHeld marks a lane this process did NOT get: another daemon holds the
-// election. It is a distinct sentinel because the two refusals lead to
-// different endings — a held lane lets THIS daemon run without the lane role,
-// while a socket that cannot be created at all is a startup failure.
-var ErrLaneHeld = errors.New("another pastured already holds the lifecycle write lane")
-
 // Lane is the elected, listening daemon side. At most ONE process may hold a
 // given lane: the exclusive flock on the socket's lock file is the election,
 // and a second process is refused rather than allowed to double-write.

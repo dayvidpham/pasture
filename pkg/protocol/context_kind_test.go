@@ -117,7 +117,7 @@ func TestContext_StructFields(t *testing.T) {
 	// Smoke test that the Context struct carries (Kind, ContextId).
 	c := protocol.Context{
 		Kind:      protocol.ContextEpoch,
-		ContextId: "aura-plugins--01968a3c-1234-7000-8000-000000000000",
+		ContextId: "aura-plugins/01968a3c-1234-7000-8000-000000000000",
 	}
 	if c.Kind != protocol.ContextEpoch {
 		t.Errorf("Context.Kind = %q, want %q", c.Kind, protocol.ContextEpoch)

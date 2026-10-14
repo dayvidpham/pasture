@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -219,6 +220,51 @@ func TestTheWriteLaneRefusalIsReportedWithTheDaemonStage(t *testing.T) {
 		"an invocation the daemon answered must record that the writer was the daemon")
 	require.Equal(t, hostexit.FaultStageNotRecorded.String(), line["faultStage"],
 		"a refusal raised before admission is provably not-recorded")
+}
+
+// TestTheGuardRefusalOnTheDirectFallbackIsNotRecorded is the guard/lane
+// interaction, hook side.
+//
+// The URI cutover added an open-path guard that can REFUSE a store before any
+// schema work. When the daemon is not there (or never started, because the
+// daemon's own open hit the same refusal), the hook writes directly and its own
+// open meets the same guard. That refusal is raised BEFORE the first write
+// attempt, so the fault it produces must say NOT-RECORDED — a refusal silently
+// reported as record-unknown would tell the operator to go looking for an
+// occurrence that the refusal's own Impact says cannot exist.
+func TestTheGuardRefusalOnTheDirectFallbackIsNotRecorded(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	initializeLifecycleTestDatabase(t, dbPath)
+	// A store recording a schema version above this build's ceiling is refused
+	// by the SAME open-path guard the URI cutover added, with the same storage
+	// category and the same "nothing was changed" impact.
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO audit_schema_meta (version, applied_at) VALUES (999, 0)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	t.Setenv(hookWriteLaneEnv, string(WriteLaneAuto))
+	t.Setenv(hookWriteLaneSocketEnv, filepath.Join(t.TempDir(), "absent.sock"))
+
+	cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.261", dbPath)
+	cmd.SetIn(strings.NewReader(`{}`))
+	outcome := lifecycleTestOutcome(t, cmd, nil,
+		handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
+
+	require.Equal(t, hostexit.ExitContinue, outcome.Exit,
+		"a store refusal is a fault, not a decision, so the host continues under the fail-open default")
+	require.Contains(t, outcome.Stderr, "written by a newer pasture (version 999)",
+		"the guard's own refusal text must reach the operator unchanged")
+	require.Contains(t, outcome.Stderr, "durable state not-recorded",
+		"the fault diagnostic must state the not-recorded claim the refusal earns")
+
+	line := readLastFaultRecordLine(t)
+	require.Equal(t, hostexit.FaultStageNotRecorded.String(), line["faultStage"],
+		"a refusal raised before the first write attempt is provably not-recorded; record-unknown would send the "+
+			"operator looking for an occurrence the refusal itself says cannot exist")
+	require.Equal(t, lifecycleWriterDirect, line["writer"],
+		"the refusal was met on the direct fallback, so the record must say so")
 }
 
 // TestTheWriteLaneIsNeverAskedWhenDisabled pins the operator's direct-only

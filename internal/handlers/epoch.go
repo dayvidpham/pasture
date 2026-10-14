@@ -12,7 +12,7 @@ import (
 )
 
 // validateEpochID enforces that an --epoch-id parses as a Provenance TaskId
-// ("<namespace>--<uuid>"). A free-string epoch id is rejected so an epoch never
+// ("<namespace>/<uuid>"). A free-string epoch id is rejected so an epoch never
 // runs against an id that cannot align the task, audit, and durable subsystems
 // (they all key on the same id).
 //
@@ -23,9 +23,9 @@ func validateEpochID(epochId, caller string) error {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("The epoch ID %q is not valid.", epochId),
-			Why: "Epoch IDs need the shape \"yourproject--01968a3c-...\" — a project name\n" +
-				"followed by \"--\" and a UUID. The value you passed couldn't be split\n" +
-				"into those two parts because the \"--\" separator was missing.",
+			Why: "Epoch IDs need the shape \"yourproject/01968a3c-...\" — a project name\n" +
+				"followed by \"/\" and a UUID. The value you passed couldn't be split\n" +
+				"into those two parts because the \"/\" separator was missing.",
 			Where: fmt.Sprintf("Validating the epoch id (internal/handlers/epoch.go in %s).", caller),
 			Impact: "The epoch can't run. Without a properly-formatted ID, the audit\n" +
 				"log can't link events back to any task, which would leave a broken trail.",

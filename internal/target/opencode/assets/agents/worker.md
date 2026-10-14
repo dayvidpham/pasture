@@ -111,7 +111,7 @@ You own a vertical slice (full production code path from CLI/API entry point →
 - [ ] Production code path verified end-to-end via code inspection
 
 **slice-closure gates:**
-- [ ] Supervisor notified via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close)
+- [ ] Supervisor notified via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close)
 - [ ] All completion-gate items passed
 - [ ] Can only close on a review wave, not a worker wave
 - [ ] Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings
@@ -150,7 +150,7 @@ Exit conditions:
 
 - Commit completed work (`git agent-commit -m ...`)
 
-- Notify supervisor of completion via pasture task comment add (`pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Implementation complete"`)
+- Notify supervisor of completion via pasture task comment add (`pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Implementation complete"`)
 
 Exit conditions:
 - **success**: All tests pass; no TODO placeholders; real deps wired; production code path verified via code inspection

@@ -1011,7 +1011,7 @@ func TestHandler_SliceStart_WorkflowError_NeverStartedSlice_Exit3(t *testing.T) 
 	defer ctrl.Close()
 
 	code, hErr := handlers.SliceStart(ctrl,
-		"demo--ffffffff-ffff-7fff-8fff-ff0000000099",
+		"demo/ffffffff-ffff-7fff-8fff-ff0000000099",
 		protocol.SliceMock, "", 0, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for a never-started slice; got nil")
@@ -1034,7 +1034,7 @@ func TestHandler_SliceComplete_WorkflowError_NeverStartedSlice_Exit3(t *testing.
 
 	out := "done"
 	code, hErr := handlers.SliceComplete(ctrl,
-		"demo--ffffffff-ffff-7fff-8fff-ff0000000098",
+		"demo/ffffffff-ffff-7fff-8fff-ff0000000098",
 		&out, nil, types.OutputText)
 	if hErr == nil {
 		t.Fatal("expected a workflow error for a never-started slice; got nil")
@@ -1265,7 +1265,7 @@ func TestRunSlice_AllModes(t *testing.T) {
 				t.Fatalf("RunWorkflow(control): %v", err)
 			}
 
-			sliceId := epochId + "--" + string(tc.mode)
+			sliceId := epochId + "/" + string(tc.mode)
 
 			// Set the mode via start_slice signal BEFORE the sub-workflow dequeues.
 			// Pre-populate the notifications table by spinning until send succeeds.
@@ -1701,7 +1701,7 @@ func startGatedSlices(t *testing.T, e *engine.Engine, epochId string, n int) []d
 	handles := make([]dbos.WorkflowHandle[engine.SliceResult], n)
 	sliceIds := make([]string, n)
 	for i := 0; i < n; i++ {
-		sliceId := fmt.Sprintf("%s--gated-%02x", epochId, i)
+		sliceId := fmt.Sprintf("%s/gated-%02x", epochId, i)
 		sliceIds[i] = sliceId
 		h, err := e.EnqueueSlice(engine.SliceInput{
 			EpochId:          epochId,
@@ -2547,7 +2547,7 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 	const epochId = "queue--recovery-limit"
 	sliceIds := make([]string, slices)
 	for i := range sliceIds {
-		sliceIds[i] = fmt.Sprintf("%s--gated-%02x", epochId, i)
+		sliceIds[i] = fmt.Sprintf("%s/gated-%02x", epochId, i)
 	}
 	startGatedSlices(t, first, epochId, slices)
 	waitUntil(t, 30*time.Second, func() bool {

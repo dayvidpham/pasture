@@ -80,7 +80,7 @@ func gateServeInput(t *testing.T, raw []byte, event string) HookLifecycleServeIn
 func TestTheServedAnswerIsNotPublishedBeforeTheCommit(t *testing.T) {
 	raw := gateFixture(t, gateClaudeGateFixture)
 	dbPath := gateStore(t)
-	const actor = "lifecycle-lane-allow--0193f1c0-0000-7000-8000-0000000000c1"
+	const actor = "lifecycle-lane-allow/0193f1c0-0000-7000-8000-0000000000c1"
 	reader := &gateFakeReader{snap: gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan))}
 
 	hold := make(chan struct{})
@@ -164,7 +164,7 @@ func TestAServedWithheldEventStagedNothing(t *testing.T) {
 func TestTheServedPathCommitsThroughARealLane(t *testing.T) {
 	raw := gateFixture(t, gateClaudeGateFixture)
 	dbPath := gateStore(t)
-	const actor = "lifecycle-lane-real--0193f1c0-0000-7000-8000-0000000000c2"
+	const actor = "lifecycle-lane-real/0193f1c0-0000-7000-8000-0000000000c2"
 	reader := &gateFakeReader{snap: gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan))}
 
 	budget, err := writelane.BudgetFromProfile(timeouts.DeadlineTestProfile())

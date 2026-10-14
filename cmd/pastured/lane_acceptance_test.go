@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +16,9 @@ import (
 	"time"
 
 	"github.com/dayvidpham/provenance"
+	_ "modernc.org/sqlite"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/lanewire"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -130,6 +134,7 @@ func TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow(t *testin
 	}
 
 	const workers = 18
+	windowStarted := time.Now()
 	var wg sync.WaitGroup
 	workerErr := make(chan error, workers)
 	for i := 0; i < workers; i++ {
@@ -160,6 +165,7 @@ func TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow(t *testin
 		t.Errorf("a hook invocation failed against a healthy daemon lane: %v", err)
 	}
 
+	window := time.Since(windowStarted)
 	appended := countFaultLines(t, faultRecord) - baselineFaults
 	if appended != 0 {
 		t.Errorf("the daemon lane appended %d fault lines while it was healthy; the acceptance target is zero faults", appended)
@@ -169,9 +175,14 @@ func TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow(t *testin
 	}
 	sort.Slice(probeLatencies, func(i, j int) bool { return probeLatencies[i] < probeLatencies[j] })
 	p95 := probeLatencies[(len(probeLatencies)*95)/100]
-	t.Logf("acceptance row: workers=%d probeRuns=%d probeP95=%s appendedFaults=%d", workers, len(probeLatencies), p95, appended)
+	faultsPerSecond := float64(appended) / window.Seconds()
+	t.Logf("acceptance row: workers=%d window=%s probeRuns=%d probeP95=%s faultsPerSecond=%.3f appendedFaults=%d",
+		workers, window.Round(time.Millisecond), len(probeLatencies), p95, faultsPerSecond, appended)
 	if p95 > 250*time.Millisecond {
 		t.Errorf("serial probe p95 was %s, above the 250 ms acceptance target", p95)
+	}
+	if faultsPerSecond != 0 {
+		t.Errorf("faults/second was %.3f, above the zero-fault acceptance target", faultsPerSecond)
 	}
 }
 
@@ -191,6 +202,66 @@ func bootstrapStore(t *testing.T, dbPath string) {
 	if _, err := tracker.Create("file://lane-acceptance", "bootstrap", "initialise the persisted ingress identity",
 		provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped); err != nil {
 		t.Fatalf("bootstrap the acceptance store: %v", err)
+	}
+}
+
+// TestTheDaemonRefusesARefusedStoreAndHostsNoLane is the guard/lane
+// interaction, daemon side.
+//
+// The URI cutover's open-path guard can refuse a store before any schema work.
+// The daemon opens its ONE long-lived handle at startup, so a refused store
+// makes the daemon exit with the guard's own storage category and text, and the
+// lane is never hosted — there is no socket for a hook to reach, which is why
+// the hook's fallback meets the SAME refusal on its own open and reports it
+// not-recorded (proved in cmd/pasture by
+// TestTheGuardRefusalOnTheDirectFallbackIsNotRecorded). A refusal must never be
+// reachable as a LANE error, because a lane error reads as record-unknown.
+func TestTheDaemonRefusesARefusedStoreAndHostsNoLane(t *testing.T) {
+	if testing.Short() {
+		t.Skip("this row builds the daemon and starts it; -short skips it")
+	}
+	tmp := t.TempDir()
+	daemonBinary := filepath.Join(tmp, "pastured")
+	buildPasturedBinary(t, daemonBinary, "")
+
+	dbPath := filepath.Join(tmp, "pasture.db")
+	bootstrapStore(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open the acceptance store: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO audit_schema_meta (version, applied_at) VALUES (999, 0)`); err != nil {
+		t.Fatalf("raise the recorded schema version: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close the acceptance store: %v", err)
+	}
+
+	configPath := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(configPath, []byte("audit_trail: sqlite\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	command := exec.Command(daemonBinary, "--config", configPath, "--db", dbPath)
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	runErr := command.Run()
+
+	exitCode := -1
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		exitCode = exitErr.ExitCode()
+	}
+	if exitCode != 5 {
+		t.Fatalf("the daemon exited %d on a store the guard refuses; the refusal is a storage-category error and "+
+			"must carry exit 5, with this output:\n%s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "written by a newer pasture (version 999)") {
+		t.Fatalf("the guard's own refusal text did not reach the operator:\n%s", stderr.String())
+	}
+	if _, statErr := os.Lstat(lanewire.SocketPath(dbPath)); statErr == nil {
+		t.Fatalf("a lane socket exists at %s although the daemon refused the store; a hook would then reach a lane "+
+			"that cannot commit anything", lanewire.SocketPath(dbPath))
 	}
 }
 

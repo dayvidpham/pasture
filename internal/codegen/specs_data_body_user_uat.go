@@ -59,7 +59,7 @@ var userUatBody = SkillBody{
 			Id:        "uat-update-urd",
 			Given:     "UAT completes",
 			When:      "results are captured",
-			Then:      "update the URD with UAT results via `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 \"${URD_ID_URI}\" \"UAT: <summary>\"`",
+			Then:      "update the URD with UAT results via `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${URD_ID_URI}\" \"UAT: <summary>\"`",
 			ShouldNot: "leave the URD out of date after UAT",
 		},
 		{
@@ -337,7 +337,7 @@ pasture task label add "$UAT_ID_URI" pasture:p5-user:s5-uat
 pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
 
 # Update URD with plan UAT results
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
 ` + "```" + ``,
 				},
 				{
@@ -366,7 +366,7 @@ pasture task label add "$IMPL_UAT_ID_URI" pasture:p11-user:s11-uat
 pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${IMPL_UAT_ID_URI}"
 
 # Update URD with implementation UAT results
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
 ` + "```" + ``,
 				},
 			},

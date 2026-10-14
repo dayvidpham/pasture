@@ -87,7 +87,7 @@ pasture task show "${TASK_ID_URI}"
 pasture task comments "${TASK_ID_URI}"
 
 # Add coordination notes
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "All slices complete — proceeding to Phase 10 (code review)"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "All slices complete — proceeding to Phase 10 (code review)"
 ` + "```" + ``,
 		},
 		{

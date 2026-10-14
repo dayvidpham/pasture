@@ -23,6 +23,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
+	"github.com/dayvidpham/pasture/internal/idmigrate"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 )
@@ -67,6 +69,14 @@ func Migrate(w io.Writer, in MigrateInput, format types.OutputFormat) (int, erro
 		dbPath = tasks.DefaultDBPath()
 	}
 
+	// ABSENT PATH: observe it BEFORE opening anything that could create it.
+	// Both dry run and apply exit 0, and no file is created: the first open
+	// creates the store and performs its cutover under the fence.
+	if !idmigrate.StatStore(dbPath) {
+		fmt.Fprintf(w, "No store at %q; nothing to migrate. The first open creates the store and performs its cutover under the fence.\n", dbPath)
+		return 0, nil
+	}
+
 	// Ensure the parent directory exists. Without this, dry-run against a
 	// non-existent target path would fail with a confusing "unable to open
 	// database file" rather than the actionable directory-creation error.
@@ -90,10 +100,35 @@ func Migrate(w io.Writer, in MigrateInput, format types.OutputFormat) (int, erro
 		return pasterrors.ExitCode(se), se
 	}
 
+	// READ-ONLY STATE PRECHECK, before any step writes. Plain `pasture migrate`
+	// keeps its schema meaning only for a NORMAL store; every non-NORMAL store
+	// is refused with guidance to the identity cutover (or a normal open, which
+	// cuts over).
+	state, err := idmigrate.InspectOpenState(context.Background(), dbPath)
+	if err != nil {
+		return pasterrors.ExitCode(err), err
+	}
+	if state.Outcome != idmigrate.OutcomeNormal {
+		se := plainMigrateRefusal(state)
+		return pasterrors.ExitCode(se), se
+	}
+
 	if in.DryRun {
 		return runMigrateDryRun(w, dbPath, format)
 	}
 	return runMigrateApply(w, dbPath, format)
+}
+
+// plainMigrateRefusal maps a non-NORMAL state verdict to the plain-migrate
+// refusal, which names the identity cutover as the way forward. The refusing
+// verdicts come from the ONE shared mapping (idmigrate.OutcomeRefusal); only the
+// CUTOVER verdict gets the plain-migrate guidance, because a plain migrate must
+// not raise the schema floor on a store whose fence evidence is incomplete.
+func plainMigrateRefusal(state idmigrate.CutoverState) error {
+	if refusal := idmigrate.OutcomeRefusal(state, false); refusal != nil {
+		return refusal
+	}
+	return idmigrate.CutoverGuidanceRefusal(state.StorePath)
 }
 
 // runMigrateDryRun opens the file, probes the version + plan, and prints the

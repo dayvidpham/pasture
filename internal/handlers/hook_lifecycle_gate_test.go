@@ -291,7 +291,7 @@ func gateBoundSnapshot(t *testing.T, wire string, episodes ...gateauthority.Epis
 func gateOwnedEpisode(t *testing.T, wire string, phase gateauthority.TaskPhase) gateauthority.Episode {
 	return gateauthority.Episode{
 		Assignment: provenance.AssignmentID(wire + "-assignment"),
-		Task:       gateTask(t, "lifecycle-gate-task--0193f1c0-0000-7000-8000-0000000000a1"),
+		Task:       gateTask(t, "lifecycle-gate-task/0193f1c0-0000-7000-8000-0000000000a1"),
 		Role:       gateauthority.RoleOwnerResponsibility,
 		Phase:      phase,
 	}
@@ -469,7 +469,7 @@ func TestObservationNeverConsultsTheReader(t *testing.T) {
 // and would allow or deny on another session's ownership.
 func TestTheGateConsultsTheReaderWithTheBoundSession(t *testing.T) {
 	t.Parallel()
-	const actor = "lifecycle-gate-allow--0193f1c0-0000-7000-8000-0000000000b1"
+	const actor = "lifecycle-gate-allow/0193f1c0-0000-7000-8000-0000000000b1"
 	raw := gateFixture(t, gateClaudeGateFixture)
 	snapshot := gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan))
 	reader := &gateFakeReader{snap: snapshot}
@@ -496,7 +496,7 @@ func TestTheGateConsultsTheReaderWithTheBoundSession(t *testing.T) {
 // a host response that is not a continue.
 func TestTheGateDeniesABoundActorWithNoAssignment(t *testing.T) {
 	t.Parallel()
-	const actor = "lifecycle-gate-deny--0193f1c0-0000-7000-8000-0000000000b2"
+	const actor = "lifecycle-gate-deny/0193f1c0-0000-7000-8000-0000000000b2"
 	raw := gateFixture(t, gateClaudeGateFixture)
 	snapshot := gateBoundSnapshot(t, actor)
 	reader := &gateFakeReader{snap: snapshot}
@@ -652,8 +652,8 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 				return &gateFakeReader{fault: &tasks.GateReadIntegrityError{
 					Stage: provenance.ActorOwnershipStageOwnedTasks,
 					Cause: &provenance.OwnerProjectionMismatchError{
-						Task:  gateTask(t, "lifecycle-gate-task--0193f1c0-0000-7000-8000-0000000000a2"),
-						Owner: gateActor(t, "lifecycle-gate-owner--0193f1c0-0000-7000-8000-0000000000a3"),
+						Task:  gateTask(t, "lifecycle-gate-task/0193f1c0-0000-7000-8000-0000000000a2"),
+						Owner: gateActor(t, "lifecycle-gate-owner/0193f1c0-0000-7000-8000-0000000000a3"),
 					},
 				}}
 			},
@@ -684,7 +684,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 			name: "role-source",
 			build: func() *gateFakeReader {
 				return &gateFakeReader{fault: &tasks.GateRoleSourceError{
-					Task:       gateTask(t, "lifecycle-gate-task--0193f1c0-0000-7000-8000-0000000000a4"),
+					Task:       gateTask(t, "lifecycle-gate-task/0193f1c0-0000-7000-8000-0000000000a4"),
 					Assignment: provenance.AssignmentID("assignment-with-no-readable-role"),
 					Reason:     "its role is written by no record the reader accepts",
 				}}
@@ -705,7 +705,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 				return &gateFakeReader{snap: &gateFakeSnapshot{
 					claim: gateauthority.SessionClaim{
 						Bound: true, Known: true,
-						Actor: gateActor(t, "lifecycle-gate-scope--0193f1c0-0000-7000-8000-0000000000b3"),
+						Actor: gateActor(t, "lifecycle-gate-scope/0193f1c0-0000-7000-8000-0000000000b3"),
 					},
 					authorityFault: &tasks.GateReaderScopeError{Operation: "read an authority this snapshot does not hold"},
 				}}
@@ -721,7 +721,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 				return &gateFakeReader{snap: &gateFakeSnapshot{
 					claim: gateauthority.SessionClaim{
 						Bound: true, Known: true,
-						Actor: gateActor(t, "lifecycle-gate-closed--0193f1c0-0000-7000-8000-0000000000b4"),
+						Actor: gateActor(t, "lifecycle-gate-closed/0193f1c0-0000-7000-8000-0000000000b4"),
 					},
 					resolveFault: &tasks.GateSnapshotClosedError{},
 				}}
@@ -738,7 +738,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 			// would silently turn into a blocked user.
 			name: "unmapped-phase",
 			build: func() *gateFakeReader {
-				const actor = "lifecycle-gate-unmapped--0193f1c0-0000-7000-8000-0000000000b5"
+				const actor = "lifecycle-gate-unmapped/0193f1c0-0000-7000-8000-0000000000b5"
 				return &gateFakeReader{snap: gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.TaskPhaseUnset))}
 			},
 			check: func(t *testing.T, err error) {
@@ -753,7 +753,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 			// enum arm would meet before the tables caught up.
 			name: "policy-unlisted",
 			build: func() *gateFakeReader {
-				const actor = "lifecycle-gate-unlisted--0193f1c0-0000-7000-8000-0000000000b6"
+				const actor = "lifecycle-gate-unlisted/0193f1c0-0000-7000-8000-0000000000b6"
 				episode := gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan)
 				episode.Role = gateauthority.RoleUnset
 				return &gateFakeReader{snap: gateBoundSnapshot(t, actor, episode)}

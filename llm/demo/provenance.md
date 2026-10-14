@@ -17,7 +17,7 @@ defer t.Close()
 
 // Create
 task, _ := t.Create("aura-plugins", "REQUEST: Port codegen to Go", "User request verbatim", TaskTypeFeature, PriorityMedium, PhaseRequest)
-// task.ID.String() == "aura-plugins--01968a3c-..."
+// task.ID.String() == "aura-plugins/01968a3c-..."
 
 // Show
 found, _ := t.Show(task.ID)
@@ -39,7 +39,7 @@ tasks, _ := t.List(ListFilter{Status: ptr(StatusOpen)})
 ```
 
 **Acceptance criteria:**
-- TaskID uses UUIDv7, formatted as `namespace--uuid`
+- TaskID uses UUIDv7, formatted as `namespace/uuid`
 - CRUD lifecycle works: open -> in_progress -> closed
 - List filters by status, type, priority
 

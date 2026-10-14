@@ -198,7 +198,7 @@ func TestGitRecorder_Handle_RecordsWhenSHAPresent(t *testing.T) {
 
 	payload := hooks.HookPayload{
 		Event:   hooks.HookGitCommit,
-		EpochId: "aura-plugins--01968a3c-1111-7000-8000-000000000123",
+		EpochId: "aura-plugins/01968a3c-1111-7000-8000-000000000123",
 		Phase:   protocol.PhaseWorkerSlices,
 		Data:    map[string]any{hooks.GitCommitDataKey: sha, "slice": "S9"},
 	}
