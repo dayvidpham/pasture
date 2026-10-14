@@ -14,7 +14,7 @@ var architectBody = SkillBody{
 2. Mark PROPOSAL-N as superseded:
    ` + "```" + `bash
    pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
+   pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
    ` + "```" + `
 3. Re-spawn all 3 reviewers to assess PROPOSAL-N+1`,
 		},
@@ -109,7 +109,7 @@ pasture task label add "$UAT_ID_URI" pasture:p5-user:s5-uat
 pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
 
 # Update URD with UAT results
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: <summary of user acceptance/feedback>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: <summary of user acceptance/feedback>"
 ` + "```" + ``,
 				},
 				{
@@ -118,14 +118,14 @@ pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000
 					Content: `Add label to proposal (DO NOT close, delete, or create new task):
 ` + "```" + `bash
 pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
 
 # Mark all previous proposals as superseded
 pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
 
 # Update URD with ratification
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as <summary>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as <summary>"
 ` + "```" + ``,
 				},
 				{

@@ -203,7 +203,7 @@ func TestCLI_TaskAuthorValidationDoesNotWrite(t *testing.T) {
 	before := run("agents", "list")
 	require.Zero(t, before.exitCode)
 
-	for _, author := range []string{"", "malformed", "unknown--00000000-0000-0000-0000-000000000000"} {
+	for _, author := range []string{"", "malformed", "unknown/00000000-0000-0000-0000-000000000000"} {
 		args := []string{"comment", "add", id, "No write"}
 		if author != "" {
 			args = append(args, "--author", author)
@@ -430,7 +430,7 @@ func TestCLI_TaskDepTreeRejectsUnknownKindBeforeDBOpen(t *testing.T) {
 	for _, kind := range []string{"bogus", "generated_by", "attributed_to", "all,kinds", "Blocked_By"} {
 		path := absentDB(t)
 		got := runCLI(t, "--db", path, "task", "dep", "tree",
-			"demo--00000000-0000-0000-0000-000000000001", "--kind", kind)
+			"demo/00000000-0000-0000-0000-000000000001", "--kind", kind)
 		require.Equal(t, 1, got.exitCode, "kind %q: %s", kind, got.stderr)
 		require.Contains(t, got.stderr,
 			"valid values are blocked_by, derived_from, supersedes, discovered_from, or all")
@@ -452,7 +452,7 @@ func TestCLI_TaskDepTreeHelpTruthfulAndNoDepthFlag(t *testing.T) {
 		require.NotContains(t, help.stdout, "--depth")
 	}
 
-	got := runCLI(t, "task", "dep", "tree", "demo--00000000-0000-0000-0000-000000000001", "--depth", "1")
+	got := runCLI(t, "task", "dep", "tree", "demo/00000000-0000-0000-0000-000000000001", "--depth", "1")
 	require.Equal(t, 1, got.exitCode)
 	require.Contains(t, got.stderr, "unknown flag")
 }
@@ -535,7 +535,7 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 			require.Len(t, tasks, len(tc.Titles)+inputCount)
 			var titles []string
 			for _, task := range tasks {
-				require.True(t, strings.HasPrefix(task.ID, namespace+"--"), task.ID)
+				require.True(t, strings.HasPrefix(task.ID, namespace+"/"), task.ID)
 				if task.ID != input.ID && task.ID != originalURDID {
 					titles = append(titles, task.Title)
 					labels := runCLI(t, "--db", db, "--format", "json", "task", "label", "list", task.ID)

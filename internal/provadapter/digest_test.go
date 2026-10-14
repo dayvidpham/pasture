@@ -23,7 +23,7 @@ func mustDigest(t *testing.T, command []byte) ir.CanonicalCommandDigest {
 // output equals a direct hex-decode of the digest's canonical text, and equals a
 // direct sha256.Sum256 of the same command bytes ir digested.
 func TestCommandDigestBytes_BytePreserving(t *testing.T) {
-	command := []byte(`{"verb":"close","task":"aura-plugins--x","reason":"done"}`)
+	command := []byte(`{"verb":"close","task":"aura-plugins/x","reason":"done"}`)
 	d := mustDigest(t, command)
 
 	got, err := CommandDigestBytes(d)
@@ -54,7 +54,7 @@ func TestCommandDigestBytes_BytePreserving(t *testing.T) {
 // byte-identical digest bytes across independent digest computations, which is
 // what makes a pinned-OperationID replay match across processes.
 func TestCommandDigestBytes_CrossProcessEquality(t *testing.T) {
-	command := []byte(`{"verb":"start","task":"aura-plugins--y"}`)
+	command := []byte(`{"verb":"start","task":"aura-plugins/y"}`)
 	a, err := CommandDigestBytes(mustDigest(t, command))
 	if err != nil {
 		t.Fatalf("CommandDigestBytes a: %v", err)

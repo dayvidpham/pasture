@@ -70,7 +70,7 @@ func TestTaskEvents_EpochFilter(t *testing.T) {
 	t.Parallel()
 
 	path := dbPath(t)
-	epochID := "acme--01968a3c-0000-7000-8000-000000000001"
+	epochID := "acme/01968a3c-0000-7000-8000-000000000001"
 	seededID := seedAuditEvent(t, path, protocol.AuditEvent{
 		EpochId:   epochID,
 		Phase:     protocol.PhaseWorkerSlices,
@@ -106,7 +106,7 @@ func TestTaskEvents_CombinedEpochAndContextFilter(t *testing.T) {
 
 	path := dbPath(t)
 	const (
-		epochID = "acme--01968a3c-0000-7000-8000-000000000010"
+		epochID = "acme/01968a3c-0000-7000-8000-000000000010"
 		sha     = "deadbeefcafebabe1234567890abcdef12345678"
 	)
 
@@ -152,8 +152,8 @@ func TestTaskEvents_AgentFilterMatchesLiveAndLegacyNames(t *testing.T) {
 
 	path := dbPath(t)
 	const (
-		epochLive   = "acme--01968a3c-0000-7000-8000-000000000020"
-		epochLegacy = "acme--01968a3c-0000-7000-8000-000000000021"
+		epochLive   = "acme/01968a3c-0000-7000-8000-000000000020"
+		epochLegacy = "acme/01968a3c-0000-7000-8000-000000000021"
 		liveName    = "pasture/automaton/check-constraints"
 		legacyName  = "worker"
 	)
@@ -271,7 +271,7 @@ func TestTaskContexts_ListsAttachedEdges(t *testing.T) {
 	t.Parallel()
 
 	path := dbPath(t)
-	epochID := "acme--01968a3c-0000-7000-8000-000000000002"
+	epochID := "acme/01968a3c-0000-7000-8000-000000000002"
 	sha := "deadbeefcafebabe1234567890abcdef12345678"
 	eventID := seedAuditEvent(t, path, protocol.AuditEvent{
 		EpochId:   epochID,

@@ -51,7 +51,7 @@ func TestTaskAgentsRegister_AllKindsThenCommentAdd(t *testing.T) {
 	})
 	require.Equal(t, "human", human.Kind)
 	require.Equal(t, "Ada Lovelace", human.Name)
-	require.True(t, strings.HasPrefix(human.AgentID, "acme--"), "namespace must be honoured: %q", human.AgentID)
+	require.True(t, strings.HasPrefix(human.AgentID, "acme/"), "namespace must be honoured: %q", human.AgentID)
 
 	software := register(handlers.TaskAgentRegisterInput{
 		DBPath:    path,
@@ -220,7 +220,7 @@ func TestTaskAgentsRegister_TextOutputCarriesID(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, code)
 	require.Contains(t, out.String(), "AgentId:")
-	require.Contains(t, out.String(), "acme--")
+	require.Contains(t, out.String(), "acme/")
 	require.Contains(t, out.String(), "Grace Hopper")
 }
 

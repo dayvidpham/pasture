@@ -11,7 +11,7 @@ import (
 // treeID builds a valid wire-format task ID for a small numeric suffix, so the
 // walk can parse and expand it.
 func treeID(n int) string {
-	return fmt.Sprintf("tree--00000000-0000-0000-0000-%012x", n)
+	return fmt.Sprintf("tree/00000000-0000-0000-0000-%012x", n)
 }
 
 // fetchTable maps a source ID and kind to that source's outgoing target IDs,

@@ -120,7 +120,7 @@ Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## When to Use
 
@@ -273,7 +273,7 @@ MINOR (must fix — must reach 0 before wave close):
 - "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
 After fixing all items:
-  pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
+  pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
 
 Do NOT shut down. Ephemeral reviewers will re-review.`,
   summary: "Review cycle <N> fixes for SLICE-1"
@@ -283,14 +283,14 @@ Do NOT shut down. Ephemeral reviewers will re-review.`,
 ## Worker Should Update Pasture Status
 
 - On start: `pasture task update "${TASK_ID_URI}" --status=in_progress`
-- On implementation complete (NOT slice close): `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"`
+- On implementation complete (NOT slice close): `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"`
 - On blocked: `pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>"`
 - Slice closure: **only the supervisor** closes slices after review passes
 
 ## Assign via Pasture
 
 ```bash
-pasture task assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
+pasture task assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
 pasture task update "${TASK_ID_URI}" --status=in_progress
 ```
 

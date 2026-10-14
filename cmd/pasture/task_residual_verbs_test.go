@@ -36,7 +36,7 @@ func TestCLI_TaskAgentsRegisterThenComment(t *testing.T) {
 	}
 
 	human := agentID(run("agents", "register", "human", "--name", "Ada Lovelace", "--contact", "ada@example.com", "--namespace", "acme"))
-	require.True(t, strings.HasPrefix(human, "acme--"))
+	require.True(t, strings.HasPrefix(human, "acme/"))
 
 	software := agentID(run("agents", "register", "software", "--name", "pasture-cli", "--version", "0.0.13", "--namespace", "acme"))
 	ml := agentID(run("agents", "register", "ml", "--role", "worker", "--provider", "anthropic", "--model", "claude-opus-4-6", "--namespace", "acme"))
@@ -92,7 +92,7 @@ func TestCLI_TaskEventsAndContexts(t *testing.T) {
 
 	db := newDB(t)
 	const (
-		epochID = "acme--01968a3c-0000-7000-8000-000000000001"
+		epochID = "acme/01968a3c-0000-7000-8000-000000000001"
 		sha     = "deadbeefcafebabe1234567890abcdef12345678"
 	)
 
@@ -323,7 +323,7 @@ func TestCLI_TaskMappedMultiCommandRecipe(t *testing.T) {
 						require.True(t, ok)
 						id, ok := object[step.IDField].(string)
 						require.True(t, ok, "actual JSON must expose %s", step.IDField)
-						require.True(t, strings.HasPrefix(id, namespace+"--"), id)
+						require.True(t, strings.HasPrefix(id, namespace+"/"), id)
 						bindings[step.Bind] = id
 					}
 					if step.Want != nil {

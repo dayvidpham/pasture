@@ -538,7 +538,7 @@ func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 	// Insert one new row in each of the three new tables. For
 	// context_edges, use a distinct context_id from the auto-backfilled
 	// row (whose context_id is "epoch-pre-s2", from seedLegacyV1DB).
-	const userContextId = "aura-plugins--01968a3c-1234-7000-8000-000000000001"
+	const userContextId = "aura-plugins/01968a3c-1234-7000-8000-000000000001"
 	mustExec(t, db,
 		`INSERT INTO context_edges (event_id, context_kind, context_id) VALUES (?, ?, ?)`,
 		eventId, "SliceContext", userContextId,
