@@ -4405,10 +4405,12 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 		// ends were found by enumerating from the source, which is what the
 		// reason had claimed to do. The current routes are below.
 		"hostexit.FaultStageNotRecorded": "the route faults before any durable write, or the durable write itself " +
-			"returned an error and committed nothing. Four routes pass it directly — the environment refusal and " +
-			"the argument refusal, neither of which opens a store, and the flag-parse refusal inside " +
-			"SetFlagErrorFunc, which runs before the command body, plus the host-version resolution refusal " +
-			"before the work goroutine starts — and it is also the default of the computed " +
+			"returned an error and committed nothing. Five routes pass it directly — the environment refusal and " +
+			"the argument refusal, neither of which opens a store, the flag-parse refusal inside " +
+			"SetFlagErrorFunc, which runs before the command body, the host-version resolution refusal " +
+			"before the work goroutine starts, and the operator time-budget refusal, which is raised when an " +
+			"environment-supplied override inverts the timeout hierarchy and stops before the event is read — " +
+			"and it is also the default of the computed " +
 			"stage below. The multiple-decision input refusal that used to be listed here is RETIRED: the " +
 			"command no longer accepts a verdict, so there is no input that could be refused for carrying one, " +
 			"and the gate's own refusals arrive through the handler-error route below",
@@ -4502,12 +4504,12 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 	for _, count := range found {
 		total += count
 	}
-	assert.Equal(t, 4, found["hostexit.FaultStageNotRecorded"],
-		"exactly four routes refuse directly before durable work; each must preserve the no-write stage")
-	assert.Equal(t, 7, total,
-		"this command has seven fault routes: the panic recovery, the environment refusal, the argument "+
-			"refusal, the host-version resolution refusal, the deadline fault, the handler error (which now carries "+
-			"the gate's own read faults), and the flag-parse refusal inside "+
+	assert.Equal(t, 5, found["hostexit.FaultStageNotRecorded"],
+		"exactly five routes refuse directly before durable work; each must preserve the no-write stage")
+	assert.Equal(t, 8, total,
+		"this command has eight fault routes: the panic recovery, the environment refusal, the argument "+
+			"refusal, the host-version resolution refusal, the operator time-budget refusal, the deadline fault, "+
+			"the handler error (which now carries the gate's own read faults), and the flag-parse refusal inside "+
 			"SetFlagErrorFunc. A route added or removed without updating the judged reasons above leaves "+
 			"the prose describing a command that does not exist, which has happened once already")
 }
@@ -4515,7 +4517,7 @@ func TestEveryFaultRouteDeclaresAStageThatMatchesItsDurableState(t *testing.T) {
 // TestTheRoutesThatNeverOpenAStoreSayTheDeliveryWasNotRecorded drives, on the
 // built binary, flag, argument and host-version resolution refusals.
 //
-// WHY THESE TWO. Four of the six routes are measured on host bytes somewhere in
+// WHY THESE TWO. Four of the eight routes are measured on host bytes somewhere in
 // this file. The FLAG-PARSE refusal inside SetFlagErrorFunc and the ARGUMENT
 // refusal were not, and both declare not-recorded. Mutating either to declare
 // "recorded" left the whole cmd/pasture package GREEN — over 208 seconds each —
@@ -5562,7 +5564,16 @@ func TestTheDurableRegionBeginsAtItsWrites(t *testing.T) {
 		// BOTH BINDING FORMS. The reader followed `svc := service` and not
 		// `var svc = service`, which is the same binding written the other way.
 		bind := func(targets []ast.Expr, value ast.Expr) {
-			holds := strings.Contains(sourceOf(value), "NewLifecycleReceiptService") || holdsService(value)
+			// EVERY PRODUCTION CONSTRUCTOR OF THE SERVICE, not one spelling.
+			// The receipt service is built either directly through
+			// tasks.NewLifecycleReceiptService (the untuned default) or through
+			// lifecycleReceiptServiceFor, the local wrapper that selects the tuned
+			// profile when one is supplied; a reader that named only the direct
+			// constructor would go blind to the path the operator-tuned profile
+			// takes and report the durable region as empty.
+			holds := strings.Contains(sourceOf(value), "NewLifecycleReceiptService") ||
+				strings.Contains(sourceOf(value), "lifecycleReceiptServiceFor") ||
+				holdsService(value)
 			// A CONTAINER BUILT FROM THE SERVICE holds it: a struct, map or
 			// slice literal with the service, or a name that holds it, among
 			// its elements.
@@ -5916,6 +5927,7 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 var guardSweepOwned = []string{
 	"hook_environment_test.go",
 	"hook_lifecycle_additive_test.go",
+	"hook_lifecycle_budget_test.go",
 	"hook_lifecycle_capture_test.go",
 	"hook_lifecycle_codex_test.go",
 	"hook_lifecycle_diagnostic_production_test.go",

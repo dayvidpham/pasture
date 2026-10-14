@@ -239,6 +239,39 @@ Rules:
 - A change to a tier is a change to observable behaviour under load. State the
   measurement that justifies it, and keep the ordering strict.
 
+**Operator overrides.** Three production tiers can be tuned at run time through
+the lifecycle hook's environment, read in `cmd/pasture/hook_environment.go` and
+validated by `internal/timeouts`:
+
+| Variable | Tier | Default | Meaning |
+|---|---|---|---|
+| `PASTURE_HOOK_INVOCATION_TIMEOUT` | `HookInvocation` | 5 s | how long ONE whole lifecycle hook invocation may run before it reports a fault |
+| `PASTURE_INGRESS_TIMEOUT` | `Ingress` | 1 s | one lifecycle receipt append, including its lock retries |
+| `PASTURE_START_SLICE_TIMEOUT` | `StartSlice` | 2 s | how long a slice sub-workflow waits for its `start_slice` signal |
+
+Each accepts a Go duration (`750ms`, `3s`). An unset or empty variable keeps the
+production value, so the default behaviour is unchanged. The three are applied
+together through `Profile.WithOverride`, which re-runs the constructor, so the
+ordering invariant above still holds and an inverted combination is refused with
+the same inversion error rather than silently clamped; a refused configuration
+reaches the host as a fail-open fault (the reason is on standard error and in the
+fault record) exactly as a malformed environment does.
+
+THE LIFECYCLE COMMAND CONSUMES TWO OF THE THREE. `HookInvocation` is the work
+deadline and `Ingress` is the receipt appender's deadline, so both take effect on
+the hook path. `StartSlice` is the slice sub-workflow's signal wait, which the
+hook command never reaches: it is read and validated with its siblings under the
+same mechanism (so a combination that inverts it is still refused), and its
+consumer is the slice workflow.
+
+The trade-off is the operator's to own. LOWERING the hook-invocation deadline
+makes the lifecycle hook fail fast: it abandons the work, reports a fault and
+answers the host fail-open, so the gate is left unevaluated while the host stops
+waiting at once instead of stalling for the whole window. RAISING it only helps
+on a fast store — a hook that outruns the host's own budget freezes the session
+it was meant to protect, and the default 5 s is already sized below the smallest
+host budget this tree has evidence for.
+
 ### The lifecycle fault record
 
 A lifecycle hook that cannot evaluate its event appends one JSON line to

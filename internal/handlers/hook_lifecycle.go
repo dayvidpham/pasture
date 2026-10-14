@@ -33,6 +33,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
@@ -84,6 +85,12 @@ type HookLifecycleInput struct {
 	// handler path with an alternative manifest; there is no separate test-only
 	// code path.
 	Activations []activation.Entry
+	// TimeoutProfile optionally supplies the ordered timeout profile the receipt
+	// path runs under; its Ingress tier becomes the receipt appender's deadline.
+	// The zero value keeps the production profile, so a caller that does not tune
+	// it is unaffected. The lifecycle command passes the profile it resolved from
+	// the operator's environment, so a tuned Ingress window reaches this append.
+	TimeoutProfile timeouts.Profile
 }
 
 type lifecycleStoreOpener func(context.Context, string) (protocol.TaskTracker, error)
@@ -101,6 +108,23 @@ type lifecycleStoreOpener func(context.Context, string) (protocol.TaskTracker, e
 // package's interface over a Pasture store: a caller that satisfies it already
 // imports both, and the authority package must stay free of the store.
 type lifecycleReaderFactory func(protocol.TaskTracker, ir.HarnessID, string) (gateauthority.Reader, error)
+
+// lifecycleReceiptServiceFor builds the receipt service under the profile the
+// caller supplied, falling back to the production profile when none is given.
+//
+// WHY A PARAMETER. The receipt appender's deadline is the profile's Ingress
+// tier and the reclaim window is its WorkflowResult tier. A caller that tunes
+// the ordered profile — the lifecycle command, from the operator's environment —
+// must have that tuning reach this append, not only the hook's own deadline;
+// a caller that does not tune it (every other handler caller, and every test)
+// passes the zero profile and gets the production default, so nothing changes
+// for them.
+func lifecycleReceiptServiceFor(tracker protocol.TaskTracker, clock receipt.Clock, operations receipt.OperationIDSource, profile timeouts.Profile) (receipt.Service, error) {
+	if profile.IsZero() {
+		return tasks.NewLifecycleReceiptService(tracker, clock, operations)
+	}
+	return tasks.NewLifecycleReceiptServiceWithProfile(tracker, clock, operations, profile)
+}
 
 // HookLifecycle preserves the accepted no-response Claude caller contract.
 func HookLifecycle(ctx context.Context, in HookLifecycleInput) error {
@@ -438,7 +462,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryStorage, "The lifecycle store opener returned no store.", "A receipt cannot be appended without the unified tracker.", "Nothing was recorded.", "Use tasks.OpenTaskTracker.", nil)
 	}
 	defer tracker.Close()
-	service, err := tasks.NewLifecycleReceiptService(tracker, in.Clock, in.Operations)
+	service, err := lifecycleReceiptServiceFor(tracker, in.Clock, in.Operations, in.TimeoutProfile)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}

@@ -37,6 +37,29 @@
 // 250ms / 500ms / 1s / 2s) keep the same ordering with different budgets. New
 // rejects any profile that inverts it.
 //
+// An OPERATOR may tune three of the production tiers at run time, and the
+// lifecycle hook reads them from its process environment: the hook-invocation
+// deadline (PASTURE_HOOK_INVOCATION_TIMEOUT), the ingress window
+// (PASTURE_INGRESS_TIMEOUT) and the start-slice window
+// (PASTURE_START_SLICE_TIMEOUT). Each takes a Go duration; an unset or empty
+// variable keeps the production value. The values are collected into an Override
+// and applied with Profile.WithOverride, which re-runs New, so the ordering
+// invariant above is preserved and an inverted combination is refused with the
+// same error New returns rather than clamped.
+//
+// The environment parser lives with the hook's other knobs in
+// cmd/pasture/hook_environment.go; this package owns the values and the
+// invariant, not the transport. The lifecycle command consumes HookInvocation
+// (its work deadline) and Ingress (the receipt appender's deadline); StartSlice
+// is the slice sub-workflow's signal wait, which the hook never reaches, and it
+// is read and validated with its siblings so the invariant still covers it. The
+// trade-off the operator owns: LOWERING the
+// hook-invocation deadline makes a slow store fail fast — the hook abandons the
+// work, reports a fault and answers the host fail-open, so the gate is left
+// unevaluated while the host stops waiting at once instead of stalling for the
+// whole window; RAISING it only helps on a fast store, because a hook that
+// outruns the host's own budget freezes the session it was meant to protect.
+//
 // Production code must read these values from an injected Profile and must not
 // write a duration or a busy_timeout DSN literal of its own.
 //
