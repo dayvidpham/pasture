@@ -204,7 +204,9 @@ func TestPostArchiveSeamInjectionIsRefusedAndRestorable(t *testing.T) {
 	require.Equal(t, OutcomeRefuseUnbackedMark, state.Outcome)
 
 	// Restore this run's archive by file replacement, removing the stale
-	// -wal/-shm siblings.
+	// -wal/-shm siblings. The three restore clauses are pinned: (1) file
+	// replacement, (2) both stale siblings removed, (3) the restored main file's
+	// bytes equal the archive's.
 	require.NoError(t, db.Close())
 	restored, err := os.ReadFile(archive.Path)
 	require.NoError(t, err)
@@ -215,6 +217,11 @@ func TestPostArchiveSeamInjectionIsRefusedAndRestorable(t *testing.T) {
 		}
 	}
 	require.NotEqual(t, fileName, "", "the store keeps its name across the replacement")
+	for _, sibling := range []string{path + "-wal", path + "-shm"} {
+		_, statErr := os.Stat(sibling)
+		require.True(t, os.IsNotExist(statErr), "restore must leave no stale %s sibling", sibling)
+	}
+	require.Equal(t, archive.SHA256, fileDigest(t, path), "the restored store bytes must equal the archive's")
 
 	reopened, err := dbconn.OpenDefaultDB(path)
 	require.NoError(t, err)

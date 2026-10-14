@@ -754,42 +754,121 @@ func TestReaderGateFaultRowsFailClosedOnlyWhereEvidenced(t *testing.T) {
 	}
 }
 
-// readerGatedWriteFaultToken and readerGatedWriteDeadlineToken together name the
-// fault a held writer now produces. The first is the pasture-owned surface of
-// the gated lifecycle write that could not be committed (the definition
-// activation of the active metamodel that precedes the receipt append); the
-// second is the caller deadline it expired on while acquiring SQLite write
-// ownership. Asserting BOTH keeps the row a DEADLINE proof: the first alone
-// would pass on any gated-write failure, so it is not a weakening of the old
-// single-token assertion.
+// A held writer can surface its fault through MORE THAN ONE deadline window,
+// and which window the invocation reaches first is a RACE, not a behaviour any
+// Provenance version promised: it depends only on whether the store open holds
+// the write lock and how fast the invocation reaches its first gated write. The
+// row therefore accepts the SET of the verified surfaces below instead of
+// pinning whichever window won today, because pinning the winner is what made
+// this row go stale twice as the store got faster.
+//
+// Every surface is the SAME fault — a lifecycle write that could not be
+// committed because another writer held the store — reported on the SAME host
+// fault path: one host-facing diagnostic, one durable record, the fail-open
+// continuation or the fail-closed refusal.
+//
+//   - The gated-write caller deadline — the surface the row pinned while
+//     Provenance was v0.5.2, where the open still ran an activation write
+//     bounded by the ingress window. The definition-activation write that
+//     precedes the receipt append expires on its own caller window while SQLite
+//     write ownership is held; its "what" is pasture-owned
+//     (readerGatedWriteFaultToken, internal/lifecycle/receipt/write.go) and its
+//     expired window is Provenance-owned (readerGatedWriteDeadlineToken, still
+//     emitted by the pinned v0.5.3 journal at internal/sqlite/operations.go).
+//     Both are required, so the surface is a DEADLINE proof and not merely any
+//     gated-write failure.
+//
+//   - The hook-invocation deadline — the surface THIS pin observes (Provenance
+//     v0.5.3, whose verified-as-of ledger makes the open O(1) and takes no
+//     write lock, so the contention is met at the first gated write and the
+//     hook's own HookInvocation work deadline expires with it). The command
+//     abandons the work; both phrases are from the one production sentence that
+//     reports it (cmd/pasture/hook_lifecycle.go), so the surface names the
+//     deadline AND the store contention it expired against.
 const (
 	readerGatedWriteFaultToken    = "The gated lifecycle write could not be committed."
 	readerGatedWriteDeadlineToken = "caller deadline expired while acquiring SQLite write ownership"
+
+	readerInvocationDeadlineToken = "hook-invocation deadline and abandoned the work"
+	readerInvocationStoreToken    = "another writer holding the pasture store"
 )
 
+// readerDeadlineSurface is one honest way a held writer surfaces on the host
+// fault path. EVERY phrase must appear in ONE diagnostic (the host-facing
+// standard error AND the durable record) for the surface to match, so a
+// diagnostic that names a deadline for an unrelated reason is NOT a match.
+type readerDeadlineSurface struct {
+	name    string
+	phrases []string
+}
+
+// readerDeadlineSurfaces is the honest accepted SET held in one place, so a
+// later Provenance change that adds a third window has exactly one list to
+// extend and the comment above says why the row must accept it rather than
+// pin it.
+var readerDeadlineSurfaces = []readerDeadlineSurface{
+	{
+		name:    "gated-write caller deadline",
+		phrases: []string{readerGatedWriteFaultToken, readerGatedWriteDeadlineToken},
+	},
+	{
+		name:    "hook-invocation deadline",
+		phrases: []string{readerInvocationDeadlineToken, readerInvocationStoreToken},
+	},
+}
+
+// readerDeadlineSurfaceMatch returns the first accepted surface whose every
+// phrase the text names, or false when the text names none of them.
+func readerDeadlineSurfaceMatch(text string) (readerDeadlineSurface, bool) {
+	for _, surface := range readerDeadlineSurfaces {
+		matched := true
+		for _, phrase := range surface.phrases {
+			if !strings.Contains(text, phrase) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return surface, true
+		}
+	}
+	return readerDeadlineSurface{}, false
+}
+
+// readerDeadlineSurfaceNames lists the accepted surfaces for a failure message,
+// so a red row says which surfaces it looked for without a second grep.
+func readerDeadlineSurfaceNames() string {
+	names := make([]string, 0, len(readerDeadlineSurfaces))
+	for _, surface := range readerDeadlineSurfaces {
+		names = append(names, surface.name)
+	}
+	return strings.Join(names, ", ")
+}
+
 // runReaderDeadlineRow holds the SQLite write lock while the real transport runs
-// the gate, so a contended SQLite write acquisition fails at a caller deadline.
-// It is the built /deadline settlement proof.
+// the gate, so a lifecycle write the invocation cannot commit surfaces as a
+// deadline fault on the host fault path. It is the built /deadline settlement
+// proof.
 //
-// WHICH DEADLINE IT PROVES, AND WHY IT IS NO LONGER THE HOOK-INVOCATION ONE. The
-// row was written against Provenance v0.5.0, whose activation ran on every open
-// and took the write lock, so a held writer made the OPEN wait: the invocation
-// reached its 5s hook-invocation deadline with the ownership read unanswerable,
-// and the assertion pinned that open-time budget. The pinned Provenance release
-// adds the store-currency fast path: an already-current store gets a read-only
-// probe and takes NO activation write lock, so the open completes under the held
-// writer and the ownership read — a WAL read snapshot — is answerable too. The
-// contention therefore surfaces LATER, at the first gated lifecycle WRITE (the
-// active-metamodel definition activation that precedes the receipt append),
-// which is bounded by the 1s ingress window rather than the 5s hook-invocation
-// window. The row is kept, not deleted: it still proves a DEADLINE fault — now
-// the gated-write caller deadline — and readerGatedWriteFaultToken plus
-// readerGatedWriteDeadlineToken prove that fault by naming both the gated write
-// and the expired write-ownership acquisition.
+// WHICH DEADLINE WINDOW IT PROVES, AND WHY THE ROW DOES NOT PIN ONE. The row
+// was written against Provenance v0.5.0, whose activation ran on every open and
+// took the write lock, so a held writer made the OPEN wait and the invocation
+// reached its 5s hook-invocation deadline. Provenance v0.5.2 added the
+// store-currency fast path (an already-current store opens without the
+// activation write lock), so the contention surfaced later, at the gated write,
+// bounded by that write's caller window. Provenance v0.5.3 made the open O(1)
+// outright, so the invocation now reaches its OWN HookInvocation deadline before
+// the gated write reports. WHICH OF THE TWO WINDOWS FIRES FIRST IS A RACE, so
+// pinning either one re-brittles the row on the next performance change; the row
+// therefore asserts the invariant that holds in both cases — a fault reaches the
+// host fault path and names the deadline AND the store contention — by matching
+// one of readerDeadlineSurfaces (see the list above for each surface and why it
+// is legitimate).
 //
-// WHAT PINS THE OPEN-TIME BUDGET NOW. The skip itself — a current store opening
-// without the activation write lock, under a real held writer — is pinned by
-// Provenance's own TestCurrentSchemaBorrowedOpenSkipsActivationWriteLock
+// WHAT STILL PINS THE OPEN-TIME BUDGET. The store-currency skip itself — a
+// current store opening without the activation write lock, under a real held
+// writer — is pinned by Provenance's own
+// TestCurrentSchemaBorrowedOpenSkipsActivationWriteLock
 // (internal/sqlite/activation_contention_test.go), which holds BEGIN IMMEDIATE
 // for the whole call and fails if the open waits for it. On the pasture side the
 // whole host-visible budget is still pinned end-to-end by
@@ -854,13 +933,18 @@ func runReaderDeadlineRow(t *testing.T, binary string, harness readerHarnessCase
 	}
 	assert.Equal(t, wantContinuation, run.Continuation)
 	assert.Equal(t, wantExit, run.ExitCode)
-	assert.Contains(t, run.Stderr, readerGatedWriteFaultToken, "the diagnostic must name the gated write it could not commit")
-	assert.Contains(t, run.Stderr, readerGatedWriteDeadlineToken, "the diagnostic must name the expired caller deadline that was the contention")
+	surface, matched := readerDeadlineSurfaceMatch(run.Stderr)
+	require.True(t, matched,
+		"the diagnostic must name one of the accepted deadline surfaces (%s); it named none, so no held-writer deadline fault reached the host: %s",
+		readerDeadlineSurfaceNames(), run.Stderr)
 	records := readFaultRecords(t, run.FaultDir)
 	require.Len(t, records, 1, "the fault must be recorded durably")
 	assert.Equal(t, "fault", records[0]["outcomeClass"])
-	assert.Contains(t, fmt.Sprint(records[0]["cause"]), readerGatedWriteFaultToken, "the durable record must agree with the host-facing diagnostic")
-	assert.Contains(t, fmt.Sprint(records[0]["cause"]), readerGatedWriteDeadlineToken)
+	recordCause := fmt.Sprint(records[0]["cause"])
+	for _, phrase := range surface.phrases {
+		assert.Contains(t, recordCause, phrase,
+			"the durable record must agree with the host-facing diagnostic (surface %q)", surface.name)
+	}
 	assert.Empty(t, readerConsultation(t, dbPath), "a faulted invocation commits no consultation")
 }
 
