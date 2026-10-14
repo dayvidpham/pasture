@@ -155,25 +155,44 @@ type lifecycleDeadline func(parent context.Context, tier time.Duration) (context
 // production profile, and the zero profile reads as the production one, so a
 // caller that supplies nothing still gets the tier the host budget requires.
 //
-// IT IS AN IN-PROCESS PARAMETER AND NOTHING MORE. There is NO environment
-// variable and NO flag for it, and that absence is a refusal rather than a
-// gap, because HANDING THIS DIAL TO A USER HANDS THE USER THE DEFECT BACK.
-// Both directions of change harm the person who turns it:
+// THE BUDGET IS AN IN-PROCESS PARAMETER, AND THE OPERATOR MAY ALSO TUNE THE TIER
+// FROM THE ENVIRONMENT. The two are not the same dial: the parameter is what the
+// command passes in (production passes timeouts.ProductionProfile(), a test may
+// pass a shorter profile to observe the deadline path in-process), while the
+// environment knobs the operator sets are applied ON TOP of that base through
+// Profile.WithOverride. An unset environment leaves the base untouched, so the
+// default production behaviour is exactly what it was.
 //
-//   - A user who SHORTENS the tier stops proving the budget the host actually
-//     enforces. The hook would keep satisfying its own proof while it says
-//     nothing at all about the window the host gives it.
-//   - A user who LENGTHENS the tier can FREEZE THEIR OWN SESSION. That is the
-//     exact failure this tier exists to prevent, and it is measured: with the
-//     store held under a write lock the work below took about 31 seconds,
-//     three times the 10-second budget hooks/hooks.json sets on each pasture
-//     lifecycle row for Claude Code, the smallest host budget this tree has
-//     evidence for.
+// HANDING THIS DIAL TO AN OPERATOR TRADES ONE HARM FOR ANOTHER ON PURPOSE, and
+// the operator owns the trade:
 //
-// A test may supply a shorter tier because a test is not a user: it observes
-// the deadline PATH in this process, and the value it supplies never reaches
-// a host. That distinction is what makes the seam safe, and it is pinned by
-// an assertion that the command path passes the production tier.
+//   - LOWERING the deadline makes a hook that meets a slow store fail fast: it
+//     abandons the work, reports a fault and answers the host fail-open, so the
+//     gate is left unevaluated while the host stops waiting at once instead of
+//     stalling for the whole window. The cost is that a store which was merely
+//     slow is no longer waited out.
+//   - RAISING the deadline only helps on a fast store. On a store that is slow
+//     because a peer holds the lock it changes nothing, and a hook that outruns
+//     the host's own budget FREEZES THE SESSION — the exact failure this tier
+//     exists to prevent. It is measured: with the store held under a write lock
+//     the work took about 31 seconds, three times the 10-second budget
+//     hooks/hooks.json sets on each pasture lifecycle row for Claude Code, the
+//     smallest host budget this tree has evidence for. The default 5s is sized
+//     against that budget; a raised value is the operator's risk, not the
+//     default's.
+//
+// The ordering invariant is not weakened by the dial. The hook-invocation
+// deadline must stay strictly above both caller windows and strictly below the
+// workflow-result wait, and every applied override is re-validated by
+// timeouts.New through Profile.WithOverride, so an inverted combination is
+// refused with the existing invariant error instead of being clamped. The
+// knobs and their names are read in cmd/pasture/hook_environment.go and
+// documented beside the tiers in internal/timeouts and AGENTS.md.
+//
+// A test may supply a shorter tier because a test is not an operator: it
+// observes the deadline PATH in this process, and the value it supplies never
+// reaches a host. That distinction is what makes the parameter seam safe, and
+// it is pinned by an assertion that the command path passes the production tier.
 //
 // The deadline derives the work's context from the tier. Production passes
 // context.WithTimeout, which is what the type is the signature of; a proof of
@@ -186,7 +205,8 @@ type lifecycleDeadline func(parent context.Context, tier time.Duration) (context
 // timeouts.New is the only constructor, its fields are unexported, and it
 // refuses an out-of-order hook-invocation tier. So the only profile a caller
 // can build without New is the zero one, which is normalized to production
-// below. There is no third state to check for.
+// below, and any environment override is re-validated by New as it is applied.
+// There is no third state to check for.
 //
 // The internal/errors category table is deliberately NOT consulted. That table
 // maps a pasture error class to an operator exit code for a person at a
@@ -334,9 +354,7 @@ func lifecycleOutcomeWithCompletion(
 	// The tier and the deadline both arrive as parameters: the tier so an
 	// in-process proof can observe this PATH under a value it chooses, and the
 	// deadline so a proof can trip the signal at a chosen point instead of
-	// racing a clock against the work. The reason there is no environment
-	// variable and no flag for either is recorded where the parameters are
-	// declared, above; it is a refusal, not a gap.
+	// racing a clock against the work.
 	//
 	// The zero profile reads as the production one, so a caller that supplies
 	// nothing still runs under the tier the host budget requires. It is
@@ -344,6 +362,29 @@ func lifecycleOutcomeWithCompletion(
 	// recover is installed.
 	if budget.IsZero() {
 		budget = timeouts.ProductionProfile()
+	}
+	// The operator's time-budget knobs are applied AFTER the base profile is
+	// known and BEFORE the tier is read. The parser (hookEnvironment, above)
+	// refuses a malformed value; applying the override re-runs timeouts.New, so
+	// an inverted combination is refused with the invariant error and is never
+	// clamped. A refusal is a fault: the host is answered fail-open (unless it
+	// opted into fail-closed) and the reason reaches the diagnostic and the
+	// fault record, exactly as a malformed environment does.
+	if !env.BudgetOverride.IsZero() {
+		adjusted, overrideErr := budget.WithOverride(env.BudgetOverride)
+		if overrideErr != nil {
+			return lifecycleFault(cmd, coords, failure, policy, continuation,
+				hostexit.FaultStageNotRecorded, fmt.Errorf(
+					"the hook could not use the operator's timeout configuration, so it cannot evaluate "+
+						"event %q of harness %q: one of %s, %s or %s breaks the ordering the timeout "+
+						"hierarchy requires; unset those variables to keep the defaults, or choose values "+
+						"where the hook-invocation deadline stays strictly above ingress and start_slice "+
+						"and below the workflow-result wait: %w",
+					coords.Event, coords.Harness,
+					hookInvocationTimeoutEnv, hookIngressTimeoutEnv, hookStartSliceTimeoutEnv,
+					overrideErr))
+		}
+		budget = adjusted
 	}
 	tier := budget.HookInvocation()
 	ctx, cancel := deadline(cmd.Context(), tier)
@@ -413,6 +454,10 @@ func lifecycleOutcomeWithCompletion(
 			Barrier:    barrier,
 			ActorClaim: tasks.ActorClaim(env.ActorClaim),
 			Settlement: settlement,
+			// The operator's resolved profile reaches the receipt path here, so a
+			// tuned Ingress window is the appender's deadline and not only a
+			// number validated beside the hook deadline.
+			TimeoutProfile: budget,
 			// The command's standard error is the best-effort channel for the
 			// session-claim mismatch line: the receipt is committed before the
 			// claim is written, so the committed host Outcome cannot carry it.

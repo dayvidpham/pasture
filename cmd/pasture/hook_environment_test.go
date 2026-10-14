@@ -2,8 +2,10 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -43,7 +45,7 @@ func TestHookEnvironmentTreatsSetButEmptyAsUnset(t *testing.T) {
 		},
 		{
 			name:   "every variable set but empty",
-			values: map[string]string{hookFailClosedEnv: "", hookCaptureDirEnv: "", hookActorIDEnv: ""},
+			values: map[string]string{hookFailClosedEnv: "", hookCaptureDirEnv: "", hookActorIDEnv: "", hookInvocationTimeoutEnv: "", hookIngressTimeoutEnv: "", hookStartSliceTimeoutEnv: ""},
 			want:   HookEnvironment{FaultPolicy: hostexit.FaultFailOpen},
 		},
 		{
@@ -109,6 +111,50 @@ func TestHookEnvironmentTreatsSetButEmptyAsUnset(t *testing.T) {
 				ActorClaim:  "worker-1",
 			},
 		},
+		{
+			name:   "hook-invocation deadline lowered",
+			values: map[string]string{hookInvocationTimeoutEnv: "3s"},
+			want: HookEnvironment{
+				FaultPolicy:    hostexit.FaultFailOpen,
+				BudgetOverride: timeouts.Override{HookInvocation: 3 * time.Second},
+			},
+		},
+		{
+			name: "all three time budgets set together",
+			values: map[string]string{
+				hookInvocationTimeoutEnv: "4s",
+				hookIngressTimeoutEnv:    "900ms",
+				hookStartSliceTimeoutEnv: "1500ms",
+			},
+			want: HookEnvironment{
+				FaultPolicy: hostexit.FaultFailOpen,
+				BudgetOverride: timeouts.Override{
+					HookInvocation: 4 * time.Second,
+					Ingress:        900 * time.Millisecond,
+					StartSlice:     1500 * time.Millisecond,
+				},
+			},
+		},
+		{
+			name:       "hook-invocation deadline is not a duration",
+			values:     map[string]string{hookInvocationTimeoutEnv: "soon"},
+			wantErrHas: `PASTURE_HOOK_INVOCATION_TIMEOUT is set to "soon"`,
+		},
+		{
+			name:       "ingress window is padded",
+			values:     map[string]string{hookIngressTimeoutEnv: " 1s"},
+			wantErrHas: `PASTURE_INGRESS_TIMEOUT is set to " 1s"`,
+		},
+		{
+			name:       "start-slice window is zero",
+			values:     map[string]string{hookStartSliceTimeoutEnv: "0s"},
+			wantErrHas: `PASTURE_START_SLICE_TIMEOUT is set to "0s", which is not a positive duration`,
+		},
+		{
+			name:       "hook-invocation deadline is negative",
+			values:     map[string]string{hookInvocationTimeoutEnv: "-1s"},
+			wantErrHas: "which is not a positive duration",
+		},
 	}
 
 	for _, test := range tests {
@@ -166,6 +212,9 @@ func TestHookEnvironmentReadsTheRealProcessEnvironment(t *testing.T) {
 	t.Setenv(hookFailClosedEnv, "1")
 	t.Setenv(hookCaptureDirEnv, "/var/tmp/pasture-captures")
 	t.Setenv(hookActorIDEnv, "worker-1")
+	t.Setenv(hookInvocationTimeoutEnv, "3s")
+	t.Setenv(hookIngressTimeoutEnv, "800ms")
+	t.Setenv(hookStartSliceTimeoutEnv, "1500ms")
 
 	got, err := hookEnvironment()
 	require.NoError(t, err)
@@ -173,13 +222,23 @@ func TestHookEnvironmentReadsTheRealProcessEnvironment(t *testing.T) {
 		FaultPolicy: hostexit.FaultFailClosed,
 		CaptureDir:  "/var/tmp/pasture-captures",
 		ActorClaim:  "worker-1",
+		BudgetOverride: timeouts.Override{
+			HookInvocation: 3 * time.Second,
+			Ingress:        800 * time.Millisecond,
+			StartSlice:     1500 * time.Millisecond,
+		},
 	}, got, "the production entry point must read the real process environment")
 
 	t.Setenv(hookFailClosedEnv, "")
+	t.Setenv(hookInvocationTimeoutEnv, "")
+	t.Setenv(hookIngressTimeoutEnv, "")
+	t.Setenv(hookStartSliceTimeoutEnv, "")
 	empty, err := hookEnvironment()
 	require.NoError(t, err)
 	assert.Equal(t, hostexit.FaultFailOpen, empty.FaultPolicy,
 		"an exported but empty variable must read as unset in the real environment too")
+	assert.True(t, empty.BudgetOverride.IsZero(),
+		"an exported but empty time-budget knob must read as unset, keeping the default tiers")
 }
 
 func assertActionableEnvError(t *testing.T, err error) {
