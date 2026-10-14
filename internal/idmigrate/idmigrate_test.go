@@ -57,27 +57,29 @@ func TestConvertIsANoOpOnACurrentStore(t *testing.T) {
 	if !report.AlreadyCurrent {
 		t.Fatalf("report=%+v want AlreadyCurrent", report)
 	}
-	if report.BackupPath != "" || report.BackupSHA256 != "" {
-		t.Fatalf("report=%+v want no backup on the already-current path", report)
+	if report.ArchivePath != "" || report.ArchiveSHA256 != "" {
+		t.Fatalf("report=%+v want no archive on the already-current path", report)
 	}
 	if after := sha256File(t, path); after != before {
 		t.Fatalf("store bytes changed on the no-op path: before=%s after=%s", before, after)
 	}
 }
 
-// TestConvertIsANoOpOnAnEmptyStore: a store with no identities at all gets its
-// marker from the dependency's own activation, so conversion reports
-// NothingToConvert and makes no backup.
-func TestConvertIsANoOpOnAnEmptyStore(t *testing.T) {
+// TestFreshStoreIsCutOverOnFirstOpen: a store that does not exist is created and
+// cut over by its first open — the pipeline writes marker + receipt + floor — so
+// a later conversion under the lock is a no-op with complete fence evidence.
+func TestFreshStoreIsCutOverOnFirstOpen(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "empty.db")
-	file, err := os.Create(path)
+	path := filepath.Join(t.TempDir(), "fresh.db")
+	tracker, err := tasks.OpenTaskTracker(path)
 	if err != nil {
-		t.Fatalf("create: %v", err)
+		t.Fatalf("open fresh: %v", err)
 	}
-	if err := file.Close(); err != nil {
+	if err := tracker.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
+	before := sha256File(t, path)
+
 	db, err := dbconn.OpenSharedDB(path)
 	if err != nil {
 		t.Fatalf("open shared: %v", err)
@@ -87,8 +89,11 @@ func TestConvertIsANoOpOnAnEmptyStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if !report.NothingToConvert || report.AlreadyCurrent {
-		t.Fatalf("report=%+v want NothingToConvert only", report)
+	if !report.AlreadyCurrent {
+		t.Fatalf("report=%+v want AlreadyCurrent on a first-open store", report)
+	}
+	if after := sha256File(t, path); after != before {
+		t.Fatalf("store bytes changed on the no-op path: before=%s after=%s", before, after)
 	}
 }
 

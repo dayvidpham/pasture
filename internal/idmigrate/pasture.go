@@ -49,7 +49,12 @@ var runtimeStateTables = []string{
 // DBOS execution/history state. It names the table and the row count and tells
 // the operator to drain with the previous build and export through a supported
 // owner path; it never deletes vendor history.
-func refuseRuntimeState(ctx context.Context, tx *sql.Tx) error {
+//
+// The Impact sentence is scoped for the cutover pipeline: P1's archive and P2's
+// catch-up are already committed when this fires, so the conversion transaction
+// (which wrote nothing and was rolled back) is the only thing this refusal
+// undid.
+func refuseRuntimeState(ctx context.Context, tx *sql.Tx, storePath string, archive Archive, appliedCatchUpSteps int) error {
 	for _, table := range runtimeStateTables {
 		exists, err := tableExists(ctx, tx, table)
 		if err != nil {
@@ -60,7 +65,7 @@ func refuseRuntimeState(ctx context.Context, tx *sql.Tx) error {
 		}
 		var count int64
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM "`+table+`"`).Scan(&count); err != nil {
-			return conversionError("Pasture couldn't inspect the runtime-state table "+table+".", "The read-only row count failed.", "No store data was changed; the conversion aborts before any write.", "Confirm the store is readable and retry.", err)
+			return conversionError("Pasture couldn't inspect the runtime-state table "+table+".", "The read-only row count failed.", "No store data was changed; the conversion aborts before any conversion write.", "Confirm the store is readable and retry.", err)
 		}
 		if count > 0 {
 			return &pasterrors.StructuredError{
@@ -69,7 +74,7 @@ func refuseRuntimeState(ctx context.Context, tx *sql.Tx) error {
 				Why: "DBOS execution and history rows can embed task and actor identities inside opaque vendor bytes. " +
 					"Pasture has no owner recipe for that serialization, so rewriting it would be a guess, and a guess can re-point work.",
 				Where:  "Preflighting runtime state (internal/idmigrate/pasture.go in idmigrate.refuseRuntimeState).",
-				Impact: "Nothing was changed by this attempt. The conversion stops before its first write, so the store keeps its retired identities.",
+				Impact: fmt.Sprintf("The conversion transaction wrote nothing and was rolled back. This run's archive (%s) and its %d applied audit catch-up step(s) remain committed; the store keeps its retired identities.", archive.Path, appliedCatchUpSteps),
 				Fix: "1. Finish or drain the in-flight work with the PREVIOUS pasture build (stop the daemon and let queued workflows settle).\n" +
 					"2. Export or archive the runtime history through its supported owner path.\n" +
 					"3. Re-run `pasture migrate ids` once the runtime tables are empty; do not delete vendor history by hand.",

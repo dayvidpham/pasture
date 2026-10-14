@@ -1,37 +1,36 @@
-// Package idmigrate owns pasture's one-time OFFLINE identity-format conversion:
-// the `pasture migrate ids [--dry-run]` command's production path. It is not a
-// runtime reader and adds no compatibility mode. After it runs, the retired
-// two-dash representation never resolves anywhere in pasture.
+// Package idmigrate owns pasture's one-time OFFLINE identity-format cutover:
+// the `pasture migrate ids [--dry-run]` command's production path and the
+// cutover write the first open of a legacy store performs. It is not a runtime
+// reader and adds no compatibility mode. After it runs, the retired two-dash
+// representation never resolves anywhere in pasture.
 //
 // The dependency (github.com/dayvidpham/provenance) owns the format, the parser
 // and every Provenance-owned table, canonical mutation and allocation receipt.
 // This package owns only what pasture owns: the audit trail, the pasture-side
-// registry and projection tables, and the shared lifecycle replay that must run
-// inside the same transaction. It calls the dependency's published conversion
-// APIs; it never patches or duplicates them.
+// registry and projection tables, the shared lifecycle replay that must run
+// inside the same transaction, and the cutover receipt. It calls the
+// dependency's published conversion APIs; it never patches or duplicates them.
 //
-// One transaction, marker last. The whole conversion runs inside ONE
-// BEGIN IMMEDIATE transaction:
+// The cutover is one fenced pipeline with named phases:
 //
-//  1. preflight is repeated under the lock;
-//  2. Provenance-owned columns, canonical mutations and allocation receipts are
-//     converted by provenance.ConvertIDsInTx;
-//  3. pasture-owned typed columns and declared structured fields are converted
-//     by this package's codecs;
-//  4. provenance.VerifyIDConversionInTx checks canonical and allocation
-//     integrity through their real owners, on this transaction;
-//  5. the disposable lifecycle projection is replayed from the CONVERTED journal
-//     truth through a transaction-bound evidence reader (no pooled connection),
-//     then compared against that truth;
-//  6. the complete raw payload-blob inventory is compared with its pre-conversion
-//     inventory, so nothing is silently deleted or rewritten;
-//  7. provenance.PublishIDFormatInTx publishes the format marker, and
-//     audit.RaiseIDFormatCeilingInTx raises the schema ceiling, BOTH last.
+//	P0 read-only state check (EvaluateCutoverOnHandle); the dry run stops here.
+//	P1 archive (ArchiveStore): a consistent logical copy through a read-only
+//	   source, verified, with the archive's own format marker recorded.
+//	P2 audit catch-up with the DEFERRED ceiling (audit.WithDeferredCeiling).
+//	P3 conversion transaction (Convert): ONE BEGIN IMMEDIATE on a pinned
+//	   connection, bracketed by the dependency's verified FK-off/restore.
+//	P4 reopen proof (the command frontend only).
 //
-// Any failure in steps 2-6 rolls the entire transaction back: no key, canonical
-// byte, digest, projection row, blob row or marker survives a failure. No normal
-// open or pooled read runs inside the lock. Reclaim is structurally absent from
-// this path, so the conversion reports zero reclaimed bodies.
+// Inside P3 the phases are: (a) the under-lock EVIDENCE verdict; (b) the
+// runtime-state refusal; (c) the raw blob inventory; (d) schema completion;
+// (e) the conversions; (f) owner verification; (g) the transaction-bound
+// non-reclaiming lifecycle replay and comparison; (h) inventory equality;
+// (i) the marker; (j) the receipt; (k) the deferred ceiling — then COMMIT.
+//
+// Any failure in (b)-(k) rolls the entire transaction back: no key, canonical
+// byte, digest, projection row, blob row, marker, receipt or ceiling survives.
+// No normal open or pooled read runs inside the lock. Reclaim is structurally
+// absent from this path, so the conversion reports zero reclaimed bodies.
 package idmigrate
 
 import (
@@ -72,41 +71,36 @@ type InspectionReader = provenance.IDFormatReader
 func Inspect(ctx context.Context, reader InspectionReader, storePath string) (Inspection, error) {
 	inspection, err := provenance.InspectIDFormat(ctx, reader)
 	if err != nil {
-		return Inspection{StorePath: storePath}, &pasterrors.StructuredError{
-			Category: pasterrors.CategoryStorage,
-			What:     fmt.Sprintf("Pasture couldn't read the identity format of the database at %q.", storePath),
-			Why:      "The dependency's read-only format inspection failed, or the store's marker is malformed or unknown to this build.",
-			Where:    "Inspecting the store identity format (internal/idmigrate/idmigrate.go in idmigrate.Inspect).",
-			Impact:   "No store data was read or written. The format cannot be confirmed, so no open or conversion proceeds.",
-			Fix: "1. Confirm the file is a readable SQLite database:\n" +
-				"     sqlite3 <path> 'PRAGMA integrity_check'\n" +
-				"2. If the marker looks wrong, restore the complete byte-exact archive of the store and retry.",
-			Cause: err,
-		}
+		return Inspection{StorePath: storePath}, formatInspectionError(storePath, err)
 	}
 	return Inspection{StorePath: storePath, Format: inspection.Format, Populated: inspection.Populated}, nil
 }
 
-// ConvertOptions carries the inputs to a single offline conversion.
+// ConvertOptions carries the inputs to the P3 conversion transaction.
 type ConvertOptions struct {
 	// StorePath is the resolved database path. It labels errors and names the
-	// backup, and it is the path the operator is told to convert.
+	// store in refusals.
 	StorePath string
-	// BackupDir is where the consistent backup is written. Empty means the
-	// store's own directory.
-	BackupDir string
-	// Now is the transaction timestamp source. Nil means the wall clock.
+	// Archive is the P1 result this run recorded. P3's scoped refusals name it.
+	Archive Archive
+	// AppliedCatchUpSteps is the number of audit steps this run's P2 catch-up
+	// applied (zero when the store was already current). P3's scoped refusals
+	// name it.
+	AppliedCatchUpSteps int
+	// Now is the timestamp source for the receipt and the ceiling. Nil means
+	// the wall clock.
 	Now func() time.Time
 }
 
-// Report is what one conversion did. It is returned even for the no-op paths
-// (already current, or an empty store with nothing to convert).
+// Report is what one conversion did. It is returned even for the no-op path
+// (already current).
 type Report struct {
 	StorePath          string
-	BackupPath         string
-	BackupSHA256       string
+	ArchivePath        string
+	ArchiveSHA256      string
 	AlreadyCurrent     bool
-	NothingToConvert   bool
+	ReceiptWritten     bool
+	FloorVersion       int
 	ChangedFields      int
 	ChangedMutations   int
 	ChangedAllocations int
@@ -114,10 +108,10 @@ type Report struct {
 	Reclaimed          int
 }
 
-// Convert runs the one-time offline conversion against an already-open
-// database handle. The handle MUST be the only writer: the caller (the CLI
-// handler) is responsible for the stopped-writer requirement and for closing
-// the handle before any reopen.
+// Convert runs the P3 conversion transaction against an already-open shared
+// handle. The handle MUST be the only writer: the caller (the CLI handler or
+// the open path) is responsible for the stopped-writer requirement and for
+// closing the handle before any reopen.
 //
 // It never opens a second connection and never runs a normal open inside the
 // conversion transaction.
@@ -125,147 +119,155 @@ func Convert(ctx context.Context, db *sql.DB, opts ConvertOptions) (Report, erro
 	if db == nil {
 		return Report{}, conversionError("The identity conversion has no database handle.", "An open, exclusive handle is required; the conversion never opens its own.", "Nothing was converted.", "Open the store and retry.", nil)
 	}
-	report := Report{StorePath: opts.StorePath}
+	report := Report{StorePath: opts.StorePath, ArchivePath: opts.Archive.Path, ArchiveSHA256: opts.Archive.SHA256}
 	now := opts.Now
 	if now == nil {
 		now = time.Now
 	}
 
-	inspection, err := Inspect(ctx, db, opts.StorePath)
+	conn, err := db.Conn(ctx)
 	if err != nil {
-		return report, err
+		return report, conversionError("The identity conversion couldn't pin a database connection.", err.Error(), "Nothing was converted.", "Stop other writers and retry.", err)
 	}
-	if inspection.Current() {
+	defer conn.Close()
+
+	restoreFK, err := provenance.PauseForeignKeys(ctx, conn)
+	if err != nil {
+		return report, conversionError("The identity conversion couldn't pause foreign-key enforcement.", err.Error(), "Nothing was converted; the store is unchanged.", "Confirm no transaction is open on this connection and retry.", err)
+	}
+
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		restoreErr := restoreFK(err)
+		return report, conversionError("The identity conversion transaction could not start.", "SQLite did not grant the exclusive write transaction.", "No store row was changed; the archive remains available.", "Stop other writers, confirm the store is healthy, and retry.", restoreErr)
+	}
+
+	opErr := runConversion(ctx, tx, opts, now, &report)
+	if opErr != nil {
+		_ = tx.Rollback()
+		return report, restoreFK(opErr)
+	}
+	if err := tx.Commit(); err != nil {
+		return report, restoreFK(conversionError("The identity conversion could not be committed.", "SQLite rejected the commit after every conversion and verification step succeeded.", "The store keeps its retired identities and the archive remains available.", "Confirm storage health and free space, then retry.", err))
+	}
+	return report, restoreFK(nil)
+}
+
+// runConversion is the single P3 body. It returns nil only when every step
+// succeeded and the transaction is ready to commit; the caller rolls back on
+// any error.
+func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now func() time.Time, report *Report) error {
+	// P3a: the under-lock EVIDENCE verdict. This is the evidence subset only
+	// (marker, receipt, marker_format match, recorded version vs floor, version
+	// vs MaxKnown). The populated column is P0 routing and is NOT consulted.
+	state, err := EvaluateEvidenceInTx(ctx, tx, opts.StorePath)
+	if err != nil {
+		return err
+	}
+	switch state.EvidenceVerdict() {
+	case EvidenceNormal:
 		report.AlreadyCurrent = true
-		return report, nil
+		return nil
+	case EvidenceRefuseUnbackedMark:
+		return ScopedP3aRefusal(opts.StorePath, !opts.Archive.Skipped, opts.Archive.Marker, opts.Archive.Path, opts.AppliedCatchUpSteps)
+	case EvidenceNewerSchema:
+		return audit.NewerSchemaError(state.RecordedVersion, audit.MaxKnownSchemaVersion)
 	}
-	if !inspection.Populated {
-		// An empty store gets the slash marker from the dependency's own
-		// activation transaction the first time it is opened; there is nothing
-		// to convert and nothing to back up.
-		report.NothingToConvert = true
-		return report, nil
+	// EvidenceMarkerless: proceed on both frontends.
+
+	// P3b: refuse non-empty runtime state, never guess vendor bytes.
+	if err := refuseRuntimeState(ctx, tx, opts.StorePath, opts.Archive, opts.AppliedCatchUpSteps); err != nil {
+		return err
 	}
 
-	backup, err := makeConsistentBackup(ctx, db, opts.StorePath, opts.BackupDir, now())
-	if err != nil {
-		return report, err
-	}
-	report.BackupPath = backup.Path
-	report.BackupSHA256 = backup.SHA256
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return report, conversionError("The identity conversion transaction could not start.", "SQLite did not grant the exclusive write transaction.", "No store row was changed; the backup remains available.", "Stop other writers, confirm the store is healthy, and retry.", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
-		}
-	}()
-
-	// RE-PREFLIGHT UNDER THE LOCK. A writer could have changed the format
-	// between the unlocked inspection and the lock; repeat it inside the
-	// transaction so the conversion never runs against a store it did not
-	// inspect.
-	locked, err := Inspect(ctx, tx, opts.StorePath)
-	if err != nil {
-		return report, err
-	}
-	if locked.Current() {
-		report.AlreadyCurrent = true
-		return report, nil
-	}
-	if !locked.Populated {
-		report.NothingToConvert = true
-		return report, nil
-	}
-
-	// RUNTIME STATE IS REFUSED, NEVER GUESSED. A non-empty serialized DBOS
-	// execution/history table can carry identities in opaque vendor bytes that
-	// this conversion has no owner recipe for. Fail closed with drain/export
-	// guidance instead of rewriting vendor history.
-	if err := refuseRuntimeState(ctx, tx); err != nil {
-		return report, err
-	}
-
-	// RAW EVIDENCE INVENTORY, BEFORE ANY WRITE. Every payload blob row is
-	// captured as (digest, body, byte_count, written_at) so the exact inventory
-	// can be compared after the conversion. Row counts would miss a swapped body.
+	// P3c: raw evidence inventory, before any write.
 	before, err := captureBlobInventory(ctx, tx)
 	if err != nil {
-		return report, err
+		return err
 	}
 
-	// 1. Dependency-owned columns, canonical mutations, allocation receipts,
-	//    their owner-derived digests, and Provenance-owned extension contexts.
+	// P3d: complete the Provenance schema inside this transaction, so a legacy
+	// store has the governed_allocation_operations and journal_operations
+	// relations conversion and verification read.
+	if err := provenance.EnsureSchemaInTx(ctx, tx, provenance.DefaultModelRegistry().Models()); err != nil {
+		return conversionError("Pasture couldn't complete the store's Provenance schema inside the conversion transaction.", err.Error(), "The whole conversion transaction rolls back, including the schema additions; the store keeps its retired identities.", "Confirm the store is writable and retry.", err)
+	}
+
+	// P3e: dependency-owned columns, canonical mutations, allocation receipts,
+	// their owner-derived digests, and Provenance-owned extension contexts.
 	dependencyReport, err := provenance.ConvertIDsInTx(ctx, tx, provenance.IDConversionOptions{
 		RewriteEffect:  rewritePastureEffect,
 		RewriteContext: rewritePastureContext,
 	})
 	if err != nil {
-		return report, conversionError("Converting the dependency-owned identities failed.", err.Error(), "The whole conversion transaction rolls back; the store keeps its retired identities and the backup is available.", "Repair the reported column/key from the archive and retry.", err)
+		return conversionError("Converting the dependency-owned identities failed.", err.Error(), "The whole conversion transaction rolls back; the store keeps its retired identities and the archive remains available.", "Repair the reported column/key from the archive and retry.", err)
 	}
 	report.ChangedFields = dependencyReport.ChangedFields
 	report.ChangedMutations = dependencyReport.ChangedMutations
 	report.ChangedAllocations = dependencyReport.ChangedAllocations
 
-	// 2. Pasture-owned typed identity columns and declared structured fields, in
-	//    the SAME transaction.
+	// P3e (pasture): pasture-owned typed identity columns and declared
+	// structured fields, in the SAME transaction.
 	pastureRows, err := convertPastureIdentities(ctx, tx)
 	if err != nil {
-		return report, err
+		return err
 	}
 	report.PastureRows = pastureRows
 
-	// 3. Owner integrity on this transaction: canonical mutations, allocation
-	//    receipts, evidence and projections through their production owners.
+	// P3f: owner integrity on this transaction.
 	if err := provenance.VerifyIDConversionInTx(ctx, tx); err != nil {
-		return report, conversionError("The converted store failed owner integrity verification.", err.Error(), "The whole conversion transaction rolls back; the store keeps its retired identities and the backup is available.", "Restore the matching archived bytes/digest/version and retry.", err)
+		return conversionError("The converted store failed owner integrity verification.", err.Error(), "The whole conversion transaction rolls back; the store keeps its retired identities and the archive remains available.", "Restore the matching archived bytes/digest/version and retry.", err)
 	}
 
-	// 4. SAME-TRANSACTION, NON-RECLAIMING LIFECYCLE REPLAY. The reader is bound
-	//    to this transaction, so it observes the converted rows that are not yet
-	//    committed; there is no pooled reader and no second connection.
+	// P3g: same-transaction, non-reclaiming lifecycle replay, then comparison
+	// against the transaction-bound evidence.
 	reader, err := provenance.NewTransactionEvidenceReader(ctx, tx)
 	if err != nil {
-		return report, conversionError("The transaction-bound lifecycle evidence reader could not be constructed.", err.Error(), "The whole conversion transaction rolls back.", "Confirm the transaction is still open and retry.", err)
+		return conversionError("The transaction-bound lifecycle evidence reader could not be constructed.", err.Error(), "The whole conversion transaction rolls back.", "Confirm the transaction is still open and retry.", err)
 	}
 	if err := projection.RebuildOccurrencesInTx(ctx, tx, reader); err != nil {
-		return report, conversionError("Replaying the converted lifecycle journal failed.", err.Error(), "The whole conversion transaction rolls back, including every converted key and digest, and no marker is published.", "Repair the reported evidence row from the archive and retry.", err)
+		return conversionError("Replaying the converted lifecycle journal failed.", err.Error(), "The whole conversion transaction rolls back, including every converted key and digest, and no marker is published.", "Repair the reported evidence row from the archive and retry.", err)
 	}
 	if err := projection.CompareOccurrencesToEvidence(ctx, tx, reader); err != nil {
-		return report, err
+		return err
 	}
 
-	// 5. RAW INVENTORY EQUALITY. Conversion must not delete, rewrite or reclaim
-	//    any raw payload body. The eligible aged orphan is retained too.
+	// P3h: raw inventory equality. Conversion must not delete, rewrite or
+	// reclaim any raw payload body.
 	after, err := captureBlobInventory(ctx, tx)
 	if err != nil {
-		return report, err
+		return err
 	}
 	if err := compareBlobInventories(before, after); err != nil {
-		return report, err
+		return err
 	}
 	report.Reclaimed = 0
 
-	// 6. MARKER AND CEILING LAST. PublishIDFormatInTx repeats dependency
-	//    integrity and SQLite constraint checks, then writes the marker; the
-	//    audit ceiling goes in after it, in the same transaction, so a store can
-	//    never carry the ceiling without the marker.
+	// P3i: the marker, LAST-but-two. PublishIDFormatInTx repeats dependency
+	// integrity and SQLite constraint checks before writing.
 	if err := provenance.PublishIDFormatInTx(ctx, tx); err != nil {
-		return report, conversionError("Publishing the identity-format marker failed.", err.Error(), "The whole conversion transaction rolls back; no partial marker is published and the store keeps its retired identities.", "Restore the complete archive and retry.", err)
-	}
-	if err := audit.RaiseIDFormatCeilingInTx(tx, opts.StorePath, now().UTC().UnixNano()); err != nil {
-		return report, err
+		return conversionError("Publishing the identity-format marker failed.", err.Error(), "The whole conversion transaction rolls back; no partial marker is published and the store keeps its retired identities.", "Restore the archive and retry.", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return report, conversionError("The identity conversion could not be committed.", "SQLite rejected the commit after every conversion and verification step succeeded.", "The store keeps its retired identities and the backup remains available.", "Confirm storage health and free space, then retry.", err)
+	// P3j: the cutover receipt, in the SAME transaction as the marker and the
+	// floor, so the fence evidence commits together. Written once.
+	if err := writeReceipt(ctx, tx, Receipt{
+		MarkerFormat:  string(provenance.IDFormatSlash),
+		FloorVersion:  audit.MaxKnownSchemaVersion,
+		ArchivePath:   opts.Archive.Path,
+		ArchiveSHA256: opts.Archive.SHA256,
+		CutoverAt:     now().UTC().UnixNano(),
+	}); err != nil {
+		return err
 	}
-	committed = true
-	return report, nil
+	report.ReceiptWritten = true
+	report.FloorVersion = audit.MaxKnownSchemaVersion
+
+	// P3k: the deferred ceiling step(s), applied by name, LAST.
+	if err := audit.RaiseIDFormatCeilingInTx(tx, opts.StorePath, now().UTC().UnixNano()); err != nil {
+		return err
+	}
+	return nil
 }
 
 // rewritePastureEffect and rewritePastureContext translate the declared

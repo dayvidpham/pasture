@@ -69,6 +69,11 @@ type SqliteAuditTrail struct {
 type sqliteAuditTrailOptions struct {
 	skipMigrations bool
 	timeouts       timeouts.Profile
+	// ceiling, when non-zero, stops the migrator short of
+	// MaxKnownSchemaVersion so the offline cutover's catch-up runs to the
+	// deferred target and the conversion transaction applies the remaining
+	// step(s) atomically with the marker and the receipt.
+	ceiling int
 	// busyRetry bounds the retry the open runs around the statements outside
 	// the migrator's transaction (open_retry.go). The zero value means the
 	// migrator's own budget; only in-package tests set another.
@@ -77,6 +82,14 @@ type sqliteAuditTrailOptions struct {
 
 func WithTimeoutProfile(profile timeouts.Profile) SqliteAuditTrailOption {
 	return func(o *sqliteAuditTrailOptions) { o.timeouts = profile }
+}
+
+// WithDeferredCeiling stops the audit migrator short of the identity-format
+// ceiling. The offline cutover's catch-up phase uses it so the ceiling step is
+// applied by the conversion transaction, atomically with the marker and the
+// receipt, never by a plain open.
+func WithDeferredCeiling(ceiling int) SqliteAuditTrailOption {
+	return func(o *sqliteAuditTrailOptions) { o.ceiling = ceiling }
 }
 
 // SqliteAuditTrailOption configures NewSqliteAuditTrailWithOptions.
@@ -252,7 +265,7 @@ func NewSqliteAuditTrailContextWithOptions(ctx context.Context, dbPath string, o
 	// wrote it), Migrate returns a *pasterrors.StructuredError with
 	// Category=CategoryStorage — propagated unwrapped so callers can
 	// errors.As() it (PROPOSAL-2 §11 Scenario 5).
-	if err := MigrateContext(ctx, db); err != nil {
+	if err := MigrateContextToCeiling(ctx, db, cfg.ceiling); err != nil {
 		db.Close()
 		return nil, err
 	}

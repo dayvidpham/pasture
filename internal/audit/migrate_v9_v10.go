@@ -17,34 +17,31 @@ import (
 // file for EVERY command, exactly as it already does for version 9. The way
 // past this file is an upgraded binary, never a hand-edited key.
 //
-// WHERE THE FORMAT GATE LIVES, AND WHY NOT HERE. The gate that refuses a
-// populated two-dash store runs BEFORE this migrator, on the normal open path
-// (internal/tasks/id_format_guard.go), because a legacy store's first open
-// legitimately CREATES populated provenance tables through the v2→v3 backfill:
-// the identity-format marker is published later, by the dependency's activation
-// transaction. A gate inside a migration step would therefore refuse the very
-// store it had just populated. The open-path guard inspects the format before
-// any schema work, so it sees the store as the previous build left it. The
-// conversion publishes the marker and raises THIS ceiling in one transaction
-// (audit.RaiseIDFormatCeilingInTx), so a converted file can never carry one
-// without the other.
+// WHAT GATES IT. The step refuses a populated store that does not carry the
+// dependency's slash identity-format marker, so no path can raise the floor
+// without the marker. The offline cutover applies this step AFTER it publishes
+// the marker, inside one transaction, so the marker and the ceiling commit
+// together; plain `pasture migrate` never raises the floor on a store that is
+// not marker-bearing, because its precheck refuses every non-NORMAL store
+// before any step writes and this gate is the backstop.
 //
 // ATOMICITY. runStep holds one BEGIN IMMEDIATE transaction and commits only on
 // a nil return; the version stamp is the LAST statement, so a crash rolls the
 // step back.
 func migrateV9toV10Step(tx *sql.Tx, now int64) error {
-	return writeVersion(tx, 10, now)
+	return raiseIdentityCeiling(tx, now, "the database being migrated")
 }
 
-// RaiseIDFormatCeilingInTx stamps the identity-format schema ceiling (version
-// 10) inside the CALLER's conversion transaction, after the dependency has
-// published the slash marker. It is the same floor the normal open path
-// enforces, applied at the moment of conversion, so the marker and the ceiling
-// can never disagree on a populated store: one without the other is exactly the
-// half-converted state the ceiling exists to prevent. The caller owns
-// Commit/Rollback.
+// RaiseIDFormatCeilingInTx applies the remaining identity-format ceiling step(s)
+// inside the CALLER's conversion transaction, after the dependency has published
+// the slash marker and this transaction has written the cutover receipt. It is
+// the same floor the normal open path enforces, applied at the moment of
+// conversion, so the marker, the receipt and the ceiling can never disagree:
+// one without the others is exactly the half-converted state the ceiling exists
+// to prevent. The caller owns Commit/Rollback.
 func RaiseIDFormatCeilingInTx(tx *sql.Tx, storePath string, nowUnixNano int64) error {
-	inspection, err := provenance.InspectIDFormat(context.Background(), tx)
+	ctx := context.Background()
+	inspection, err := provenance.InspectIDFormat(ctx, tx)
 	if err != nil {
 		return &pasterrors.StructuredError{
 			Category: pasterrors.CategoryStorage,
@@ -60,13 +57,38 @@ func RaiseIDFormatCeilingInTx(tx *sql.Tx, storePath string, nowUnixNano int64) e
 	if inspection.Populated && inspection.Format != provenance.IDFormatSlash {
 		return identityFormatCeilingRefusal(storePath)
 	}
-	return writeVersion(tx, MaxKnownSchemaVersion, nowUnixNano)
+	current, err := readVersionInTx(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return ApplyCeilingInTx(ctx, tx, current, nowUnixNano)
+}
+
+// raiseIdentityCeiling is the shared body of the v9→v10 step: it refuses a
+// populated store without the slash marker, then stamps the ceiling version.
+func raiseIdentityCeiling(tx *sql.Tx, now int64, location string) error {
+	inspection, err := provenance.InspectIDFormat(context.Background(), tx)
+	if err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     fmt.Sprintf("Pasture couldn't read the identity format of %s before raising its schema ceiling.", location),
+			Why:      "The dependency's read-only format inspection failed inside the migration step.",
+			Where:    "Raising the database schema ceiling (internal/audit/migrate_v9_v10.go in audit.raiseIdentityCeiling).",
+			Impact:   "The schema version was not changed; the step rolls back.",
+			Fix:      "1. Confirm the database is a readable SQLite file and retry the migration.",
+			Cause:    err,
+		}
+	}
+	if inspection.Populated && inspection.Format != provenance.IDFormatSlash {
+		return identityFormatCeilingRefusal(location)
+	}
+	return writeVersion(tx, MaxKnownSchemaVersion, now)
 }
 
 // identityFormatCeilingRefusal is returned when a caller asks to raise the
 // audit schema ceiling without the dependency's slash marker present on a
-// populated store. The offline conversion calls this before stamping version
-// 10 so the ceiling and the marker can never disagree.
+// populated store. The offline conversion publishes the marker before it calls
+// this, so the ceiling and the marker can never disagree.
 func identityFormatCeilingRefusal(storePath string) error {
 	return &pasterrors.StructuredError{
 		Category: pasterrors.CategoryStorage,
@@ -78,6 +100,6 @@ func identityFormatCeilingRefusal(storePath string) error {
 			"The whole conversion transaction rolls back.",
 		Fix: "1. Re-run the offline conversion, which publishes the marker before it raises the ceiling:\n" +
 			"     pasture migrate ids\n" +
-			"2. If it keeps failing, restore the complete archive the conversion made and retry from that copy.",
+			"2. If it keeps failing, restore the consistent archive the conversion made and retry from that copy.",
 	}
 }

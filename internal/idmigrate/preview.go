@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -28,6 +29,16 @@ type Preview struct {
 	// declare identity fields that would convert.
 	EpochProjectionRows int
 	AuditPayloadRows    int
+	// RecordedVersion is the audit schema version this run read.
+	RecordedVersion int
+	// PendingCatchUpSteps is how many audit steps the deferred catch-up phase
+	// (P2) would apply before the conversion transaction runs.
+	PendingCatchUpSteps int
+	// EpochIDLowerBound is a LOWER-BOUND count of work the catch-up exposes: the
+	// retired-shaped audit_events.epoch_id values a pre-v4 store still carries.
+	// It is informational only — never a verdict — because the catch-up moves
+	// them into context_edges where the conversion then translates them.
+	EpochIDLowerBound int
 	// Blockers names runtime-state tables that hold rows and would refuse the
 	// conversion.
 	Blockers []string
@@ -73,6 +84,15 @@ func preview(ctx context.Context, db *sql.DB, storePath string) (Preview, error)
 		return Preview{}, err
 	}
 	out := Preview{Inspection: inspection, Columns: map[string]int{}}
+	if out.RecordedVersion, err = readRecordedVersion(ctx, db); err != nil {
+		return Preview{}, err
+	}
+	if target := audit.MaxKnownSchemaVersion - 1; out.RecordedVersion < target {
+		out.PendingCatchUpSteps = target - out.RecordedVersion
+	}
+	if out.EpochIDLowerBound, err = countLegacyEpochIDs(ctx, db, out.RecordedVersion); err != nil {
+		return Preview{}, err
+	}
 	if !inspection.Retired() {
 		return out, nil
 	}
@@ -224,4 +244,52 @@ func tableExistsReader(ctx context.Context, q reader, table string) (bool, error
 		return false, conversionError("Pasture couldn't inspect the store's table catalog.", err.Error(), "Nothing was changed by the dry run.", "Confirm the store is readable and retry.", err)
 	}
 	return exists, nil
+}
+
+// countLegacyEpochIDs reports a LOWER-BOUND count of work the catch-up phase
+// exposes: the recognizable retired-shaped audit_events.epoch_id values a store
+// below v4 still carries. The column is dropped by the v3→v4 step, which copies
+// the values into context_edges; this count is informational, never a verdict,
+// so the dry run does not claim an audit-only legacy store is empty.
+func countLegacyEpochIDs(ctx context.Context, q reader, recordedVersion int) (int, error) {
+	if recordedVersion >= 4 {
+		return 0, nil
+	}
+	exists, err := tableExistsReader(ctx, q, "audit_events")
+	if err != nil || !exists {
+		return 0, err
+	}
+	hasColumn, err := columnExistsReader(ctx, q, "audit_events", "epoch_id")
+	if err != nil || !hasColumn {
+		return 0, err
+	}
+	rows, err := q.QueryContext(ctx, `SELECT DISTINCT epoch_id FROM audit_events WHERE epoch_id IS NOT NULL`)
+	if err != nil {
+		return 0, conversionError("Pasture couldn't read the legacy audit epoch attachments for the dry run.", err.Error(), "Nothing was changed by the dry run.", "Confirm the store is readable and retry.", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return 0, err
+		}
+		if looksRetired(raw) {
+			count++
+		}
+	}
+	return count, rows.Err()
+}
+
+func columnExistsReader(ctx context.Context, q reader, table, column string) (bool, error) {
+	var existing string
+	err := q.QueryRowContext(ctx, `SELECT name FROM pragma_table_info(?) WHERE name = ?`, table, column).Scan(&existing)
+	switch err {
+	case sql.ErrNoRows:
+		return false, nil
+	case nil:
+		return true, nil
+	default:
+		return false, err
+	}
 }

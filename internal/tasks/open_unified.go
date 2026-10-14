@@ -41,6 +41,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/idmigrate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -229,54 +230,55 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 		}
 	}
 
-	// IDENTITY-FORMAT GUARD, BEFORE ANY SCHEMA WORK. A populated store that
-	// still uses the retired two-dash format is refused here — before the
+	// P0: THE IDENTITY-FORMAT STATE MACHINE, READ-ONLY, BEFORE ANY SCHEMA WORK.
+	// A store whose fence evidence is incomplete is refused here — before the
 	// audit schema migrator, fixed-actor registration, genesis reconciliation
 	// and every journal decode — because this is the last point at which the
-	// store still looks the way the previous build left it. See
-	// internal/tasks/id_format_guard.go for why the guard cannot live in a
-	// migration step.
-	if err := refuseRetiredIdentityFormat(ctx, dbPath); err != nil {
+	// store still looks the way the previous build left it. The state machine
+	// and its refusal texts are owned by internal/idmigrate; this is the auto
+	// frontend.
+	openState, err := idmigrate.InspectOpenState(ctx, dbPath)
+	if err != nil {
 		return nil, err
 	}
+	switch openState.Outcome {
+	case idmigrate.OutcomeRefusePopulated, idmigrate.OutcomeRefuseUnbackedMark, idmigrate.OutcomeNewerSchema:
+		return nil, refuseIncompleteFenceOnState(openState)
+	}
 
-	// Open audit first so its migrator runs and creates audit_schema_meta
-	// (and any of its own tables). NewSqliteAuditTrail invokes audit.Migrate
-	// internally; if Migrate returns a CategoryStorage / CategoryValidation
-	// error (newer-schema rejection), it propagates out unchanged via %w.
 	var trail *audit.SqliteAuditTrail
-	var err error
-	if cfg.skipMigrations {
-		trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.timeouts))
+	var auditDB *sql.DB
+	if openState.Outcome == idmigrate.OutcomeCutover {
+		// CUTOVER-AUTO: archive (unless the store did not exist) -> audit
+		// catch-up with the DEFERRED ceiling -> shared handle -> the conversion
+		// transaction. The trail the pipeline opened is REUSED as the tracker's
+		// trail: it is already current after the transaction raises the floor.
+		trail, auditDB, err = runAutoCutover(ctx, dbPath, poolSize, cfg)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithTimeoutProfile(cfg.timeouts))
-	}
-	if err != nil {
-		return nil, wrapOpenError(dbPath, "audit subsystem", err)
-	}
-
-	// Open the audit *sql.DB handle for our pasture-only methods. We open a
-	// fresh handle (not reuse trail's) to avoid taking a hidden reference
-	// into audit's struct internals — the modernc.org/sqlite driver shares
-	// the underlying file (via WAL) so writes through either handle hit the
-	// same disk state. The shared DSN (WAL + busy_timeout + _txlock=immediate)
-	// gives this handle the same write serialisation as the audit handle.
-	// poolSize was already resolved above (WithMaxOpenConns > env > default 1).
-	auditDB, err := openAuditHandleContext(ctx, dbPath, poolSize, cfg.timeouts)
-	if err != nil {
-		_ = trail.Close()
-		return nil, err
-	}
-
-	// Defensive: ensure the post-v2 pasture tables exist. S2 will land the
-	// proper v2→v3 migration; until then this CREATE IF NOT EXISTS unblocks
-	// S5's race test (which writes to context_edges) without forking the
-	// schema. Once S2 lands the migrator runs the same DDL inside its
-	// transaction and this call is a no-op.
-	if err := ensurePastureTablesContext(ctx, auditDB); err != nil {
-		_ = auditDB.Close()
-		_ = trail.Close()
-		return nil, err
+		// NORMAL: the trail open is a no-op when the store is current.
+		if cfg.skipMigrations {
+			trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.timeouts))
+		} else {
+			trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithTimeoutProfile(cfg.timeouts))
+		}
+		if err != nil {
+			return nil, wrapOpenError(dbPath, "audit subsystem", err)
+		}
+		// Open the audit *sql.DB handle for our pasture-only methods. We open a
+		// fresh handle (not reuse trail's) to avoid taking a hidden reference
+		// into audit's struct internals — the modernc.org/sqlite driver shares
+		// the underlying file (via WAL) so writes through either handle hit the
+		// same disk state. The shared DSN (WAL + busy_timeout + _txlock=immediate)
+		// gives this handle the same write serialisation as the audit handle.
+		// poolSize was already resolved above (WithMaxOpenConns > env > default 1).
+		auditDB, err = openAuditHandleContext(ctx, dbPath, poolSize, cfg.timeouts)
+		if err != nil {
+			_ = trail.Close()
+			return nil, err
+		}
 	}
 
 	// Provenance borrows auditDB, not the audit trail's separate pool. The
@@ -317,6 +319,16 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 		}
 	}
 
+	// Defensive: ensure the post-v2 pasture tables exist, after activation has
+	// accepted (or established) the store's format. This CREATE IF NOT EXISTS
+	// is a no-op once the audit migrator has created the same DDL.
+	if err := ensurePastureTablesContext(ctx, auditDB); err != nil {
+		_ = prov.Close()
+		_ = auditDB.Close()
+		_ = trail.Close()
+		return nil, err
+	}
+
 	tracker, err := newTrackerImplContext(ctx, prov, trail, auditDB, true)
 	if err != nil {
 		_ = prov.Close()
@@ -349,6 +361,46 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 		}
 	}
 	return tracker, nil
+}
+
+// runAutoCutover runs the cutover pipeline for a CUTOVER-AUTO open: P1 archive,
+// P2 audit catch-up with the deferred ceiling, and P3 the conversion
+// transaction on the shared handle. It returns the trail and shared handle the
+// caller reuses for activation and the tracker. The archive is skipped only
+// when the store did not exist at P1's own read-only observation of the path.
+func runAutoCutover(ctx context.Context, dbPath string, poolSize int, cfg openTaskTrackerOptions) (*audit.SqliteAuditTrail, *sql.DB, error) {
+	archive, err := idmigrate.ArchiveStore(ctx, dbPath, "", time.Now())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	beforeVersion := idmigrate.RecordedSchemaVersionPath(dbPath)
+	trail, err := audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath,
+		audit.WithTimeoutProfile(cfg.timeouts),
+		audit.WithDeferredCeiling(audit.MaxKnownSchemaVersion-1))
+	if err != nil {
+		return nil, nil, wrapOpenError(dbPath, "audit catch-up", err)
+	}
+	auditDB, err := openAuditHandleContext(ctx, dbPath, poolSize, cfg.timeouts)
+	if err != nil {
+		_ = trail.Close()
+		return nil, nil, err
+	}
+	applied := idmigrate.RecordedSchemaVersionPath(dbPath) - beforeVersion
+	if applied < 0 {
+		applied = 0
+	}
+	if _, err := idmigrate.Convert(ctx, auditDB, idmigrate.ConvertOptions{
+		StorePath:           dbPath,
+		Archive:             archive,
+		AppliedCatchUpSteps: applied,
+		Now:                 time.Now,
+	}); err != nil {
+		_ = auditDB.Close()
+		_ = trail.Close()
+		return nil, nil, err
+	}
+	return trail, auditDB, nil
 }
 
 // openAuditHandle opens a private *sql.DB on the same SQLite file used by
