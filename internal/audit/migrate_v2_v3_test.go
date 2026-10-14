@@ -22,6 +22,7 @@ package audit_test
 
 import (
 	"database/sql"
+	stderrors "errors"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 
 	_ "modernc.org/sqlite"
 )
@@ -161,9 +163,7 @@ func TestMigrateV2toV3_TablesExist(t *testing.T) {
 	_ = seedLegacyV1DB(t, dbPath)
 
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	for _, name := range []string{
 		"context_edges",
@@ -184,9 +184,7 @@ func TestMigrateV2toV3_IndexesExist(t *testing.T) {
 	_ = seedLegacyV1DB(t, dbPath)
 
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	for _, idx := range []string{
 		"idx_context_edges_lookup",
@@ -246,9 +244,7 @@ func TestMigrateV2toV3_ContextEdges_BCNF(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_bcnf.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	cols := tableInfo(t, db, "context_edges")
 	if len(cols) != 3 {
@@ -294,9 +290,7 @@ func TestMigrateV2toV3_WellKnownAgents_UAT1Layout(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_uat1.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	cols := tableInfo(t, db, "pasture_well_known_agents")
 	if len(cols) != 2 {
@@ -363,9 +357,7 @@ func TestMigrateV2toV3_AgentCategories_Layout(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_categories.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	cols := tableInfo(t, db, "pasture_agent_categories")
 	if len(cols) != 3 {
@@ -411,9 +403,7 @@ func TestMigrateV2toV3_LegacyAuditEventsBackfilled(t *testing.T) {
 	originalId := seedLegacyV1DB(t, dbPath)
 
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	// Row count unchanged — every legacy row survives both table rebuilds.
 	var count int
@@ -520,9 +510,7 @@ func TestMigrateV2toV3_NewTablesInsertable(t *testing.T) {
 	eventId := seedLegacyV1DB(t, dbPath)
 
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	// Snapshot context_edges row count after migration (S4 backfilled one
 	// row for the seeded legacy event); subsequent insertions are tested
@@ -603,9 +591,7 @@ func TestMigrateV2toV3_WellKnownAgents_NameUniqueEnforced(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_unique.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	const name = "pasture/automaton/check-constraints"
 	mustExec(t, db,
@@ -644,9 +630,7 @@ func TestMigrateV2toV3_ContextEdges_PKEnforced(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "v3_pk.db")
 	eventId := seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	// Snapshot the post-S4 baseline: one row per legacy event with
 	// non-NULL epoch_id. The seedLegacyV1DB helper writes one row.
@@ -695,18 +679,14 @@ func TestMigrateV2toV3_Idempotent_ReRunNoop(t *testing.T) {
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
 
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("first Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 	// Snapshot row count of audit_schema_meta after first migrate.
 	var firstCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_schema_meta`).Scan(&firstCount); err != nil {
 		t.Fatalf("first count: %v", err)
 	}
 
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("second Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 	var secondCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_schema_meta`).Scan(&secondCount); err != nil {
 		t.Fatalf("second count: %v", err)
@@ -721,9 +701,9 @@ func TestMigrateV2toV3_Idempotent_ReRunNoop(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("version probe: %v", err)
 	}
-	if version != audit.MaxKnownSchemaVersion {
+	if version != cutoverTarget {
 		t.Errorf("MAX(version) after re-Migrate = %d, want %d (MaxKnownSchemaVersion)",
-			version, audit.MaxKnownSchemaVersion)
+			version, cutoverTarget)
 	}
 
 	// Tables still present, indexes still present.
@@ -743,36 +723,45 @@ func TestMigrateV2toV3_Idempotent_ReRunNoop(t *testing.T) {
 
 // ---- Version bookkeeping ---------------------------------------------------
 
-// TestMigrate_VersionBumpedToMaxKnown verifies that after Migrate against
-// a legacy v1 database, audit_schema_meta records the binary's
-// MaxKnownSchemaVersion (currently 4 after S4). Catches accidental
-// regressions to the constant or the migration step registry.
+// TestMigrate_PopulatedStoreRefusesAtIdentityCeiling verifies the identity-format
+// ceiling step's own refusal: a populated, markerless legacy store cannot raise
+// the audit schema ceiling through plain Migrate, because that would publish an
+// unbacked irreversible floor. The store stays at the last step below the
+// ceiling; the offline cutover applies the ceiling atomically with the marker
+// and the receipt.
 //
-// History: this test was originally TestMigrateV2toV3_VersionBumpedTo3
-// and hard-coded "3". Updated to read from the constant so the assertion
-// follows the binary; explicitly asserts MaxKnownSchemaVersion >= 4 to
-// catch a regression below S4's published guarantee.
-func TestMigrate_VersionBumpedToMaxKnown(t *testing.T) {
+// History: this test was TestMigrate_VersionBumpedToMaxKnown, which asserted a
+// populated legacy store's plain Migrate reached MaxKnownSchemaVersion. That
+// assertion cannot hold under the ceiling gate and is replaced by the refusal,
+// which is the stronger contract the gate exists to enforce. The
+// "empty store reaches MaxKnown" half of the old assertion is covered by
+// TestMigrate_FreshV2DbAdvancesToMaxKnown.
+func TestMigrate_PopulatedStoreRefusesAtIdentityCeiling(t *testing.T) {
 	t.Parallel()
-	dbPath := filepath.Join(t.TempDir(), "max_known_version.db")
+	dbPath := filepath.Join(t.TempDir(), "ceiling_gate.db")
 	_ = seedLegacyV1DB(t, dbPath)
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
+
+	err := audit.Migrate(db)
+	if err == nil {
+		t.Fatal("audit.Migrate on a populated markerless store returned nil, want the identity-ceiling refusal")
+	}
+	var se *pasterrors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("audit.Migrate returned %T, want *pasterrors.StructuredError: %v", err, err)
+	}
+	if se.Category != pasterrors.CategoryStorage {
+		t.Errorf("Category = %q, want %q", se.Category, pasterrors.CategoryStorage)
 	}
 
-	if audit.MaxKnownSchemaVersion < 4 {
-		t.Errorf("audit.MaxKnownSchemaVersion = %d, want >= 4 (S4 must bump to 4 or higher)",
-			audit.MaxKnownSchemaVersion)
-	}
-
+	// The floor stayed below the ceiling: the refused step did not stamp it.
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("version probe: %v", err)
 	}
-	if version != audit.MaxKnownSchemaVersion {
-		t.Errorf("post-Migrate MAX(version) = %d, want %d (MaxKnownSchemaVersion)",
-			version, audit.MaxKnownSchemaVersion)
+	if version != cutoverTarget {
+		t.Errorf("MAX(version) after the refused ceiling = %d, want %d (the step below the ceiling)",
+			version, cutoverTarget)
 	}
 }
 

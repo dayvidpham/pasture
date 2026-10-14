@@ -146,10 +146,7 @@ func TestOpeningALegacyDatabaseMigratesItAndBackfillsOneAgentPerRole(t *testing.
 	dst := copyFixtureToTemp(t, "legacy_open.db")
 
 	// ── When ────────────────────────────────────────────────────────────
-	trail, err := audit.NewSqliteAuditTrail(dst)
-	if err != nil {
-		t.Fatalf("NewSqliteAuditTrail(%q): %v", dst, err)
-	}
+	trail := openCutoverTargetStore(t, dst)
 	t.Cleanup(func() { _ = trail.Close() })
 
 	// ── Then ────────────────────────────────────────────────────────────
@@ -237,21 +234,21 @@ func TestOpeningALegacyDatabaseMigratesItAndBackfillsOneAgentPerRole(t *testing.
 		}
 	}
 
-	// 7. Schema meta records the binary's MaxKnownSchemaVersion. Read from
-	//    the constant so this assertion follows the binary as new v* steps
-	//    land. Asserts >= 4 because the epoch_id check above only holds from
-	//    version 4 on.
+	// 7. Schema meta records the cutover target (the last step below the
+	//    identity-format ceiling). Read from the constant so this assertion
+	//    follows the binary as new v* steps land. Asserts >= 4 because the
+	//    epoch_id check above only holds from version 4 on.
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("MAX(version): %v", err)
 	}
-	if version != audit.MaxKnownSchemaVersion {
-		t.Errorf("audit_schema_meta MAX(version) = %d, want %d (MaxKnownSchemaVersion)",
-			version, audit.MaxKnownSchemaVersion)
+	if version != cutoverTarget {
+		t.Errorf("audit_schema_meta MAX(version) = %d, want %d (the cutover target)",
+			version, cutoverTarget)
 	}
-	if audit.MaxKnownSchemaVersion < 4 {
-		t.Errorf("audit.MaxKnownSchemaVersion = %d, want >= 4 (the epoch_id drop asserted above landed in version 4)",
-			audit.MaxKnownSchemaVersion)
+	if cutoverTarget < 4 {
+		t.Errorf("cutoverTarget = %d, want >= 4 (the epoch_id drop asserted above landed in version 4)",
+			cutoverTarget)
 	}
 
 	// 8. Per-role row counts in audit_events match the fixture distribution
@@ -289,11 +286,8 @@ func TestOpeningAMigratedDatabaseAgainCreatesNoDuplicateAgents(t *testing.T) {
 	t.Parallel()
 	dst := copyFixtureToTemp(t, "legacy_reopen.db")
 
-	// First open + migrate.
-	trail1, err := audit.NewSqliteAuditTrail(dst)
-	if err != nil {
-		t.Fatalf("first NewSqliteAuditTrail: %v", err)
-	}
+	// First open + migrate to the cutover target.
+	trail1 := openCutoverTargetStore(t, dst)
 	if err := trail1.Close(); err != nil {
 		t.Fatalf("first Close: %v", err)
 	}
@@ -309,11 +303,9 @@ func TestOpeningAMigratedDatabaseAgainCreatesNoDuplicateAgents(t *testing.T) {
 		t.Fatalf("first migration produced %d legacy-role agents, want 7", firstCount)
 	}
 
-	// Second open + migrate (should be a no-op for v3).
-	trail2, err := audit.NewSqliteAuditTrail(dst)
-	if err != nil {
-		t.Fatalf("second NewSqliteAuditTrail: %v", err)
-	}
+	// Second open + migrate (should be a no-op: the store is already at the
+	// cutover target, so the deferred ceiling is a no-op).
+	trail2 := openCutoverTargetStore(t, dst)
 	if err := trail2.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
 	}
@@ -414,25 +406,22 @@ func TestACrashMidMigrationLeavesTheDatabaseWholeAndTheNextOpenFinishesTheUpgrad
 	}
 
 	// ── Then: reopen and assert one of the two acceptable end-states ────
-	trail, err := audit.NewSqliteAuditTrail(dst)
-	if err != nil {
-		t.Fatalf("NewSqliteAuditTrail after crash: %v", err)
-	}
+	trail := openCutoverTargetStore(t, dst)
 	t.Cleanup(func() { _ = trail.Close() })
 
 	db := openDB(t, dst)
 
 	// Read MAX(version). After the reopen, the migration framework should
-	// have brought the file up to MaxKnownSchemaVersion (either it was
-	// already there, or the recovery reset it to v2 and we re-ran the
-	// remaining steps cleanly through to v4).
+	// have brought the file up to the cutover target (either it was already
+	// there, or the recovery reset it to v2 and we re-ran the remaining
+	// steps cleanly through the target below the identity-format ceiling).
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("MAX(version) after reopen: %v", err)
 	}
-	if version != audit.MaxKnownSchemaVersion {
-		t.Errorf("post-reopen MAX(version) = %d, want %d (recovery + Migrate must bring it up to MaxKnownSchemaVersion)",
-			version, audit.MaxKnownSchemaVersion)
+	if version != cutoverTarget {
+		t.Errorf("post-reopen MAX(version) = %d, want %d (recovery + Migrate must bring it up to the cutover target)",
+			version, cutoverTarget)
 	}
 
 	// PRAGMA integrity_check is "ok".
@@ -622,9 +611,16 @@ func (w *readyOutput) String() string {
 	return w.buf.String()
 }
 
+// safeLoss is one accepted way for a process that LOST the concurrent open to
+// exit: the sentence it must carry and the exit code its category maps to.
+type safeLoss struct {
+	sentence string
+	exitCode int
+}
+
 // safeLoserDiagnostics are the sentences a process that LOST the concurrent
-// open may exit with. Each one is written by pasture for a contention it lost,
-// says so, and is produced only after nothing was written:
+// open may exit with. Each one is written by pasture (or its dependency) for a
+// contention it lost, says so, and is produced only after nothing was written:
 //   - the audit trail's open met a locked file on every attempt for its whole
 //     ceiling — the other process was switching the file to write-ahead
 //     logging or upgrading it (internal/audit/open_retry.go);
@@ -633,39 +629,55 @@ func (w *readyOutput) String() string {
 //   - the durable-execution schema bootstrap lost its create race and hit its
 //     bounded retry ceiling (internal/engine/dbosinit.go);
 //   - the durable schema gate watched the other process write the layout and
-//     ran out of its bound (internal/engine/schema_gate.go).
+//     ran out of its bound (internal/engine/schema_gate.go);
+//   - the first upgraded open of a legacy store could not take the consistent
+//     archive because the other process was rewriting the file underneath it;
+//     the archive is taken before any write, so this is a safe loss
+//     (internal/idmigrate/backup.go);
+//   - the shared connection could not be initialised while the other process
+//     held the file (internal/dbconn/connector.go);
+//   - provenance activation gave up acquiring the schema write lock within its
+//     budget while the other process held it (the dependency's activation).
 //
-// Nothing else is accepted. A loser that exits with any other text — a generic
-// wrapper, a raw driver error, a refusal that blames an older build for a file
-// the winner was writing — fails this test with that text quoted, because such
-// an exit is either a wrong sentence or a lock nobody retried, and both are
-// defects to surface rather than outcomes to allow. The generic wrapper this
-// list used to accept ("audit trail initialisation failed") hid exactly such a
-// lock: the loser's first statement on a rollback-journal fixture lost the
-// switch to write-ahead logging, and nobody retried it.
+// The exit code is per sentence: the storage sentences exit 5, the two
+// connection-category contentions exit 2. Nothing else is accepted. A loser
+// that exits with any other text — a generic wrapper, a raw driver error, a
+// refusal that blames an older build for a file the winner was writing — fails
+// this test with that text quoted, because such an exit is either a wrong
+// sentence or a lock nobody retried, and both are defects to surface rather
+// than outcomes to allow.
 //
 // The list cannot mask corruption: the post-race invariants below are the real
 // oracle, and they run against the file both processes touched whatever either
 // one printed.
-var safeLoserDiagnostics = []string{
-	"Another pasture process held the audit database while this one was opening it.",
-	"Another pasture process is already upgrading the audit database.",
-	"Couldn't set up the durable-execution schema in the pasture database.",
-	"another process was migrating it and did not finish",
+var safeLoserDiagnostics = []safeLoss{
+	{"Another pasture process held the audit database while this one was opening it.", 5},
+	{"Another pasture process is already upgrading the audit database.", 5},
+	{"Couldn't set up the durable-execution schema in the pasture database.", 5},
+	{"another process was migrating it and did not finish", 5},
+	{"Couldn't initialize the shared SQLite connection.", 2},
+	{"activate SQLite schema on ", 2},
+	{"Pasture couldn't make the consistent archive of", 5},
 }
 
-// safeLoserExitCode is the exit code every accepted loss carries: each sentence
-// above belongs to a storage-category error, and pastured exits with the code
-// of the error's category.
-const safeLoserExitCode = 5
+// safeLossSentences lists the accepted sentences for a failure message.
+func safeLossSentences() []string {
+	out := make([]string, 0, len(safeLoserDiagnostics))
+	for _, loss := range safeLoserDiagnostics {
+		out = append(out, loss.sentence)
+	}
+	return out
+}
 
-func namesASafeLoss(output string) bool {
-	for _, sentence := range safeLoserDiagnostics {
-		if strings.Contains(output, sentence) {
-			return true
+// safeLossExitCode reports the accepted exit code for one loser's output, and
+// whether the output names an accepted loss at all.
+func safeLossExitCode(output string) (int, bool) {
+	for _, loss := range safeLoserDiagnostics {
+		if strings.Contains(output, loss.sentence) {
+			return loss.exitCode, true
 		}
 	}
-	return false
+	return 0, false
 }
 
 // readinessTimeout bounds how long the test waits for ONE process to reach a
@@ -814,10 +826,11 @@ func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t
 		if stderrors.As(outcome.exited.err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		}
-		if exitCode != safeLoserExitCode || !namesASafeLoss(outcome.exited.output) {
+		wantExit, accepted := safeLossExitCode(outcome.exited.output)
+		if !accepted || exitCode != wantExit {
 			t.Fatalf("%s exited before readiness with exit code %d and a diagnostic that is not an accepted safe loss "+
-				"(want exit %d and one of %q); the loser must serve the migrated database or say truthfully what it lost:\n%s",
-				outcome.name, exitCode, safeLoserExitCode, safeLoserDiagnostics, outcome.exited.output)
+				"(want that sentence's exit code and one of %q); the loser must serve the migrated database or say truthfully what it lost:\n%s",
+				outcome.name, exitCode, safeLossSentences(), outcome.exited.output)
 		}
 		t.Logf("%s lost the concurrent open safely (exit %d)", outcome.name, exitCode)
 	}
@@ -1078,11 +1091,10 @@ func TestV3Backfill_PreservesNonRoleColumns(t *testing.T) {
 		}
 	}
 
-	// Run migration.
+	// Run migration to the cutover target: the store is populated by this very
+	// migration, so the identity-format ceiling step is applied by the cutover.
 	db := openDB(t, dbPath)
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
+	migratePopulatedToCutoverTarget(t, db)
 
 	// Post-migration: phase / event_type / payload / timestamp unchanged.
 	var (

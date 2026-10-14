@@ -18,12 +18,36 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/provenance"
 	"github.com/google/uuid"
 )
+
+// seedCutoverReceipt writes the pasture_id_cutover singleton so a fixture whose
+// slash marker was published out of band carries the complete fence evidence a
+// normal open requires. The marker_format and floor are exactly what the
+// cutover transaction records.
+func seedCutoverReceipt(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS pasture_id_cutover (
+		singleton_id    INTEGER PRIMARY KEY CHECK (singleton_id = 0),
+		marker_format   TEXT    NOT NULL,
+		floor_version   INTEGER NOT NULL,
+		archive_path    TEXT    NOT NULL,
+		archive_sha256  TEXT    NOT NULL,
+		cutover_at      INTEGER NOT NULL)`)
+	if err != nil {
+		t.Fatalf("create the cutover receipt table: %v", err)
+	}
+	_, err = db.Exec(`INSERT OR REPLACE INTO pasture_id_cutover VALUES(0, ?, ?, '', '', ?)`,
+		string(provenance.IDFormatSlash), audit.MaxKnownSchemaVersion, time.Now().UTC().UnixNano())
+	if err != nil {
+		t.Fatalf("write the cutover receipt: %v", err)
+	}
+}
 
 // openFreshTracker assembles a real unregistered tracker for registrar tests.
 // The durable public opener ensures built-ins, so these collision tests use
@@ -50,6 +74,11 @@ func openFreshTracker(t *testing.T, dbPath string) (*trackerImpl, *sql.DB) {
 		_ = trail.Close()
 		t.Fatal(err)
 	}
+	// The raw dependency activation marks an empty store out of band, with no
+	// cutover receipt. Write the receipt so the fixture carries the complete
+	// fence evidence a normal open now requires (marker + receipt + floor),
+	// exactly as the cutover transaction writes it.
+	seedCutoverReceipt(t, db)
 	tracker := newTrackerImpl(prov, trail, db)
 	tracker.timeoutProfile = timeouts.TestProfile()
 	tracker.storeClock = wallClock{}
