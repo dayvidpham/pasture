@@ -226,7 +226,7 @@ func TestEpochHumanServiceAuthorityLand(t *testing.T) {
 		{name: "no publication set", publications: func([]candidateMember) []repositoryPublication { return nil }},
 		{name: "missing member", publications: func(members []candidateMember) []repositoryPublication { return publicationsForMembers(members[:1]) }},
 		{name: "extra member", publications: func(members []candidateMember) []repositoryPublication {
-			return append(publicationsForMembers(members), repositoryPublication{Repository: "repo-extra", Candidate: "human-service--018f0000-0000-7000-8000-000000000099", Ref: "refs/heads/extra", Commit: members[0].Commit, VerificationOperation: "verify-extra"})
+			return append(publicationsForMembers(members), repositoryPublication{Repository: "repo-extra", Candidate: "human-service/018f0000-0000-7000-8000-000000000099", Ref: "refs/heads/extra", Commit: members[0].Commit, VerificationOperation: "verify-extra"})
 		}},
 		{name: "commit mismatch", publications: func(members []candidateMember) []repositoryPublication {
 			publications := publicationsForMembers(members)

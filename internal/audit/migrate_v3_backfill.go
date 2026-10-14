@@ -76,8 +76,8 @@ const (
 // legacyRoleAgentNamespace is the AgentId namespace minted for synthetic
 // legacy-role SoftwareAgents during the v3 backfill.
 //
-// Provenance's AgentId String() returns "<namespace>--<uuid>" (see
-// provenance/pkg/ptypes/types.go:91). The migrator uses "pasture" as the
+// Provenance's AgentId String() returns "<namespace>/<uuid>" (see
+// provenance/pkg/ptypes/types.go). The migrator uses "pasture" as the
 // namespace because (a) the agent is owned by the pasture binary, not by
 // any external system, and (b) Provenance's RegisterSoftwareAgent
 // (agents.go:97) takes a namespace argument and pasture's S7 wiring will
@@ -309,8 +309,8 @@ func distinctRoles(tx *sql.Tx) ([]string, error) {
 // Provenance, not here, per C4.
 //
 // AgentId format matches Provenance's mintage exactly:
-// "<namespace>--<uuid>" via ptypes.AgentId.String() — see
-// provenance/pkg/ptypes/types.go:91. We use namespace "pasture" because
+// "<namespace>/<uuid>" via ptypes.AgentId.String() — see
+// provenance/pkg/ptypes/types.go. We use namespace "pasture" because
 // these agents are owned by the pasture binary and S7's live well-known
 // agents will use the same namespace.
 func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
@@ -370,7 +370,7 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 			Cause: err,
 		}
 	}
-	agentId := legacyRoleAgentNamespace + "--" + newUUID.String()
+	agentId := legacyRoleAgentNamespace + "/" + newUUID.String()
 
 	if _, err := tx.Exec(
 		`INSERT INTO agents (id, kind_id) VALUES (?, 2)`,

@@ -203,7 +203,7 @@ code snippet here
 			Content: `When invoked as part of Phase 1 (s1_2-research), record a summary on the REQUEST task in addition to writing the full report:
 
 ` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}

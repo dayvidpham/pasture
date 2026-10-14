@@ -89,7 +89,7 @@ var userRequestBody = SkillBody{
 
 4. **Record classification** via comment on the request task:
    ` + "```" + `bash
-   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+   pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
      "Classification: scope={{scope}}, complexity={{complexity}}, risk={{risk}}, novelty={{novelty}}"
    ` + "```" + ``,
 				},
@@ -102,7 +102,7 @@ When the intent is to fix existing behavior, the **validation-case lifecycle** a
 
 Record the recognition in the same classification comment so downstream phases pick it up:
 ` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Fix-intent: yes — validation-case lifecycle applies (elicit cases in URE, confirm in UAT, store as fixtures)"
 ` + "```" + ``,
 				},
@@ -137,7 +137,7 @@ pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000
 					Content: `Record the user's depth choice, then spawn two parallel agents:
 
 ` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Research depth: {{depth}} (user confirmed)"
 ` + "```" + `
 
@@ -171,7 +171,7 @@ See [skills/research/SKILL.md](../research/SKILL.md) for full procedure, output 
 
 **Record findings** as a comment on the REQUEST task:
 ` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}
@@ -209,7 +209,7 @@ See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output fo
 
 **Record findings** as a comment on the REQUEST task:
 ` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions}}
   - Related types: {{existing types/schemas}}
@@ -236,7 +236,7 @@ REQUEST_ID_URI=$(pasture task create "REQUEST: Add logout button to header" --ph
 pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
 pasture task update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
 
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Classification: scope=module, complexity=low, risk=internal-only, novelty=familiar"
 ` + "```" + ``,
 		},

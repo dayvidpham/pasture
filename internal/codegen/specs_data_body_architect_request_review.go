@@ -72,7 +72,7 @@ pasture task comments "${PROPOSAL_ID_URI}"
 			Title: "Coordination",
 			Content: `` + "```" + `bash
 # Add comment to notify that review is ready
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "Review requested — 3 reviewers spawned"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "Review requested — 3 reviewers spawned"
 
 # Check for review votes
 pasture task comments "${PROPOSAL_ID_URI}"

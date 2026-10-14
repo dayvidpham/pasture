@@ -2,25 +2,30 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	_ "modernc.org/sqlite"
 
+	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
 // v8AssignmentIndexDDL is the retired assignment-index schema a version-8
 // file carries, so the dry run is taken against a file that really has
-// something to plan. The names match internal/audit/migrate_v8_v9.go.
+// something to plan. The names match internal/audit/migrate_v8_v9.go. The
+// session-claim table is created IF NOT EXISTS because the migrator already
+// created it at an earlier version and the v8→v9 step keeps it.
 const v8AssignmentIndexDDL = `
 CREATE TABLE pasture_actor_assignment (
 	assignment_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, task_id TEXT NOT NULL,
@@ -45,23 +50,25 @@ CREATE TABLE pasture_assignment_recovery_member (
 	PRIMARY KEY(generation,snapshot_jid,producer,assignment_id));
 CREATE TRIGGER pasture_assignment_deleted AFTER DELETE ON pasture_actor_assignment BEGIN SELECT 1; END;
 CREATE TRIGGER pasture_assignment_changed AFTER UPDATE ON pasture_actor_assignment BEGIN SELECT 1; END;
-CREATE TABLE pasture_session_claim (
+CREATE TABLE IF NOT EXISTS pasture_session_claim (
 	harness TEXT NOT NULL, session TEXT NOT NULL, actor TEXT NOT NULL, claimed_at INTEGER NOT NULL,
 	PRIMARY KEY (harness, session));
-INSERT INTO pasture_session_claim VALUES('claude-code','dry-1','actor-1',1);
+INSERT OR REPLACE INTO pasture_session_claim VALUES('claude-code','dry-1','actor-1',1);
 `
 
-// makeVersionEightFile writes a version-8 file carrying the retired
-// assignment-index schema and returns its path.
+// makeVersionEightFile writes a COMPLETE version-8 file: the real audit schema
+// through the v8→v9 step's predecessor, plus the retired assignment-index schema
+// the v8→v9 step removes, plus one session claim. It returns its path.
 func makeVersionEightFile(t *testing.T) string {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := dbconn.OpenDefaultDB(dbPath)
 	require.NoError(t, err)
-	defer db.Close()
-	_, err = db.Exec(`CREATE TABLE audit_schema_meta (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
-		INSERT INTO audit_schema_meta(version,applied_at) VALUES(8,1);` + v8AssignmentIndexDDL)
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, 8),
+		"the version 8 schema must be built through the real migrator")
+	_, err = db.Exec(v8AssignmentIndexDDL)
 	require.NoError(t, err)
+	require.NoError(t, db.Close())
 	return dbPath
 }
 
@@ -75,47 +82,37 @@ func sha256Of(t *testing.T, path string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// TestMigrateDryRunLeavesAVersionEightFileUnchanged is the dry-run proof for
-// the v8 → v9 step. `pasture migrate --dry-run` on a version-8 file must list
-// the step, say what it removes, what it keeps and what the new floor costs an
-// older binary, and leave the file's bytes exactly as they were: the whole
-// point of a dry run is that the file the operator is being shown is not the
-// file that changed.
-func TestMigrateDryRunLeavesAVersionEightFileUnchanged(t *testing.T) {
+// TestMigrateDryRunRefusesANonNormalStoreAndLeavesTheFileUnchanged: plain
+// `pasture migrate` keeps its schema meaning only for a NORMAL store (complete
+// fence evidence). A version-8 file carries no slash marker and no cutover
+// receipt, so the read-only precheck refuses it before any step writes, and the
+// file's bytes are untouched.
+func TestMigrateDryRunRefusesANonNormalStoreAndLeavesTheFileUnchanged(t *testing.T) {
 	t.Parallel()
 	dbPath := makeVersionEightFile(t)
 	before := sha256Of(t, dbPath)
 
 	var out bytes.Buffer
 	code, err := handlers.Migrate(&out, handlers.MigrateInput{DBPath: dbPath, DryRun: true}, types.OutputText)
-	require.NoError(t, err)
-	require.Equal(t, 0, code, "a dry run exits 0")
+	require.Error(t, err, "a non-NORMAL store must be refused")
+	require.Equal(t, 5, code, "the refusal is a storage error")
+	require.Contains(t, err.Error(), "has not been cut over to the slash identity format",
+		"the refusal must name the identity cutover:\n%s", err)
 
-	printed := out.String()
-	require.Contains(t, printed, "v8->v9", "the plan must list the step:\n%s", printed)
-	require.Contains(t, printed, "remove the retired gate assignment-index tables and triggers; session claims are kept",
-		"the plan must say what the step removes and what it keeps:\n%s", printed)
-	require.Contains(t, printed, "an older pasture binary will then refuse this database for every command until it is upgraded",
-		"the plan must name the consequence of the new floor, because the migrator runs on every open "+
-			"and the operator is not shown this output before the upgrade happens:\n%s", printed)
-	require.Contains(t, printed, "(v8 -> v9)", "the plan must span v8 to v9:\n%s", printed)
-	require.Contains(t, printed, "Dry run:", "the output must be marked as a dry run:\n%s", printed)
-
-	require.Equal(t, before, sha256Of(t, dbPath), "a dry run must not write a single byte to the file")
+	require.Equal(t, before, sha256Of(t, dbPath), "a refused dry run must not write a single byte to the file")
 }
 
-// TestMigrateDryRunOnAVersionEightFileLeavesTheRetiredRelationsInPlace is the
-// same promise read off the file's schema rather than its bytes: the retired
-// relations the step would remove are still on disk after the dry run, and the
-// recorded version is still 8. A byte-identical file and a schema-identical
-// file are the same guarantee, and this one names the relations.
-func TestMigrateDryRunOnAVersionEightFileLeavesTheRetiredRelationsInPlace(t *testing.T) {
+// TestMigrateRefusesANonNormalStoreLeavingTheRetiredRelationsInPlace is the
+// same refusal read off the file's schema rather than its bytes: the retired
+// relations the v8→v9 step would remove are still on disk, and the recorded
+// version is still 8.
+func TestMigrateRefusesANonNormalStoreLeavingTheRetiredRelationsInPlace(t *testing.T) {
 	t.Parallel()
 	dbPath := makeVersionEightFile(t)
 
 	var out bytes.Buffer
 	_, err := handlers.Migrate(&out, handlers.MigrateInput{DBPath: dbPath, DryRun: true}, types.OutputText)
-	require.NoError(t, err)
+	require.Error(t, err)
 
 	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
@@ -132,38 +129,37 @@ func TestMigrateDryRunOnAVersionEightFileLeavesTheRetiredRelationsInPlace(t *tes
 		require.NoError(t, db.QueryRow(
 			`SELECT count(*) FROM sqlite_schema WHERE name = ? AND type IN ('table','index','trigger')`, name,
 		).Scan(&count), "probe %q", name)
-		require.Equal(t, 1, count, "a dry run must leave %q on the file", name)
+		require.Equal(t, 1, count, "a refused run must leave %q on the file", name)
 	}
 
 	var version int
 	require.NoError(t, db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version))
-	require.Equal(t, 8, version, "a dry run must not record a version")
+	require.Equal(t, 8, version, "a refused run must not record a version")
 
 	var claims int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM pasture_session_claim`).Scan(&claims))
 	require.Equal(t, 1, claims)
 }
 
-// TestMigrateApplyUpgradesAVersionEightFile is the apply half, through the
-// handler the CLI delegates to. The first run reports v8 → v9, the second
-// reports v9 → v9 because an up-to-date file is a no-op, and the retired
-// relations are gone after the first.
-func TestMigrateApplyUpgradesAVersionEightFile(t *testing.T) {
+// TestMigrateApplyRefusesANonNormalStoreAndTheCutoverRunsTheStep: the apply
+// half. Plain apply refuses a version-8 file before any write; the v8→v9 step
+// still runs, but through the identity cutover's audit catch-up, which the
+// production opener performs. After the cutover the retired relations are gone,
+// the recorded version is the ceiling, and the session claim survives.
+func TestMigrateApplyRefusesANonNormalStoreAndTheCutoverRunsTheStep(t *testing.T) {
 	t.Parallel()
 	dbPath := makeVersionEightFile(t)
 
 	var first bytes.Buffer
 	code, err := handlers.Migrate(&first, handlers.MigrateInput{DBPath: dbPath}, types.OutputText)
-	require.NoError(t, err)
-	require.Equal(t, 0, code)
-	require.Equal(t, "migrated "+dbPath+" from v8 to v9", strings.TrimSpace(first.String()))
+	require.Error(t, err, "plain apply must refuse a non-NORMAL store")
+	require.Equal(t, 5, code)
 
-	var second bytes.Buffer
-	code, err = handlers.Migrate(&second, handlers.MigrateInput{DBPath: dbPath}, types.OutputText)
+	// The production opener cuts the store over: its catch-up runs the v8→v9
+	// step and its conversion publishes the marker, receipt and ceiling.
+	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
-	require.Equal(t, 0, code)
-	require.Equal(t, "migrated "+dbPath+" from v9 to v9", strings.TrimSpace(second.String()),
-		"a second run on an up-to-date file is a no-op that reports the same version twice")
+	require.NoError(t, tracker.Close())
 
 	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
@@ -179,9 +175,12 @@ func TestMigrateApplyUpgradesAVersionEightFile(t *testing.T) {
 		require.NoError(t, db.QueryRow(
 			`SELECT count(*) FROM sqlite_schema WHERE name = ? AND type IN ('table','index','trigger')`, name,
 		).Scan(&count), "probe %q", name)
-		require.Zero(t, count, "retired relation %q survived the apply", name)
+		require.Zero(t, count, "retired relation %q survived the cutover", name)
 	}
+	var version int
+	require.NoError(t, db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version))
+	require.Equal(t, audit.MaxKnownSchemaVersion, version, "the cutover raises the ceiling")
 	var claims int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM pasture_session_claim WHERE session='dry-1'`).Scan(&claims))
-	require.Equal(t, 1, claims, "session claims survive the apply")
+	require.Equal(t, 1, claims, "session claims survive the cutover")
 }

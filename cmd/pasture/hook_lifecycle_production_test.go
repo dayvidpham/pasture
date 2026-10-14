@@ -1512,13 +1512,16 @@ func TestLifecycleListStandardExitCategories(t *testing.T) {
 
 	dir := t.TempDir()
 	binary := lifecycleBinary(t)
-	connectionPath := filepath.Join(dir, "database-directory")
+	directoryPath := filepath.Join(dir, "database-directory")
 	storagePath := filepath.Join(dir, "future.db")
+	// Both cases fail closed as storage errors (exit 5): a directory cannot be
+	// opened as a store, and the read-only state check refuses a store whose
+	// recorded version is above this build's ceiling.
 	cases := []struct {
 		name, path string
 		prepare    func()
 		want       int
-	}{{"connection", connectionPath, func() { require.NoError(t, os.Mkdir(connectionPath, 0o700)) }, 2}, {"storage", storagePath, func() {
+	}{{"directory", directoryPath, func() { require.NoError(t, os.Mkdir(directoryPath, 0o700)) }, 5}, {"storage", storagePath, func() {
 		initializeLifecycleTestDatabase(t, storagePath)
 		db, err := sql.Open("sqlite", storagePath)
 		require.NoError(t, err)

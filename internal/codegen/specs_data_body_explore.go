@@ -195,7 +195,7 @@ User input → CLI parser (src/cli/parse.ts:30)
 			Content: `When invoked as part of Phase 1 (s1_3-explore), record findings on the REQUEST task:
 
 ` + "```" + `bash
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions with line numbers}}
   - Related types: {{existing types/schemas with locations}}

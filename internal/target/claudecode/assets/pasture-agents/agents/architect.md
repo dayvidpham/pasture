@@ -77,7 +77,7 @@ You design specifications and coordinate the planning phases of epochs. See the 
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Pasture
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 whenever user intent is captured
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 ## Behaviors

@@ -629,7 +629,7 @@ func (s *epochHumanService) preflightCommon(meta CommandMeta, epochID EpochRootI
 func parseTaskID(where, raw, label string) (provenance.TaskID, error) {
 	id, err := provenance.ParseTaskID(raw)
 	if err != nil {
-		return provenance.TaskID{}, humanServiceErr(where, fmt.Sprintf("%s id %q is malformed", label, raw), "journal-backed epoch operations require an existing Provenance task identity", fmt.Sprintf("supply %s as namespace--uuid", label))
+		return provenance.TaskID{}, humanServiceErr(where, fmt.Sprintf("%s id %q is malformed", label, raw), "journal-backed epoch operations require an existing Provenance task identity", fmt.Sprintf("supply %s as namespace/uuid", label))
 	}
 	return id, nil
 }

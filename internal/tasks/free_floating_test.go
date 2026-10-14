@@ -338,7 +338,7 @@ func TestRecordGitEvent_PiggybackEpochContext(t *testing.T) {
 
 	const (
 		sha     = "deadbeefcafebabe1234567890abcdef12345678"
-		epochId = "epoch--01968a3c-ffff-7000-8000-000000000099"
+		epochId = "epoch/01968a3c-ffff-7000-8000-000000000099"
 	)
 
 	eventId, err := tasks.RecordGitEvent(

@@ -373,7 +373,7 @@ fi`,
 		Id:    "C-slice-review-before-close",
 		Given: "workers complete their implementation slices",
 		When:  "slice implementation is done",
-		Then:  "workers notify supervisor with pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes",
+		Then:  "workers notify supervisor with pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes",
 		ShouldNot: "close slices immediately upon worker completion; " +
 			"allow workers to close their own slices",
 	},
@@ -466,7 +466,7 @@ fi`,
 		Id:    "C-ure-verbatim",
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
 		When:  "recording in Pasture",
-		Then:  "capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 whenever user intent is captured",
+		Then:  "capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured",
 		ShouldNot: "summarize options as (1)/(2)/(3) without option text, paraphrase user responses, " +
 			"or omit code/snippets shown inside option previews",
 		Examples: []Example{
@@ -1225,7 +1225,7 @@ var ChecklistSpecs = map[string]Checklist{
 		RoleRef: protocol.RoleWorker,
 		Gate:    "slice-closure",
 		Items: []ChecklistItem{
-			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 (not pasture task close)", Required: true},
+			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close)", Required: true},
 			{Id: "CL-worker-completion-done", Text: "All completion-gate items passed", Required: true},
 			{Id: "CL-worker-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
 			{Id: "CL-worker-review-eligible", Text: "Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings", Required: true},
@@ -1273,7 +1273,7 @@ var CoordinationCommands = map[string]CoordinationCommand{
 	"cmd-coord-comment": {
 		Id:       "cmd-coord-comment",
 		Action:   "Add progress note",
-		Template: "pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Progress: ...\"",
+		Template: "pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Progress: ...\"",
 		Shared:   true,
 	},
 	"cmd-coord-list": {
@@ -1291,7 +1291,7 @@ var CoordinationCommands = map[string]CoordinationCommand{
 	"cmd-coord-assign": {
 		Id:       "cmd-coord-assign",
 		Action:   "Transfer existing assignment (supervisor only)",
-		Template: "pasture task assignment transfer \"${TASK_ID_URI}\" --slot owner-responsibility --assignment \"${SUCCESSOR_ASSIGNMENT_ID}\" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant \"${REGISTERED_WORKER_ACTOR}\"",
+		Template: "pasture task assignment transfer \"${TASK_ID_URI}\" --slot owner-responsibility --assignment \"${SUCCESSOR_ASSIGNMENT_ID}\" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant \"${REGISTERED_WORKER_ACTOR}\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-label": {
@@ -1309,7 +1309,7 @@ var CoordinationCommands = map[string]CoordinationCommand{
 	"cmd-coord-close": {
 		Id:       "cmd-coord-close",
 		Action:   "Report completion without closing",
-		Template: "pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Implementation complete; awaiting independent review and supervisor closure.\"",
+		Template: "pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Implementation complete; awaiting independent review and supervisor closure.\"",
 		RoleRef:  protocol.RoleWorker,
 	},
 	"cmd-coord-worker-notes": {
@@ -1556,7 +1556,7 @@ var WorkflowSpecs = map[string]Workflow{
 					{
 						Id:          "lc-impl-notify",
 						Instruction: "Notify supervisor of completion via pasture task comment add",
-						Command:     "pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 \"${SLICE_ID_URI}\" \"Implementation complete\"",
+						Command:     "pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${SLICE_ID_URI}\" \"Implementation complete\"",
 					},
 				},
 				ExitConditions: []ExitCondition{

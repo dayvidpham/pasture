@@ -77,6 +77,13 @@ func stepDescription(fromVersion, toVersion int) string {
 		// newerSchemaError, which is what an older build meets afterwards.
 		return "remove the retired gate assignment-index tables and triggers; session claims are kept; " +
 			"an older pasture binary will then refuse this database for every command until it is upgraded"
+	case fromVersion == 9 && toVersion == 10:
+		// The format gate's consequence is the same kind of floor, with one
+		// extra requirement: the store must already be converted, because the
+		// slash identity format is the only one this ceiling admits.
+		return "require the slash task-identity format before opening the database; " +
+			"a populated store must be converted first with 'pasture migrate ids', and " +
+			"an older pasture binary will then refuse this database for every command until it is upgraded"
 	default:
 		// Forward-compatible default: workers who add a new step will see
 		// this generic text and know to add a tailored description here.

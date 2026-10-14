@@ -31,7 +31,7 @@ fragments:
     contains: [PASTURE_DB_PATH, XDG_DATA_HOME, '--namespace', 'pasture task ready', 'pasture task blocked', 'pasture task list', '--status in_progress', 'pasture task show', 'pasture task comments', 'pasture task timeline', '--blocked-by', 'references:', non-atomic, supervisor, 'git agent-commit', 'explicit user approval']
   - id: frag--task-author
     every_body: true
-    contains: ['pasture task agents list', '--author', 'pasture-system--00000000-0000-0000-0000-000000000000', verbatim]
+    contains: ['pasture task agents list', '--author', 'pasture-system/00000000-0000-0000-0000-000000000000', verbatim]
 historical:
   - owner: skills/protocol/UAT_EXAMPLE.md
     banner: "# Historical UAT record — non-operational quotation"

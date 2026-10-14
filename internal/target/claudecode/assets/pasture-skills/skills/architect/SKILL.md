@@ -123,7 +123,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Pasture
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 whenever user intent is captured
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 _Example (correct)_
@@ -207,7 +207,7 @@ Agents coordinate through **beads** tasks and comments:
 | Action | Command |
 |--------|---------|
 | List blocked | `pasture task blocked` |
-| Add progress note | `pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
+| Add progress note | `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
 | List in-progress | `pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
 | Check task details | `pasture task show "${TASK_ID_URI}"` |
 | Update status | `pasture task update "${TASK_ID_URI}" --status=in_progress` |
@@ -335,7 +335,7 @@ Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## PROPOSAL-N Naming
 
@@ -344,7 +344,7 @@ Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. When a revisi
 2. Mark PROPOSAL-N as superseded:
    ```bash
    pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-   pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
+   pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
    ```
 3. Re-spawn all 3 reviewers to assess PROPOSAL-N+1
 
@@ -431,7 +431,7 @@ pasture task label add "$UAT_ID_URI" pasture:p5-user:s5-uat
 pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
 
 # Update URD with UAT results
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: <summary of user acceptance/feedback>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: <summary of user acceptance/feedback>"
 ```
 
 ### Phase 6: RATIFY
@@ -439,14 +439,14 @@ pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000
 Add label to proposal (DO NOT close, delete, or create new task):
 ```bash
 pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
 
 # Mark all previous proposals as superseded
 pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
 
 # Update URD with ratification
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as <summary>"
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as <summary>"
 ```
 
 ### Phase 7: HANDOFF

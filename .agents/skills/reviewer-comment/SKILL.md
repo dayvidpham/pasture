@@ -40,7 +40,7 @@ Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system--00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## When to Use
 
@@ -56,10 +56,10 @@ Documenting review findings for the permanent record. Applies to both plan revie
 
 ```bash
 # Plan review comment (no severity tree)
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user alignment confirmed. MVP scope achievable."
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user alignment confirmed. MVP scope achievable."
 
 # Code review comment (with severity references)
-pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - 1 BLOCKER found (see severity tree). Suggestion: fix type error in auth middleware."
+pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - 1 BLOCKER found (see severity tree). Suggestion: fix type error in auth middleware."
 ```
 
 ## Format

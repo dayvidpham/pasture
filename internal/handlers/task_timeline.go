@@ -32,6 +32,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
+	"github.com/dayvidpham/pasture/internal/idmigrate"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -40,7 +41,7 @@ import (
 // TaskTimelineInput captures the CLI inputs for `pasture task timeline`.
 type TaskTimelineInput struct {
 	DBPath          string
-	TaskIDStr       string // wire-format task ID (e.g. "yourproject--01968a3c-9d4f-7c8a-bc12-feedfacecafe")
+	TaskIDStr       string // wire-format task ID (e.g. "yourproject/01968a3c-9d4f-7c8a-bc12-feedfacecafe")
 	IncludeChildren bool   // accepted but currently no-op (see file-level doc)
 	Depth           int    // accepted but currently no-op
 }
@@ -62,12 +63,18 @@ func TaskTimeline(w io.Writer, in TaskTimelineInput, format types.OutputFormat) 
 		return pasterrors.ExitCode(se), se
 	}
 
-	// We intentionally do NOT validate via provenance.ParseTaskID here —
-	// PROPOSAL-2 §7.9 documents the timeline command as accepting any
-	// "task-id" string, and free-floating contexts (Git SHAs, skill run IDs)
-	// are routed through `pasture task events --context-kind=...` instead.
-	// Strict task-ID validation lives at the events ingest path (S8 §7.12),
-	// not the read path. We accept any non-empty string.
+	// A retired "<namespace>--<uuid>" identity is REFUSED BY NAME, not treated as
+	// an unknown free string. After the cutover the retired form never resolves,
+	// so accepting it would return a silent empty timeline; the design (and the
+	// acceptance criteria) require the mismatch to be reported instead. Free
+	// strings that are not recognizable retired identities — Git SHAs, skill run
+	// IDs — are still accepted and routed to the events command's context filter.
+	// Strict task-ID validation otherwise lives at the events ingest path, not
+	// the read path.
+	if idmigrate.IsRetiredIdentity(in.TaskIDStr) {
+		se := idmigrate.RetiredIdentityRefusal(in.TaskIDStr)
+		return pasterrors.ExitCode(se), se
+	}
 
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {

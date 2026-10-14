@@ -819,7 +819,7 @@ func newTypedEvidenceEffect(subject provenance.TaskID, kind provenance.EvidenceK
 		return provenance.Effect{}, authorityErr("newTypedEvidenceEffect", "the evidence subject is zero", label+" evidence must be task-scoped", "supply the exact subject task")
 	}
 	if _, err := provenance.TaskContext(subject); err != nil {
-		return provenance.Effect{}, authorityErr("newTypedEvidenceEffect", "the evidence subject is malformed", label+" evidence requires a valid Provenance task identity", "supply a valid namespace--uuid task identity")
+		return provenance.Effect{}, authorityErr("newTypedEvidenceEffect", "the evidence subject is malformed", label+" evidence requires a valid Provenance task identity", "supply a valid namespace/uuid task identity")
 	}
 	if resultSlot == "" {
 		return provenance.Effect{}, authorityErr("newTypedEvidenceEffect", "the evidence result slot is empty", label+" evidence must expose its committed fact binding", "supply a non-empty result slot")
@@ -1069,7 +1069,7 @@ func parseAuthorityTaskID(raw, label string) (provenance.TaskID, error) {
 			Why:      "Authority facts are scoped to existing Provenance task identities.",
 			Where:    "Epoch authority contract (internal/tasks/epoch_authority.go, parseAuthorityTaskID).",
 			Impact:   "The authority fact was not constructed; no journal effect was produced.",
-			Fix:      fmt.Sprintf("Supply %s as namespace--uuid.", label),
+			Fix:      fmt.Sprintf("Supply %s as namespace/uuid.", label),
 			Cause:    err,
 		}
 	}
@@ -1077,7 +1077,7 @@ func parseAuthorityTaskID(raw, label string) (provenance.TaskID, error) {
 }
 
 // canonicalAuthorityTaskID retains the parsed TaskID so every authority DTO
-// can serialize the single canonical namespace--lowercase-UUID spelling.
+// can serialize the single canonical namespace/lowercase-UUID spelling.
 func canonicalAuthorityTaskID(raw, label string) (string, error) {
 	id, err := parseAuthorityTaskID(raw, label)
 	if err != nil {

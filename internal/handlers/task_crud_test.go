@@ -49,8 +49,8 @@ func TestTaskCreate_PopulatesAllFields(t *testing.T) {
 	if got.Phase != "request" {
 		t.Errorf("phase: got %q, want %q", got.Phase, "request")
 	}
-	if !strings.HasPrefix(got.ID, "test--") {
-		t.Errorf("id: expected prefix %q, got %q", "test--", got.ID)
+	if !strings.HasPrefix(got.ID, "test/") {
+		t.Errorf("id: expected prefix %q, got %q", "test/", got.ID)
 	}
 }
 

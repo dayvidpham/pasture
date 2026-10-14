@@ -670,7 +670,7 @@ func TestGateReaderClaimedUnknownActor(t *testing.T) {
 	t.Parallel()
 	store, _ := openGateStore(t)
 	known := feasibilityActor(t, store, "gate-known")
-	stranger, err := provenance.ParseActorID("gate-stranger--0193f1c0-0000-7000-8000-0000000000fe")
+	stranger, err := provenance.ParseActorID("gate-stranger/0193f1c0-0000-7000-8000-0000000000fe")
 	require.NoError(t, err)
 	gateClaim(t, store, known, "known-session")
 	gateClaim(t, store, stranger, "stranger-session")
@@ -1098,7 +1098,7 @@ func TestGateReaderUnmappedPhaseReachesPolicyAsUnset(t *testing.T) {
 	payload, err := canonicalJSON(assignmentStartPayload{
 		Assignment: "unmapped-assignment",
 		Role:       RoleOwnerResponsibility.String(),
-		Occupant:   "human-service--0193f1c0-0000-7000-8000-0000000000ff",
+		Occupant:   "human-service/0193f1c0-0000-7000-8000-0000000000ff",
 	})
 	require.NoError(t, err)
 	episode, err := ownedTaskEpisode(provenance.ActorID{}, provenance.OwnedTaskRow{
@@ -1145,9 +1145,9 @@ func TestGateReaderUnmappedPhaseReachesPolicyAsUnset(t *testing.T) {
 // successor's own material instead of its predecessor's naming.
 func TestGateReaderTransferPredecessorGrantsOwnerRoleIsTheAcceptedResidual(t *testing.T) {
 	t.Parallel()
-	actor, err := provenance.ParseActorID("gate-residual--0193f1c0-0000-7000-8000-0000000000f7")
+	actor, err := provenance.ParseActorID("gate-residual/0193f1c0-0000-7000-8000-0000000000f7")
 	require.NoError(t, err)
-	task, err := provenance.ParseTaskID("task-residual--0193f1c0-0000-7000-8000-0000000000f8")
+	task, err := provenance.ParseTaskID("task-residual/0193f1c0-0000-7000-8000-0000000000f8")
 	require.NoError(t, err)
 	predecessor := provenance.AssignmentID("residual-reviewer-episode")
 	payload, err := canonicalJSON(assignmentStartPayload{

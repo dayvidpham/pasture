@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -22,14 +21,25 @@ import (
 func unregisteredDurableDB(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "pasture.db")
-	trail, err := audit.NewSqliteAuditTrail(path)
+	// Build the store through the PRODUCTION opener so its fence evidence is
+	// complete (marker + receipt + floor). A store marked out-of-band by direct
+	// dependency activation carries no receipt, and the normal-open guard
+	// refuses it, so the fixture must be produced the way production produces
+	// one. The well-known registrations are then stripped, leaving a durable
+	// store with no built-ins — the shape these tests start from.
+	tracker, err := tasks.OpenTaskTracker(path)
 	require.NoError(t, err)
-	require.NoError(t, trail.Close())
+	require.NoError(t, tracker.Close())
+
 	db, err := sql.Open("sqlite", dbconn.SharedDSNWithProfile(path, timeouts.TestProfile()))
 	require.NoError(t, err)
-	prov, err := provenance.OpenBorrowedSQLite(db)
-	require.NoError(t, err)
-	require.NoError(t, prov.Close())
+	for _, stmt := range []string{
+		`DELETE FROM pasture_agent_categories`,
+		`DELETE FROM pasture_well_known_agents`,
+	} {
+		_, err := db.Exec(stmt)
+		require.NoError(t, err)
+	}
 	require.NoError(t, db.Close())
 	return path
 }

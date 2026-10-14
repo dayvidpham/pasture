@@ -23,7 +23,7 @@
 # Fields:
 #   id:        human-readable subtest name
 #   args:      CLI arguments passed to the binary. A well-formed epoch id
-#              (demo--01960000-0000-7000-8000-000000000001) is baked in where the
+#              (demo/01960000-0000-7000-8000-000000000001) is baked in where the
 #              failure is NOT about the epoch id, so cobra's required-flag check
 #              and the epoch-id guard both pass and the intended semantic guard is
 #              what fires.
@@ -53,7 +53,7 @@ tests:
     want_exit: 1
 
   - id: "signal_vote_bad_axis"
-    args: ["signal", "vote", "--epoch-id", "demo--01960000-0000-7000-8000-000000000001", "--axis", "badaxis", "--vote", "ACCEPT"]
+    args: ["signal", "vote", "--epoch-id", "demo/01960000-0000-7000-8000-000000000001", "--axis", "badaxis", "--vote", "ACCEPT"]
     want_exit: 1
 
   # Malformed --epoch-id with an otherwise-valid slice-id + single output: only
@@ -63,7 +63,7 @@ tests:
     want_exit: 1
 
   - id: "signal_complete_output_and_error"
-    args: ["signal", "complete", "--epoch-id", "demo--01960000-0000-7000-8000-000000000001", "--slice-id", "s-1", "--output", "o", "--error", "e"]
+    args: ["signal", "complete", "--epoch-id", "demo/01960000-0000-7000-8000-000000000001", "--slice-id", "s-1", "--output", "o", "--error", "e"]
     want_exit: 1
 
   - id: "slice_start_bad_mode"
@@ -85,7 +85,7 @@ tests:
   # before-open path for the session family, whose guards are all non-empty
   # checks with no other semantic case to trigger after cobra.
   - id: "session_register_empty_role"
-    args: ["session", "register", "--epoch-id", "demo--01960000-0000-7000-8000-000000000001", "--session-id", "s-1", "--role", ""]
+    args: ["session", "register", "--epoch-id", "demo/01960000-0000-7000-8000-000000000001", "--session-id", "s-1", "--role", ""]
     want_exit: 1
 
   # Malformed --epoch-id with an otherwise-valid target phase: only the epoch id
@@ -96,5 +96,5 @@ tests:
     want_exit: 1
 
   - id: "phase_advance_bad_phase"
-    args: ["phase", "advance", "--epoch-id", "demo--01960000-0000-7000-8000-000000000001", "--to", "not-a-real-phase"]
+    args: ["phase", "advance", "--epoch-id", "demo/01960000-0000-7000-8000-000000000001", "--to", "not-a-real-phase"]
     want_exit: 1

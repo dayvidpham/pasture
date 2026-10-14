@@ -1,16 +1,13 @@
 package main_test
 
 import (
-	"database/sql"
 	"encoding/json"
 	"sync"
 	"testing"
 
-	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/internal/tasks"
-	"github.com/dayvidpham/provenance"
 	"github.com/stretchr/testify/require"
 )
 
@@ -80,15 +77,13 @@ func TestCLIOnlyFirstTaskEnsuresPersistedWellKnownAgents(t *testing.T) {
 func TestCLIProcessesRacingDurableOpenConverge(t *testing.T) {
 	t.Parallel()
 	path := absentDB(t)
-	trail, err := audit.NewSqliteAuditTrail(path)
+	// Build the store through the production opener so its fence evidence is
+	// complete (marker + receipt + floor): a store marked out of band by direct
+	// dependency activation carries no receipt and the normal-open guard refuses
+	// it before any command runs.
+	seed, err := tasks.OpenTaskTracker(path)
 	require.NoError(t, err)
-	require.NoError(t, trail.Close())
-	db, err := sql.Open("sqlite", dbconn.SharedDSN(path))
-	require.NoError(t, err)
-	prov, err := provenance.OpenBorrowedSQLite(db)
-	require.NoError(t, err)
-	require.NoError(t, prov.Close())
-	require.NoError(t, db.Close())
+	require.NoError(t, seed.Close())
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	results := make([]runOutcome, 2)
@@ -104,7 +99,7 @@ func TestCLIProcessesRacingDurableOpenConverge(t *testing.T) {
 		require.Zero(t, out.exitCode, out.stderr)
 	}
 	bindings := assertCLIBuiltIns(t, path)
-	db, err = dbconn.OpenReadOnlyDB(path)
+	db, err := dbconn.OpenReadOnlyDB(path)
 	require.NoError(t, err)
 	defer db.Close()
 	var software, categories, canonical int

@@ -43,6 +43,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
+	"github.com/dayvidpham/pasture/internal/idmigrate"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -100,6 +101,18 @@ func TaskEvents(w io.Writer, in TaskEventsInput, format types.OutputFormat) (int
 				"3. Supported kinds: " + listContextKindWireValues(),
 		}
 		return errors.ExitCode(se), se
+	}
+
+	// A retired "<namespace>--<uuid>" value is refused by name before any query:
+	// the retired form never resolves, so accepting it as an epoch id or a
+	// context id would return a silent empty result. Free strings that are not
+	// recognizable retired identities (Git SHAs, session names) are still
+	// accepted — only the retired identity shape is rejected.
+	for _, candidate := range []string{in.EpochId, in.ContextId} {
+		if idmigrate.IsRetiredIdentity(candidate) {
+			se := idmigrate.RetiredIdentityRefusal(candidate)
+			return errors.ExitCode(se), se
+		}
 	}
 
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)

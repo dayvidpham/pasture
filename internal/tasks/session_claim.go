@@ -130,7 +130,7 @@ func RecordLifecycleSessionClaim(ctx context.Context, tracker protocol.TaskTrack
 	if !ok || store.auditDBHandle() == nil {
 		return SessionClaimOutcome{}, sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}
-	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().SQLiteBusy())
+	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().Ingress())
 	defer cancel()
 	// READ FIRST. The common case on the hot hook path is a session that is
 	// already claimed, and that case must take no write lock. A read fault is a
@@ -215,7 +215,7 @@ func LifecycleSession(bindings []model.NativeBinding) (string, error) {
 // present is false when no claim row exists, which is an unbound session and
 // not an error. A returned error is a read fault; the caller decides its kind.
 func (t *trackerImpl) readLifecycleSessionClaim(ctx context.Context, harness ir.HarnessID, session string) (actor string, present bool, err error) {
-	bounded, cancel := context.WithTimeout(ctx, t.timeoutProfile.SQLiteBusy())
+	bounded, cancel := context.WithTimeout(ctx, t.timeoutProfile.Ingress())
 	defer cancel()
 	return readSessionClaimRow(bounded, t.auditDB, harness, session)
 }
