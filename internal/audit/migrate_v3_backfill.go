@@ -370,7 +370,7 @@ func findOrCreateLegacyRoleAgent(tx *sql.Tx, role string) (string, error) {
 			Cause: err,
 		}
 	}
-	agentId := legacyRoleAgentNamespace + "--" + newUUID.String()
+	agentId := legacyRoleAgentNamespace + "/" + newUUID.String()
 
 	if _, err := tx.Exec(
 		`INSERT INTO agents (id, kind_id) VALUES (?, 2)`,

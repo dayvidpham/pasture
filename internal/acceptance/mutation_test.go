@@ -220,8 +220,8 @@ func TestEveryVersionedOperatorProducesOneDistinctMutant(t *testing.T) {
 				ID:    "assignment-original",
 				Actor: row.Setup.Actors[0].ID,
 				Role:  tasks.RoleOwnerResponsibility,
-				Task:  mustTaskID(t, "acceptance--00000000-0000-7000-8000-000000000020"),
-				Epoch: mustTaskID(t, "acceptance--00000000-0000-7000-8000-000000000021"),
+				Task:  mustTaskID(t, "acceptance/00000000-0000-7000-8000-000000000020"),
+				Epoch: mustTaskID(t, "acceptance/00000000-0000-7000-8000-000000000021"),
 				State: provenance.TransitionStarted,
 			}}
 			inline := `{"evidence":true}`

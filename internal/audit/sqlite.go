@@ -716,7 +716,7 @@ func (s *SqliteAuditTrail) resolveLegacyRoleAgentId(ctx context.Context, tx *sql
 			Cause: err,
 		}
 	}
-	agentId := legacyRoleAgentNamespace + "--" + newUUID.String()
+	agentId := legacyRoleAgentNamespace + "/" + newUUID.String()
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO agents (id, kind_id) VALUES (?, 2)`,

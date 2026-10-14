@@ -229,6 +229,17 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 		}
 	}
 
+	// IDENTITY-FORMAT GUARD, BEFORE ANY SCHEMA WORK. A populated store that
+	// still uses the retired two-dash format is refused here — before the
+	// audit schema migrator, fixed-actor registration, genesis reconciliation
+	// and every journal decode — because this is the last point at which the
+	// store still looks the way the previous build left it. See
+	// internal/tasks/id_format_guard.go for why the guard cannot live in a
+	// migration step.
+	if err := refuseRetiredIdentityFormat(ctx, dbPath); err != nil {
+		return nil, err
+	}
+
 	// Open audit first so its migrator runs and creates audit_schema_meta
 	// (and any of its own tables). NewSqliteAuditTrail invokes audit.Migrate
 	// internally; if Migrate returns a CategoryStorage / CategoryValidation

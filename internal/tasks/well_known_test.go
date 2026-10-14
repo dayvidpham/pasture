@@ -279,8 +279,8 @@ func TestRegisterWellKnownAgents_AllNamesPresent(t *testing.T) {
 
 			// Verify the namespace is "pasture" (worker agent registration
 			// path uses WellKnownAgentNamespace).
-			if !strings.HasPrefix(diskId, tasks.WellKnownAgentNamespace+"--") {
-				t.Errorf("AgentId %q for %q does not have %q-- namespace prefix", diskId, spec.Name, tasks.WellKnownAgentNamespace)
+			if !strings.HasPrefix(diskId, tasks.WellKnownAgentNamespace+"/") {
+				t.Errorf("AgentId %q for %q does not have %q/ namespace prefix", diskId, spec.Name, tasks.WellKnownAgentNamespace)
 			}
 		})
 	}

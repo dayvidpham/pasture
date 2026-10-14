@@ -51,12 +51,11 @@ func TestFreshStoreReachesVersionNineThroughTheRealOpener(t *testing.T) {
 	var version int
 	require.NoError(t, impl.auditDB.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version))
 	require.Equal(t, audit.MaxKnownSchemaVersion, version, "a fresh store must open at the version the migrator records")
-	require.Equal(t, 9, version, "the ceiling this step raises the store to is 9")
 
 	// One row per applied step on a file that started at version 1. Version 1
-	// is never written, so the chain's eight steps record 2 through 9 and the
-	// table holds eight rows; a fresh file stamped once at the top would hold
-	// one.
+	// is never written, so the chain records 2 through the ceiling and the
+	// table holds one row per step; a fresh file stamped once at the top would
+	// hold one.
 	var rows int
 	require.NoError(t, impl.auditDB.QueryRow(`SELECT count(*) FROM audit_schema_meta`).Scan(&rows))
 	require.Equal(t, audit.MaxKnownSchemaVersion-1, rows, "a file that started at version 1 records one row per step")
@@ -82,7 +81,7 @@ func TestFreshStoreHasNoRetiredAssignmentIndexRelations(t *testing.T) {
 
 	var version int
 	require.NoError(t, impl.auditDB.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version))
-	require.Equal(t, 9, version, "run this assertion against a store the v8 to v9 step has already processed")
+	require.Equal(t, audit.MaxKnownSchemaVersion, version, "run this assertion against a store the migrator has already processed")
 
 	for _, name := range retiredAssignmentIndexRelations {
 		var count int

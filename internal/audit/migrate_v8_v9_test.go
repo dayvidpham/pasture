@@ -3,6 +3,7 @@ package audit
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -217,9 +218,6 @@ func TestMigrateV8ToV9DropsTheRetiredIndexRelations(t *testing.T) {
 	if err != nil || version != MaxKnownSchemaVersion {
 		t.Fatalf("version=%d want=%d err=%v", version, MaxKnownSchemaVersion, err)
 	}
-	if version != 9 {
-		t.Fatalf("version=%d want 9 (MaxKnownSchemaVersion moved on but the step must stamp 9)", version)
-	}
 	requireNoRetiredRelations(t, db)
 
 	var claimRows int
@@ -230,14 +228,15 @@ func TestMigrateV8ToV9DropsTheRetiredIndexRelations(t *testing.T) {
 		t.Errorf("session claim rows=%d want 1; the step must keep session claims", claimRows)
 	}
 
-	// One row per applied step: the fixture recorded 8, the step added 9, and
-	// nothing else. A step that stamped twice, or not at all, is caught here.
+	// One row per applied step: the fixture recorded 8, the v8->v9 step added 9,
+	// and the identity-format ceiling added 10. A step that stamped twice, or
+	// not at all, is caught here.
 	var metaRows int
 	if err := db.QueryRow(`SELECT count(*) FROM audit_schema_meta`).Scan(&metaRows); err != nil {
 		t.Fatalf("read version rows: %v", err)
 	}
-	if metaRows != 2 {
-		t.Errorf("audit_schema_meta rows=%d want 2 (the fixture's 8 and this step's 9)", metaRows)
+	if want := MaxKnownSchemaVersion - 7; metaRows != want {
+		t.Errorf("audit_schema_meta rows=%d want %d (the fixture's 8 and every step up to %d)", metaRows, want, MaxKnownSchemaVersion)
 	}
 }
 
@@ -318,8 +317,8 @@ func TestMigrateV8ToV9ToleratesMissingRelations(t *testing.T) {
 				t.Fatalf("Migrate over a file missing %v: %v", skip, err)
 			}
 			version, err := readVersion(db)
-			if err != nil || version != 9 {
-				t.Fatalf("version=%d want 9 err=%v", version, err)
+			if err != nil || version != MaxKnownSchemaVersion {
+				t.Fatalf("version=%d want=%d err=%v", version, MaxKnownSchemaVersion, err)
 			}
 			requireNoRetiredRelations(t, db)
 			var claimRows int
@@ -353,8 +352,8 @@ func TestMigrateV8ToV9IsIdempotentOnAVersion9Database(t *testing.T) {
 		}
 	}
 	version, err := readVersion(db)
-	if err != nil || version != 9 {
-		t.Fatalf("version=%d want 9 err=%v", version, err)
+	if err != nil || version != MaxKnownSchemaVersion {
+		t.Fatalf("version=%d want=%d err=%v", version, MaxKnownSchemaVersion, err)
 	}
 	var rowsAfterRepeat int
 	if err := db.QueryRow(`SELECT count(*) FROM audit_schema_meta`).Scan(&rowsAfterRepeat); err != nil {
@@ -430,8 +429,8 @@ func TestMigrateV8ToV9RollsBackEveryDropWhenTheStepFails(t *testing.T) {
 }
 
 // TestMigrateV8ToV9RefusesADatabaseNewerThanItKnows is the ceiling. A file at
-// version 10 is refused by the same newerSchemaError an older binary would
-// get from a version-9 file, and the refusal names the supported version the
+// one version above the ceiling is refused by the same newerSchemaError an
+// older binary would get, and the refusal names the supported version the
 // constant now carries.
 func TestMigrateV8ToV9RefusesADatabaseNewerThanItKnows(t *testing.T) {
 	t.Parallel()
@@ -439,12 +438,13 @@ func TestMigrateV8ToV9RefusesADatabaseNewerThanItKnows(t *testing.T) {
 	if err := Migrate(db); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	if _, err := db.Exec(`INSERT INTO audit_schema_meta(version,applied_at) VALUES(10,1)`); err != nil {
+	future := MaxKnownSchemaVersion + 1
+	if _, err := db.Exec(`INSERT INTO audit_schema_meta(version,applied_at) VALUES(?,1)`, future); err != nil {
 		t.Fatal(err)
 	}
 	err := Migrate(db)
 	if err == nil {
-		t.Fatal("Migrate accepted a version 10 database")
+		t.Fatalf("Migrate accepted a version %d database", future)
 	}
 	var se *pasterrors.StructuredError
 	if !errors.As(err, &se) {
@@ -453,7 +453,7 @@ func TestMigrateV8ToV9RefusesADatabaseNewerThanItKnows(t *testing.T) {
 	if se.Category != pasterrors.CategoryStorage {
 		t.Errorf("Category=%q want %q", se.Category, pasterrors.CategoryStorage)
 	}
-	want := "This audit database was written by a newer pasture (version 10) than this build supports (version 9)."
+	want := fmt.Sprintf("This audit database was written by a newer pasture (version %d) than this build supports (version %d).", future, MaxKnownSchemaVersion)
 	if se.What != want {
 		t.Errorf("What=%q want %q", se.What, want)
 	}
@@ -465,37 +465,38 @@ func TestMigrateV8ToV9RefusesADatabaseNewerThanItKnows(t *testing.T) {
 	}
 }
 
-// TestPlanMigrationsListsTheV8ToV9Step pins the dry-run wording for the new
-// step. PlanMigrations(8) must offer exactly one step, and its description
-// must say all three halves of the promise: the retired tables and triggers go,
-// session claims stay, and the floor moves far enough that an older binary
-// refuses the whole file. The last clause is the one the migrator cannot warn
-// about anywhere else, because it runs on every open.
+// TestPlanMigrationsListsTheV8ToV9Step pins the dry-run wording for the step.
+// PlanMigrations(8) must offer the v8->v9 step first and then the identity-format
+// ceiling, and the v8->v9 description must say all three halves of the promise:
+// the retired tables and triggers go, session claims stay, and the floor moves
+// far enough that an older binary refuses the whole file. The last clause is the
+// one the migrator cannot warn about anywhere else, because it runs on every
+// open.
 func TestPlanMigrationsListsTheV8ToV9Step(t *testing.T) {
 	t.Parallel()
 	plan := PlanMigrations(8)
-	if len(plan) != 1 {
-		t.Fatalf("PlanMigrations(8) returned %d steps, want 1: %+v", len(plan), plan)
+	if len(plan) == 0 {
+		t.Fatalf("PlanMigrations(8) returned no steps, want at least the v8->v9 step")
 	}
 	if plan[0].FromVersion != 8 || plan[0].ToVersion != 9 {
-		t.Errorf("step is v%d->v%d, want v8->v9", plan[0].FromVersion, plan[0].ToVersion)
+		t.Errorf("first step is v%d->v%d, want v8->v9", plan[0].FromVersion, plan[0].ToVersion)
 	}
 	const want = "remove the retired gate assignment-index tables and triggers; session claims are kept; " +
 		"an older pasture binary will then refuse this database for every command until it is upgraded"
 	if plan[0].Description != want {
 		t.Errorf("Description=%q want %q", plan[0].Description, want)
 	}
-	// A database already at 9 plans nothing, which is what makes a second
-	// `pasture migrate` a no-op.
+	// A database already at the ceiling plans nothing, which is what makes a
+	// second `pasture migrate` a no-op.
 	if got := PlanMigrations(MaxKnownSchemaVersion); len(got) != 0 {
-		t.Errorf("PlanMigrations(9) returned %d steps, want 0: %+v", len(got), got)
+		t.Errorf("PlanMigrations(%d) returned %d steps, want 0: %+v", MaxKnownSchemaVersion, len(got), got)
 	}
 	// The registry and the constant cannot disagree: every step the plan
 	// offers must be a real step, and the last one must reach the constant.
 	steps := migrationSteps()
 	last := steps[len(steps)-1]
-	if last.fromVersion != 8 || last.toVersion != 9 {
-		t.Errorf("last registry step is v%d->v%d, want v8->v9", last.fromVersion, last.toVersion)
+	if last.fromVersion != 9 || last.toVersion != 10 {
+		t.Errorf("last registry step is v%d->v%d, want v9->v10", last.fromVersion, last.toVersion)
 	}
 	if MaxKnownSchemaVersion != last.toVersion {
 		t.Errorf("MaxKnownSchemaVersion=%d but the last step reaches %d", MaxKnownSchemaVersion, last.toVersion)

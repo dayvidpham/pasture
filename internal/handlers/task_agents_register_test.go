@@ -189,7 +189,7 @@ func TestTaskAgentsRegister_DuplicateIsNamespaceScoped(t *testing.T) {
 		require.Zero(t, code, "namespace %q", ns)
 		var created registeredAgentJSON
 		require.NoError(t, json.Unmarshal(out.Bytes(), &created))
-		require.True(t, strings.HasPrefix(created.AgentID, ns+"--"))
+		require.True(t, strings.HasPrefix(created.AgentID, ns+"/"))
 	}
 }
 
