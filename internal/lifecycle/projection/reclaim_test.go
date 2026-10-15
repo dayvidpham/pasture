@@ -419,12 +419,16 @@ func TestTheReclaimIsReachedOnlyFromTheRebuild(t *testing.T) {
 		"the reclaim is called exactly once, from the rebuild, inside its transaction after the re-insert; any other caller reads a projection that may be stale")
 	assert.Equal(t, []string{filepath.Join("internal", "lifecycle", "projection", "reclaim.go") + ": reclaimOrphanPayloads"}, deleters,
 		"the narrow delete type is constructed only by the reclaim; a construction anywhere else is a second delete door")
-	// The rebuild has EXACTLY ONE production caller, the tasks wrapper that
-	// every read command reaches; the reclaim is reached through it and
-	// through nothing else. A second caller is a new path that must state
-	// where its failure line goes; a caller on a hook path is refused.
-	assert.Equal(t, []string{filepath.Join("internal", "tasks", "lifecycle_identity.go") + ": RebuildLifecycleOccurrencesReporting"}, reclaimingCallers,
-		"production callers of the rebuild: %v; the one caller is the tasks wrapper the read commands share, never a hook path", reclaimingCallers)
+	// The rebuild has EXACTLY TWO production callers, both in internal/tasks:
+	// the wrapper every read command reaches, and the operator prune's bulk
+	// wrapper. The reclaim is reached through them and through nothing else. A
+	// third caller is a new path that must state where its failure line goes;
+	// a caller on a hook path is refused.
+	assert.Equal(t, []string{
+		filepath.Join("internal", "tasks", "lifecycle_identity.go") + ": RebuildLifecycleOccurrencesReporting",
+		filepath.Join("internal", "tasks", "lifecycle_prune.go") + ": PruneLifecyclePayloads",
+	}, reclaimingCallers,
+		"production callers of the rebuild: %v; the read wrapper and the operator prune wrapper, both in tasks and never a hook path", reclaimingCallers)
 }
 
 func TestReclaimFailureLineNamesTheOutcome(t *testing.T) {

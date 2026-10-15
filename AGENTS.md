@@ -18,7 +18,7 @@ project. All contributors (human and AI) must follow these standards.
 ```
 pasture/
 ├── cmd/
-│   ├── pasture/         # Local Pasture CLI (task verbs + top-level migrate)
+│   ├── pasture/         # Local Pasture CLI (task verbs + top-level migrate and prune)
 │   ├── pastured/        # DBOS engine-host daemon entry point
 │   └── pasture-release/ # Release and versioning tool
 ├── internal/
@@ -508,6 +508,79 @@ contends. It would therefore be slowest under exactly the condition that
 produces orphans, and a slow enough count would push the invocation into its
 deadline and leave one more orphan behind — making the counter a cause of the
 thing it counts. A test asserts that no hook-path source calls it.
+
+### Reclaiming the blob backlog: `pasture prune`
+
+The read commands' reclaim is a safety valve bounded small (1024 rows, one
+per command); under a sustained flood the backlog outruns it, so the operator
+gets an explicit database-level verb. `pasture prune` is a TOP-LEVEL command
+beside `migrate`, because it takes the store's write lock and may run VACUUM.
+
+IT IS A HYGIENE RECLAIM, AND IT IS NOT A CAPACITY FIX FOR A FULLY-REFERENCED
+STORE. It deletes only blobs no recorded occurrence names, so it reclaims
+exactly the orphans the store has left. That can be most of the blob bytes:
+measured on a byte copy of the live store (2026-10-14), 24,416 of 28,975 blobs
+(123.5 MB of the 160.4 MB of body bytes) were unnamed; pruning reclaimed
+24,414 rows / 123.46 MB, leaving 4,561 blobs (36.9 MB, all but two referenced);
+without VACUUM the file did not shrink at all (it grew by ~4.6 MB and held
+41,288 free pages), and with `--vacuum` it shrank from 253 MB to 87 MB. It
+reclaims NOTHING on a store whose blobs are ALL named by recorded occurrences —
+those bytes are the recorded evidence, and the verb cannot touch them without
+breaking the read path, because the projection re-inserts each occurrence's
+digest against the blob table's foreign key. What would bound such a store is a
+retention policy over the lifecycle occurrence journal ITSELF — age- or
+size-bounded dropping of old per-event rows, and transitively the blobs they
+stop naming. That is a policy over audit history, an operator decision with a
+blast radius this verb does not have, and this change does NOT implement it;
+the shape it would need, its knobs and its invariants are recorded on
+https://github.com/dayvidpham/pasture/issues/59.
+
+It deletes ORPHAN payload blobs and nothing else. An orphan is a payload blob
+no recorded occurrence names, left by a hook invocation abandoned between its
+two durable writes; the verb reclaims them in bounded batches (`PruneCap`,
+4096 rows per batch), oldest first, each batch its own write transaction so a
+store that is being written keeps moving between batches. Its retention and
+its refusals:
+
+- **Age.** `--max-age` sets a retention age; an orphan is eligible only when it
+  is older than `max(--max-age, WriterWindow)`, so the writer window is a FLOOR
+  and never a ceiling. The default is zero, which keeps no orphan beyond that
+  floor; the read path's behavior is the same rule read at 1024 rows a command.
+- **Size.** `--max-bytes` stops the run once that many bytes have been dropped,
+  so one command cannot reclaim more than the operator asked for. A run that
+  stops at either bound reports `Truncated` rather than pretending the job is
+  done, and a second run finds the rest.
+- **A blob an occurrence names is NEVER deleted.** The projection re-inserts
+  each occurrence's `payload_digest` against `lifecycle_payload_blobs`'s
+  foreign key, so deleting a named blob would make the very next read command
+  fail on that key. Each batch rebuilds the projection from the journal in the
+  same transaction the delete runs in, so "no occurrence names this digest" is
+  true of the journal as of the batch.
+- **The newest row is NEVER deleted.** The prune excludes the one row with the
+  greatest `written_at` (ties broken by the greatest digest), whatever its age.
+- **An unknown age is NEVER eligible.** A `written_at` of 0 keeps the row, for
+  the same reason the read path's reclaim never treats 0 as old.
+- **History is preserved.** Only an orphan's raw bytes are lost; every
+  recorded occurrence keeps its digest, contract, event, bindings, envelope and
+  interpreted evidence in the journal, and the verb prints what it kept and
+  what it lost beside the counts rather than reporting a bare number.
+
+The delete returns the freed pages to SQLite's free list, where new writes
+reuse them, but the database FILE only shrinks after VACUUM. `--vacuum` runs
+it; without it the verb says the file has not shrunk yet. VACUUM rewrites the
+whole file and takes the store's write lock, so it is opt-in and best run when
+no hook writer is active.
+
+WHO READS A BLOB. Nothing on the hook path or the write path reads a blob body:
+the receipt service only ever writes one, and the projection rebuild reads only
+the digest the journal carries. The one production reader is
+`model.LifecycleReader.Payload`, the public bounded reader's exact-byte
+read-back of a recorded occurrence, which today has no in-tree caller and
+exists for a consumer that wants the original host bytes. Because the prune
+never deletes a blob an occurrence names, that read-back is unchanged for every
+recorded occurrence: it still finds the exact bytes, and a deleted digest can
+only ever be one no occurrence names. That is why the prune can be the only
+delete path the payload blob table has without making read-back dishonest.
 
 ### Capturing host payloads and clearing them into fixtures
 
