@@ -350,18 +350,24 @@ func (l *Lane) absorb(batch *[]*item, bytes *int64) (drained, stopped bool, arri
 // the writer against HoldTarget; exceeding the target is reported, never
 // enforced by truncating the batch, because a record already admitted must
 // either commit or fail honestly, never be dropped.
+//
+// THE PER-RECORD COUNTER IS PUBLISHED BEFORE THE ACKNOWLEDGEMENT. A caller that
+// has received its result can then already observe that its record committed;
+// an observable that lags the ack is a lie about what the caller knows, and a
+// reader that polled Stats for "did my record commit" would race the very
+// guarantee the lane exists to give. The turn counters follow the batch, since
+// they describe the turn and not one record.
 func (l *Lane) commitBatch(batch []*item) {
 	started := time.Now()
 	for _, it := range batch {
 		err := it.commit(l.ctx)
+		l.records.Add(1)
 		it.result <- err
 	}
 	held := time.Since(started)
 
 	l.batches.Add(1)
-	l.records.Add(int64(len(batch)))
-	recordCount := int64(len(batch))
-	raiseMax(&l.maxBatchRecords, recordCount)
+	raiseMax(&l.maxBatchRecords, int64(len(batch)))
 	raiseMax(&l.maxHoldNanos, held.Nanoseconds())
 	if held > l.budget.HoldTarget {
 		l.holdExceeded.Add(1)
