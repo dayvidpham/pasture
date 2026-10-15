@@ -37,6 +37,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/idmigrate"
+	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/provenance"
@@ -235,8 +236,13 @@ func runMigrateIDsApply(ctx context.Context, w io.Writer, dbPath, backupDir stri
 	}
 
 	// The count baseline is captured AFTER catch-up and BEFORE the conversion
-	// transaction, so the reopen comparison proves conversion adds and removes
+	// transaction. The reopen comparison proves conversion adds and removes
 	// no identity rows (fixed actors and genesis are not duplicated).
+	// Projection-derived tables are excluded from this baseline by design
+	// (see projectionDerivedTables): the conversion replays them from the
+	// converted journal, so their counts legitimately move from stale or
+	// empty to journal truth. They are verified semantically on reopen
+	// against the converted journal instead.
 	baseline, err := identityCountsPath(ctx, dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
@@ -311,9 +317,10 @@ func identityCountsPath(ctx context.Context, dbPath string) (map[string]int64, e
 
 // reopenAndVerify opens the converted store through the production tracker,
 // runs the dependency's owner integrity verifier on the committed file in an
-// explicit transaction that is ALWAYS rolled back, and confirms the
-// identity-bearing row counts did not change (fixed actors and genesis are not
-// duplicated).
+// explicit transaction that is ALWAYS rolled back, verifies the disposable
+// lifecycle projection against the converted journal truth (also rolled
+// back), and confirms the identity-bearing row counts did not change (fixed
+// actors and genesis are not duplicated).
 func reopenAndVerify(ctx context.Context, dbPath string, before map[string]int64) (*reopenProof, error) {
 	verifyDB, err := dbconn.OpenSharedDB(dbPath)
 	if err != nil {
@@ -338,6 +345,10 @@ func reopenAndVerify(ctx context.Context, dbPath string, before map[string]int64
 				"2. Report the verification failure with the store's source revision before retrying.",
 			Cause: verifyErr,
 		}
+	}
+	if err := verifyProjectionMatchesConvertedJournal(ctx, verifyDB); err != nil {
+		_ = verifyDB.Close()
+		return nil, err
 	}
 	after, err := identityCountsQuery(ctx, verifyDB)
 	_ = verifyDB.Close()
@@ -372,19 +383,101 @@ func reopenAndVerify(ctx context.Context, dbPath string, before map[string]int64
 	return proof, nil
 }
 
+// verifyProjectionMatchesConvertedJournal confirms the disposable lifecycle
+// projection on the committed store equals the converted journal truth. It
+// runs the same semantic comparison the conversion runs inside its own
+// transaction (internal/idmigrate/idmigrate.go P3g via
+// internal/lifecycle/projection/rebuild.go CompareOccurrencesToEvidence),
+// but on the committed file in an explicit transaction that is ALWAYS
+// rolled back. A mismatch means the replay and the reopen disagree, which
+// the identity row-count comparison cannot see because projection rows are
+// excluded from it by design.
+func verifyProjectionMatchesConvertedJournal(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	reader, err := provenance.NewTransactionEvidenceReader(ctx, tx)
+	if err != nil {
+		_ = tx.Rollback()
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "The converted store's lifecycle evidence reader could not be constructed after reopen.",
+			Why:      err.Error(),
+			Where:    "Reopening and verifying the converted store (internal/handlers/migrate_ids.go in handlers.verifyProjectionMatchesConvertedJournal).",
+			Impact:   "The projection could not be verified against the converted journal. The committed store may be unusable.",
+			Fix:      "Restore the archive the conversion made and report the verification failure with the store's source revision.",
+			Cause:    err,
+		}
+	}
+	cmpErr := projection.CompareOccurrencesToEvidence(ctx, tx, reader)
+	_ = tx.Rollback()
+	if cmpErr != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "The converted store's lifecycle projection does not match its converted journal after reopen.",
+			Why:      cmpErr.Error(),
+			Where:    "Reopening and verifying the converted store (internal/handlers/migrate_ids.go in handlers.verifyProjectionMatchesConvertedJournal).",
+			Impact:   "The replayed projection and the committed journal disagree. The committed store may be unusable.",
+			Fix:      "Restore the archive the conversion made and report the projection mismatch with the store's source revision.",
+			Cause:    cmpErr,
+		}
+	}
+	return nil
+}
+
+// projectionDerivedTables is the CLOSED set of relations the conversion
+// re-derives from the converted journal instead of rewriting in place, so
+// their row counts legitimately change across conversion and must NOT be
+// compared before against after.
+//
+// Invariant, from the design:
+//
+//   - lifecycle_occurrences and lifecycle_occurrence_bindings are a
+//     disposable projection: the conversion deletes every row and re-inserts
+//     journal truth inside the same transaction
+//     (internal/lifecycle/projection/rebuild.go writeOccurrenceRows via
+//     RebuildOccurrencesInTx, called in internal/idmigrate/idmigrate.go P3g),
+//     then proves the result equals the converted journal with
+//     CompareOccurrencesToEvidence. On a store whose projection was empty or
+//     stale before conversion the counts legitimately go 0 (or stale) to N.
+//     Comparing them against the pre-conversion file is a false positive;
+//     they are compared against the converted journal instead, both inside
+//     the conversion and again on reopen (see
+//     verifyProjectionMatchesConvertedJournal).
+//   - lifecycle_payload_blobs is NOT re-derived: it is raw content-addressed
+//     evidence preserved byte-exact, proven by the raw inventory equality in
+//     internal/idmigrate/inventory.go. Its count must not change, so it stays
+//     in identityCountTables.
+//   - epoch_state_projection is NOT re-derived in this path: it is converted
+//     in place row by row (internal/idmigrate/pasture.go
+//     convertEpochProjection), never deleted and rebuilt, so it does not
+//     belong here either.
+//
+// The classification gate in migrate_ids_counts_gate_test.go fails when a
+// conversion mirror drifts out of exactly one of identityCountTables or this
+// list, so the two lists cannot silently diverge from what the conversion
+// touches.
+var projectionDerivedTables = []string{
+	"lifecycle_occurrence_bindings",
+	"lifecycle_occurrences",
+}
+
 // identityCountTables is the CLOSED set of relations whose row count the reopen
 // proof compares before and after conversion. It must name every table that
-// carries a converted identity (the conversion mirrors), so a conversion that
-// silently dropped or duplicated rows in a converted relation is caught. The
-// classification gate in migrate_ids_counts_gate_test.go fails when a mirror
-// table is missing here.
+// carries a converted identity (the conversion mirrors) EXCEPT the disposable
+// projection tables in projectionDerivedTables, which are verified
+// semantically against the converted journal instead of by count. A conversion
+// that silently dropped or duplicated rows in a converted relation listed here
+// is caught. The classification gate in migrate_ids_counts_gate_test.go fails
+// when a mirror table is missing from both lists.
 var identityCountTables = []string{
 	"agents", "agents_software", "agents_human", "agents_ml", "activities",
 	"comments", "tasks", "edges", "labels", "task_attributions",
 	"journal", "journal_operations", "governed_allocation_operations",
 	"actor_namespace_claims", "fixed_actor_manifest_entries",
 	"pasture_well_known_agents", "pasture_agent_categories",
-	"audit_events", "context_edges", "lifecycle_occurrences", "lifecycle_payload_blobs",
+	"audit_events", "context_edges", "lifecycle_payload_blobs",
 	"journal_activity_creations", "journal_authority_assignment_episodes",
 	"journal_authority_assignment_transitions", "journal_decisions", "journal_evidence",
 	"journal_task_events", "journal_operation_result_slots", "journal_authorities",
