@@ -231,10 +231,12 @@ func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now fun
 
 	// P3e: dependency-owned columns, canonical mutations, allocation receipts,
 	// their owner-derived digests, and Provenance-owned extension contexts.
-	dependencyReport, err := provenance.ConvertIDsInTx(ctx, tx, provenance.IDConversionOptions{
-		RewriteEffect:  rewritePastureEffect,
-		RewriteContext: rewritePastureContext,
-	})
+	// Pasture declares no canonical-backed extension effect and no extension
+	// identity context, so it passes nil for both rewrite callbacks: the
+	// dependency treats nil as "translate only its own declared fields" and its
+	// complete field/order validation rejects anything unsupported rather than
+	// guessing.
+	dependencyReport, err := provenance.ConvertIDsInTx(ctx, tx, provenance.IDConversionOptions{})
 	if err != nil {
 		return conversionError("Converting the dependency-owned identities failed.", err.Error(), "The whole conversion transaction rolls back; the store keeps its retired identities and the archive remains available.", "Repair the reported column/key from the archive and retry.", err)
 	}
@@ -332,20 +334,6 @@ func injectAt(opts ConvertOptions, point InjectPoint, tx *sql.Tx) error {
 		return nil
 	}
 	return opts.injectInTx(point, tx)
-}
-
-// rewritePastureEffect and rewritePastureContext translate the declared
-// structured fields of an operation's canonical effect/context that pasture
-// itself owns. Pasture records no extension identity context and declares no
-// canonical-backed extension effect, so both are identity-preserving: they
-// return the value unchanged and let the dependency's complete field/order
-// validation reject anything unsupported rather than guessing.
-func rewritePastureEffect(effect provenance.Effect) (provenance.Effect, error) {
-	return effect, nil
-}
-
-func rewritePastureContext(kind, value string) (string, error) {
-	return value, nil
 }
 
 // conversionError builds the uniform CategoryStorage failure for the conversion

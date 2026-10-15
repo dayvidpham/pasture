@@ -13,20 +13,101 @@ import (
 )
 
 // pastureIdentityColumns is the CLOSED set of pasture-owned TEXT columns that
-// hold a declared namespace-plus-UUID identity. A column is listed only because
-// its owning type declares it as an identity, never because its name ends in
-// "id": assignment, operation, authority and result-slot identifiers are opaque
-// and are deliberately absent. context_edges.context_id, the epoch projection
-// JSON and the audit payload JSON are handled separately because they are
-// kind-aware or structured.
+// hold a declared namespace-plus-UUID identity, one identity per cell. A column
+// is listed only because its owning type declares it as an identity, never
+// because its name ends in "id": assignment, operation, authority and
+// result-slot identifiers are opaque and are deliberately recorded in
+// pasturePreservedColumns instead. The identity-array columns (one JSON array
+// of identities per cell) live in pastureIdentityArrayColumns; the kind-aware
+// context_edges.context_id, the epoch projection JSON and the audit payload
+// JSON are handled separately because they are kind-aware or structured.
 var pastureIdentityColumns = []struct{ table, column string }{
 	{"audit_events", "agent_id"},
 	{"pasture_agent_categories", "agent_id"},
 	{"pasture_well_known_agents", "agent_id"},
 	{"pasture_system_identity", "committer_actor_id"},
 	{"pasture_session_claim", "actor"},
+}
+
+// pastureIdentityArrayColumns is the CLOSED set of pasture-owned TEXT columns
+// that hold a canonical JSON array of declared identities, one identity per
+// element. GovernedAllocationAuditParticipant writes both from the committed
+// closure's child TaskID and Occupant (internal/tasks/governed_create_slice.go),
+// so every element is an owned identity and conversion must rewrite each one.
+// A scalar "looks retired" check never sees an array, so these columns are
+// handled by convertIdentityArrayColumn, never by convertIdentityColumn.
+var pastureIdentityArrayColumns = []struct{ table, column string }{
 	{"pasture_governed_allocation_audit", "child_task_id"},
 	{"pasture_governed_allocation_audit", "occupant_id"},
+}
+
+// pasturePreservedColumns is the CLOSED set of pasture-owned *_id-named TEXT
+// columns deliberately kept OUT of conversion: an opaque, equality-only handle
+// whose declared domain is never parsed or resolved. Recording them (rather than
+// omitting them) is what lets the red-by-default schema walk demand that every
+// identity-looking pasture column be classified on purpose.
+var pasturePreservedColumns = []struct{ table, column, reason string }{
+	{"pasture_governed_allocation_audit", "operation_id", "opaque operation handle; equality-only projection key"},
+	{"pasture_governed_allocation_audit", "child_assignment_id", "opaque assignment handles as a canonical JSON array; equality-only"},
+	{"session_entries", "entry_id", "opaque audit session-entry key"},
+	{"session_entries", "parent_entry_id", "opaque audit session-entry key"},
+	{"session_entries", "session_id", "opaque audit session key"},
+	{"session_entries", "tool_call_id", "opaque vendor tool-call handle"},
+}
+
+// pastureSpecialColumns is the CLOSED set of pasture-owned identity-bearing
+// columns conversion handles outside the plain scalar loop: kind-routed context
+// identities and a disposable projection that is rebuilt from the converted
+// journal inside the conversion transaction rather than rewritten in place.
+var pastureSpecialColumns = []struct{ table, column, reason string }{
+	{"context_edges", "context_id", "kind-aware: task/actor/activity identities convert, epoch/session/Git values stay byte-exact"},
+	{"lifecycle_occurrences", "actor_id", "disposable projection rebuilt from the converted journal inside the conversion transaction, never rewritten in place"},
+}
+
+// IdentityColumn names one "table.column" pair in a conversion mirror.
+type IdentityColumn struct{ Table, Column string }
+
+// ConversionMirrors is the read surface the cross-module classification gate
+// needs: every declared mirror that decides what the dry run and the conversion
+// treat as identities. Production code reads the package-private slices
+// directly; this accessor exists so a black-box gate can compare the mirrors to
+// the dependency's schema and to pasture's own schema.
+type ConversionMirrors struct {
+	ProvenanceOwned        []IdentityColumn
+	ProvenancePreserved    []IdentityColumn
+	ProvenanceOwnedContext []IdentityColumn
+	PastureOwned           []IdentityColumn
+	PastureOwnedArray      []IdentityColumn
+	PasturePreserved       []IdentityColumn
+	PastureSpecial         []IdentityColumn
+}
+
+// DeclaredConversionMirrors returns the complete set of declared conversion
+// mirrors. It is the gate's read surface, not a production entry point.
+func DeclaredConversionMirrors() ConversionMirrors {
+	toIdentityColumns := func(cols []struct{ table, column string }) []IdentityColumn {
+		out := make([]IdentityColumn, 0, len(cols))
+		for _, c := range cols {
+			out = append(out, IdentityColumn{Table: c.table, Column: c.column})
+		}
+		return out
+	}
+	toIdentityColumnsWithReason := func(cols []struct{ table, column, reason string }) []IdentityColumn {
+		out := make([]IdentityColumn, 0, len(cols))
+		for _, c := range cols {
+			out = append(out, IdentityColumn{Table: c.table, Column: c.column})
+		}
+		return out
+	}
+	return ConversionMirrors{
+		ProvenanceOwned:        toIdentityColumns(previewDependencyColumns),
+		ProvenancePreserved:    toIdentityColumns(preservedDependencyColumns),
+		ProvenanceOwnedContext: toIdentityColumns(previewDependencyContextColumns),
+		PastureOwned:           toIdentityColumns(pastureIdentityColumns),
+		PastureOwnedArray:      toIdentityColumns(pastureIdentityArrayColumns),
+		PasturePreserved:       toIdentityColumnsWithReason(pasturePreservedColumns),
+		PastureSpecial:         toIdentityColumnsWithReason(pastureSpecialColumns),
+	}
 }
 
 // runtimeStateTables are the DBOS execution/history tables whose non-empty rows
@@ -91,6 +172,16 @@ func convertPastureIdentities(ctx context.Context, tx *sql.Tx) (int, error) {
 	total := 0
 	for _, col := range pastureIdentityColumns {
 		n, err := convertIdentityColumn(ctx, tx, col.table, col.column)
+		if err != nil {
+			return total, err
+		}
+		total += n
+	}
+	// The governed-allocation audit columns hold a canonical JSON array of
+	// identities, so each element converts and the row is re-encoded; a scalar
+	// recognizable-retired check would leave every retired element in place.
+	for _, col := range pastureIdentityArrayColumns {
+		n, err := convertIdentityArrayColumn(ctx, tx, col.table, col.column)
 		if err != nil {
 			return total, err
 		}
@@ -198,6 +289,112 @@ func convertIdentityColumn(ctx context.Context, tx *sql.Tx, table, column string
 		}
 	}
 	return len(changes), nil
+}
+
+// convertIdentityArrayColumn rewrites the declared identities inside one column
+// that stores a canonical JSON array of identity strings. It parses the array,
+// converts every element, and re-encodes canonically; a value whose elements are
+// already current is left byte-exact. It returns the number of rows it rewrote.
+func convertIdentityArrayColumn(ctx context.Context, tx *sql.Tx, table, column string) (int, error) {
+	exists, err := tableExists(ctx, tx, table)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, nil
+	}
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`SELECT rowid, "%s" FROM "%s" WHERE "%s" IS NOT NULL`, column, table, column))
+	if err != nil {
+		return 0, conversionError(
+			fmt.Sprintf("Pasture couldn't read %s.%s for conversion.", table, column),
+			"The preflight SELECT failed inside the conversion transaction.",
+			"No store data was changed; the conversion aborts before any write.",
+			"Confirm the store is readable and retry.", err)
+	}
+	type arrayRow struct {
+		rowid int64
+		raw   string
+	}
+	var pending []arrayRow
+	for rows.Next() {
+		var item arrayRow
+		if err := rows.Scan(&item.rowid, &item.raw); err != nil {
+			_ = rows.Close()
+			return 0, conversionError("Pasture couldn't scan a "+table+"."+column+" value.", err.Error(), "No store data was changed.", "Restore the store from the archive and retry.", err)
+		}
+		pending = append(pending, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+
+	changed := 0
+	for _, item := range pending {
+		target, rewritten, err := convertIdentityArrayValue(item.raw)
+		if err != nil {
+			return 0, identityFieldError(table+"."+column, item.raw, err)
+		}
+		if !rewritten {
+			continue
+		}
+		update := fmt.Sprintf(`UPDATE "%s" SET "%s"=? WHERE rowid=?`, table, column)
+		if _, err := tx.ExecContext(ctx, update, target, item.rowid); err != nil {
+			return 0, conversionError(
+				fmt.Sprintf("Converting %s.%s failed.", table, column),
+				"SQLite rejected the rewrite of the identity array.",
+				"The whole conversion transaction rolls back; no partial key change survives.",
+				"Restore the complete archive, inspect the row, and retry from the archive.", err)
+		}
+		changed++
+	}
+	return changed, nil
+}
+
+// convertIdentityArrayValue decodes one declared identity-array value and
+// rewrites each element that is a recognizable retired identity, returning the
+// canonical re-encoding and whether anything changed. A value that is not a JSON
+// string array is preserved byte-exact unless it is itself a recognizable
+// retired scalar (a malformed declared identity), which is refused rather than
+// guessed.
+func convertIdentityArrayValue(raw string) (string, bool, error) {
+	var elements []string
+	if err := json.Unmarshal([]byte(raw), &elements); err != nil {
+		if looksRetired(raw) {
+			return "", false, fmt.Errorf("the declared identity array %q is not a JSON string array", raw)
+		}
+		return raw, false, nil
+	}
+	changed := false
+	for i, element := range elements {
+		converted, err := convertPossibleIdentity(element)
+		if err != nil {
+			return "", false, err
+		}
+		if converted != element {
+			elements[i] = converted
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, false, nil
+	}
+	blob, err := json.Marshal(elements)
+	if err != nil {
+		return "", false, err
+	}
+	return string(blob), true, nil
+}
+
+// identityArrayWouldChange reports whether one declared identity-array value
+// carries a recognizable retired element. It shares convertIdentityArrayValue so
+// the dry run's count and the conversion's rewrite can never disagree.
+func identityArrayWouldChange(raw string) bool {
+	_, changed, err := convertIdentityArrayValue(raw)
+	return err == nil && changed
 }
 
 // convertEpochProjection rewrites the declared identity fields of the epoch

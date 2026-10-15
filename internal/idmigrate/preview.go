@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -61,12 +62,15 @@ func (p Preview) WouldChange() bool {
 }
 
 // previewDependencyColumns mirrors the dependency's own declared owned-identity
-// set (provenance internal/sqlite/id_conversion.go ownedIdentityColumns plus
-// ownedContextIdentityColumns). The dry run reports them so the operator sees the
-// FULL affected count: ConvertIDsInTx rewrites these, and the dry run must not
-// under-report by listing only pasture-owned tables. A column belongs here only
-// if the dependency declares it an owned identity; an opaque, equality-only
-// label belongs in preservedDependencyColumns instead.
+// set (provenance internal/sqlite/id_conversion.go ownedIdentityColumns). The dry
+// run reports them so the operator sees the FULL affected count: ConvertIDsInTx
+// rewrites these, and the dry run must not under-report by listing only
+// pasture-owned tables. A column belongs here only if the dependency declares it
+// an owned identity; an opaque, equality-only label belongs in
+// preservedDependencyColumns instead. The dependency's kind-routed context
+// identity columns are a separate declaration and are mirrored in
+// previewDependencyContextColumns; both are covered by the classification gate
+// in classification_gate_test.go.
 var previewDependencyColumns = []struct{ table, column string }{
 	{"tasks", "id"}, {"tasks", "owner_id"}, {"agents", "id"},
 	{"agents_human", "agent_id"}, {"agents_ml", "agent_id"}, {"agents_software", "agent_id"},
@@ -81,6 +85,24 @@ var previewDependencyColumns = []struct{ table, column string }{
 	{"governed_allocation_operations", "actor_id"},
 }
 
+// previewDependencyContextColumns mirrors the dependency's kind-routed context
+// identity declaration (provenance internal/sqlite/id_conversion.go
+// ownedContextIdentityColumns). Each row stores a context kind beside its
+// identity, and ConvertIDsInTx rewrites the identity only under a kind its owner
+// codec parses (task, actor, activity); every other kind is preserved
+// byte-exact. The dry run counts only the kind-filtered, recognizable-retired
+// rows so its plan matches what the conversion rewrites.
+var previewDependencyContextColumns = []struct{ table, column string }{
+	{"journal_decision_contexts", "context_identity"},
+	{"journal_evidence_contexts", "context_identity"},
+	{"journal_task_event_contexts", "context_identity"},
+}
+
+// contextIdentityConvertedKinds is the kind set the dependency's context codec
+// parses. The dry-run count filters on exactly this set so a context row of any
+// other kind (for example a git context) is never reported as convertible.
+var contextIdentityConvertedKinds = []string{"task", "activity", "actor"}
+
 // preservedDependencyColumns mirrors the dependency's declared OUT set
 // (provenance internal/sqlite/id_conversion.go preservedOpaqueColumns): opaque,
 // equality-only labels conversion preserves byte-exact and never parses. The dry
@@ -88,9 +110,13 @@ var previewDependencyColumns = []struct{ table, column string }{
 // conversion. actor_namespace_claims.claimant_id is the motivating case — the
 // contract's claimant example is a bare namespace ("pasture-system"), and the
 // dependency removed it from the owned set precisely because parsing it refused
-// every store a real writer produces. Keep this list in lockstep with the
-// dependency's preservedOpaqueColumns; a change on either side is a lockstep
-// change.
+// every store a real writer produces. provenance_verified_store.shape_id is a
+// dependency-owned schema-contract digest (an opaque label) that the
+// dependency's own declaration gate does not walk because its gate runs on a
+// store that does not create the verified ledger; it is recorded here so the
+// cross-module gate in classification_gate_test.go sees it classified. Keep this
+// list in lockstep with the dependency's preservedOpaqueColumns; a change on
+// either side is a lockstep change.
 var preservedDependencyColumns = []struct{ table, column string }{
 	{"actor_namespace_claims", "claimant_id"},
 	{"journal_operations", "operation_id"},
@@ -104,6 +130,7 @@ var preservedDependencyColumns = []struct{ table, column string }{
 	{"governed_allocation_genesis", "operation_id"},
 	{"governed_composed_supplement_owners", "supplement_operation_id"},
 	{"governed_composed_supplement_owners", "governed_operation_id"},
+	{"provenance_verified_store", "shape_id"},
 }
 
 // DryRun runs the read-only dry run. It never writes and never begins a
@@ -141,6 +168,31 @@ func preview(ctx context.Context, db *sql.DB, storePath string) (Preview, error)
 	for _, col := range cols {
 		key := col.table + "." + col.column
 		count, err := countRetired(ctx, db, col.table, col.column)
+		if err != nil {
+			return Preview{}, err
+		}
+		if count > 0 {
+			out.Columns[key] = count
+		}
+	}
+	// The governed-allocation audit columns hold a JSON array of identities, so
+	// the scalar recognizable-retired check above would never see them; count
+	// them the way the conversion rewrites them.
+	for _, col := range pastureIdentityArrayColumns {
+		key := col.table + "." + col.column
+		count, err := countRetiredArray(ctx, db, col.table, col.column)
+		if err != nil {
+			return Preview{}, err
+		}
+		if count > 0 {
+			out.Columns[key] = count
+		}
+	}
+	// The dependency's context identity columns convert only under the kinds its
+	// codec parses; count them kind-filtered so the plan matches the rewrite.
+	for _, col := range previewDependencyContextColumns {
+		key := col.table + "." + col.column
+		count, err := countRetiredContext(ctx, db, col.table, col.column)
 		if err != nil {
 			return Preview{}, err
 		}
@@ -197,6 +249,74 @@ func countRetired(ctx context.Context, q reader, table, column string) (int, err
 	rows, err := q.QueryContext(ctx, fmt.Sprintf(`SELECT DISTINCT "%s" FROM "%s" WHERE "%s" IS NOT NULL`, column, table, column))
 	if err != nil {
 		return 0, conversionError(fmt.Sprintf("Pasture couldn't count convertible values in %s.%s.", table, column), "The read-only dry-run SELECT failed.", "Nothing was changed by the dry run.", "Confirm the store is readable and retry.", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return 0, err
+		}
+		if looksRetired(raw) {
+			count++
+		}
+	}
+	return count, rows.Err()
+}
+
+// countRetiredArray counts, in one column that stores a canonical JSON array of
+// identities, the distinct values that carry at least one recognizable retired
+// element. It shares identityArrayWouldChange with the conversion, so the plan
+// and the rewrite cannot disagree about an array.
+func countRetiredArray(ctx context.Context, q reader, table, column string) (int, error) {
+	exists, err := tableExistsReader(ctx, q, table)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, nil
+	}
+	rows, err := q.QueryContext(ctx, fmt.Sprintf(`SELECT DISTINCT "%s" FROM "%s" WHERE "%s" IS NOT NULL`, column, table, column))
+	if err != nil {
+		return 0, conversionError(fmt.Sprintf("Pasture couldn't count convertible values in %s.%s.", table, column), "The read-only dry-run SELECT failed.", "Nothing was changed by the dry run.", "Confirm the store is readable and retry.", err)
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return 0, err
+		}
+		if identityArrayWouldChange(raw) {
+			count++
+		}
+	}
+	return count, rows.Err()
+}
+
+// countRetiredContext counts the kind-filtered, recognizable-retired identities
+// in one dependency context identity column: a value converts only under a kind
+// the dependency's context codec parses, so any other kind is never reported as
+// convertible.
+func countRetiredContext(ctx context.Context, q reader, table, column string) (int, error) {
+	exists, err := tableExistsReader(ctx, q, table)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, nil
+	}
+	placeholders := make([]string, len(contextIdentityConvertedKinds))
+	args := make([]any, 0, len(contextIdentityConvertedKinds))
+	for i, kind := range contextIdentityConvertedKinds {
+		placeholders[i] = "?"
+		args = append(args, kind)
+	}
+	query := fmt.Sprintf(`SELECT DISTINCT "%s" FROM "%s" WHERE "%s" IS NOT NULL AND context_kind IN (%s)`,
+		column, table, column, strings.Join(placeholders, ","))
+	rows, err := q.QueryContext(ctx, query, args...)
+	if err != nil {
+		return 0, conversionError(fmt.Sprintf("Pasture couldn't count convertible context identities in %s.%s.", table, column), "The read-only dry-run SELECT failed.", "Nothing was changed by the dry run.", "Confirm the store is readable and retry.", err)
 	}
 	defer rows.Close()
 	count := 0

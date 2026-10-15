@@ -372,19 +372,33 @@ func reopenAndVerify(ctx context.Context, dbPath string, before map[string]int64
 	return proof, nil
 }
 
+// identityCountTables is the CLOSED set of relations whose row count the reopen
+// proof compares before and after conversion. It must name every table that
+// carries a converted identity (the conversion mirrors), so a conversion that
+// silently dropped or duplicated rows in a converted relation is caught. The
+// classification gate in migrate_ids_counts_gate_test.go fails when a mirror
+// table is missing here.
+var identityCountTables = []string{
+	"agents", "agents_software", "agents_human", "agents_ml", "activities",
+	"comments", "tasks", "edges", "labels", "task_attributions",
+	"journal", "journal_operations", "governed_allocation_operations",
+	"actor_namespace_claims", "fixed_actor_manifest_entries",
+	"pasture_well_known_agents", "pasture_agent_categories",
+	"audit_events", "context_edges", "lifecycle_occurrences", "lifecycle_payload_blobs",
+	"journal_activity_creations", "journal_authority_assignment_episodes",
+	"journal_authority_assignment_transitions", "journal_decisions", "journal_evidence",
+	"journal_task_events", "journal_operation_result_slots", "journal_authorities",
+	"journal_decision_contexts", "journal_evidence_contexts", "journal_task_event_contexts",
+	"governed_allocation_genesis", "governed_composed_supplement_owners",
+	"pasture_system_identity", "pasture_session_claim", "pasture_governed_allocation_audit",
+	"session_entries", "provenance_verified_store",
+}
+
 func identityCountsQuery(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }) (map[string]int64, error) {
-	tables := []string{
-		"agents", "agents_software", "agents_human", "agents_ml", "activities",
-		"comments", "tasks", "edges", "labels", "task_attributions",
-		"journal", "journal_operations", "governed_allocation_operations",
-		"actor_namespace_claims", "fixed_actor_manifest_entries",
-		"pasture_well_known_agents", "pasture_agent_categories",
-		"audit_events", "context_edges", "lifecycle_occurrences", "lifecycle_payload_blobs",
-	}
 	counts := map[string]int64{}
-	for _, table := range tables {
+	for _, table := range identityCountTables {
 		var exists bool
 		if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)", table).Scan(&exists); err != nil {
 			return nil, err
