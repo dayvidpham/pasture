@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,8 +16,12 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
+	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
 )
@@ -270,6 +275,35 @@ func TestDecisionRecordRejectsMalformedOrUnevaluatedValues(t *testing.T) {
 	}
 }
 
+func receiptServiceForBackendTest(t *testing.T) (protocol.TaskTracker, receipt.Service) {
+	t.Helper()
+	ctx := context.Background()
+	database := filepath.Join(t.TempDir(), "pasture.db")
+	bootstrap, err := tasks.OpenTaskTracker(database)
+	if err != nil {
+		t.Fatalf("open bootstrap tracker: %v", err)
+	}
+	if _, err := bootstrap.Create("file://backend-test", "bootstrap", "initialize the persisted ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped); err != nil {
+		t.Fatalf("bootstrap identity: %v", err)
+	}
+	if err := bootstrap.Close(); err != nil {
+		t.Fatalf("close bootstrap tracker: %v", err)
+	}
+	tracker, err := tasks.OpenTaskTracker(database)
+	if err != nil {
+		t.Fatalf("open tracker: %v", err)
+	}
+	t.Cleanup(func() { _ = tracker.Close() })
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, fixedClock{now: time.Unix(10, 0)}, operationFake{}, timeouts.TestProfile())
+	if err != nil {
+		t.Fatalf("wire production receipt service: %v", err)
+	}
+	if _, err := receipt.EnsureActiveMetamodel(ctx, service); err != nil {
+		t.Fatalf("ensure active metamodel: %v", err)
+	}
+	return tracker, service
+}
+
 func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 	t.Parallel()
 	l2 := realL2(t, runtime.ClaudeEventElicitation)
@@ -280,21 +314,15 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls := []string{}
-	inputs := []provenance.OperationInput{}
-	clock := fixedClock{now: time.Unix(10, 0)}
-	service := receipt.Service{
-		Window:     time.Second,
-		Blobs:      blobFake{calls: &calls},
-		Appender:   receipt.JournalAppender{Journal: journalFake{calls: &calls, inputs: &inputs}, Clock: clock, Deadline: time.Second},
-		Identity:   identityFake{},
-		Clock:      clock,
-		Operations: operationFake{},
-	}
+	// The receipt boundary ensures definition refs through the real journal,
+	// so this production-effects pin runs on the production opener against a
+	// bootstrapped store. The delivery names the wire (registration) profile;
+	// the prepared interpretation names the runtime profile compiled for it.
+	tracker, service := receiptServiceForBackendTest(t)
 	delivery := receipt.Delivery{
-		Contract: runtime.ClaudeCode2_1_261Lifecycle().ID(),
+		Contract: registration.ClaudeCode2_1_261().Contract,
 		Event:    model.ContractEventKind(runtime.ClaudeEventElicitation),
-		Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: runtime.ClaudeCode2_1_261Lifecycle().ID()}},
+		Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: registration.ClaudeCode2_1_261().Contract}},
 		Capture:  model.CaptureValid,
 		Body:     []byte(`{"hook_event_name":"Elicitation"}`),
 	}
@@ -309,14 +337,30 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 	if _, err := service.Receive(context.Background(), warrant, delivery, interpreted.Effect(), consultation.Effect()); err != nil {
 		t.Fatalf("Receive() rejected production effects: %v", err)
 	}
-	if len(calls) != 2 || calls[0] != "blob" || calls[1] != "append" {
-		t.Fatalf("calls = %v, want [blob append]", calls)
+	// The prepared pair finalizes on commit: the occurrence carries the
+	// complete envelope as occurrence.v2, the interpretation as
+	// interpreted.v3, and the consultation re-emitted against the final v3
+	// bytes, all in canonical interpreted-then-consultation order.
+	page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
+		Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
+		Kinds: []provenance.EvidenceKind{
+			"pasture.lifecycle.occurrence.v2",
+			"pasture.lifecycle.interpreted.v3",
+			"pasture.lifecycle.consultation.v2",
+		},
+		Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
+	})
+	if err != nil {
+		t.Fatalf("query committed effects: %v", err)
 	}
-	if len(inputs) != 1 || len(inputs[0].Effects) != 3 {
-		t.Fatalf("operation inputs = %#v, want occurrence + interpreted + consultation", inputs)
+	if len(page.Rows) != 3 {
+		t.Fatalf("committed rows = %d, want occurrence.v2 + interpreted.v3 + consultation", len(page.Rows))
 	}
-	if inputs[0].Effects[1].ResultSlot != interpreted.Effect().ResultSlot || inputs[0].Effects[2].ResultSlot != consultation.Effect().ResultSlot {
-		t.Fatalf("effect order = %#v", inputs[0].Effects)
+	operation := page.Rows[0].ProducingOperationID
+	for _, row := range page.Rows[1:] {
+		if row.ProducingOperationID != operation {
+			t.Fatal("the finalized pair did not commit in one delivery operation")
+		}
 	}
 }
 

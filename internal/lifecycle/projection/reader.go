@@ -22,19 +22,27 @@ import (
 
 const interpretedKind = provenance.EvidenceKind("pasture.lifecycle.interpreted.v1")
 const interpretedKindV2 = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
+const interpretedKindV3 = provenance.EvidenceKind("pasture.lifecycle.interpreted.v3")
 
 // interpretedKinds is the closed set of interpreted evidence kinds the reader
-// admits. BOTH kinds MUST be queried at BOTH read sites (the operation
+// admits. ALL kinds MUST be queried at BOTH read sites (the operation
 // association query and the global snapshot watermark query): a store that
-// holds only interpreted.v2 records would otherwise receive a v1-filtered
+// holds only interpreted.v3 records would otherwise receive a v1-filtered
 // watermark and read back no interpretations. The exactly-one-interpretation
 // invariant is enforced ACROSS kinds — an occurrence may carry at most one
-// interpretation whether it is v1 or v2.
-var interpretedKinds = []provenance.EvidenceKind{interpretedKind, interpretedKindV2}
+// interpretation whether it is v1, v2 or v3. A v3 record proves its complete
+// five-reference semantic envelope through the definition owners before it is
+// exposed; legacy records expose absence, never an inferred envelope.
+var interpretedKinds = []provenance.EvidenceKind{interpretedKind, interpretedKindV2, interpretedKindV3}
 
 type Reader struct {
 	DB    *sql.DB
 	Facts provenance.FactQueryAPI
+	// Defs is the owner read capability v3 envelope validation needs:
+	// evidence queries plus the committed-result lookup on one snapshot. It
+	// is wired by tasks.NewLifecycleReader. A v3 record read with nil Defs
+	// fails closed rather than returning an unvalidated envelope.
+	Defs receipt.DefinitionReader
 }
 
 func (r Reader) Records(ctx context.Context, query model.OccurrenceQuery) (model.LifecyclePage, error) {
@@ -57,6 +65,14 @@ func (r Reader) Records(ctx context.Context, query model.OccurrenceQuery) (model
 	return model.LifecyclePage{Items: items, State: page.State}, nil
 }
 
+func occurrenceByJournalID(occurrences []model.OccurrenceRecord) map[provenance.JournalID]model.OccurrenceRecord {
+	byID := make(map[provenance.JournalID]model.OccurrenceRecord, len(occurrences))
+	for _, occurrence := range occurrences {
+		byID[occurrence.JournalID()] = occurrence
+	}
+	return byID
+}
+
 func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot provenance.JournalID) (map[provenance.JournalID][]model.InterpretedRecord, error) {
 	result := make(map[provenance.JournalID][]model.InterpretedRecord, len(occurrences))
 	if len(occurrences) == 0 {
@@ -67,7 +83,7 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 		wanted[o.JournalID()] = struct{}{}
 	}
 	operationOccurrence := map[provenance.OperationID]model.OccurrenceID{}
-	q := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: []provenance.EvidenceKind{occurrenceEvidenceKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize, SnapshotMaxJournalID: snapshot}}
+	q := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: occurrenceEvidenceKinds, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize, SnapshotMaxJournalID: snapshot}}
 	for {
 		page, err := r.Facts.QueryEvidence(q)
 		if err != nil {
@@ -114,7 +130,7 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 					return nil, readerError("Interpreted evidence crossed operation boundaries.", "The producing operation is not associated with a selected occurrence.", "No partial page is returned.", "Repair the corrupt journal association.", nil)
 				}
 				// Exactly-one-interpretation holds ACROSS kinds: a duplicate is
-				// rejected whether the prior interpretation was v1 or v2.
+				// rejected whether the prior interpretation was v1, v2 or v3.
 				if len(result[occurrence.JournalID()]) != 0 {
 					return nil, readerError("A lifecycle occurrence has duplicate interpretations.", "Its operation produced more than one interpreted fact.", "No partial page is returned.", "Repair the corrupt operation.", nil)
 				}
@@ -125,6 +141,11 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 				decoded, err := decodeInterpretedByKind(row.EvidenceKind, model.InterpretationID(row.JournalID), occurrence, row.Payload)
 				if err != nil {
 					return nil, readerError("Interpreted lifecycle evidence is malformed or noncanonical.", err.Error(), "No partial page is returned.", "Repair the evidence producer and row.", err)
+				}
+				if row.EvidenceKind == interpretedKindV3 {
+					if err := r.validateSemanticEnvelope(decoded, occurrences, snapshot); err != nil {
+						return nil, err
+					}
 				}
 				result[occurrence.JournalID()] = []model.InterpretedRecord{decoded}
 			}
@@ -137,9 +158,29 @@ func (r Reader) interpretations(occurrences []model.OccurrenceRecord, snapshot p
 	return result, nil
 }
 
+// validateSemanticEnvelope proves one decoded v3 record owner-valid on the
+// same snapshot its occurrence was read under: all five refs resolve and the
+// three shared refs are exactly equal to the associated occurrence envelope.
+// A nil definition reader fails closed: an unvalidated envelope is never
+// exposed.
+func (r Reader) validateSemanticEnvelope(decoded model.InterpretedRecord, occurrences []model.OccurrenceRecord, snapshot provenance.JournalID) error {
+	if r.Defs == nil {
+		return readerError("A semantic envelope cannot be validated.", "The reader has no definition owner capability, so a v3 envelope cannot be resolved.", "No partial page is returned.", "Construct the reader through tasks.NewLifecycleReader.", nil)
+	}
+	occurrence, ok := occurrenceByJournalID(occurrences)[decoded.OccurrenceID.JournalID()]
+	if !ok {
+		return readerError("Interpreted evidence crossed operation boundaries.", "The v3 record names an occurrence outside the selected page.", "No partial page is returned.", "Repair the corrupt journal association.", nil)
+	}
+	if err := receipt.ResolveSemanticEnvelope(r.Defs, occurrence, decoded, snapshot); err != nil {
+		return readerError("A semantic envelope failed owner validation.", err.Error(), "No partial page is returned.", "Restore the damaged envelope from a verified backup.", err)
+	}
+	return nil
+}
+
 // decodeInterpretedByKind strictly decodes an interpreted evidence row using the
 // decoder for its exact kind: interpreted.v1 records (committed pre-M5) decode
-// without a metamodel coordinate, interpreted.v2 records decode with one. A row
+// without a metamodel coordinate, interpreted.v2 records decode with one, and
+// interpreted.v3 records decode with the complete semantic envelope. A row
 // whose kind is outside the admitted set is a corrupt query result.
 func decodeInterpretedByKind(kind provenance.EvidenceKind, id model.InterpretationID, occurrence model.OccurrenceID, payload []byte) (model.InterpretedRecord, error) {
 	switch kind {
@@ -147,6 +188,8 @@ func decodeInterpretedByKind(kind provenance.EvidenceKind, id model.Interpretati
 		return receipt.DecodeInterpreted(id, occurrence, payload)
 	case interpretedKindV2:
 		return receipt.DecodeInterpretedV2(id, occurrence, payload)
+	case interpretedKindV3:
+		return receipt.DecodeInterpretedV3(id, occurrence, payload)
 	default:
 		return model.InterpretedRecord{}, fmt.Errorf("interpreted evidence kind %q is not an admitted interpreted kind", kind)
 	}
@@ -195,8 +238,8 @@ func (r Reader) occurrences(ctx context.Context, query model.OccurrenceQuery) (m
 			return model.OccurrencePage{}, 0, readerError("The lifecycle cursor bounds are invalid.", "Journal positions must be positive and ordered.", "No records were read.", "Use a cursor emitted by this command.", nil)
 		}
 	} else {
-		// BOTH interpreted kinds are queried so a store holding only
-		// interpreted.v2 records still establishes a correct global snapshot
+		// ALL interpreted kinds are queried so a store holding only
+		// interpreted.v3 records still establishes a correct global snapshot
 		// watermark rather than a v1-filtered one.
 		watermark, err := r.Facts.QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: interpretedKinds, Page: provenance.FactPageRequest{Limit: 1}})
 		if err != nil {

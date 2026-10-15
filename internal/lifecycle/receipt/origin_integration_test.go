@@ -26,9 +26,9 @@ import (
 // and reader (the gate_integration_test.go real-store pattern applied to the
 // origin carrier).
 //
-// The committed occurrence.v1 payload must carry origin "raw" in BOTH the
+// The committed occurrence.v2 payload must carry origin "raw" in BOTH the
 // receipt payload member and the envelope member (ratified UAT-Q4), the
-// evidence kind must stay occurrence.v1 (no new raw kind), and the read-back
+// evidence kind must be the complete occurrence.v2, and the read-back
 // must survive the tolerant projection decode.
 func TestRawOriginOccurrenceReadsBackThroughProductionStore(t *testing.T) {
 	t.Parallel()
@@ -68,7 +68,7 @@ func TestRawOriginOccurrenceReadsBackThroughProductionStore(t *testing.T) {
 
 	page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
 		Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-		Kinds:  []provenance.EvidenceKind{provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")},
+		Kinds:  []provenance.EvidenceKind{provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")},
 		Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
 	})
 	if err != nil {

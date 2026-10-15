@@ -208,8 +208,8 @@ func gateService(t *testing.T, dbPath string) (receipt.Service, func()) {
 // kind a subject happened to remember to read.
 func gateEvidenceKinds() []provenance.EvidenceKind {
 	return []provenance.EvidenceKind{
-		"pasture.lifecycle.occurrence.v1",
-		"pasture.lifecycle.interpreted.v2",
+		"pasture.lifecycle.occurrence.v2",
+		"pasture.lifecycle.interpreted.v3",
 		receipt.CurrentConsultationEvidenceKind(),
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/definitions"
 	"github.com/dayvidpham/pasture/internal/lifecycle/legalize"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
@@ -15,9 +16,18 @@ import (
 )
 
 // Derivation is the constructor-owned result of deriving a verified event.
+// Its effects are PREPARED, non-durable evidence: one interpreted.v2-shaped
+// prepared effect and its optional consultation, carrying verified L2
+// semantic arms, the producer contract and manifest, but no journal refs. The
+// common receipt boundary finalizes them to occurrence.v2, interpreted.v3
+// and a rebound consultation. The prepared interpreter coordinate pins the
+// compiled interpretation entry that executed this derivation; the finalizer
+// ensures the same compiled artifact (never a store-latest substitute), and
+// production tests prove the committed ref resolves to that exact body.
 type Derivation struct {
 	effects     []provenance.Effect
 	response    backend.HostResponse
+	interpreter definitions.Document
 	constructed bool
 }
 
@@ -34,8 +44,13 @@ func Derive(event waist.L2, manifest model.LifecycleMetamodelManifest) (Derivati
 	if err != nil {
 		return Derivation{}, err
 	}
+	interpreter, err := definitions.NewInterpreter()
+	if err != nil {
+		return Derivation{}, err
+	}
 	derivation := Derivation{
 		effects:     []provenance.Effect{interpreted.Effect()},
+		interpreter: interpreter,
 		constructed: true,
 	}
 	switch result.Semantic() {
@@ -84,6 +99,18 @@ func (d Derivation) Response() backend.HostResponse {
 		return backend.HostResponse{}
 	}
 	return d.response
+}
+
+// PreparedInterpreter returns the compiled interpreter document coordinate
+// pinned at derivation time: the artifact entry that executed NewEvent,
+// Derive and NewInterpreted for this value. Production tests prove the
+// finalized envelope resolves to this exact body, so the committed semantic
+// envelope identifies the implementation that actually ran.
+func (d Derivation) PreparedInterpreter() definitions.Document {
+	if !d.IsValid() {
+		return definitions.Document{}
+	}
+	return d.interpreter
 }
 
 // IsValid reports whether this value was constructed by Derive.

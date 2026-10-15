@@ -38,11 +38,12 @@ type schemaDocument struct {
 // this is not a host JSON schema and not the interpretation vocabulary.
 type SchemaSpecification struct {
 	// OccurrenceKinds are the durable occurrence evidence kinds the receipt
-	// writer emits. Only v1 exists; a v2 writer belongs to a later change and
-	// must extend this set with its own review.
+	// writer emits. v1 is read-only legacy without refs; v2 carries the
+	// complete four-reference envelope and is the only kind new writes emit.
 	OccurrenceKinds []string `json:"occurrence_kinds"`
 	// InterpretedKinds are the durable interpreted evidence kinds. v1 is
-	// read-only legacy without a metamodel coordinate; v2 carries one.
+	// read-only legacy without a metamodel coordinate; v2 carries one; v3
+	// carries the complete five-reference semantic envelope.
 	InterpretedKinds []string `json:"interpreted_kinds"`
 	// DefinitionKinds are the durable definition snapshot evidence kinds for
 	// the legacy metamodel writer (v1) and the five-kind writer (v2).
@@ -107,8 +108,8 @@ type ByteBounds struct {
 // rotting.
 func SchemaSpecificationForBinary() (SchemaSpecification, error) {
 	return SchemaSpecification{
-		OccurrenceKinds:      []string{"pasture.lifecycle.occurrence.v1"},
-		InterpretedKinds:     []string{"pasture.lifecycle.interpreted.v1", "pasture.lifecycle.interpreted.v2"},
+		OccurrenceKinds:      []string{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.occurrence.v2"},
+		InterpretedKinds:     []string{"pasture.lifecycle.interpreted.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.interpreted.v3"},
 		DefinitionKinds:      []string{"pasture.lifecycle.definition.v1", "pasture.lifecycle.definition.v2"},
 		DefinitionStateKinds: []string{"pasture.lifecycle.definition-state.v1", "pasture.lifecycle.definition-state.v2"},
 		DefinitionSlots:      []string{"definition", "definition-state"},

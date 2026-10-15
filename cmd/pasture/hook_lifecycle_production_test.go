@@ -749,8 +749,8 @@ var (
 )
 
 const (
-	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
-	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
+	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")
+	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v3")
 	expectedSessionIdentity       = "c02859c0-10ab-49c3-9b93-29280bd45fbb"
 	expectedInterpretedIdentities = `[{"kind":1,"value":"c02859c0-10ab-49c3-9b93-29280bd45fbb"}]`
 )
@@ -1638,6 +1638,21 @@ type interpretedEvidencePayload struct {
 	UnresolvedFacts []interpretedUnresolvedPayload `json:"unresolved_facts"`
 	Contract        string                         `json:"contract"`
 	Metamodel       interpretedMetamodelPayload    `json:"manifest"`
+	Envelope        interpretedEnvelopePayload     `json:"envelope"`
+}
+
+type interpretedEnvelopePayload struct {
+	Runtime        definitionRefPayload `json:"runtime"`
+	Schema         definitionRefPayload `json:"schema"`
+	Metamodel      definitionRefPayload `json:"metamodel"`
+	Interpreter    definitionRefPayload `json:"interpreter"`
+	Implementation definitionRefPayload `json:"implementation"`
+}
+
+type definitionRefPayload struct {
+	Definition int64  `json:"definition"`
+	Kind       uint8  `json:"kind"`
+	Content    string `json:"content"`
 }
 
 type interpretedMetamodelPayload struct {
@@ -1846,7 +1861,7 @@ func decodeOccurrencePayload(t *testing.T, raw []byte) lifecycleOccurrencePayloa
 func decodeInterpretedPayload(t *testing.T, raw []byte) interpretedEvidencePayload {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
-	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "manifest"}, mapKeys(members))
+	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "manifest", "envelope"}, mapKeys(members))
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var payload interpretedEvidencePayload
@@ -1944,22 +1959,44 @@ func assertOccurrenceEnvelope(t *testing.T, raw json.RawMessage) {
 	runtime := decodeJSONObject(t, members["Runtime"])
 	require.ElementsMatch(t, []string{"Definition", "Contract"}, mapKeys(runtime))
 	require.JSONEq(t, strconv.Quote(occurrenceLifecycleContract), string(runtime["Contract"]))
-	assertZeroDefinitionRef(t, runtime["Definition"])
+	assertCompleteDefinitionRef(t, runtime["Definition"], model.DefinitionRuntimeContract)
 
-	for _, wrapper := range []string{"Schema", "Implementation", "Retention"} {
-		definition := decodeJSONObject(t, members[wrapper])
+	for _, wrapper := range []struct {
+		name string
+		kind model.DefinitionKind
+	}{
+		{"Schema", model.DefinitionLifecycleSchema},
+		{"Implementation", model.DefinitionEpochImplementation},
+		{"Retention", model.DefinitionRetentionPolicy},
+	} {
+		definition := decodeJSONObject(t, members[wrapper.name])
 		require.ElementsMatch(t, []string{"Definition"}, mapKeys(definition))
-		assertZeroDefinitionRef(t, definition["Definition"])
+		assertCompleteDefinitionRef(t, definition["Definition"], wrapper.kind)
 	}
 }
 
-func assertZeroDefinitionRef(t *testing.T, raw json.RawMessage) {
+// assertCompleteDefinitionRef pins the complete-envelope side of the occurrence
+// contract: every ref carries a positive journal coordinate, its exact owner
+// kind, and a nonzero 32-byte content identity. Zero refs never appear on the
+// new writer; legacy zero rows stay readable but are never emitted.
+func assertCompleteDefinitionRef(t *testing.T, raw json.RawMessage, wantKind model.DefinitionKind) {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
 	require.ElementsMatch(t, []string{"Definition", "Kind", "Content"}, mapKeys(members))
-	require.JSONEq(t, `0`, string(members["Definition"]))
-	require.JSONEq(t, `0`, string(members["Kind"]))
-	require.JSONEq(t, `[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]`, string(members["Content"]))
+	var ref struct {
+		Definition int64   `json:"Definition"`
+		Kind       uint8   `json:"Kind"`
+		Content    []uint8 `json:"Content"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &ref))
+	require.Positive(t, ref.Definition, "envelope ref must name a positive journal coordinate")
+	require.Equal(t, uint8(wantKind), ref.Kind, "envelope ref kind must be its owner kind")
+	require.Len(t, ref.Content, 32, "envelope ref content must be a sha256 identity")
+	zero := true
+	for _, b := range ref.Content {
+		zero = zero && b == 0
+	}
+	require.False(t, zero, "envelope ref content must be nonzero")
 }
 
 func assertInterpretedEvidence(t *testing.T, raw []byte) {
@@ -1969,7 +2006,7 @@ func assertInterpretedEvidence(t *testing.T, raw []byte) {
 	require.NoError(t, decoder.Decode(&members))
 	var trailing any
 	require.ErrorIs(t, decoder.Decode(&trailing), io.EOF)
-	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "manifest"}, mapKeys(members))
+	require.ElementsMatch(t, []string{"semantic", "identities", "unresolved_facts", "contract", "manifest", "envelope"}, mapKeys(members))
 	require.Equal(t, json.RawMessage(`1`), members["semantic"])
 	require.Equal(t, json.RawMessage(expectedInterpretedIdentities), members["identities"])
 	require.Equal(t, json.RawMessage(strconv.Quote(interpretedLifecycleContract)), members["contract"])
@@ -1985,11 +2022,28 @@ func assertInterpretedEvidence(t *testing.T, raw []byte) {
 	require.Equal(t, expectedSessionIdentity, payload.Identities[0].Value)
 	require.Empty(t, payload.UnresolvedFacts)
 	require.Equal(t, interpretedLifecycleContract, payload.Contract)
-	// interpreted.v2 carries the metamodel coordinate it was interpreted against.
+	// interpreted.v3 carries the metamodel coordinate it was interpreted against.
 	active := metamodel.Active()
 	require.Equal(t, string(active.ID), payload.Metamodel.ID)
 	require.Equal(t, active.Version, payload.Metamodel.Version)
 	require.Equal(t, hex.EncodeToString(active.Content[:]), payload.Metamodel.Content)
+	// The complete five-reference semantic envelope rides the same record:
+	// every slot carries its owner kind, a positive coordinate and a nonzero
+	// content identity.
+	require.Equal(t, uint8(model.DefinitionRuntimeContract), payload.Envelope.Runtime.Kind)
+	require.Equal(t, uint8(model.DefinitionLifecycleSchema), payload.Envelope.Schema.Kind)
+	require.Equal(t, uint8(model.DefinitionMetamodel), payload.Envelope.Metamodel.Kind)
+	require.Equal(t, uint8(model.DefinitionInterpreter), payload.Envelope.Interpreter.Kind)
+	require.Equal(t, uint8(model.DefinitionEpochImplementation), payload.Envelope.Implementation.Kind)
+	for name, ref := range map[string]definitionRefPayload{
+		"runtime": payload.Envelope.Runtime, "schema": payload.Envelope.Schema,
+		"metamodel": payload.Envelope.Metamodel, "interpreter": payload.Envelope.Interpreter,
+		"implementation": payload.Envelope.Implementation,
+	} {
+		require.Positive(t, ref.Definition, "semantic envelope slot %s must name a positive coordinate", name)
+		require.Len(t, ref.Content, 64, "semantic envelope slot %s content must be a hex sha256", name)
+		require.NotEqual(t, strings.Repeat("0", 64), ref.Content, "semantic envelope slot %s content must be nonzero", name)
+	}
 }
 
 func mapKeys(values map[string]json.RawMessage) []string {
@@ -2007,6 +2061,59 @@ func assertSharedOperation(t *testing.T, occurrence, interpreted provenance.Evid
 	require.Equal(t, occurrence.ProducingOperationID, interpreted.ProducingOperationID)
 	require.NotZero(t, occurrence.ProducingOperationJournalID)
 	require.Equal(t, occurrence.ProducingOperationJournalID, interpreted.ProducingOperationJournalID)
+	// The pair commits atomically AND paired: the three refs shared by the
+	// occurrence and semantic envelopes must be exactly equal, not merely
+	// nonzero or coincidentally same-kind.
+	occurrencePayload := decodeOccurrenceEnvelopeRefs(t, occurrence.Payload)
+	interpretedPayload := decodeInterpretedPayload(t, interpreted.Payload)
+	shared := []struct {
+		name       string
+		occurrence definitionRefJSON
+		semantic   definitionRefPayload
+	}{
+		{"runtime", occurrencePayload.Runtime, interpretedPayload.Envelope.Runtime},
+		{"schema", occurrencePayload.Schema, interpretedPayload.Envelope.Schema},
+		{"implementation", occurrencePayload.Implementation, interpretedPayload.Envelope.Implementation},
+	}
+	for _, slot := range shared {
+		require.Equal(t, slot.occurrence.Definition, slot.semantic.Definition, "shared %s coordinate must be exactly equal across the pair", slot.name)
+		require.Equal(t, slot.occurrence.Kind, slot.semantic.Kind, "shared %s kind must be exactly equal across the pair", slot.name)
+		require.Equal(t, hex.EncodeToString(slot.occurrence.Content), slot.semantic.Content, "shared %s content must be exactly equal across the pair", slot.name)
+	}
+}
+
+type definitionRefJSON struct {
+	Definition int64   `json:"Definition"`
+	Kind       uint8   `json:"Kind"`
+	Content    []uint8 `json:"Content"`
+}
+
+type occurrenceEnvelopeRefs struct {
+	Runtime        definitionRefJSON `json:"Runtime"`
+	Schema         definitionRefJSON `json:"Schema"`
+	Implementation definitionRefJSON `json:"Implementation"`
+}
+
+func decodeOccurrenceEnvelopeRefs(t *testing.T, raw []byte) occurrenceEnvelopeRefs {
+	t.Helper()
+	members := decodeJSONObject(t, raw)
+	var envelope struct {
+		Runtime struct {
+			Definition definitionRefJSON `json:"Definition"`
+		} `json:"Runtime"`
+		Schema struct {
+			Definition definitionRefJSON `json:"Definition"`
+		} `json:"Schema"`
+		Implementation struct {
+			Definition definitionRefJSON `json:"Definition"`
+		} `json:"Implementation"`
+	}
+	require.NoError(t, json.Unmarshal(members["envelope"], &envelope))
+	return occurrenceEnvelopeRefs{
+		Runtime:        envelope.Runtime.Definition,
+		Schema:         envelope.Schema.Definition,
+		Implementation: envelope.Implementation.Definition,
+	}
 }
 
 // --- activation-last integrated Codex production proof --------------------

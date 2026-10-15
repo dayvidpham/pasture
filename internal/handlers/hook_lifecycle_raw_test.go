@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -150,28 +149,6 @@ func TestRawHostVersionSourcePreviewCommitAndLegacy(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile("../lifecycle/ingress/claude/testdata/fixtures/session_start_2_1_261.json")
 	require.NoError(t, err)
-	dispatch, err := dispatchLifecycle(ir.HarnessClaudeCode)
-	require.NoError(t, err)
-	event := dispatch.manifest.Events[0]
-	require.Equal(t, "SessionStart", event.NativeName)
-	legacy := dispatch.rawParse(raw, event, "2.1.299")
-	legacyEnvelope, err := json.Marshal(legacy.delivery.Envelope)
-	require.NoError(t, err)
-	// The journal stores canonical object ordering, not Go struct-field order.
-	// Use its public encoding contract and still compare exact retained bytes.
-	legacyDigest := sha256.Sum256(legacyEnvelope)
-	canonical, err := provenance.Canonicalize(provenance.OperationInput{
-		Effects: []provenance.Effect{{
-			Sort:          provenance.EffectEvidence,
-			ResultSlot:    "legacy-envelope",
-			EvidenceKind:  "pasture.test.raw-envelope",
-			ContentDigest: legacyDigest[:],
-			Payload:       legacyEnvelope,
-		}},
-	})
-	require.NoError(t, err)
-	require.Len(t, canonical.NormalizedEffects(), 1)
-	legacyEnvelope = canonical.NormalizedEffects()[0].Payload
 	for _, source := range []model.HostVersionSource{"", model.HostVersionCallerSupplied} {
 		name := string(source)
 		if name == "" {
@@ -232,7 +209,7 @@ func TestRawHostVersionSourcePreviewCommitAndLegacy(t *testing.T) {
 			defer tracker.Close()
 			page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
 				Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-				Kinds:  []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1"},
+				Kinds:  []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"},
 				Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
 			})
 			require.NoError(t, err)
@@ -245,7 +222,13 @@ func TestRawHostVersionSourcePreviewCommitAndLegacy(t *testing.T) {
 			require.Equal(t, source, envelope.HostVersionSource)
 			require.Equal(t, "raw", string(envelope.Origin))
 			if source == "" {
-				require.Equal(t, legacyEnvelope, []byte(fields["envelope"]), "zero-source raw envelope bytes must remain identical to the unstamped parser envelope")
+				// The unstamped parser envelope carries zero refs; the commit
+				// populates the complete four-ref envelope through the owners
+				// while leaving the source member absent, never defaulted.
+				require.NoError(t, model.ValidateOccurrenceEnvelope(envelope), "committed raw envelope must carry the complete occurrence refs")
+				var envelopeMembers map[string]json.RawMessage
+				require.NoError(t, json.Unmarshal(fields["envelope"], &envelopeMembers))
+				require.NotContains(t, envelopeMembers, "hostVersionSource", "zero-source raw envelope must omit the source member, not default it")
 			}
 		})
 	}

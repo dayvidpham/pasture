@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sync"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/definitions"
@@ -31,7 +32,7 @@ func BridgeActiveMetamodel(ctx context.Context, reader DefinitionReader) (model.
 	if err := ctx.Err(); err != nil {
 		return model.LifecycleMetamodelRef{}, model.DefinitionSnapshot{}, model.DefinitionStateRecord{}, bridgeError("BridgeActiveMetamodel", "Metamodel bridging was canceled before resolution.", err)
 	}
-	return BridgeMetamodelProducer(reader, metamodel.Active())
+	return bridgeMetamodelProducerAt(reader, metamodel.Active(), 0)
 }
 
 // BridgeMetamodelProducer resolves one legacy metamodel activation — addressed
@@ -55,6 +56,14 @@ func BridgeActiveMetamodel(ctx context.Context, reader DefinitionReader) (model.
 // bytes, so they resolve through the persisted normalized evidence, the
 // manifest-bound state payload, and the operation recipe alone.
 func BridgeMetamodelProducer(reader DefinitionReader, manifest model.LifecycleMetamodelManifest) (model.LifecycleMetamodelRef, model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
+	return bridgeMetamodelProducerAt(reader, manifest, 0)
+}
+
+// bridgeMetamodelProducerAt shares the batch watermark across the bridge and
+// the definition resolutions: one enclosing snapshot for the whole envelope.
+// A zero watermark captures a fresh one; a positive watermark is never
+// widened.
+func bridgeMetamodelProducerAt(reader DefinitionReader, manifest model.LifecycleMetamodelManifest, watermark provenance.JournalID) (model.LifecycleMetamodelRef, model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
 	var empty model.DefinitionSnapshot
 	var noState model.DefinitionStateRecord
 	if reader == nil || !manifest.IsValid() {
@@ -72,15 +81,16 @@ func BridgeMetamodelProducer(reader DefinitionReader, manifest model.LifecycleMe
 	if err != nil {
 		return model.LifecycleMetamodelRef{}, empty, noState, err
 	}
-	// Capture the enclosing evidence watermark over the legacy definition
-	// evidence. Exact-ID bounds locate the snapshot row, but the activation
-	// state row is read under this enclosing watermark, never under the
-	// snapshot row alone.
-	watermarkPage, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitionKind, definitionStateKind}, Page: provenance.FactPageRequest{Limit: 1}})
-	if err != nil {
-		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Enclosing evidence snapshot could not be captured.", err)
+	// The enclosing evidence watermark pins one snapshot for the snapshot and
+	// state reads below. A batch shares its already captured watermark; a
+	// zero watermark captures a fresh one over the legacy definition kinds.
+	if watermark == 0 {
+		watermarkPage, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitionKind, definitionStateKind}, Page: provenance.FactPageRequest{Limit: 1}})
+		if err != nil {
+			return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("bridgeMetamodelProducerAt", "Enclosing evidence snapshot could not be captured.", err)
+		}
+		watermark = watermarkPage.SnapshotMaxJournalID
 	}
-	watermark := watermarkPage.SnapshotMaxJournalID
 	id := provenance.JournalID(snapshotID)
 	if watermark < provenance.JournalID(stateID) {
 		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Activation lies beyond the enclosing snapshot watermark.", nil)
@@ -155,16 +165,30 @@ func BridgeMetamodelProducer(reader DefinitionReader, manifest model.LifecycleMe
 // yields the referenced snapshot bytes, and the coordinate content is the raw
 // body digest. Historical producers skip this step; their raw bytes are not
 // reconstructible.
-func producerAgreement(snapshot []byte) error {
+//
+// The normalization is memoized: the producer body and coordinate are
+// compiled into the binary, so the normalized bytes are a pure function of
+// the binary, not of the store. Journal truth (the snapshot row the result is
+// compared against) is never cached — every call still reads and verifies
+// the persisted row, digest, state and linkage.
+var producerAgreementMemo = sync.OnceValues(func() ([]byte, error) {
 	body := metamodel.Body()
 	manifest := metamodel.Active()
 	rawDigest := sha256.Sum256(body)
 	if model.ContentIdentity(rawDigest) != manifest.Content {
-		return bridgeError("producerAgreement", "Active producer coordinate does not identify the active body.", nil)
+		return nil, bridgeError("producerAgreement", "Active producer coordinate does not identify the active body.", nil)
 	}
 	normalized, err := definitions.NormalizePayload(definitionKind, body)
 	if err != nil {
-		return bridgeError("producerAgreement", "Active producer body is malformed.", err)
+		return nil, bridgeError("producerAgreement", "Active producer body is malformed.", err)
+	}
+	return normalized, nil
+})
+
+func producerAgreement(snapshot []byte) error {
+	normalized, err := producerAgreementMemo()
+	if err != nil {
+		return err
 	}
 	if !bytes.Equal(normalized, snapshot) {
 		return bridgeError("producerAgreement", "Owner canonicalization of the producer body does not yield the snapshot bytes.", nil)

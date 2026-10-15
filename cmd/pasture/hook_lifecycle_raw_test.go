@@ -243,7 +243,7 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 				occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
 				require.Len(t, occurrences, 1, "%s must commit exactly one occurrence", surface)
 				interpretedRows := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
-				require.Len(t, interpretedRows, 1, "%s must commit exactly one interpreted.v2 record", surface)
+				require.Len(t, interpretedRows, 1, "%s must commit exactly one interpreted.v3 record", surface)
 				consultationRows := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
 				if tc.wantReaction {
 					require.Len(t, consultationRows, 1, "%s gate must commit exactly one consultation record", surface)
@@ -294,15 +294,42 @@ func TestRawAndNativeCommitEquivalentRecordsModuloOrigin(t *testing.T) {
 			require.NotContains(t, nativeEnvelope, "origin", "native envelope must not carry an origin member")
 			assertMembersModuloOrigin(t, nativeEnvelope, rawEnvelope)
 
-			// The derived (L2) evidence must be byte-identical: no origin member
-			// exists in interpreted.v2, so equivalence is exact.
-			require.JSONEq(t, string(nativeInterpreted), string(rawInterpreted), "interpreted.v2 derivation must be byte-identical")
+			// The derived (L2) evidence finalizes identically on both surfaces: the
+			// same owner refs resolve in the same order on fresh stores, and no
+			// origin member exists in interpreted.v3, so equivalence is exact.
+			require.JSONEq(t, string(nativeInterpreted), string(rawInterpreted), "interpreted.v3 finalization must be byte-identical")
 			if tc.wantReaction {
 				require.NotEmpty(t, nativeConsultation)
 				require.JSONEq(t, string(nativeConsultation), string(rawConsultation), "current consultation derivation must be byte-identical")
 			}
 		})
 	}
+}
+
+// assertCommittedV3PairsWithOccurrence proves the committed interpreted.v3
+// shares exactly its runtime, schema and implementation refs with the
+// committed occurrence.v2 of the same operation.
+func assertCommittedV3PairsWithOccurrence(t *testing.T, occurrenceMembers map[string]json.RawMessage, interpreted []byte) {
+	t.Helper()
+	var occurrenceEnvelope struct {
+		Runtime struct {
+			Definition definitionRefJSON `json:"Definition"`
+		} `json:"Runtime"`
+		Schema struct {
+			Definition definitionRefJSON `json:"Definition"`
+		} `json:"Schema"`
+		Implementation struct {
+			Definition definitionRefJSON `json:"Definition"`
+		} `json:"Implementation"`
+	}
+	require.NoError(t, json.Unmarshal(occurrenceMembers["envelope"], &occurrenceEnvelope))
+	semantic := decodeInterpretedPayload(t, interpreted).Envelope
+	require.Equal(t, occurrenceEnvelope.Runtime.Definition.Definition, semantic.Runtime.Definition, "paired runtime coordinate must be exactly equal")
+	require.Equal(t, occurrenceEnvelope.Schema.Definition.Definition, semantic.Schema.Definition, "paired schema coordinate must be exactly equal")
+	require.Equal(t, occurrenceEnvelope.Implementation.Definition.Definition, semantic.Implementation.Definition, "paired implementation coordinate must be exactly equal")
+	require.Equal(t, hex.EncodeToString(occurrenceEnvelope.Runtime.Definition.Content), semantic.Runtime.Content, "paired runtime content must be exactly equal")
+	require.Equal(t, hex.EncodeToString(occurrenceEnvelope.Schema.Definition.Content), semantic.Schema.Content, "paired schema content must be exactly equal")
+	require.Equal(t, hex.EncodeToString(occurrenceEnvelope.Implementation.Definition.Content), semantic.Implementation.Content, "paired implementation content must be exactly equal")
 }
 
 // assertMembersModuloOrigin asserts two decoded JSON object member maps are
@@ -610,6 +637,23 @@ func TestRawDryRunPreviewMatchesCommit(t *testing.T) {
 				effect := preview.Effects[index]
 				require.Equal(t, "evidence", effect.Sort)
 				require.Equal(t, wantSlots[index], effect.ResultSlot)
+				if effect.ResultSlot == "interpreted" {
+					// THE PREVIEW AND THE COMMIT DELIBERATELY DIVERGE HERE, and
+					// only here alongside the consultation reason below. The
+					// store-free preview shows the prepared interpretation
+					// (v2-shaped, no journal refs); the real commit finalizes
+					// it to interpreted.v3 with the complete owner-resolved
+					// envelope. Asserting equality would demand the preview
+					// manufacture journal coordinates it cannot read.
+					require.Equal(t, "pasture.lifecycle.interpreted.v2", effect.EvidenceKind, "preview shows prepared material, never a durable-looking complete effect")
+					require.Equal(t, string(interpretedEvidenceKind), string(row.EvidenceKind), "the commit finalizes the prepared interpretation to v3")
+					previewMembers := decodeJSONObject(t, effect.Payload)
+					require.NotContains(t, previewMembers, "envelope", "prepared preview must carry no envelope refs")
+					committedMembers := decodeJSONObject(t, row.Payload)
+					require.Contains(t, committedMembers, "envelope", "finalized v3 must carry the complete semantic envelope")
+					assertCommittedV3PairsWithOccurrence(t, members, row.Payload)
+					continue
+				}
 				require.Equal(t, string(row.EvidenceKind), effect.EvidenceKind)
 				if effect.ResultSlot == "consultation" {
 					// THE PREVIEW AND THE COMMIT DELIBERATELY DIVERGE HERE, and

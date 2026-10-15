@@ -66,7 +66,8 @@ type InterpreterSpecification struct {
 	// evaluator, the durable consultation, and the backend.
 	DecisionKinds []string `json:"decision_kinds"`
 	// RecordKinds are the durable interpreted evidence kinds: v1 is read-only
-	// legacy without a coordinate, v2 carries the producing manifest.
+	// legacy without a coordinate, v2 carries the producing manifest, and v3
+	// carries the complete five-reference semantic envelope.
 	RecordKinds []string `json:"record_kinds"`
 	// VocabularyRule states how the interpretation vocabulary travels: every
 	// produced record stamps the manifest coordinate it was interpreted
@@ -109,7 +110,7 @@ func AssembleInterpreterSpecification(sources []SourceEntry) (InterpreterSpecifi
 		IdentityKinds:     []string{"session", "turn", "request", "tool-call", "agent", "message"},
 		IdentityBounds:    ByteBounds{Min: 1, Max: 512},
 		DecisionKinds:     []string{"proceed", "deny", "require-human"},
-		RecordKinds:       []string{"pasture.lifecycle.interpreted.v1", "pasture.lifecycle.interpreted.v2"},
+		RecordKinds:       []string{"pasture.lifecycle.interpreted.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.interpreted.v3"},
 		VocabularyRule:    "every produced record stamps its producing manifest; readers resolve to the journaled vocabulary",
 		Sources:           sources,
 	}, nil

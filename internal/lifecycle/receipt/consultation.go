@@ -163,6 +163,8 @@ func DecodeConsultation(effect, interpreted provenance.Effect) (ConsultationReco
 		interpretedRecord, err = DecodeInterpreted(1, 1, interpreted.Payload)
 	case interpretedKindV2:
 		interpretedRecord, err = DecodeInterpretedV2(1, 1, interpreted.Payload)
+	case interpretedKindV3:
+		interpretedRecord, err = DecodeInterpretedV3(1, 1, interpreted.Payload)
 	default:
 		err = fmt.Errorf("unsupported interpreted kind %q", interpreted.EvidenceKind)
 	}

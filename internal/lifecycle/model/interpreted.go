@@ -18,6 +18,8 @@ type InterpretedRecord struct {
 	contract         ir.RuntimeContractID
 	metamodel        LifecycleMetamodelManifest
 	hasMetamodel     bool
+	envelope         SemanticEnvelopeRef
+	hasEnvelope      bool
 	constructed      bool
 }
 
@@ -45,6 +47,63 @@ func NewInterpretedRecordWithMetamodel(id InterpretationID, occurrence Occurrenc
 	record.metamodel = manifest
 	record.hasMetamodel = true
 	return record, nil
+}
+
+// NewInterpretedRecordWithEnvelope constructs an interpreted.v3 record that
+// carries the complete five-reference semantic envelope it was finalized
+// against. The envelope must be structurally complete: all five refs carry a
+// positive journal coordinate, their owner kind, and a nonzero content
+// identity. Owner resolution (body, digest, slot, state) and cross-envelope
+// equality with the associated occurrence are enforced at the receipt and
+// read boundaries, not here, so this constructor stays pure.
+func NewInterpretedRecordWithEnvelope(id InterpretationID, occurrence OccurrenceID, semantic runtime.EventSemantic, identities []waist.SemanticIdentity, unresolved []waist.UnresolvedFact, contract ir.RuntimeContractID, manifest LifecycleMetamodelManifest, envelope SemanticEnvelopeRef) (InterpretedRecord, error) {
+	if !manifest.IsValid() {
+		return InterpretedRecord{}, fmt.Errorf("construct lifecycle interpreted.v3 record: invalid metamodel coordinate")
+	}
+	if err := ValidateSemanticEnvelope(envelope); err != nil {
+		return InterpretedRecord{}, err
+	}
+	record, err := NewInterpretedRecord(id, occurrence, semantic, identities, unresolved, contract)
+	if err != nil {
+		return InterpretedRecord{}, err
+	}
+	record.metamodel = manifest
+	record.hasMetamodel = true
+	record.envelope = envelope
+	record.hasEnvelope = true
+	return record, nil
+}
+
+// ValidateSemanticEnvelope proves an envelope is structurally complete: five
+// nonzero refs with the exact owner kind per slot. A resolving boundary must
+// additionally prove every ref owner-resolvable and the three shared refs
+// exactly equal to the associated occurrence envelope.
+func ValidateSemanticEnvelope(envelope SemanticEnvelopeRef) error {
+	slots := []struct {
+		name string
+		ref  DefinitionRef
+		kind DefinitionKind
+	}{
+		{"runtime", envelope.Runtime.Definition, DefinitionRuntimeContract},
+		{"schema", envelope.Schema.Definition, DefinitionLifecycleSchema},
+		{"metamodel", envelope.Metamodel.Definition, DefinitionMetamodel},
+		{"interpreter", envelope.Interpreter.Definition, DefinitionInterpreter},
+		{"implementation", envelope.Implementation.Definition, DefinitionEpochImplementation},
+	}
+	for _, slot := range slots {
+		if slot.ref.Definition <= 0 || slot.ref.Kind != slot.kind || slot.ref.Content == (ContentIdentity{}) {
+			return fmt.Errorf("construct lifecycle interpreted.v3 record: semantic envelope slot %q is not a complete nonzero owner reference", slot.name)
+		}
+	}
+	return nil
+}
+
+// SemanticEnvelope returns the complete five-reference envelope this
+// interpretation was finalized against and whether one is present. It is false
+// for decoded legacy interpreted.v1/v2 records, which predate the semantic
+// envelope: no envelope is inferred for historical reads.
+func (r InterpretedRecord) SemanticEnvelope() (SemanticEnvelopeRef, bool) {
+	return r.envelope, r.hasEnvelope
 }
 
 // Metamodel returns the metamodel coordinate this interpretation was produced

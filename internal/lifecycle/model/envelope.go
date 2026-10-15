@@ -1,6 +1,10 @@
 package model
 
-import "github.com/dayvidpham/pasture/internal/acceptance/origin"
+import (
+	"fmt"
+
+	"github.com/dayvidpham/pasture/internal/acceptance/origin"
+)
 
 type OccurrenceEnvelopeRef struct {
 	nonJournalValue
@@ -30,4 +34,35 @@ type SemanticEnvelopeRef struct {
 	Metamodel      LifecycleMetamodelRef
 	Interpreter    InterpreterDefinitionRef
 	Implementation EpochImplementationRef
+}
+
+// ValidateOccurrenceEnvelope proves an occurrence envelope is structurally
+// complete: four nonzero refs with the exact owner kind per slot. Resolution
+// (body, digest, slot, state) is enforced at the receipt and read boundaries.
+func ValidateOccurrenceEnvelope(envelope OccurrenceEnvelopeRef) error {
+	slots := []struct {
+		name string
+		ref  DefinitionRef
+		kind DefinitionKind
+	}{
+		{"runtime", envelope.Runtime.Definition, DefinitionRuntimeContract},
+		{"schema", envelope.Schema.Definition, DefinitionLifecycleSchema},
+		{"implementation", envelope.Implementation.Definition, DefinitionEpochImplementation},
+		{"retention", envelope.Retention.Definition, DefinitionRetentionPolicy},
+	}
+	for _, slot := range slots {
+		if slot.ref.Definition <= 0 || slot.ref.Kind != slot.kind || slot.ref.Content == (ContentIdentity{}) {
+			return fmt.Errorf("lifecycle occurrence envelope slot %q is not a complete nonzero owner reference", slot.name)
+		}
+	}
+	return nil
+}
+
+// SharedRefsEqual reports whether the three refs the semantic envelope shares
+// with its associated occurrence envelope are exactly equal. Individually
+// valid but different paired refs fail the pair.
+func (s SemanticEnvelopeRef) SharedRefsEqual(occurrence OccurrenceEnvelopeRef) bool {
+	return s.Runtime.Definition == occurrence.Runtime.Definition &&
+		s.Schema.Definition == occurrence.Schema.Definition &&
+		s.Implementation.Definition == occurrence.Implementation.Definition
 }
