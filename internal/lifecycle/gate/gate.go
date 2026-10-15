@@ -165,6 +165,25 @@ func NewEnvelopeDefinitionActivationIntent(kind model.DefinitionKind, content mo
 	return WriteIntent{class: WriteDefinitionActivation}, nil
 }
 
+// ParseWriteClass converts the stable lowercase spelling back to its write
+// class. It reports false for anything String never emits, so a descriptor
+// that names a non-admitted class fails against the live gate set rather than
+// against a copied literal.
+func ParseWriteClass(token string) (WriteClass, bool) {
+	switch token {
+	case "delivery-receipt":
+		return WriteDeliveryReceipt, true
+	case "definition-activation":
+		return WriteDefinitionActivation, true
+	case "lineage-links":
+		return WriteLineageLinks, true
+	case "disclosure":
+		return WriteDisclosure, true
+	default:
+		return 0, false
+	}
+}
+
 // NewLineageIntent constructs a lineage-links write intent. It validates the
 // host and the bounded edge count (1..MaxLinksPerOperation); an over-cap
 // derivation is refused so the operator narrows the scope rather than committing

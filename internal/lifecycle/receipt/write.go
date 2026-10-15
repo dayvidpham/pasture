@@ -81,7 +81,7 @@ func NewDefinitionActivation(manifest model.LifecycleMetamodelManifest, body []b
 		{Sort: provenance.EffectEvidence, ResultSlot: definitionSlot, EvidenceKind: definitionKind, ContentDigest: snapshotDigest[:], Payload: append(json.RawMessage(nil), snapshotPayload...)},
 		{Sort: provenance.EffectEvidence, ResultSlot: definitionStateSlot, EvidenceKind: definitionStateKind, ContentDigest: stateDigest[:], Payload: append(json.RawMessage(nil), statePayload...)},
 	}
-	operationID := provenance.OperationID(definitionOperationPrefix + hex.EncodeToString(manifest.Content[:16]))
+	operationID := metamodelOperationID(manifest)
 	command := sha256.Sum256(append([]byte(definitionCommand+"\x00"), manifest.Content[:]...))
 	return GatedWrite{
 		class:         gate.WriteDefinitionActivation,
