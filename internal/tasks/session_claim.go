@@ -201,8 +201,9 @@ func LifecycleSession(bindings []model.NativeBinding) (string, error) {
 
 // readLifecycleSessionClaim reads the actor claimed for one harness session.
 //
-// The whole read is one SELECT under the store's own SQLite busy tier, and the
-// pooled connection is released before this function returns. That release is
+// The whole read is one SELECT bounded by the caller's Ingress tier — a caller
+// window strictly above the DSN busy_timeout, so a lock wait fits inside it — and
+// the pooled connection is released before this function returns. That release is
 // load-bearing, and the reason is the pool, not the claim: the ownership read
 // that follows borrows the SAME *sql.DB through Provenance's borrowed open
 // (open_unified.go), and that pool's default size is one connection, so a public
