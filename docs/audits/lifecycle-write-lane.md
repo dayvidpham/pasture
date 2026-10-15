@@ -51,6 +51,15 @@ Observed (this machine, four runs on the merged tree):
 | 3 | 3.027 s | 83 | 43.9 ms | 0.000 | 0 |
 | 4 | 3.004 s | 72 | 51.7 ms | 0.000 | 0 |
 
+Re-measured after the final accounting fix (`writelane` publishes a record's
+counter before its acknowledgement), three further runs on the final tree:
+
+| run | window | probe runs | probe p95 | faults/s | appended faults |
+|---|---|---|---|---|---|
+| 5 | 3.012 s | 88 | 34.5 ms | 0.000 | 0 |
+| 6 | 3.014 s | 88 | 34.3 ms | 0.000 | 0 |
+| 7 | 3.031 s | 88 | 34.6 ms | 0.000 | 0 |
+
 The PRE-MERGE run on the same harness (branch tip `3cd7f648`, before the URI
 cutover merged) measured `probeRuns=89 probeP95=34.5 ms appendedFaults=0`. It is
 recorded here only as the pre-merge comparison; the merged numbers above are the
