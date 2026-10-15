@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -46,6 +47,31 @@ func (lifecycleCLIOperations) NewOperationID() (string, error) {
 // fault is that the database could not be opened or written, and a record that
 // needs the failing store would be lost exactly when it is needed.
 const lifecycleFaultRecordFile = "lifecycle-faults.jsonl"
+
+// lifecycleFaultRecordMaxBytes is the size at which the live record is ROTATED
+// to its single bounded backup, and lifecycleFaultRecordBackupSuffix names that
+// backup. The pair bounds the record at about twice this constant — the live
+// file and one backup, each at most this large — no matter how long a store
+// stays broken.
+//
+// THE FILE WAS UNBOUNDED AND THAT WAS THE DEFECT. It grew one line per faulting
+// invocation with nothing rotating, trimming or removing a line; measured at
+// 581 MiB and 528,562 lines on the default store, at roughly 165 MiB a day. A
+// hook runs on every wired event, so a store that stays broken accumulated the
+// whole of its own history on disk. The bound is chosen so the operator keeps a
+// usable recent window — at the observed ~1.1 KiB a line this is on the order
+// of fifty thousand faults, hours of the highest rate seen — while a runaway
+// store can no longer fill the filesystem. Raising or lowering the knob is a
+// one-line change here; it is not a policy read from the store, because the
+// record must be placeable exactly when the store could not be opened.
+const lifecycleFaultRecordMaxBytes = 32 << 20
+
+// lifecycleFaultRecordBackupSuffix is appended to the record path to name the
+// one rotated copy that sits beside it. A single, fixed name is deliberate:
+// rotation renames the live record onto it, so the pair is bounded and the
+// OLDEST history is the only thing ever dropped. A count or a timestamp here
+// would be a second unbounded surface, which is the defect this bound removes.
+const lifecycleFaultRecordBackupSuffix = ".1"
 
 // lifecycleFaultOutcomeClass is the value of the outcomeClass member of every
 // fault record line. The file records FAULTS only: an invocation that emitted
@@ -130,25 +156,44 @@ type lifecycleDeadline func(parent context.Context, tier time.Duration) (context
 // production profile, and the zero profile reads as the production one, so a
 // caller that supplies nothing still gets the tier the host budget requires.
 //
-// IT IS AN IN-PROCESS PARAMETER AND NOTHING MORE. There is NO environment
-// variable and NO flag for it, and that absence is a refusal rather than a
-// gap, because HANDING THIS DIAL TO A USER HANDS THE USER THE DEFECT BACK.
-// Both directions of change harm the person who turns it:
+// THE BUDGET IS AN IN-PROCESS PARAMETER, AND THE OPERATOR MAY ALSO TUNE THE TIER
+// FROM THE ENVIRONMENT. The two are not the same dial: the parameter is what the
+// command passes in (production passes timeouts.ProductionProfile(), a test may
+// pass a shorter profile to observe the deadline path in-process), while the
+// environment knobs the operator sets are applied ON TOP of that base through
+// Profile.WithOverride. An unset environment leaves the base untouched, so the
+// default production behaviour is exactly what it was.
 //
-//   - A user who SHORTENS the tier stops proving the budget the host actually
-//     enforces. The hook would keep satisfying its own proof while it says
-//     nothing at all about the window the host gives it.
-//   - A user who LENGTHENS the tier can FREEZE THEIR OWN SESSION. That is the
-//     exact failure this tier exists to prevent, and it is measured: with the
-//     store held under a write lock the work below took about 31 seconds,
-//     three times the 10-second budget hooks/hooks.json sets on each pasture
-//     lifecycle row for Claude Code, the smallest host budget this tree has
-//     evidence for.
+// HANDING THIS DIAL TO AN OPERATOR TRADES ONE HARM FOR ANOTHER ON PURPOSE, and
+// the operator owns the trade:
 //
-// A test may supply a shorter tier because a test is not a user: it observes
-// the deadline PATH in this process, and the value it supplies never reaches
-// a host. That distinction is what makes the seam safe, and it is pinned by
-// an assertion that the command path passes the production tier.
+//   - LOWERING the deadline makes a hook that meets a slow store fail fast: it
+//     abandons the work, reports a fault and answers the host fail-open, so the
+//     gate is left unevaluated while the host stops waiting at once instead of
+//     stalling for the whole window. The cost is that a store which was merely
+//     slow is no longer waited out.
+//   - RAISING the deadline only helps on a fast store. On a store that is slow
+//     because a peer holds the lock it changes nothing, and a hook that outruns
+//     the host's own budget FREEZES THE SESSION — the exact failure this tier
+//     exists to prevent. It is measured: with the store held under a write lock
+//     the work took about 31 seconds, three times the 10-second budget
+//     hooks/hooks.json sets on each pasture lifecycle row for Claude Code, the
+//     smallest host budget this tree has evidence for. The default 5s is sized
+//     against that budget; a raised value is the operator's risk, not the
+//     default's.
+//
+// The ordering invariant is not weakened by the dial. The hook-invocation
+// deadline must stay strictly above both caller windows and strictly below the
+// workflow-result wait, and every applied override is re-validated by
+// timeouts.New through Profile.WithOverride, so an inverted combination is
+// refused with the existing invariant error instead of being clamped. The
+// knobs and their names are read in cmd/pasture/hook_environment.go and
+// documented beside the tiers in internal/timeouts and AGENTS.md.
+//
+// A test may supply a shorter tier because a test is not an operator: it
+// observes the deadline PATH in this process, and the value it supplies never
+// reaches a host. That distinction is what makes the parameter seam safe, and
+// it is pinned by an assertion that the command path passes the production tier.
 //
 // The deadline derives the work's context from the tier. Production passes
 // context.WithTimeout, which is what the type is the signature of; a proof of
@@ -161,7 +206,8 @@ type lifecycleDeadline func(parent context.Context, tier time.Duration) (context
 // timeouts.New is the only constructor, its fields are unexported, and it
 // refuses an out-of-order hook-invocation tier. So the only profile a caller
 // can build without New is the zero one, which is normalized to production
-// below. There is no third state to check for.
+// below, and any environment override is re-validated by New as it is applied.
+// There is no third state to check for.
 //
 // The internal/errors category table is deliberately NOT consulted. That table
 // maps a pasture error class to an operator exit code for a person at a
@@ -309,9 +355,7 @@ func lifecycleOutcomeWithCompletion(
 	// The tier and the deadline both arrive as parameters: the tier so an
 	// in-process proof can observe this PATH under a value it chooses, and the
 	// deadline so a proof can trip the signal at a chosen point instead of
-	// racing a clock against the work. The reason there is no environment
-	// variable and no flag for either is recorded where the parameters are
-	// declared, above; it is a refusal, not a gap.
+	// racing a clock against the work.
 	//
 	// The zero profile reads as the production one, so a caller that supplies
 	// nothing still runs under the tier the host budget requires. It is
@@ -320,7 +364,36 @@ func lifecycleOutcomeWithCompletion(
 	if budget.IsZero() {
 		budget = timeouts.ProductionProfile()
 	}
+	// The operator's time-budget knobs are applied AFTER the base profile is
+	// known and BEFORE the tier is read. The parser (hookEnvironment, above)
+	// refuses a malformed value; applying the override re-runs timeouts.New, so
+	// an inverted combination is refused with the invariant error and is never
+	// clamped. A refusal is a fault: the host is answered fail-open (unless it
+	// opted into fail-closed) and the reason reaches the diagnostic and the
+	// fault record, exactly as a malformed environment does.
+	if !env.BudgetOverride.IsZero() {
+		adjusted, overrideErr := budget.WithOverride(env.BudgetOverride)
+		if overrideErr != nil {
+			return lifecycleFault(cmd, coords, failure, policy, continuation,
+				hostexit.FaultStageNotRecorded, fmt.Errorf(
+					"the hook could not use the operator's timeout configuration, so it cannot evaluate "+
+						"event %q of harness %q: one of %s, %s or %s breaks the ordering the timeout "+
+						"hierarchy requires; unset those variables to keep the defaults, or choose values "+
+						"where the hook-invocation deadline stays strictly above ingress and start_slice "+
+						"and below the workflow-result wait: %w",
+					coords.Event, coords.Harness,
+					hookInvocationTimeoutEnv, hookIngressTimeoutEnv, hookStartSliceTimeoutEnv,
+					overrideErr))
+		}
+		budget = adjusted
+	}
 	tier := budget.HookInvocation()
+	connectTimeout := lifecycleLaneConnectTimeout(budget)
+	// ONE fallback diagnostic per invocation. A hook process handles one event,
+	// so this is one line per process; it is created here rather than held in a
+	// package variable so an in-process owner that drives several invocations
+	// still gets one line for each.
+	fallbackOnce := &sync.Once{}
 	ctx, cancel := deadline(cmd.Context(), tier)
 	defer cancel()
 	// Resolve before starting the worker. Capture, admission, the deadline arm
@@ -379,6 +452,15 @@ func lifecycleOutcomeWithCompletion(
 		if env.CaptureDir != "" {
 			input = captureHostPayload(cmd, coords, env.CaptureDir, input)
 		}
+		// CLIENT-FIRST, WITH THE DIRECT PATH AS THE FALLBACK. The lane branch
+		// settles the host answer whenever the request reached the daemon; only a
+		// provably nothing-sent outcome hands the bytes on to the direct path.
+		laneWork, fallback, decided := lifecycleLaneAttempt(cmd, ctx, coords, env, connectTimeout, fallbackOnce, input)
+		if decided {
+			completed <- *laneWork
+			return
+		}
+		input = fallback
 		committed, err := handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
 			DBPath: flagDBPath, Harness: coords.Harness, Event: coords.Event,
 			HostVersion:       coords.HostVersion,
@@ -388,6 +470,10 @@ func lifecycleOutcomeWithCompletion(
 			Barrier:    barrier,
 			ActorClaim: tasks.ActorClaim(env.ActorClaim),
 			Settlement: settlement,
+			// The operator's resolved profile reaches the receipt path here, so a
+			// tuned Ingress window is the appender's deadline and not only a
+			// number validated beside the hook deadline.
+			TimeoutProfile: budget,
 			// The command's standard error is the best-effort channel for the
 			// session-claim mismatch line: the receipt is committed before the
 			// claim is written, so the committed host Outcome cannot carry it.
@@ -420,8 +506,12 @@ func lifecycleOutcomeWithCompletion(
 	if work.err != nil {
 		// A fault raised AFTER the durable commit leaves an occurrence behind.
 		// Saying "not recorded" there would send a maintainer to look in the
-		// wrong place, so the stage follows the error and not the position.
-		stage := faultStageForWorkError(work.err)
+		// wrong place, so the stage follows the error and not the position. An
+		// error that ARRIVED with a stage (the write lane's answer) keeps it.
+		stage := work.stage
+		if !stage.IsValid() {
+			stage = faultStageForWorkError(work.err)
+		}
 		return lifecycleFault(cmd, coords, failure, policy, continuation, stage, fmt.Errorf(
 			"the hook could not evaluate event %q of harness %q at host version %q: %w",
 			coords.Event, coords.Harness, coords.HostVersion, work.err))
@@ -506,9 +596,16 @@ func lifecycleContinuation(
 
 // lifecycleWork is what one hook evaluation produced: the native continuation
 // bytes, or the error that stopped it.
+//
+// stage is EMPTY for every error this package raises itself, and the stage table
+// below decides from the error's sentinel. It is set only by the write-lane
+// branch, whose error text comes from another PROCESS: that process knows which
+// sentinel it raised, and this one cannot see it, so the daemon states the stage
+// outright rather than having the hook infer it from a string.
 type lifecycleWork struct {
 	outcome hostexit.Outcome
 	err     error
+	stage   hostexit.FaultStage
 }
 
 // errLifecycleWorkPanicked marks a panic raised INSIDE the work goroutine. It
@@ -922,8 +1019,14 @@ func recordLifecycleFault(
 		"unusableFaultInputs": unusable,
 		"failureCitedBy":      failure.Evidence.Source,
 		"faultPolicy":         policy.String(),
-		"faultStage":          stage.String(),
-		"hostExit":            outcome.Exit.String(),
+		// writer names WHICH writer this invocation attempted: "daemon" when the
+		// event was sent to the pastured write lane, "direct" when the hook wrote
+		// in-process (the default, and what a hook does when no lane is there).
+		// Without it a fault on a healthy daemon and the same fault on a machine
+		// with no daemon are byte-identical in the record.
+		"writer":     lifecycleWriter(),
+		"faultStage": stage.String(),
+		"hostExit":   outcome.Exit.String(),
 		// hostContinuation is the exact byte body the host was given so that
 		// it could carry on. It is recorded because on OpenCode and Codex the
 		// proceed is a byte shape, and a reader must be able to see that these
@@ -1033,19 +1136,67 @@ func recordLifecycleFault(
 // record written somewhere else is evidence nobody finds. A generated host hook
 // passes no --db flag, so this is the path a real hook takes.
 //
-// THE FILE GROWS WITHOUT A BOUND. One line is appended per faulting invocation,
-// about 500 bytes, and nothing rotates, trims or removes a line. A hook runs on
-// every wired event, so a database that stays broken accumulates one line per
-// event, silently, because a fail-open fault exits 0 and most hosts do not show
-// the standard error of an exit-0 hook. Retention and reclaim are deliberately
-// out of scope here; the file is named in AGENTS.md with the command to clear
-// it so that somebody who never sees the diagnostic can still find it.
+// IT ALSO KEEPS THAT RECORD BOUNDED. Before it hands the path back it calls
+// boundLifecycleFaultRecord, which rotates an over-large live record onto its
+// single backup. The rotation lives on the PATH RESOLUTION and not in
+// recordLifecycleFault on purpose: recordLifecycleFault is the subject of a
+// structural guard that reads every one of its branches as a way the record can
+// be lost, and a rotation is not a loss — it runs BEFORE the record for THIS
+// fault is composed, and that record is always appended to the (freshly
+// reopened) live file afterwards, so the newest record is never the one
+// dropped. Folding rotation into the resolver keeps that guard's population
+// exactly the loss routes it was written to enumerate.
 func lifecycleFaultRecordPath() string {
 	directory := filepath.Dir(lifecycleStorePath())
 	if directory == "" || directory == "." {
 		return ""
 	}
-	return filepath.Join(directory, lifecycleFaultRecordFile)
+	path := filepath.Join(directory, lifecycleFaultRecordFile)
+	boundLifecycleFaultRecord(path, lifecycleFaultRecordMaxBytes)
+	return path
+}
+
+// boundLifecycleFaultRecord rotates an over-large live record onto its single
+// bounded backup and is deliberately FAIL-SAFE: it never fails the caller, it
+// never returns an error, and it never touches the newest record.
+//
+// IT IS BEST-EFFORT BY DESIGN, BECAUSE MANY SHORT-LIVED HOOK PROCESSES APPEND
+// CONCURRENTLY AND THE RECORD SITS BESIDE THE CONTENDED STORE. The decision
+// adds NO lock and NO new failure mode to the hot path: it is one stat(2) on
+// the common (under-cap) route, and a single rename(2) on the rare over-cap
+// route. Two processes that choose to rotate at once are safe because rename is
+// atomic and its destination is replaced: the loser's rename fails with ENOENT
+// once the winner has moved the source, this returns without a word, and both
+// processes then append their own newest record to the live path. No path can
+// corrupt the record. A writer that had already opened the live inode across a
+// rotation appends into the file now named as the backup — retained, not
+// dropped — and only a second rotation racing that same stale descriptor can
+// outlive a copy, which is the rare, accepted cost of bounding without a lock.
+//
+// THE FAILURE CONTRACT IS UNCHANGED. If rotation cannot run — the record does
+// not exist yet, the directory is not writable, the rename loses a race — this
+// returns and the caller proceeds to open and append exactly as before, so the
+// existing arms of recordLifecycleFault still report a lost record on standard
+// error. This function swallows its own errors precisely because there is
+// nothing to report: a rotation that did not happen costs only the bound, never
+// the incoming record.
+func boundLifecycleFaultRecord(path string, maxBytes int64) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return
+	}
+	// ONLY A REGULAR FILE IS ROTATED. A directory, a device or a symlink target
+	// that is not a regular file is not this record, and renaming it would move
+	// something the operator put there.
+	if !info.Mode().IsRegular() || info.Size() < maxBytes {
+		return
+	}
+	// The rename replaces any earlier backup, which is what keeps the bound at
+	// two files. Its error is ignored ON PURPOSE and not merely unchecked: a
+	// lost race or an unwritable directory leaves the record in place for the
+	// caller to append to, which is the whole contract, so there is nothing to
+	// report and no reason to fail the caller.
+	_ = os.Rename(path, path+lifecycleFaultRecordBackupSuffix)
 }
 
 // lifecycleStorePath resolves the store path THIS invocation would use, by the

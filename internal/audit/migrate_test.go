@@ -137,21 +137,22 @@ func TestMigrate_LegacyV1Database_PromotedToV2(t *testing.T) {
 		t.Fatalf("expected no audit_schema_meta table pre-Migrate, found %d", preCount)
 	}
 
-	// Run the migrator.
-	if err := audit.Migrate(db); err != nil {
-		t.Fatalf("audit.Migrate: %v", err)
-	}
+	// Run the migrator to the cutover target. The store is populated by this
+	// very migration (the v2→v3 backfill mints agent rows), so the
+	// identity-format ceiling step refuses to raise the floor without the slash
+	// marker; the offline cutover applies it atomically with the marker.
+	migratePopulatedToCutoverTarget(t, db)
 
 	// Post-conditions:
-	//   1. audit_schema_meta exists, has version=2.
+	//   1. audit_schema_meta exists, has version=cutoverTarget.
 	//   2. audit_events row count is unchanged (1).
 	//   3. The legacy row's data survived verbatim.
 	var version int
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("post-Migrate SELECT MAX(version): %v", err)
 	}
-	if version != audit.MaxKnownSchemaVersion {
-		t.Errorf("post-Migrate version = %d, want %d", version, audit.MaxKnownSchemaVersion)
+	if version != cutoverTarget {
+		t.Errorf("post-Migrate version = %d, want %d", version, cutoverTarget)
 	}
 
 	var eventCount int

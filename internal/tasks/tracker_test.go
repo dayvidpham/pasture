@@ -230,8 +230,8 @@ func TestAnEventAttachedToTwoContextsAppearsOnBothTimelines(t *testing.T) {
 
 	tracker, dbPath := openTrackerForTest(t)
 	const (
-		epochId = "epoch--01968a3c-1234-7000-8000-000000000001"
-		sliceId = "slice--01968a3c-1234-7000-8000-000000000002"
+		epochId = "epoch/01968a3c-1234-7000-8000-000000000001"
+		sliceId = "slice/01968a3c-1234-7000-8000-000000000002"
 	)
 
 	ev := protocol.AuditEvent{

@@ -257,6 +257,35 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 	return 0, structured(pasterrors.CategoryStorage, "The lifecycle occurrence committed without its receipt identity.", "The journal result did not contain the mandatory occurrence result slot.", "Committing a lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.Append).", "The caller cannot claim a receipt even though the operation reported success.", "Use a compatible Provenance journal and inspect the committed operation before retrying.", fmt.Errorf("missing result slot %q", receiptSlot))
 }
 
+// AppendBatch commits a bounded batch of operations in ONE transaction through
+// the pinned Provenance BatchJournal. It is the lane's flush: one transaction
+// per batch, with the same ingress deadline as Append and the same per-record
+// taxonomy (committed / short-circuited / conflict / failed / not-recorded)
+// that ApplyContext gives a single record. The batch is all-or-nothing, so a
+// caller that reads Committed=false knows NO record this batch newly folded is
+// durable, while a short-circuited record stays durable from its earlier
+// transaction.
+//
+// The Observer is NOT consulted here. It observes ONE occurrence commit and a
+// batch is many; production wires no observer at all, so this seam is
+// documented rather than given a fabricated per-batch meaning.
+func (a JournalAppender) AppendBatch(ctx context.Context, inputs []provenance.OperationInput) (provenance.BatchResult, error) {
+	const where = "Committing a batched lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.AppendBatch)."
+	batch, ok := a.Journal.(provenance.BatchJournal)
+	if !ok {
+		return provenance.BatchResult{}, structured(pasterrors.CategoryValidation, "The lifecycle journal cannot commit a batch in one transaction.", "The configured Provenance journal does not implement BatchJournal.ApplyBatchContext, so using it would commit each record separately and the batch would not be one transaction.", where, "No occurrence was recorded; already written payload blobs may remain as reclaimable orphans.", "Use the pinned Provenance journal implementation that provides BatchJournal.ApplyBatchContext.", nil)
+	}
+	if a.Deadline <= 0 {
+		return provenance.BatchResult{}, structured(pasterrors.CategoryValidation, "The lifecycle journal appender has no ingress deadline.", "Timeouts must come from one validated injected profile; silently defaulting here could invert SQLite retry and caller deadlines.", where, "No occurrence was recorded; already written payload blobs may remain as reclaimable orphans.", "Construct the receipt service with a validated timeout profile.", nil)
+	}
+	if a.Clock == nil {
+		return provenance.BatchResult{}, structured(pasterrors.CategoryValidation, "The lifecycle journal appender has no clock.", "Deadline accounting must use the injected process clock so timeout behavior is deterministic and testable.", where, "No occurrence was recorded; already written payload blobs may remain as reclaimable orphans.", "Construct the journal appender with the receipt service clock.", nil)
+	}
+	bounded, cancel := context.WithTimeout(ctx, a.Deadline)
+	defer cancel()
+	return batch.ApplyBatchContext(bounded, inputs)
+}
+
 func structured(category pasterrors.Category, what, why, where, impact, fix string, cause error) error {
 	return &pasterrors.StructuredError{Category: category, What: what, Why: why, Where: where, Impact: impact, Fix: fix, Cause: cause}
 }
@@ -293,29 +322,89 @@ type PayloadReclaimer struct{ Tx *sql.Tx }
 // alternative, which deletes a blob whose writer may still be between its
 // blob write and its journal append and so manufactures a journal row naming
 // an absent blob.
-func (r PayloadReclaimer) ReclaimOrphansWrittenBefore(ctx context.Context, before int64, limit int) ([]digest.Digest, error) {
+func (r PayloadReclaimer) ReclaimOrphansWrittenBefore(ctx context.Context, before int64, limit int) ([]digest.Digest, int64, error) {
 	if r.Tx == nil || limit <= 0 {
-		return nil, structured(pasterrors.CategoryValidation, "The orphan payload reclaim is invalid.", "A transaction and a positive limit are required; the reclaim never runs on a bare handle, because it must delete only against a projection rebuilt in the same transaction.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted.", "Construct the reclaimer from the projection rebuild's own transaction with a limit of at least 1.", nil)
+		return nil, 0, structured(pasterrors.CategoryValidation, "The orphan payload reclaim is invalid.", "A transaction and a positive limit are required; the reclaim never runs on a bare handle, because it must delete only against a projection rebuilt in the same transaction.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted.", "Construct the reclaimer from the projection rebuild's own transaction with a limit of at least 1.", nil)
 	}
-	rows, err := r.Tx.QueryContext(ctx, `DELETE FROM lifecycle_payload_blobs WHERE digest IN (SELECT b.digest FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL AND b.written_at > 0 AND b.written_at < ? ORDER BY b.written_at ASC, b.digest ASC LIMIT ?) RETURNING digest`, before, limit)
+	rows, err := r.Tx.QueryContext(ctx, `DELETE FROM lifecycle_payload_blobs WHERE digest IN (SELECT b.digest FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL AND b.written_at > 0 AND b.written_at < ? ORDER BY b.written_at ASC, b.digest ASC LIMIT ?) RETURNING digest, byte_count`, before, limit)
 	if err != nil {
-		return nil, structured(pasterrors.CategoryStorage, "Orphan lifecycle payloads could not be reclaimed.", "SQLite rejected the bounded orphan delete.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted; the enclosing savepoint is rolled back by the caller.", "Run `pasture migrate` so the payload blob table carries its written-at stamp, confirm database health, and run a read command again.", err)
+		return nil, 0, structured(pasterrors.CategoryStorage, "Orphan lifecycle payloads could not be reclaimed.", "SQLite rejected the bounded orphan delete.", "Reclaiming orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.ReclaimOrphansWrittenBefore).", "Nothing was deleted; the enclosing savepoint is rolled back by the caller.", "Run `pasture migrate` so the payload blob table carries its written-at stamp, confirm database health, and run a read command again.", err)
 	}
 	defer rows.Close()
+	deleted, bytes, err := scanDeletedBlobs(rows, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	return deleted, bytes, nil
+}
+
+// scanDeletedBlobs reads the digest and byte_count of every row a RETURNING
+// clause handed back. The byte total is what lets an operator read how much a
+// reclaim actually freed rather than only how many rows it removed, and it is
+// summed from the rows themselves so a concurrent writer adding bytes to the
+// table cannot distort it the way a before/after table total would.
+func scanDeletedBlobs(rows *sql.Rows, limit int) ([]digest.Digest, int64, error) {
 	deleted := make([]digest.Digest, 0, limit)
+	var total int64
 	for rows.Next() {
 		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
+		var count int64
+		if err := rows.Scan(&raw, &count); err != nil {
+			return nil, 0, err
 		}
 		ref, err := digest.Parse(raw)
 		if err != nil {
-			return nil, fmt.Errorf("reclaimed lifecycle payload digest %q is invalid: %w", raw, err)
+			return nil, 0, fmt.Errorf("reclaimed lifecycle payload digest %q is invalid: %w", raw, err)
 		}
 		deleted = append(deleted, ref)
+		total += count
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return deleted, nil
+	return deleted, total, nil
+}
+
+// PruneOrphansWrittenBefore is the OPERATOR-DRIVEN bulk reclaim: it deletes,
+// oldest first and at most limit, the same rows ReclaimOrphansWrittenBefore
+// does — blobs no lifecycle_occurrences row names, with a KNOWN written_at
+// before the given instant — and adds ONE condition of its own: it never
+// deletes THE newest row, the one row with the greatest written_at in the
+// table (ties broken by the greatest digest), whatever that row's age. The
+// operator verb is the only caller, and the reason for the extra condition is
+// stated on the verb: an operator asked for a bounded reclaim, and the newest
+// record is the one a bounded reclaim must never surprise by removing, because
+// it is the row a concurrent writer is most likely to still be touching.
+//
+// Exactly ONE row is excluded, not every row sharing the greatest instant: a
+// real store stamps each Put with its own instant, so the tie is a test
+// artifact, and excluding every tied row would make a bulk reclaim reclaim
+// nothing whenever a batch of blobs happened to share a stamp.
+//
+// It shares the invariants of the read-path reclaim exactly, and they are the
+// ones that matter here:
+//
+//   - a blob an occurrence names is never selected, because the projection the
+//     eligibility reads was rebuilt from the journal in this same transaction;
+//   - a blob with written_at 0 is never selected, because 0 means an UNKNOWN
+//     age and an unknown age never satisfies an age bound;
+//   - a blob younger than the age bound is never selected, so a writer that is
+//     still between its blob write and its journal append cannot lose the blob
+//     its append is about to name.
+//
+// It is a SECOND method on the one delete-door type rather than a variant of
+// the first so that the read path's single-statement guarantee
+// (TestTheReclaimIsOneBoundedStatement) stays exactly as it was: the read path
+// keeps its statement, the operator verb has this one, and neither can drift
+// into the other.
+func (r PayloadReclaimer) PruneOrphansWrittenBefore(ctx context.Context, before int64, limit int) ([]digest.Digest, int64, error) {
+	if r.Tx == nil || limit <= 0 {
+		return nil, 0, structured(pasterrors.CategoryValidation, "The orphan payload prune is invalid.", "A transaction and a positive limit are required; the prune never runs on a bare handle, because it must delete only against a projection rebuilt in the same transaction.", "Pruning orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.PruneOrphansWrittenBefore).", "Nothing was deleted.", "Construct the pruner from the projection rebuild's own transaction with a limit of at least 1.", nil)
+	}
+	rows, err := r.Tx.QueryContext(ctx, `DELETE FROM lifecycle_payload_blobs WHERE digest IN (SELECT b.digest FROM lifecycle_payload_blobs b LEFT JOIN lifecycle_occurrences o ON o.payload_digest = b.digest WHERE o.journal_id IS NULL AND b.written_at > 0 AND b.written_at < ? AND b.digest <> (SELECT n.digest FROM lifecycle_payload_blobs n ORDER BY n.written_at DESC, n.digest DESC LIMIT 1) ORDER BY b.written_at ASC, b.digest ASC LIMIT ?) RETURNING digest, byte_count`, before, limit)
+	if err != nil {
+		return nil, 0, structured(pasterrors.CategoryStorage, "Orphan lifecycle payloads could not be pruned.", "SQLite rejected the bounded orphan prune delete.", "Pruning orphan lifecycle payloads (internal/lifecycle/receipt/journal.go in receipt.PayloadReclaimer.PruneOrphansWrittenBefore).", "Nothing was deleted; the enclosing savepoint is rolled back by the caller.", "Run `pasture migrate` so the payload blob table carries its written-at stamp, confirm database health, and run `pasture prune` again.", err)
+	}
+	defer rows.Close()
+	return scanDeletedBlobs(rows, limit)
 }

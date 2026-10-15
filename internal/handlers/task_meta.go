@@ -31,7 +31,7 @@ func TaskLabelAdd(w io.Writer, dbPath, idStr, label string, format types.OutputF
 			Fix: "1. Pass the label as the second positional argument:\n" +
 				"     pasture task label add <task-id> <label>\n" +
 				"2. For example:\n" +
-				"     pasture task label add yourproject--01968a3c-9d4f-7c8a-bc12-feedfacecafe important",
+				"     pasture task label add yourproject/01968a3c-9d4f-7c8a-bc12-feedfacecafe important",
 		}
 		return pasterrors.ExitCode(se), se
 	}
@@ -126,7 +126,7 @@ func TaskCommentAdd(w io.Writer, in TaskCommentAddInput, format types.OutputForm
 	}
 	authorId, err := provenance.ParseAgentID(in.AuthorId)
 	if err != nil {
-		return invalidCommentAuthor(in.AuthorId, "The author ID is malformed; expected namespace--uuid.", err)
+		return invalidCommentAuthor(in.AuthorId, "The author ID is malformed; expected namespace/uuid.", err)
 	}
 
 	tr, err := tasks.OpenTaskTracker(in.DBPath)

@@ -32,6 +32,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/formatters"
+	"github.com/dayvidpham/pasture/internal/idmigrate"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -40,7 +41,7 @@ import (
 // TaskTimelineInput captures the CLI inputs for `pasture task timeline`.
 type TaskTimelineInput struct {
 	DBPath          string
-	TaskIDStr       string // wire-format task ID (e.g. "yourproject--01968a3c-9d4f-7c8a-bc12-feedfacecafe")
+	TaskIDStr       string // wire-format task ID (e.g. "yourproject/01968a3c-9d4f-7c8a-bc12-feedfacecafe")
 	IncludeChildren bool   // accepted but currently no-op (see file-level doc)
 	Depth           int    // accepted but currently no-op
 }
@@ -62,12 +63,42 @@ func TaskTimeline(w io.Writer, in TaskTimelineInput, format types.OutputFormat) 
 		return pasterrors.ExitCode(se), se
 	}
 
-	// We intentionally do NOT validate via provenance.ParseTaskID here —
-	// PROPOSAL-2 §7.9 documents the timeline command as accepting any
-	// "task-id" string, and free-floating contexts (Git SHAs, skill run IDs)
-	// are routed through `pasture task events --context-kind=...` instead.
-	// Strict task-ID validation lives at the events ingest path (S8 §7.12),
-	// not the read path. We accept any non-empty string.
+	// A retired "<namespace>--<uuid>" identity is REFUSED BY NAME, not treated as
+	// an unknown free string. After the cutover the retired form never resolves,
+	// so accepting it would return a silent empty timeline; the design (and the
+	// acceptance criteria) require the mismatch to be reported instead. The
+	// retired check runs first so the caller gets the format correction that
+	// names the slash form of the same identity.
+	if idmigrate.IsRetiredIdentity(in.TaskIDStr) {
+		se := idmigrate.RetiredIdentityRefusal(in.TaskIDStr)
+		return pasterrors.ExitCode(se), se
+	}
+
+	// The timeline argument is a TASK IDENTITY, so it is validated as one before
+	// the store is opened. A value that is neither a recognizable retired
+	// identity nor a valid task ID is refused rather than accepted as an unknown
+	// free string: the events query would simply match nothing, and an empty
+	// timeline would hide the mismatch behind a successful exit. Free-string
+	// context values (Git SHAs, session names) belong to `task events
+	// --context-kind/--context-id`, not to the task-keyed timeline.
+	if _, parseErr := provenance.ParseTaskID(in.TaskIDStr); parseErr != nil {
+		se := &pasterrors.StructuredError{
+			Category: pasterrors.CategoryValidation,
+			What:     fmt.Sprintf("%q is not a valid task ID.", in.TaskIDStr),
+			Why: "A task timeline is keyed by a task identity, and this build reads only the slash form " +
+				"\"<namespace>/<uuid>\". The value is neither that form nor a recognizable retired identity, " +
+				"so no task can resolve it.",
+			Where:  "Resolving a task timeline argument (internal/handlers/task_timeline.go in handlers.TaskTimeline).",
+			Impact: "Nothing was read: the command stopped before it opened the store, so it cannot return an empty timeline for an argument it never understood.",
+			Fix: "1. Pass a task ID in the slash form:\n" +
+				"     pasture task timeline <namespace>/<uuid>\n" +
+				"2. To find a task ID, list tasks first:\n" +
+				"     pasture task list\n" +
+				"3. To query events for a non-task context (a commit, a session), use the context filter instead:\n" +
+				"     pasture task events --context-kind <kind> --context-id <id>",
+		}
+		return pasterrors.ExitCode(se), se
+	}
 
 	tracker, err := tasks.OpenTaskTracker(in.DBPath)
 	if err != nil {

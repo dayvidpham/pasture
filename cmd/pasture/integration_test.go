@@ -37,8 +37,6 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/dayvidpham/provenance"
-
 	"github.com/dayvidpham/pasture/internal/audit"
 )
 
@@ -190,14 +188,11 @@ func makeLegacyV1ForS10(t *testing.T) string {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
 
-	tr, err := provenance.OpenSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("provenance bootstrap: %v", err)
-	}
-	if err := tr.Close(); err != nil {
-		t.Fatalf("provenance close: %v", err)
-	}
-
+	// Build only the v1 audit_events table. The store carries no Provenance
+	// identity rows and no cutover evidence, so the first command's open treats
+	// it as a cutover and runs the identity cutover before the audit migrator's
+	// legacy schema work is attributed. (A direct Provenance bootstrap would
+	// mark the store out of band and the normal-open guard would refuse it.)
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("sql.Open: %v", err)

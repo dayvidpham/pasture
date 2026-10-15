@@ -50,7 +50,7 @@ var supervisorBody = SkillBody{
 			Id:        "sup-worker-persistence",
 			Given:     "worker completes initial implementation",
 			When:      "deciding whether to shut down the worker",
-			Then:      "keep workers alive for the review-fix cycle; workers notify supervisor via pasture task comment add --author pasture-system--00000000-0000-0000-0000-000000000000 but do NOT shut down",
+			Then:      "keep workers alive for the review-fix cycle; workers notify supervisor via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 but do NOT shut down",
 			ShouldNot: "shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings",
 		},
 		{
@@ -306,9 +306,9 @@ Workers are assigned to leaf tasks, not slices. The slice closes when all its le
 			Title: "Assigning Slices",
 			Content: `` + "```" + `bash
 # Assign slices to workers
-pasture task assignment transfer "${SLICE_1_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_1_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_1}"
-pasture task assignment transfer "${SLICE_2_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_2_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_2}"
-pasture task assignment transfer "${SLICE_3_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_3_ID}" --actor pasture-system--00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_3}"
+pasture task assignment transfer "${SLICE_1_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_1_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_1}"
+pasture task assignment transfer "${SLICE_2_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_2_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_2}"
+pasture task assignment transfer "${SLICE_3_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_3_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_3}"
 ` + "```" + ``,
 		},
 		{

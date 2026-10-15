@@ -87,6 +87,9 @@ func main() {
 	for _, file := range result.Files {
 		fmt.Printf("Generated %s\n", file.Path)
 	}
+	for _, file := range result.InventoryFiles {
+		fmt.Printf("Generated %s\n", file.Path)
+	}
 
 	if len(errors) > 0 {
 		fmt.Fprintf(os.Stderr, "\n%d error(s) encountered:\n", len(errors))

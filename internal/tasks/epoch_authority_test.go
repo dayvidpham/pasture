@@ -20,10 +20,10 @@ const (
 
 func TestEpochAuthorityContractsRejectMalformedAndDuplicateValues(t *testing.T) {
 	t.Parallel()
-	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
-	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	epoch := EpochRootID("tasks/018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks/018f0000-0000-7000-8000-000000000002")
 	memberA := candidateMember{Repository: RepositoryID("repo-a"), Candidate: ImplementationCandidateID(candidate), Commit: authorityTestCommitA}
-	memberB := candidateMember{Repository: RepositoryID("repo-b"), Candidate: ImplementationCandidateID("tasks--018f0000-0000-7000-8000-000000000003"), Commit: authorityTestCommitB}
+	memberB := candidateMember{Repository: RepositoryID("repo-b"), Candidate: ImplementationCandidateID("tasks/018f0000-0000-7000-8000-000000000003"), Commit: authorityTestCommitB}
 	manifest, err := newIntegrationCandidateManifest(epoch, candidate, []candidateMember{memberB, memberA}, "manifest-order")
 	if err != nil {
 		t.Fatalf("newIntegrationCandidateManifest: %v", err)
@@ -108,11 +108,11 @@ func TestEpochAuthorityContractsRejectMalformedAndDuplicateValues(t *testing.T) 
 
 func TestEpochAuthorityEffectBoundariesValidateAndCanonicalize(t *testing.T) {
 	t.Parallel()
-	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
-	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	epoch := EpochRootID("tasks/018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks/018f0000-0000-7000-8000-000000000002")
 	subject := authorityTestTaskID(t, string(candidate))
 	memberA := candidateMember{Repository: "repo-a", Candidate: ImplementationCandidateID(candidate), Commit: authorityTestCommitA}
-	memberB := candidateMember{Repository: "repo-b", Candidate: "tasks--018f0000-0000-7000-8000-000000000003", Commit: authorityTestCommitB}
+	memberB := candidateMember{Repository: "repo-b", Candidate: "tasks/018f0000-0000-7000-8000-000000000003", Commit: authorityTestCommitB}
 
 	for _, test := range []struct {
 		name   string
@@ -202,11 +202,11 @@ func TestEpochAuthorityEffectBoundariesValidateAndCanonicalize(t *testing.T) {
 
 func TestEpochAuthorityLandBindingIsCanonicalAndStrict(t *testing.T) {
 	t.Parallel()
-	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
-	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	epoch := EpochRootID("tasks/018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks/018f0000-0000-7000-8000-000000000002")
 	subject := authorityTestTaskID(t, string(epoch))
-	memberA := candidateMember{Repository: "repo-a", Candidate: "tasks--018f0000-0000-7000-8000-000000000003", Commit: authorityTestCommitA}
-	memberB := candidateMember{Repository: "repo-b", Candidate: "tasks--018f0000-0000-7000-8000-000000000004", Commit: authorityTestCommitB}
+	memberA := candidateMember{Repository: "repo-a", Candidate: "tasks/018f0000-0000-7000-8000-000000000003", Commit: authorityTestCommitA}
+	memberB := candidateMember{Repository: "repo-b", Candidate: "tasks/018f0000-0000-7000-8000-000000000004", Commit: authorityTestCommitB}
 	publicationA := repositoryPublication{Repository: memberA.Repository, Candidate: memberA.Candidate, Ref: "refs/heads/main", Commit: memberA.Commit, VerificationOperation: "verify-a"}
 	publicationB := repositoryPublication{Repository: memberB.Repository, Candidate: memberB.Candidate, Ref: "refs/heads/main", Commit: memberB.Commit, VerificationOperation: "verify-b"}
 	value := landAuthorityBinding{
@@ -278,11 +278,11 @@ func TestEpochAuthorityLandBindingIsCanonicalAndStrict(t *testing.T) {
 
 func TestEpochAuthorityRejectsNonAdjacentCandidateDuplicates(t *testing.T) {
 	t.Parallel()
-	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
-	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	epoch := EpochRootID("tasks/018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks/018f0000-0000-7000-8000-000000000002")
 	subject := authorityTestTaskID(t, string(candidate))
-	duplicateCandidate := ImplementationCandidateID("tasks--018f0000-0000-7000-8000-000000000003")
-	otherCandidate := ImplementationCandidateID("tasks--018f0000-0000-7000-8000-000000000004")
+	duplicateCandidate := ImplementationCandidateID("tasks/018f0000-0000-7000-8000-000000000003")
+	otherCandidate := ImplementationCandidateID("tasks/018f0000-0000-7000-8000-000000000004")
 	members := []candidateMember{
 		{Repository: "repo-a", Candidate: duplicateCandidate, Commit: authorityTestCommitA},
 		{Repository: "repo-b", Candidate: otherCandidate, Commit: authorityTestCommitB},
@@ -311,12 +311,12 @@ func TestEpochAuthorityRejectsNonAdjacentCandidateDuplicates(t *testing.T) {
 func TestEpochAuthorityEffectsSerializeCanonicalTaskIDs(t *testing.T) {
 	t.Parallel()
 	const (
-		canonicalEpoch     = "tasks--018f0000-0000-7000-8000-000000000001"
-		canonicalCandidate = "tasks--018f0000-0000-7000-8000-000000000002"
-		canonicalMember    = "tasks--018f0000-0000-7000-8000-000000000003"
-		aliasedEpoch       = "tasks--018F0000-0000-7000-8000-000000000001"
-		aliasedCandidate   = "tasks--018F0000-0000-7000-8000-000000000002"
-		aliasedMember      = "tasks--018F0000-0000-7000-8000-000000000003"
+		canonicalEpoch     = "tasks/018f0000-0000-7000-8000-000000000001"
+		canonicalCandidate = "tasks/018f0000-0000-7000-8000-000000000002"
+		canonicalMember    = "tasks/018f0000-0000-7000-8000-000000000003"
+		aliasedEpoch       = "tasks/018F0000-0000-7000-8000-000000000001"
+		aliasedCandidate   = "tasks/018F0000-0000-7000-8000-000000000002"
+		aliasedMember      = "tasks/018F0000-0000-7000-8000-000000000003"
 	)
 	subject := authorityTestTaskID(t, canonicalCandidate)
 	manifestEffect, err := newCandidateManifestEvidenceEffect(subject, integrationCandidateManifest{
@@ -373,8 +373,8 @@ func TestEpochAuthorityEffectsSerializeCanonicalTaskIDs(t *testing.T) {
 func TestEpochAuthorityRejectsInvalidUTF8AtAuthorityBoundaries(t *testing.T) {
 	t.Parallel()
 	invalid := string([]byte{'x', 0xff})
-	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
-	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	epoch := EpochRootID("tasks/018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks/018f0000-0000-7000-8000-000000000002")
 	subject := authorityTestTaskID(t, string(candidate))
 	publication := repositoryPublication{Repository: "repo-a", Candidate: ImplementationCandidateID(candidate), Ref: "refs/heads/main", Commit: authorityTestCommitA, VerificationOperation: "verify"}
 
@@ -422,8 +422,8 @@ func TestEpochAuthorityRejectsInvalidUTF8AtAuthorityBoundaries(t *testing.T) {
 func TestEpochAuthorityDecodersRejectInvalidRawUTF8(t *testing.T) {
 	t.Parallel()
 	payload := []byte{'{', '"', 'v', '"', ':', '"', 0xff, '"', '}'}
-	epoch := authorityTestTaskID(t, "tasks--018f0000-0000-7000-8000-000000000001")
-	subject := authorityTestTaskID(t, "tasks--018f0000-0000-7000-8000-000000000002")
+	epoch := authorityTestTaskID(t, "tasks/018f0000-0000-7000-8000-000000000001")
+	subject := authorityTestTaskID(t, "tasks/018f0000-0000-7000-8000-000000000002")
 	for _, test := range []struct {
 		name   string
 		decode func() error
@@ -466,8 +466,8 @@ func TestEpochAuthorityValidatesExactGitRefs(t *testing.T) {
 
 func TestEpochAuthorityRequiresPositiveJournalIDs(t *testing.T) {
 	t.Parallel()
-	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
-	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	epoch := EpochRootID("tasks/018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks/018f0000-0000-7000-8000-000000000002")
 	for _, journalID := range []provenance.JournalID{0, -1} {
 		axes := [3]reviewAxisAuthority{
 			{Axis: AxisCorrectness, Event: journalID, Verdict: VerdictAccept},
@@ -488,8 +488,8 @@ func TestEpochAuthorityReviewAxisOrderIgnoresExportedReviewAxes(t *testing.T) {
 	ReviewAxes = [3]ReviewAxis{AxisElegance, AxisTestQuality, AxisCorrectness}
 	t.Cleanup(func() { ReviewAxes = original })
 
-	epoch := EpochRootID("tasks--018f0000-0000-7000-8000-000000000001")
-	candidate := IntegrationCandidateSetID("tasks--018f0000-0000-7000-8000-000000000002")
+	epoch := EpochRootID("tasks/018f0000-0000-7000-8000-000000000001")
+	candidate := IntegrationCandidateSetID("tasks/018f0000-0000-7000-8000-000000000002")
 	canonical := [3]reviewAxisAuthority{
 		{Axis: AxisCorrectness, Event: 1, Verdict: VerdictAccept},
 		{Axis: AxisTestQuality, Event: 2, Verdict: VerdictAccept},
@@ -507,7 +507,7 @@ func TestEpochAuthorityReviewAxisOrderIgnoresExportedReviewAxes(t *testing.T) {
 
 func TestEpochAuthoritySubjectStateEffectPropagatesEpochParseError(t *testing.T) {
 	t.Parallel()
-	candidate := authorityTestTaskID(t, "tasks--018f0000-0000-7000-8000-000000000002")
+	candidate := authorityTestTaskID(t, "tasks/018f0000-0000-7000-8000-000000000002")
 	malformedEpoch := "not-a-task"
 	_, parseErr := provenance.ParseTaskID(malformedEpoch)
 	if parseErr == nil {

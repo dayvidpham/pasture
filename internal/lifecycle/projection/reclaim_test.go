@@ -21,7 +21,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
@@ -114,10 +116,18 @@ func blobExists(t *testing.T, db *sql.DB, ref digest.Digest) bool {
 	return count == 1
 }
 
-// commitOccurrenceNaming appends one occurrence to the real journal that
-// names the blob, through the production journal and identity, so the
-// projection rebuild will project it.
+// commitOccurrenceNaming appends one binding-free occurrence naming the blob.
 func commitOccurrenceNaming(t *testing.T, tracker protocol.TaskTracker, ref digest.Digest, operation string) {
+	t.Helper()
+	commitOccurrenceWithBindings(t, tracker, ref, operation, nil)
+}
+
+// commitOccurrenceWithBindings appends one occurrence to the real journal that
+// names the blob, through the production journal and identity, so the
+// projection rebuild will project it. bindings are recorded in the occurrence
+// envelope, so the rebuilt projection carries one binding row per entry — the
+// state the FK-paused replay must replace without a UNIQUE collision.
+func commitOccurrenceWithBindings(t *testing.T, tracker protocol.TaskTracker, ref digest.Digest, operation string, bindings []model.NativeBinding) {
 	t.Helper()
 	ctx := context.Background()
 	resolver, ok := tracker.(receipt.IdentityResolver)
@@ -133,7 +143,7 @@ func commitOccurrenceNaming(t *testing.T, tracker protocol.TaskTracker, ref dige
 		Bindings []model.NativeBinding       `json:"bindings"`
 		Capture  model.CaptureDisposition    `json:"capture"`
 		Body     string                      `json:"body_digest"`
-	}{Contract: contract.String(), Event: model.ContractEventKind(1), Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: contract}}, Capture: model.CaptureValid, Body: ref.String()})
+	}{Contract: contract.String(), Event: model.ContractEventKind(1), Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: contract}}, Bindings: bindings, Capture: model.CaptureValid, Body: ref.String()})
 	require.NoError(t, err)
 	sum := sha256.Sum256(payload)
 	command := sha256.Sum256(append([]byte("pasture.lifecycle.receipt.append/v1\x00"), payload...))
@@ -409,12 +419,16 @@ func TestTheReclaimIsReachedOnlyFromTheRebuild(t *testing.T) {
 		"the reclaim is called exactly once, from the rebuild, inside its transaction after the re-insert; any other caller reads a projection that may be stale")
 	assert.Equal(t, []string{filepath.Join("internal", "lifecycle", "projection", "reclaim.go") + ": reclaimOrphanPayloads"}, deleters,
 		"the narrow delete type is constructed only by the reclaim; a construction anywhere else is a second delete door")
-	// The rebuild has EXACTLY ONE production caller, the tasks wrapper that
-	// every read command reaches; the reclaim is reached through it and
-	// through nothing else. A second caller is a new path that must state
-	// where its failure line goes; a caller on a hook path is refused.
-	assert.Equal(t, []string{filepath.Join("internal", "tasks", "lifecycle_identity.go") + ": RebuildLifecycleOccurrencesReporting"}, reclaimingCallers,
-		"production callers of the rebuild: %v; the one caller is the tasks wrapper the read commands share, never a hook path", reclaimingCallers)
+	// The rebuild has EXACTLY TWO production callers, both in internal/tasks:
+	// the wrapper every read command reaches, and the operator prune's bulk
+	// wrapper. The reclaim is reached through them and through nothing else. A
+	// third caller is a new path that must state where its failure line goes;
+	// a caller on a hook path is refused.
+	assert.Equal(t, []string{
+		filepath.Join("internal", "tasks", "lifecycle_identity.go") + ": RebuildLifecycleOccurrencesReporting",
+		filepath.Join("internal", "tasks", "lifecycle_prune.go") + ": PruneLifecyclePayloads",
+	}, reclaimingCallers,
+		"production callers of the rebuild: %v; the read wrapper and the operator prune wrapper, both in tasks and never a hook path", reclaimingCallers)
 }
 
 func TestReclaimFailureLineNamesTheOutcome(t *testing.T) {
@@ -505,40 +519,35 @@ func TestAnUnstampedBlobIsNeverReclaimedAtAnyAge(t *testing.T) {
 	assert.Equal(t, []digest.Digest{earliestKnown}, report.Reclaimed)
 }
 
-// openStoreUpgradedFromV7 builds a store whose payload blob table has the
-// shape a build without the written_at column left behind, holding the given
-// bodies as unstamped rows, and then opens it through the production opener so
-// the real version 7 to 8 migration runs on it. The shape is reconstructed
-// from a store this build made, by removing the column and every version row
-// from 8 upward; the bound is `>= 8` rather than `= 8` because the migrator's
-// ceiling moves, and deleting only the 8 row would leave a higher row behind
-// so the next open would see an up-to-date file and upgrade nothing. The
-// schema the migration then meets is the version 7 schema. It returns the open
-// tracker, its handle, the digests of the bodies, and the migration instant
-// the migration recorded as the applied_at of version 8.
+// openStoreUpgradedFromV7 builds an audit-only version 7 store whose payload
+// blob table has the shape a build without the written_at column left behind,
+// holding the given bodies as unstamped rows, and then opens it through the
+// production opener so the real version 7 to 8 migration runs during the
+// cutover's catch-up phase. The store carries no Provenance identity rows and
+// no cutover evidence, so the opener treats it as a cutover: the guard admits
+// it, P2's deferred catch-up runs v7→v8 (stamping the pre-existing blobs at the
+// migration instant), and the conversion publishes the marker and the receipt.
+// It returns the open tracker, its handle, the digests of the bodies, and the
+// migration instant the migration recorded as the applied_at of version 8.
 func openStoreUpgradedFromV7(t *testing.T, bodies ...[]byte) (protocol.TaskTracker, *sql.DB, []digest.Digest, time.Time) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "pasture.db")
-	bootstrap, err := tasks.OpenTaskTracker(dbPath)
+
+	seed, err := dbconn.OpenDefaultDB(dbPath)
 	require.NoError(t, err)
-	_, err = bootstrap.Create("file://projection-reclaim-upgrade-test", "bootstrap", "initialize the persisted ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
-	require.NoError(t, err)
-	v7 := auditDB(t, bootstrap)
-	_, err = v7.Exec(`ALTER TABLE lifecycle_payload_blobs DROP COLUMN written_at`)
-	require.NoError(t, err)
-	_, err = v7.Exec(`DELETE FROM audit_schema_meta WHERE version >= 8`)
-	require.NoError(t, err)
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), seed, 7),
+		"the version 7 schema must be built directly")
 	refs := make([]digest.Digest, 0, len(bodies))
 	for _, body := range bodies {
 		ref := digest.FromBytes(body)
-		_, err = v7.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, ref.String(), body, len(body))
+		_, err = seed.Exec(`INSERT INTO lifecycle_payload_blobs(digest, body, byte_count) VALUES(?,?,?)`, ref.String(), body, len(body))
 		require.NoError(t, err)
 		refs = append(refs, ref)
 	}
-	require.NoError(t, bootstrap.Close())
+	require.NoError(t, seed.Close())
 
 	tracker, err := tasks.OpenTaskTracker(dbPath)
-	require.NoError(t, err, "the production opener must upgrade the version 7 store")
+	require.NoError(t, err, "the production opener must cut over the version 7 store")
 	t.Cleanup(func() { _ = tracker.Close() })
 	db := auditDB(t, tracker)
 	var appliedAt int64

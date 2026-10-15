@@ -10,8 +10,8 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 )
 
-// emitInventoryRows writes the two authoring-side inventory projections owned by
-// the codegen generation root:
+// renderInventoryFiles stages the two authoring-side inventory projections
+// owned by the codegen generation root:
 //
 //   - internal/inventory/commands.gen.go — the command-skill authoring surface
 //     (commandSkillDirs) fanned out per enabled harness (UAT resolution 4:
@@ -29,31 +29,28 @@ import (
 // imports internal/inventory, preserving the authoring-side-only invariant: no
 // production package depends on the table — only generators emit rows into it
 // and tests validate it.
-func emitInventoryRows(root string, opts GenerateOptions) error {
+func renderInventoryFiles(root string) ([]GeneratedFile, error) {
 	commandsSrc, err := renderInventoryCommandRows()
 	if err != nil {
-		return fmt.Errorf("render commands.gen.go: %w", err)
+		return nil, fmt.Errorf("render commands.gen.go: %w", err)
 	}
 	commandsFormatted, err := formatGeneratedGo(commandsSrc)
 	if err != nil {
-		return fmt.Errorf("format commands.gen.go: %w", err)
-	}
-	if _, err := writeFullGeneratedFile(filepath.Join(root, "internal/inventory/commands.gen.go"), commandsFormatted, opts); err != nil {
-		return err
+		return nil, fmt.Errorf("format commands.gen.go: %w", err)
 	}
 
 	nativeSrc, err := renderInventoryNativeFunctionRows()
 	if err != nil {
-		return fmt.Errorf("render native_functions.gen.go: %w", err)
+		return nil, fmt.Errorf("render native_functions.gen.go: %w", err)
 	}
 	nativeFormatted, err := formatGeneratedGo(nativeSrc)
 	if err != nil {
-		return fmt.Errorf("format native_functions.gen.go: %w", err)
+		return nil, fmt.Errorf("format native_functions.gen.go: %w", err)
 	}
-	if _, err := writeFullGeneratedFile(filepath.Join(root, "internal/inventory/native_functions.gen.go"), nativeFormatted, opts); err != nil {
-		return err
-	}
-	return nil
+	return []GeneratedFile{
+		{Path: filepath.Join(root, "internal/inventory/commands.gen.go"), Content: commandsFormatted},
+		{Path: filepath.Join(root, "internal/inventory/native_functions.gen.go"), Content: nativeFormatted},
+	}, nil
 }
 
 // renderInventoryCommandRows emits commands.gen.go: every authored command

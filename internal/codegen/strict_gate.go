@@ -52,6 +52,9 @@ func RequireEvidencedLifecycleRows() error {
 // at which section/range, and exactly how to classify it) so a maintainer can
 // resolve it without re-deriving the scan.
 func RequireClassifiedSource(root string) error {
+	if err := RequireOperationalSource(root); err != nil {
+		return err
+	}
 	inventory, err := scan.ScanCanonical(root)
 	if err != nil {
 		return fmt.Errorf(

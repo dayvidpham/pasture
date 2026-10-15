@@ -16,7 +16,7 @@ func TestCLI_EpochInventoryAndRetiredAdapter(t *testing.T) {
 	if root.exitCode != 0 {
 		t.Fatalf("root help exit %d: %s", root.exitCode, root.stderr)
 	}
-	if got, want := commandNames(root.stdout), []string{"bundle", "epoch", "hook", "install", "migrate", "queue", "status", "task", "uninstall", "upgrade"}; !sameStrings(got, want) {
+	if got, want := commandNames(root.stdout), []string{"bundle", "epoch", "hook", "install", "migrate", "prune", "queue", "status", "task", "uninstall", "upgrade"}; !sameStrings(got, want) {
 		t.Fatalf("root commands = %v, want %v\n%s", got, want, root.stdout)
 	}
 
@@ -72,8 +72,8 @@ func TestCLI_TaskAssignmentTransferRejectsInvalidInputBeforeStoreOpen(t *testing
 		"task", "assignment", "transfer", "not-a-task-id",
 		"--slot", "owner-responsibility",
 		"--assignment", "assignment/cli/next",
-		"--actor", "cli--01960000-0000-7000-8000-000000000001",
-		"--occupant", "cli--01960000-0000-7000-8000-000000000002",
+		"--actor", "cli/01960000-0000-7000-8000-000000000001",
+		"--occupant", "cli/01960000-0000-7000-8000-000000000002",
 	)
 	if out.exitCode != 1 {
 		t.Fatalf("exit=%d, want validation failure; stdout=%s stderr=%s", out.exitCode, out.stdout, out.stderr)
@@ -90,8 +90,8 @@ func TestCLI_EpochStructuredInputRejectsBeforeStoreOpen(t *testing.T) {
 	t.Parallel()
 
 	const (
-		epoch = "cli--01960000-0000-7000-8000-000000000001"
-		round = "cli--01960000-0000-7000-8000-000000000002"
+		epoch = "cli/01960000-0000-7000-8000-000000000001"
+		round = "cli/01960000-0000-7000-8000-000000000002"
 	)
 	cases := []struct {
 		name  string

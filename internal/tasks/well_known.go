@@ -8,9 +8,9 @@
 //  1. Lookup-by-name in `pasture_well_known_agents` (O(1) via the UNIQUE index
 //     on `name`). If found, recover the AgentId and skip steps 2-3 (idempotent
 //     fast path; second-and-subsequent opens hit only this branch).
-//  2. If absent: call `provenance.Tracker.RegisterSoftwareAgent("pasture",
-//     name, version, source)` — this mints one fresh UUIDv7 in the
-//     Provenance subsystem (separate `*sql.DB` handle on the same file).
+//  2. If absent: call TaskTracker.RegisterSoftwareAgentContext with the caller's
+//     context — this mints one fresh UUIDv7 through Provenance using the
+//     same borrowed pool as the audit subsystem.
 //  3. INSERT into `pasture_well_known_agents` (agent_id, name), doing nothing
 //     on a name conflict, read back the id the name is bound to, and — only
 //     when it is the id minted in step 2 — INSERT `pasture_agent_categories`
@@ -102,12 +102,12 @@ type auditDBHolder interface {
 //   - CategoryConfig (exit 4): tracker is nil, does not implement auditDBHolder,
 //     or its auditDBHandle() returns nil; cache is nil.
 //   - CategoryStorage (exit 5): SQLite read/write or transaction failure.
-//   - CategoryWorkflow (exit 3): Provenance RegisterSoftwareAgent failure.
+//   - CategoryWorkflow (exit 3): Provenance RegisterSoftwareAgentContext failure.
 //
-// The function takes ctx for cancellation. Durable construction supplies a
-// background context (the opener has no context parameter); explicit callers
-// can supply cancellation through ctx. Fresh opens mint every missing entry;
-// warm opens recover IDs without sequential identity growth. Defensive
+// The function takes ctx for cancellation. Context-aware durable construction
+// supplies its caller's context through cold software registration and binding;
+// only compatibility openers supply Background. Fresh opens mint every missing
+// entry; warm opens recover IDs without sequential identity growth. Defensive
 // table DDL still runs, so a warm call is not a strictly read-only operation.
 func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, cache *WellKnownAgentCache) error {
 	if cache == nil {
@@ -246,16 +246,15 @@ func RegisterWellKnownAgents(ctx context.Context, tracker protocol.TaskTracker, 
 // minted on a miss) and a *StructuredError if any step fails.
 //
 // auditDB is the audit subsystem's *sql.DB; provTracker is the provenance
-// surface (we accept it via the protocol.TaskTracker because the only
-// Provenance call we need is RegisterSoftwareAgent, which is in the
-// embedded interface). The split keeps this helper unit-testable: tests
+// surface, accepted via protocol.TaskTracker's context registration capability.
+// The split keeps this helper unit-testable: tests
 // can provide a real auditDB (file-backed t.TempDir()) and a real
 // protocol.TaskTracker, no mocks needed.
 //
 // Error categorisation:
 //
 //   - CategoryStorage: SELECT, BEGIN, INSERT, COMMIT failures.
-//   - CategoryWorkflow: Provenance RegisterSoftwareAgent failures (treated as
+//   - CategoryWorkflow: Provenance RegisterSoftwareAgentContext failures (treated as
 //     workflow because Provenance's surface is part of pasture's task-tracker
 //     workflow façade).
 func ensureWellKnownAgent(
@@ -341,11 +340,12 @@ func ensureWellKnownAgent(
 	}
 
 	// 2. Mint a fresh SoftwareAgent through Provenance. This call writes to
-	//    Provenance's *sql.DB (separate handle from auditDB on the same file).
+	//    the shared pool borrowed by Provenance, using this caller's context.
 	//    On success we get an AgentId; on failure we abort without touching
 	//    the audit-side tables (so the next startup retries cleanly via the
 	//    fast-path miss).
-	sa, err := provTracker.RegisterSoftwareAgent(
+	sa, err := provTracker.RegisterSoftwareAgentContext(
+		ctx,
 		WellKnownAgentNamespace,
 		spec.Name,
 		WellKnownAgentVersion,

@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // Environment variables the lifecycle hook reads. They are named here once so
@@ -24,6 +26,44 @@ const (
 	hookCaptureDirEnv = "PASTURE_CAPTURE_DIR"
 	// hookActorIDEnv carries the actor a host session claims at session start.
 	hookActorIDEnv = "PASTURE_ACTOR_ID"
+	// hookInvocationTimeoutEnv tunes the hook-invocation deadline: how long ONE
+	// whole lifecycle hook invocation may run before it reports a fault. It is
+	// the budget the HOST pays for, so lowering it makes a slow store fail fast
+	// (the gate is left unevaluated and the host is answered fail-open) instead
+	// of stalling for the whole window; raising it only helps on a fast store,
+	// because a hook that outruns the host's own budget freezes the session.
+	hookInvocationTimeoutEnv = "PASTURE_HOOK_INVOCATION_TIMEOUT"
+	// hookIngressTimeoutEnv tunes one lifecycle receipt append, including its
+	// lock retries. It must stay strictly above the SQLite busy timeout and
+	// strictly below the hook-invocation deadline.
+	hookIngressTimeoutEnv = "PASTURE_INGRESS_TIMEOUT"
+	// hookStartSliceTimeoutEnv tunes how long a slice sub-workflow waits for its
+	// start_slice signal. It must stay strictly above the SQLite busy timeout and
+	// strictly below the hook-invocation deadline. The lifecycle hook command
+	// never reaches this wait: it is read and validated with its siblings so the
+	// ordering invariant covers it, and its consumer is the slice workflow.
+	hookStartSliceTimeoutEnv = "PASTURE_START_SLICE_TIMEOUT"
+	// hookWriteLaneEnv selects whether the hook asks the daemon's write lane to
+	// record its event. It accepts exactly "auto" (the default: ask the daemon,
+	// and write directly when it is unreachable) and "direct" (never ask: write
+	// in-process exactly as a build without a lane does).
+	hookWriteLaneEnv = "PASTURE_WRITE_LANE"
+	// hookWriteLaneSocketEnv overrides the socket the hook asks. It exists for
+	// an operator who runs the daemon against a store the hook cannot derive
+	// from its own flags; the derived path is the default and needs no setting.
+	hookWriteLaneSocketEnv = "PASTURE_WRITE_LANE_SOCKET"
+)
+
+// WriteLaneMode is the operator's choice of how the hook records its event.
+type WriteLaneMode string
+
+const (
+	// WriteLaneAuto asks the daemon's lane and falls back to the direct write
+	// path when it cannot be reached. It is the default.
+	WriteLaneAuto WriteLaneMode = "auto"
+	// WriteLaneDirect never asks, and writes in-process exactly as a build
+	// without a lane does.
+	WriteLaneDirect WriteLaneMode = "direct"
 )
 
 // HookEnvironment is the parsed process environment of one lifecycle hook
@@ -44,6 +84,21 @@ type HookEnvironment struct {
 	// ActorClaim is the actor identifier a host session claims, or "" when the
 	// session makes no claim.
 	ActorClaim string
+	// BudgetOverride carries the operator's requested substitutions for the
+	// hook-invocation deadline and the caller windows beneath it. The zero
+	// value asks for no change, so an unset environment keeps the production
+	// profile exactly. The values are validated against the ordered hierarchy
+	// when they are applied to a base profile (see timeouts.Profile.WithOverride),
+	// so an inverted combination is refused rather than clamped.
+	BudgetOverride timeouts.Override
+	// WriteLane is whether the hook asks the daemon's write lane. It defaults
+	// to WriteLaneAuto, so a hook with no environment set asks the daemon and
+	// writes directly when it cannot be reached.
+	WriteLane WriteLaneMode
+	// WriteLaneSocket overrides the socket path the hook asks, or "" to derive
+	// it from the store path. A value here is an exact path, like every other
+	// path this parser reads.
+	WriteLaneSocket string
 }
 
 // hookEnvironment is the production entry point. It reads the real process
@@ -74,7 +129,38 @@ func HookEnvironmentFromOS(lookup func(string) (string, bool)) (HookEnvironment,
 				"without one; pass os.LookupEnv, or use hookEnvironment() which supplies it")
 	}
 
-	parsed := HookEnvironment{FaultPolicy: hostexit.FaultFailOpen}
+	parsed := HookEnvironment{FaultPolicy: hostexit.FaultFailOpen, WriteLane: WriteLaneAuto}
+
+	if raw, present := lookup(hookWriteLaneEnv); present && raw != "" {
+		switch WriteLaneMode(raw) {
+		case WriteLaneAuto, WriteLaneDirect:
+			parsed.WriteLane = WriteLaneMode(raw)
+		default:
+			return HookEnvironment{}, fmt.Errorf(
+				"%s is set to %q, which is not one of the two accepted values %s and %s; "+
+					"this happened in HookEnvironmentFromOS (cmd/pasture/hook_environment.go) while the hook "+
+					"was starting, before any host payload was read; the hook will not guess whether you asked "+
+					"it to write through the daemon's single-writer lane or directly to the store; "+
+					"set %s=%s to ask the daemon and write directly when it is unreachable, "+
+					"set %s=%s to never ask, or unset it to keep the default",
+				hookWriteLaneEnv, raw, WriteLaneAuto, WriteLaneDirect,
+				hookWriteLaneEnv, WriteLaneAuto, hookWriteLaneEnv, WriteLaneDirect)
+		}
+	}
+
+	if raw, present := lookup(hookWriteLaneSocketEnv); present && raw != "" {
+		if strings.TrimSpace(raw) != raw || strings.TrimSpace(raw) == "" {
+			return HookEnvironment{}, fmt.Errorf(
+				"%s is set to %q, which is blank or has leading or trailing space, so it is not an exact "+
+					"socket path; this happened in HookEnvironmentFromOS (cmd/pasture/hook_environment.go) while "+
+					"the hook was starting, before any host payload was read; a padded path names a different "+
+					"socket from the one you meant, so the hook would ask a daemon that is not there and fall "+
+					"back without you learning why; set %s to the exact socket path, or unset it to derive the "+
+					"path from the store",
+				hookWriteLaneSocketEnv, raw, hookWriteLaneSocketEnv)
+		}
+		parsed.WriteLaneSocket = raw
+	}
 
 	if raw, present := lookup(hookFailClosedEnv); present && raw != "" {
 		switch raw {
@@ -127,5 +213,65 @@ func HookEnvironmentFromOS(lookup func(string) (string, bool)) (HookEnvironment,
 		parsed.ActorClaim = raw
 	}
 
+	// The three time-budget knobs are parsed together and each is refused on its
+	// own terms: an unset or empty value keeps the default, a malformed one is
+	// refused instead of guessed, and a non-positive one is refused rather than
+	// read as "unset" — a zero is a value the operator typed, not an absence.
+	// The ORDERING between the three is not checked here, because the base
+	// profile is a parameter the parser does not see; it is checked where they
+	// are applied, by timeouts.New through Profile.WithOverride.
+	for _, knob := range []struct {
+		env    string
+		target *time.Duration
+	}{
+		{hookInvocationTimeoutEnv, &parsed.BudgetOverride.HookInvocation},
+		{hookIngressTimeoutEnv, &parsed.BudgetOverride.Ingress},
+		{hookStartSliceTimeoutEnv, &parsed.BudgetOverride.StartSlice},
+	} {
+		raw, present := lookup(knob.env)
+		if !present || raw == "" {
+			continue
+		}
+		d, err := parseHookDuration(knob.env, raw)
+		if err != nil {
+			return HookEnvironment{}, err
+		}
+		*knob.target = d
+	}
+
 	return parsed, nil
+}
+
+// parseHookDuration reads one Go duration from a hook time-budget knob. It
+// refuses a padded, malformed or non-positive value with an actionable error
+// and never guesses: guessing here changes how long the host waits for a hook,
+// which is the one decision the operator set the knob to make.
+func parseHookDuration(name, raw string) (time.Duration, error) {
+	if strings.TrimSpace(raw) != raw || strings.TrimSpace(raw) == "" {
+		return 0, fmt.Errorf(
+			"%s is set to %q, which is blank or has leading or trailing space, so it is not an exact "+
+				"duration; this happened in HookEnvironmentFromOS "+
+				"(cmd/pasture/hook_environment.go) while the hook was starting, before any host payload "+
+				"was read; a padded value is not the duration you meant; set %s to a Go duration such as "+
+				"750ms or 3s, or unset it to keep the default",
+			name, raw, name)
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf(
+			"%s is set to %q, which is not a Go duration; this happened in HookEnvironmentFromOS "+
+				"(cmd/pasture/hook_environment.go) while the hook was starting, before any host payload "+
+				"was read; the hook will not guess how long the host should wait for it; set %s to a Go "+
+				"duration such as 750ms or 3s, or unset it to keep the default: %w",
+			name, raw, name, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf(
+			"%s is set to %q, which is not a positive duration; this happened in HookEnvironmentFromOS "+
+				"(cmd/pasture/hook_environment.go) while the hook was starting, before any host payload "+
+				"was read; a zero or negative budget would expire before the work starts; set %s to a "+
+				"positive Go duration such as 750ms or 3s, or unset it to keep the default",
+			name, raw, name)
+	}
+	return d, nil
 }

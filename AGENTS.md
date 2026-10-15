@@ -18,7 +18,7 @@ project. All contributors (human and AI) must follow these standards.
 ```
 pasture/
 ├── cmd/
-│   ├── pasture/         # Local Pasture CLI (task verbs + top-level migrate)
+│   ├── pasture/         # Local Pasture CLI (task verbs + top-level migrate and prune)
 │   ├── pastured/        # DBOS engine-host daemon entry point
 │   └── pasture-release/ # Release and versioning tool
 ├── internal/
@@ -239,6 +239,39 @@ Rules:
 - A change to a tier is a change to observable behaviour under load. State the
   measurement that justifies it, and keep the ordering strict.
 
+**Operator overrides.** Three production tiers can be tuned at run time through
+the lifecycle hook's environment, read in `cmd/pasture/hook_environment.go` and
+validated by `internal/timeouts`:
+
+| Variable | Tier | Default | Meaning |
+|---|---|---|---|
+| `PASTURE_HOOK_INVOCATION_TIMEOUT` | `HookInvocation` | 5 s | how long ONE whole lifecycle hook invocation may run before it reports a fault |
+| `PASTURE_INGRESS_TIMEOUT` | `Ingress` | 1 s | one lifecycle receipt append, including its lock retries |
+| `PASTURE_START_SLICE_TIMEOUT` | `StartSlice` | 2 s | how long a slice sub-workflow waits for its `start_slice` signal |
+
+Each accepts a Go duration (`750ms`, `3s`). An unset or empty variable keeps the
+production value, so the default behaviour is unchanged. The three are applied
+together through `Profile.WithOverride`, which re-runs the constructor, so the
+ordering invariant above still holds and an inverted combination is refused with
+the same inversion error rather than silently clamped; a refused configuration
+reaches the host as a fail-open fault (the reason is on standard error and in the
+fault record) exactly as a malformed environment does.
+
+THE LIFECYCLE COMMAND CONSUMES TWO OF THE THREE. `HookInvocation` is the work
+deadline and `Ingress` is the receipt appender's deadline, so both take effect on
+the hook path. `StartSlice` is the slice sub-workflow's signal wait, which the
+hook command never reaches: it is read and validated with its siblings under the
+same mechanism (so a combination that inverts it is still refused), and its
+consumer is the slice workflow.
+
+The trade-off is the operator's to own. LOWERING the hook-invocation deadline
+makes the lifecycle hook fail fast: it abandons the work, reports a fault and
+answers the host fail-open, so the gate is left unevaluated while the host stops
+waiting at once instead of stalling for the whole window. RAISING it only helps
+on a fast store — a hook that outruns the host's own budget freezes the session
+it was meant to protect, and the default 5 s is already sized below the smallest
+host budget this tree has evidence for.
+
 ### The lifecycle fault record
 
 A lifecycle hook that cannot evaluate its event appends one JSON line to
@@ -315,15 +348,112 @@ points here rather than restating it, and
 end of that pointer is removed, if this paragraph is moved OUT of this section,
 or if that test is renamed while these two documents go on citing it.
 
-THE FILE HAS NO RETENTION. One line of roughly 500 bytes is appended per
-faulting invocation; nothing rotates, trims or removes a line, and no command
-reads or clears it. A hook runs on every wired event, so a database that stays
-broken accumulates one line per event, silently, because a fail-open fault exits
-0 and most hosts do not show the standard error of an exit-0 hook. Delete the
-file to clear it. Retention and reclaim are deferred, and this file is one of
-the surfaces that work inherits.
+THE FILE IS BOUNDED BY ROTATION, AND THE NEWEST RECORD IS NEVER THE ONE
+DROPPED. The live record is rotated onto a single backup
+(`lifecycle-faults.jsonl.1`) once it reaches `lifecycleFaultRecordMaxBytes`, so
+the pair is bounded at roughly twice that constant however long a store stays
+broken. The rotation is best-effort and lock-free, because many short-lived hook
+processes append concurrently beside the contended store: it costs one `stat(2)`
+on the common route and one `rename(2)` on the over-cap route, and a lost rename
+race simply leaves the record in place. It runs BEFORE the record for the current
+fault is composed, and that record is always appended to the live file
+afterwards, so bounding can never drop the newest record. Deleting the live file
+(and its backup) still clears the record. If rotation cannot run — the file is
+absent, the directory is unwritable, or a race is lost — the writer appends
+exactly as it did before, and the loss routes below are unchanged: a rotating
+store never silently swallows the record, because the record is only ever lost
+through one of those routes, each of which says so on standard error.
 
-A second unreclaimed surface comes from the same failure class. A lifecycle
+### The lifecycle write lane
+
+`pastured` fronts `pasture.db` as the SINGLE WRITER for the lifecycle hook
+firehose. Every hook sends one consult-and-record request to the daemon over a
+Unix-domain socket; the daemon re-validates the delivery, reads the gate and
+takes the decision from its ONE long-lived store handle, encodes the answer, and
+admits the record to a bounded in-memory queue. ONE lane goroutine commits
+admitted records; the hook is answered only after the commit, so "proceed" keeps
+exactly the meaning it has always had.
+
+Rules that must hold for any change to the lane:
+
+- **One lane, one splitter.** `internal/writelane` owns the budget
+  (`WriteLaneBudget`) and the ONE count/byte splitter (`ExceedsWriteBatch`).
+  Every grouping site asks the splitter; no site re-derives a bound. The lane is
+  the only writer for hook records, and it is what makes the property true — not
+  a connection or pool limit.
+- **The hold bound protects the other writers.** `HoldTarget` (400 ms, derived
+  as 4/5 of the SQLite busy tier and capped) bounds one lane turn, so the DBOS
+  engine's own writes and every CLI writer keep their measured wait.
+  `writelane.BudgetFromProfile` derives every bound from the validated timeout
+  profile and refuses a profile that cannot contain the hold.
+- **`proceed` means committed, and nothing is acknowledged early.** The lane's
+  `Submit` returns only after the record's `Settle` ran and reported its result,
+  which is only after the flush's one transaction committed or failed.
+  A pre-admission refusal (`ErrNotAdmitted`, or any refusal raised before the
+  first write attempt) is provably NOT-RECORDED; anything after a request was
+  sent and not answered is RECORD-UNKNOWN. Never claim durability the lane does
+  not have.
+- **Fallback never follows a send.** A daemon that is absent, refusing, or
+  speaking another protocol version makes the hook write directly, exactly as a
+  build without a lane does, with ONE diagnostic line per invocation WHEN A LANE
+  WAS EXPECTED (the socket exists but could not be used). On a machine that has
+  never run `pastured` the hook is byte-identical to a build without a lane on
+  both streams, and the only trace is the fault record's `writer=direct`. A
+  request that WAS sent and whose answer never came is reported record-unknown
+  and never re-written directly, because the daemon may already have committed
+  it.
+- **Two daemons cannot share a lane.** The daemon takes an exclusive `flock` on
+  `<socket>.lock`. A second daemon on the same store is refused the LANE ROLE
+  and keeps serving everything else, so a handover or the concurrent-open race
+  the audit migrator already handles does not take the durable engine down; the
+  holder serves that store's hooks through the one socket, so there is still
+  exactly one lane writer. A stale socket is reclaimed only through that
+  election.
+- **One request per event, ONE transaction per lane turn (phase 2).** The lane
+  groups records into bounded batches with the ONE splitter, then commits the
+  whole turn's operations in ONE `ApplyBatchContext` (Provenance v0.9.0's
+  `BatchJournal`, capped at `MaxBatchRecords`), so a flush is one transaction
+  rather than one per record. A record's durable work is split into
+  `writelane.Record.Prepare` (blob write, identity, canonicalization — before
+  the transaction) and `writelane.Record.Settle` (map the record's own outcome
+  back and run its continuation). A prepare failure fails only that record; the
+  batch transaction contains only the operations that were prepared. The batch
+  is all-or-nothing, so a whole-batch failure (`*BatchApplyError`) is never
+  reported as a partial commit, and a short-circuited record — durable from an
+  earlier transaction — is NOT a failure. `writelane.Report` is the ONE home of
+  the outcome-to-report mapping.
+- **A store the open-path guard refuses is never a lane error.** The URI
+  cutover's identity-format guard runs inside the store opener, so a refused
+  store makes `pastured` exit with the guard's own storage category and text and
+  the lane is never hosted (no socket exists). A hook's direct fallback then
+  meets the SAME refusal on its own open, and because that refusal is raised
+  before the first write attempt it is reported NOT-RECORDED — never
+  record-unknown. The served path never opens a store, so a guard refusal cannot
+  surface as a lane error. Pinned by
+  `cmd/pasture TestTheGuardRefusalOnTheDirectFallbackIsNotRecorded` and
+  `cmd/pastured TestTheDaemonRefusesARefusedStoreAndHostsNoLane`.
+- **Windows runs direct-only.** There is no Unix-domain-socket transport there,
+  and the hook says so rather than failing.
+
+Operator knobs. The HOOK reads two variables, parsed in
+`cmd/pasture/hook_environment.go` with the same "set-but-empty is not an opt-in"
+rule as every other knob:
+
+| Variable | Values | Effect |
+|---|---|---|
+| `PASTURE_WRITE_LANE` | `auto` (default), `direct` | ask the daemon and fall back when it is unreachable, or never ask |
+| `PASTURE_WRITE_LANE_SOCKET` | an exact socket path | override the path derived from the store path |
+
+The DAEMON derives its socket from the store path
+(`$XDG_RUNTIME_DIR/pasture/lane-<sha256(dbPath)[:12]>.sock`, 0600 inside a 0700
+directory; beside the database when `XDG_RUNTIME_DIR` is unset) and derives its
+lane budget from the timeout profile. A fresh store must be initialised before
+any hook can be recorded against it: the persisted system identity is written by
+a normal Pasture command and the served receipt resolves it read-only.
+
+Measurement record: `docs/audits/lifecycle-write-lane.md`.
+
+A DIFFERENT unreclaimed surface comes from the same failure class. A lifecycle
 invocation abandoned before commit entry, or whose append fails, can leave a committed payload blob with no
 occurrence — one orphan per abandoned invocation, holding that invocation's raw
 host payload, bounded by the 1 MiB ingress payload cap. The write order is
@@ -387,6 +517,79 @@ contends. It would therefore be slowest under exactly the condition that
 produces orphans, and a slow enough count would push the invocation into its
 deadline and leave one more orphan behind — making the counter a cause of the
 thing it counts. A test asserts that no hook-path source calls it.
+
+### Reclaiming the blob backlog: `pasture prune`
+
+The read commands' reclaim is a safety valve bounded small (1024 rows, one
+per command); under a sustained flood the backlog outruns it, so the operator
+gets an explicit database-level verb. `pasture prune` is a TOP-LEVEL command
+beside `migrate`, because it takes the store's write lock and may run VACUUM.
+
+IT IS A HYGIENE RECLAIM, AND IT IS NOT A CAPACITY FIX FOR A FULLY-REFERENCED
+STORE. It deletes only blobs no recorded occurrence names, so it reclaims
+exactly the orphans the store has left. That can be most of the blob bytes:
+measured on a byte copy of the live store (2026-10-14), 24,416 of 28,975 blobs
+(123.5 MB of the 160.4 MB of body bytes) were unnamed; pruning reclaimed
+24,414 rows / 123.46 MB, leaving 4,561 blobs (36.9 MB, all but two referenced);
+without VACUUM the file did not shrink at all (it grew by ~4.6 MB and held
+41,288 free pages), and with `--vacuum` it shrank from 253 MB to 87 MB. It
+reclaims NOTHING on a store whose blobs are ALL named by recorded occurrences —
+those bytes are the recorded evidence, and the verb cannot touch them without
+breaking the read path, because the projection re-inserts each occurrence's
+digest against the blob table's foreign key. What would bound such a store is a
+retention policy over the lifecycle occurrence journal ITSELF — age- or
+size-bounded dropping of old per-event rows, and transitively the blobs they
+stop naming. That is a policy over audit history, an operator decision with a
+blast radius this verb does not have, and this change does NOT implement it;
+the shape it would need, its knobs and its invariants are recorded on
+https://github.com/dayvidpham/pasture/issues/59.
+
+It deletes ORPHAN payload blobs and nothing else. An orphan is a payload blob
+no recorded occurrence names, left by a hook invocation abandoned between its
+two durable writes; the verb reclaims them in bounded batches (`PruneCap`,
+4096 rows per batch), oldest first, each batch its own write transaction so a
+store that is being written keeps moving between batches. Its retention and
+its refusals:
+
+- **Age.** `--max-age` sets a retention age; an orphan is eligible only when it
+  is older than `max(--max-age, WriterWindow)`, so the writer window is a FLOOR
+  and never a ceiling. The default is zero, which keeps no orphan beyond that
+  floor; the read path's behavior is the same rule read at 1024 rows a command.
+- **Size.** `--max-bytes` stops the run once that many bytes have been dropped,
+  so one command cannot reclaim more than the operator asked for. A run that
+  stops at either bound reports `Truncated` rather than pretending the job is
+  done, and a second run finds the rest.
+- **A blob an occurrence names is NEVER deleted.** The projection re-inserts
+  each occurrence's `payload_digest` against `lifecycle_payload_blobs`'s
+  foreign key, so deleting a named blob would make the very next read command
+  fail on that key. Each batch rebuilds the projection from the journal in the
+  same transaction the delete runs in, so "no occurrence names this digest" is
+  true of the journal as of the batch.
+- **The newest row is NEVER deleted.** The prune excludes the one row with the
+  greatest `written_at` (ties broken by the greatest digest), whatever its age.
+- **An unknown age is NEVER eligible.** A `written_at` of 0 keeps the row, for
+  the same reason the read path's reclaim never treats 0 as old.
+- **History is preserved.** Only an orphan's raw bytes are lost; every
+  recorded occurrence keeps its digest, contract, event, bindings, envelope and
+  interpreted evidence in the journal, and the verb prints what it kept and
+  what it lost beside the counts rather than reporting a bare number.
+
+The delete returns the freed pages to SQLite's free list, where new writes
+reuse them, but the database FILE only shrinks after VACUUM. `--vacuum` runs
+it; without it the verb says the file has not shrunk yet. VACUUM rewrites the
+whole file and takes the store's write lock, so it is opt-in and best run when
+no hook writer is active.
+
+WHO READS A BLOB. Nothing on the hook path or the write path reads a blob body:
+the receipt service only ever writes one, and the projection rebuild reads only
+the digest the journal carries. The one production reader is
+`model.LifecycleReader.Payload`, the public bounded reader's exact-byte
+read-back of a recorded occurrence, which today has no in-tree caller and
+exists for a consumer that wants the original host bytes. Because the prune
+never deletes a blob an occurrence names, that read-back is unchanged for every
+recorded occurrence: it still finds the exact bytes, and a deleted digest can
+only ever be one no occurrence names. That is why the prune can be the only
+delete path the payload blob table has without making read-back dishonest.
 
 ### Capturing host payloads and clearing them into fixtures
 
@@ -589,7 +792,7 @@ do not promise a snapshot under concurrent writers.
 | `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
 | `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
 | `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `github.com/dayvidpham/provenance` | v0.6.0 | Task, edge and receipt store; slash-only identity cutover and caller-transaction evidence/result reads; built on the same DBOS version |
+| `github.com/dayvidpham/provenance` | v0.9.0 | Task, edge and receipt store; context-aware borrowed activation and software registration; store-currency fast path and the O(1) verified-as-of ledger open; in-transaction schema completion and a verified foreign-key bracket for the offline identity cutover; a declared membership for the identity-format conversion that preserves `actor_namespace_claims.claimant_id` byte-exact as an opaque namespace-valued label; an optional `BatchJournal` extension (`ApplyBatchContext`, concrete `DB.ApplyBatch`) that commits a bounded batch of operations in ONE `BEGIN IMMEDIATE` transaction with a per-record outcome for every input (committed / short-circuited / conflict / failed / not-recorded), all-or-nothing, with the two store-wide integrity gates hoisted to run once over the final transaction state; built on the same DBOS version |
 | `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
 | `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |

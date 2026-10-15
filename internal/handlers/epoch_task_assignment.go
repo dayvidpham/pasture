@@ -134,7 +134,7 @@ func parseTaskAssignmentTransferRequest(in TaskTransferAssignmentInput) (protoco
 func parseTaskAssignmentTransferTask(value string) (provenance.TaskID, error) {
 	id, err := provenance.ParseTaskID(value)
 	if err != nil || id.String() != value {
-		return provenance.TaskID{}, taskAssignmentTransferValidationError(fmt.Sprintf("The %q field has invalid value %q.", "task", value), "The task assignment transfer requires the canonical task identity", "supply the canonical namespace--UUID task identity", err)
+		return provenance.TaskID{}, taskAssignmentTransferValidationError(fmt.Sprintf("The %q field has invalid value %q.", "task", value), "The task assignment transfer requires the canonical task identity", "supply the canonical namespace/UUID task identity", err)
 	}
 	return id, nil
 }
@@ -142,7 +142,7 @@ func parseTaskAssignmentTransferTask(value string) (provenance.TaskID, error) {
 func parseTaskAssignmentTransferActor(field, value string) (provenance.ActorID, error) {
 	id, err := provenance.ParseActorID(value)
 	if err != nil || id.String() != value {
-		return provenance.ActorID{}, taskAssignmentTransferValidationError(fmt.Sprintf("The %q field has invalid value %q.", field, value), "The task assignment transfer requires a canonical registered actor identity", "supply the canonical namespace--UUID registered actor identity", err)
+		return provenance.ActorID{}, taskAssignmentTransferValidationError(fmt.Sprintf("The %q field has invalid value %q.", field, value), "The task assignment transfer requires a canonical registered actor identity", "supply the canonical namespace/UUID registered actor identity", err)
 	}
 	return id, nil
 }

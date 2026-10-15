@@ -1,0 +1,351 @@
+- name: fenced
+  file: skill.md
+  content: "## Work\n```bash\nbd ready\n```\n"
+  reject: true
+- name: inline
+  file: skill.md
+  content: 'Run `bd show "$TASK"` after recovery.'
+  reject: true
+- name: prose recipe
+  file: skill.md
+  content: 'Run bd list to find work.'
+  reject: true
+- name: env wrapper
+  file: hook.sh
+  content: 'env -i PATH="$PATH" bd ready'
+  reject: true
+- name: command wrapper
+  file: hook.sh
+  content: 'command -- bd blocked'
+  reject: true
+- name: sudo wrapper
+  file: hook.sh
+  content: 'sudo -u user -- bd sync'
+  reject: true
+- name: quoted command
+  file: hook.sh
+  content: "'bd' ready"
+  reject: true
+- name: shell array
+  file: hook.sh
+  content: 'argv=("bd" "show" "$ID"); "${argv[@]}"'
+  reject: true
+- name: JSON argv
+  file: hooks.json
+  content: '{"command": ["bd", "ready"]}'
+  reject: true
+- name: JSON string
+  file: hooks.json
+  content: '{"command": "env bd ready"}'
+  reject: true
+- name: JS prompt
+  file: plugin.ts
+  content: 'event.system.push({text: "Recover by running bd ready"});'
+  reject: true
+- name: continuation
+  file: hook.sh
+  content: "bd \\\n ready"
+  reject: true
+- name: escaped command token
+  file: hook.sh
+  content: 'b\d ready'
+  reject: true
+- name: split command token
+  file: hook.sh
+  content: "b\\\nd ready"
+  reject: true
+- name: shell heredoc
+  file: hook.sh
+  content: "bash <<'EOF'\nbd ready\nEOF\n"
+  reject: true
+- name: prompt heredoc
+  file: hook.sh
+  content: "cat <<'PROMPT'\nRecover using bd ready.\nPROMPT\n"
+  reject: true
+- name: historical framing alone insufficient
+  file: history.md
+  content: "# Historical only — non-operational quotation\n\n```sh\nbd close old\n```"
+  reject: true
+- name: historical incorrect example alone insufficient
+  file: history.md
+  content: "# Historical incorrect example\nNever execute `bd sync`."
+  reject: true
+- name: unknown ambiguous command
+  file: skill.md
+  content: 'Run bd frobnicate --future'
+  reject: true
+- name: shell comment
+  file: hook.sh
+  content: '# bd ready was removed'
+  reject: false
+- name: echo literal
+  file: hook.sh
+  content: "echo 'bd ready'"
+  reject: false
+- name: echo substitution executes
+  file: hook.sh
+  content: 'echo "$(bd ready)"'
+  reject: true
+- name: eval quoted
+  file: hook.sh
+  content: "eval 'bd ready'"
+  reject: true
+- name: shell c quoted
+  file: hook.sh
+  content: "sh -c 'bd ready'"
+  reject: true
+- name: noncommand name
+  file: skill.md
+  content: 'The bd binary is retired. Beads is historical.'
+  reject: false
+- name: boundary
+  file: skill.md
+  content: 'Use bdist and the bd-retirement report.'
+  reject: false
+- name: native pasture
+  file: skill.md
+  content: 'Run `pasture task ready`.'
+  reject: false
+- name: create
+  file: recipe.md
+  content: '`bd create title`'
+  reject: true
+- name: q
+  file: recipe.md
+  content: '`bd q title`'
+  reject: true
+- name: update
+  file: recipe.md
+  content: '`bd update task --status in_progress`'
+  reject: true
+- name: close
+  file: recipe.md
+  content: '`bd close task`'
+  reject: true
+- name: comments add
+  file: recipe.md
+  content: '`bd comments add task text`'
+  reject: true
+- name: comment add
+  file: recipe.md
+  content: '`bd comment add task text`'
+  reject: true
+- name: comments list
+  file: recipe.md
+  content: '`bd comments list task`'
+  reject: true
+- name: comments
+  file: recipe.md
+  content: '`bd comments task`'
+  reject: true
+- name: label add
+  file: recipe.md
+  content: '`bd label add task label`'
+  reject: true
+- name: label remove
+  file: recipe.md
+  content: '`bd label remove task label`'
+  reject: true
+- name: label list
+  file: recipe.md
+  content: '`bd label list task`'
+  reject: true
+- name: update add label
+  file: recipe.md
+  content: '`bd update task --add-label label`'
+  reject: true
+- name: dep add
+  file: recipe.md
+  content: '`bd dep add parent child`'
+  reject: true
+- name: dep tree
+  file: recipe.md
+  content: '`bd dep tree parent`'
+  reject: true
+- name: stats
+  file: recipe.md
+  content: '`bd stats`'
+  reject: true
+- name: count
+  file: recipe.md
+  content: '`bd count`'
+  reject: true
+- name: search
+  file: recipe.md
+  content: '`bd search words`'
+  reject: true
+- name: task
+  file: recipe.md
+  content: '`bd task create title`'
+  reject: true
+- name: prime
+  file: recipe.md
+  content: '`bd prime`'
+  reject: true
+- name: edit
+  file: recipe.md
+  content: '`bd edit task`'
+  reject: true
+- name: mol
+  file: recipe.md
+  content: '`bd mol workflow`'
+  reject: true
+- name: doctor
+  file: recipe.md
+  content: '`bd doctor`'
+  reject: true
+- name: bare executable
+  file: recipe.md
+  content: "```sh\nbd\n```"
+  reject: true
+- name: bare inline executable
+  file: recipe.md
+  content: 'Run `bd`.'
+  reject: true
+- name: permission recipe
+  file: hooks.json
+  content: '{"bash":{"bd *":"allow"}}'
+  reject: true
+- name: unknown verb in fence not prose
+  file: recipe.md
+  content: "```sh\nbd binary\n```"
+  reject: true
+- name: comment not executable
+  file: hook.sh
+  content: 'echo ok # bd ready is removed'
+  reject: false
+- name: closed echo quote cannot hide execution
+  file: hook.sh
+  content: "echo 'ok'; bd ready"
+  reject: true
+- name: heredoc comment is prompt content
+  file: hook.sh
+  content: "cat <<'PROMPT'\n# Run bd ready\nPROMPT\n"
+  reject: true
+- name: exact historical negative
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  reject: false
+- name: history owner changed
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: owner
+  reject: true
+- name: history section changed
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: section
+  reject: true
+- name: history node changed
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: node
+  reject: true
+- name: history range changed
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: range
+  reject: true
+- name: history content window changed
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: window
+  reject: true
+- name: history digest changed
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: digest
+  reject: true
+- name: history framing removed
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: framing
+  reject: true
+- name: new command in historical owner
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: content
+  reject: true
+- name: pinned quotation missing
+  file: history.md
+  content: "# Historical incorrect example — non-operational quotation\n\nNever run `bd sync`.\n"
+  history: true
+  mutation: missing
+  reject: true
+- name: call command in prose
+  file: skill.md
+  content: 'Call bd from your terminal.'
+  reject: true
+- name: invoke command in prose
+  file: skill.md
+  content: 'Invoke bd with --flag.'
+  reject: true
+- name: use command in prose
+  file: skill.md
+  content: 'Use bd for issue tracking.'
+  reject: true
+- name: start command in prose
+  file: skill.md
+  content: 'Start bd for issue tracking.'
+  reject: true
+- name: launch command in prose
+  file: skill.md
+  content: 'Launch bd with --help.'
+  reject: true
+- name: visually ambiguous tracker token
+  file: skill.md
+  content: "Run b\u200bd ready."
+  reject: true
+- name: ambiguous prose-shaped unknown operand
+  file: skill.md
+  content: 'bd with --future'
+  reject: true
+- name: echoed recipe piped to shell
+  file: hook.sh
+  content: "echo 'bd ready' | sh"
+  reject: true
+- name: printed recipe evaluated later
+  file: hook.sh
+  content: "printf 'bd ready' > /tmp/recipe; sh /tmp/recipe"
+  reject: true
+- name: task identifier table heading is not a command
+  file: docs/version.md
+  content: "| bd task | summary | status |\n|---|---|---|\n| old-id | delivered | closed |\n"
+  reject: false
+- name: command in table header still rejects
+  file: docs/operations.md
+  content: "| `bd task` | summary |\n|---|---|\n"
+  reject: true
+- name: task column with executable operand rejects
+  file: docs/operations.md
+  content: "| bd task create | summary |\n|---|---|\n"
+  reject: true
+- name: prose migration arrow is not a command
+  file: docs/design.md
+  content: 'The `activities` store precedes the bd→`pasture task` migration.'
+  reject: false
+- name: task identifier heading cannot exempt executable sibling cell
+  file: docs/operations.md
+  content: "| bd task | Run bd task create new |\n|---|---|\n"
+  reject: true
+- name: task identifier heading cannot exempt earlier executable cell
+  file: docs/operations.md
+  content: "| Run bd task create new | bd task |\n|---|---|\n"
+  reject: true
+- name: task identifier heading cannot exempt bare executable sibling cell
+  file: docs/operations.md
+  content: "| bd task | bd task create new |\n|---|---|\n"
+  reject: true
+- name: table-like config command payload cannot borrow identifier exemption
+  file: docs/hooks.json
+  content: '{"command":"| bd task | Run bd task create new |\n|---|---|\n"}'
+  reject: true

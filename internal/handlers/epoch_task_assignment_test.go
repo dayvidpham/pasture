@@ -20,8 +20,8 @@ func TestTaskTransferAssignmentValidatesBeforeOpeningStore(t *testing.T) {
 		TaskID:         "not-a-task-id",
 		Slot:           "owner-responsibility",
 		NextAssignment: "assignment/next",
-		Actor:          "cli--01960000-0000-7000-8000-000000000001",
-		Occupant:       "cli--01960000-0000-7000-8000-000000000002",
+		Actor:          "cli/01960000-0000-7000-8000-000000000001",
+		Occupant:       "cli/01960000-0000-7000-8000-000000000002",
 		Output:         &bytes.Buffer{},
 	}, func(string) (taskAssignmentTransferStore, error) {
 		opened = true
@@ -45,9 +45,9 @@ func TestTaskTransferAssignmentValidatesBeforeOpeningStore(t *testing.T) {
 func TestTaskTransferAssignmentUsesOnlySemanticRequestAndResult(t *testing.T) {
 	t.Parallel()
 
-	taskID := mustTaskAssignmentTransferTask(t, "cli--01960000-0000-7000-8000-000000000010")
-	actor := mustTaskAssignmentTransferActor(t, "cli--01960000-0000-7000-8000-000000000011")
-	occupant := mustTaskAssignmentTransferActor(t, "cli--01960000-0000-7000-8000-000000000012")
+	taskID := mustTaskAssignmentTransferTask(t, "cli/01960000-0000-7000-8000-000000000010")
+	actor := mustTaskAssignmentTransferActor(t, "cli/01960000-0000-7000-8000-000000000011")
+	occupant := mustTaskAssignmentTransferActor(t, "cli/01960000-0000-7000-8000-000000000012")
 	store := &taskAssignmentTransferTestStore{result: protocol.TransferTaskAssignmentResult{
 		Previous: protocol.TaskAssignmentState{
 			TaskID:       taskID,
@@ -90,7 +90,7 @@ func TestTaskTransferAssignmentUsesOnlySemanticRequestAndResult(t *testing.T) {
 	if store.request != wantRequest {
 		t.Fatalf("request = %+v, want %+v", store.request, wantRequest)
 	}
-	const wantOutput = `{"previous":{"taskId":"cli--01960000-0000-7000-8000-000000000010","slot":"owner-responsibility","assignmentId":"assignment/previous","occupant":"cli--01960000-0000-7000-8000-000000000011"},"next":{"taskId":"cli--01960000-0000-7000-8000-000000000010","slot":"owner-responsibility","assignmentId":"assignment/next","occupant":"cli--01960000-0000-7000-8000-000000000012"},"replayed":true}` + "\n"
+	const wantOutput = `{"previous":{"taskId":"cli/01960000-0000-7000-8000-000000000010","slot":"owner-responsibility","assignmentId":"assignment/previous","occupant":"cli/01960000-0000-7000-8000-000000000011"},"next":{"taskId":"cli/01960000-0000-7000-8000-000000000010","slot":"owner-responsibility","assignmentId":"assignment/next","occupant":"cli/01960000-0000-7000-8000-000000000012"},"replayed":true}` + "\n"
 	if got := output.String(); got != wantOutput {
 		t.Fatalf("output = %q, want %q", got, wantOutput)
 	}
@@ -134,11 +134,11 @@ func (s *taskAssignmentTransferTestStore) Close() error {
 
 func validTaskAssignmentTransferInput(output *bytes.Buffer) TaskTransferAssignmentInput {
 	return TaskTransferAssignmentInput{
-		TaskID:         "cli--01960000-0000-7000-8000-000000000020",
+		TaskID:         "cli/01960000-0000-7000-8000-000000000020",
 		Slot:           "owner-responsibility",
 		NextAssignment: "assignment/next",
-		Actor:          "cli--01960000-0000-7000-8000-000000000021",
-		Occupant:       "cli--01960000-0000-7000-8000-000000000022",
+		Actor:          "cli/01960000-0000-7000-8000-000000000021",
+		Occupant:       "cli/01960000-0000-7000-8000-000000000022",
 		Output:         output,
 	}
 }

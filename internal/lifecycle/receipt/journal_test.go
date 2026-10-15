@@ -112,14 +112,22 @@ func TestAStoreBuiltAsALiteralStampsTheWallClock(t *testing.T) {
 // payload blob table is reached through. The write door, BlobStore, declares
 // exactly Put, and the receipt service depends on nothing else of the store;
 // the concrete store carries the write plus read-only inspection and NO
-// delete; the delete door, PayloadReclaimer, declares exactly the bounded
-// orphan delete, and only the projection rebuild's reclaim constructs it. A
+// delete; the delete door, PayloadReclaimer, declares exactly the two bounded
+// orphan deletes, and only the projection rebuild's reclaim constructs it. A
 // method added to either set is a new door and must be argued here.
+//
+// TWO DELETE METHODS ARE DELIBERATE. The read path's reclaim
+// (ReclaimOrphansWrittenBefore) and the operator verb's bulk delete
+// (PruneOrphansWrittenBefore) delete the same class of row under the same
+// safety rules, and the second adds one refusal of its own: it never deletes
+// the row at the greatest written_at. They are separate methods and not a
+// variant of one so that the read path's single-statement guarantee stays
+// exactly as it was; the door is still ONE type, constructed in one place.
 func TestTheWriteDoorAndTheDeleteDoorStayNarrow(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, []string{"Put"}, methodNames(reflect.TypeOf((*receipt.BlobStore)(nil)).Elem()), "the write door declares exactly Put")
 	assert.Equal(t, []string{"Exists", "Put", "Reclaimable", "ReclaimableCount"}, methodNames(reflect.TypeOf(receipt.SQLiteBlobStore{})), "the concrete store writes and inspects; a delete on it would make its doc false and the value unsafe to hand around")
-	assert.Equal(t, []string{"ReclaimOrphansWrittenBefore"}, methodNames(reflect.TypeOf(receipt.PayloadReclaimer{})), "the delete door declares exactly the bounded orphan delete")
+	assert.Equal(t, []string{"PruneOrphansWrittenBefore", "ReclaimOrphansWrittenBefore"}, methodNames(reflect.TypeOf(receipt.PayloadReclaimer{})), "the delete door declares exactly the two bounded orphan deletes")
 	assert.False(t, reflect.TypeOf(receipt.PayloadReclaimer{}).Implements(reflect.TypeOf((*receipt.BlobStore)(nil)).Elem()), "the delete door is not a write door")
 }
 

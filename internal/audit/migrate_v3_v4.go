@@ -26,10 +26,10 @@
 //
 // Legacy audit_events.epoch_id values are migrated AS-IS into
 // context_edges, regardless of whether the string parses as a Provenance
-// TaskId. Free-string epoch IDs (e.g. "epoch-2026-04-22-mvp") and valid
-// TaskIDs (e.g. "aura-plugins--01968a3c-1234-7000-8000-...") are both
-// preserved because they are historical records and rejecting them would
-// lose audit data. The §7.12 ParseTaskId validation applies only to NEW
+// TaskId. Free-string epoch IDs (e.g. "epoch-2026-04-22-mvp") and TaskIDs in
+// the retired two-dash form (e.g. "aura-plugins--01968a3c-1234-7000-8000-...")
+// are both preserved because they are historical records and rejecting them
+// would lose audit data. The §7.12 ParseTaskId validation applies only to NEW
 // workflow starts post-migration; that validation is owned by S8.
 //
 // Pseudocode parity with PROPOSAL-2 §7.10.1 v4 row:

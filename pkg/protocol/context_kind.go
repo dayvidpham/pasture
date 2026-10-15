@@ -27,7 +27,7 @@ const (
 	ContextNone ContextKind = "None"
 
 	// ContextEpoch attaches an event to an epoch (Provenance TaskID for the
-	// originating REQUEST). Wire format of context_id: "namespace--uuid".
+	// originating REQUEST). Wire format of context_id: "namespace/uuid".
 	ContextEpoch ContextKind = "EpochContext"
 
 	// ContextSlice attaches an event to an implementation slice (Beads
@@ -94,7 +94,7 @@ func (k ContextKind) String() string { return string(k) }
 //
 // ContextId's shape varies per Kind:
 //   - ContextEpoch / ContextSlice / ContextReview / ContextFollowup: a
-//     Provenance TaskID string ("namespace--uuid").
+//     Provenance TaskID string ("namespace/uuid").
 //   - ContextGit: a git commit SHA (or remote ref).
 //   - ContextSkill: a skill run ID.
 //   - ContextSession: a Claude Code session ID.

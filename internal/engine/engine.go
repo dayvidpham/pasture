@@ -174,6 +174,12 @@ type Engine struct {
 // The returned Engine is NOT yet launched; call Launch to run the recovery
 // sweep and accept work. Always call Shutdown to release handles.
 func New(ctx context.Context, cfg Config) (*Engine, error) {
+	return newEngine(ctx, cfg, nil)
+}
+
+// newEngine's observer marks the schema-gated, pre-audit boundary. The public
+// constructor supplies nil; tests can coordinate an independent SQLite writer.
+func newEngine(ctx context.Context, cfg Config, beforeAudit func(*sql.DB)) (*Engine, error) {
 	if cfg.Timeouts.IsZero() {
 		cfg.Timeouts = timeouts.ProductionProfile()
 	}
@@ -232,7 +238,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	// rejects a database recorded at a newer version than the build knows). The
 	// refusal below promises that no pasture data was written and that the older
 	// build can still read the history, so that promise must be true.
-	db, err := dbconn.OpenSharedDBWithProfile(cfg.DBPath, cfg.Timeouts)
+	db, err := dbconn.OpenSharedDBContextWithProfile(ctx, cfg.DBPath, cfg.Timeouts)
 	if err != nil {
 		return nil, err
 	}
@@ -268,15 +274,18 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	// SQLITE_BUSY while the engine still had budget left. See
 	// https://github.com/dayvidpham/pasture/issues/104.
 	trail := cfg.Trail
+	if beforeAudit != nil {
+		beforeAudit(db)
+	}
 	var trailCloser io.Closer
 	if trail == nil {
 		var st *audit.SqliteAuditTrail
 		var err error
 		if cfg.SkipMigrations {
-			st, err = audit.NewSqliteAuditTrailWithOptions(cfg.DBPath,
+			st, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, cfg.DBPath,
 				audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.Timeouts))
 		} else {
-			st, err = audit.NewSqliteAuditTrailWithOptions(cfg.DBPath,
+			st, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, cfg.DBPath,
 				audit.WithTimeoutProfile(cfg.Timeouts))
 		}
 		if err != nil {
@@ -291,7 +300,7 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 		trailCloser = st
 	}
 
-	if err := ensureProjectionTable(db); err != nil {
+	if err := ensureProjectionTableContext(ctx, db); err != nil {
 		_ = db.Close()
 		if trailCloser != nil {
 			_ = trailCloser.Close()

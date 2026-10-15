@@ -291,7 +291,7 @@ func gateBoundSnapshot(t *testing.T, wire string, episodes ...gateauthority.Epis
 func gateOwnedEpisode(t *testing.T, wire string, phase gateauthority.TaskPhase) gateauthority.Episode {
 	return gateauthority.Episode{
 		Assignment: provenance.AssignmentID(wire + "-assignment"),
-		Task:       gateTask(t, "lifecycle-gate-task--0193f1c0-0000-7000-8000-0000000000a1"),
+		Task:       gateTask(t, "lifecycle-gate-task/0193f1c0-0000-7000-8000-0000000000a1"),
 		Role:       gateauthority.RoleOwnerResponsibility,
 		Phase:      phase,
 	}
@@ -299,7 +299,7 @@ func gateOwnedEpisode(t *testing.T, wire string, phase gateauthority.TaskPhase) 
 
 // ─── the production wiring, read from the source ──────────────────────────────
 
-// TestTheLifecycleEntryPointsWireTheGateReader pins BOTH committing surfaces to
+// TestTheLifecycleEntryPointsWireTheGateReader pins EVERY committing surface to
 // the real reader, and pins the shape of the gate call so a second core cannot
 // grow beside the first.
 //
@@ -310,6 +310,12 @@ func gateOwnedEpisode(t *testing.T, wire string, phase gateauthority.TaskPhase) 
 // unevaluated — which is the exact state this change exists to end. So the pin
 // reads the non-test sources and names the constructor, the opener, the parameter
 // and the number of callers.
+//
+// THERE ARE THREE SURFACES NOW, and the third is the daemon's served path: the
+// direct native core, the raw committing path, and the write-lane server. Each
+// consults the SAME reader over the SAME store; the server reaches it through
+// the factory it was constructed with, which defaults to tasks.NewGateReader
+// and is named in its own constructor.
 func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 	t.Parallel()
 
@@ -318,6 +324,7 @@ func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 
 	nativeReaders, rawReaders := 0, 0
 	coreCallers, gateCalls := 0, 0
+	serverReaders := 0
 	for _, name := range sources {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
@@ -373,12 +380,18 @@ func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 				gateCalls++
 				require.Len(t, call.Args, 7, "%s calls evaluateGate with the wrong shape", name)
 				supplied := gateSourceOf(call.Args[2])
-				if name == "hook_lifecycle_raw.go" {
+				switch name {
+				case "hook_lifecycle_raw.go":
 					require.Equal(t, "tasks.NewGateReader", supplied,
 						"the raw surface is a second copy of the committing path, and the one thing it may not do "+
 							"is evaluate the same payload by a weaker rule than the native path")
 					rawReaders++
-				} else {
+				case "hook_lifecycle_server.go":
+					require.Equal(t, "s.readers", supplied,
+						"the served path must consult the reader through the factory its constructor resolved, which "+
+							"defaults to tasks.NewGateReader and is the only production value")
+					serverReaders++
+				default:
 					require.Equal(t, "readers", supplied,
 						"the native path consults the reader through the factory it was given, so an in-process proof "+
 							"can drive the gate without a second core")
@@ -393,8 +406,12 @@ func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 			"free to disagree about when the gate runs")
 	require.Equal(t, 1, rawReaders,
 		"the raw committing path must run the same evaluateGate, or the two surfaces would judge one payload differently")
+	require.Equal(t, 1, serverReaders,
+		"the daemon's served path is the third committing surface and must be pinned by name, or a future edit "+
+			"could evaluate it with a reader the store does not back")
 	require.Equal(t, 1, coreCallers, "hookLifecycle must have exactly one non-test caller")
-	require.Equal(t, 2, gateCalls, "evaluateGate must be called from exactly two places: the native core and the raw commit")
+	require.Equal(t, 3, gateCalls,
+		"evaluateGate must be called from exactly three places: the native core, the raw commit, and the write-lane server")
 
 	// THE FACTORY TYPE LIVES HERE, NOT IN THE AUTHORITY PACKAGE. That package
 	// sits at the bottom of the import graph and must not name a Pasture store,
@@ -452,7 +469,7 @@ func TestObservationNeverConsultsTheReader(t *testing.T) {
 // and would allow or deny on another session's ownership.
 func TestTheGateConsultsTheReaderWithTheBoundSession(t *testing.T) {
 	t.Parallel()
-	const actor = "lifecycle-gate-allow--0193f1c0-0000-7000-8000-0000000000b1"
+	const actor = "lifecycle-gate-allow/0193f1c0-0000-7000-8000-0000000000b1"
 	raw := gateFixture(t, gateClaudeGateFixture)
 	snapshot := gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan))
 	reader := &gateFakeReader{snap: snapshot}
@@ -479,7 +496,7 @@ func TestTheGateConsultsTheReaderWithTheBoundSession(t *testing.T) {
 // a host response that is not a continue.
 func TestTheGateDeniesABoundActorWithNoAssignment(t *testing.T) {
 	t.Parallel()
-	const actor = "lifecycle-gate-deny--0193f1c0-0000-7000-8000-0000000000b2"
+	const actor = "lifecycle-gate-deny/0193f1c0-0000-7000-8000-0000000000b2"
 	raw := gateFixture(t, gateClaudeGateFixture)
 	snapshot := gateBoundSnapshot(t, actor)
 	reader := &gateFakeReader{snap: snapshot}
@@ -635,8 +652,8 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 				return &gateFakeReader{fault: &tasks.GateReadIntegrityError{
 					Stage: provenance.ActorOwnershipStageOwnedTasks,
 					Cause: &provenance.OwnerProjectionMismatchError{
-						Task:  gateTask(t, "lifecycle-gate-task--0193f1c0-0000-7000-8000-0000000000a2"),
-						Owner: gateActor(t, "lifecycle-gate-owner--0193f1c0-0000-7000-8000-0000000000a3"),
+						Task:  gateTask(t, "lifecycle-gate-task/0193f1c0-0000-7000-8000-0000000000a2"),
+						Owner: gateActor(t, "lifecycle-gate-owner/0193f1c0-0000-7000-8000-0000000000a3"),
 					},
 				}}
 			},
@@ -667,7 +684,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 			name: "role-source",
 			build: func() *gateFakeReader {
 				return &gateFakeReader{fault: &tasks.GateRoleSourceError{
-					Task:       gateTask(t, "lifecycle-gate-task--0193f1c0-0000-7000-8000-0000000000a4"),
+					Task:       gateTask(t, "lifecycle-gate-task/0193f1c0-0000-7000-8000-0000000000a4"),
 					Assignment: provenance.AssignmentID("assignment-with-no-readable-role"),
 					Reason:     "its role is written by no record the reader accepts",
 				}}
@@ -688,7 +705,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 				return &gateFakeReader{snap: &gateFakeSnapshot{
 					claim: gateauthority.SessionClaim{
 						Bound: true, Known: true,
-						Actor: gateActor(t, "lifecycle-gate-scope--0193f1c0-0000-7000-8000-0000000000b3"),
+						Actor: gateActor(t, "lifecycle-gate-scope/0193f1c0-0000-7000-8000-0000000000b3"),
 					},
 					authorityFault: &tasks.GateReaderScopeError{Operation: "read an authority this snapshot does not hold"},
 				}}
@@ -704,7 +721,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 				return &gateFakeReader{snap: &gateFakeSnapshot{
 					claim: gateauthority.SessionClaim{
 						Bound: true, Known: true,
-						Actor: gateActor(t, "lifecycle-gate-closed--0193f1c0-0000-7000-8000-0000000000b4"),
+						Actor: gateActor(t, "lifecycle-gate-closed/0193f1c0-0000-7000-8000-0000000000b4"),
 					},
 					resolveFault: &tasks.GateSnapshotClosedError{},
 				}}
@@ -721,7 +738,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 			// would silently turn into a blocked user.
 			name: "unmapped-phase",
 			build: func() *gateFakeReader {
-				const actor = "lifecycle-gate-unmapped--0193f1c0-0000-7000-8000-0000000000b5"
+				const actor = "lifecycle-gate-unmapped/0193f1c0-0000-7000-8000-0000000000b5"
 				return &gateFakeReader{snap: gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.TaskPhaseUnset))}
 			},
 			check: func(t *testing.T, err error) {
@@ -736,7 +753,7 @@ func TestReaderFaultsNeverBecomeADenial(t *testing.T) {
 			// enum arm would meet before the tables caught up.
 			name: "policy-unlisted",
 			build: func() *gateFakeReader {
-				const actor = "lifecycle-gate-unlisted--0193f1c0-0000-7000-8000-0000000000b6"
+				const actor = "lifecycle-gate-unlisted/0193f1c0-0000-7000-8000-0000000000b6"
 				episode := gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan)
 				episode.Role = gateauthority.RoleUnset
 				return &gateFakeReader{snap: gateBoundSnapshot(t, actor, episode)}

@@ -27,6 +27,8 @@ const (
 	DefinitionKinds         FixtureName = "definition_kinds"
 	DefinitionCorruption    FixtureName = "definition_corruption"
 	RuntimeDocumentVersions FixtureName = "runtime_document_versions"
+	// OperationalTracker covers executable tracker detection and exact history.
+	OperationalTracker FixtureName = "operational_tracker"
 	// ContentBlock is used by S2–S3 tests (message/content-block scenarios).
 	ContentBlock FixtureName = "content_block"
 

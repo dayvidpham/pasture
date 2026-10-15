@@ -256,7 +256,7 @@ func taskFanOut(row provadapter.LegacyAuditEvent) ([]provenance.TaskID, error) {
 
 // legacyContextIdentity extracts the identity portion of a raw context string. A
 // legacy context is stored as an opaque string that may be a bare task id
-// ("namespace--uuid") or a kind-qualified "Kind:identity" pair; this returns the
+// ("namespace/uuid") or a kind-qualified "Kind:identity" pair; this returns the
 // identity after the last ':' separator, or the whole string when unqualified, so a
 // bare task id and a kind-qualified task context both resolve to the same task.
 func legacyContextIdentity(raw string) string {

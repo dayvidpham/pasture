@@ -42,7 +42,7 @@ rejected:
   - {name: no tree all paths, args: [dep, tree, URI, '--show-all-paths'], error: 'unknown flag: --show-all-paths'}
   - {name: label accepts one operand, args: [label, add, URI, work, second], error: 'accepts 2 arg(s), received 3'}
   - name: assignment real argv validation
-    args: [assignment, transfer, invalid, '--slot', owner-responsibility, '--assignment', recipe-next, '--actor', 'recipe--01960000-0000-7000-8000-000000000001', '--occupant', 'recipe--01960000-0000-7000-8000-000000000002']
+    args: [assignment, transfer, invalid, '--slot', owner-responsibility, '--assignment', recipe-next, '--actor', 'recipe/01960000-0000-7000-8000-000000000001', '--occupant', 'recipe/01960000-0000-7000-8000-000000000002']
     error: Pasture store was not opened
 recipe:
   - name: register explicit author

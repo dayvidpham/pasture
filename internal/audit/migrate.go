@@ -43,6 +43,9 @@
 //     (migrate_v7_v8.go).
 //   - v8 → v9: the retired assignment-index triggers and tables are dropped;
 //     session claims are kept (migrate_v8_v9.go).
+//   - v9 → v10: the identity-format schema ceiling. A populated store without
+//     the slash identity marker is refused before any Provenance activation
+//     (migrate_v9_v10.go).
 //
 // The ceiling is MaxKnownSchemaVersion below, not a number in this comment,
 // and the steps this binary applies are the dispatch table migrationSteps().
@@ -89,14 +92,15 @@ const busyRetryInitialDelay = 50 * time.Millisecond
 const busyRetryMaxDelay = 2 * time.Second
 
 // MaxKnownSchemaVersion is the highest schema version this binary can
-// produce. Bumped by S2 (→3, landed), S4 (→4, landed) and the v8 → v9
-// assignment-index removal (migrate_v8_v9.go).
+// produce. Bumped by S2 (→3, landed), S4 (→4, landed), the v8 → v9
+// assignment-index removal (migrate_v8_v9.go), and the v9 → v10
+// identity-format ceiling (migrate_v9_v10.go).
 //
 // Layer Integration Point owned by S1: any caller that needs to know "what
 // version does my binary support?" reads this constant. The §11 Scenario 5
 // newer-schema rejection error reports this value as the "supported
 // version" — bumping it here automatically updates the assertion.
-const MaxKnownSchemaVersion = 9
+const MaxKnownSchemaVersion = 10
 
 // migrationStep applies a single forward migration. Each step receives an
 // open transaction (already holding the write lock via BEGIN IMMEDIATE)
@@ -134,6 +138,7 @@ func migrationSteps() []migrationStep {
 		{fromVersion: 6, toVersion: 7, apply: migrateV6toV7Step},
 		{fromVersion: 7, toVersion: 8, apply: migrateV7toV8Step},
 		{fromVersion: 8, toVersion: 9, apply: migrateV8toV9Step},
+		{fromVersion: 9, toVersion: 10, apply: migrateV9toV10Step},
 	}
 }
 
@@ -164,8 +169,23 @@ func Migrate(db *sql.DB) error {
 
 // MigrateContext applies whole migration steps under the caller's budget.
 func MigrateContext(ctx context.Context, db *sql.DB) error {
+	return MigrateContextToCeiling(ctx, db, MaxKnownSchemaVersion)
+}
+
+// MigrateContextToCeiling applies whole migration steps up to the caller's
+// ceiling. It is the deferred-ceiling entry the offline cutover's catch-up
+// phase uses: the catch-up stops short of the identity-format ceiling, and the
+// conversion transaction applies the remaining step(s) atomically with the
+// marker and the receipt.
+//
+// Semantics (a store already at or above the ceiling is a NO-OP, never a
+// newer-schema refusal; only a store above MaxKnownSchemaVersion is newer):
+//   - recorded > MaxKnownSchemaVersion -> newer-schema refusal (unchanged).
+//   - recorded >= ceiling -> no-op success.
+//   - recorded <  ceiling -> apply steps through the ceiling.
+func MigrateContextToCeiling(ctx context.Context, db *sql.DB, ceiling int) error {
 	if ctx == nil {
-		return contextValidationError("MigrateContext")
+		return contextValidationError("MigrateContextToCeiling")
 	}
 	if err := ctx.Err(); err != nil {
 		return migrationCancelledError("before schema read", err)
@@ -175,12 +195,15 @@ func MigrateContext(ctx context.Context, db *sql.DB) error {
 			Category: pasterrors.CategoryStorage,
 			What:     "The audit database can't be migrated because no database connection was provided.",
 			Why:      "The migrator was called without an open database — this is a wiring bug in the caller.",
-			Where:    "Upgrading the audit database (internal/audit/migrate.go in audit.Migrate).",
+			Where:    "Upgrading the audit database (internal/audit/migrate.go in audit.MigrateContextToCeiling).",
 			Impact:   "No migration can run, and the audit database can't be opened until the caller provides a valid handle.",
 			Fix: "1. Open the audit database first, then pass the handle to the migrator.\n" +
 				"2. If you're calling the migrator directly from a test or tool, make sure the database\n" +
 				"   was opened successfully before invoking it.",
 		}
+	}
+	if ceiling <= 0 || ceiling > MaxKnownSchemaVersion {
+		ceiling = MaxKnownSchemaVersion
 	}
 
 	currentVersion, err := readVersionContext(ctx, db)
@@ -194,8 +217,10 @@ func MigrateContext(ctx context.Context, db *sql.DB) error {
 		return newerSchemaError(currentVersion, MaxKnownSchemaVersion)
 	}
 
-	// Already current — no work to do.
-	if currentVersion == MaxKnownSchemaVersion {
+	// At or above the deferred ceiling — no work to do. This is the rule that
+	// keeps a store already past the catch-up target from being refused as
+	// "newer pasture" by the deferral.
+	if currentVersion >= ceiling {
 		return nil
 	}
 
@@ -222,7 +247,7 @@ func MigrateContext(ctx context.Context, db *sql.DB) error {
 						"is missing the step needed to move forward from here.",
 					step.fromVersion, currentVersion,
 				),
-				Where: "Upgrading the audit database (internal/audit/migrate.go in audit.Migrate).",
+				Where: "Upgrading the audit database (internal/audit/migrate.go in audit.MigrateContextToCeiling).",
 				Impact: "The audit database can't be upgraded to the version this build of pasture supports,\n" +
 					"so it can't be opened until the gap is fixed.",
 				Fix: "1. This is a pasture bug — the migration table is missing a step.\n" +
@@ -238,7 +263,7 @@ func MigrateContext(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 		currentVersion = step.toVersion
-		if currentVersion >= MaxKnownSchemaVersion {
+		if currentVersion >= ceiling {
 			break
 		}
 	}
@@ -562,8 +587,7 @@ func readVersionInTx(ctx context.Context, tx *sql.Tx) (int, error) {
 // option offered no escape the first did not. A floor that only moves up is
 // stated as a floor, and the reader is sent to a newer binary.
 func newerSchemaError(dbVersion, maxKnownVersion int) error {
-	return &pasterrors.StructuredError{
-		Category: pasterrors.CategoryStorage,
+	return &pasterrors.StructuredError{Category: pasterrors.CategoryStorage,
 		What: fmt.Sprintf(
 			"This audit database was written by a newer pasture (version %d) than this build supports (version %d).",
 			dbVersion, maxKnownVersion,
@@ -586,4 +610,63 @@ func newerSchemaError(dbVersion, maxKnownVersion int) error {
 			dbVersion, dbVersion,
 		),
 	}
+}
+
+// NewerSchemaError is the exported constructor for the newer-schema refusal.
+// The migrator and the read-only preflight both call it, so the sentence is
+// literally one source and the archive/conversion frontends cannot drift.
+func NewerSchemaError(dbVersion, maxKnownVersion int) error {
+	return newerSchemaError(dbVersion, maxKnownVersion)
+}
+
+// ApplyCeilingInTx applies every remaining forward migration step to the
+// caller's transaction, using each step's real apply function, through
+// MaxKnownSchemaVersion. The audit version bump is the last statement of each
+// step, so a failure rolls the whole transaction back.
+//
+// The offline cutover calls it as its LAST phase (after the marker and the
+// receipt are written), so a store can never carry the identity-format ceiling
+// without the marker and the receipt. A future real migration step is therefore
+// applied by name, never silently stamped.
+func ApplyCeilingInTx(ctx context.Context, tx *sql.Tx, fromVersion int, nowUnixNano int64) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if tx == nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "The audit schema ceiling cannot be applied without a transaction.",
+			Why:      "ApplyCeilingInTx was called with no transaction — this is a wiring bug in the caller.",
+			Where:    "Raising the database schema ceiling (internal/audit/migrate.go in audit.ApplyCeilingInTx).",
+			Impact:   "No schema version was changed.",
+			Fix:      "Call it inside the conversion transaction, after the marker has been published.",
+		}
+	}
+	if fromVersion >= MaxKnownSchemaVersion {
+		return nil
+	}
+	version := fromVersion
+	for _, step := range migrationSteps() {
+		if step.fromVersion < version {
+			continue
+		}
+		if step.fromVersion != version {
+			return &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     fmt.Sprintf("The audit database is at version %d but no upgrade step starts there.", version),
+				Why:      "The conversion transaction tried to apply the deferred ceiling step(s) and found a gap in the migration table.",
+				Where:    "Raising the database schema ceiling (internal/audit/migrate.go in audit.ApplyCeilingInTx).",
+				Impact:   "The conversion transaction rolls back; the store keeps its retired identities and no marker is published.",
+				Fix:      "Report this as a bug: the migration table is missing a step.",
+			}
+		}
+		if err := step.apply(tx, nowUnixNano); err != nil {
+			return err
+		}
+		version = step.toVersion
+		if version >= MaxKnownSchemaVersion {
+			break
+		}
+	}
+	return nil
 }
