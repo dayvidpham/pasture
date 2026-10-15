@@ -1,0 +1,11 @@
+cases:
+  - {kind: 0, admitted: false}
+  - {kind: 1, admitted: true}
+  - {kind: 2, admitted: true}
+  - {kind: 3, admitted: false}
+  - {kind: 4, admitted: true}
+  - {kind: 5, admitted: true}
+  - {kind: 6, admitted: false}
+  - {kind: 7, admitted: false}
+  - {kind: 8, admitted: true}
+  - {kind: 255, admitted: false}

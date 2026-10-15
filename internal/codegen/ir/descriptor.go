@@ -117,10 +117,10 @@ func (c JSONCodec[T]) Decode(data []byte) (T, error) {
 // DescriptorSemantics is the portable behavioral contract carried by a typed
 // operation or effect descriptor.
 type DescriptorSemantics struct {
-	Summary        string
-	Preconditions  []string
-	Postconditions []string
-	Result         string
+	Summary        string   `json:"Summary"`
+	Preconditions  []string `json:"Preconditions"`
+	Postconditions []string `json:"Postconditions"`
+	Result         string   `json:"Result"`
 }
 
 func (s DescriptorSemantics) validate(where string) error {

@@ -153,6 +153,18 @@ func NewDefinitionActivationIntent(content model.ContentIdentity) (WriteIntent, 
 	return WriteIntent{class: WriteDefinitionActivation}, nil
 }
 
+// NewEnvelopeDefinitionActivationIntent admits only the five typed document
+// owners; coordinates are validated and discarded, preserving origin blindness.
+func NewEnvelopeDefinitionActivationIntent(kind model.DefinitionKind, content model.ContentIdentity) (WriteIntent, *Refusal) {
+	if !model.IsEnvelopeDefinitionKind(kind) || content == (model.ContentIdentity{}) {
+		return WriteIntent{}, refuseInvalidIntent(WriteDefinitionActivation,
+			"a definition activation has an unsupported kind or empty content identity",
+			"only runtime, schema, interpreter, implementation and retention documents belong to this writer",
+			"use the matching typed document owner; activate metamodels through their existing owner")
+	}
+	return WriteIntent{class: WriteDefinitionActivation}, nil
+}
+
 // NewLineageIntent constructs a lineage-links write intent. It validates the
 // host and the bounded edge count (1..MaxLinksPerOperation); an over-cap
 // derivation is refused so the operator narrows the scope rather than committing

@@ -27,32 +27,32 @@ const (
 )
 
 type Identity struct {
-	Field    model.NativeFieldID
-	Binding  model.NativeBindingKind
-	Required bool
+	Field    model.NativeFieldID     `json:"Field"`
+	Binding  model.NativeBindingKind `json:"Binding"`
+	Required bool                    `json:"Required"`
 }
 
 // Event is generated target-neutral registration data. Host-specific source
 // code is inaccessible to this package by Go's internal-package rule.
 type Event struct {
-	Kind          model.ContractEventKind
-	NativeName    string
-	AllowedFields []model.NativeFieldID
-	Identities    []Identity
-	Blocking      BlockingMode
-	Mutation      MutationMode
-	Failure       pastureruntime.FailureMode
-	StopLoop      StopLoopPolicy
+	Kind          model.ContractEventKind    `json:"Kind"`
+	NativeName    string                     `json:"NativeName"`
+	AllowedFields []model.NativeFieldID      `json:"AllowedFields"`
+	Identities    []Identity                 `json:"Identities"`
+	Blocking      BlockingMode               `json:"Blocking"`
+	Mutation      MutationMode               `json:"Mutation"`
+	Failure       pastureruntime.FailureMode `json:"Failure"`
+	StopLoop      StopLoopPolicy             `json:"StopLoop"`
 }
 
 func (e Event) Fields() []model.NativeFieldID { return slices.Clone(e.AllowedFields) }
 func (e Event) IdentityFields() []Identity    { return slices.Clone(e.Identities) }
 
 type Manifest struct {
-	Harness  ir.HarnessID
-	Version  string
-	Contract ir.RuntimeContractID
-	Events   []Event
+	Harness  ir.HarnessID         `json:"Harness"`
+	Version  string               `json:"Version"`
+	Contract ir.RuntimeContractID `json:"Contract"`
+	Events   []Event              `json:"Events"`
 }
 
 func (m Manifest) Entries() []Event {

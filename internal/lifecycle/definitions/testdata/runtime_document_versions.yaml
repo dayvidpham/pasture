@@ -1,0 +1,15 @@
+# Released-body version ledger. On content changes, add a new version entry and
+# retain historical entries; do not replace a released version's digest.
+versions:
+  - contract: claude-code/claude-code@2.1.261
+    version: 1
+    sha256: 0e4a5b99b081aec4a281fca1183a5895f0d02ac1ffaebd0ff5abf1482cff85a2
+  - contract: opencode/opencode@1.18.29
+    version: 1
+    sha256: 5b3a398bb67f87fcbdaed659b96b7e0aed7e8cc38e13e7ba9facee90c30fad79
+  - contract: opencode/opencode@2.0.20
+    version: 1
+    sha256: 7000fd9aaba7647dc27fd26899a210d8038f23c1c698fab6617a77d15a414fac
+  - contract: codex/codex@0.153.0
+    version: 1
+    sha256: 5803b0414d06422ca48123a820a78306fcab3dd7247868e81750f02e744b65ff
