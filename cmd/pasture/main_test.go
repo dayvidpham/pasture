@@ -30,6 +30,19 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not set hermetic env: %v\n", err)
 		os.Exit(1)
 	}
+	// The DIRECT PATH IS PINNED FOR THIS PACKAGE. Production defaults to asking
+	// the daemon's write lane and falling back to the direct write with one
+	// diagnostic when it is unreachable; that default is exercised deliberately
+	// by the lane tests, which set the mode themselves. Every other test in this
+	// package describes the direct path's contract, so leaving the mode at its
+	// default would make them depend on whether a daemon happens to be running on
+	// the machine — the same non-hermetic hazard the store path and the fault
+	// record were already pinned against.
+	if err := os.Setenv("PASTURE_WRITE_LANE", "direct"); err != nil {
+		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not pin the write-lane mode: %v\n", err)
+		envCleanup()
+		os.Exit(1)
+	}
 	tmpDir, err := os.MkdirTemp("", "pasture-cli-smoke-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not create temp dir: %v\n", err)

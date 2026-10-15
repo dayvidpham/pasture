@@ -328,6 +328,131 @@ func mappingLookup[E comparable](contract pastureruntime.LifecycleContract[E]) f
 	}
 }
 
+// lifecycleAdmission is the input of the shared preparation step: the
+// coordinates, the optional activation override, and the payload stream. It is
+// a struct of its own rather than HookLifecycleInput because BOTH entry points
+// reach preparation and only the direct one owns a settlement, a clock and an
+// operation identity source; carrying fields neither path reads would invite a
+// caller to believe they had an effect here.
+type lifecycleAdmission struct {
+	Harness           ir.HarnessID
+	Event             string
+	HostVersion       string
+	HostVersionSource model.HostVersionSource
+	Activations       []activation.Entry
+	Input             io.Reader
+}
+
+// lifecyclePrepared is what admission and parse produced for one invocation:
+// the resolved per-harness row, the event coordinate, and the classified
+// capture. It carries no store handle, so BOTH entry points — the direct
+// in-process path and the daemon's served path — reach the same prepared state
+// without either owning a store before it is needed.
+type lifecyclePrepared struct {
+	dispatch lifecycleDispatch
+	event    registration.Event
+	capture  lifecycleCapture
+}
+
+// prepareLifecycleDelivery performs every check that runs BEFORE a store is
+// touched: dispatch, the activation catalog, the version observation and its
+// provenance, the event reverse lookup, the activation posture, the bounded
+// payload read, and the per-harness parse.
+//
+// IT IS EXTRACTED SO THE TWO ENTRY POINTS CANNOT DRIFT. The direct path and the
+// daemon's served path must refuse exactly the same inputs with exactly the
+// same words; a second copy of these checks is how one of them comes to accept
+// what the other refuses.
+func prepareLifecycleDelivery(in lifecycleAdmission) (lifecyclePrepared, error) {
+	dispatch, err := dispatchLifecycleFor(in.Harness, in.HostVersion)
+	if err != nil {
+		return lifecyclePrepared{}, err
+	}
+	// The activation catalog is a fallible generated proof; resolve it here at
+	// dispatch time (the same point the former switch resolved it), preserving
+	// the wrapped error text verbatim. Production callers leave in.Activations
+	// nil so the committed per-harness manifest governs admission; the override
+	// exercises the same durable path with an alternative manifest.
+	activations, err := dispatch.activations()
+	if err != nil {
+		return lifecyclePrepared{}, fmt.Errorf("dispatch %s lifecycle activation: %w", dispatch.name, err)
+	}
+	if in.Activations != nil {
+		activations = in.Activations
+	}
+	if strings.TrimSpace(in.HostVersion) == "" {
+		return lifecyclePrepared{}, lifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records a version observation, without using the value as an admission check or treating an executable query as running-process attestation.", "The input was not read and no database was opened.", "Supply a version observation through the lifecycle command.", nil)
+	}
+	if err := model.ValidateHostVersionSource(in.HostVersionSource); err != nil {
+		return lifecyclePrepared{}, lifecycleError(pasterrors.CategoryValidation,
+			err.Error(), "Version provenance must describe the actual observation route.",
+			"The input was not read and no database was opened.",
+			"Use a declared source for the route that supplied the version, or leave legacy provenance unspecified.", nil)
+	}
+	// The event is resolved by the one validating reverse lookup every ingress
+	// path shares, so a name the registration does not declare is refused with
+	// one text: the harness, the version and the name, spelled exactly.
+	event, err := ingress.EventByNativeName(dispatch.manifest, in.Event)
+	if err != nil {
+		return lifecyclePrepared{}, lifecycleError(pasterrors.CategoryValidation, err.Error(), "The generated registration is the only authority for native event names.", "The input was not read and no database was opened.", "Invoke the hook with a native event name present in the support report.", nil)
+	}
+	state, found := activationFor(event.Kind, activations)
+	if !found || state.State != activation.Enabled {
+		reason := activation.WithheldMissingFixture
+		if found {
+			reason = state.Reason
+		}
+		return lifecyclePrepared{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("%s event %q is withheld (reason %s).", dispatch.name, event.NativeName, reason.String()), "Only events with authentic capture evidence and a passing production proof are admitted.", "The input was not read and no database was opened.", "Inspect the generated activation support report and enable the event only after its proof passes.", nil)
+	}
+	raw, err := io.ReadAll(io.LimitReader(in.Input, model.MaxNativePayloadBytes+1))
+	if err != nil {
+		return lifecyclePrepared{}, lifecycleError(pasterrors.CategoryValidation, "The native payload could not be read.", "Standard input failed during the bounded read.", "No database was opened.", "Retry with a readable complete payload.", err)
+	}
+	// A ZERO-LENGTH PAYLOAD HAS ITS OWN ARM, AND IT HAD NONE.
+	//
+	// The read succeeds, so the arm above does not fire; the length is under
+	// the bound, so the arm below does not either. The empty slice then travels
+	// all the way to the blob writer, where a nil body binds as NULL against a
+	// NOT NULL column, and the operator is handed
+	// "constraint failed: NOT NULL constraint failed: lifecycle_payload_blobs.body (1299)"
+	// on all three harnesses — a storage fault naming a column, for a condition
+	// that is neither storage nor a fault of the store.
+	//
+	// It is the nil-versus-empty class again: an absent value and a present
+	// empty one are different facts, and a layer that cannot tell them apart
+	// reports the wrong one. The condition is known HERE, where the bytes were
+	// read and their count is in hand, so it is named here.
+	if len(raw) == 0 {
+		// WHAT CARRIES THE WHOLE SENTENCE, for the reason the sibling refusal
+		// records: a StructuredError renders as "category: What" once WRAPPED,
+		// and this error is always wrapped into the fault cause. Why and Fix
+		// reach nobody unless something calls Report, and nothing on this path
+		// does. They stay populated for a caller that renders the full block.
+		const emptyWhy = "A lifecycle event is evaluated from the payload the host writes to standard input, " +
+			"and this invocation received an empty stream rather than a malformed or partial one."
+		const emptyImpact = "Nothing was parsed and no database was opened, so no occurrence exists for " +
+			"this invocation."
+		const emptyFix = "Check that the host is writing the event payload to the hook's standard input: a " +
+			"hook wired without its input redirected, a wrapper that consumes stdin before pasture runs, " +
+			"or a manual invocation with no payload piped in all arrive here."
+		return lifecyclePrepared{}, lifecycleError(pasterrors.CategoryValidation,
+			"The host sent no payload: standard input carried zero bytes. "+
+				emptyWhy+" "+emptyImpact+" "+emptyFix,
+			emptyWhy, emptyImpact, emptyFix, nil)
+	}
+	if len(raw) > model.MaxNativePayloadBytes {
+		return lifecyclePrepared{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The native payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "Ingress never truncates retained evidence.", "No database was opened.", "Reduce the host payload below the static bound.", nil)
+	}
+	capture := dispatch.parse(raw, event, in.HostVersion)
+	capture.delivery.Envelope.HostVersionSource = in.HostVersionSource
+	if err := capture.cause.Check(capture.disposition); err != nil {
+		return lifecyclePrepared{}, lifecycleError(pasterrors.CategoryValidation,
+			"The lifecycle parser returned inconsistent diagnostic evidence. "+err.Error(),
+			err.Error(), "No occurrence was written or evaluated.", "Report the parser result; do not infer a payload repair from it.", nil)
+	}
+	return lifecyclePrepared{dispatch: dispatch, event: event, capture: capture}, nil
+}
+
 func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener, readers lifecycleReaderFactory) (response backend.HostResponse, err error) {
 	// durablePossible RECORDS THE ONE FACT A CALLER CANNOT OTHERWISE LEARN:
 	// whether this invocation ever ATTEMPTED A WRITE, and so whether a row can
@@ -368,92 +493,18 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if ctx == nil || in.Input == nil || in.Clock == nil || in.Operations == nil || open == nil || readers == nil {
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The lifecycle ingress boundary is incompletely wired.", "A context, stdin, clock, operation identity source, store opener, and gate reader factory are required.", "Nothing was read or recorded.", "Invoke this path through the production lifecycle command.", nil)
 	}
-	dispatch, err := dispatchLifecycleFor(in.Harness, in.HostVersion)
+	prepared, err := prepareLifecycleDelivery(lifecycleAdmission{
+		Harness:           in.Harness,
+		Event:             in.Event,
+		HostVersion:       in.HostVersion,
+		HostVersionSource: in.HostVersionSource,
+		Activations:       in.Activations,
+		Input:             in.Input,
+	})
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	// The activation catalog is a fallible generated proof; resolve it here at
-	// dispatch time (the same point the former switch resolved it), preserving
-	// the wrapped error text verbatim. Production callers leave in.Activations
-	// nil so the committed per-harness manifest governs admission; the override
-	// exercises the same durable path with an alternative manifest.
-	activations, err := dispatch.activations()
-	if err != nil {
-		return backend.HostResponse{}, fmt.Errorf("dispatch %s lifecycle activation: %w", dispatch.name, err)
-	}
-	if in.Activations != nil {
-		activations = in.Activations
-	}
-	if strings.TrimSpace(in.HostVersion) == "" {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The observed host version is missing.", "Every retained occurrence records a version observation, without using the value as an admission check or treating an executable query as running-process attestation.", "The input was not read and no database was opened.", "Supply a version observation through the lifecycle command.", nil)
-	}
-	if err := model.ValidateHostVersionSource(in.HostVersionSource); err != nil {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation,
-			err.Error(), "Version provenance must describe the actual observation route.",
-			"The input was not read and no database was opened.",
-			"Use a declared source for the route that supplied the version, or leave legacy provenance unspecified.", nil)
-	}
-	// The event is resolved by the one validating reverse lookup every ingress
-	// path shares, so a name the registration does not declare is refused with
-	// one text: the harness, the version and the name, spelled exactly.
-	event, err := ingress.EventByNativeName(dispatch.manifest, in.Event)
-	if err != nil {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, err.Error(), "The generated registration is the only authority for native event names.", "The input was not read and no database was opened.", "Invoke the hook with a native event name present in the support report.", nil)
-	}
-	state, found := activationFor(event.Kind, activations)
-	if !found || state.State != activation.Enabled {
-		reason := activation.WithheldMissingFixture
-		if found {
-			reason = state.Reason
-		}
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("%s event %q is withheld (reason %s).", dispatch.name, event.NativeName, reason.String()), "Only events with authentic capture evidence and a passing production proof are admitted.", "The input was not read and no database was opened.", "Inspect the generated activation support report and enable the event only after its proof passes.", nil)
-	}
-	raw, err := io.ReadAll(io.LimitReader(in.Input, model.MaxNativePayloadBytes+1))
-	if err != nil {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, "The native payload could not be read.", "Standard input failed during the bounded read.", "No database was opened.", "Retry with a readable complete payload.", err)
-	}
-	// A ZERO-LENGTH PAYLOAD HAS ITS OWN ARM, AND IT HAD NONE.
-	//
-	// The read succeeds, so the arm above does not fire; the length is under
-	// the bound, so the arm below does not either. The empty slice then travels
-	// all the way to the blob writer, where a nil body binds as NULL against a
-	// NOT NULL column, and the operator is handed
-	// "constraint failed: NOT NULL constraint failed: lifecycle_payload_blobs.body (1299)"
-	// on all three harnesses — a storage fault naming a column, for a condition
-	// that is neither storage nor a fault of the store.
-	//
-	// It is the nil-versus-empty class again: an absent value and a present
-	// empty one are different facts, and a layer that cannot tell them apart
-	// reports the wrong one. The condition is known HERE, where the bytes were
-	// read and their count is in hand, so it is named here.
-	if len(raw) == 0 {
-		// WHAT CARRIES THE WHOLE SENTENCE, for the reason the sibling refusal
-		// records: a StructuredError renders as "category: What" once WRAPPED,
-		// and this error is always wrapped into the fault cause. Why and Fix
-		// reach nobody unless something calls Report, and nothing on this path
-		// does. They stay populated for a caller that renders the full block.
-		const emptyWhy = "A lifecycle event is evaluated from the payload the host writes to standard input, " +
-			"and this invocation received an empty stream rather than a malformed or partial one."
-		const emptyImpact = "Nothing was parsed and no database was opened, so no occurrence exists for " +
-			"this invocation."
-		const emptyFix = "Check that the host is writing the event payload to the hook's standard input: a " +
-			"hook wired without its input redirected, a wrapper that consumes stdin before pasture runs, " +
-			"or a manual invocation with no payload piped in all arrive here."
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation,
-			"The host sent no payload: standard input carried zero bytes. "+
-				emptyWhy+" "+emptyImpact+" "+emptyFix,
-			emptyWhy, emptyImpact, emptyFix, nil)
-	}
-	if len(raw) > model.MaxNativePayloadBytes {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation, fmt.Sprintf("The native payload exceeds the %d-byte bound.", model.MaxNativePayloadBytes), "Ingress never truncates retained evidence.", "No database was opened.", "Reduce the host payload below the static bound.", nil)
-	}
-	capture := dispatch.parse(raw, event, in.HostVersion)
-	capture.delivery.Envelope.HostVersionSource = in.HostVersionSource
-	if err := capture.cause.Check(capture.disposition); err != nil {
-		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryValidation,
-			"The lifecycle parser returned inconsistent diagnostic evidence. "+err.Error(),
-			err.Error(), "No occurrence was written or evaluated.", "Report the parser result; do not infer a payload repair from it.", nil)
-	}
+	dispatch, event, capture := prepared.dispatch, prepared.event, prepared.capture
 	tracker, err := open(ctx, in.DBPath)
 	if err != nil {
 		return backend.HostResponse{}, err
@@ -511,7 +562,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		// receives: this harness's continue bytes, a stderr diagnostic, a fault
 		// record line, and the fail-closed opt-in.
 		return backend.HostResponse{}, fmt.Errorf("%w: %w",
-			ErrLifecycleDeliveryRefused, unbindableCaptureError(dispatch, event, in, capture))
+			ErrLifecycleDeliveryRefused, unbindableCaptureError(dispatch, event, in.HostVersion, capture))
 	}
 	// THE GATE IS EVALUATED HERE, BEFORE THE MARKER AND BEFORE ANY WRITE.
 	//
@@ -543,7 +594,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, fmt.Errorf("%w: %w", ErrLifecycleCommittedWithoutContinuation, err)
 	}
-	if line := sessionClaimMismatchDiagnostic(in, capture.delivery.Bindings, claimOutcome); line != "" && in.Diagnostics != nil {
+	if line := sessionClaimMismatchDiagnostic(in.Harness, in.ActorClaim, capture.delivery.Bindings, claimOutcome); line != "" && in.Diagnostics != nil {
 		fmt.Fprintln(in.Diagnostics, line)
 	}
 	response = committed
@@ -566,8 +617,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 // the plugin does forward the hook's standard error. It names BOTH actors,
 // because the whole point of reporting a lost claim is to say who holds the
 // session and who tried to take it.
-func sessionClaimMismatchDiagnostic(in HookLifecycleInput, bindings []model.NativeBinding, outcome tasks.SessionClaimOutcome) string {
-	if !outcome.Mismatch(in.ActorClaim) {
+func sessionClaimMismatchDiagnostic(harness ir.HarnessID, actorClaim tasks.ActorClaim, bindings []model.NativeBinding, outcome tasks.SessionClaimOutcome) string {
+	if !outcome.Mismatch(actorClaim) {
 		return ""
 	}
 	session, err := tasks.LifecycleSession(bindings)
@@ -584,7 +635,7 @@ func sessionClaimMismatchDiagnostic(in HookLifecycleInput, bindings []model.Nati
 			"this happened in internal/handlers/hook_lifecycle.go after the lifecycle receipt was committed, so the event "+
 			"was recorded and the claim mismatch does not change the committed host decision; the receipt remains authored by the system actor; if this is "+
 			"unexpected, inspect pasture_session_claim for this session and check which host process exported PASTURE_ACTOR_ID",
-		outcome.State.String(), string(in.Harness), session, string(in.ActorClaim), stored)
+		outcome.State.String(), string(harness), session, string(actorClaim), stored)
 }
 
 // evaluateGate answers the host's question for one invocation, and it answers
@@ -1219,7 +1270,7 @@ func unsupportedSchemaReason(_ lifecycleDispatch) string {
 func unbindableCaptureError(
 	dispatch lifecycleDispatch,
 	event registration.Event,
-	in HookLifecycleInput,
+	hostVersion string,
 	capture lifecycleCapture,
 ) error {
 	if capture.cause.Kind() != model.CauseUnknown {
@@ -1232,7 +1283,7 @@ func unbindableCaptureError(
 			"host's answer; the row carries the disposition that refused it and an empty interpreted set."
 		return lifecycleError(pasterrors.CategoryValidation,
 			fmt.Sprintf("The %s payload for event %q at host version %q could not be bound, so the event WAS NOT EVALUATED: %s. %s %s",
-				dispatch.name, event.NativeName, in.HostVersion, reason, impact, fix),
+				dispatch.name, event.NativeName, hostVersion, reason, impact, fix),
 			reason, impact, fix, nil)
 	}
 	// Without a cause, list required identities only as schema context. This
@@ -1300,7 +1351,7 @@ func unbindableCaptureError(
 			"the event named on the command line is authoritative, and a payload that declares a different one is "+
 			"refused rather than reinterpreted. Check too that the host version on the command line (%q) is the "+
 			"version the host actually runs, because the event a host reports can change between versions.",
-			event.NativeName, in.HostVersion)
+			event.NativeName, hostVersion)
 	case capture.disposition == model.CaptureUnsupportedSchema:
 		// THE ADVICE FOLLOWS WHAT THIS PARSER ENFORCES, and it used to name the
 		// harness while describing another one's rules. Both facts are on the
@@ -1322,7 +1373,7 @@ func unbindableCaptureError(
 		fix = fmt.Sprintf("Compare the payload with this build's %s registration for %q: every identity field "+
 			"it declares %s. %s Check too that the host version on the command line (%q) is the version the "+
 			"host actually runs.",
-			dispatch.name, event.NativeName, naming, members, in.HostVersion)
+			dispatch.name, event.NativeName, naming, members, hostVersion)
 	}
 
 	// WHAT CARRIES THE WHOLE SENTENCE, and that is not redundancy. A
@@ -1336,7 +1387,7 @@ func unbindableCaptureError(
 		pasterrors.CategoryValidation,
 		fmt.Sprintf("The %s payload for event %q at host version %q could not be bound, so the event WAS NOT EVALUATED: "+
 			"%s. %s %s",
-			dispatch.name, event.NativeName, in.HostVersion, why, impact, fix),
+			dispatch.name, event.NativeName, hostVersion, why, impact, fix),
 		why, impact, fix, nil)
 }
 

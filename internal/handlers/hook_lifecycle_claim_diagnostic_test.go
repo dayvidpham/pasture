@@ -44,7 +44,8 @@ func TestSessionClaimDiagnosticOnlyOnAMismatch(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 			line := sessionClaimMismatchDiagnostic(
-				HookLifecycleInput{Harness: ir.HarnessClaudeCode, ActorClaim: tasks.ActorClaim(testCase.attempted)},
+				ir.HarnessClaudeCode,
+				tasks.ActorClaim(testCase.attempted),
 				bindings,
 				tasks.SessionClaimOutcome{State: testCase.state, StoredActor: testCase.stored},
 			)
@@ -78,7 +79,8 @@ func TestSessionClaimDiagnosticOnlyOnAMismatch(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 			line := sessionClaimMismatchDiagnostic(
-				HookLifecycleInput{Harness: ir.HarnessClaudeCode, ActorClaim: tasks.ActorClaim(testCase.actor)},
+				ir.HarnessClaudeCode,
+				tasks.ActorClaim(testCase.actor),
 				bindings,
 				tasks.SessionClaimOutcome{State: testCase.state, StoredActor: testCase.stored},
 			)

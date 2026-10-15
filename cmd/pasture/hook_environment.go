@@ -43,6 +43,27 @@ const (
 	// never reaches this wait: it is read and validated with its siblings so the
 	// ordering invariant covers it, and its consumer is the slice workflow.
 	hookStartSliceTimeoutEnv = "PASTURE_START_SLICE_TIMEOUT"
+	// hookWriteLaneEnv selects whether the hook asks the daemon's write lane to
+	// record its event. It accepts exactly "auto" (the default: ask the daemon,
+	// and write directly when it is unreachable) and "direct" (never ask: write
+	// in-process exactly as a build without a lane does).
+	hookWriteLaneEnv = "PASTURE_WRITE_LANE"
+	// hookWriteLaneSocketEnv overrides the socket the hook asks. It exists for
+	// an operator who runs the daemon against a store the hook cannot derive
+	// from its own flags; the derived path is the default and needs no setting.
+	hookWriteLaneSocketEnv = "PASTURE_WRITE_LANE_SOCKET"
+)
+
+// WriteLaneMode is the operator's choice of how the hook records its event.
+type WriteLaneMode string
+
+const (
+	// WriteLaneAuto asks the daemon's lane and falls back to the direct write
+	// path when it cannot be reached. It is the default.
+	WriteLaneAuto WriteLaneMode = "auto"
+	// WriteLaneDirect never asks, and writes in-process exactly as a build
+	// without a lane does.
+	WriteLaneDirect WriteLaneMode = "direct"
 )
 
 // HookEnvironment is the parsed process environment of one lifecycle hook
@@ -70,6 +91,14 @@ type HookEnvironment struct {
 	// when they are applied to a base profile (see timeouts.Profile.WithOverride),
 	// so an inverted combination is refused rather than clamped.
 	BudgetOverride timeouts.Override
+	// WriteLane is whether the hook asks the daemon's write lane. It defaults
+	// to WriteLaneAuto, so a hook with no environment set asks the daemon and
+	// writes directly when it cannot be reached.
+	WriteLane WriteLaneMode
+	// WriteLaneSocket overrides the socket path the hook asks, or "" to derive
+	// it from the store path. A value here is an exact path, like every other
+	// path this parser reads.
+	WriteLaneSocket string
 }
 
 // hookEnvironment is the production entry point. It reads the real process
@@ -100,7 +129,38 @@ func HookEnvironmentFromOS(lookup func(string) (string, bool)) (HookEnvironment,
 				"without one; pass os.LookupEnv, or use hookEnvironment() which supplies it")
 	}
 
-	parsed := HookEnvironment{FaultPolicy: hostexit.FaultFailOpen}
+	parsed := HookEnvironment{FaultPolicy: hostexit.FaultFailOpen, WriteLane: WriteLaneAuto}
+
+	if raw, present := lookup(hookWriteLaneEnv); present && raw != "" {
+		switch WriteLaneMode(raw) {
+		case WriteLaneAuto, WriteLaneDirect:
+			parsed.WriteLane = WriteLaneMode(raw)
+		default:
+			return HookEnvironment{}, fmt.Errorf(
+				"%s is set to %q, which is not one of the two accepted values %s and %s; "+
+					"this happened in HookEnvironmentFromOS (cmd/pasture/hook_environment.go) while the hook "+
+					"was starting, before any host payload was read; the hook will not guess whether you asked "+
+					"it to write through the daemon's single-writer lane or directly to the store; "+
+					"set %s=%s to ask the daemon and write directly when it is unreachable, "+
+					"set %s=%s to never ask, or unset it to keep the default",
+				hookWriteLaneEnv, raw, WriteLaneAuto, WriteLaneDirect,
+				hookWriteLaneEnv, WriteLaneAuto, hookWriteLaneEnv, WriteLaneDirect)
+		}
+	}
+
+	if raw, present := lookup(hookWriteLaneSocketEnv); present && raw != "" {
+		if strings.TrimSpace(raw) != raw || strings.TrimSpace(raw) == "" {
+			return HookEnvironment{}, fmt.Errorf(
+				"%s is set to %q, which is blank or has leading or trailing space, so it is not an exact "+
+					"socket path; this happened in HookEnvironmentFromOS (cmd/pasture/hook_environment.go) while "+
+					"the hook was starting, before any host payload was read; a padded path names a different "+
+					"socket from the one you meant, so the hook would ask a daemon that is not there and fall "+
+					"back without you learning why; set %s to the exact socket path, or unset it to derive the "+
+					"path from the store",
+				hookWriteLaneSocketEnv, raw, hookWriteLaneSocketEnv)
+		}
+		parsed.WriteLaneSocket = raw
+	}
 
 	if raw, present := lookup(hookFailClosedEnv); present && raw != "" {
 		switch raw {
