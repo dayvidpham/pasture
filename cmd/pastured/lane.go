@@ -52,16 +52,24 @@ func startDaemonLane(parent context.Context, tracker protocol.TaskTracker, dbPat
 	if err != nil {
 		return nil, fmt.Errorf("pastured: the lifecycle write lane budget could not be derived from the daemon's timeout profile, so no single-writer lane can be hosted: %w", err)
 	}
-	lane, err := writelane.New(budget)
+
+	host, err := tasks.NewLifecycleLaneHost(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, profile)
+	if err != nil {
+		return nil, fmt.Errorf("pastured: the lifecycle write lane host could not be assembled: %w", err)
+	}
+	// THE LANE COMMITS A FLUSH THROUGH THE PINNED BATCH JOURNAL. The receipt
+	// appender's AppendBatch bounds the transaction by the ingress tier and
+	// commits the whole flush's operations in ONE ApplyBatchContext, so the
+	// lane's turn is one transaction rather than one per record.
+	receiptService, err := tasks.NewLifecycleReceiptServiceWithProfile(host.Tracker(), host.Clock(), host.Operations(), host.Profile())
+	if err != nil {
+		return nil, fmt.Errorf("pastured: the lifecycle batch applier could not be built, so no flush could be committed in one transaction: %w", err)
+	}
+	lane, err := writelane.New(budget, receiptService.Appender.AppendBatch)
 	if err != nil {
 		return nil, fmt.Errorf("pastured: the lifecycle write lane could not be constructed: %w", err)
 	}
 
-	host, err := tasks.NewLifecycleLaneHost(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, profile)
-	if err != nil {
-		_ = lane.Close(context.Background())
-		return nil, fmt.Errorf("pastured: the lifecycle write lane host could not be assembled: %w", err)
-	}
 	server, err := handlers.NewHookLifecycleServer(handlers.HookLifecycleServerConfig{
 		Tracker:     host.Tracker(),
 		Lane:        lane,

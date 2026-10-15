@@ -21,20 +21,21 @@ import (
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/writelane"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/provenance"
 )
 
 // LifecycleWriteLane is the ONE serialized writer a served lifecycle record's
 // durable work goes through. It is an interface here, and not the concrete
 // lane, so this package states only the contract it needs: admit a record of
-// bytes, run its commit on the single writer, and report the commit's result to
-// the caller.
+// bytes, run its two-phase commit on the single writer, and report the commit's
+// result to the caller.
 //
 // THE CALLER LEARNS ONLY AFTER THE COMMIT, which is the whole point: Submit
 // returns nil only once the record is durable, so a served answer of "proceed"
 // cannot be produced for a record that has not committed. *writelane.Lane
 // satisfies this interface; nothing else in production does.
 type LifecycleWriteLane interface {
-	Submit(ctx context.Context, bytes int64, commit writelane.Commit) error
+	Submit(ctx context.Context, bytes int64, record writelane.Record) error
 }
 
 // submitToLane admits one record and waits for its commit, converting the
@@ -43,11 +44,11 @@ type LifecycleWriteLane interface {
 //
 // THE CONVERSION IS THE HONESTY STEP. A Submit that returns ErrNotAdmitted
 // staged nothing, so the refusal it produces is provably not-recorded; a
-// Submit that returns anything else got as far as running the commit, whose
-// durable state only the commit can report. Without this the two would collapse
-// into one stage and an operator could not tell them apart.
-func submitToLane(ctx context.Context, lane LifecycleWriteLane, bytes int64, commit writelane.Commit) error {
-	err := lane.Submit(ctx, bytes, commit)
+// Submit that returns anything else got as far as running the record's commit,
+// whose durable state only the commit can report. Without this the two would
+// collapse into one stage and an operator could not tell them apart.
+func submitToLane(ctx context.Context, lane LifecycleWriteLane, bytes int64, record writelane.Record) error {
+	err := lane.Submit(ctx, bytes, record)
 	if err != nil && errors.Is(err, writelane.ErrNotAdmitted) {
 		return fmt.Errorf("%w: %w", ErrLifecycleBeforeDurableWrite, err)
 	}
@@ -196,10 +197,12 @@ func (s *HookLifecycleServer) Serve(ctx context.Context, in HookLifecycleServeIn
 			return HookLifecycleServed{}, err
 		}
 		durablePossible = true
-		if commitErr := submitToLane(ctx, s.lane, int64(len(in.Payload)), func(laneCtx context.Context) error {
-			_, receiveErr := service.Receive(laneCtx, warrant, capture.delivery)
-			return receiveErr
-		}); commitErr != nil {
+		record := &servedLifecycleRecord{
+			service:  service,
+			warrant:  warrant,
+			delivery: capture.delivery,
+		}
+		if commitErr := submitToLane(ctx, s.lane, int64(len(in.Payload)), record); commitErr != nil {
 			return HookLifecycleServed{}, commitErr
 		}
 		return HookLifecycleServed{}, fmt.Errorf("%w: %w", ErrLifecycleDeliveryRefused,
@@ -223,24 +226,23 @@ func (s *HookLifecycleServer) Serve(ctx context.Context, in HookLifecycleServeIn
 	var occurrence model.OccurrenceID
 	var claim tasks.SessionClaimOutcome
 	durablePossible = true
-	if commitErr := submitToLane(ctx, s.lane, int64(len(in.Payload)), func(laneCtx context.Context) error {
-		if _, err := receipt.EnsureActiveMetamodel(laneCtx, service); err != nil {
-			return err
-		}
-		committed, err := service.Receive(laneCtx, warrant, capture.delivery, preparedCommit.effects...)
-		if err != nil {
-			return err
-		}
-		occurrence = committed.OccurrenceID
-		outcome, err := tasks.RecordLifecycleSessionClaim(laneCtx, s.tracker, in.Harness, event.Kind, capture.delivery.Bindings, in.ActorClaim, s.clock)
-		if err != nil {
-			return fmt.Errorf("%w: %w", ErrLifecycleCommittedWithoutContinuation, err)
-		}
-		claim = outcome
-		return nil
-	}); commitErr != nil {
+	record := &servedLifecycleRecord{
+		service:         service,
+		tracker:         s.tracker,
+		warrant:         warrant,
+		delivery:        capture.delivery,
+		effects:         preparedCommit.effects,
+		ensureMetamodel: true,
+		claim:           in.ActorClaim,
+		clock:           s.clock,
+		harness:         in.Harness,
+		eventKind:       event.Kind,
+	}
+	if commitErr := submitToLane(ctx, s.lane, int64(len(in.Payload)), record); commitErr != nil {
 		return HookLifecycleServed{}, commitErr
 	}
+	occurrence = record.occurrence
+	claim = record.claimOutcome
 
 	if line := sessionClaimMismatchDiagnostic(in.Harness, in.ActorClaim, capture.delivery.Bindings, claim); line != "" && s.diagnostics != nil {
 		fmt.Fprintln(s.diagnostics, line)
@@ -248,9 +250,93 @@ func (s *HookLifecycleServer) Serve(ctx context.Context, in HookLifecycleServeIn
 	return HookLifecycleServed{Outcome: preparedCommit.outcome, OccurrenceID: strconv.FormatInt(int64(occurrence.JournalID()), 10), ClaimState: claim.State.String()}, nil
 }
 
+// servedLifecycleRecord is ONE served request's durable work, expressed as the
+// lane's two-phase writelane.Record so several requests' receipt appends can
+// share ONE transaction.
+//
+// THE PREPARE/SETTLE SPLIT IS THE PHASE-2 SHAPE. Phase 1 ran the whole commit —
+// blob, metamodel, receipt append, session claim — in one closure per record, so
+// every record took its own journal transaction. Phase 2 splits it: Prepare
+// writes the blob and builds the canonical operation (everything that must
+// precede the transaction), the lane commits the flush's operations in ONE
+// ApplyBatchContext, and Settle maps this record's own outcome back and runs the
+// continuation (the session claim) only for a record that is durably recorded.
+//
+// The compatibility-sensitive ordering is preserved: the metamodel activation
+// still commits BEFORE the receipt's operation, because Prepare runs it before
+// it returns the operation the batch will fold.
+type servedLifecycleRecord struct {
+	service   receipt.Service
+	tracker   protocol.TaskTracker
+	warrant   gate.Warrant
+	delivery  receipt.Delivery
+	effects   []provenance.Effect
+	claim     tasks.ActorClaim
+	clock     receipt.Clock
+	harness   ir.HarnessID
+	eventKind model.ContractEventKind
+
+	// ensureMetamodel is set on the valid-capture arm, whose interpreted.v2
+	// record must never cite an unjournaled metamodel. The invalid-capture arm
+	// writes only the disposition row.
+	ensureMetamodel bool
+
+	pending      receipt.PendingReceipt
+	occurrence   model.OccurrenceID
+	claimOutcome tasks.SessionClaimOutcome
+}
+
+// Prepare runs everything that must precede the shared transaction and returns
+// the record's canonical journal operation.
+func (r *servedLifecycleRecord) Prepare(ctx context.Context) (provenance.OperationInput, error) {
+	if r.ensureMetamodel {
+		if _, err := receipt.EnsureActiveMetamodel(ctx, r.service); err != nil {
+			return provenance.OperationInput{}, err
+		}
+	}
+	pending, err := r.service.PrepareReceipt(ctx, r.warrant, r.delivery, r.effects...)
+	if err != nil {
+		return provenance.OperationInput{}, err
+	}
+	r.pending = pending
+	return pending.Operation(), nil
+}
+
+// Settle reports this record's own outcome and runs its continuation. It is
+// called exactly once, with this record's own BatchRecordResult, whatever the
+// batch did:
+//
+//   - committed or short-circuited: writelane.Report returns nil, the receipt's
+//     occurrence is resolved, and the session claim runs. A failure AFTER the
+//     commit is ErrLifecycleCommittedWithoutContinuation (recorded), exactly as
+//     the direct path reports it.
+//   - conflict, failed, or not-recorded: the record is not durably recorded and
+//     writelane.Report returns its typed error, so the served path answers
+//     record-unknown and NEVER claims a commit the batch rolled back. A
+//     short-circuited record is not in this class.
+func (r *servedLifecycleRecord) Settle(ctx context.Context, outcome provenance.BatchRecordResult) error {
+	if err := writelane.Report(outcome); err != nil {
+		return err
+	}
+	settled, err := r.pending.Settle(outcome.Result)
+	if err != nil {
+		return err
+	}
+	r.occurrence = settled.OccurrenceID
+	if r.tracker == nil {
+		return nil
+	}
+	claim, err := tasks.RecordLifecycleSessionClaim(ctx, r.tracker, r.harness, r.eventKind, r.delivery.Bindings, r.claim, r.clock)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrLifecycleCommittedWithoutContinuation, err)
+	}
+	r.claimOutcome = claim
+	return nil
+}
+
 // prepareServedDelivery composes the same pure verification and encoding steps
 // deliveryCommit runs, WITHOUT the metamodel write: the served path performs
-// that write inside the lane's commit closure, so the store is touched only by
+// that write inside the lane's record Prepare, so the store is touched only by
 // the lane's one goroutine.
 //
 // The compatibility-sensitive ordering is preserved. deliveryCommit sequences

@@ -1,6 +1,7 @@
 # Lifecycle write lane — measurement record
 
-Status: phase 1 landed (daemon-fronted, UDS-only, per-record commits).
+Status: phase 2 landed (daemon-fronted, UDS-only, ONE transaction per lane turn
+via Provenance v0.9.0's batched apply).
 Subject: PROPOSAL-19, `https://github.com/dayvidpham/pasture--01a13c08-4b57-7bd4-b25d-2f750b9ed6d9`.
 
 ## Rule 1 discipline
@@ -75,6 +76,80 @@ p95 ≤ 250 ms** is met on every run. This is ONE machine at ONE concurrency for
 a few seconds; it is not a scaling study and it does not replace the sandbox
 harness above.
 
+## Phase 2 — one transaction per lane turn, measured
+
+Taken 2026-10-14 by the phase-2 implementer. REVISION: branch
+`pasture-01a13c08--feat--batched-lane-commit` off `origin/main` merge `d9c8b0c`,
+provenance **v0.9.0** (the batched `BatchJournal`), built with the Nix Go 1.26.3
+shell. The lane now prepares every record's canonical operation, commits the
+whole turn's operations in ONE `ApplyBatchContext`, and maps each record's own
+outcome back (`writelane.Report`).
+
+### Acceptance row (same harness as phase 1), measured
+
+COMMAND:
+
+    CGO_ENABLED=1 go test -count=1 -v -run TestEighteenConcurrent ./cmd/pastured/
+
+| run | window | probe runs | probe p95 | faults/s | appended faults |
+|---|---|---|---|---|---|
+| 1 | 3.004 s | 86 | 35.8 ms | 0.000 | 0 |
+| 2 | 3.028 s | 87 | 34.8 ms | 0.000 | 0 |
+| 3 | 3.018 s | 87 | 34.5 ms | 0.000 | 0 |
+
+Baseline for comparison (direct path, recorded at `1b5c7b0`): 7.47 faults/s and
+probe p95 2,003 ms. The acceptance target (faults/s = 0, probe p95 ≤ 250 ms) is
+met on every run, as it was in phase 1.
+
+### Throughput, measured
+
+COMMAND:
+
+    bash /tmp/opencode/lane-throughput/measure.sh <label> <tree-root> \
+        <pastured> <pasture> 10 <workers>
+
+The harness bootstraps a fresh sandbox store, starts the real `pastured` with
+`PASTURE_WRITE_LANE=auto`, waits for the `lifecycle write lane listening` line,
+runs `<workers>` concurrent `pasture hook lifecycle --harness claude-code
+--event SessionStart --host-version 2.1.261 --db <sandbox>` workers plus a
+serial probe for 10 s, and counts committed rows in `journal_evidence` with
+`evidence_kind = 'pasture.lifecycle.occurrence.v1'`.
+
+| tree | workers | window | committed events | events/s | faults/s | probe p95 |
+|---|---|---|---|---|---|---|
+| phase 1 (per-record) | 18 | 9.934 s | 1,392 | 140.1 | 0.000 | 180 ms |
+| phase 1 (per-record) | 18 | 10.496 s | 1,471 | 140.2 | 0.000 | 189 ms |
+| phase 1 (per-record) | 18 | 10.708 s | 1,497 | 139.8 | 0.000 | 191 ms |
+| phase 1 (per-record) | 36 | 10.578 s | 1,453 | 137.4 | 0.000 | 365 ms |
+| phase 1 (per-record) | 54 | 10.827 s | 1,452 | 134.1 | 0.000 | 513 ms |
+| phase 2 (batched) | 18 | 10.656 s | 2,742 | 257.3 | 0.000 | 84 ms |
+| phase 2 (batched) | 18 | 10.200 s | 2,484 | 243.5 | 0.000 | 88 ms |
+| phase 2 (batched) | 18 | 10.725 s | 2,708 | 252.5 | 0.000 | 86 ms |
+| phase 2 (batched) | 36 | 10.107 s | 2,444 | 241.8 | 0.000 | 181 ms |
+| phase 2 (batched) | 54 | 10.688 s | 2,657 | 248.6 | 0.000 | 260 ms |
+
+What this shows, stated carefully:
+
+- The PER-RECORD lane SATURATES at about **135–140 events/s** on this harness:
+  raising the offered concurrency from 18 to 36 to 54 does not move the committed
+  rate, it only moves the probe latency (180 ms → 365 ms → 513 ms). That is the
+  per-record commit ceiling.
+- The BATCHED lane sustains about **244–257 events/s at C = 18**, roughly
+  **1.8×** the per-record lane, and it does NOT saturate at C = 18: at C = 36 and
+  C = 54 the committed rate stays ~242–249/s while the probe p95 rises. So on
+  this harness the committed rate is bounded by host process spawn and CPU, not
+  by the lane; ~250 events/s is a FLOOR on the batched lane's capacity, not its
+  ceiling.
+- The probe p95 at C = 18 fell from ~180–191 ms (per-record) to ~84–88 ms
+  (batched).
+
+An UNREPRODUCED figure is recorded rather than repeated: the phase-2 task
+brief described the per-record lane as capped at "~10 events/s". On THIS
+harness, with THIS 484-byte session-start fixture and a tiny sandbox store, the
+per-record lane committed ~137–140 events/s, so ~10/s did not reproduce here. It
+may describe the direct path (~7.5 events/s, recorded above) or a much larger
+store; it is not claimed as a measurement of this tree.
+
 ## Lane budget derivation (DERIVED)
 
 `writelane.BudgetFromProfile` derives every lane bound from the validated
@@ -90,22 +165,31 @@ carrying a second set of durations.
 | `QueueBytes` | 32 MiB | 4 × `BatchBytes` |
 | `FlushInterval` | 25 ms | the design's stated start, capped at `HoldTarget/4` |
 
-`assumedPerRecordCommitCost` (20 ms) is **DERIVED, NOT MEASURED**. The only
-recorded figure for this path is the serial per-invocation p50 of 97 ms above,
-which covers process start, the store open and two write transactions, so the
-in-transaction cost is strictly smaller and 20 ms errors the batch count
-shallow. The phase-2 sandbox run that owns the batching change replaces it with
-a measured per-record commit cost.
+`assumedPerRecordCommitCost` (20 ms) is **DERIVED, NOT MEASURED**, and phase 2
+keeps it as the splitter's conservative per-record allowance rather than
+replacing it. A lane turn is now ONE transaction, so the per-record cost is no
+longer the turn's cost; what the count must still bound is the turn's hold on
+the writer. The pinned Provenance v0.9.0 release records a batched per-record
+fold cost of 11.64 ms (serial p50, its own sandbox), so 20 records per turn is
+~233 ms, inside `HoldTarget` (400 ms). The phase-2 measurement above is the
+check that the bound is not the bottleneck: the batched lane did not saturate at
+C = 18, 36 or 54.
 
 `HoldTarget` is the one bound with an external consequence: it is what keeps
 the lane from starving the engine's and the CLI's own writers past their busy
 window. It is validated at construction (`WriteLaneBudget.Validate`) and
 `BudgetFromProfile` refuses a profile whose busy tier cannot contain it.
+`Validate` also refuses a `BatchRecords` above Provenance's `MaxBatchRecords`
+(256), because one turn is one `ApplyBatchContext` call and a larger turn would
+be refused by the journal.
 
 ## What is NOT measured here
 
 - The store-size scaling of the open/verification path (PROPOSAL-19 bands it
   with the two live report numbers; not re-measured).
-- Windows: phase 1 has no Unix-domain-socket transport, so Windows runs
+- Windows: there is no Unix-domain-socket transport, so Windows runs
   direct-only. That is a stated scope boundary, not a measurement.
-- Phase 2 (one commit per batch, needs a provenance batch API and a pin bump).
+- The batched lane's CEILING: the harness above is process-spawn-bound, so the
+  ~250 events/s it sustains is a floor. The measured per-record saturation
+  (~137/s) and the 1.8× ratio are the comparison; the absolute batched ceiling
+  is not measured.

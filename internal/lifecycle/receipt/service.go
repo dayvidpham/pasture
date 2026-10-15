@@ -79,47 +79,131 @@ type occurrencePayload struct {
 // parameter is required) nor reaches the store. The gate is origin-blind: the
 // warrant certifies only the write class, never which host or delivery produced
 // it.
+//
+// It is PrepareReceipt followed by the single append, with the settlement fence
+// around the append. The direct path keeps exactly this shape; the served lane
+// path uses PrepareReceipt directly so several records' appends can share ONE
+// transaction.
 func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Delivery, extra ...provenance.Effect) (Receipt, error) {
+	pending, err := s.PrepareReceipt(ctx, warrant, delivery, extra...)
+	if err != nil {
+		return Receipt{}, err
+	}
+	appendReceipt := func() (model.OccurrenceID, error) {
+		receipt, err := pending.Append(ctx)
+		if err != nil {
+			return 0, err
+		}
+		return receipt.OccurrenceID, nil
+	}
+	var id model.OccurrenceID
+	if s.Settlement != nil {
+		if delivery.Capture != model.CaptureValid {
+			id, err = s.Settlement.RunRecordOnly(ctx, appendReceipt)
+		} else {
+			id, err = s.Settlement.Run(ctx, s.Outcome, appendReceipt)
+		}
+	} else {
+		id, err = appendReceipt()
+	}
+	if err != nil {
+		return Receipt{}, err
+	}
+	return Receipt{OccurrenceID: id}, nil
+}
+
+// PendingReceipt is one delivery's durable work up to (but not including) the
+// journal append. PrepareReceipt writes the payload blob, resolves the ingress
+// identity, and canonicalizes the effects, so a PendingReceipt names the exact
+// operation the journal will fold; the append itself is the caller's, either
+// alone (Append, the direct path) or as one record of a batch (Settle, the
+// served lane path).
+type PendingReceipt struct {
+	appender JournalAppender
+	input    provenance.OperationInput
+}
+
+// Operation returns the canonical journal operation this receipt will commit.
+// The lane batches these across a flush and hands them to ONE ApplyBatchContext.
+func (p PendingReceipt) Operation() provenance.OperationInput { return p.input }
+
+// Append commits the pending receipt ALONE, in its own transaction, with the
+// appender's deadline and contention classification. It is the direct path's
+// write.
+func (p PendingReceipt) Append(ctx context.Context) (Receipt, error) {
+	id, err := p.appender.Append(ctx, p.input)
+	if err != nil {
+		return Receipt{}, err
+	}
+	return Receipt{OccurrenceID: id}, nil
+}
+
+// Settle maps a committed batch result back to this receipt. It returns the
+// occurrence identity the journal produced for this operation; a missing
+// occurrence result slot is a storage error, exactly as it is on the single
+// append.
+func (p PendingReceipt) Settle(result provenance.CommittedResult) (Receipt, error) {
+	for _, slot := range result.ResultSlots {
+		if slot.Slot == receiptSlot && slot.ProducedJournalID > 0 {
+			return Receipt{OccurrenceID: model.OccurrenceID(slot.ProducedJournalID)}, nil
+		}
+	}
+	return Receipt{}, structured(pasterrors.CategoryStorage, "The lifecycle occurrence committed without its receipt identity.", "The journal result did not contain the mandatory occurrence result slot.", "Settling a batched lifecycle occurrence (internal/lifecycle/receipt/service.go in receipt.PendingReceipt.Settle).", "The caller cannot claim a receipt even though the operation reported success.", "Use a compatible Provenance journal and inspect the committed operation before retrying.", fmt.Errorf("missing result slot %q", receiptSlot))
+}
+
+// PrepareReceipt is Receive up to the journal append: it authorizes the write,
+// validates the delivery and its extras, writes the payload blob, resolves the
+// ingress identity, and canonicalizes the effects into the exact operation the
+// journal will fold. It performs NO journal write, so a caller that batches
+// several PendingReceipts can commit them in ONE transaction.
+//
+// Every pre-append refusal is raised here, before the append, so a refusal that
+// escapes PrepareReceipt is provably not-recorded on both the direct and the
+// served path.
+func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, delivery Delivery, extra ...provenance.Effect) (PendingReceipt, error) {
 	if refusal := gate.Authorize(warrant, gate.WriteDeliveryReceipt); refusal != nil {
-		return Receipt{}, refusal
+		return PendingReceipt{}, refusal
 	}
 	if err := validateDelivery(delivery); err != nil {
-		return Receipt{}, err
+		return PendingReceipt{}, err
 	}
 	if err := validateLifecycleExtras(extra); err != nil {
-		return Receipt{}, err
+		return PendingReceipt{}, err
 	}
 	if s.Settlement != nil && delivery.Capture == model.CaptureValid {
 		if _, known := s.Outcome.Exit.Code(); !known {
-			return Receipt{}, fmt.Errorf("receive lifecycle delivery: validated event has no candidate Outcome for settlement; no receipt was written; encode its complete response before Receive")
+			return PendingReceipt{}, fmt.Errorf("receive lifecycle delivery: validated event has no candidate Outcome for settlement; no receipt was written; encode its complete response before Receive")
 		}
 	}
 	if s.Blobs == nil || s.Identity == nil || s.Clock == nil || s.Operations == nil {
-		return Receipt{}, structured(pasterrors.CategoryValidation, "The lifecycle receipt service is incompletely wired.", "Blob storage, identity resolution, clock, and operation identity are all required to produce an attributable durable receipt.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "Nothing was recorded.", "Construct the service through the unified production opener with every dependency supplied.", nil)
+		return PendingReceipt{}, structured(pasterrors.CategoryValidation, "The lifecycle receipt service is incompletely wired.", "Blob storage, identity resolution, clock, and operation identity are all required to produce an attributable durable receipt.", "Preparing a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "Nothing was recorded.", "Construct the service through the unified production opener with every dependency supplied.", nil)
 	}
 	if err := s.boundedWriter(ctx); err != nil {
-		return Receipt{}, err
+		return PendingReceipt{}, err
 	}
 	body := append([]byte(nil), delivery.Body...)
 	ref := digest.FromBytes(body)
 
 	// Crash safety depends on this order: an orphan blob is reclaimable, while a
-	// journal row that names an absent blob is corruption.
+	// journal row that names an absent blob is corruption. PrepareReceipt runs
+	// the blob write BEFORE the caller's transaction, so a rolled-back batch
+	// leaves only reclaimable orphans and never a journal row naming an absent
+	// blob.
 	if err := s.Blobs.Put(ctx, ref, body); err != nil {
-		return Receipt{}, err
+		return PendingReceipt{}, err
 	}
 	identity, err := s.Identity.ResolveLifecycleIdentity(ctx)
 	if err != nil {
-		return Receipt{}, err
+		return PendingReceipt{}, err
 	}
 	operation, err := s.Operations.NewOperationID()
 	if err != nil {
-		return Receipt{}, structured(pasterrors.CategoryStorage, "A fresh lifecycle operation identity could not be created.", "Every host delivery must have a distinct operation identity, including byte-identical deliveries.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Restore the injected operation identity source and retry the delivery.", err)
+		return PendingReceipt{}, structured(pasterrors.CategoryStorage, "A fresh lifecycle operation identity could not be created.", "Every host delivery must have a distinct operation identity, including byte-identical deliveries.", "Preparing a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Restore the injected operation identity source and retry the delivery.", err)
 	}
 	receivedAt := s.Clock.Now().UTC()
 	payload, err := json.Marshal(occurrencePayload{Contract: delivery.Contract, Event: delivery.Event, Envelope: delivery.Envelope, Bindings: append([]model.NativeBinding(nil), delivery.Bindings...), Capture: delivery.Capture, Body: ref.String(), Origin: delivery.Origin})
 	if err != nil {
-		return Receipt{}, structured(pasterrors.CategoryStorage, "The lifecycle occurrence envelope could not be encoded.", "The validated typed delivery failed JSON encoding, which indicates an internal contract defect.", "Receiving a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Report the incompatible delivery shape and retry only after correcting it.", err)
+		return PendingReceipt{}, structured(pasterrors.CategoryStorage, "The lifecycle occurrence envelope could not be encoded.", "The validated typed delivery failed JSON encoding, which indicates an internal contract defect.", "Preparing a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Report the incompatible delivery shape and retry only after correcting it.", err)
 	}
 	command := sha256.Sum256(append([]byte(receiptCommand+"\x00"), payload...))
 	payloadDigest := sha256.Sum256(payload)
@@ -137,28 +221,12 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 	}
 	input.Effects, err = CanonicalizeLifecycleEffects(input.Effects)
 	if err != nil {
-		return Receipt{}, structured(pasterrors.CategoryValidation, "Lifecycle evidence could not cross the canonical journal boundary.", "The validated effects did not produce one canonical operation.", "Preparing lifecycle evidence (internal/lifecycle/receipt/service.go in receipt.Service.Receive).", "No occurrence was committed; the blob may be reclaimable.", "Construct effects through receipt records and retry.", err)
+		return PendingReceipt{}, structured(pasterrors.CategoryValidation, "Lifecycle evidence could not cross the canonical journal boundary.", "The validated effects did not produce one canonical operation.", "Preparing lifecycle evidence (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "No occurrence was committed; the blob may be reclaimable.", "Construct effects through receipt records and retry.", err)
 	}
 	if err := validateLifecycleExtras(input.Effects[1:]); err != nil {
-		return Receipt{}, err
+		return PendingReceipt{}, err
 	}
-	appendReceipt := func() (model.OccurrenceID, error) {
-		return s.Appender.Append(ctx, input)
-	}
-	var id model.OccurrenceID
-	if s.Settlement != nil {
-		if delivery.Capture != model.CaptureValid {
-			id, err = s.Settlement.RunRecordOnly(ctx, appendReceipt)
-		} else {
-			id, err = s.Settlement.Run(ctx, s.Outcome, appendReceipt)
-		}
-	} else {
-		id, err = appendReceipt()
-	}
-	if err != nil {
-		return Receipt{}, err
-	}
-	return Receipt{OccurrenceID: id}, nil
+	return PendingReceipt{appender: s.Appender, input: input}, nil
 }
 
 // boundedWriter refuses a delivery whose context carries a deadline BEYOND the

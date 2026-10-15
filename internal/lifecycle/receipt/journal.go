@@ -257,6 +257,35 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 	return 0, structured(pasterrors.CategoryStorage, "The lifecycle occurrence committed without its receipt identity.", "The journal result did not contain the mandatory occurrence result slot.", "Committing a lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.Append).", "The caller cannot claim a receipt even though the operation reported success.", "Use a compatible Provenance journal and inspect the committed operation before retrying.", fmt.Errorf("missing result slot %q", receiptSlot))
 }
 
+// AppendBatch commits a bounded batch of operations in ONE transaction through
+// the pinned Provenance BatchJournal. It is the lane's flush: one transaction
+// per batch, with the same ingress deadline as Append and the same per-record
+// taxonomy (committed / short-circuited / conflict / failed / not-recorded)
+// that ApplyContext gives a single record. The batch is all-or-nothing, so a
+// caller that reads Committed=false knows NO record this batch newly folded is
+// durable, while a short-circuited record stays durable from its earlier
+// transaction.
+//
+// The Observer is NOT consulted here. It observes ONE occurrence commit and a
+// batch is many; production wires no observer at all, so this seam is
+// documented rather than given a fabricated per-batch meaning.
+func (a JournalAppender) AppendBatch(ctx context.Context, inputs []provenance.OperationInput) (provenance.BatchResult, error) {
+	const where = "Committing a batched lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.AppendBatch)."
+	batch, ok := a.Journal.(provenance.BatchJournal)
+	if !ok {
+		return provenance.BatchResult{}, structured(pasterrors.CategoryValidation, "The lifecycle journal cannot commit a batch in one transaction.", "The configured Provenance journal does not implement BatchJournal.ApplyBatchContext, so using it would commit each record separately and the batch would not be one transaction.", where, "No occurrence was recorded; already written payload blobs may remain as reclaimable orphans.", "Use the pinned Provenance journal implementation that provides BatchJournal.ApplyBatchContext.", nil)
+	}
+	if a.Deadline <= 0 {
+		return provenance.BatchResult{}, structured(pasterrors.CategoryValidation, "The lifecycle journal appender has no ingress deadline.", "Timeouts must come from one validated injected profile; silently defaulting here could invert SQLite retry and caller deadlines.", where, "No occurrence was recorded; already written payload blobs may remain as reclaimable orphans.", "Construct the receipt service with a validated timeout profile.", nil)
+	}
+	if a.Clock == nil {
+		return provenance.BatchResult{}, structured(pasterrors.CategoryValidation, "The lifecycle journal appender has no clock.", "Deadline accounting must use the injected process clock so timeout behavior is deterministic and testable.", where, "No occurrence was recorded; already written payload blobs may remain as reclaimable orphans.", "Construct the journal appender with the receipt service clock.", nil)
+	}
+	bounded, cancel := context.WithTimeout(ctx, a.Deadline)
+	defer cancel()
+	return batch.ApplyBatchContext(bounded, inputs)
+}
+
 func structured(category pasterrors.Category, what, why, where, impact, fix string, cause error) error {
 	return &pasterrors.StructuredError{Category: category, What: what, Why: why, Where: where, Impact: impact, Fix: fix, Cause: cause}
 }

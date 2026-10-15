@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/provenance"
 )
 
 // assumedPerRecordCommitCost is the per-record commit cost the batch-record
@@ -29,14 +30,15 @@ import (
 //
 // IT IS A CONSERVATIVE DESIGN CONSTANT, NOT A MEASUREMENT OF THIS TREE. Rule 1
 // of the sibling repository's design-performance skill forbids presenting a
-// guess as a measurement, so this is named for what it is. The only figure
-// recorded for this path is PROPOSAL-19's serial per-invocation p50 of 97 ms,
-// which covers process start, the store open and two write transactions, so the
-// in-transaction cost is strictly smaller; 20 ms is chosen below that band so
-// the derived batch count ERRORS SMALL. The phase-2 sandbox run that owns the
-// batching change re-derives this from a real per-record commit measurement and
-// replaces it; until then the batch is deliberately shallower than the hold
-// target would allow.
+// guess as a measurement, so this is named for what it is. Phase 2 kept it as
+// the splitter's per-record allowance rather than replacing it: a lane turn is
+// now ONE ApplyBatchContext transaction, so what the count must still bound is
+// the turn's hold on the writer. The pinned Provenance v0.9.0 release records a
+// batched per-record fold cost of 11.64 ms (its own sandbox, serial p50), so 20
+// records per turn is about 233 ms, inside HoldTarget (400 ms); the phase-2
+// measurement in docs/audits/lifecycle-write-lane.md is the check that the
+// bound is not the bottleneck. The constant stays at 20 ms so the derived count
+// errors SMALL.
 const assumedPerRecordCommitCost = 20 * time.Millisecond
 
 // maxDerivedHoldTarget is the ceiling BudgetFromProfile places on the lane's
@@ -116,6 +118,8 @@ func (b WriteLaneBudget) Validate() error {
 		return fmt.Errorf("write lane budget BatchRecords is %d; it must be positive, because it is the record count of one lane turn", b.BatchRecords)
 	case b.BatchRecords > b.QueueRecords:
 		return fmt.Errorf("write lane budget BatchRecords is %d and QueueRecords is %d; one lane turn cannot take more records than the queue can stage, so BatchRecords must not exceed QueueRecords", b.BatchRecords, b.QueueRecords)
+	case b.BatchRecords > provenance.MaxBatchRecords:
+		return fmt.Errorf("write lane budget BatchRecords is %d, above the Provenance batch cap of %d; one lane turn commits its whole batch in ONE transaction, and Provenance refuses a batch larger than %d, so a turn that could exceed it would fail every record in it: lower BatchRecords to at most %d", b.BatchRecords, provenance.MaxBatchRecords, provenance.MaxBatchRecords, provenance.MaxBatchRecords)
 	case b.BatchBytes <= 0:
 		return fmt.Errorf("write lane budget BatchBytes is %d; it must be positive, because it is the staged payload bytes of one lane turn", b.BatchBytes)
 	case b.BatchBytes > b.QueueBytes:
