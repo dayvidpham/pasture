@@ -404,6 +404,46 @@ func TestTaskTimelineRefusesARetiredIdentity(t *testing.T) {
 	require.Empty(t, out.String())
 }
 
+// TestTaskTimelineRefusesANonTaskArgument pins the design's task-timeline input
+// rule: the timeline argument is a task identity, so a value that is neither a
+// valid slash task ID nor a recognizable retired identity is refused BEFORE the
+// store is opened. Accepting it would query for a task that cannot exist and
+// return a silent empty timeline behind a successful exit.
+func TestTaskTimelineRefusesANonTaskArgument(t *testing.T) {
+	t.Parallel()
+	for _, arg := range []string{"deadbeefcafe", "not-a-task-id", "01968a3c-9d4f-7c8a-bc12-feedfacecafe"} {
+		t.Run(arg, func(t *testing.T) {
+			var out bytes.Buffer
+			code, err := handlers.TaskTimeline(&out, handlers.TaskTimelineInput{
+				DBPath:    filepath.Join(t.TempDir(), "pasture.db"),
+				TaskIDStr: arg,
+			}, types.OutputJSON)
+			require.Error(t, err)
+			require.Equal(t, 1, code)
+			var se *pasterrors.StructuredError
+			require.ErrorAs(t, err, &se)
+			require.Equal(t, pasterrors.CategoryValidation, se.Category)
+			require.Contains(t, se.What, "not a valid task ID")
+			require.Contains(t, se.Impact, "empty timeline")
+			require.Empty(t, out.String(), "the refusal writes no timeline")
+		})
+	}
+}
+
+// TestTaskTimelineAcceptsAValidTaskID pins the other half of the rule: a slash
+// task ID is accepted, and an empty timeline for a task with no events is a
+// successful result rather than a refusal.
+func TestTaskTimelineAcceptsAValidTaskID(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	code, err := handlers.TaskTimeline(&out, handlers.TaskTimelineInput{
+		DBPath:    filepath.Join(t.TempDir(), "pasture.db"),
+		TaskIDStr: "file://project/01968a3c-9d4f-7c8a-bc12-feedfacecafe",
+	}, types.OutputJSON)
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+}
+
 // TestTaskEventsRefusesARetiredIdentity pins the same for the events verb's
 // epoch-id and context-id filters.
 func TestTaskEventsRefusesARetiredIdentity(t *testing.T) {

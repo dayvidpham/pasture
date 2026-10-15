@@ -244,27 +244,37 @@ func TestPostArchiveSeamInjectionIsRefusedAndRestorable(t *testing.T) {
 }
 
 // TestPreBeginDigestSeamIsolatesTheConversionTransaction pins the digest seam
-// position: it fires after the foreign-key bracket is established and
-// immediately before BEGIN IMMEDIATE, so the store's digest there equals the
-// digest before Convert was called (nothing pre-BEGIN writes) and differs from
-// the committed result.
+// position on the PRODUCTION handle: it fires after the foreign-key bracket is
+// established and immediately before BEGIN IMMEDIATE, so the store's digest there
+// equals the digest before Convert was called (nothing pre-BEGIN writes) and
+// differs from the committed result. The handle is dbconn.OpenSharedDB, the
+// _txlock=immediate / WAL handle production uses, so the seam's "final journal
+// mode" contract is exercised rather than assumed.
 func TestPreBeginDigestSeamIsolatesTheConversionTransaction(t *testing.T) {
-	path, db := markerlessStore(t)
+	path, db := markerlessStoreOnTheProductionHandle(t)
+	require.NoError(t, checkpointWAL(db))
 	before := fileDigest(t, path)
 
 	var seamDigest string
+	var seamErr error
 	seamSeen := false
 	opts := ConvertOptions{StorePath: path}
 	opts.beforeBegin = func() {
 		seamSeen = true
-		seamDigest = fileDigest(t, path)
+		// Checkpoint before the digest so a pre-BEGIN write that landed in the
+		// WAL is visible rather than hidden by a stale main file.
+		seamErr = checkpointWAL(db)
+		if seamErr == nil {
+			seamDigest = fileDigest(t, path)
+		}
 	}
 	_, err := Convert(context.Background(), db, opts)
 	require.NoError(t, err)
 	require.True(t, seamSeen, "the pre-BEGIN seam must fire")
+	require.NoError(t, seamErr)
 	require.Equal(t, before, seamDigest, "nothing may write to the store before BEGIN IMMEDIATE")
 
-	after := fileDigest(t, path)
+	after := checkpointedDigest(t, db, path)
 	require.NotEqual(t, before, after, "the committed conversion changes the store")
 }
 
@@ -409,30 +419,36 @@ func TestScopedP3aMarkedArchiveBranchIsRefused(t *testing.T) {
 }
 
 // TestBelowTargetPreBeginDigestEquality pins the digest seam for a store BELOW
-// the cutover target (not only at it): with the deferred catch-up pending, the
-// store's digest at the seam — after the foreign-key bracket, before BEGIN
-// IMMEDIATE — still equals the digest before Convert was called, and the
-// committed conversion changes the store.
+// the cutover target (not only at it), on the production handle: with the
+// deferred catch-up pending, the store's digest at the seam — after the
+// foreign-key bracket, before BEGIN IMMEDIATE — still equals the digest before
+// Convert was called, and the committed conversion changes the store.
 func TestBelowTargetPreBeginDigestEquality(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pasture.db")
-	db, err := dbconn.OpenDefaultDB(path)
+	db, err := dbconn.OpenSharedDB(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.MaxKnownSchemaVersion-2))
+	require.NoError(t, checkpointWAL(db))
 	before := fileDigest(t, path)
 
 	var seamDigest string
+	var seamErr error
 	seamSeen := false
 	opts := ConvertOptions{StorePath: path}
 	opts.beforeBegin = func() {
 		seamSeen = true
-		seamDigest = fileDigest(t, path)
+		seamErr = checkpointWAL(db)
+		if seamErr == nil {
+			seamDigest = fileDigest(t, path)
+		}
 	}
 	_, err = Convert(context.Background(), db, opts)
 	require.NoError(t, err)
 	require.True(t, seamSeen)
+	require.NoError(t, seamErr)
 	require.Equal(t, before, seamDigest, "nothing may write before BEGIN IMMEDIATE for a below-target store either")
-	require.NotEqual(t, before, fileDigest(t, path), "the committed conversion changes the store")
+	require.NotEqual(t, before, checkpointedDigest(t, db, path), "the committed conversion changes the store")
 }
 
 // TestForeignKeyBracketRestoresEnforcementOnAFailedConversion pins the ABORT
