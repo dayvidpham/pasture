@@ -8,14 +8,15 @@ import (
 )
 
 //go:generate go run ./cmd/runtimedocgen
+//go:generate go run ./cmd/docgen
 
 //go:embed generated/*.json
-var runtimeBodies embed.FS
+var generatedBodies embed.FS
 
 func generatedRuntimeBody(contract ir.RuntimeContractID) ([]byte, error) {
 	for index, registered := range RuntimeContracts() {
 		if registered == contract {
-			body, err := runtimeBodies.ReadFile(fmt.Sprintf("generated/runtime-%d.json", index))
+			body, err := generatedBodies.ReadFile(fmt.Sprintf("generated/runtime-%d.json", index))
 			if err != nil {
 				return nil, failure("generatedRuntimeBody", "The compiled runtime document is missing; regenerate the artifact.", err)
 			}

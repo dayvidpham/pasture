@@ -147,6 +147,14 @@ func Decode(payload []byte) (Document, error) {
 	switch header.Kind {
 	case model.DefinitionRuntimeContract:
 		return decodeRuntime(payload)
+	case model.DefinitionLifecycleSchema:
+		return decodeSchema(payload)
+	case model.DefinitionInterpreter:
+		return decodeInterpreter(payload)
+	case model.DefinitionEpochImplementation:
+		return decodeEpoch(payload)
+	case model.DefinitionRetentionPolicy:
+		return decodeRetention(payload)
 	default:
 		return Document{}, failure("Decode", fmt.Sprintf("No supported document owner codec for kind %d.", header.Kind), nil)
 	}

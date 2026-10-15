@@ -27,6 +27,10 @@ const (
 	DefinitionKinds         FixtureName = "definition_kinds"
 	DefinitionCorruption    FixtureName = "definition_corruption"
 	RuntimeDocumentVersions FixtureName = "runtime_document_versions"
+	// RemainingDocumentVersions pins the schema, epoch implementation,
+	// retention, and interpreter owner bodies: a stable-ID body change
+	// requires a document version bump and a new ledger entry.
+	RemainingDocumentVersions FixtureName = "remaining_document_versions"
 	// OperationalTracker covers executable tracker detection and exact history.
 	OperationalTracker FixtureName = "operational_tracker"
 	// ContentBlock is used by S2–S3 tests (message/content-block scenarios).
