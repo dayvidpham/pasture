@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
@@ -28,12 +29,20 @@ type Archive struct {
 	Marker  ArchiveMarker
 }
 
+// stagingSeq makes every archive staging name unique within this process.
+// Combined with the PID below, no two archivers ever share a staging file:
+// not two pastured processes stamping the same UTC second on one store's
+// first open, and not two concurrent attempts in one process either.
+var stagingSeq atomic.Uint64
+
 // ArchiveStore runs P1: a consistent logical copy of the committed store,
 // taken through a READ-ONLY source connection so no journal-mode switch or any
-// other write precedes it. The copy is staged as `<unique>.partial`, fsynced,
-// verified (integrity_check + foreign_key_check + the format marker + SHA-256),
-// and only then renamed to its final, unique name. An unverified file can never
-// sit at the name a recovery instruction points at.
+// other write precedes it. The copy is staged as `<final>.<pid>.<seq>.partial`,
+// fsynced, verified (integrity_check + foreign_key_check + the format marker
+// + SHA-256), and only then published to its final name with a link that
+// refuses to overwrite another archive. An unverified file can never sit at
+// the name a recovery instruction points at, and one archiver can never
+// clear, overwrite, or rename away another's bytes mid-flight.
 //
 // It is skipped only when the store did not exist at this function's own
 // read-only observation of the path: the first open of a brand-new store has no
@@ -57,12 +66,13 @@ func ArchiveStore(ctx context.Context, storePath, backupDir string, now time.Tim
 	if err != nil {
 		return Archive{}, err
 	}
-	partial := final + ".partial"
-	// A previous interrupted run can leave the staging name behind; remove only
-	// that staging file (never the final archive) so VACUUM INTO can write.
-	if err := os.Remove(partial); err != nil && !os.IsNotExist(err) {
-		return Archive{}, archiveError(storePath, "Pasture couldn't clear the staging archive name.", err)
-	}
+	partial := fmt.Sprintf("%s.%d.%d.partial", final, os.Getpid(), stagingSeq.Add(1))
+	// The staging name is fresh per attempt, so it cannot pre-exist: VACUUM
+	// INTO either writes it or fails cleanly, and no stale cleanup runs that
+	// could delete another archiver's live file. (Only this attempt knows
+	// this name; a staging file left by a killed run lingers harmlessly
+	// beside the store instead of risking a live attempt.) Legacy
+	// `<final>.partial` files from previous versions are never touched.
 
 	if _, err := source.ExecContext(ctx, `VACUUM INTO ?`, partial); err != nil {
 		return Archive{}, &pasterrors.StructuredError{
@@ -94,14 +104,43 @@ func ArchiveStore(ctx context.Context, storePath, backupDir string, now time.Tim
 		return Archive{}, archiveError(storePath, "Pasture made a staged archive but couldn't checksum it.", err)
 	}
 
-	if err := os.Rename(partial, final); err != nil {
+	published, err := publishArchive(storePath, partial, final)
+	if err != nil {
 		_ = os.Remove(partial)
-		return Archive{}, archiveError(storePath, "Pasture couldn't move the verified archive into place.", err)
+		return Archive{}, err
+	}
+	// The staging name was this attempt's alone: drop it now that the same
+	// bytes are linked at the final name, then flush the directory so both
+	// the publish and the staging removal are durable.
+	if err := os.Remove(partial); err != nil {
+		return Archive{}, archiveError(storePath, "Pasture couldn't clear the published staging archive.", err)
 	}
 	if err := fsyncPath(dir); err != nil {
 		return Archive{}, archiveError(storePath, "Pasture couldn't flush the archive directory.", err)
 	}
-	return Archive{Path: final, SHA256: sum, Marker: marker}, nil
+	return Archive{Path: published, SHA256: sum, Marker: marker}, nil
+}
+
+// publishArchive moves the verified staging file to its final archive name
+// without ever overwriting another archive. os.Link publishes atomically
+// only when the target does not exist; on EEXIST — a concurrent archiver
+// published the same timestamped name first, or a previous archive is already
+// there — it retries with the same numeric suffixes uniqueBackupPath uses,
+// linking the already-verified bytes under each candidate in turn. The
+// staging file is this attempt's alone, so no other process can take it
+// between verification and publish.
+func publishArchive(storePath, partial, final string) (string, error) {
+	for attempt := 0; ; attempt++ {
+		target := final
+		if attempt > 0 {
+			target = fmt.Sprintf("%s-%d", final, attempt)
+		}
+		if err := os.Link(partial, target); err == nil {
+			return target, nil
+		} else if !os.IsExist(err) {
+			return "", archiveError(storePath, "Pasture couldn't move the verified archive into place.", err)
+		}
+	}
 }
 
 // verifyArchive reopens the staged archive read-only and proves it is a
