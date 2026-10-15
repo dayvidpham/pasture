@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/definitions"
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
@@ -70,9 +71,12 @@ func TestReceiptSettlementCoversRealCommitReturnGapCancellationAndRollback(t *te
 			require.NoError(t, err)
 			_, err = receipt.EnsureActiveMetamodel(context.Background(), service)
 			require.NoError(t, err)
-
-			// Authentic ingress and genuine middle-end effects. The supplied Deny
-			// proves commit/transport mechanics, NOT assignment/Reader policy.
+			// The held Apply below must be the occurrence append, not a lazy
+			// definition activation: complete envelopes ensure their owner
+			// refs before the blob write, so pre-activate every envelope
+			// document the commit will resolve. These commits carry
+			// definition evidence only — no occurrence or interpretation —
+			// so the row assertions below still count exactly the pair.
 			manifest := registration.ClaudeCode2_1_261()
 			var event registration.Event
 			for _, candidate := range manifest.Events {
@@ -85,6 +89,20 @@ func TestReceiptSettlementCoversRealCommitReturnGapCancellationAndRollback(t *te
 			require.NoError(t, err)
 			capture := claudeingress.Parse(raw, event, manifest.Version, model.OccurrenceEnvelopeRef{})
 			require.Equal(t, model.CaptureValid, capture.Disposition)
+			runtimeContract, err := definitions.RuntimeContractForDelivery(capture.Delivery.Contract)
+			require.NoError(t, err)
+			documents, err := definitions.ActiveForContract(runtimeContract)
+			require.NoError(t, err)
+			_, err = receipt.EnsureActiveDefinition(context.Background(), service, documents.Runtime)
+			require.NoError(t, err)
+			_, err = receipt.EnsureActiveDefinition(context.Background(), service, documents.Schema)
+			require.NoError(t, err)
+			_, err = receipt.EnsureActiveDefinition(context.Background(), service, documents.EpochImplementation)
+			require.NoError(t, err)
+			_, err = receipt.EnsureActiveDefinition(context.Background(), service, documents.Retention)
+			require.NoError(t, err)
+			_, err = receipt.EnsureActiveDefinition(context.Background(), service, documents.Interpreter)
+			require.NoError(t, err)
 			binding, identities, err := claudefrontend.Bind(capture.Delivery.Event, capture.Delivery.Bindings)
 			require.NoError(t, err)
 			l2, err := binding.NewEvent(identities)
@@ -111,7 +129,7 @@ func TestReceiptSettlementCoversRealCommitReturnGapCancellationAndRollback(t *te
 
 			query := provenance.EvidenceQuery{
 				Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-				Kinds:  []provenance.EvidenceKind{receipt.CurrentConsultationEvidenceKind(), "pasture.lifecycle.interpreted.v2"},
+				Kinds:  []provenance.EvidenceKind{receipt.CurrentConsultationEvidenceKind(), receipt.CurrentInterpretedEvidenceKind()},
 				Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
 			}
 			if scenario == "expiry-before-entry" {

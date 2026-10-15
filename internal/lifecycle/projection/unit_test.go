@@ -436,16 +436,17 @@ func TestReaderInterpretationsEmptyForNoOccurrences(t *testing.T) {
 	}
 }
 
-// TestInterpretedKindsCoversBothKinds pins the dual-kind admission set used at
-// BOTH read sites (the watermark query in occurrences and the association query
-// in interpretations both range over interpretedKinds). If a kind is dropped, a
-// v1-only or v2-only store silently reads back nothing.
+// TestInterpretedKindsCoversBothKinds pins the triple-kind admission set used
+// at BOTH read sites (the watermark query in occurrences and the association
+// query in interpretations both range over interpretedKinds). If a kind is
+// dropped, a store holding only that kind silently reads back nothing, and
+// the at-most-one invariant stops covering it.
 func TestInterpretedKindsCoversBothKinds(t *testing.T) {
 	t.Parallel()
-	if len(interpretedKinds) != 2 {
-		t.Fatalf("interpretedKinds has %d entries, want exactly v1 and v2", len(interpretedKinds))
+	if len(interpretedKinds) != 3 {
+		t.Fatalf("interpretedKinds has %d entries, want exactly v1, v2 and v3", len(interpretedKinds))
 	}
-	if !kindsContain(interpretedKinds, interpretedKind) || !kindsContain(interpretedKinds, interpretedKindV2) {
-		t.Fatalf("interpretedKinds = %v, want both interpreted.v1 and interpreted.v2", interpretedKinds)
+	if !kindsContain(interpretedKinds, interpretedKind) || !kindsContain(interpretedKinds, interpretedKindV2) || !kindsContain(interpretedKinds, interpretedKindV3) {
+		t.Fatalf("interpretedKinds = %v, want interpreted.v1, interpreted.v2 and interpreted.v3", interpretedKinds)
 	}
 }

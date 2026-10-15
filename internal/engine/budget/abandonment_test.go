@@ -121,6 +121,13 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 		raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
 
+	// The blocked journal below gates the FIRST ApplyContext it sees. Complete
+	// envelopes ensure their owner refs before the blob write, so pre-activate
+	// every envelope document now: the abandoned run must block on the
+	// occurrence append, exactly as it did before definitions rode along.
+	// These commits carry definition evidence only and leave no occurrence.
+	preactivateEnvelopeDocuments(t, service, delivery.Contract)
+
 	// STATE 3: abandoned between the blob commit and the journal append.
 	abandoned := service
 	journal := &blockedJournal{Journal: service.Appender.Journal, reached: make(chan struct{})}

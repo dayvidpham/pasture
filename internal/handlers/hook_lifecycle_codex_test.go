@@ -77,7 +77,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			semantic:     runtime.SemanticObservation,
 			wantResponse: false,
 			wantNative:   []byte(`{}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2"},
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3"},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession: "session_id",
 			},
@@ -91,8 +91,8 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			wantResponse: true,
 			wantNative:   []byte(`{"continue":true}`),
 			wantEvidence: []provenance.EvidenceKind{
-				"pasture.lifecycle.occurrence.v1",
-				"pasture.lifecycle.interpreted.v2",
+				"pasture.lifecycle.occurrence.v2",
+				"pasture.lifecycle.interpreted.v3",
 				receipt.CurrentConsultationEvidenceKind(),
 			},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
@@ -105,7 +105,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			name: "Stop gate", fixture: "stop_0_153_0.json", event: "Stop",
 			kind: registration.EventCodexStop, semantic: runtime.SemanticGateConsultation,
 			wantResponse: true, wantNative: []byte(`{"continue":true}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", receipt.CurrentConsultationEvidenceKind()},
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3", receipt.CurrentConsultationEvidenceKind()},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession: "session_id", runtime.IdentityTurn: "turn_id",
 			},
@@ -114,7 +114,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			name: "PostToolUse gate", fixture: "post_tool_use_0_153_0.json", event: "PostToolUse",
 			kind: registration.EventCodexPostToolUse, semantic: runtime.SemanticGateConsultation,
 			wantResponse: true, wantNative: []byte(`{"continue":true}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", receipt.CurrentConsultationEvidenceKind()},
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3", receipt.CurrentConsultationEvidenceKind()},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession: "session_id", runtime.IdentityTurn: "turn_id", runtime.IdentityToolCall: "tool_use_id",
 			},
@@ -161,7 +161,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 				require.Equal(t, provenance.OperationID("test.codex."+tc.name), row.ProducingOperationID)
 			}
 			if tc.wantResponse {
-				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v2")
+				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v3")
 				consultation := queryOneEvidence(t, tracker, receipt.CurrentConsultationEvidenceKind())
 				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID, "one durable operation must group interpreted and consultation evidence")
 				require.Less(t, interpreted.JournalID, consultation.JournalID, "interpreted evidence must precede consultation evidence in the committed operation")

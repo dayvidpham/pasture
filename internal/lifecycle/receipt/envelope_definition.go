@@ -136,55 +136,105 @@ func definitionSlots(result provenance.CommittedResult) (provenance.JournalID, p
 }
 
 func EnsureActiveDefinition(ctx context.Context, s Service, document definitions.Document) (model.DefinitionRef, error) {
-	write, err := NewEnvelopeDefinitionActivation(document)
-	if err != nil {
-		return model.DefinitionRef{}, err
-	}
 	reader, err := NewDefinitionReader(s.Appender.Journal)
 	if err != nil {
 		return model.DefinitionRef{}, err
 	}
+	ref, _, _, err := ensureActiveDefinitionAt(ctx, s, document, reader, 0)
+	return ref, err
+}
+
+// ensureActiveDefinitionAt is the batch-path ensure: one indexed lookup, one
+// shared-watermark resolution, snapshots kept for pure admission checks. Its
+// behavior matches EnsureActiveDefinition plus ResolveDefinition — same
+// absence scan, same fixed-class gate, same deterministic commit, same
+// slot/body resolution — with no duplicate lookups and one shared enclosing
+// watermark for the whole envelope instead of one capture per document.
+func ensureActiveDefinitionAt(ctx context.Context, s Service, document definitions.Document, reader DefinitionReader, watermark provenance.JournalID) (model.DefinitionRef, model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
+	var empty model.DefinitionSnapshot
+	var noState model.DefinitionStateRecord
+	ref, result, _, err := ensureCommittedDefinition(ctx, s, document, reader)
+	if err != nil {
+		return model.DefinitionRef{}, empty, noState, err
+	}
+	return resolveCommittedDefinition(reader, ref, document, result, watermark)
+}
+
+// ensureCommittedDefinition performs the indexed lookup and, on absence, the
+// bounded absence scan, fixed-class gate, and deterministic commit for one
+// document, returning its reference, committed result, and whether this call
+// performed the commit (fresh). It performs no evidence resolution: callers
+// that need resolved snapshots resolve afterward under a post-commit
+// watermark; the hot path resolves only freshly committed activations and
+// trusts nothing else.
+func ensureCommittedDefinition(ctx context.Context, s Service, document definitions.Document, reader DefinitionReader) (model.DefinitionRef, provenance.CommittedResult, bool, error) {
+	write, err := NewEnvelopeDefinitionActivation(document)
+	if err != nil {
+		return model.DefinitionRef{}, provenance.CommittedResult{}, false, err
+	}
+	if reader == nil {
+		return model.DefinitionRef{}, provenance.CommittedResult{}, false, definitionError("ensureCommittedDefinition", "No definition reader was supplied.", nil)
+	}
 	result, err := reader.LookupCommitted(write.OperationID())
 	if err != nil {
-		return model.DefinitionRef{}, definitionError("EnsureActiveDefinition", "The indexed activation lookup failed.", err)
+		return model.DefinitionRef{}, provenance.CommittedResult{}, false, definitionError("ensureCommittedDefinition", "The indexed activation lookup failed.", err)
 	}
+	// fresh reports whether this call activated the document (the first
+	// lookup found nothing and the commit path ran). A hit returns a
+	// reference built from the journal's committed slots for the
+	// content-derived operation identity; evidence resolution for hits
+	// happens on read and replay boundaries, which re-prove every ref before
+	// exposing anything.
+	fresh := result.Kind == provenance.CommittedAbsent
 	switch result.Kind {
 	case provenance.CommittedAbsent:
 		if err := rejectDisplacedDefinition(ctx, reader, document); err != nil {
-			return model.DefinitionRef{}, err
+			return model.DefinitionRef{}, provenance.CommittedResult{}, false, err
 		}
 		intent, refusal := gate.NewEnvelopeDefinitionActivationIntent(document.Kind(), document.Content())
 		if refusal != nil {
-			return model.DefinitionRef{}, refusal
+			return model.DefinitionRef{}, provenance.CommittedResult{}, false, refusal
 		}
 		warrant, refusal := gate.Legalize(intent)
 		if refusal != nil {
-			return model.DefinitionRef{}, refusal
+			return model.DefinitionRef{}, provenance.CommittedResult{}, false, refusal
 		}
 		if _, err := s.Commit(ctx, warrant, write); err != nil {
-			return model.DefinitionRef{}, err
+			return model.DefinitionRef{}, provenance.CommittedResult{}, false, err
 		}
 		result, err = reader.LookupCommitted(write.OperationID())
 		if err != nil {
-			return model.DefinitionRef{}, definitionError("EnsureActiveDefinition", "Post-commit slot lookup failed; activation may be committed.", err)
+			return model.DefinitionRef{}, provenance.CommittedResult{}, false, definitionError("ensureCommittedDefinition", "Post-commit slot lookup failed; activation may be committed.", err)
 		}
 	case provenance.CommittedExact:
 	default:
-		return model.DefinitionRef{}, definitionError("EnsureActiveDefinition", "The activation identity conflicts with committed journal truth.", nil)
+		return model.DefinitionRef{}, provenance.CommittedResult{}, false, definitionError("ensureCommittedDefinition", "The activation identity conflicts with committed journal truth.", nil)
 	}
 	id, _, err := definitionSlots(result)
 	if err != nil {
-		return model.DefinitionRef{}, err
+		return model.DefinitionRef{}, provenance.CommittedResult{}, false, err
 	}
-	ref := model.DefinitionRef{Definition: model.DefinitionJournalID(id), Kind: document.Kind(), Content: document.Content()}
-	snapshot, _, err := ResolveDefinition(reader, ref)
+	return model.DefinitionRef{Definition: model.DefinitionJournalID(id), Kind: document.Kind(), Content: document.Content()}, result, fresh, nil
+}
+
+// resolveCommittedDefinition resolves one ensured reference to its snapshot
+// and activation state under the shared watermark, proving the committed
+// body equals the requested owner document byte-for-byte.
+func resolveCommittedDefinition(reader DefinitionReader, ref model.DefinitionRef, document definitions.Document, result provenance.CommittedResult, watermark provenance.JournalID) (model.DefinitionRef, model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
+	var empty model.DefinitionSnapshot
+	var noState model.DefinitionStateRecord
+	decoded, row, watermark, err := resolveDefinitionHead(reader, ref, watermark)
 	if err != nil {
-		return model.DefinitionRef{}, err
+		return model.DefinitionRef{}, empty, noState, err
+	}
+	snapshot, state, err := resolveDefinitionTail(reader, ref, decoded, row, result, watermark)
+	if err != nil {
+		return model.DefinitionRef{}, empty, noState, err
 	}
 	if !bytes.Equal(snapshot.Body(), document.Body()) {
-		return model.DefinitionRef{}, definitionError("EnsureActiveDefinition", "The committed body does not match the requested owner document.", nil)
+		return model.DefinitionRef{}, empty, noState, definitionError("resolveCommittedDefinition", "The committed body does not match the requested owner document.", nil)
 	}
-	return ref, nil
+	return ref, snapshot, state, nil
 }
 
 // The indexed lookup cannot distinguish first activation from a renamed
@@ -245,44 +295,80 @@ func ResolveDefinition(reader DefinitionReader, ref model.DefinitionRef) (model.
 // ResolveDefinitionAt lets replay share its already selected enclosing snapshot.
 // Zero selects a fresh snapshot; a positive watermark is never widened.
 func ResolveDefinitionAt(reader DefinitionReader, ref model.DefinitionRef, watermark provenance.JournalID) (model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
-	var empty model.DefinitionSnapshot
-	var noState model.DefinitionStateRecord
+	document, row, watermark, err := resolveDefinitionHead(reader, ref, watermark)
+	if err != nil {
+		return model.DefinitionSnapshot{}, model.DefinitionStateRecord{}, err
+	}
+	result, err := reader.LookupCommitted(row.ProducingOperationID)
+	if err != nil {
+		return model.DefinitionSnapshot{}, model.DefinitionStateRecord{}, definitionError("ResolveDefinitionAt", "Producing operation result-slot reconstruction failed.", err)
+	}
+	return resolveDefinitionTail(reader, ref, document, row, result, watermark)
+}
+
+// resolveDefinitionHead proves the exact evidence row for one reference: reader
+// and coordinate validation, one shared enclosing watermark, the exact-ID row
+// read, and the typed owner decode with kind, canonical-byte, digest and
+// operation-recipe checks. The batch ensure path shares this head and supplies
+// its already-fetched committed result to the tail instead of repeating the
+// indexed lookup.
+func resolveDefinitionHead(reader DefinitionReader, ref model.DefinitionRef, watermark provenance.JournalID) (definitions.Document, provenance.EvidenceRow, provenance.JournalID, error) {
+	var noRow provenance.EvidenceRow
 	if reader == nil || ref.Definition <= 0 || !model.IsEnvelopeDefinitionKind(ref.Kind) || ref.Content == (model.ContentIdentity{}) || watermark < 0 {
-		return empty, noState, definitionError("ResolveDefinitionAt", "Reader, positive journal coordinate, admitted kind or content identity is missing.", nil)
+		return definitions.Document{}, noRow, 0, definitionError("resolveDefinitionHead", "Reader, positive journal coordinate, admitted kind or content identity is missing.", nil)
 	}
 	if watermark == 0 {
-		page, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitions.EvidenceKind, envelopeStateKind}, Page: provenance.FactPageRequest{Limit: 1}})
+		captured, err := captureDefinitionWatermark(reader)
 		if err != nil {
-			return empty, noState, definitionError("ResolveDefinitionAt", "Enclosing evidence snapshot could not be captured.", err)
+			return definitions.Document{}, noRow, 0, err
 		}
-		watermark = page.SnapshotMaxJournalID
+		watermark = captured
 	}
 	id := provenance.JournalID(ref.Definition)
 	if watermark < id {
-		return empty, noState, definitionError("ResolveDefinitionAt", "Definition lies beyond the enclosing snapshot watermark.", nil)
+		return definitions.Document{}, noRow, 0, definitionError("resolveDefinitionHead", "Definition lies beyond the enclosing snapshot watermark.", nil)
 	}
 	page, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitions.EvidenceKind}, Page: provenance.FactPageRequest{Limit: 1, SnapshotMaxJournalID: id, AfterJournalID: id - 1}})
 	if err != nil {
-		return empty, noState, definitionError("ResolveDefinitionAt", fmt.Sprintf("Exact definition row %d could not be read.", id), err)
+		return definitions.Document{}, noRow, 0, definitionError("resolveDefinitionHead", fmt.Sprintf("Exact definition row %d could not be read.", id), err)
 	}
 	if len(page.Rows) != 1 || page.Rows[0].JournalID != id {
-		return empty, noState, definitionError("ResolveDefinitionAt", fmt.Sprintf("Definition row %d is missing or has the wrong evidence kind.", id), nil)
+		return definitions.Document{}, noRow, 0, definitionError("resolveDefinitionHead", fmt.Sprintf("Definition row %d is missing or has the wrong evidence kind.", id), nil)
 	}
 	row := page.Rows[0]
 	document, err := definitions.Decode(row.Payload)
 	if err != nil {
-		return empty, noState, definitionError("ResolveDefinitionAt", fmt.Sprintf("Definition row %d failed its typed owner codec.", id), err)
+		return definitions.Document{}, noRow, 0, definitionError("resolveDefinitionHead", fmt.Sprintf("Definition row %d failed its typed owner codec.", id), err)
 	}
 	if document.Kind() != ref.Kind || document.Content() != ref.Content || !bytes.Equal(document.Body(), row.Payload) || !bytes.Equal(row.ContentDigest, ref.Content[:]) {
-		return empty, noState, definitionError("ResolveDefinitionAt", fmt.Sprintf("Definition row %d kind, canonical bytes or content digest does not match the reference.", id), nil)
+		return definitions.Document{}, noRow, 0, definitionError("resolveDefinitionHead", fmt.Sprintf("Definition row %d kind, canonical bytes or content digest does not match the reference.", id), nil)
 	}
 	if row.ProducingOperationID != definitionOperationID(document) {
-		return empty, noState, definitionError("ResolveDefinitionAt", "Definition producing operation does not match its owner coordinate recipe.", nil)
+		return definitions.Document{}, noRow, 0, definitionError("resolveDefinitionHead", "Definition producing operation does not match its owner coordinate recipe.", nil)
 	}
-	result, err := reader.LookupCommitted(row.ProducingOperationID)
+	return document, row, watermark, nil
+}
+
+// captureDefinitionWatermark reads one enclosing evidence watermark shared by
+// every resolution in a batch, so one Prepare pins a single snapshot instead
+// of capturing one per document.
+func captureDefinitionWatermark(reader DefinitionReader) (provenance.JournalID, error) {
+	page, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitions.EvidenceKind, envelopeStateKind}, Page: provenance.FactPageRequest{Limit: 1}})
 	if err != nil {
-		return empty, noState, definitionError("ResolveDefinitionAt", "Producing operation result-slot reconstruction failed.", err)
+		return 0, definitionError("captureDefinitionWatermark", "Enclosing evidence snapshot could not be captured.", err)
 	}
+	return page.SnapshotMaxJournalID, nil
+}
+
+// resolveDefinitionTail completes a definition resolution from the decoded
+// owner document, its exact evidence row, and the producing operation's
+// committed result. The batch ensure path supplies the result it already
+// fetched instead of repeating the indexed lookup; every slot, anchor,
+// state, digest and construction check below still runs.
+func resolveDefinitionTail(reader DefinitionReader, ref model.DefinitionRef, document definitions.Document, row provenance.EvidenceRow, result provenance.CommittedResult, watermark provenance.JournalID) (model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
+	var empty model.DefinitionSnapshot
+	var noState model.DefinitionStateRecord
+	id := provenance.JournalID(ref.Definition)
 	definitionID, stateID, err := definitionSlots(result)
 	if err != nil {
 		return empty, noState, err

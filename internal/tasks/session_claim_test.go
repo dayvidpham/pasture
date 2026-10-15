@@ -205,7 +205,7 @@ func TestSessionStartStoresClaimAndKeepsSystemReceiptAuthor(t *testing.T) {
 			require.NoError(t, db.QueryRow(`SELECT COUNT(*), actor FROM pasture_session_claim WHERE harness = ?`, string(tc.harness)).Scan(&count, &actor))
 			require.Equal(t, 1, count, "a re-fired session start must not add a claim")
 			require.Equal(t, claimedActor.ID.String(), actor, "a re-fired session start must not overwrite the original actor")
-			page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1"}, Page: provenance.FactPageRequest{Limit: 10}})
+			page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}, Page: provenance.FactPageRequest{Limit: 10}})
 			require.NoError(t, err)
 			require.Len(t, page.Rows, 2, "both receipt operations must exist")
 			for _, row := range page.Rows {

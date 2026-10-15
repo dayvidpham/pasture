@@ -422,8 +422,13 @@ func (l *Lane) commitRecords(batch []*item) []error {
 	}
 	prepared := make([]staged, 0, len(batch))
 	inputs := make([]provenance.OperationInput, 0, len(batch))
+	// One share per turn: every record prepared in this loop resolves
+	// turn-constant owner facts once and reuses them, instead of repeating
+	// the identical indexed lookups against the same journal rows. The scope
+	// dies with the turn, so nothing learned here outlives the batch apply.
+	turn := ContextWithTurnScope(l.ctx, NewTurnScope())
 	for i, it := range batch {
-		input, err := it.record.Prepare(l.ctx)
+		input, err := it.record.Prepare(turn)
 		if err != nil {
 			reports[i] = err
 			continue

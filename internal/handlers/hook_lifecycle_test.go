@@ -151,7 +151,7 @@ func TestNativeUnenforcedDecisionAgreesWithDurableConsultation(t *testing.T) {
 				t.Cleanup(func() { require.NoError(t, tracker.Close()) })
 				page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
 					Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-					Kinds:  []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", receipt.CurrentConsultationEvidenceKind()},
+					Kinds:  []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3", receipt.CurrentConsultationEvidenceKind()},
 					Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
 				})
 				require.NoError(t, err)
@@ -165,8 +165,8 @@ func TestNativeUnenforcedDecisionAgreesWithDurableConsultation(t *testing.T) {
 					rows[row.EvidenceKind] = row
 				}
 				require.Len(t, rows, 3)
-				occurrence := rows["pasture.lifecycle.occurrence.v1"]
-				interpreted := rows["pasture.lifecycle.interpreted.v2"]
+				occurrence := rows["pasture.lifecycle.occurrence.v2"]
+				interpreted := rows["pasture.lifecycle.interpreted.v3"]
 				consultation := rows[receipt.CurrentConsultationEvidenceKind()]
 				require.NotZero(t, occurrence.ProducingOperationJournalID)
 				require.Equal(t, occurrence.ProducingOperationJournalID, interpreted.ProducingOperationJournalID)
@@ -249,8 +249,8 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 		wantResponse         bool
 		wantEvidence         []provenance.EvidenceKind
 	}{
-		{name: "observation", fixture: "session_created_1_18_29.json", event: "session.created", wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2"}},
-		{name: "gate", fixture: "tool_execute_before_1_18_29.json", event: "tool.execute.before", wantResponse: true, wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.interpreted.v2", receipt.CurrentConsultationEvidenceKind()}},
+		{name: "observation", fixture: "session_created_1_18_29.json", event: "session.created", wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3"}},
+		{name: "gate", fixture: "tool_execute_before_1_18_29.json", event: "tool.execute.before", wantResponse: true, wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3", receipt.CurrentConsultationEvidenceKind()}},
 	}
 	for _, test := range tests {
 		test := test
@@ -288,8 +288,8 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 				require.Equal(t, provenance.OperationID("test."+test.name), row.ProducingOperationID)
 			}
 			if test.wantResponse {
-				occurrence := queryOneEvidence(t, tracker, "pasture.lifecycle.occurrence.v1")
-				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v2")
+				occurrence := queryOneEvidence(t, tracker, "pasture.lifecycle.occurrence.v2")
+				interpreted := queryOneEvidence(t, tracker, "pasture.lifecycle.interpreted.v3")
 				consultation := queryOneEvidence(t, tracker, receipt.CurrentConsultationEvidenceKind())
 				require.Equal(t, occurrence.ProducingOperationJournalID, interpreted.ProducingOperationJournalID)
 				require.Equal(t, interpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID)

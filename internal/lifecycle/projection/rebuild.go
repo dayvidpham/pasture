@@ -7,12 +7,21 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/provenance"
 )
 
 const occurrenceEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
+const occurrenceEvidenceKindV2 = provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")
+
+// occurrenceEvidenceKinds is the closed set of occurrence evidence kinds the
+// replay admits. v1 is read-only legacy (all-zero envelopes pass through;
+// any nonzero ref must validate); v2 carries the complete four-reference
+// envelope and is the only kind new writes emit.
+var occurrenceEvidenceKinds = []provenance.EvidenceKind{occurrenceEvidenceKind, occurrenceEvidenceKindV2}
 
 type occurrencePayload struct {
 	Contract string                      `json:"contract"`
@@ -33,9 +42,21 @@ type EvidencePageReader interface {
 	QueryEvidence(query provenance.EvidenceQuery) (provenance.EvidencePage, error)
 }
 
+// DefinitionResolver is the owner read capability replay validation needs.
+// Evidence alone cannot authenticate an operation's actual committed result
+// slots, so v2 envelope validation requires the committed-result lookup
+// alongside the evidence query. It is satisfied by the ordinary journal and
+// by provenance.TransactionEvidenceReader on the caller's transaction.
+type DefinitionResolver interface {
+	EvidencePageReader
+	LookupCommitted(provenance.OperationID) (provenance.CommittedResult, error)
+}
+
 // occurrenceRow is one decoded occurrence envelope in JournalID order.
 type occurrenceRow struct {
 	journalID  provenance.JournalID
+	operation  provenance.OperationID
+	kind       provenance.EvidenceKind
 	recordedAt int64
 	actor      string
 	payload    occurrencePayload
@@ -46,20 +67,37 @@ type occurrenceRow struct {
 // caller did not pin one; later pages carry it, so the read is one bounded
 // snapshot. It is shared by the ordinary rebuild (pooled journal) and the
 // transaction-bound migration replay (transaction reader).
-func readOccurrenceRows(reader EvidencePageReader) ([]occurrenceRow, error) {
-	query := provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{occurrenceEvidenceKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
+//
+// Every v2 row is validated through the definition owners at that watermark
+// before it is projected: four nonzero, correctly typed, resolvable refs
+// with the delivery contract pairing. A v1 row with any nonzero ref must
+// validate every supplied ref. Validation failure rolls the caller back
+// before any projection row is exposed.
+func readOccurrenceRows(reader DefinitionResolver) ([]occurrenceRow, provenance.JournalID, error) {
+	query := provenance.EvidenceQuery{Kinds: occurrenceEvidenceKinds, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
 	var rows []occurrenceRow
+	watermark := provenance.JournalID(0)
 	for {
 		page, err := reader.QueryEvidence(query)
 		if err != nil {
-			return nil, projectionError("Lifecycle occurrence evidence could not be read for projection rebuild.", "The bounded journal query failed before the disposable projection was touched.", "No projection rows were changed.", "Repair the journal query failure and retry the rebuild.", err)
+			return nil, 0, projectionError("Lifecycle occurrence evidence could not be read for projection rebuild.", "The bounded journal query failed before the disposable projection was touched.", "No projection rows were changed.", "Repair the journal query failure and retry the rebuild.", err)
+		}
+		if watermark == 0 {
+			watermark = page.SnapshotMaxJournalID
 		}
 		for _, evidence := range page.Rows {
 			var payload occurrencePayload
 			if err := json.Unmarshal(evidence.Payload, &payload); err != nil {
-				return nil, projectionError("A lifecycle occurrence journal row could not be decoded.", fmt.Sprintf("Evidence row %d does not contain the canonical occurrence envelope.", evidence.JournalID), "No projection rows were changed.", "Repair or restore the malformed journal row before rebuilding.", err)
+				return nil, 0, projectionError("A lifecycle occurrence journal row could not be decoded.", fmt.Sprintf("Evidence row %d does not contain the canonical occurrence envelope.", evidence.JournalID), "No projection rows were changed.", "Repair or restore the malformed journal row before rebuilding.", err)
 			}
-			rows = append(rows, occurrenceRow{journalID: evidence.JournalID, recordedAt: evidence.RecordedAt.UnixNano(), actor: evidence.EffectiveActorID.String(), payload: payload})
+			contract, err := parseOccurrenceContract(payload.Contract)
+			if err != nil {
+				return nil, 0, projectionError("A lifecycle occurrence journal row carries an invalid contract.", fmt.Sprintf("Evidence row %d does not name a runtime contract.", evidence.JournalID), "No projection rows were changed.", "Repair or restore the malformed journal row before rebuilding.", err)
+			}
+			if err := receipt.ValidateStoredOccurrenceEnvelope(reader, evidence.EvidenceKind, contract, payload.Envelope, watermark); err != nil {
+				return nil, 0, projectionError("A lifecycle occurrence journal row failed envelope validation.", fmt.Sprintf("Evidence row %d is not a complete owner-resolved envelope.", evidence.JournalID), "No projection rows were changed.", "Restore the damaged journal row from a verified backup before rebuilding.", err)
+			}
+			rows = append(rows, occurrenceRow{journalID: evidence.JournalID, operation: evidence.ProducingOperationID, kind: evidence.EvidenceKind, recordedAt: evidence.RecordedAt.UnixNano(), actor: evidence.EffectiveActorID.String(), payload: payload})
 		}
 		if page.Next == nil {
 			break
@@ -67,7 +105,37 @@ func readOccurrenceRows(reader EvidencePageReader) ([]occurrenceRow, error) {
 		query.Page.SnapshotMaxJournalID = page.Next.SnapshotMaxJournalID
 		query.Page.AfterJournalID = page.Next.AfterJournalID
 	}
-	return rows, nil
+	return rows, watermark, nil
+}
+
+// verifyTransactionSemanticEvidence verifies interpreted and consultation
+// integrity on the caller's transaction view before the projection is
+// touched. The occurrence rows supply the journal-truth envelopes the v3
+// pairing rule checks against; any failure rolls the caller back before a
+// migration marker is published.
+func verifyTransactionSemanticEvidence(reader DefinitionResolver, rows []occurrenceRow, watermark provenance.JournalID) error {
+	occurrences := make(map[provenance.OperationID]receipt.StoredOccurrence, len(rows))
+	for _, row := range rows {
+		contract, err := parseOccurrenceContract(row.payload.Contract)
+		if err != nil {
+			return projectionError("A lifecycle occurrence journal row carries an invalid contract.", fmt.Sprintf("Evidence row %d does not name a runtime contract.", row.journalID), "No semantic evidence was verified.", "Repair or restore the malformed journal row before rebuilding.", err)
+		}
+		occurrences[row.operation] = receipt.StoredOccurrence{JournalID: row.journalID, Contract: contract, Envelope: row.payload.Envelope}
+	}
+	if err := receipt.VerifyTransactionSemanticEvidence(reader, occurrences, watermark); err != nil {
+		return projectionError("Transaction semantic evidence failed verification.", "An interpreted or consultation record did not prove its envelope, pairing, or exact-payload link on the transaction view.", "No projection rows were changed.", "Restore the damaged journal rows from a verified backup before publishing the marker.", err)
+	}
+	return nil
+}
+
+// parseOccurrenceContract decodes the contract coordinate journal truth
+// declares. Envelope pairing, not this parse, decides admission.
+func parseOccurrenceContract(text string) (ir.RuntimeContractID, error) {
+	var contract ir.RuntimeContractID
+	if err := json.Unmarshal([]byte(fmt.Sprintf("%q", text)), &contract); err != nil {
+		return ir.RuntimeContractID{}, err
+	}
+	return contract, nil
 }
 
 // writeOccurrenceRows replaces every disposable occurrence/binding row with the
@@ -134,7 +202,7 @@ func rebuildOccurrences(ctx context.Context, journal provenance.Journal, db *sql
 	// projection, and its blob is younger than the writer window relative to
 	// it, so it cannot be selected however slow the rebuild is.
 	snapshotInstant := reclaim.Clock.Now()
-	rows, err := readOccurrenceRows(journal.Facts())
+	rows, _, err := readOccurrenceRows(journalResolver{Journal: journal})
 	if err != nil {
 		return ReclaimOutcome{}, err
 	}
@@ -172,6 +240,19 @@ func rebuildOccurrences(ctx context.Context, journal provenance.Journal, db *sql
 	return outcome, nil
 }
 
+// journalResolver binds the ordinary pooled journal to the owner read
+// capability replay validation needs: evidence queries plus the
+// committed-result lookup, both on the same journal.
+type journalResolver struct{ Journal provenance.Journal }
+
+func (r journalResolver) QueryEvidence(query provenance.EvidenceQuery) (provenance.EvidencePage, error) {
+	return r.Journal.Facts().QueryEvidence(query)
+}
+
+func (r journalResolver) LookupCommitted(operation provenance.OperationID) (provenance.CommittedResult, error) {
+	return r.Journal.LookupCommitted(operation)
+}
+
 // RebuildOccurrencesInTx recreates the disposable occurrence projection from
 // converted journal truth inside the CALLER's transaction, reading that truth
 // through reader. It is the offline identity-format conversion's same-transaction
@@ -189,12 +270,21 @@ func rebuildOccurrences(ctx context.Context, journal provenance.Journal, db *sql
 //
 // It never calls Begin, Commit or Rollback: transaction ownership stays with
 // the migration, which rolls the whole thing back on any error.
-func RebuildOccurrencesInTx(ctx context.Context, tx *sql.Tx, reader EvidencePageReader) error {
+//
+// Before the projection is touched, interpreted and consultation integrity is
+// verified on the same transaction view: every v3 record resolves its
+// complete semantic envelope and proves its pairing, and every consultation
+// proves its exact-payload link. A migration marker must never publish over
+// damaged semantic evidence.
+func RebuildOccurrencesInTx(ctx context.Context, tx *sql.Tx, reader DefinitionResolver) error {
 	if ctx == nil || tx == nil || reader == nil {
 		return projectionError("The transaction-bound lifecycle replay is incompletely wired.", "The caller's SQL transaction and its transaction-bound evidence reader are both required; a pooled reader would read past the conversion.", "No projection rows were changed.", "Pass the active migration transaction and the reader bound to it.", nil)
 	}
-	rows, err := readOccurrenceRows(reader)
+	rows, watermark, err := readOccurrenceRows(reader)
 	if err != nil {
+		return err
+	}
+	if err := verifyTransactionSemanticEvidence(reader, rows, watermark); err != nil {
 		return err
 	}
 	return writeOccurrenceRows(ctx, tx, rows)
@@ -231,11 +321,11 @@ type expectedBinding struct {
 // catches a replay that inserted rows the evidence does not contain, dropped a
 // row the evidence does contain, or wrote a different actor, envelope, digest or
 // binding bytes. It never writes, never reclaims and never owns the transaction.
-func CompareOccurrencesToEvidence(ctx context.Context, tx *sql.Tx, reader EvidencePageReader) error {
+func CompareOccurrencesToEvidence(ctx context.Context, tx *sql.Tx, reader DefinitionResolver) error {
 	if ctx == nil || tx == nil || reader == nil {
 		return projectionError("The lifecycle projection comparison is incompletely wired.", "The caller's transaction and its evidence reader are required.", "No comparison was performed.", "Pass the active transaction and its bound reader.", nil)
 	}
-	evidenceRows, err := readOccurrenceRows(reader)
+	evidenceRows, _, err := readOccurrenceRows(reader)
 	if err != nil {
 		return err
 	}

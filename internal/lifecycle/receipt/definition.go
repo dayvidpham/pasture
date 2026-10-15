@@ -2,12 +2,14 @@ package receipt
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/writelane"
 	"github.com/dayvidpham/provenance"
 )
 
@@ -34,6 +36,31 @@ func EnsureActiveMetamodel(ctx context.Context, s Service) (model.LifecycleMetam
 			"No metamodel definition was resolved or committed.",
 			"Construct the service through tasks.NewLifecycleReceiptService.", nil)
 	}
+	// Within one lane turn the first record to need the active metamodel
+	// performs the existence check and shares its reference; later same-turn
+	// records reuse it instead of repeating the identical indexed lookup
+	// against the same rows. Journal truth is monotonic and the activation
+	// is content-derived and idempotent, so the reuse sees the same rows the
+	// first check proved. Outside a turn every call checks standalone.
+	if scope := writelane.TurnScopeFrom(ctx); scope != nil {
+		active := metamodel.Active()
+		key := "lifecycle-active-metamodel:" + hex.EncodeToString(active.Content[:])
+		if cached, ok := scope.Get(key); ok {
+			if ref, ok := cached.(model.LifecycleMetamodelRef); ok {
+				return ref, nil
+			}
+		}
+		ref, err := ensureActiveMetamodelUnshared(ctx, s)
+		if err != nil {
+			return model.LifecycleMetamodelRef{}, err
+		}
+		scope.Set(key, ref)
+		return ref, nil
+	}
+	return ensureActiveMetamodelUnshared(ctx, s)
+}
+
+func ensureActiveMetamodelUnshared(ctx context.Context, s Service) (model.LifecycleMetamodelRef, error) {
 	// Bounded, content-addressed existence check: the operation identity is
 	// derived from the metamodel content, so an already-active metamodel resolves
 	// with a single indexed lookup and no writes.

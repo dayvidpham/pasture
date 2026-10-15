@@ -63,13 +63,18 @@ func validatePersistedGenesisAuthorityReadOnly(j provenance.Journal, authority p
 }
 
 // NewLifecycleReader returns the public bounded lifecycle reader backed by the
-// disposable replay-derived projection.
+// disposable replay-derived projection. The reader carries the definition
+// owner capability v3 envelope validation needs, bound to the same journal.
 func NewLifecycleReader(tracker protocol.TaskTracker) (model.LifecycleReader, error) {
 	store, ok := tracker.(lifecycleReceiptStore)
 	if !ok || store.auditDBHandle() == nil {
 		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot serve lifecycle reads.", Why: "The bounded reader needs the unified projection database handle.", Where: "Wiring lifecycle reads (internal/tasks/lifecycle_identity.go in tasks.NewLifecycleReader).", Impact: "No lifecycle records were read.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
 	}
-	return projection.Reader{DB: store.auditDBHandle(), Facts: store.Journal().Facts()}, nil
+	defs, err := receipt.NewDefinitionReader(store.Journal())
+	if err != nil {
+		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot serve validated lifecycle reads.", Why: "Semantic envelope validation needs the unified provenance journal.", Where: "Wiring lifecycle reads (internal/tasks/lifecycle_identity.go in tasks.NewLifecycleReader).", Impact: "No lifecycle records were read.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
+	}
+	return projection.Reader{DB: store.auditDBHandle(), Facts: store.Journal().Facts(), Defs: defs}, nil
 }
 
 // NewLifecycleBlobStore binds the payload blob store to the unified database

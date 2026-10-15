@@ -2,10 +2,15 @@
 # changes, add a new version entry and retain historical entries; do not
 # replace a released version's digest. A changed source dependency changes the
 # epoch/interpreter body, which requires a document version bump here.
+# DEFS-SLICE-3 note: the schema and interpreter entries below were refreshed
+# pre-release (no immutable corpus published yet) to cover the reviewed
+# occurrence.v2/interpreted.v3 wire. Per PROPOSAL-18 an initial unreleased
+# document keeps version 1 with this broader content; after release any
+# further body change must bump the version and retain this entry.
 versions:
   - id: pasture.lifecycle.occurrence-schema
     version: 1
-    sha256: ab6c44bd69c233ca0663a408ecd26cb6eae803d0700999e1d551251472f6514c
+    sha256: 4545eabebf51405118b476beb8757847ad4001025783df05b31865d2dd12252b
   - id: pasture.lifecycle.retention.store-all
     version: 1
     sha256: a32a0f49aa541ba3650b359f1acfdfe9035699fd5cc3464d2da9eea49dbe4f19
@@ -14,4 +19,4 @@ versions:
     sha256: 30202cbcd3649f19c3992e0130fe53f99d9335710cfca186da4a6cdf13d0f723
   - id: pasture.lifecycle.interpreter
     version: 1
-    sha256: 0ef49f53e14972feada3b8bff42953284b42d2b10b9ea04088ae34d5c00bd8ba
+    sha256: 7a3e0bcd5d5d8cfdfd4eef93483dd5ba0e8a3ead7a130060dd146c7f84d06f13

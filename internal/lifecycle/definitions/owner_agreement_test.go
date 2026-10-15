@@ -249,6 +249,6 @@ func TestInterpreterSpecificationAgreesWithPipelineOwners(t *testing.T) {
 	// Closed enum literals still match their live owners; the decode path
 	// already enforces these, and this pins the committed bytes as well.
 	require.Equal(t, []string{"observation", "gate-consultation", "explicit-human-response"}, spec.Semantics)
-	require.Equal(t, []string{"pasture.lifecycle.interpreted.v1", "pasture.lifecycle.interpreted.v2"}, spec.RecordKinds)
+	require.Equal(t, []string{"pasture.lifecycle.interpreted.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.interpreted.v3"}, spec.RecordKinds)
 	require.NotEmpty(t, spec.VocabularyRule)
 }

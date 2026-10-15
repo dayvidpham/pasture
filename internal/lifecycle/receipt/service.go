@@ -152,10 +152,13 @@ func (p PendingReceipt) Settle(result provenance.CommittedResult) (Receipt, erro
 }
 
 // PrepareReceipt is Receive up to the journal append: it authorizes the write,
-// validates the delivery and its extras, writes the payload blob, resolves the
-// ingress identity, and canonicalizes the effects into the exact operation the
-// journal will fold. It performs NO journal write, so a caller that batches
-// several PendingReceipts can commit them in ONE transaction.
+// validates the delivery and its extras, ensures the complete envelope owner
+// definitions, writes the payload blob, resolves the ingress identity, and
+// canonicalizes the effects into the exact operation the journal will fold.
+// The definition activations commit in their own idempotent operations before
+// the blob write; the PendingReceipt itself performs no journal write, so a
+// caller that batches several PendingReceipts can commit their occurrence
+// operations in ONE transaction.
 //
 // Every pre-append refusal is raised here, before the append, so a refusal that
 // escapes PrepareReceipt is provably not-recorded on both the direct and the
@@ -181,6 +184,20 @@ func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, deliv
 	if err := s.boundedWriter(ctx); err != nil {
 		return PendingReceipt{}, err
 	}
+	// Complete envelopes are ensured BEFORE the payload blob write and the
+	// journal append: a definition failure refuses durable occurrence
+	// admission outright rather than masquerading as a policy denial. Failure
+	// may leave already activated reusable definitions, but never a partial
+	// occurrence/interpretation pair. Record-only captures (malformed,
+	// unsupported, or valid without prepared interpretation) commit the
+	// complete occurrence alone; no semantic record is fabricated for a
+	// capture that has no interpretation. One memoized document build serves
+	// the whole envelope, and one lane turn shares every owner resolution
+	// instead of repeating the identical reads per record.
+	complete, final, err := s.prepareEnvelopes(ctx, delivery, delivery.Envelope, extra)
+	if err != nil {
+		return PendingReceipt{}, err
+	}
 	body := append([]byte(nil), delivery.Body...)
 	ref := digest.FromBytes(body)
 
@@ -201,16 +218,16 @@ func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, deliv
 		return PendingReceipt{}, structured(pasterrors.CategoryStorage, "A fresh lifecycle operation identity could not be created.", "Every host delivery must have a distinct operation identity, including byte-identical deliveries.", "Preparing a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Restore the injected operation identity source and retry the delivery.", err)
 	}
 	receivedAt := s.Clock.Now().UTC()
-	payload, err := json.Marshal(occurrencePayload{Contract: delivery.Contract, Event: delivery.Event, Envelope: delivery.Envelope, Bindings: append([]model.NativeBinding(nil), delivery.Bindings...), Capture: delivery.Capture, Body: ref.String(), Origin: delivery.Origin})
+	payload, err := json.Marshal(occurrencePayload{Contract: delivery.Contract, Event: delivery.Event, Envelope: complete, Bindings: append([]model.NativeBinding(nil), delivery.Bindings...), Capture: delivery.Capture, Body: ref.String(), Origin: delivery.Origin})
 	if err != nil {
 		return PendingReceipt{}, structured(pasterrors.CategoryStorage, "The lifecycle occurrence envelope could not be encoded.", "The validated typed delivery failed JSON encoding, which indicates an internal contract defect.", "Preparing a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Report the incompatible delivery shape and retry only after correcting it.", err)
 	}
 	command := sha256.Sum256(append([]byte(receiptCommand+"\x00"), payload...))
 	payloadDigest := sha256.Sum256(payload)
 	authority := identity.Authority
-	effects := make([]provenance.Effect, 0, 1+len(extra))
-	effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: receiptKind, ContentDigest: payloadDigest[:], Payload: payload})
-	effects = append(effects, extra...)
+	effects := make([]provenance.Effect, 0, 1+len(final))
+	effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: occurrenceKindV2, ContentDigest: payloadDigest[:], Payload: payload})
+	effects = append(effects, final...)
 	input := provenance.OperationInput{
 		OperationID:        provenance.OperationID(operation),
 		ActorID:            identity.Actor,
@@ -223,7 +240,7 @@ func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, deliv
 	if err != nil {
 		return PendingReceipt{}, structured(pasterrors.CategoryValidation, "Lifecycle evidence could not cross the canonical journal boundary.", "The validated effects did not produce one canonical operation.", "Preparing lifecycle evidence (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "No occurrence was committed; the blob may be reclaimable.", "Construct effects through receipt records and retry.", err)
 	}
-	if err := validateLifecycleExtras(input.Effects[1:]); err != nil {
+	if err := validateFinalExtras(input.Effects[1:]); err != nil {
 		return PendingReceipt{}, err
 	}
 	return PendingReceipt{appender: s.Appender, input: input}, nil
@@ -329,6 +346,13 @@ func CanonicalizeLifecycleEffects(effects []provenance.Effect) ([]provenance.Eff
 }
 
 func validateLifecycleExtras(extra []provenance.Effect) error {
+	// Prepared-material validation: the middle end derives one interpreted.v2
+	// record and its optional consultation as NON-DURABLE prepared evidence.
+	// The common receipt boundary finalizes them to occurrence.v2,
+	// interpreted.v3 and a rebound consultation before the append; finalized
+	// commits are checked by validateFinalExtras instead. A v3-shaped extra is
+	// refused here: refs are owner-assigned at finalization, never
+	// caller-supplied.
 	if len(extra) > 2 {
 		return invalid("The lifecycle delivery contains too many interpreted effects.", "Only one interpreted record and its immediately following consultation may accompany an occurrence.", "Pass the canonical ordered interpreted/consultation pair once.")
 	}
@@ -341,6 +365,33 @@ func validateLifecycleExtras(extra []provenance.Effect) error {
 	}
 	if err := validateInterpretedPayload(interpreted.Payload); err != nil {
 		return invalid("The lifecycle delivery contains malformed interpreted evidence.", err.Error(), "Use receipt.Record.Effect without modifying or reconstructing its payload.")
+	}
+	if len(extra) == 1 {
+		return nil
+	}
+	consultation := extra[1]
+	if consultation.Sort != provenance.EffectEvidence || consultation.ResultSlot != consultationSlot || consultation.EvidenceKind != consultationKind || !effectDigestValid(consultation) {
+		return invalid("The lifecycle delivery contains a forged consultation effect.", "Its slot, kind, or content digest is not canonical consultation evidence.", "Use receipt.ConsultationRecord.Effect without modifying it.")
+	}
+	if _, err := DecodeConsultation(consultation, interpreted); err != nil {
+		return invalid("The lifecycle consultation does not reference its immediately preceding interpreted effect.", "The operation-local slot and exact interpreted payload digest must match as one ordered pair.", "Construct both records together and preserve interpreted-then-consultation order.")
+	}
+	return nil
+}
+
+func validateFinalExtras(extra []provenance.Effect) error {
+	if len(extra) > 2 {
+		return invalid("The lifecycle delivery contains too many interpreted effects.", "Only one interpreted record and its immediately following consultation may accompany an occurrence.", "Pass the canonical ordered interpreted/consultation pair once.")
+	}
+	if len(extra) == 0 {
+		return nil
+	}
+	interpreted := extra[0]
+	if interpreted.Sort != provenance.EffectEvidence || interpreted.ResultSlot != interpretedSlot || interpreted.EvidenceKind != interpretedKindV3 || !effectDigestValid(interpreted) {
+		return invalid("The lifecycle delivery contains a forged finalized interpretation.", "Its slot, kind, or content digest is not canonical interpreted.v3 evidence.", "Finalize interpretations only through the common receipt boundary.")
+	}
+	if err := validateInterpretedV3Payload(interpreted.Payload); err != nil {
+		return invalid("The lifecycle delivery contains malformed finalized interpretation.", err.Error(), "Finalize interpretations only through the common receipt boundary.")
 	}
 	if len(extra) == 1 {
 		return nil

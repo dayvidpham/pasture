@@ -15,7 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/engine/budget"
+	"github.com/dayvidpham/pasture/internal/lifecycle/definitions"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -43,6 +45,33 @@ type operationSource struct {
 func (s *operationSource) NewOperationID() (string, error) {
 	s.next++
 	return fmt.Sprintf("pasture.budget.%s.%d", s.prefix, s.next), nil
+}
+
+// preactivateEnvelopeDocuments commits every definition activation the
+// complete-envelope receipt path resolves, without recording any occurrence.
+// Contention and abandonment proofs call it while the writer is still free so
+// the injected block gates the occurrence append itself — the statement under
+// test — rather than a lazy definition activation.
+func preactivateEnvelopeDocuments(t *testing.T, service receipt.Service, contract ir.RuntimeContractID) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := receipt.EnsureActiveMetamodel(ctx, service); err != nil {
+		t.Fatalf("pre-activate metamodel: %v", err)
+	}
+	if _, err := receipt.EnsureOccurrenceEnvelope(ctx, service, contract, model.OccurrenceEnvelopeRef{}); err != nil {
+		t.Fatalf("pre-activate occurrence envelope: %v", err)
+	}
+	runtimeContract, err := definitions.RuntimeContractForDelivery(contract)
+	if err != nil {
+		t.Fatalf("delivery runtime profile: %v", err)
+	}
+	documents, err := definitions.ActiveForContract(runtimeContract)
+	if err != nil {
+		t.Fatalf("envelope documents: %v", err)
+	}
+	if _, err := receipt.EnsureActiveDefinition(ctx, service, documents.Interpreter); err != nil {
+		t.Fatalf("pre-activate interpreter: %v", err)
+	}
 }
 
 type observation struct {
@@ -155,18 +184,22 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "honest"}, profile)
+	if err != nil {
+		tracker.Close()
+		t.Fatal(err)
+	}
+	// The injected contention below must gate the occurrence append itself:
+	// complete envelopes ensure their owner refs before the blob write, so
+	// pre-activate every envelope document while the writer is still free.
+	// These commits carry definition evidence only and leave no occurrence.
+	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode2_1_261().Contract)
 	held, release := make(chan struct{}), make(chan struct{})
 	lockErr := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	go func() { lockErr <- budget.HoldWriter(ctx, dbPath, timeouts.DeadlineTestProfile(), held, release) }()
 	<-held
-	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "honest"}, profile)
-	if err != nil {
-		close(release)
-		tracker.Close()
-		t.Fatal(err)
-	}
 	realStore, ok := service.Blobs.(receipt.SQLiteBlobStore)
 	if !ok {
 		close(release)

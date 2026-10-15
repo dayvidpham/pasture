@@ -12,7 +12,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
-	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
@@ -109,74 +108,6 @@ func (contextJournal) MigrateLegacyBaseline(provenance.MigrationInput) (provenan
 	return provenance.MigrationResult{}, nil
 }
 
-func TestReceiveWritesBlobBeforeOccurrence(t *testing.T) {
-	t.Parallel()
-	calls := []string{}
-	inputs := []provenance.OperationInput{}
-	clock := testClock{now: time.Unix(10, 0)}
-	j := contextJournal{calls: &calls, inputs: &inputs, result: provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 41}}}}
-	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-order"}}
-	r, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery())
-	if err != nil {
-		t.Fatalf("Receive: %v", err)
-	}
-	if r.JournalID() != 41 {
-		t.Fatalf("receipt journal id = %d, want 41", r.JournalID())
-	}
-	if len(calls) != 2 || calls[0] != "blob" || calls[1] != "occurrence" {
-		t.Fatalf("write order = %v, want [blob occurrence]", calls)
-	}
-
-	if len(inputs) != 1 || len(inputs[0].Effects) != 1 {
-		t.Fatalf("zero-extra effects = %#v, want one occurrence effect", inputs)
-	}
-	effect := inputs[0].Effects[0]
-	if effect.Sort != provenance.EffectEvidence || effect.ResultSlot != expectedOccurrenceResultSlot || effect.EvidenceKind != expectedOccurrenceEvidenceKind {
-		t.Fatalf("zero-extra occurrence effect = %#v, want independently pinned occurrence metadata", effect)
-	}
-}
-
-func TestReceiveAppendsOccurrenceAndOneExtraInOneOperation(t *testing.T) {
-	calls := []string{}
-	inputs := []provenance.OperationInput{}
-	applyCount := 0
-	clock := testClock{now: time.Unix(10, 0)}
-	j := contextJournal{
-		calls:      &calls,
-		inputs:     &inputs,
-		applyCount: &applyCount,
-		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 43}}},
-	}
-	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-one-extra"}}
-	interpreted, err := NewInterpreted(mustSessionStartL2(t, "session-1"), mustClaudeLifecycleContract(t), metamodel.Active())
-	if err != nil {
-		t.Fatal(err)
-	}
-	extra := interpreted.Effect()
-
-	receipt, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), extra)
-	if err != nil {
-		t.Fatalf("Receive: %v", err)
-	}
-	if receipt.JournalID() != 43 {
-		t.Fatalf("receipt journal id = %d, want 43", receipt.JournalID())
-	}
-	if applyCount != 1 || len(inputs) != 1 {
-		t.Fatalf("ApplyContext calls = %d, recorded inputs = %d, want one each", applyCount, len(inputs))
-	}
-	effects := inputs[0].Effects
-	if len(effects) != 2 {
-		t.Fatalf("effects = %d, want occurrence plus one extra", len(effects))
-	}
-	occurrence := effects[0]
-	if occurrence.Sort != provenance.EffectEvidence || occurrence.ResultSlot != expectedOccurrenceResultSlot || occurrence.EvidenceKind != expectedOccurrenceEvidenceKind {
-		t.Fatalf("first effect = %#v, want independently pinned occurrence metadata", occurrence)
-	}
-	if effects[1].Sort != extra.Sort || effects[1].ResultSlot != extra.ResultSlot || effects[1].EvidenceKind != extra.EvidenceKind || !effectDigestValid(effects[1]) || validateInterpretedPayload(effects[1].Payload) != nil {
-		t.Fatalf("second effect is not canonical interpreted evidence: %#v", effects[1])
-	}
-}
-
 func TestReceiveRejectsForgedLifecycleExtraBeforeAppend(t *testing.T) {
 	t.Parallel()
 	calls := []string{}
@@ -213,68 +144,6 @@ func TestReceiveRejectsUnnormalizedBindingsBeforeWrites(t *testing.T) {
 				t.Fatalf("writes occurred: %v %#v", calls, inputs)
 			}
 		})
-	}
-}
-
-func TestReceiveAppendsOccurrenceAndExtrasInOneOperation(t *testing.T) {
-	t.Parallel()
-	calls := []string{}
-	inputs := []provenance.OperationInput{}
-	applyCount := 0
-	clock := testClock{now: time.Unix(10, 0)}
-	j := contextJournal{
-		calls:      &calls,
-		inputs:     &inputs,
-		applyCount: &applyCount,
-		result:     provenance.CommittedResult{ResultSlots: []provenance.ResultSlotBinding{{Slot: expectedOccurrenceResultSlot, ProducedJournalID: 42}}},
-	}
-	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: j, Clock: clock, Deadline: time.Second}, Identity: testIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-extras"}}
-	interpreted, err := NewInterpreted(mustPostToolBatchL2(t, "session-1"), mustClaudeLifecycleContract(t), metamodel.Active())
-	if err != nil {
-		t.Fatal(err)
-	}
-	extraOne := interpreted.Effect()
-	consultation, err := NewConsultation(interpreted, jsonPort{raw: []byte(`{"rule":"allow"}`), valid: true}, jsonPort{raw: []byte(`{"decision":"proceed"}`), valid: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	extraTwo := consultation.Effect()
-
-	receipt, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery(), extraOne, extraTwo)
-	if err != nil {
-		t.Fatalf("Receive: %v", err)
-	}
-	if receipt.JournalID() != 42 {
-		t.Fatalf("receipt journal id = %d, want 42", receipt.JournalID())
-	}
-	if applyCount != 1 || len(inputs) != 1 {
-		t.Fatalf("ApplyContext calls = %d, recorded inputs = %d, want one each", applyCount, len(inputs))
-	}
-	effects := inputs[0].Effects
-	if len(effects) != 3 {
-		t.Fatalf("effects = %d, want occurrence plus two extras", len(effects))
-	}
-	if effects[0].Sort != provenance.EffectEvidence || effects[0].ResultSlot != expectedOccurrenceResultSlot || effects[0].EvidenceKind != expectedOccurrenceEvidenceKind {
-		t.Fatalf("first effect = %#v, want occurrence effect", effects[0])
-	}
-	if effects[1].Sort != extraOne.Sort || effects[1].ResultSlot != extraOne.ResultSlot || effects[1].EvidenceKind != extraOne.EvidenceKind || !effectDigestValid(effects[1]) || validateInterpretedPayload(effects[1].Payload) != nil {
-		t.Fatalf("second effect is not canonical interpreted evidence: %#v", effects[1])
-	}
-	if effects[2].Sort != extraTwo.Sort || effects[2].ResultSlot != extraTwo.ResultSlot || effects[2].EvidenceKind != extraTwo.EvidenceKind || !effectDigestValid(effects[2]) || validateConsultationPayload(effects[2].Payload, effects[1].Payload) != nil {
-		t.Fatalf("third effect is not canonical consultation evidence: %#v", effects[2])
-	}
-}
-
-func TestReceiveCrashAfterBlobLeavesNoOccurrence(t *testing.T) {
-	t.Parallel()
-	calls := []string{}
-	clock := testClock{now: time.Unix(10, 0)}
-	s := Service{Window: time.Second, Blobs: orderedBlobs{calls: &calls}, Appender: JournalAppender{Journal: contextJournal{calls: &calls}, Clock: clock, Deadline: time.Second}, Identity: failingIdentity{}, Clock: clock, Operations: testOperations{id: "receipt-crash"}}
-	if _, err := s.Receive(context.Background(), mustDeliveryWarrant(), validDelivery()); err == nil {
-		t.Fatal("Receive succeeded, want simulated crash")
-	}
-	if len(calls) != 1 || calls[0] != "blob" {
-		t.Fatalf("calls = %v, occurrence must not be attempted after blob failure", calls)
 	}
 }
 
@@ -471,26 +340,11 @@ func requireCommitted(t *testing.T, r Receipt, err error, calls []string) {
 	}
 }
 
-// TestReceiveAcceptsAContextWithNoDeadline: a context bounded by cancellation
-// is bounded and reports no deadline; the bound on production writers is
-// enforced where their contexts are made, not here.
-func TestReceiveAcceptsAContextWithNoDeadline(t *testing.T) {
-	t.Parallel()
-	calls := []string{}
-	r, err := windowService(&calls).Receive(context.Background(), mustDeliveryWarrant(), validDelivery())
-	requireCommitted(t, r, err, calls)
-}
-
-// TestReceiveAcceptsADeadlineInsideTheWindow is the control for the refusal
-// below: a deadline inside the window commits blob then occurrence.
-func TestReceiveAcceptsADeadlineInsideTheWindow(t *testing.T) {
-	t.Parallel()
-	calls := []string{}
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	r, err := windowService(&calls).Receive(ctx, mustDeliveryWarrant(), validDelivery())
-	requireCommitted(t, r, err, calls)
-}
+// Window-acceptance success paths (a context with no deadline, a deadline
+// inside the window) commit through the production opener; their pins live in
+// envelope_production_test.go, where a real journal backs the definition
+// ensures every success commit now performs. The refusal arms below stay on
+// fakes because they refuse before any journal I/O.
 
 // TestReceiveRefusesADeadlineBeyondTheWriterWindow: a deadline that is
 // present must lie inside the window, or the writer may outlive the bound

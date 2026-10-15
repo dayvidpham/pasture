@@ -145,7 +145,7 @@ func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testin
 	require.Contains(t, diagnostics.String(), `"stored-actor"`)
 	require.Contains(t, diagnostics.String(), session)
 	require.Contains(t, diagnostics.String(), tasks.SessionClaimAlreadyClaimed.String())
-	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1"}), 1,
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), 1,
 		"the invocation commits exactly one occurrence; the claim write adds no journal row")
 }
 
@@ -201,7 +201,7 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 	require.Contains(t, diagnostics.String(), `"winner-actor"`)
 	require.Contains(t, diagnostics.String(), session)
 	require.Contains(t, diagnostics.String(), tasks.SessionClaimLostRace.String())
-	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v1"}), 1,
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), 1,
 		"the invocation commits exactly one occurrence; the race trigger adds no journal row")
 }
 

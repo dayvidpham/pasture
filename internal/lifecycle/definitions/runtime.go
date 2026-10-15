@@ -195,6 +195,49 @@ func decodeRuntime(payload []byte) (Document, error) {
 	return Document{kind: wire.Kind, id: wire.ID, version: wire.Version, codec: wire.Codec, body: normalized, content: model.ContentIdentity(sha256.Sum256(normalized))}, nil
 }
 
+// ParseRuntimeSpecification strictly decodes one runtime owner body and
+// returns its shared specification. Readers consume the specification through
+// this parser, never by reimplementing the codec. The specification carries
+// both the runtime-spelled contract and the registration coordinate it was
+// compiled for, which is the owner pairing the receipt boundary enforces.
+func ParseRuntimeSpecification(body []byte) (RuntimeSpecification, error) {
+	var wire runtimeDocument
+	if err := strictDecode(body, &wire); err != nil {
+		return RuntimeSpecification{}, failure("ParseRuntimeSpecification", "The typed runtime document contains malformed, duplicate or unknown fields.", err)
+	}
+	doc, err := decodeRuntime(body)
+	if err != nil {
+		return RuntimeSpecification{}, err
+	}
+	if doc.ID() != runtimeID(wire.Specification.Contract) {
+		return RuntimeSpecification{}, failure("ParseRuntimeSpecification", "The document does not identify the runtime owner.", nil)
+	}
+	return wire.Specification, nil
+}
+
+// RuntimeContractForDelivery resolves one delivery (registration-spelled)
+// contract to the runtime-spelled contract whose compiled owner document was
+// built for it. The match is by the registration coordinate the runtime owner
+// stamps into its specification, never by string surgery on either spelling:
+// a delivery names the wire profile, the runtime document names the versioned
+// execution profile compiled for that wire, and this function proves they are
+// the same profile. An unregistered delivery contract is refused, not guessed.
+func RuntimeContractForDelivery(delivery ir.RuntimeContractID) (ir.RuntimeContractID, error) {
+	if !delivery.IsValid() {
+		return ir.RuntimeContractID{}, failure("RuntimeContractForDelivery", "The delivery contract is invalid.", nil)
+	}
+	for _, candidate := range RuntimeContracts() {
+		specification, err := RuntimeSpecificationForContract(candidate)
+		if err != nil {
+			return ir.RuntimeContractID{}, err
+		}
+		if specification.Registration.Contract == delivery {
+			return candidate, nil
+		}
+	}
+	return ir.RuntimeContractID{}, failure("RuntimeContractForDelivery", "The delivery contract names no compiled runtime profile.", nil)
+}
+
 func validateRuntimeSpecification(spec RuntimeSpecification) error {
 	known := false
 	for _, contract := range RuntimeContracts() {
