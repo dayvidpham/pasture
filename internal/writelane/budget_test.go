@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/provenance"
 )
 
 // testBudget is the smallest budget that satisfies Validate, used as the base
@@ -60,6 +61,10 @@ func TestValidateRefusesEachInvertedKnobAndNamesIt(t *testing.T) {
 		{name: "queue bytes", mut: func(b *WriteLaneBudget) { b.QueueBytes = 0 }, want: "QueueBytes"},
 		{name: "batch records", mut: func(b *WriteLaneBudget) { b.BatchRecords = 0 }, want: "BatchRecords"},
 		{name: "batch records above queue records", mut: func(b *WriteLaneBudget) { b.BatchRecords = b.QueueRecords + 1 }, want: "BatchRecords"},
+		{name: "batch records above the provenance batch cap", mut: func(b *WriteLaneBudget) {
+			b.QueueRecords = provenance.MaxBatchRecords + 1
+			b.BatchRecords = provenance.MaxBatchRecords + 1
+		}, want: "Provenance batch cap"},
 		{name: "batch bytes", mut: func(b *WriteLaneBudget) { b.BatchBytes = 0 }, want: "BatchBytes"},
 		{name: "batch bytes above queue bytes", mut: func(b *WriteLaneBudget) { b.BatchBytes = b.QueueBytes + 1 }, want: "BatchBytes"},
 		{name: "batch bytes below the ingress floor", mut: func(b *WriteLaneBudget) { b.BatchBytes = 1 }, want: "ingress payload cap"},

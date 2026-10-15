@@ -387,7 +387,8 @@ Rules that must hold for any change to the lane:
   `writelane.BudgetFromProfile` derives every bound from the validated timeout
   profile and refuses a profile that cannot contain the hold.
 - **`proceed` means committed, and nothing is acknowledged early.** The lane's
-  `Submit` returns only after the commit closure ran and reported its result.
+  `Submit` returns only after the record's `Settle` ran and reported its result,
+  which is only after the flush's one transaction committed or failed.
   A pre-admission refusal (`ErrNotAdmitted`, or any refusal raised before the
   first write attempt) is provably NOT-RECORDED; anything after a request was
   sent and not answered is RECORD-UNKNOWN. Never claim durability the lane does
@@ -408,11 +409,19 @@ Rules that must hold for any change to the lane:
   holder serves that store's hooks through the one socket, so there is still
   exactly one lane writer. A stale socket is reclaimed only through that
   election.
-- **One request per event, one commit per record (phase 1).** Provenance v0.5.3
-  has no public multi-operation batch apply, so the lane groups records into
-  bounded batches but still commits each record in its own transaction. Batching
-  that commits a whole batch in one transaction is phase 2 and needs a
-  provenance batch API plus a pin bump.
+- **One request per event, ONE transaction per lane turn (phase 2).** The lane
+  groups records into bounded batches with the ONE splitter, then commits the
+  whole turn's operations in ONE `ApplyBatchContext` (Provenance v0.9.0's
+  `BatchJournal`, capped at `MaxBatchRecords`), so a flush is one transaction
+  rather than one per record. A record's durable work is split into
+  `writelane.Record.Prepare` (blob write, identity, canonicalization — before
+  the transaction) and `writelane.Record.Settle` (map the record's own outcome
+  back and run its continuation). A prepare failure fails only that record; the
+  batch transaction contains only the operations that were prepared. The batch
+  is all-or-nothing, so a whole-batch failure (`*BatchApplyError`) is never
+  reported as a partial commit, and a short-circuited record — durable from an
+  earlier transaction — is NOT a failure. `writelane.Report` is the ONE home of
+  the outcome-to-report mapping.
 - **A store the open-path guard refuses is never a lane error.** The URI
   cutover's identity-format guard runs inside the store opener, so a refused
   store makes `pastured` exit with the guard's own storage category and text and
@@ -423,8 +432,8 @@ Rules that must hold for any change to the lane:
   surface as a lane error. Pinned by
   `cmd/pasture TestTheGuardRefusalOnTheDirectFallbackIsNotRecorded` and
   `cmd/pastured TestTheDaemonRefusesARefusedStoreAndHostsNoLane`.
-- **Windows runs direct-only in phase 1.** There is no Unix-domain-socket
-  transport there, and the hook says so rather than failing.
+- **Windows runs direct-only.** There is no Unix-domain-socket transport there,
+  and the hook says so rather than failing.
 
 Operator knobs. The HOOK reads two variables, parsed in
 `cmd/pasture/hook_environment.go` with the same "set-but-empty is not an opt-in"
@@ -783,7 +792,7 @@ do not promise a snapshot under concurrent writers.
 | `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
 | `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
 | `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `github.com/dayvidpham/provenance` | v0.8.1 | Task, edge and receipt store; context-aware borrowed activation and software registration; store-currency fast path and the O(1) verified-as-of ledger open; in-transaction schema completion and a verified foreign-key bracket for the offline identity cutover; a declared membership for the identity-format conversion that preserves `actor_namespace_claims.claimant_id` byte-exact as an opaque namespace-valued label; built on the same DBOS version |
+| `github.com/dayvidpham/provenance` | v0.9.0 | Task, edge and receipt store; context-aware borrowed activation and software registration; store-currency fast path and the O(1) verified-as-of ledger open; in-transaction schema completion and a verified foreign-key bracket for the offline identity cutover; a declared membership for the identity-format conversion that preserves `actor_namespace_claims.claimant_id` byte-exact as an opaque namespace-valued label; an optional `BatchJournal` extension (`ApplyBatchContext`, concrete `DB.ApplyBatch`) that commits a bounded batch of operations in ONE `BEGIN IMMEDIATE` transaction with a per-record outcome for every input (committed / short-circuited / conflict / failed / not-recorded), all-or-nothing, with the two store-wide integrity gates hoisted to run once over the final transaction state; built on the same DBOS version |
 | `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
 | `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |

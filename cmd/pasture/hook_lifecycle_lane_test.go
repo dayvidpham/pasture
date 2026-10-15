@@ -45,7 +45,9 @@ func startHookTestWriteLane(t *testing.T, dbPath string) string {
 	require.NoError(t, err)
 	budget, err := writelane.BudgetFromProfile(timeouts.TestProfile())
 	require.NoError(t, err)
-	lane, err := writelane.New(budget)
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(host.Tracker(), host.Clock(), host.Operations(), host.Profile())
+	require.NoError(t, err)
+	lane, err := writelane.New(budget, service.Appender.AppendBatch)
 	require.NoError(t, err)
 
 	server, err := handlers.NewHookLifecycleServer(handlers.HookLifecycleServerConfig{

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/dayvidpham/provenance"
 )
 
 // ErrLaneClosed is returned by Submit once the lane has been closed: no record
@@ -22,21 +24,41 @@ var ErrLaneClosed = errors.New("the lifecycle write lane is closed")
 // never wrapped in it.
 var ErrNotAdmitted = errors.New("the lifecycle write lane did not admit the record")
 
-// Commit is one admitted record's serialized durable work. The lane runs it on
-// its single goroutine and returns its error to the submitting caller.
+// Record is one admitted record's durable work, expressed in two phases so the
+// lane can commit a whole flush in ONE provenance transaction:
 //
-// The context it receives is the LANE's, not the submitter's: a record that a
-// hook abandoned while it waited in the queue is still committed (evidence
-// over silence), so the commit must not be cancelled by the hook's own
-// deadline. The work's own writers bound themselves with the injected profile.
-type Commit func(ctx context.Context) error
+//   - Prepare runs everything that must happen BEFORE the shared write
+//     transaction — the payload blob write, identity resolution, and
+//     canonicalization — and returns the record's canonical journal operation.
+//     A Prepare error is this record's own: it contributes no operation to the
+//     batch and the lane reports that error to its caller. Anything durable it
+//     left behind is a reclaimable payload blob, never a journal row.
+//   - Settle reports this record's own outcome to its caller and runs any work
+//     that must follow the shared commit. It is called exactly once for every
+//     record whose Prepare succeeded, with that record's own BatchRecordResult,
+//     whatever the batch did.
+//
+// The context both phases receive is the LANE's, not the submitter's: a record
+// a hook abandoned while it waited in the queue is still committed (evidence
+// over silence), so neither phase may be cancelled by the hook's own deadline.
+type Record interface {
+	Prepare(ctx context.Context) (provenance.OperationInput, error)
+	Settle(ctx context.Context, outcome provenance.BatchRecordResult) error
+}
+
+// BatchApply commits a flush's prepared operations in ONE transaction and
+// returns one outcome per input, aligned by index. It is the lane's whole reason
+// for phase 2: the per-record lane ran one transaction per record, and the
+// pinned Provenance BatchJournal folds the batch through the same per-operation
+// reducer step in a single BEGIN IMMEDIATE.
+type BatchApply func(ctx context.Context, inputs []provenance.OperationInput) (provenance.BatchResult, error)
 
 // item is one admitted-but-uncommitted record. Its identity is deliberately
-// opaque to the lane: the lane moves bytes and calls a closure, and never
-// knows what a record means.
+// opaque to the lane: the lane moves bytes and calls a Record, and never knows
+// what a record means.
 type item struct {
 	bytes  int64
-	commit Commit
+	record Record
 	result chan error
 }
 
@@ -58,12 +80,13 @@ type Stats struct {
 // committed.
 //
 // THE CALLER LEARNS NOTHING BEFORE THE COMMIT. Submit returns only after the
-// commit closure has run and reported its error, so there is no path on which
+// record's Settle has run and reported its result, so there is no path on which
 // a hook is told "recorded" for a record that has not committed. That is the
 // property the whole daemon-fronted lane exists to preserve, and it is a
 // property of Submit's shape rather than of any discipline at the call site.
 type Lane struct {
 	budget WriteLaneBudget
+	apply  BatchApply
 	ctx    context.Context
 
 	mu           sync.Mutex
@@ -88,13 +111,19 @@ type Lane struct {
 }
 
 // New constructs the lane and starts its commit goroutine. The budget is
-// validated here, so a lane that exists is a lane whose bounds hold.
-func New(budget WriteLaneBudget) (*Lane, error) {
+// validated here, so a lane that exists is a lane whose bounds hold; the batch
+// applier is required, because a lane with no way to commit a flush would admit
+// records it could never make durable.
+func New(budget WriteLaneBudget, apply BatchApply) (*Lane, error) {
 	if err := budget.Validate(); err != nil {
 		return nil, fmt.Errorf("construct the lifecycle write lane: %w", err)
 	}
+	if apply == nil {
+		return nil, fmt.Errorf("construct the lifecycle write lane: no batch applier was supplied, so an admitted record could never be committed")
+	}
 	lane := &Lane{
 		budget:  budget,
+		apply:   apply,
 		ctx:     context.Background(),
 		arrived: make(chan struct{}),
 		done:    make(chan struct{}),
@@ -118,12 +147,12 @@ func (l *Lane) Budget() WriteLaneBudget { return l.budget }
 //
 // A record larger than the whole batch byte budget is admitted when the queue
 // is empty and committed ALONE; refusing it would lose an event that happened.
-func (l *Lane) Submit(ctx context.Context, bytes int64, commit Commit) error {
+func (l *Lane) Submit(ctx context.Context, bytes int64, record Record) error {
 	if l == nil {
 		return fmt.Errorf("%w: the lane is nil, so no record could be admitted and nothing was committed", ErrNotAdmitted)
 	}
-	if commit == nil {
-		return fmt.Errorf("%w: no commit work was supplied, so nothing was committed", ErrNotAdmitted)
+	if record == nil {
+		return fmt.Errorf("%w: no record work was supplied, so nothing was committed", ErrNotAdmitted)
 	}
 	if bytes < 0 {
 		return fmt.Errorf("%w: the record states %d bytes, and a negative size cannot be staged", ErrNotAdmitted, bytes)
@@ -131,7 +160,7 @@ func (l *Lane) Submit(ctx context.Context, bytes int64, commit Commit) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	me := &item{bytes: bytes, commit: commit, result: make(chan error, 1)}
+	me := &item{bytes: bytes, record: record, result: make(chan error, 1)}
 
 	// Unblock a waiter promptly when its context ends. Without this the
 	// admission wait would only be revisited when a commit freed room, so an
@@ -236,9 +265,9 @@ func (l *Lane) Stats() Stats {
 //
 // The first two commit at once; the third is the IDLE FALLBACK that bounds how
 // long a partial batch — including a lone record, which has no companion to
-// wait for — may hold the store before it is committed anyway. Each record's own
-// result channel is answered as soon as its commit returns, so a slow record in
-// a batch delays only its own acknowledgement, never another record's.
+// wait for — may hold the store before it is committed anyway. A turn's records
+// share ONE transaction and one sequential prepare/apply/settle pass, so each
+// result channel is answered as soon as that record's own report is produced.
 func (l *Lane) run() {
 	defer close(l.done)
 	for {
@@ -345,11 +374,11 @@ func (l *Lane) absorb(batch *[]*item, bytes *int64) (drained, stopped bool, arri
 	return len(l.pending) == 0, l.closed, l.arrived
 }
 
-// commitBatch runs each record's commit in order and answers each record's
-// result channel with that commit's error. It records how long the turn held
-// the writer against HoldTarget; exceeding the target is reported, never
-// enforced by truncating the batch, because a record already admitted must
-// either commit or fail honestly, never be dropped.
+// commitBatch runs the batch's durable work and answers each record's result
+// channel with its own report. It records how long the turn held the writer
+// against HoldTarget; exceeding the target is reported, never enforced by
+// truncating the batch, because a record already admitted must either commit or
+// fail honestly, never be dropped.
 //
 // THE PER-RECORD COUNTER IS PUBLISHED BEFORE THE ACKNOWLEDGEMENT. A caller that
 // has received its result can then already observe that its record committed;
@@ -359,10 +388,10 @@ func (l *Lane) absorb(batch *[]*item, bytes *int64) (drained, stopped bool, arri
 // they describe the turn and not one record.
 func (l *Lane) commitBatch(batch []*item) {
 	started := time.Now()
-	for _, it := range batch {
-		err := it.commit(l.ctx)
+	reports := l.commitRecords(batch)
+	for i, it := range batch {
 		l.records.Add(1)
-		it.result <- err
+		it.result <- reports[i]
 	}
 	held := time.Since(started)
 
@@ -372,6 +401,99 @@ func (l *Lane) commitBatch(batch []*item) {
 	if held > l.budget.HoldTarget {
 		l.holdExceeded.Add(1)
 	}
+}
+
+// commitRecords commits one lane turn. It PREPARES every record (the per-record
+// blob write and canonicalization, which must precede the shared transaction),
+// commits every prepared operation in ONE batch apply, then SETTLES every
+// record against its own outcome. It returns one report per input, aligned by
+// index, so commitBatch can answer each caller.
+//
+// A record whose Prepare fails contributes no operation to the transaction: its
+// own error is its report, and the other records still commit. That keeps a
+// single record's pre-transaction fault from failing a whole flush, and it is
+// honest because the batch transaction contains only the operations that were
+// actually prepared.
+func (l *Lane) commitRecords(batch []*item) []error {
+	reports := make([]error, len(batch))
+	type staged struct {
+		index int
+		item  *item
+	}
+	prepared := make([]staged, 0, len(batch))
+	inputs := make([]provenance.OperationInput, 0, len(batch))
+	for i, it := range batch {
+		input, err := it.record.Prepare(l.ctx)
+		if err != nil {
+			reports[i] = err
+			continue
+		}
+		prepared = append(prepared, staged{index: i, item: it})
+		inputs = append(inputs, input)
+	}
+	if len(inputs) == 0 {
+		return reports
+	}
+	result, applyErr := l.apply(l.ctx, inputs)
+	for k, p := range prepared {
+		reports[p.index] = p.item.record.Settle(l.ctx, batchOutcome(result, k, applyErr))
+	}
+	return reports
+}
+
+// batchOutcome returns one prepared record's own outcome from a batch apply. It
+// is the honesty seam between Provenance's closed outcome taxonomy and the
+// lane's per-request reporting:
+//
+//   - A committed or short-circuited record is durably recorded; the lane hands
+//     the record that exact outcome, and Report decides what its caller learns.
+//     A short-circuit is NOT a failure: its durability comes from an earlier
+//     transaction, so it stays durable whatever this batch did.
+//   - A conflict, a failed fold, or a record a rolled-back batch never durably
+//     folded is NOT recorded by this batch. The lane fills in the batch-level
+//     error when the record carries none of its own, so Report always has a
+//     typed reason to report.
+//   - A missing outcome (the batch apply refused before it built any, e.g. an
+//     oversized or deadline-expired batch) is the honest not-recorded with the
+//     batch error attached.
+func batchOutcome(result provenance.BatchResult, index int, applyErr error) provenance.BatchRecordResult {
+	if index >= 0 && index < len(result.Records) {
+		outcome := result.Records[index]
+		if outcome.Err == nil && !OutcomeIsDurable(outcome.Outcome) {
+			outcome.Err = applyErr
+		}
+		return outcome
+	}
+	return provenance.BatchRecordResult{Outcome: provenance.BatchRecordNotRecorded, Err: applyErr}
+}
+
+// OutcomeIsDurable reports whether a batch outcome means the record is durably
+// recorded after the call: BatchRecordCommitted (this batch's transaction wrote
+// it) or BatchRecordShortCircuited (an earlier transaction did). Every other
+// outcome means nothing this batch folded is durable for the record.
+func OutcomeIsDurable(outcome provenance.BatchRecordOutcome) bool {
+	return outcome == provenance.BatchRecordCommitted || outcome == provenance.BatchRecordShortCircuited
+}
+
+// Report maps one record's batch outcome to the error the lane reports for that
+// record. It is the ONE home of the mapping, so the lane and the served path
+// cannot drift about what an outcome means.
+//
+//   - nil means the record is durably recorded: committed by this batch, or
+//     short-circuited because an EARLIER transaction already committed it. A
+//     caller that gets nil may claim durability; a short-circuit is NOT a
+//     failure.
+//   - Every other outcome (conflict, failed, not-recorded) returns a typed,
+//     actionable error. A record the batch rolled back is never reported as a
+//     commit, and the whole-batch failure is never reported as a partial commit.
+func Report(outcome provenance.BatchRecordResult) error {
+	if OutcomeIsDurable(outcome.Outcome) {
+		return nil
+	}
+	if outcome.Err != nil {
+		return outcome.Err
+	}
+	return fmt.Errorf("the lifecycle write lane did not commit this record: the batch reported outcome %q for it with no per-record error, so nothing this batch folded is durable for it", outcome.Outcome)
 }
 
 // raiseMax swaps a larger value into a peak counter without a lock.

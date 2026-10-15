@@ -17,31 +17,45 @@ import (
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/writelane"
 	"github.com/dayvidpham/pasture/pkg/protocol"
+	"github.com/dayvidpham/provenance"
 )
 
-// fakeLane is the served path's write lane under a test's control: it can hold
-// the commit open, count admissions, and run the real closure.
+// fakeLane is the served path's write lane under a test's control: it counts
+// admissions and can hold them open before delegating to a REAL lane, so the
+// served tests exercise the production two-phase commit while still being able
+// to assert on what has NOT happened yet.
 type fakeLane struct {
+	inner      *writelane.Lane
 	admissions int64
 	hold       <-chan struct{}
-	run        func(writelane.Commit) error
 }
 
-func (f *fakeLane) Submit(ctx context.Context, bytes int64, commit writelane.Commit) error {
+func (f *fakeLane) Submit(ctx context.Context, bytes int64, record writelane.Record) error {
 	atomic.AddInt64(&f.admissions, 1)
 	if f.hold != nil {
 		<-f.hold
 	}
-	if f.run != nil {
-		return f.run(commit)
-	}
-	return commit(context.Background())
+	return f.inner.Submit(ctx, bytes, record)
 }
 
-func servedServer(t *testing.T, dbPath string, lane LifecycleWriteLane, readers lifecycleReaderFactory) *HookLifecycleServer {
+// servedFixture opens the ONE unified store the served path and its lane share,
+// plus a REAL lane committing through the pinned batch journal, so every served
+// test runs the production commit path rather than a seam.
+func servedFixture(t *testing.T, dbPath string) (protocol.TaskTracker, *writelane.Lane) {
 	t.Helper()
 	tracker := mustOpenTracker(t, dbPath)
-	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, gateClock{}, &gateOperations{}, timeouts.TestProfile())
+	require.NoError(t, err)
+	budget, err := writelane.BudgetFromProfile(timeouts.TestProfile())
+	require.NoError(t, err)
+	lane, err := writelane.New(budget, service.Appender.AppendBatch)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lane.Close(context.Background())) })
+	return tracker, lane
+}
+
+func servedServer(t *testing.T, tracker protocol.TaskTracker, lane LifecycleWriteLane, readers lifecycleReaderFactory) *HookLifecycleServer {
+	t.Helper()
 	server, err := NewHookLifecycleServer(HookLifecycleServerConfig{
 		Tracker:    tracker,
 		Lane:       lane,
@@ -83,9 +97,11 @@ func TestTheServedAnswerIsNotPublishedBeforeTheCommit(t *testing.T) {
 	const actor = "lifecycle-lane-allow/0193f1c0-0000-7000-8000-0000000000c1"
 	reader := &gateFakeReader{snap: gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan))}
 
+	tracker, realLane := servedFixture(t, dbPath)
+	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
 	hold := make(chan struct{})
-	lane := &fakeLane{hold: hold}
-	server := servedServer(t, dbPath, lane, reader.gateFactory)
+	lane := &fakeLane{inner: realLane, hold: hold}
+	server := servedServer(t, tracker, lane, reader.gateFactory)
 
 	input := gateServeInput(t, raw, "PreToolUse")
 	input.ActorClaim = tasks.ActorClaim(actor)
@@ -124,8 +140,10 @@ func TestTheServedAnswerIsNotPublishedBeforeTheCommit(t *testing.T) {
 // evidence rather than a default.
 func TestAServedPreAdmissionRefusalStagedNothing(t *testing.T) {
 	dbPath := gateStore(t)
-	lane := &fakeLane{}
-	server := servedServer(t, dbPath, lane, nil)
+	tracker, realLane := servedFixture(t, dbPath)
+	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
+	lane := &fakeLane{inner: realLane}
+	server := servedServer(t, tracker, lane, nil)
 
 	// An empty payload is refused by the shared preparation, before any store
 	// handle is touched and before any write class exists.
@@ -144,8 +162,10 @@ func TestAServedPreAdmissionRefusalStagedNothing(t *testing.T) {
 // bound, and the lane is untouched.
 func TestAServedWithheldEventStagedNothing(t *testing.T) {
 	dbPath := gateStore(t)
-	lane := &fakeLane{}
-	server := servedServer(t, dbPath, lane, nil)
+	tracker, realLane := servedFixture(t, dbPath)
+	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
+	lane := &fakeLane{inner: realLane}
+	server := servedServer(t, tracker, lane, nil)
 
 	_, err := server.Serve(context.Background(), HookLifecycleServeInput{
 		Harness:     ir.HarnessClaudeCode,
@@ -167,13 +187,10 @@ func TestTheServedPathCommitsThroughARealLane(t *testing.T) {
 	const actor = "lifecycle-lane-real/0193f1c0-0000-7000-8000-0000000000c2"
 	reader := &gateFakeReader{snap: gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan))}
 
-	budget, err := writelane.BudgetFromProfile(timeouts.DeadlineTestProfile())
-	require.NoError(t, err)
-	lane, err := writelane.New(budget)
-	require.NoError(t, err)
-	defer lane.Close(context.Background())
+	tracker, lane := servedFixture(t, dbPath)
+	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
 
-	server := servedServer(t, dbPath, lane, reader.gateFactory)
+	server := servedServer(t, tracker, lane, reader.gateFactory)
 	input := gateServeInput(t, raw, "PreToolUse")
 	input.ActorClaim = tasks.ActorClaim(actor)
 
@@ -193,17 +210,56 @@ func TestServedObservationCommitsWithoutConsultingTheGate(t *testing.T) {
 	dbPath := gateStore(t)
 	reader := &gateFakeReader{fault: errors.New("the reader must not be reached for an observation")}
 
-	budget, err := writelane.BudgetFromProfile(timeouts.DeadlineTestProfile())
-	require.NoError(t, err)
-	lane, err := writelane.New(budget)
-	require.NoError(t, err)
-	defer lane.Close(context.Background())
+	tracker, lane := servedFixture(t, dbPath)
+	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
 
-	server := servedServer(t, dbPath, lane, reader.gateFactory)
+	server := servedServer(t, tracker, lane, reader.gateFactory)
 	served, err := server.Serve(context.Background(), gateServeInput(t, raw, "SessionStart"))
 	require.NoError(t, err)
 	require.NotEmpty(t, served.OccurrenceID)
 	require.Zero(t, reader.reads, "no snapshot may be taken for an observation")
+}
+
+// TestTheServedPathReportsAWholeBatchFailureAsRecordUnknown pins the served
+// half of the batch mapping: a record the lane admitted and whose batch then
+// rolled back is NOT a pre-admission refusal and must never be answered as a
+// commit — it is record-unknown.
+func TestTheServedPathReportsAWholeBatchFailureAsRecordUnknown(t *testing.T) {
+	raw := gateFixture(t, gateClaudeGateFixture)
+	dbPath := gateStore(t)
+	const actor = "lifecycle-lane-batch/0193f1c0-0000-7000-8000-0000000000d1"
+	reader := &gateFakeReader{snap: gateBoundSnapshot(t, actor, gateOwnedEpisode(t, actor, gateauthority.PhaseImplPlan))}
+
+	tracker := mustOpenTracker(t, dbPath)
+	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
+
+	rollback := errors.New("the batch transaction rolled back")
+	apply := func(_ context.Context, inputs []provenance.OperationInput) (provenance.BatchResult, error) {
+		records := make([]provenance.BatchRecordResult, len(inputs))
+		for i := range records {
+			records[i] = provenance.BatchRecordResult{Outcome: provenance.BatchRecordNotRecorded}
+		}
+		return provenance.BatchResult{Committed: false, Records: records},
+			&provenance.BatchApplyError{Index: 0, Cause: rollback}
+	}
+	budget, err := writelane.BudgetFromProfile(timeouts.TestProfile())
+	require.NoError(t, err)
+	lane, err := writelane.New(budget, apply)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lane.Close(context.Background())) })
+
+	server := servedServer(t, tracker, lane, reader.gateFactory)
+	input := gateServeInput(t, raw, "PreToolUse")
+	input.ActorClaim = tasks.ActorClaim(actor)
+
+	_, err = server.Serve(context.Background(), input)
+	require.Error(t, err)
+	require.ErrorIs(t, err, rollback, "the served path must report the batch's own failure")
+	require.NotErrorIs(t, err, ErrLifecycleBeforeDurableWrite,
+		"a record that was admitted and then rolled back is not a pre-admission refusal")
+	require.Equal(t, hostexit.FaultStageRecordUnknown, LifecycleFaultStageForError(err),
+		"a whole-batch failure must be answered record-unknown, never as a commit")
+	require.Equal(t, int64(1), lane.Stats().Records, "the admitted record must have reached exactly one commit attempt")
 }
 
 // TestTheServerRefusesIncompleteWiring pins the construction refusals, so a

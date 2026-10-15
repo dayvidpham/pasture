@@ -201,7 +201,7 @@ func TestListenReclaimsAStaleSocketThroughTheElection(t *testing.T) {
 	require.NotZero(t, info.Mode()&os.ModeSocket, "the stale regular file must have been replaced by a socket")
 }
 
-// blockingLane wraps the real lane and holds each commit at a point a test
+// blockingLane wraps the real lane and holds each record at a point a test
 // chooses, so the "answer lost, record still committed" case is ordered by a
 // condition and never by a clock.
 type blockingLane struct {
@@ -211,12 +211,24 @@ type blockingLane struct {
 	release chan struct{}
 }
 
-func (b *blockingLane) Submit(ctx context.Context, bytes int64, commit writelane.Commit) error {
-	return b.inner.Submit(ctx, bytes, func(laneCtx context.Context) error {
-		b.once.Do(func() { close(b.entered) })
-		<-b.release
-		return commit(laneCtx)
-	})
+func (b *blockingLane) Submit(ctx context.Context, bytes int64, record writelane.Record) error {
+	return b.inner.Submit(ctx, bytes, &blockingRecord{Record: record, once: &b.once, entered: b.entered, release: b.release})
+}
+
+// blockingRecord holds its record's PREPARE — the point at which its durable
+// work has entered the lane — until the test releases it, then runs the real
+// two-phase record unchanged.
+type blockingRecord struct {
+	writelane.Record
+	once    *sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingRecord) Prepare(ctx context.Context) (provenance.OperationInput, error) {
+	r.once.Do(func() { close(r.entered) })
+	<-r.release
+	return r.Record.Prepare(ctx)
 }
 
 // TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown is the
@@ -236,7 +248,9 @@ func TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown(t *
 	require.NoError(t, err)
 	budget, err := writelane.BudgetFromProfile(timeouts.TestProfile())
 	require.NoError(t, err)
-	inner, err := writelane.New(budget)
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, timeouts.TestProfile())
+	require.NoError(t, err)
+	inner, err := writelane.New(budget, service.Appender.AppendBatch)
 	require.NoError(t, err)
 	lane := &blockingLane{inner: inner, entered: make(chan struct{}), release: make(chan struct{})}
 

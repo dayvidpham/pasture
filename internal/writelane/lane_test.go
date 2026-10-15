@@ -6,30 +6,69 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/dayvidpham/provenance"
 )
 
-// waitForCommitted runs Submit on its own goroutine and returns a channel that
-// receives Submit's result, so a test can assert on what has NOT happened yet.
-func waitForCommitted(lane *Lane, ctx context.Context, bytes int64, commit Commit) <-chan error {
-	done := make(chan error, 1)
-	go func() { done <- lane.Submit(ctx, bytes, commit) }()
-	return done
+// commitFunc is a lane test's Record: Prepare succeeds with a synthetic
+// operation and Settle runs the closure the test supplied. It exists so the
+// lane's transport behaviour (admission, batching, flush policy, hold) can be
+// tested without a store, exactly as the phase-1 tests did with a bare closure.
+type commitFunc func(ctx context.Context) error
+
+func (f commitFunc) Prepare(context.Context) (provenance.OperationInput, error) {
+	return provenance.OperationInput{OperationID: provenance.OperationID("lane-test")}, nil
 }
 
-func TestSubmitDoesNotReturnBeforeTheCommit(t *testing.T) {
-	lane, err := New(testBudget())
+func (f commitFunc) Settle(ctx context.Context, _ provenance.BatchRecordResult) error { return f(ctx) }
+
+// testApply is a BatchApply that commits every prepared record, so a lane test
+// that does not care about the batch seam sees each record commit exactly as it
+// did before phase 2.
+func testApply(_ context.Context, inputs []provenance.OperationInput) (provenance.BatchResult, error) {
+	records := make([]provenance.BatchRecordResult, len(inputs))
+	for i := range records {
+		records[i] = provenance.BatchRecordResult{Outcome: provenance.BatchRecordCommitted}
+	}
+	return provenance.BatchResult{Committed: true, Records: records}, nil
+}
+
+// newTestLane constructs a lane on the given budget with the default committing
+// applier.
+func newTestLane(t *testing.T, budget WriteLaneBudget) *Lane {
+	t.Helper()
+	lane, err := New(budget, testApply)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return lane
+}
+
+// waitForCommitted runs Submit on its own goroutine and returns a channel that
+// receives Submit's result, so a test can assert on what has NOT happened yet.
+func waitForCommitted(lane *Lane, ctx context.Context, bytes int64, record Record) <-chan error {
+	done := make(chan error, 1)
+	go func() { done <- lane.Submit(ctx, bytes, record) }()
+	return done
+}
+
+func TestNewRefusesANilBatchApplier(t *testing.T) {
+	if _, err := New(testBudget(), nil); err == nil {
+		t.Fatal("New accepted a lane with no way to commit a flush")
+	}
+}
+
+func TestSubmitDoesNotReturnBeforeTheCommit(t *testing.T) {
+	lane := newTestLane(t, testBudget())
 	defer lane.Close(context.Background())
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	done := waitForCommitted(lane, context.Background(), 16, func(context.Context) error {
+	done := waitForCommitted(lane, context.Background(), 16, commitFunc(func(context.Context) error {
 		close(entered)
 		<-release
 		return nil
-	})
+	}))
 
 	<-entered
 	select {
@@ -44,14 +83,11 @@ func TestSubmitDoesNotReturnBeforeTheCommit(t *testing.T) {
 }
 
 func TestSubmitReturnsTheCommitError(t *testing.T) {
-	lane, err := New(testBudget())
-	if err != nil {
-		t.Fatal(err)
-	}
+	lane := newTestLane(t, testBudget())
 	defer lane.Close(context.Background())
 
 	want := errors.New("journal refused the append")
-	if got := lane.Submit(context.Background(), 8, func(context.Context) error { return want }); !errors.Is(got, want) {
+	if got := lane.Submit(context.Background(), 8, commitFunc(func(context.Context) error { return want })); !errors.Is(got, want) {
 		t.Fatalf("Submit returned %v, want the commit's own error %v", got, want)
 	}
 }
@@ -61,10 +97,7 @@ func TestFlushWhenFullGroupsRecordsIntoBoundedBatches(t *testing.T) {
 	budget.BatchRecords = 4
 	budget.QueueRecords = 32
 	budget.FlushInterval = 50 * time.Millisecond
-	lane, err := New(budget)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lane := newTestLane(t, budget)
 	defer lane.Close(context.Background())
 
 	var mu sync.Mutex
@@ -75,13 +108,13 @@ func TestFlushWhenFullGroupsRecordsIntoBoundedBatches(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_ = lane.Submit(context.Background(), 8, func(context.Context) error {
+			_ = lane.Submit(context.Background(), 8, commitFunc(func(context.Context) error {
 				mu.Lock()
 				seen++
 				mu.Unlock()
 				<-hold
 				return nil
-			})
+			}))
 		}()
 	}
 	// Hold every batch open so the queue fills to its bound and the splitter is
@@ -106,19 +139,16 @@ func TestDrainFlushCommitsAsSoonAsACompanionDrainsTheQueue(t *testing.T) {
 	budget := testBudget()
 	budget.HoldTarget = time.Hour
 	budget.FlushInterval = time.Second // the drain trigger must fire long before the interval
-	lane, err := New(budget)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lane := newTestLane(t, budget)
 	defer lane.Close(context.Background())
 
-	first := waitForCommitted(lane, context.Background(), 8, func(context.Context) error { return nil })
+	first := waitForCommitted(lane, context.Background(), 8, commitFunc(func(context.Context) error { return nil }))
 	// Let the commit goroutine take the first record and park on its idle wait,
 	// so the second record's arrival is what drains the queue.
 	time.Sleep(10 * time.Millisecond)
 
 	started := time.Now()
-	second := waitForCommitted(lane, context.Background(), 8, func(context.Context) error { return nil })
+	second := waitForCommitted(lane, context.Background(), 8, commitFunc(func(context.Context) error { return nil }))
 	for _, done := range []<-chan error{first, second} {
 		select {
 		case err := <-done:
@@ -143,10 +173,7 @@ func TestIntervalFallbackCommitsAPartialBatch(t *testing.T) {
 	budget.QueueBytes = 8 << 20
 	budget.FlushInterval = 200 * time.Millisecond
 	budget.HoldTarget = time.Second
-	lane, err := New(budget)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lane := newTestLane(t, budget)
 	defer lane.Close(context.Background())
 
 	// Two records that cannot share a batch under the byte budget: the one that
@@ -154,8 +181,8 @@ func TestIntervalFallbackCommitsAPartialBatch(t *testing.T) {
 	// queue and only the interval can bound the partial batch's wait.
 	const halfMiB = 600 << 10
 	started := time.Now()
-	first := waitForCommitted(lane, context.Background(), halfMiB, func(context.Context) error { return nil })
-	second := waitForCommitted(lane, context.Background(), halfMiB, func(context.Context) error { return nil })
+	first := waitForCommitted(lane, context.Background(), halfMiB, commitFunc(func(context.Context) error { return nil }))
+	second := waitForCommitted(lane, context.Background(), halfMiB, commitFunc(func(context.Context) error { return nil }))
 	for _, done := range []<-chan error{first, second} {
 		select {
 		case err := <-done:
@@ -178,14 +205,11 @@ func TestOversizeRecordIsAdmittedAndCommittedAlone(t *testing.T) {
 	budget := testBudget()
 	budget.BatchBytes = 1 << 20
 	budget.QueueBytes = 8 << 20
-	lane, err := New(budget)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lane := newTestLane(t, budget)
 	defer lane.Close(context.Background())
 
 	const oversize = 2 << 20
-	if err := lane.Submit(context.Background(), oversize, func(context.Context) error { return nil }); err != nil {
+	if err := lane.Submit(context.Background(), oversize, commitFunc(func(context.Context) error { return nil })); err != nil {
 		t.Fatalf("an oversize record was refused rather than committed alone: %v", err)
 	}
 	if stats := lane.Stats(); stats.Records != 1 || stats.MaxBatchRecords != 1 {
@@ -199,15 +223,12 @@ func TestQueueBoundAppliesBackpressureInsteadOfRefusing(t *testing.T) {
 	budget.BatchRecords = 1
 	budget.FlushInterval = 10 * time.Millisecond
 	budget.HoldTarget = time.Second
-	lane, err := New(budget)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lane := newTestLane(t, budget)
 	defer lane.Close(context.Background())
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	held := waitForCommitted(lane, context.Background(), 8, func(context.Context) error {
+	held := waitForCommitted(lane, context.Background(), 8, commitFunc(func(context.Context) error {
 		select {
 		case <-entered:
 		default:
@@ -215,12 +236,12 @@ func TestQueueBoundAppliesBackpressureInsteadOfRefusing(t *testing.T) {
 		}
 		<-release
 		return nil
-	})
+	}))
 	<-entered // the commit goroutine now holds the lane
 
 	// The first record has left the queue and is being committed, so one more
 	// may be staged; the next one must wait.
-	staged := waitForCommitted(lane, context.Background(), 8, func(context.Context) error { return nil })
+	staged := waitForCommitted(lane, context.Background(), 8, commitFunc(func(context.Context) error { return nil }))
 	deadline := time.Now().Add(2 * time.Second)
 	for lane.Stats().QueueDepth == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -229,7 +250,7 @@ func TestQueueBoundAppliesBackpressureInsteadOfRefusing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	blocked := lane.Submit(ctx, 8, func(context.Context) error { return nil })
+	blocked := lane.Submit(ctx, 8, commitFunc(func(context.Context) error { return nil }))
 	if elapsed := time.Since(started); elapsed < 25*time.Millisecond {
 		t.Fatalf("the record beyond the queue bound returned after %s while the bound was held; it should have waited for its own context", elapsed)
 	}
@@ -251,10 +272,7 @@ func TestQueueBoundAppliesBackpressureInsteadOfRefusing(t *testing.T) {
 func TestCloseDrainsStagedRecords(t *testing.T) {
 	budget := testBudget()
 	budget.FlushInterval = 20 * time.Millisecond
-	lane, err := New(budget)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lane := newTestLane(t, budget)
 
 	var mu sync.Mutex
 	committed := 0
@@ -263,12 +281,12 @@ func TestCloseDrainsStagedRecords(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
-			if err := lane.Submit(context.Background(), 8, func(context.Context) error {
+			if err := lane.Submit(context.Background(), 8, commitFunc(func(context.Context) error {
 				mu.Lock()
 				committed++
 				mu.Unlock()
 				return nil
-			}); err != nil {
+			})); err != nil {
 				t.Errorf("Submit %d returned %v", n, err)
 			}
 		}(i)
@@ -283,7 +301,7 @@ func TestCloseDrainsStagedRecords(t *testing.T) {
 	if committed != 4 {
 		t.Fatalf("Close committed %d of 4 staged records", committed)
 	}
-	if err := lane.Submit(context.Background(), 8, func(context.Context) error { return nil }); !errors.Is(err, ErrLaneClosed) {
+	if err := lane.Submit(context.Background(), 8, commitFunc(func(context.Context) error { return nil })); !errors.Is(err, ErrLaneClosed) {
 		t.Fatalf("Submit after Close returned %v, want ErrLaneClosed", err)
 	}
 }
@@ -292,16 +310,13 @@ func TestStatsReportATurnThatOutranItsHoldTarget(t *testing.T) {
 	budget := testBudget()
 	budget.HoldTarget = 5 * time.Millisecond
 	budget.FlushInterval = time.Millisecond
-	lane, err := New(budget)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lane := newTestLane(t, budget)
 	defer lane.Close(context.Background())
 
-	if err := lane.Submit(context.Background(), 8, func(context.Context) error {
+	if err := lane.Submit(context.Background(), 8, commitFunc(func(context.Context) error {
 		time.Sleep(15 * time.Millisecond)
 		return nil
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	stats := lane.Stats()
