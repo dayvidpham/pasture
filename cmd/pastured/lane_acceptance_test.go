@@ -93,9 +93,17 @@ func TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow(t *testin
 	}
 
 	daemon := exec.Command(daemonBinary, "--config", configPath, "--db", dbPath)
+	// The daemon and every hook derive the SAME lane socket from the store
+	// path and XDG_RUNTIME_DIR, so they share one private runtime directory
+	// under the test's temp dir: they still meet on one socket, but the run
+	// cannot touch the operator's live runtime state (see
+	// isolateLaneChildEnv). The direct-baseline hooks below get the same
+	// override for uniformity, although direct mode never dials the lane.
+	laneRuntime := laneTestRuntimeDir(t)
 	daemon.Env = append(daemon.Environ(),
 		"PASTURE_WRITE_LANE=auto",
 	)
+	isolateLaneChildEnv(t, daemon, laneRuntime)
 	stderr, err := daemon.StderrPipe()
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
@@ -138,6 +146,7 @@ func TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow(t *testin
 			"--harness", "claude-code", "--event", "SessionStart", "--host-version", "2.1.261",
 			"--db", dbPath)
 		cmd.Env = append(cmd.Environ(), "PASTURE_WRITE_LANE=auto")
+		isolateLaneChildEnv(t, cmd, laneRuntime)
 		cmd.Stdin = bytes.NewReader(fixture)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
@@ -223,6 +232,7 @@ func TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow(t *testin
 		// cmd/pastured cannot import the cmd/pasture main package for the
 		// constant, and the literal is pinned by the lane-mode tests there.
 		cmd.Env = append(cmd.Environ(), "PASTURE_WRITE_LANE=direct")
+		isolateLaneChildEnv(t, cmd, laneRuntime)
 		cmd.Stdin = bytes.NewReader(fixture)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr

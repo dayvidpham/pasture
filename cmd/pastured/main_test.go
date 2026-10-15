@@ -388,6 +388,12 @@ func TestNewEngineConfigWiresRecoveryConstantsAndHooks(t *testing.T) {
 
 func TestBuildDaemonRuntime_SqliteWiresHooksMgr(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	// buildDaemonRuntime hosts a REAL lane in-process through
+	// lanewire.SocketPath, which lands in the ambient XDG_RUNTIME_DIR when
+	// one is set. Redirect the test process's runtime directory so this
+	// test cannot touch the operator's live runtime state (a child-env
+	// override cannot reach an in-process lane; see isolateLaneChildEnv).
+	t.Setenv("XDG_RUNTIME_DIR", laneTestRuntimeDir(t))
 	cfg := config.PasturedConfig{
 		AuditTrail:  types.BackendSqlite,
 		AuditDBPath: filepath.Join(t.TempDir(), "pasture.db"),
@@ -537,9 +543,10 @@ func TestPasturedExitCodeComesFromTheErrorCategory(t *testing.T) {
 }
 
 // startPastured starts the daemon and returns the running command together
-// with a channel of its log lines. The caller reads the channel to wait on a
+// with a channel of its log lines and the test-private runtime directory the
+// daemon's lane socket lives under. The caller reads the channel to wait on a
 // condition; the channel closes when the daemon's output ends.
-func startPastured(t *testing.T, tmp string) (*exec.Cmd, <-chan string) {
+func startPastured(t *testing.T, tmp string) (*exec.Cmd, <-chan string, string) {
 	t.Helper()
 	binary := filepath.Join(tmp, "pastured")
 	buildPasturedBinary(t, binary, "")
@@ -550,6 +557,12 @@ func startPastured(t *testing.T, tmp string) (*exec.Cmd, <-chan string) {
 	}
 
 	command := exec.Command(binary, "--config", configPath, "--db", filepath.Join(tmp, "pasture.db"))
+	// A real daemon hosts its lane through lanewire.SocketPath, which lands
+	// in the ambient XDG_RUNTIME_DIR when one is set. Point the child at a
+	// test-private runtime directory so the test run cannot touch the
+	// operator's live runtime state (see isolateLaneChildEnv).
+	runtimeDir := laneTestRuntimeDir(t)
+	isolateLaneChildEnv(t, command, runtimeDir)
 	stderr, err := command.StderrPipe()
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
@@ -567,7 +580,7 @@ func startPastured(t *testing.T, tmp string) (*exec.Cmd, <-chan string) {
 			lines <- scanner.Text()
 		}
 	}()
-	return command, lines
+	return command, lines, runtimeDir
 }
 
 // awaitLogLine reads log lines until one carries want, and fails the test if
@@ -603,7 +616,7 @@ func awaitLogLine(t *testing.T, lines <-chan string, want string, ceiling time.D
 // path bought only for the test. The two outcomes either side of that line
 // are pinned, and the line itself is one `if err != nil { return err }`.
 func TestPasturedStopsCleanlyOnSignal(t *testing.T) {
-	command, lines := startPastured(t, t.TempDir())
+	command, lines, _ := startPastured(t, t.TempDir())
 	awaitLogLine(t, lines, "waiting for shutdown", 60*time.Second)
 
 	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
@@ -636,7 +649,7 @@ func TestPasturedStopsCleanlyOnSignal(t *testing.T) {
 // catch is the third ending: a process killed by the default action, which
 // leaves the operator with a daemon that answers to nothing but a kill.
 func TestPasturedAnswersASignalWhileItIsStillStarting(t *testing.T) {
-	command, lines := startPastured(t, t.TempDir())
+	command, lines, _ := startPastured(t, t.TempDir())
 	awaitLogLine(t, lines, "pastured starting", 60*time.Second)
 
 	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
