@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 	"github.com/dayvidpham/provenance"
 )
 
@@ -57,9 +58,10 @@ type BatchApply func(ctx context.Context, inputs []provenance.OperationInput) (p
 // opaque to the lane: the lane moves bytes and calls a Record, and never knows
 // what a record means.
 type item struct {
-	bytes  int64
-	record Record
-	result chan error
+	queueDone func()
+	bytes     int64
+	record    Record
+	result    chan error
 }
 
 // Stats is a read-only snapshot of what the lane has done. It exists so an
@@ -148,6 +150,7 @@ func (l *Lane) Budget() WriteLaneBudget { return l.budget }
 // A record larger than the whole batch byte budget is admitted when the queue
 // is empty and committed ALONE; refusing it would lose an event that happened.
 func (l *Lane) Submit(ctx context.Context, bytes int64, record Record) error {
+	defer writeprofile.Region("lane.admission.through.response")()
 	if l == nil {
 		return fmt.Errorf("%w: the lane is nil, so no record could be admitted and nothing was committed", ErrNotAdmitted)
 	}
@@ -187,6 +190,7 @@ func (l *Lane) Submit(ctx context.Context, bytes int64, record Record) error {
 		}
 		l.cond.Wait()
 	}
+	me.queueDone = writeprofile.Timer("lane.queue.accumulation.wait")
 	l.pending = append(l.pending, me)
 	l.pendingBytes += bytes
 	close(l.arrived)
@@ -387,6 +391,7 @@ func (l *Lane) absorb(batch *[]*item, bytes *int64) (drained, stopped bool, arri
 // guarantee the lane exists to give. The turn counters follow the batch, since
 // they describe the turn and not one record.
 func (l *Lane) commitBatch(batch []*item) {
+	defer writeprofile.Region("lane.turn.prepare.apply.settle")()
 	started := time.Now()
 	reports := l.commitRecords(batch)
 	for i, it := range batch {
@@ -428,7 +433,12 @@ func (l *Lane) commitRecords(batch []*item) []error {
 	// dies with the turn, so nothing learned here outlives the batch apply.
 	turn := ContextWithTurnScope(l.ctx, NewTurnScope())
 	for i, it := range batch {
+		if it.queueDone != nil {
+			it.queueDone()
+		}
+		prepareDone := writeprofile.Region("lane.prepare.blob.identity.definitions.encode")
 		input, err := it.record.Prepare(turn)
+		prepareDone()
 		if err != nil {
 			reports[i] = err
 			continue
@@ -439,9 +449,13 @@ func (l *Lane) commitRecords(batch []*item) []error {
 	if len(inputs) == 0 {
 		return reports
 	}
+	applyDone := writeprofile.Region("lane.apply.pool.lock.fold.integrity.commit")
 	result, applyErr := l.apply(l.ctx, inputs)
+	applyDone()
 	for k, p := range prepared {
+		settleDone := writeprofile.Region("lane.settle.response")
 		reports[p.index] = p.item.record.Settle(l.ctx, batchOutcome(result, k, applyErr))
+		settleDone()
 	}
 	return reports
 }

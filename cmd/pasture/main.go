@@ -23,11 +23,19 @@ package main
 import (
 	"fmt"
 	"os"
+
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 )
 
 func main() {
+	if err := writeprofile.StartEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer writeprofile.Stop()
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		writeprofile.Stop()
 		os.Exit(1)
 	}
 }
@@ -35,5 +43,6 @@ func main() {
 // exitWithCode terminates the process with the given exit code.
 // Called by RunE handlers after printing a human-readable error to stderr.
 func exitWithCode(code int) {
+	writeprofile.Stop()
 	os.Exit(code)
 }

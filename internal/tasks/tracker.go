@@ -47,6 +47,7 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -248,11 +249,15 @@ func (t *trackerImpl) lockWrite() func() {
 // Task CRUD.
 
 func (t *trackerImpl) Create(namespace, title, description string, taskType provenance.TaskType, priority provenance.Priority, phase provenance.Phase) (provenance.Task, error) {
+	defer writeprofile.Region("task.create.total")()
 	defer t.lockWrite()()
+	identityDone := writeprofile.Region("task.system_identity")
 	s, err := t.systemSession()
+	identityDone()
 	if err != nil {
 		return provenance.Task{}, err
 	}
+	defer writeprofile.Region("task.prepare.apply.readback")()
 	return s.Create(namespace, title, description, taskType, priority, phase)
 }
 func (t *trackerImpl) Show(id provenance.TaskID) (provenance.Task, error) {
