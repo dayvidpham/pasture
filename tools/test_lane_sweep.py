@@ -241,6 +241,17 @@ class SweepTests(unittest.TestCase):
             self.assertIn("PASTURE_EXPERIMENT_LANE_BUDGET", denv)
             self.assertEqual((work/row["case"]).stat().st_mode & 0o777, 0o700)
 
+    def test_stage_parent_exists_but_artifact_leaf_remains_exclusive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work=Path(directory);args=SWEEP.parser().parse_args(["--dependency-worktree",str(work),"--stages"]);args.manifest={"runs":[]}
+            row=dict(SWEEP.plan()[0],mode="ON")
+            daemon=unittest.mock.Mock();daemon.poll.return_value=1
+            guard=unittest.mock.Mock();guard.deadline=time.monotonic()+10;guard.spawn.return_value=daemon
+            with patch.object(SWEEP.PW,"backup"),patch.object(SWEEP.PW,"stop"):
+                with self.assertRaisesRegex(RuntimeError,"readiness"):SWEEP.run_case(work,row,work/"seed",{"pastured":"not-run"},b"{}",args,guard)
+            self.assertTrue((work/row["case"]/"profiles").is_dir())
+            self.assertFalse((work/row["case"]/"profiles/daemon").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

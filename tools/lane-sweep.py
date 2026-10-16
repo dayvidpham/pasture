@@ -359,6 +359,7 @@ def run_case(work, row, seed, bins, payload, args, guard):
                 raise RuntimeError(f"observer output {case/name} already exists; use a fresh exclusive case, never truncate retained evidence")
         denv.update(PASTURE_EXPERIMENT_LANE_METRICS=str(case/"lane.jsonl"), PASTURE_EXPERIMENT_SQL_TIMINGS=str(case/"sql-daemon.jsonl"))
         if args.stages:
+            (case/"profiles").mkdir(mode=0o700)
             denv.update(PASTURE_WRITE_PROFILE_DIR=str(case/"profiles/daemon"), PASTURE_WRITE_PROFILE_MODE="stages")
     (case/"config.yaml").write_text("audit_trail: sqlite\n")
     requests, peers, daemon = [], [], None
