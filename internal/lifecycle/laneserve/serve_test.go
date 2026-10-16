@@ -21,8 +21,10 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/laneclient"
 	"github.com/dayvidpham/pasture/internal/lifecycle/lanewire"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/writelane"
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -45,24 +47,22 @@ func shortSocketPath(t *testing.T) string {
 	return filepath.Join(directory, "lane.sock")
 }
 
-// journalEvidenceCount counts the committed evidence rows a store holds. It is
-// the durable-state read the "the record still committed" assertion needs, and
-// it reads through the SAME journal API the gate tests use.
-func journalEvidenceCount(t *testing.T, tracker protocol.TaskTracker) int {
+// journalReceiptEvidence reads current receipt evidence through the same
+// journal API the gate uses. Definition activations are not delivery receipts.
+func journalReceiptEvidence(t *testing.T, tracker protocol.TaskTracker) []provenance.EvidenceRow {
 	t.Helper()
 	page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
 		Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
 		Kinds: []provenance.EvidenceKind{
-			provenance.EvidenceKind("pasture.lifecycle.occurrence.v1"),
-			provenance.EvidenceKind("pasture.lifecycle.interpreted.v2"),
-			provenance.EvidenceKind("pasture.lifecycle.consultation.v3"),
-			provenance.EvidenceKind("pasture.lifecycle.definition.v1"),
+			receipt.CurrentOccurrenceEvidenceKind(),
+			receipt.CurrentInterpretedEvidenceKind(),
+			receipt.CurrentConsultationEvidenceKind(),
 		},
 		Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
 	})
 	require.NoError(t, err)
 	require.Nil(t, page.Next, "one page must hold every row this proof committed")
-	return len(page.Rows)
+	return page.Rows
 }
 
 // fakeHandler is a RequestHandler under a test's control.
@@ -205,30 +205,43 @@ func TestListenReclaimsAStaleSocketThroughTheElection(t *testing.T) {
 // chooses, so the "answer lost, record still committed" case is ordered by a
 // condition and never by a clock.
 type blockingLane struct {
-	inner   *writelane.Lane
-	once    sync.Once
-	entered chan struct{}
-	release chan struct{}
+	inner     *writelane.Lane
+	once      sync.Once
+	entered   chan struct{}
+	release   chan struct{}
+	completed chan error
 }
 
 func (b *blockingLane) Submit(ctx context.Context, bytes int64, record writelane.Record) error {
-	return b.inner.Submit(ctx, bytes, &blockingRecord{Record: record, once: &b.once, entered: b.entered, release: b.release})
+	return b.inner.Submit(ctx, bytes, &blockingRecord{Record: record, once: &b.once, entered: b.entered, release: b.release, completed: b.completed})
 }
 
-// blockingRecord holds its record's PREPARE — the point at which its durable
-// work has entered the lane — until the test releases it, then runs the real
-// two-phase record unchanged.
+// blockingRecord holds a successfully prepared receipt before the batch apply.
+// The barrier cannot accidentally hold a cold definition activation instead of
+// the occurrence whose durability the test proves.
 type blockingRecord struct {
 	writelane.Record
-	once    *sync.Once
-	entered chan struct{}
-	release chan struct{}
+	once      *sync.Once
+	entered   chan struct{}
+	release   chan struct{}
+	completed chan error
 }
 
 func (r *blockingRecord) Prepare(ctx context.Context) (provenance.OperationInput, error) {
+	input, err := r.Record.Prepare(ctx)
+	if err != nil {
+		r.completed <- err
+		return input, err
+	}
 	r.once.Do(func() { close(r.entered) })
 	<-r.release
-	return r.Record.Prepare(ctx)
+	return input, nil
+}
+
+func (r *blockingRecord) Settle(ctx context.Context, outcome provenance.BatchRecordResult) error {
+	err := r.Record.Settle(ctx, outcome)
+	r.completed <- err
+	return err
 }
 
 // TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown is the
@@ -242,7 +255,6 @@ func TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown(t *
 	_, err = tracker.Create("file://lane-serve-proof", "bootstrap", "initialize the persisted ingress identity",
 		provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
 	require.NoError(t, err)
-	baseline := journalEvidenceCount(t, tracker)
 
 	host, err := tasks.NewLifecycleLaneHost(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, timeouts.TestProfile())
 	require.NoError(t, err)
@@ -250,9 +262,18 @@ func TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown(t *
 	require.NoError(t, err)
 	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, timeouts.TestProfile())
 	require.NoError(t, err)
+	testutil.ActivateLaneTestDefinitions(t, service)
+	require.Empty(t, journalReceiptEvidence(t, tracker), "owner activation must not create a delivery receipt")
 	inner, err := writelane.New(budget, service.Appender.AppendBatch)
 	require.NoError(t, err)
-	lane := &blockingLane{inner: inner, entered: make(chan struct{}), release: make(chan struct{})}
+	lane := &blockingLane{inner: inner, entered: make(chan struct{}), release: make(chan struct{}), completed: make(chan error, 1)}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(lane.release) }) }
+	t.Cleanup(func() {
+		release()
+		require.NoError(t, inner.Close(context.Background()))
+		require.NoError(t, tracker.Close())
+	})
 
 	server, err := handlers.NewHookLifecycleServer(handlers.HookLifecycleServerConfig{
 		Tracker: host.Tracker(), Lane: lane, Clock: host.Clock(), Operations: host.Operations(),
@@ -268,32 +289,74 @@ func TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown(t *
 	serveCtx, cancelServe := context.WithCancel(context.Background())
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- listener.Serve(serveCtx) }()
+	t.Cleanup(func() {
+		release()
+		cancelServe()
+		require.NoError(t, listener.Close(context.Background()))
+		<-serveDone
+	})
 
 	raw, err := os.ReadFile(filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "pre_tool_use_2_1_261.json"))
 	require.NoError(t, err)
 
-	client := laneclient.New(socketPath, time.Second)
-	requestCtx, cancelRequest := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancelRequest()
-	_, consultErr := client.Consult(requestCtx, lanewire.Request{
-		Harness:     string(ir.HarnessClaudeCode),
-		Event:       "PreToolUse",
-		HostVersion: claudeVersion,
-	}, raw)
+	connection := make(chan net.Conn, 1)
+	client := laneclient.New(socketPath, time.Second, laneclient.WithDialer(func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+		if err == nil {
+			connection <- conn
+		}
+		return conn, err
+	}))
+	consultDone := make(chan error, 1)
+	go func() {
+		_, err := client.Consult(context.Background(), lanewire.Request{
+			Harness: string(ir.HarnessClaudeCode), Event: "PreToolUse", HostVersion: claudeVersion,
+		}, raw)
+		consultDone <- err
+	}()
+	select {
+	case <-lane.entered:
+	case err := <-lane.completed:
+		t.Fatalf("receipt preparation failed before the connection-loss barrier: %v", err)
+	case err := <-consultDone:
+		t.Fatalf("request ended before the connection-loss barrier: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("receipt never reached the connection-loss barrier")
+	}
+	// Break the actual transport only AFTER admission and preparation, before
+	// commit. No scheduling assumption about a 300 ms client timeout remains.
+	require.NoError(t, (<-connection).Close())
+	var consultErr error
+	select {
+	case consultErr = <-consultDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("hook did not report the lost connection")
+	}
 	require.ErrorIs(t, consultErr, laneclient.ErrRecordUnknown,
 		"a sent request whose answer never arrived must be reported record-unknown, never not-recorded")
 
-	<-lane.entered // the record is admitted and its commit is in flight
-	close(lane.release)
-	require.Eventually(t, func() bool { return inner.Stats().Records >= 1 }, 5*time.Second, time.Millisecond,
-		"the admitted record must still commit after the hook gave up")
-
-	require.Eventually(t, func() bool { return journalEvidenceCount(t, tracker) > baseline }, 5*time.Second, time.Millisecond,
-		"the committed occurrence must be durable, with no partial batch left behind")
-
-	cancelServe()
-	require.NoError(t, listener.Close(context.Background()))
-	<-serveDone
+	release()
+	select {
+	case err := <-lane.completed:
+		require.NoError(t, err, "the admitted receipt must settle successfully after transport loss")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the admitted receipt never settled after transport loss")
+	}
 	require.NoError(t, inner.Close(context.Background()))
-	require.NoError(t, tracker.Close())
+	require.EqualValues(t, 1, inner.Stats().Records, "the admitted receipt must commit after the hook gave up")
+
+	rows := journalReceiptEvidence(t, tracker)
+	require.Len(t, rows, 3,
+		"the settled batch must durably contain the occurrence, interpretation and consultation, not merely a definition activation")
+	counts := make(map[provenance.EvidenceKind]int)
+	for _, row := range rows {
+		counts[row.EvidenceKind]++
+		require.Equal(t, rows[0].ProducingOperationID, row.ProducingOperationID,
+			"all three receipt facts must belong to the same atomic operation")
+	}
+	require.Equal(t, map[provenance.EvidenceKind]int{
+		receipt.CurrentOccurrenceEvidenceKind():   1,
+		receipt.CurrentInterpretedEvidenceKind():  1,
+		receipt.CurrentConsultationEvidenceKind(): 1,
+	}, counts, "each member of the complete receipt must be durable exactly once")
 }

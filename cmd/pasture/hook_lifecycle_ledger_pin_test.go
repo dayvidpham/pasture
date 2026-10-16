@@ -67,7 +67,7 @@ func readLedgerAndStoreIdentity(t *testing.T, dbPath string) (ledgerGeneration, 
 // the advance turns both assertions red.
 func TestTheDaemonLaneBatchAdvancesTheVerifiedLedgerSoTheNextOpenIsFast(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
-	initializeLifecycleTestDatabase(t, dbPath)
+	initializeWarmLaneTestDatabase(t, dbPath)
 
 	// Establish a current ledger first, so the baseline below is the state a
 	// verified store opens from rather than the stale state the bootstrap
@@ -88,6 +88,7 @@ func TestTheDaemonLaneBatchAdvancesTheVerifiedLedgerSoTheNextOpenIsFast(t *testi
 		handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
 	require.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"the served hook must succeed so the ledger assertions below read a committed write")
+	require.Empty(t, outcome.Stderr, "fail-open exit 0 must not disguise a refused or timed-out batch")
 
 	ledgerGeneration, ledgerTail, storeGeneration, storeTail := readLedgerAndStoreIdentity(t, dbPath)
 	require.Equal(t, storeGeneration, ledgerGeneration,
