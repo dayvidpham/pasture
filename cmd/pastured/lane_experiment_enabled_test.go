@@ -71,6 +71,29 @@ func TestExperimentBudgetRequiresPrivateSandboxAndValidBounds(t *testing.T) {
 			t.Fatalf("database/alias output accepted: %s", path)
 		}
 	}
+	parentAlias := filepath.Join(root, "parent-alias")
+	if err := os.Symlink(root, parentAlias); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+		aliased := filepath.Join(parentAlias, "store.db"+suffix)
+		t.Setenv("PASTURE_EXPERIMENT_LANE_METRICS", aliased)
+		if _, err := laneExperimentBudget(base, db); err == nil {
+			t.Fatal("parent-directory alias bypassed sidecar reservation")
+		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		relative, err := filepath.Rel(cwd, aliased)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PASTURE_EXPERIMENT_LANE_METRICS", relative)
+		if _, err := laneExperimentBudget(base, db); err == nil {
+			t.Fatal("relative sidecar spelling accepted")
+		}
+	}
 	t.Setenv("PASTURE_EXPERIMENT_LANE_METRICS", filepath.Join(root, "metrics.jsonl"))
 	for _, raw := range []string{`{"unknown":1}`, `{"batch_records":300}`, `{"queue_records":1}`, `{"flush_ms":400}`, `{"batch_bytes":1}`, `{} {}`} {
 		t.Setenv("PASTURE_EXPERIMENT_LANE_BUDGET", raw)

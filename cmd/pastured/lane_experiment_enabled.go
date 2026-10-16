@@ -35,17 +35,7 @@ func experimentPathInside(root, path string) error {
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return fmt.Errorf("experiment sandbox must be an existing private directory (0700)")
 	}
-	physicalPath, err := filepath.EvalSymlinks(path)
-	if os.IsNotExist(err) {
-		if _, leafErr := os.Lstat(path); !os.IsNotExist(leafErr) {
-			return fmt.Errorf("experiment output leaf already exists or is a dangling symlink; choose a fresh output file")
-		}
-		parent, parentErr := filepath.EvalSymlinks(filepath.Dir(path))
-		if parentErr != nil {
-			return parentErr
-		}
-		physicalPath, err = filepath.Join(parent, filepath.Base(path)), nil
-	}
+	physicalPath, err := experimentCanonicalPath(path)
 	if err != nil {
 		return err
 	}
@@ -54,6 +44,24 @@ func experimentPathInside(root, path string) error {
 		return fmt.Errorf("experiment path must stay strictly inside the private sandbox")
 	}
 	return nil
+}
+
+func experimentCanonicalPath(path string) (string, error) {
+	physicalPath, err := filepath.EvalSymlinks(path)
+	if os.IsNotExist(err) {
+		if _, leafErr := os.Lstat(path); !os.IsNotExist(leafErr) {
+			return "", fmt.Errorf("experiment output leaf already exists or is a dangling symlink; choose a fresh output file")
+		}
+		parent, parentErr := filepath.EvalSymlinks(filepath.Dir(path))
+		if parentErr != nil {
+			return "", parentErr
+		}
+		physicalPath, err = filepath.Join(parent, filepath.Base(path)), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(physicalPath)
 }
 
 func laneExperimentBudget(base writelane.WriteLaneBudget, db string) (writelane.WriteLaneBudget, error) {
@@ -69,8 +77,16 @@ func laneExperimentBudget(base writelane.WriteLaneBudget, db string) (writelane.
 		if err := experimentPathInside(root, metrics); err != nil {
 			return base, fmt.Errorf("refusing lane metrics output: %w", err)
 		}
-		for _, reserved := range []string{db, db + "-wal", db + "-shm", db + "-journal"} {
-			if filepath.Clean(metrics) == filepath.Clean(reserved) {
+		physicalMetrics, err := experimentCanonicalPath(metrics)
+		if err != nil {
+			return base, err
+		}
+		physicalDB, err := experimentCanonicalPath(db)
+		if err != nil {
+			return base, err
+		}
+		for _, reserved := range []string{physicalDB, physicalDB + "-wal", physicalDB + "-shm", physicalDB + "-journal"} {
+			if physicalMetrics == reserved {
 				return base, fmt.Errorf("experiment metrics must not name the database or a SQLite sidecar")
 			}
 		}
