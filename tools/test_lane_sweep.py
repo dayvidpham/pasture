@@ -16,6 +16,14 @@ SPEC.loader.exec_module(SWEEP)
 
 
 class SweepTests(unittest.TestCase):
+    def test_seed_campaign_must_be_explicit(self):
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("lane-sweep.py")),
+                                 "--dependency-worktree", "/not-used"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--seed-campaign", result.stderr)
+        args = SWEEP.parser().parse_args(["--dependency-worktree", "/not-used", "--seed-campaign", "/retained-seed"])
+        self.assertEqual(args.seed_campaign, Path("/retained-seed"))
+
     def test_pilot_grid_and_pairs(self):
         plan = SWEEP.plan()
         self.assertEqual(plan, SWEEP.plan())
@@ -209,7 +217,7 @@ class SweepTests(unittest.TestCase):
         self.assertIn("actual transaction p95 exceeds 400ms", row["acceptance"]["errors"])
 
     def test_current_caps_explicit_and_socket_paths_short(self):
-        args = SWEEP.parser().parse_args(["--dependency-worktree", "/not-used"])
+        args = SWEEP.parser().parse_args(["--dependency-worktree", "/not-used", "--seed-campaign", "/not-used"])
         self.assertEqual((args.batch_bytes, args.queue_records, args.queue_bytes), (8 << 20, 256, 32 << 20))
         for row in SWEEP.plan():
             runtime = Path("/tmp/opencode/lane-sweep-abcdefgh")/row["case"]/"r/pasture/lane-0123456789ab.sock"
@@ -218,7 +226,7 @@ class SweepTests(unittest.TestCase):
     def test_environment_and_teardown_wired_without_build_or_daemon(self):
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
-            args = SWEEP.parser().parse_args(["--dependency-worktree", str(work)])
+            args = SWEEP.parser().parse_args(["--dependency-worktree", str(work), "--seed-campaign", str(work)])
             args.manifest = {"runs": []}
             row = dict(SWEEP.plan()[0], load="C1", mode="OFF")
             # Deliberate readiness failure exercises finally without a campaign.
@@ -243,7 +251,7 @@ class SweepTests(unittest.TestCase):
 
     def test_stage_parent_exists_but_artifact_leaf_remains_exclusive(self):
         with tempfile.TemporaryDirectory() as directory:
-            work=Path(directory);args=SWEEP.parser().parse_args(["--dependency-worktree",str(work),"--stages"]);args.manifest={"runs":[]}
+            work=Path(directory);args=SWEEP.parser().parse_args(["--dependency-worktree",str(work),"--seed-campaign",str(work),"--stages"]);args.manifest={"runs":[]}
             row=dict(SWEEP.plan()[0],mode="ON")
             daemon=unittest.mock.Mock();daemon.poll.return_value=1
             guard=unittest.mock.Mock();guard.deadline=time.monotonic()+10;guard.spawn.return_value=daemon

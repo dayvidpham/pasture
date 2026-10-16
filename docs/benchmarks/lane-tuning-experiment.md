@@ -127,11 +127,12 @@ The same binaries ran OFF/ON, every setting and peer writer:
 - `pasture` SHA-256 `0cd5143975db67489ddadd2c5c387d4d775bf21e61edb4582c2596aaa1b71964`
 - `pastured` SHA-256 `dce8213a4a4fb08544663472aa674cfe5dd3189b10077c8b6d753794085e9710`
 
-Exact commands, with `TIMING_SOURCE` naming the clean local `dbbde538` worktree:
+Exact commands, with `TIMING_SOURCE` naming the clean local `dbbde538` worktree
+and `SEED_CAMPAIGN` naming the retained campaign with the verified seed hashes:
 
 ```sh
-nix develop -c python3 tools/lane-sweep.py --stages --budget-seconds 850 --dependency-worktree "$TIMING_SOURCE"
-nix develop -c python3 tools/lane-sweep.py --stages --finalist-batches 20,40 --budget-seconds 900 --dependency-worktree "$TIMING_SOURCE"
+nix develop -c python3 tools/lane-sweep.py --seed-campaign "$SEED_CAMPAIGN" --stages --budget-seconds 850 --dependency-worktree "$TIMING_SOURCE"
+nix develop -c python3 tools/lane-sweep.py --seed-campaign "$SEED_CAMPAIGN" --stages --finalist-batches 20,40 --budget-seconds 900 --dependency-worktree "$TIMING_SOURCE"
 PYTHONDONTWRITEBYTECODE=1 python3 tools/analyze-lane-sweep.py "$PILOT" "$FINALISTS" > "$FINALISTS/aggregate.json"
 ```
 

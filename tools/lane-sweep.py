@@ -519,7 +519,7 @@ def campaign(args):
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dependency-worktree", required=True, type=Path)
-    p.add_argument("--seed-campaign", type=Path, default=Path("/tmp/opencode/wp-v1uzuv8i"))
+    p.add_argument("--seed-campaign", required=True, type=Path)
     p.add_argument("--budget-seconds", type=float, default=900)
     p.add_argument("--max-cases", type=int, default=80)
     p.add_argument("--requests", type=int, default=None)
