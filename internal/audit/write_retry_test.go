@@ -623,7 +623,10 @@ func TestAuditWriterRetryCancellationPreventsNextAttempt(t *testing.T) {
 }
 
 func TestAuditWriterBudgetIncludesAllAttempts(t *testing.T) {
-	t.Parallel()
+	// Keep the real wall-clock probe, but do not charge this package's parallel
+	// migration/SQLite load to its 40ms operation budget. The independent retry
+	// test below checks deadline identity across multiple attempts, without
+	// inferring a reset merely from elapsed scheduler time.
 	s, path := writerTrail(t, timeouts.ProductionProfile())
 	holder := writerHolder(t, path)
 	defer holder.Rollback()
@@ -632,14 +635,61 @@ func TestAuditWriterBudgetIncludesAllAttempts(t *testing.T) {
 	s.writerPolicy.afterAttempt = func(_ int, _ error) { attempts++ }
 	start := time.Now()
 	err := s.RecordEvent(context.Background(), writerEvent())
+	elapsed := time.Since(start)
 	if !errors.Is(err, context.DeadlineExceeded) || attempts == 0 {
 		t.Fatalf("attempts %d err %v", attempts, err)
 	}
-	if time.Since(start) > 40*time.Millisecond+writerSchedulingTolerance {
-		t.Fatal("per-attempt budget reset")
+	if elapsed > 40*time.Millisecond+writerSchedulingTolerance {
+		t.Fatalf("whole write took %s, above the 40ms total budget plus %s scheduler allowance (%d attempts)", elapsed, writerSchedulingTolerance, attempts)
 	}
+	t.Logf("real locked audit writer: total budget=40ms elapsed=%s attempts=%d, holder retained until return", elapsed, attempts)
 	if defaultAuditWriterPolicy().ceiling != 30*time.Second || busyRetryCeiling != 30*time.Second {
 		t.Fatal("global or writer ceilings changed")
+	}
+}
+
+func TestAuditWriterRetriesShareOneOperationDeadline(t *testing.T) {
+	t.Parallel()
+	s, _ := writerTrail(t, timeouts.ProductionProfile())
+	s.writerPolicy = defaultAuditWriterPolicy()
+	// Retries are driven by returned typed SQL failures, not by waiting for a
+	// timer or releasing a competing writer at just the right instant. Keep
+	// the production whole-operation ceiling; no elapsed assertion needs it
+	// to expire. The third attempt cancels the caller synchronously instead.
+	s.writerPolicy.initialDelay = time.Nanosecond
+	s.writerPolicy.maxDelay = time.Nanosecond
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var deadline time.Time
+	attempts := 0
+	err := s.withAuditWrite(ctx, "retry deadline inspection", func(ctx context.Context, tx *sql.Tx) error {
+		attempts++
+		got, ok := ctx.Deadline()
+		if !ok {
+			return errors.New("audit write attempt has no whole-operation deadline")
+		}
+		if attempts == 1 {
+			deadline = got
+		} else if !got.Equal(deadline) {
+			t.Errorf("attempt %d reset the operation deadline from %s to %s", attempts, deadline, got)
+		}
+		// Each failed attempt must really roll back before the next can insert
+		// the same primary key. The retry engine, transaction, and cleanup are
+		// production code; only the transient SQL failure is injected.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agents(id,kind_id) VALUES('budget-attempt',2)`); err != nil {
+			return err
+		}
+		if attempts < 3 {
+			return writerCodeError(5)
+		}
+		cancel()
+		return ctx.Err()
+	})
+	if !errors.Is(err, context.Canceled) || attempts != 3 {
+		t.Fatalf("attempts=%d error=%v, want three attempts followed by caller cancellation", attempts, err)
+	}
+	if writerCount(t, s, "agents") != 0 {
+		t.Fatal("an uncommitted retry published an agent row")
 	}
 }
 
