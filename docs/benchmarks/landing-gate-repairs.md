@@ -325,6 +325,15 @@ the pure renderer matrix remains parallel. The complete handlers race package
 passes after this correction. Original full-run failure remains preserved;
 it is not reclassified by that package result.
 
+The subsequent `51950c9` default wave cleared handlers but exposed the public
+claim API's trigger-driven lost-race proof: its initial read expired within
+the unchanged production ingress budget amid package-parallel fixtures. The
+trigger, not unrelated test load, supplies its competing-writer interleaving;
+that proof now runs package-serial without changing its read/write deadline.
+Suppressing the trigger's winning insert still fails the typed lost-race
+assertion. The full tasks race package passes. This disposition identifies
+unnecessary fixture competition, not a measured cause of the historical delay.
+
 The same Nix log contains a whole-package default10-minute timeout while the
 lineage over-cap test was still running. Nix now explicitly uses the existing
 local/CI30-minute whole-suite ceiling; no operation deadline or assertion is
