@@ -24,6 +24,13 @@ upstream integration, separately from the accepted restricted benchmark usage.
 
 ## Unpublished dependency verification
 
+Publication prerequisite was satisfied on2026-10-16: Provenance v0.10.1 tags the
+actual merge commit `f0572d1a6759f3bd160f85ef487a5a33a4069510`, incorporating the
+reviewed `126f06f` tree. The candidate now adopts the real module and computed
+vendor closure, without a local replacement. All final candidate gates must use
+`GOWORK=off`; the workspace recipe below remains only a record of prepublication
+verification and is not substituted for published-pin gates.
+
 Before publication, consumer checks must explicitly use a private external
 workspace pointing to both final integration trees. Do not commit a `replace`,
 workspace, downloaded binary or artificial module checksum:
