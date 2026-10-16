@@ -160,6 +160,49 @@ Two additional tests were exposed:
   fails this proof. Focused real probes measured40.07–41.39ms; default/tagged
   focused repeats passed. The original full-tagged failure remains preserved.
 
+The next exact-source default gate (`9e97f78`) exposed
+`TestAuditWriterReplacementConnectionUsesThisBudget`. Its original25ms caller,
+100ms ceiling, typed deadline failure, held writer, subsequent successful write
+and standing500ms read-back remain unchanged. The old already-WAL holder proves
+writer-BEGIN contention, not necessarily connector setup contention; its2.23s
+whole-test report did not record write elapsed. No historical scheduler cause
+or production connector bypass is established by that report.
+
+Source inspection confirms one caller-bounded operation context reaches
+`db.Conn(ctx)`. The shared connector deliberately avoids modernc DSN PRAGMAs
+(which use Background), clamps setup's busy timeout to the remaining caller
+deadline, runs setup/read-back with that context, and restores standing policy
+before publication. The writer separately reclamps its reserved connection.
+Synchronous driver Open/Close have no context API; a stalled filesystem is not
+bounded by this SQLite-contention policy. MaxIdleConns(0) closes the failed
+connection, so the subsequent write checks a NEW retained connection, not reuse.
+
+The repair isolates eight qualified native/wall-clock budget probes from the
+package's parallel SQLite fixtures, retaining the actual concurrent writers
+inside concurrency proofs; unrelated content/transaction tests remain parallel.
+An explicit guard includes nested parallel subtests. A new real DELETE-journal
+read holder prevents WAL conversion, isolating connector setup from audit BEGIN.
+It retains the same25ms/100ms bound and typed deadline error, refuses publication
+while locked, then requires WAL and standing500ms after release. Removing ONLY
+the connector deadline clamp makes this proof fail at502.52ms; the old connector
+test still passes that mutation. Ignoring ONLY the writer clamp breaks the
+original replacement proof at501.63ms. Detaching acquisition from the caller
+breaks a separate deterministic dependency-context/cancellation pin.
+
+An unchanged `9e97f78` worktree with the same published dependency passes focused
+audit tests; it does not clear the preserved full-suite failure. Restored focused
+default/tagged repeats pass: native setup25.53–26.17ms and replacement25.62–26.79ms.
+These results identify missing test isolation/attribution and strengthen the
+actual acquisition guarantee without claiming a proven historical scheduling
+trace. Production connector/writer sources are byte-identical.
+
+Nix package and check derivations now explicitly set `GOWORK=off`: an outer
+shell variable does not enter a sandbox. Race/installer CGO overrides merge the
+common environment rather than replacing it. Derivation inspection verifies
+off for all three, with CGO0 for the package and CGO1 for both checks; full
+package/check builds remain part of the exact-tree validation, not inferred
+from evaluation alone.
+
 The operator's final version correction is **Pasture v0.0.21**; earlier
 unpublished v0.1.0/v0.10.0 candidate suggestions are superseded. Provenance
 remains the already published v0.10.1. Metadata correction does not turn any
