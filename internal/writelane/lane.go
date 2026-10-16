@@ -107,11 +107,14 @@ type Lane struct {
 
 	done chan struct{}
 
-	records         atomic.Int64
-	batches         atomic.Int64
-	maxBatchRecords atomic.Int64
-	holdExceeded    atomic.Int64
-	maxHoldNanos    atomic.Int64
+	records                atomic.Int64
+	batches                atomic.Int64
+	maxBatchRecords        atomic.Int64
+	holdExceeded           atomic.Int64
+	maxHoldNanos           atomic.Int64
+	experimentQueueRecords atomic.Int64
+	experimentQueueBytes   atomic.Int64
+	experimentMetricErrors atomic.Int64
 }
 
 // New constructs the lane and starts its commit goroutine. The budget is
@@ -196,6 +199,7 @@ func (l *Lane) Submit(ctx context.Context, bytes int64, record Record) error {
 	me.admissionToPrepareDone = writeprofile.Timer("lane.admission.to_own_prepare")
 	l.pending = append(l.pending, me)
 	l.pendingBytes += bytes
+	l.observeExperimentQueue()
 	close(l.arrived)
 	l.arrived = make(chan struct{})
 	l.cond.Broadcast()
@@ -291,11 +295,18 @@ func (l *Lane) run() {
 			var drained, stopped bool
 			drained, stopped, arrival = l.absorb(&batch, &bytes)
 			if drained || stopped || ExceedsWriteBatch(l.budget, len(batch), bytes, 0) {
-				l.commitBatch(batch)
+				reason := "full"
+				if stopped {
+					reason = "stopped"
+				} else if drained {
+					reason = "drained"
+				}
+				l.flushBatch(batch, reason)
 				continue
 			}
 		}
 
+		reason := "timer"
 		timer := time.NewTimer(l.budget.FlushInterval)
 	waiting:
 		for {
@@ -304,6 +315,11 @@ func (l *Lane) run() {
 				var drained, stopped bool
 				drained, stopped, arrival = l.absorb(&batch, &bytes)
 				if drained || stopped {
+					if stopped {
+						reason = "stopped"
+					} else {
+						reason = "drained"
+					}
 					break waiting
 				}
 				// The record that arrived does not fit this batch's budget. Keep
@@ -312,6 +328,7 @@ func (l *Lane) run() {
 				break waiting
 			}
 			if ExceedsWriteBatch(l.budget, len(batch), bytes, 0) {
+				reason = "full"
 				break waiting
 			}
 		}
@@ -321,7 +338,7 @@ func (l *Lane) run() {
 			default:
 			}
 		}
-		l.commitBatch(batch)
+		l.flushBatch(batch, reason)
 	}
 }
 
@@ -382,8 +399,8 @@ func (l *Lane) absorb(batch *[]*item, bytes *int64) (drained, stopped bool, arri
 }
 
 // commitBatch runs the batch's durable work and answers each record's result
-// channel with its own report. It records how long the turn held the writer
-// against HoldTarget; exceeding the target is reported, never enforced by
+// channel with its own report. Its legacy Hold statistic records whole-turn
+// elapsed time, not SQLite writer-lock ownership. Exceeding HoldTarget is reported, never enforced by
 // truncating the batch, because a record already admitted must either commit or
 // fail honestly, never be dropped.
 //
