@@ -30,6 +30,19 @@ class ProfileSafety(unittest.TestCase):
         before = {"corpora": {"synthetic": {"sha256": "same", "counts": {"tasks": 60}}}, "payload_sha256": "same", "runs": [row]}
         after = copy.deepcopy(before)
         self.assertTrue(comparison.compare(before, after)[0]["equal_successful_work"])
+        for variant in ("fault","fallback","missing_routing","request_count"):
+            bad=copy.deepcopy(before)
+            if variant=="fault":bad["runs"][0]["requests"][0]["successful_response"]=False
+            elif variant=="request_count":bad["runs"][0]["requests"].pop()
+            else:
+                bad["runs"][0]["path"]="lane-hook"
+                if variant=="fallback":bad["runs"][0]["lane_evidence"]={"verified":False}
+            control=copy.deepcopy(before)
+            control["runs"][0]["path"]=bad["runs"][0]["path"]
+            if variant in ("fallback","missing_routing"):control["runs"][0]["lane_evidence"]={"verified":True}
+            result=comparison.compare(control,bad)[0]
+            self.assertFalse(result["equal_successful_work"],variant)
+            self.assertIsNone(result["wall_ratio_before_over_after"],variant)
         after["runs"][0]["committed"] = 1
         after["runs"][0]["failed"] = 1
         result = comparison.compare(before, after)[0]

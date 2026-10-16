@@ -46,7 +46,13 @@ def compare(before, after):
         if order(left) != order(right):
             raise ValueError("repeat/order/offered work differs")
         x, y = summarize(left), summarize(right)
-        equal_successful_work = x["offered"] == y["offered"] == x["committed"] == y["committed"] and not x["censored"] and not y["censored"]
+        def qualified(rows):
+            return all(row["offered"] == row["committed"] == len(row["requests"])
+                and row["failed"] == 0 and not any(row["failure_classes"].values())
+                and all(r.get("successful_response") is True and not r.get("censored", True) for r in row["requests"])
+                and (row["path"] != "lane-hook" or row.get("lane_evidence",{}).get("verified") is True)
+                for row in rows)
+        equal_successful_work = x["offered"] == y["offered"] == x["committed"] == y["committed"] and qualified(left) and qualified(right)
         comparisons.append({"shape": key[0], "path": key[1], "concurrency": key[2], "mode": key[3],
             "before": x, "after": y, "equal_successful_work": equal_successful_work,
             "wall_ratio_before_over_after": x["wall_seconds"]/y["wall_seconds"] if equal_successful_work else None})
