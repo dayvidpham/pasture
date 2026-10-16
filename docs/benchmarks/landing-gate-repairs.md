@@ -253,6 +253,39 @@ All production Go sources remain byte-identical to `9e97f78`. New fixture
 coverage and build-environment changes must be included in final exact-source
 validation and independent review, rather than attributed to the earlier wave.
 
+The next complete wave on `6f15d41` again passed default/tagged/recovery race
+and all non-full-Nix gates, including the packaged version check. Full Nix
+still measured68.7events/s against80, with704/704 committed and zero faults.
+Cache preparation and serial independent builders did NOT clear that failure;
+no performance assertion, CI factor or test selection was relaxed.
+
+That Nix run also exposed two post-commit command fixtures which had not
+reached their intended boundary, plus an oversize-record statistics race:
+
+* Codex's output-write proof had zero occurrences; OpenCode's panic proof had
+  not called its post-commit seam. Controlled cold-definition delay produces
+  actual fail-open definition-deadline faults on the base and passes both
+  repaired fixtures. Setup initializes five immutable owners for each actual
+  Codex/OpenCode contract on a bounded service copy; original1s/5s request
+  settings are unchanged. No receipt is manufactured. Exact atomic receipt,
+  empty-fault/actual-Outcome diagnostics and no-owner-growth pins strengthen
+  the original assertions. Actual Nix focused default/tagged checks pass;
+  bypassing the panic barrier or suppressing stdout writes still fails.
+  These controlled results do not identify the original unlogged fault cause.
+* Lane `Records` is documented to precede ACK, while whole-turn counters
+  follow it. The oversize test incorrectly read both immediately after ACK.
+  It now retains the immediate record-count assertion, joins the real lane,
+  then requires one record, one batch and maximum batch size one. Delaying
+  turn publication reproduces the original zero-batch failure and passes the
+  repair; removing actual maximum publication still fails after the join.
+  Production ACK/statistics ordering is unchanged.
+
+These are focused corrections, not retroactive full-Nix clearance. The next
+exact-source wave must establish whether the unchanged throughput requirement
+holds. If it does not, isolating the performance phase requires an explicit
+decision: never silently omit it, lower its floor or call standalone success
+a passing full race check.
+
 The operator's final version correction is **Pasture v0.0.21**; earlier
 unpublished v0.1.0/v0.10.0 candidate suggestions are superseded. Provenance
 remains the already published v0.10.1. Metadata correction does not turn any
