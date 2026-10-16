@@ -1,13 +1,13 @@
 # Changelog
 
-## [0.1.0] - 2026-10-16
+## [0.0.21] - 2026-10-16
 
 Release-preparation candidate, **not published**. The separately owned version
 command and published Provenance v0.10.1 dependency pin/checksums/Nix vendor closure
 are integrated; publication still requires final exact-tree gates and review.
 This preparation does not claim those pending steps have landed.
-Minor version proposed for the additive CLI
-surface and optional developer instrumentation; no existing contract is removed.
+The operator-selected release is v0.0.21, superseding earlier unpublished
+candidate versions. No existing contract is removed.
 
 ### Added
 - `pasture version`, using the same version data and rendering as `pasture --version`.
