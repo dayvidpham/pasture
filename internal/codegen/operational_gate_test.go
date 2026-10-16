@@ -133,6 +133,15 @@ func TestSeparateAssetEntryPointsRejectWithoutStageWrites(t *testing.T) {
 			for _, dir := range []string{"internal", "tools", "pkg", "artifact", "skills", "agents", "hooks"} {
 				require.NoError(t, os.CopyFS(filepath.Join(root, dir), os.DirFS(filepath.Join(realRoot, dir))))
 			}
+			// Nix supplies a verified offline vendor closure rather than a
+			// downloadable module cache. The independent clone needs that same
+			// closure; do not disable vendor mode or replace the real generator.
+			vendor := filepath.Join(realRoot, "vendor")
+			if _, err := os.Stat(vendor); err == nil {
+				require.NoError(t, os.CopyFS(filepath.Join(root, "vendor"), os.DirFS(vendor)))
+			} else {
+				require.True(t, os.IsNotExist(err), "inspect the parent module's optional vendor closure: %v", err)
+			}
 			for _, file := range []string{"go.mod", "go.sum"} {
 				content, err := os.ReadFile(filepath.Join(realRoot, file))
 				require.NoError(t, err)
