@@ -203,6 +203,56 @@ off for all three, with CGO0 for the package and CGO1 for both checks; full
 package/check builds remain part of the exact-tree validation, not inferred
 from evaluation alone.
 
+## Full Nix findings after the successful Go wave
+
+On `1e010ad`, default/tagged/recovery race, vet/build, module verification,
+38 Python tests, two-pass generation/drift, Nix evaluation/packages and the
+actual packaged v0.0.21 version equivalence check passed. Full Nix race still
+failed with five additional top-level findings; its complete log and all17
+including route subtests remain preserved, not replaced by focused retries.
+
+* The generated Codex conduit dependency used `/usr/bin/env`, absent in the
+  hermetic sandbox, yielding126 instead of7 on12 routes. Resolve that stand-in's
+  shell from PATH, while executing the same committed generated runner and
+  retaining exact exit/stdout/stderr/argv/raw-stdin assertions. A focused Nix
+  check passes; restoring ONLY the old interpreter fails with the actual
+  bad-interpreter diagnostic.
+* The two-daemon migration fixture inherited ambient runtime state or used an
+  overlong socket sibling of its long temporary database path. Both children
+  now share one short private0700 runtime, with an actual elected Unix socket
+  required. A padded private TMPDIR reproduces both base bind failures
+  deterministically and passes the repair; no lane is disabled or loser/winner
+  assertion relaxed. This also prevents those children using operator runtime
+  state; it does not prove which process created the earlier foreign lock.
+* The real-BUSY cancellation proof failed during its unrelated warm-up write's
+  tight cleanup reserve, BEFORE the cancellation experiment. Bounded fixture
+  SQL now seeds the same committed agent/software/event/epoch-edge state and
+  publishes its warm cache only after commit. All SQL/commit errors are required
+  to be absent. The measured writer still uses the original profile, cleanup,
+  typed contention, synchronous cancellation,100ms join and one-attempt rule;
+  four retained-row checks strengthen the unchanged event-count assertion.
+  Ignoring the caller or
+  injecting measured cleanup failure still makes it fail.
+* The malformed record-only envelope proof failed at lazy owner activation's
+  definition error surface, not occurrence append. Its setup service value
+  copy now activates exactly four occurrence owners, never an interpreter,
+  before the original2s receipt. New pins check budget preservation, exact
+  owner references and no new definition during Receive. Actual Nix receipt
+  package checks pass; budget-widening and fabricated-semantics controls fail.
+* The load tripwire committed776/776 with zero faults but measured75.8events/s
+  below the unchanged80 floor. Unchanged `9e97f78` in a standalone Nix probe
+  measured104.4 with1062/1062; this is NOT a comparable full-suite pass or a
+  historical scheduling trace. Nix now prepares race build/cache state before
+  its UNCHANGED full race command; preparation executes binaries/TestMain but
+  is not suite evidence. Independent Nix builders are validated serially,
+  without restricting Go test parallelism, enabling report-only/CI relaxation,
+  skipping a test or changing the throughput floor. Complete final Nix success
+  remains required; these setup changes cannot guarantee a contention-free host.
+
+All production Go sources remain byte-identical to `9e97f78`. New fixture
+coverage and build-environment changes must be included in final exact-source
+validation and independent review, rather than attributed to the earlier wave.
+
 The operator's final version correction is **Pasture v0.0.21**; earlier
 unpublished v0.1.0/v0.10.0 candidate suggestions are superseded. Provenance
 remains the already published v0.10.1. Metadata correction does not turn any
