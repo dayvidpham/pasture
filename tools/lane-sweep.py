@@ -247,6 +247,10 @@ def save(work, manifest):
     temp.replace(work/"manifest.json")
 
 
+def tracked_subprocess(guard):
+    return SimpleNamespace(Popen=guard.spawn, PIPE=subprocess.PIPE, TimeoutExpired=subprocess.TimeoutExpired)
+
+
 def summarize(manifest):
     """Evaluate only preregistered limits with sufficient evidence, no ranking."""
     measured = [r for r in manifest["runs"] if r.get("status") == "measured"]
@@ -450,7 +454,7 @@ def campaign(args):
     guard = Watchdog(args.budget_seconds, interrupt=True)
     # Reuse profile-writes' run/stop and its 90s per-subprocess watchdog, while
     # additionally tracking all children against the campaign's hard ceiling.
-    PW.subprocess = SimpleNamespace(Popen=guard.spawn, TimeoutExpired=subprocess.TimeoutExpired)
+    PW.subprocess = tracked_subprocess(guard)
     manifest = dict(schema="lane-sweep.v1", command=sys.argv, limits=LIMITS, runs=plan(args.order_seed,args.finalist_batches),
                     order_seed=args.order_seed, budget_seconds=args.budget_seconds, max_cases=args.max_cases,
                     requests=args.requests, python=sys.version, status="initializing", cleanup="pending",

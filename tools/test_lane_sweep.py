@@ -176,6 +176,15 @@ class SweepTests(unittest.TestCase):
         guard.close()
         self.assertFalse(guard.expired.is_set())
 
+    def test_tracked_subprocess_wires_actual_profile_runner(self):
+        guard=SWEEP.Watchdog(10)
+        try:
+            with tempfile.TemporaryDirectory() as directory, patch.object(SWEEP.PW,"subprocess",SWEEP.tracked_subprocess(guard)):
+                result=SWEEP.native_run([sys.executable,"-c","pass"],{"PATH":os.environ["PATH"]},Path(directory),"tracked",b"{}")
+                self.assertTrue(result["successful_response"])
+                self.assertTrue(result["valid_ack"])
+        finally:guard.close()
+
     def test_cleanup_reaps_descendant_after_leader_exits(self):
         guard=SWEEP.Watchdog(10)
         leader=guard.spawn([sys.executable,"-c","import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])"],start_new_session=True)
