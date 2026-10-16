@@ -3,8 +3,8 @@
 ## [0.1.0] - 2026-10-16
 
 Release-preparation candidate, **not published**. The separately owned version
-command is integrated; publication still requires the actual published Provenance
-dependency pin/checksums/Nix vendor closure and final exact-tree gates and review.
+command and published Provenance v0.10.1 dependency pin/checksums/Nix vendor closure
+are integrated; publication still requires final exact-tree gates and review.
 This preparation does not claim those pending steps have landed.
 Minor version proposed for the additive CLI
 surface and optional developer instrumentation; no existing contract is removed.
@@ -22,7 +22,7 @@ surface and optional developer instrumentation; no existing contract is removed.
   changed inputs or incomplete offered/committed accounting.
 
 ### Performance and compatibility
-- Prepare adoption of guarded upstream exact-replay proof reuse without weakening
+- Adopt guarded upstream exact-replay proof reuse without weakening
   identity, authority or integrity checks. On the measured copied corpus, serial
   create median was 1686→101 ms with 72/72 commits on each side; copied C18 create
   still committed only 28/72 after optimization. These are sandbox observations,
