@@ -2,14 +2,15 @@
 
 ## [0.1.0] - 2026-10-16
 
-Release-preparation candidate, **not published**. Publication requires integration
-of the separately owned `pasture version` command and `pasture --version` alias,
-the actual published Provenance dependency pin/checksums/Nix vendor closure, and
-final exact-tree gates and review. This metadata-only preparation does not claim
-those pending changes have landed. Minor version proposed for the additive CLI
+Release-preparation candidate, **not published**. The separately owned version
+command is integrated; publication still requires the actual published Provenance
+dependency pin/checksums/Nix vendor closure and final exact-tree gates and review.
+This preparation does not claim those pending steps have landed.
+Minor version proposed for the additive CLI
 surface and optional developer instrumentation; no existing contract is removed.
 
 ### Added
+- `pasture version`, using the same version data and rendering as `pasture --version`.
 - Opt-in developer write profiling, corrected timing attribution, disposable-store
   lane experiments and offline analysis with independently reconciled outcomes.
 - Documented matched write-cost and lane-tuning evidence, complete configured
