@@ -31,6 +31,9 @@
           vendorHash = "sha256-TbgjZ2F5BEdJL35jyXwkMcKim2NykrwzFqB3X+Ia//g=";
 
           env.CGO_ENABLED = "0";
+          # Package/check builders resolve the published module closure too;
+          # an outer shell's GOWORK does not propagate into a Nix sandbox.
+          env.GOWORK = "off";
 
           # Stamp the release identity into every main package that declares a
           # `version` var (cmd/pasture and cmd/pastured). The linker silently ignores
