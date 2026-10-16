@@ -210,7 +210,38 @@ func TestMigrateContextRealWriteLockCancelsWithoutReleasingHolder(t *testing.T) 
 func TestAuditCallerCancellationAfterRealBusyAttempt(t *testing.T) {
 	profile := timeouts.DeadlineTestProfile()
 	trail, path := writerTrail(t, profile)
-	require.NoError(t, trail.RecordEvent(t.Context(), writerEvent()))
+	// Seed the warm-state precondition, not another instance of the writer
+	// under test. A warm-up RecordEvent also measures its tight connection
+	// cleanup reserve and can fail AFTER committing, before this cancellation
+	// experiment even starts. Fixture SQL has its own bounded setup context;
+	// no cleanup error is accepted or suppressed, and the measured writer's
+	// profile, cleanup, retry policy and error path remain unchanged.
+	setupCtx, setupCancel := context.WithTimeout(t.Context(), timeouts.ProductionProfile().WorkflowResult())
+	defer setupCancel()
+	setupTx, err := trail.db.BeginTx(setupCtx, nil)
+	require.NoError(t, err)
+	defer setupTx.Rollback()
+	const agentID = "cancellation-fixture-worker"
+	_, err = setupTx.ExecContext(setupCtx, `INSERT INTO agents(id,kind_id) VALUES (?,2)`, agentID)
+	require.NoError(t, err)
+	_, err = setupTx.ExecContext(setupCtx, `INSERT INTO agents_software(agent_id,name,version,source) VALUES (?,?,?,?)`,
+		agentID, legacyRoleAgentNamePrefix+"worker", legacyRoleAgentVersion, legacyRoleAgentSource)
+	require.NoError(t, err)
+	event := writerEvent()
+	result, err := setupTx.ExecContext(setupCtx, `INSERT INTO audit_events(phase,agent_id,event_type,payload,timestamp) VALUES (?,?,?,'null',?)`,
+		string(event.Phase), agentID, string(event.EventType), event.Timestamp.UTC().UnixNano())
+	require.NoError(t, err)
+	eventID, err := result.LastInsertId()
+	require.NoError(t, err)
+	_, err = setupTx.ExecContext(setupCtx, `INSERT INTO context_edges(event_id,context_kind,context_id) VALUES (?,'EpochContext',?)`, eventID, event.EpochId)
+	require.NoError(t, err)
+	require.NoError(t, setupTx.Commit())
+	setupCancel()
+	trail.roleMu.Lock()
+	trail.roleToAgentId[event.Role] = agentID // publish only the committed warm fixture.
+	trail.roleMu.Unlock()
+	require.Equal(t, 1, writerCount(t, trail, "agents"))
+	require.Equal(t, 1, writerCount(t, trail, "audit_events"))
 	holder := writerHolder(t, path)
 	reached, resume := make(chan struct{}), make(chan struct{})
 	ctx, cancel := context.WithCancel(t.Context())
@@ -270,4 +301,7 @@ func TestAuditCallerCancellationAfterRealBusyAttempt(t *testing.T) {
 	// The independent holder is still locked. Neither cancellation nor the
 	// failed attempt may have published another event or released that lock.
 	require.Equal(t, 1, writerCount(t, trail, "audit_events"))
+	require.Equal(t, 1, writerCount(t, trail, "agents"))
+	require.Equal(t, 1, writerCount(t, trail, "agents_software"))
+	require.Equal(t, 1, writerCount(t, trail, "context_edges"))
 }
