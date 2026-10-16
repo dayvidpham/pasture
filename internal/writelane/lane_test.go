@@ -328,6 +328,11 @@ func TestStatsReportATurnThatOutranItsHoldTarget(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
+	// Submit observes the record ACK, not the end-of-turn counters. Close
+	// drains and joins the owner before observing its completed hold report.
+	if err := lane.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	stats := lane.Stats()
 	if stats.HoldExceeded == 0 {
 		t.Fatalf("stats = %+v, want the turn that outran its %s hold target to be reported", stats, budget.HoldTarget)

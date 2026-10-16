@@ -294,6 +294,34 @@ exact integration tree. No dedicated version-command tests were added.
 
 ## Completion rule
 
+### Approved separation of measurement and race correctness
+
+On 2026-10-16 the operator explicitly approved separate required phases, not
+weaker performance thresholds. See `validation-phases.md` for exact selection,
+coverage and local/Nix/CI/release wiring. Full race still executes the complete
+load workloads; controlled non-race measurement subsequently enforces the
+unchanged timing bands without competing race packages. The focused controlled
+run measured 94.4events/s (956/956 committed, zero faults), hook p95 73.91ms,
+acceptance p95 65.10ms and relative0.47. This is not final full-gate clearance
+or proof of the historical contention cause.
+
+The completed `efd4bb2` Nix failure also exposed an additional hold-statistics
+reader after ACK. It now joins the lane before checking whole-turn counters.
+A delayed-publication control breaks the old reader and passes the joined
+reader; suppressing HoldExceeded still fails. Production publication/ACK order
+is unchanged. The session-claim silence proof now prepares immutable owners on
+a bounded service copy, retains the original receipt deadline, and runs before
+unrelated package-parallel fixtures. It additionally requires exactly two real
+occurrences and read-back of the same stored actor. Suppressing the actual
+claim write fails. The original log proves a receipt append deadline, not a
+claim-rendering failure; it does not isolate which historical scheduling cost
+caused that deadline.
+
+The same Nix log contains a whole-package default10-minute timeout while the
+lineage over-cap test was still running. Nix now explicitly uses the existing
+local/CI30-minute whole-suite ceiling; no operation deadline or assertion is
+changed. Exact final full phases remain required and failures remain retained.
+
 Do not run another full wave while deterministic failures remain. Each remaining
 failure needs an explicit causal disposition, preserved invariant and focused
 sensitivity proof. Keep production20records/25ms and timeout/failure-policy

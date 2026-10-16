@@ -19,6 +19,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/provenance"
 )
@@ -209,17 +210,30 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 // end to end: the first invocation writes the claim, and the second finds it
 // already claimed by the SAME actor. Neither may emit a diagnostic.
 func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
-	t.Parallel()
+	// Claim rendering is not a concurrency experiment. Complete these two
+	// sequential receipts before unrelated package-parallel store fixtures;
+	// their original production ingress deadline remains in force.
 	raw := gateFixture(t, gateClaudeSessionStartFixture)
 	dbPath := gateStore(t)
 	operations := &gateOperations{}
+	// This proof concerns claim outcomes after a committed receipt, not cold
+	// immutable owner publication inside the receipt's one-second budget.
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	service, err := lifecycleReceiptServiceFor(tracker, gateClock{}, operations, timeouts.Profile{})
+	require.NoError(t, err)
+	deadline := service.Appender.Deadline
+	testutil.ActivateLaneTestDefinitions(t, service)
+	require.Equal(t, deadline, service.Appender.Deadline, "setup must not widen the measured receipt budget")
+	require.NoError(t, tracker.Close())
+	require.Empty(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), "setup must not manufacture a receipt")
 
 	first := gateInput(t, dbPath, "SessionStart", raw)
 	first.Operations = operations
 	first.ActorClaim = tasks.ActorClaim("same-actor")
 	var firstDiagnostics bytes.Buffer
 	first.Diagnostics = &firstDiagnostics
-	_, err := hookLifecycle(t.Context(), first, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
+	_, err = hookLifecycle(t.Context(), first, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err)
 	require.Empty(t, firstDiagnostics.String(), "a written claim is not a mismatch")
 
@@ -231,4 +245,13 @@ func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
 	_, err = hookLifecycle(t.Context(), second, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err)
 	require.Empty(t, secondDiagnostics.String(), "the same actor is not a mismatch")
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), 2, "both silent invocations must actually commit")
+	check, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer check.Close()
+	claim, err := tasks.RecordLifecycleSessionClaim(t.Context(), check, first.Harness, sessionStartEventKind(first.Harness),
+		[]model.NativeBinding{{Kind: model.BindingSession, Value: GateSessionIdentity(t, raw, "session_id")}}, first.ActorClaim, first.Clock)
+	require.NoError(t, err)
+	require.Equal(t, tasks.SessionClaimAlreadyClaimed, claim.State)
+	require.Equal(t, "same-actor", claim.StoredActor)
 }
