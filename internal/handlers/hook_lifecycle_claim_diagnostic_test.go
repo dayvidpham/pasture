@@ -99,10 +99,10 @@ func TestSessionClaimDiagnosticOnlyOnAMismatch(t *testing.T) {
 // the committed host response, writes more than one diagnostic line, or is
 // discarded.
 func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testing.T) {
-	t.Parallel()
 	raw := gateFixture(t, gateClaudeSessionStartFixture)
 	session := GateSessionIdentity(t, raw, "session_id")
 	dbPath := gateStore(t)
+	prepareClaimDiagnosticOwners(t, dbPath)
 
 	seed, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -117,6 +117,7 @@ func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testin
 	// differs — no mismatch instead of one — so the committed host response must
 	// be IDENTICAL: the diagnostic path may not touch it.
 	controlPath := gateStore(t)
+	prepareClaimDiagnosticOwners(t, controlPath)
 	controlSeed, err := tasks.OpenTaskTracker(controlPath)
 	require.NoError(t, err)
 	_, err = tasks.RecordLifecycleSessionClaim(context.Background(), controlSeed, ir.HarnessClaudeCode,
@@ -156,10 +157,10 @@ func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testin
 // hook must succeed, the committed host response must be unchanged, and exactly
 // one diagnostic must name the winner.
 func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
-	t.Parallel()
 	raw := gateFixture(t, gateClaudeSessionStartFixture)
 	session := GateSessionIdentity(t, raw, "session_id")
 	dbPath := gateStore(t)
+	prepareClaimDiagnosticOwners(t, dbPath)
 
 	db, err := dbconn.OpenSharedDBWithProfile(dbPath, timeouts.TestProfile())
 	require.NoError(t, err)
@@ -180,6 +181,7 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 	// host response must be identical to the lost-race run's, because the race
 	// settles after the response is decided and may not touch it.
 	controlPath := gateStore(t)
+	prepareClaimDiagnosticOwners(t, controlPath)
 	controlInput := gateInput(t, controlPath, "SessionStart", raw)
 	controlInput.ActorClaim = tasks.ActorClaim("loser-actor")
 	var controlDiagnostics bytes.Buffer
@@ -216,24 +218,14 @@ func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
 	raw := gateFixture(t, gateClaudeSessionStartFixture)
 	dbPath := gateStore(t)
 	operations := &gateOperations{}
-	// This proof concerns claim outcomes after a committed receipt, not cold
-	// immutable owner publication inside the receipt's one-second budget.
-	tracker, err := tasks.OpenTaskTracker(dbPath)
-	require.NoError(t, err)
-	service, err := lifecycleReceiptServiceFor(tracker, gateClock{}, operations, timeouts.Profile{})
-	require.NoError(t, err)
-	deadline := service.Appender.Deadline
-	testutil.ActivateLaneTestDefinitions(t, service)
-	require.Equal(t, deadline, service.Appender.Deadline, "setup must not widen the measured receipt budget")
-	require.NoError(t, tracker.Close())
-	require.Empty(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), "setup must not manufacture a receipt")
+	prepareClaimDiagnosticOwners(t, dbPath)
 
 	first := gateInput(t, dbPath, "SessionStart", raw)
 	first.Operations = operations
 	first.ActorClaim = tasks.ActorClaim("same-actor")
 	var firstDiagnostics bytes.Buffer
 	first.Diagnostics = &firstDiagnostics
-	_, err = hookLifecycle(t.Context(), first, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
+	_, err := hookLifecycle(t.Context(), first, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err)
 	require.Empty(t, firstDiagnostics.String(), "a written claim is not a mismatch")
 
@@ -254,4 +246,20 @@ func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, tasks.SessionClaimAlreadyClaimed, claim.State)
 	require.Equal(t, "same-actor", claim.StoredActor)
+}
+
+func prepareClaimDiagnosticOwners(t *testing.T, dbPath string) {
+	t.Helper()
+	// This proof concerns claim outcomes after a committed receipt, not cold
+	// immutable owner publication inside the receipt's one-second budget.
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	service, err := lifecycleReceiptServiceFor(tracker, gateClock{}, &gateOperations{}, timeouts.Profile{})
+	require.NoError(t, err)
+	deadline := service.Appender.Deadline
+	testutil.ActivateLaneTestDefinitions(t, service)
+	require.Equal(t, deadline, service.Appender.Deadline, "setup must not widen the measured receipt budget")
+	require.NoError(t, tracker.Close())
+	require.Empty(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), "setup must not manufacture a receipt")
+
 }

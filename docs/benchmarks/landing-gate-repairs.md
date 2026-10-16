@@ -317,6 +317,14 @@ claim write fails. The original log proves a receipt append deadline, not a
 claim-rendering failure; it does not isolate which historical scheduling cost
 caused that deadline.
 
+The first split-phase full default run on `dc5fda8` failed the sibling
+session-claim mismatch proof at its control receipt's commit deadline. The
+same owner preparation and package-local sequencing now cover all three
+end-to-end diagnostic scenarios, including the real trigger-driven lost race;
+the pure renderer matrix remains parallel. The complete handlers race package
+passes after this correction. Original full-run failure remains preserved;
+it is not reclassified by that package result.
+
 The same Nix log contains a whole-package default10-minute timeout while the
 lineage over-cap test was still running. Nix now explicitly uses the existing
 local/CI30-minute whole-suite ceiling; no operation deadline or assertion is
