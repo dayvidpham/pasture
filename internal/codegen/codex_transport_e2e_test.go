@@ -227,6 +227,8 @@ func TestCodexGeneratedRunnerDrivesBuiltCLI(t *testing.T) {
 func TestCodexGeneratedRunnerIsTransparentConduit(t *testing.T) {
 	t.Parallel()
 	root := testModuleRoot(t)
+	shell, err := exec.LookPath("sh")
+	require.NoError(t, err)
 	fixtures := codexClearedFixtures(t, root)
 	for _, event := range registration.Codex0_153_0().Entries() {
 		t.Run(event.NativeName, func(t *testing.T) {
@@ -234,7 +236,10 @@ func TestCodexGeneratedRunnerIsTransparentConduit(t *testing.T) {
 			stdinCapture := filepath.Join(dir, "stdin")
 			argvCapture := filepath.Join(dir, "argv")
 			stub := filepath.Join(dir, "stand-in")
-			script := "#!/usr/bin/env sh\nset -eu\nprintf '%s' \"$*\" > \"$STUB_ARGV_OUT\"\ncat > \"$STUB_STDIN_OUT\"\nprintf '%s' 'native-output'\nprintf '%s' 'native-diagnostic' >&2\nexit 7\n"
+			// A hermetic Nix sandbox has the declared shell on PATH but no
+			// /usr/bin/env. Only the dependency stand-in's interpreter changes;
+			// execute the committed generated runner and retain every conduit pin.
+			script := "#!" + shell + "\nset -eu\nprintf '%s' \"$*\" > \"$STUB_ARGV_OUT\"\ncat > \"$STUB_STDIN_OUT\"\nprintf '%s' 'native-output'\nprintf '%s' 'native-diagnostic' >&2\nexit 7\n"
 			require.NoError(t, os.WriteFile(stub, []byte(script), 0o755))
 			raw, err := os.ReadFile(fixtures[event.NativeName])
 			require.NoError(t, err)
@@ -246,7 +251,7 @@ func TestCodexGeneratedRunnerIsTransparentConduit(t *testing.T) {
 			command.Stderr = &stderr
 			var exit *exec.ExitError
 			require.ErrorAs(t, command.Run(), &exit)
-			require.Equal(t, 7, exit.ExitCode())
+			require.Equal(t, 7, exit.ExitCode(), "runner stderr: %s", stderr.String())
 			require.Equal(t, "native-output", stdout.String())
 			require.Equal(t, "native-diagnostic", stderr.String())
 			gotInput, err := os.ReadFile(stdinCapture)
