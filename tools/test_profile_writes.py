@@ -94,6 +94,7 @@ class ProfileSafety(unittest.TestCase):
         self.assertEqual(profile.failure_class("the lifecycle occurrence commit could not acquire the shared database writer before its deadline"), "append_deadline_before_acquire")
         self.assertEqual(profile.failure_class("provenance: authority does not govern the effect's task"), "authority_refusal")
         self.assertEqual(profile.failure_class("provenance: operation identity conflict"), "operation_conflict")
+        self.assertEqual(profile.failure_class("Apply: acquire, fold, and commit pinned SQLite write transaction: database is locked"), "operation_apply_sqlite_busy")
         self.assertEqual(profile.failure_class("unexpected failure"), "unclassified")
 
     def test_lane_proof_rejects_successful_direct_fallback_after_daemon_loss(self):

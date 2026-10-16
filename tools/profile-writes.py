@@ -126,6 +126,8 @@ def failure_class(cause):
             return "payload_begin_sqlite_busy"
         if "verify its saved genesis authority" in cause:
             return "genesis_replay_sqlite_busy"
+        if "Apply: acquire, fold, and commit" in cause:
+            return "operation_apply_sqlite_busy"
         return "sqlite_busy_other"
     if "SQLite exhausted its configured writer wait while ingress was still live" in cause:
         return "append_sqlite_busy_ingress_live"
@@ -141,7 +143,7 @@ def failure_class(cause):
 
 
 def classify_case(case, requests):
-    classes = {name: 0 for name in ("payload_begin_sqlite_busy", "genesis_replay_sqlite_busy", "sqlite_busy_other",
+    classes = {name: 0 for name in ("payload_begin_sqlite_busy", "genesis_replay_sqlite_busy", "operation_apply_sqlite_busy", "sqlite_busy_other",
         "append_sqlite_busy_ingress_live", "append_deadline_before_acquire", "other_deadline", "operation_conflict", "authority_refusal", "unclassified")}
     fault_files = list(case.glob("lifecycle-faults.jsonl*"))
     for f in fault_files:
