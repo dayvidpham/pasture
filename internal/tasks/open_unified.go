@@ -44,6 +44,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/idmigrate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -174,6 +175,7 @@ func openTaskTrackerImpl(dbPath string) (protocol.TaskTracker, error) {
 }
 
 func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTaskTrackerOptions) (protocol.TaskTracker, error) {
+	defer writeprofile.Region("store.open.migrate.activate.register")()
 	if ctx == nil {
 		return nil, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The unified store has no opening context.", Why: "A nil context cannot govern SQLite waits.", Where: "tasks.openTaskTrackerWithOptions entry (internal/tasks/open_unified.go)", Impact: "No handles were opened.", Fix: "Supply a live context or use OpenTaskTracker."}
 	}

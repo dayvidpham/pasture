@@ -34,6 +34,7 @@ import (
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
@@ -364,6 +365,7 @@ type lifecyclePrepared struct {
 // same words; a second copy of these checks is how one of them comes to accept
 // what the other refuses.
 func prepareLifecycleDelivery(in lifecycleAdmission) (lifecyclePrepared, error) {
+	defer writeprofile.Region("hook.admission.parse")()
 	dispatch, err := dispatchLifecycleFor(in.Harness, in.HostVersion)
 	if err != nil {
 		return lifecyclePrepared{}, err
@@ -454,6 +456,7 @@ func prepareLifecycleDelivery(in lifecycleAdmission) (lifecyclePrepared, error) 
 }
 
 func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleStoreOpener, readers lifecycleReaderFactory) (response backend.HostResponse, err error) {
+	defer writeprofile.Region("hook.direct.total")()
 	// durablePossible RECORDS THE ONE FACT A CALLER CANNOT OTHERWISE LEARN:
 	// whether this invocation ever ATTEMPTED A WRITE, and so whether a row can
 	// exist for it.
