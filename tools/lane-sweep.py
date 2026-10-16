@@ -11,6 +11,7 @@ No percentile or optimum claims from this deliberately small pilot.
 """
 import argparse
 import concurrent.futures
+import ctypes
 import hashlib
 import importlib.util
 import json
@@ -96,14 +97,21 @@ def accounting(requests, peers, before, after, faults):
         errors.append("SQL tasks do not reconcile with offered peers and valid task ACKs")
     return dict(verified=not errors, errors=errors, offered_hooks=len(requests),
                 acknowledged_hooks=ack, offered_peers=len(peers), acknowledged_peers=peer_ack,
-                committed_delta_tasks=delta["tasks"], committed_delta_occurrences=delta["occurrences"], faults=faults)
+                 committed_delta_tasks=delta["tasks"], committed_delta_occurrences=delta["occurrences"], faults=faults)
+
+
+def arrival_evidence(requests, peers, load):
+    return {"verified":all(r["start_lateness_ns"]<=100_000_000 for r in peers) and (load!="arrival" or all(r["start_lateness_ns"]<=20_000_000 for r in requests)),
+        "definition":"independently scheduled offers, bounded by total request count; hook lateness <=20ms on arrival, peer lateness <=100ms; missed schedules invalidate comparison"}
 
 
 def observer_evidence(case, budget, expected_batches=None, expected_peers=0):
     errors, reasons, lane, sql = [], {}, [], []
     daemon_log = case/"daemon.log"
-    if daemon_log.exists() and "EXPERIMENT_METRICS_ERROR" in daemon_log.read_text():
-        errors.append("EXPERIMENT_METRICS_ERROR: lane observer could not reliably open/encode/close; invalidate measurements despite native ACK")
+    for log in [daemon_log,*case.glob("peer-*.log")]:
+        if log.exists():
+            for marker in ("EXPERIMENT_METRICS_ERROR","EXPERIMENT_SQL_TIMINGS_ERROR"):
+                if marker in log.read_text(): errors.append(f"{marker}: observer output failure in {log.name}; invalidate despite native ACK")
     sql_paths = [case/"sql-daemon.jsonl", *[case/f"sql-peer-{i}.jsonl" for i in range(expected_peers)]]
     for filename, target in [("lane.jsonl", lane), *[(p.name, sql) for p in sql_paths]]:
         path = case/filename
@@ -121,7 +129,7 @@ def observer_evidence(case, budget, expected_batches=None, expected_peers=0):
                  full_condition=r.get("full_condition")) if isinstance(r,dict) else r for r in lane]
     for row in lane:
         keys = ("batch_records", "batch_bytes", "queue_records", "queue_bytes")
-        if not isinstance(row, dict) or not isinstance(row.get("flush_reason"), str) or any(type(row.get(k)) is not int or row[k] < 0 for k in keys):
+        if not isinstance(row, dict) or row.get("flush_reason") not in ("full","drained","timer","stopped") or any(type(row.get(k)) is not int or row[k] < 0 for k in keys):
             errors.append("lane observer schema mismatch; preserve raw rows and integrate observer contract")
             continue
         reason = row["flush_reason"]
@@ -176,10 +184,15 @@ def observer_evidence(case, budget, expected_batches=None, expected_peers=0):
 class Watchdog:
     """Track every child group, including Go build descendants, under one clock."""
     def __init__(self, seconds, interrupt=False):
+        # Adopt orphaned descendants so cleanup can reap, not merely signal,
+        # a child group whose original build/wrapper leader has already exited.
+        if sys.platform != "linux" or ctypes.CDLL(None,use_errno=True).prctl(36,1,0,0,0) != 0:
+            raise RuntimeError("bounded lane sweep requires Linux child-subreaper support; no experiment was started")
         self.deadline = time.monotonic()+seconds
         self.interrupt = interrupt
         self.lock = threading.Lock()
         self.children = []
+        self.groups = set()
         self.expired = threading.Event()
         self.timer = threading.Timer(seconds, self.kill)
         self.timer.daemon = True
@@ -189,12 +202,9 @@ class Watchdog:
         with self.lock:
             if expired:
                 self.expired.set()
-            for child in self.children:
-                if child.poll() is None:
-                    try:
-                        os.killpg(child.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+            for group in list(self.groups):
+                try: os.killpg(group,signal.SIGKILL)
+                except ProcessLookupError: self.groups.discard(group)
         if expired and self.interrupt:
             # Interrupt Python-side backup/count/setup as well as subprocesses.
             # Finally blocks still reap groups and persist the partial manifest.
@@ -206,6 +216,7 @@ class Watchdog:
                 raise RuntimeError("lane-sweep hard budget exhausted before child launch; retain manifest and reduce grid")
             child = subprocess.Popen(*args, **kwargs)
             self.children.append(child)
+            self.groups.add(child.pid)
             return child
 
     def close(self):
@@ -214,6 +225,18 @@ class Watchdog:
         self.kill(expired=False)
         for child in self.children:
             child.wait(timeout=10)
+        deadline=time.monotonic()+5
+        while self.groups:
+            for group in list(self.groups):
+                try:
+                    while os.waitpid(-group,os.WNOHANG)[0] != 0: pass
+                except ChildProcessError: pass
+                try: os.killpg(group,0)
+                except ProcessLookupError: self.groups.discard(group)
+            if not self.groups: break
+            if time.monotonic()>=deadline:
+                raise RuntimeError(f"owned process groups remain after teardown: {sorted(self.groups)}; cleanup is NOT verified")
+            time.sleep(.01)
 
 
 def save(work, manifest):
@@ -364,10 +387,10 @@ def run_case(work, row, seed, bins, payload, args, guard):
                 result.update(scheduled_ns=scheduled-start, actual_start_ns=actual-start, start_lateness_ns=actual-scheduled)
                 return result
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as peer_pool:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as peer_pool:
                 peer_futures = [peer_pool.submit(invoke, i, True) for i in range(6)]
                 if row["load"] != "peer-only":
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1 if row["load"] == "C1" else 18) as pool:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=1 if row["load"] == "C1" else args.requests if row["load"] == "arrival" else 18) as pool:
                         requests = list(pool.map(invoke, range(args.requests)))
                 peers = [f.result() for f in peer_futures]
             row["wall_ns"] = time.perf_counter_ns()-start
@@ -382,10 +405,15 @@ def run_case(work, row, seed, bins, payload, args, guard):
                 successful_peer_latency=distribution([r["ns"] for r in peers if r["successful_response"] and r["valid_ack"]]),
                 peer_failure_classes={name:sum(r.get("failure_class")==name for r in peers) for name in {r.get("failure_class") for r in peers if r.get("failure_class")}},
                 deadline_limited=sum(r["deadline_limited"] for r in requests+peers), censored=sum(r["censored"] for r in requests+peers),
-               failure_classes=PW.classify_case(case, requests))
-    if "EXPERIMENT_METRICS_ERROR" in (case/"daemon.log").read_text():
-        row["accounting"]["verified"] = False
-        row["accounting"]["errors"].append("daemon reported EXPERIMENT_METRICS_ERROR; measurements invalid even when ACK and SQL reconcile")
+                failure_classes=PW.classify_case(case, requests))
+    row["arrival_contract"]=arrival_evidence(requests,peers,row["load"])
+    if not row["arrival_contract"]["verified"]:
+        row["accounting"]["verified"]=False;row["accounting"]["errors"].append("controlled offer schedule missed its preregistered tolerance")
+    for log in [case/"daemon.log",*case.glob("peer-*.log")]:
+        for marker in ("EXPERIMENT_METRICS_ERROR","EXPERIMENT_SQL_TIMINGS_ERROR"):
+            if marker in log.read_text():
+                row["accounting"]["verified"] = False
+                row["accounting"]["errors"].append(f"{log.name} reported {marker}; measurements invalid even when ACK and SQL reconcile")
     if requests:
         row["lane_evidence"] = PW.lane_evidence((case/"daemon.log").read_text(),
             [(case/f"request-{i}.log").read_text() for i in range(len(requests))], len(requests), after["occurrences"]-before["occurrences"], daemon.returncode)
@@ -411,6 +439,7 @@ def run_case(work, row, seed, bins, payload, args, guard):
 
 
 def campaign(args):
+    args.requests=args.requests or (108 if args.finalist_batches else 36)
     os.umask(0o077)
     work = Path(tempfile.mkdtemp(prefix="lane-sweep-", dir="/tmp/opencode"))
     print(work, flush=True)
@@ -468,7 +497,7 @@ def campaign(args):
     finally:
         try:
             guard.close()
-            manifest["cleanup"] = dict(children_reaped=True, hard_budget_expired=guard.expired.is_set(),
+            manifest["cleanup"] = dict(children_reaped=not guard.groups, hard_budget_expired=guard.expired.is_set(),
                                        remaining_sockets=[str(p) for p in work.rglob("*.sock")], retained=str(work))
         finally:
             summarize(manifest)
@@ -482,9 +511,9 @@ def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dependency-worktree", required=True, type=Path)
     p.add_argument("--seed-campaign", type=Path, default=Path("/tmp/opencode/wp-v1uzuv8i"))
-    p.add_argument("--budget-seconds", type=float, default=1800)
+    p.add_argument("--budget-seconds", type=float, default=900)
     p.add_argument("--max-cases", type=int, default=80)
-    p.add_argument("--requests", type=int, default=36)
+    p.add_argument("--requests", type=int, default=None)
     p.add_argument("--order-seed", type=int, default=20261016)
     p.add_argument("--stages", action="store_true", help="optional corrected queue timing, ON cases only; never render during measurement")
     p.add_argument("--finalist-batches", type=lambda text:[int(x) for x in text.split(",")], help="two batch-count finalists at 25ms, repeated twice on C18/arrival plus peer baselines; separate bounded campaign")
@@ -498,8 +527,9 @@ def parser():
 if __name__ == "__main__":
     p = parser()
     args = p.parse_args()
-    if not 0 < args.budget_seconds <= 1800 or not 1 <= args.max_cases <= 80 or args.requests < 18:
-        p.error("budget must be (0,1800], max-cases 1..80, requests >=18; use the bounded pilot")
+    args.requests=args.requests or (108 if args.finalist_batches else 36)
+    if not 0 < args.budget_seconds <= 900 or not 1 <= args.max_cases <= 80 or args.requests != (108 if args.finalist_batches else 36):
+        p.error("each phase budget must be (0,900], max-cases 1..80, offers exactly36pilot/108finalists; at most one pilot plus one finalist phase")
     if any(getattr(args, k) is not None and getattr(args, k) < 1 for k in ("batch_bytes", "queue_records", "queue_bytes")):
         p.error("optional record/byte caps must be positive")
     if args.finalist_batches and (len(args.finalist_batches)!=2 or len(set(args.finalist_batches))!=2 or any(x not in (1,5,10,20,40) for x in args.finalist_batches)):

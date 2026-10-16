@@ -38,6 +38,16 @@ and not a claim to run an engine workflow. Repeat finalists only if the pilot
 leaves enough budget. An untested full cross-product or larger corpus remains
 explicitly untested, not inferred safe.
 
+Validated orchestration is at most one pilot command and one finalist command,
+each with a hard ceiling of 900 seconds (the CLI refuses a larger per-phase
+budget); defaults are exactly 36 and 108 offers respectively. Thus both phases
+together have at most 1800 seconds of active budget. Controlled arrivals launch
+independent scheduled threads, bounded by the phase's offer count, rather than
+blocking subsequent offers on an 18-client completion pool. A hook arrival more
+than one 20-ms interval late, or a peer offer more than its 100-ms interval late,
+invalidates that case's arrival contract. These scheduling tolerances are
+preregistered workload design choices, not latency acceptance bands.
+
 Metrics distinguish queue residence ending at batch start, same-batch
 preparation wait, process/request end-to-end, full turn elapsed and actual SQL
 owner boundaries. SQL connection acquisition, BEGIN driver call/wait, transaction

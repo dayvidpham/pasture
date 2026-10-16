@@ -81,6 +81,14 @@ class SweepTests(unittest.TestCase):
         result = SWEEP.accounting([], [dict(self.result(), successful_response=False)], before, after, 0)
         self.assertFalse(result["verified"])
 
+    def test_delayed_offers_invalidate_controlled_arrival_comparison(self):
+        ontime=[{"start_lateness_ns":0}]
+        self.assertTrue(SWEEP.arrival_evidence(ontime,ontime,"arrival")["verified"])
+        self.assertFalse(SWEEP.arrival_evidence([{"start_lateness_ns":20_000_001}],ontime,"arrival")["verified"])
+        self.assertFalse(SWEEP.arrival_evidence(ontime,[{"start_lateness_ns":100_000_001}],"C18")["verified"])
+        # Closed-loop C1 offers deliberately depend on previous completions.
+        self.assertTrue(SWEEP.arrival_evidence([{"start_lateness_ns":1_000_000_000}],ontime,"C1")["verified"])
+
     def test_observers_retain_actual_values_and_caps(self):
         with tempfile.TemporaryDirectory() as directory:
             case = Path(directory)
@@ -106,6 +114,13 @@ class SweepTests(unittest.TestCase):
             result = SWEEP.observer_evidence(case, budget)
             self.assertFalse(result["verified"])
             self.assertTrue(any("EXPERIMENT_METRICS_ERROR" in e for e in result["errors"]))
+            for name in ("daemon.log","peer-0.log"):
+                (case/"daemon.log").write_text("")
+                (case/name).write_text("EXPERIMENT_SQL_TIMINGS_ERROR close failure\n")
+                result=SWEEP.observer_evidence(case,budget)
+                self.assertFalse(result["verified"])
+                self.assertTrue(any("EXPERIMENT_SQL_TIMINGS_ERROR" in e for e in result["errors"]))
+                (case/name).write_text("")
             (case/"daemon.log").write_text("")
             (case/"sql-daemon.jsonl").write_text("".join(json.dumps(e)+"\n" for e in events[:-1]))
             self.assertFalse(SWEEP.observer_evidence(case, budget)["verified"])
@@ -160,6 +175,15 @@ class SweepTests(unittest.TestCase):
         guard = SWEEP.Watchdog(10)
         guard.close()
         self.assertFalse(guard.expired.is_set())
+
+    def test_cleanup_reaps_descendant_after_leader_exits(self):
+        guard=SWEEP.Watchdog(10)
+        leader=guard.spawn([sys.executable,"-c","import subprocess,sys; subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])"],start_new_session=True)
+        self.assertEqual(leader.wait(timeout=5),0)
+        os.killpg(leader.pid,0)
+        guard.close()
+        self.assertFalse(guard.groups)
+        with self.assertRaises(ProcessLookupError): os.killpg(leader.pid,0)
 
     def test_summary_does_not_pass_sparse_pilot_or_failed_work(self):
         base = dict(corpus="synthetic", load="peer-only", status="measured", case="base",
