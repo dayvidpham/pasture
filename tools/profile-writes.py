@@ -7,6 +7,7 @@ is made. This trusted developer harness is not an OS security sandbox.
 """
 import argparse
 import concurrent.futures
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -26,14 +27,14 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def backup(source, dest):
-    with sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True) as src:
-        with sqlite3.connect(dest) as dst:
+    with closing(sqlite3.connect(source.resolve().as_uri() + "?mode=ro", uri=True)) as src:
+        with closing(sqlite3.connect(dest)) as dst:
             src.backup(dst)
             assert dst.execute("pragma integrity_check").fetchone() == ("ok",)
 
 
 def counts(db):
-    with sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+    with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
         return {"tasks": conn.execute("select count(*) from tasks").fetchone()[0],
                 "occurrences": conn.execute("select count(*) from journal_evidence where evidence_kind in ('pasture.lifecycle.occurrence.v1','pasture.lifecycle.occurrence.v2')").fetchone()[0],
                 "journal": conn.execute("select count(*) from journal").fetchone()[0]}
@@ -174,7 +175,7 @@ def retained_payload(prior, original_fixture):
     digest = "sha256:" + hashlib.sha256(payload).hexdigest()
     for shape in manifest["corpora"]:
         source = prior/("copied.db" if shape == "copy" else "synthetic.db")
-        with sqlite3.connect(source.resolve().as_uri()+"?mode=ro", uri=True) as db:
+        with closing(sqlite3.connect(source.resolve().as_uri()+"?mode=ro", uri=True)) as db:
             row = db.execute("SELECT body FROM lifecycle_payload_blobs WHERE digest=?", (digest,)).fetchone()
         if row is None or bytes(row[0]) != payload:
             raise RuntimeError("no exact warmed payload evidence in retained seed; refusing an insert-vs-update comparison")

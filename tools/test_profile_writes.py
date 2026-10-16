@@ -1,5 +1,6 @@
 import importlib.util
 import copy
+from contextlib import closing
 import hashlib
 import json
 import os
@@ -46,7 +47,7 @@ class ProfileSafety(unittest.TestCase):
             body = b'{"cwd":"/tmp/opencode/old-private-root","unchanged":"original bytes"}'
             (prior/"fixture.json").write_bytes(body)
             (prior/"manifest.json").write_text(json.dumps({"corpora": {"synthetic": {}}, "payload_sha256": hashlib.sha256(body).hexdigest()}))
-            with sqlite3.connect(prior/"synthetic.db") as db:
+            with closing(sqlite3.connect(prior/"synthetic.db")) as db, db:
                 db.execute("create table lifecycle_payload_blobs(digest,body)")
                 db.execute("insert into lifecycle_payload_blobs values(?,?)", ("sha256:"+hashlib.sha256(body).hexdigest(), body))
             with mock.patch.object(profile, "run", side_effect=AssertionError("must not warm again")):
@@ -54,7 +55,7 @@ class ProfileSafety(unittest.TestCase):
             (prior/"fixture.json").write_bytes(body+b" ")
             with self.assertRaises(RuntimeError): profile.retained_payload(prior, {})
             (prior/"fixture.json").write_bytes(body)
-            with sqlite3.connect(prior/"synthetic.db") as db: db.execute("delete from lifecycle_payload_blobs")
+            with closing(sqlite3.connect(prior/"synthetic.db")) as db, db: db.execute("delete from lifecycle_payload_blobs")
             with self.assertRaises(RuntimeError): profile.retained_payload(prior, {})
 
     def test_task_and_hook_deadlines_both_enter_deadline_cohort(self):
@@ -135,7 +136,7 @@ Mappings
     def test_backup_includes_wal_and_never_changes_source(self):
         with tempfile.TemporaryDirectory(dir="/tmp/opencode") as tmp:
             source, dest = Path(tmp)/"source.db", Path(tmp)/"copy.db"
-            with sqlite3.connect(source) as db:
+            with closing(sqlite3.connect(source)) as db, db:
                 db.execute("pragma journal_mode=wal")
                 db.execute("create table example (n)")
                 db.execute("insert into example values (42)")
@@ -143,7 +144,7 @@ Mappings
                 before = source.read_bytes()
                 profile.backup(source, dest)
                 self.assertEqual(source.read_bytes(), before)
-                with sqlite3.connect(dest) as copy:
+                with closing(sqlite3.connect(dest)) as copy:
                     self.assertEqual(copy.execute("select n from example").fetchall(), [(42,)])
 
     def test_environment_drops_operator_knobs_and_overrides_every_root(self):
@@ -176,7 +177,7 @@ Mappings
     def test_counts_and_distribution(self):
         with tempfile.TemporaryDirectory(dir="/tmp/opencode") as tmp:
             db = Path(tmp)/"store.db"
-            with sqlite3.connect(db) as conn:
+            with closing(sqlite3.connect(db)) as conn, conn:
                 conn.executescript("create table tasks(n); create table journal(n); create table journal_evidence(evidence_kind); insert into tasks values(1); insert into journal values(1); insert into journal_evidence values('pasture.lifecycle.occurrence.v2');")
             self.assertEqual(profile.counts(db), {"tasks": 1, "journal": 1, "occurrences": 1})
             result = profile.distribution([3_000_000, 1_000_000, 2_000_000])
