@@ -126,7 +126,7 @@ def observer_evidence(case, budget, expected_batches=None, expected_peers=0):
             errors.append(f"cannot decode {filename}: {exc}")
     lane = [dict(flush_reason=r.get("reason"), batch_records=r.get("records"), batch_bytes=r.get("bytes"),
                  queue_records=r.get("max_queue_records"), queue_bytes=r.get("max_queue_bytes"),
-                 full_condition=r.get("full_condition")) if isinstance(r,dict) else r for r in lane]
+                 full_condition=r.get("full_condition"), hold_target_ns=r.get("budget",{}).get("HoldTarget")) if isinstance(r,dict) else r for r in lane]
     for row in lane:
         keys = ("batch_records", "batch_bytes", "queue_records", "queue_bytes")
         if not isinstance(row, dict) or row.get("flush_reason") not in ("full","drained","timer","stopped") or any(type(row.get(k)) is not int or row[k] < 0 for k in keys):
@@ -134,6 +134,8 @@ def observer_evidence(case, budget, expected_batches=None, expected_peers=0):
             continue
         reason = row["flush_reason"]
         reasons[reason] = reasons.get(reason, 0)+1
+        if "hold_target_ns" in budget and row.get("hold_target_ns") != budget["hold_target_ns"]:
+            errors.append("observed HoldTarget differs from recorded configured budget")
         for key in ("batch_records", "batch_bytes", "queue_records", "queue_bytes"):
             if key in budget and row[key] > budget[key]:
                 errors.append(f"observed {key} exceeds configured cap")
@@ -343,6 +345,8 @@ def run_case(work, row, seed, bins, payload, args, guard):
     budget = {k: row[k] for k in ("batch_records", "flush_ms")}
     budget.update({k: getattr(args, k) for k in ("batch_bytes", "queue_records", "queue_bytes") if getattr(args, k) is not None})
     denv = dict(env, PASTURE_EXPERIMENT_LANE_BUDGET=json.dumps(budget))
+    # Fixed by the unchanged production timeout profile, never an override.
+    budget["hold_target_ns"]=400_000_000
     if row["mode"] == "ON":
         # Exclusive case directory, fixed output names, never a reused observer
         # target. The daemon also validates aliases and opens no-follow.

@@ -13,7 +13,7 @@ class AnalysisTests(unittest.TestCase):
     def manifest(self):
         request=dict(successful_response=True,valid_ack=True,ns=1000000,censored=False,deadline_limited=False,start_lateness_ns=0)
         row=dict(status="measured",corpus="copy",load="C18",mode="OFF",batch_records=20,flush_ms=25,
-            budget=dict(batch_records=20,flush_ms=25,batch_bytes=8<<20,queue_records=256,queue_bytes=32<<20),
+            budget=dict(batch_records=20,flush_ms=25,batch_bytes=8<<20,queue_records=256,queue_bytes=32<<20,hold_target_ns=400000000),
             requests=[request],peers=[],failure_classes={},wall_ns=1000000,
             accounting=dict(committed_delta_occurrences=1,committed_delta_tasks=0,verified=True),acceptance="unobserved")
         return dict(payload_sha256="same-payload",corpora={"copy":{"sha256":"same-seed"}},runs=[row])
@@ -39,7 +39,7 @@ class AnalysisTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,"changed seed/payload"):ANALYSIS.analyze(roots)
 
     def test_different_configured_caps_never_pool(self):
-        for cap in ("batch_bytes","queue_records","queue_bytes"):
+        for cap in ("batch_bytes","queue_records","queue_bytes","hold_target_ns"):
             with self.subTest(cap=cap), tempfile.TemporaryDirectory() as directory:
                 root=Path(directory);manifest=self.manifest()
                 changed=self.manifest()["runs"][0]

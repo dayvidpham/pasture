@@ -23,7 +23,7 @@ def analyze(roots):
         for row in manifest["runs"]:
             if row.get("status")!="measured": continue
             budget=row.get("budget")
-            if not isinstance(budget,dict) or not {"batch_records","flush_ms","batch_bytes","queue_records","queue_bytes"}.issubset(budget):
+            if not isinstance(budget,dict) or not {"batch_records","flush_ms","batch_bytes","queue_records","queue_bytes","hold_target_ns"}.issubset(budget):
                 raise ValueError("missing full configured lane budget in measured case; recover its recorded caps before aggregating")
             budget_identity=json.dumps(budget,sort_keys=True,separators=(",",":"))
             key=(row["corpus"],row["load"],row["mode"],row["batch_records"],row["flush_ms"],len(row["requests"]),budget_identity)
