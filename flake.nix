@@ -98,6 +98,11 @@
             # tests that locate repo-root testdata (e.g. skills/protocol/figures)
             # via runtime.Caller. Strip -trimpath for the test run only.
             export GOFLAGS="''${GOFLAGS//-trimpath/}"
+            # Warm race build/cache state before latency probes execute. This
+            # preparation runs test binaries/TestMain but is NOT suite evidence;
+            # the unchanged full command below must still run every test.
+            # Do not lower throughput bands or restrict runtime parallelism.
+            go test -race -run '^$' ./...
             go test -race ./...
             runHook postCheck
           '';
