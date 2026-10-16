@@ -14,16 +14,16 @@ retained release-gate logs. There were thirteen distinct top-level failures:
 | `TestTheDaemonLaneBatchAdvancesTheVerifiedLedgerSoTheNextOpenIsFast` | default | Expected one occurrence; zero found. Investigate native fault/ACK and durable completion, not exit0 alone. |
 | `TestSeparateAssetEntryPointsRejectWithoutStageWrites` | default/tagged | All three standalone generators stopped at unrelated workspace membership instead of the required operational-gate rejection. Fixed fixture-module environment. |
 | `TestSliceSubWorkflow_HookSliceFailed` | default | Hook condition not met within10s; repaired durable queue-slot synchronization, not best-effort hook timing. |
-| `TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob` | default | Fixture pre-activation expired while leasing a connection; setup/cancellation investigation. |
-| `TestSliceStartHonestFailureUnderInjectedDelay` | default | Fixture pre-activation transaction hit caller deadline; setup/cancellation investigation. |
+| `TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob` | default | Fixture pre-activation expired while leasing a connection; setup now has its own bounded context, with original strict occurrence budget preserved. |
+| `TestSliceStartHonestFailureUnderInjectedDelay` | default | Fixture pre-activation transaction hit caller deadline; definition setup separated from the measured occurrence failure. |
 | `TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown` | default/tagged | Durable occurrence not observed after the hook stopped waiting; durability/fixture synchronization investigation. |
 | `TestGoCompilerRejectsTargetNeutralHostContractImport` | default/tagged | External fixture compiler rejected `-mod=mod` in an unrelated workspace before checking internal-import legality. Fixed fixture-module environment. |
 | `TestTheWriteLaneIsNeverAskedWhenDisabled` | tagged | Expected one direct-path occurrence; zero found. Investigate full Outcome, not native fail-open exit0. |
-| `TestMigrateContextRealWriteLockCancelsWithoutReleasingHolder` | tagged |604.328ms exceeded600ms bound; cancellation/measurement investigation. |
+| `TestMigrateContextRealWriteLockCancelsWithoutReleasingHolder` | tagged |604.328ms exceeded600ms bound; package-serial native timing probe retains exact25ms caller/600ms ceiling and real locked holder. |
 | `TestSliceSubWorkflow_CompleteSignalOverridesResult` | tagged/recovery | Success remained true and forced-failure override absent; repaired durable queue-slot ordering before both signals are sent. |
 | `TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires` | tagged |5.287s exceeded5s ceiling; real wall-clock test now runs before this package's parallel engine load, with unchanged3s budget/5s ceiling. |
-| `TestNativeLifecycleOpenerWorkerFinishesUnderRealLock` | tagged |612.212ms exceeded600ms bound; cancellation/measurement investigation. |
-| `TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget` | recovery | Tight caller subtest took206.985ms versus100ms allowance; unchanged-base full recovery package also failed at189.147ms. Cancellation/measurement investigation. |
+| `TestNativeLifecycleOpenerWorkerFinishesUnderRealLock` | tagged |612.212ms exceeded600ms bound; fixture input construction moved before the timer and package-serial native timing retains exact original ceiling. |
+| `TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget` | recovery | Tight caller subtest took206.985ms versus100ms allowance; unchanged base failed at189.147ms. Package-serial real25ms probe plus deterministic cancellation-after-BUSY proof retain original100ms limit. |
 
 ## Independent fixture modules
 
@@ -66,6 +66,36 @@ and tagged engine checks passed in the slice, while its recovery check exposed
 another existing expiring-gate recovery fixture. That newly discovered recovery
 failure remains under repair; audit-lock cancellation belongs to the separate
 budget repair. Those full recovery failures are not cleared by focused passes.
+
+## Cancellation and setup ownership
+
+Definition activation is setup, not the occurrence append under test. It now
+uses a bounded30s context on a value copy of the service, before taking the
+occurrence lock; the original service still has exactly250ms for its measured
+append. A forwarding-journal regression observes actual setup contexts and
+asserts the original service is not mutated. Removing setup isolation reproduces
+definition activation deadline failure. The blob-first abandonment fixture
+still cancels after the real blob commit and joins the worker before tracker
+close; dropping the real blob write makes its orphan/FK assertions fail.
+
+Native migration and opener tests retain25ms caller deadlines and600ms ceilings;
+the audit writer retains25ms and100ms. Native timing probes now precede competing
+package-parallel fixtures; no global test concurrency or production timeout is
+changed. The actual migration calls still take about502–503ms because modernc's
+interrupt goroutine cannot preempt SQLite's standing500ms busy-handler sleep.
+The audit writer independently clamps its reserved connection's busy window to
+the caller budget and retains its cleanup allowance. No evidence justified
+changing that production path.
+
+A new real-store audit proof reaches typed SQLite BUSY while the independent
+holder remains locked, pauses at the existing retry seam, explicitly cancels,
+and requires join within the original100ms, exactly one attempt, typed context
+cancellation and no event addition before lock release. The real25ms timer case
+remains alongside it. Ignoring the caller context in a production mutation
+fails both proofs; no broader error was accepted to make the gate pass.
+Published-pin focused real25ms writes measured25.79–28.02ms. These focused
+results do not retrospectively prove the cause of untraced historical scheduler
+delays or clear the original full suites; final combined gates are required.
 
 ## Completion rule
 
