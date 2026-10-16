@@ -70,3 +70,25 @@ pressure. Batch/queue byte and count inputs are exposed and validated only in
 the experiment build. Unless additional payload shapes are actually run, byte
 cap sizing, saturation behavior and total memory safety remain untested beyond
 existing correctness bounds and the observed pending-byte high water.
+
+## Exploratory finalist selection (after pilot, before repeats)
+
+The completed pilot committed all 1,944 offered hook writes and all 336 peer
+creates, but copied batch=1 produced 19 fault/deadline responses despite eventual
+durability. It is rejected, not credited with success because a process exited
+zero. Smaller 5/10-record batches produced more fixed-cost transactions and worse
+copied burst/arrival response tails. Repeat **20 versus 40 records, 25 ms** to
+test whether a larger cap helps long arrivals without exceeding the observable
+transaction/peer budgets or growing the pending queue. This is exploratory
+selection, not a fastest-median optimum claim. The repeats use 108 offers per
+case and two randomized repetitions per corpus/load/configuration; all limits
+above stay unchanged. Peer samples remain too sparse for a reliability guarantee.
+
+The campaign uses committed recorder `dbbde538` in a separate clean source
+worktree, not the other worker's unfinished general artifact-hardening edits.
+Independent review accepted this restricted measurement use: every output is a
+fixed fresh distinct file inside an exclusive mode-0700 sandbox, absent before
+launch, with no concurrent path mutation. The recorder's general existing-file
+hazard is not cleared for arbitrary users. Missing/truncated/error-marked output
+invalidates observations. SQL scope remains an interval/proxy, never a physical
+lock bound or fsync measurement.
