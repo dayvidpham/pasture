@@ -78,6 +78,12 @@ def flame(stacks, metric):
             f'<text x="5" y="20">Stack flame (root at top): {html.escape(metric)}; total {total}; width is NOT wall time or call count</text>' + "".join(boxes) + '</svg>')
 
 
+def cpu_metadata(raw, stacks):
+    match = re.search(r"^Period:\s+(\d+)\s*$", raw, re.MULTILINE)
+    period = int(match[1]) if match else 0
+    return (period, sum(w for w, _ in stacks)//period) if period > 0 else (None, None)
+
+
 def render(work, from_raw=False):
     source = Path(__file__).read_bytes()
     (work/"render-source.py").write_bytes(source)
@@ -111,9 +117,11 @@ def render(work, from_raw=False):
                 dest = output/(file+"-"+metric+".svg")
                 dest.write_text(svg)
                 dest.with_suffix(".html").write_text('<!doctype html><meta charset="utf-8"><title>Private stack profile</title>'+svg)
+                cpu_period, sample_count = cpu_metadata(raw, stacks) if metric == "cpu" else (None, None)
                 index.append({"case": row["case"], "process": process, "profile": file, "metric": metric,
                               "sample_rows": len(stacks), "weight": sum(w for w, _ in stacks),
-                              "cpu_sample_count": sum(w for w, _ in stacks)//10_000_000 if metric == "cpu" else None,
+                              "cpu_period_ns": cpu_period,
+                              "cpu_sample_count": sample_count,
                               "svg": str(dest), "command": cmd + [str(binary)] + profiles})
             if from_raw:
                 continue

@@ -23,6 +23,17 @@ logs, traces, binaries and source diffs stay local. Never attach them to an issu
 ## Work and lifetime
 
 This is an opt-in developer experiment, not a duration gate or tuning tool.
+For matched before/after runs, use `--seed-campaign <retained-campaign>` to reuse
+both exact, hash-checked warmed corpora without setup writes or another warm hook.
+It also reuses the **exact warmed fixture bytes**, hash-checked and verified in
+each seed's content-addressed payload table. Older campaigns without a fixture
+file may reconstruct their path substitution only when those exact bytes are
+proven present in every seed. Missing evidence refuses the comparison; the
+runner never silently changes an existing-blob update into a fresh insertion.
+`--repetitions 2 --order-seed 20261016` is the default: each path/concurrency
+shuffles the six repeat/mode pairs deterministically, restoring the same seed
+for every pair. Order, repeat and seed are recorded per case. `--binaries-from`
+can select retained, hash-verified binaries for an explicitly identified control.
 It reuses the existing load harness's authentic SessionStart fixture, production
 CLI arguments, readiness log, occurrence-evidence accounting and real daemon
 lane, without its time-window offer counts, main-file fallback or live defaults.
@@ -52,11 +63,19 @@ counts are separate. Hooks can fail open with process exit zero: evidence deltas
 and fault files, not exit codes alone, establish committed work. A failed case
 remains in the manifest and the overall command exits nonzero after all cases.
 Do not compare unlike committed counts as successful throughput or a speedup.
+All-offered latency includes failures. Separate successful-response, failed,
+deadline-limited and watchdog-censored cohorts are also reported; their counts
+must accompany survivor latencies. A watchdog records whether it fired, signals
+sent, process termination status, and censorship. Per-request completion is the
+acknowledged response, independently reconciled by the case SQL delta; a censored
+or faulty invocation is not assumed uncommitted. Deadline-limited observations
+are not silently pooled with successful uncensored work.
 Lane cases additionally require orderly daemon exit, no fallback diagnostics,
 and shutdown lane-record counters equal to both offered work and committed SQL
 occurrences. Readiness alone cannot prove routing: auto-mode can silently fall
 back when a socket disappears. `lane-audit.json` records that independent proof,
-including batches, maximum batch size, observed turn hold and hold-exceeded count.
+including batches, maximum batch size, observed turn elapsed (logged as maxHold)
+and the corresponding turn-exceeded count. Neither is a SQLite lock-held timer.
 The logged `committedRecords` counter counts settled failures too, so it is never
 accepted without the SQL delta. Audit retained evidence without rerunning work:
 `python3 tools/profile-writes.py --audit-existing /tmp/opencode/wp-EXAMPLE`.
@@ -83,6 +102,12 @@ Measured regions cover unified store open/migration/activation/registration;
 task system identity; task preparation/apply/readback; hook admission/parse and
 host-version selection; direct journal append; lane queue/accumulation wait;
 per-record blob/identity/definition/encoding preparation; batch apply; settlement.
+`lane.queue.accumulation.wait` ends for every record at **batch start**.
+`lane.within_batch.prepare_wait` measures batch start to that record's own
+Prepare; `lane.admission.to_own_prepare` preserves their inclusive end-to-end
+delay. The inclusive field overlaps its components and must not be summed with
+them. Earlier campaigns stopped the old queue timer at own Prepare: those values
+were admission-to-own-Prepare delays, not isolated queue residence.
 Trace regions stay on their originating goroutine; queue timers cross goroutines
 and appear only in stage JSON. `go.write_gate.wait` measures the in-process Go
 semaphore, **not** SQLite lock acquisition.
@@ -99,8 +124,11 @@ Do not subtract sampled CPU from wall time and call the remainder “disk.”
 All stage totals are inclusive: nested regions and concurrent request waits
 overlap. Their sums can exceed wall time. Baseline/stages/full comparisons need
 the same corpus, requests and outcomes; report overhead, never “instrumented
-speedup.” Run order is fixed, not randomized: cache drift and host load remain
-confounders. Repeat complete campaigns before making performance decisions.
+speedup.” Cache drift and host load remain confounders in historical fixed-order
+runs. Current campaigns use two seeded,
+randomized matched-corpus repetitions; inspect per-repeat/outcome distributions
+before estimating instrumentation overhead. Historical +23/+39/−31 ms contrasts
+are descriptive differences, not causal overhead estimates or speedups.
 
 ## Artifact index and reopening
 

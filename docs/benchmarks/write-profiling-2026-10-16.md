@@ -1,5 +1,15 @@
 # Write-path profile evidence — 2026-10-16
 
+Attribution correction after independent review: the historical field named
+`lane.queue.accumulation.wait` below ended at each record's own Prepare, so it
+includes preceding same-batch preparation. It is preserved as an
+**admission-to-own-Prepare delay**, not isolated queue residence. New campaigns
+separate queue-to-batch-start and within-batch preparation waits. Likewise the
+408 ms value is preparation/apply/settlement **turn elapsed**, not SQLite
+writer-lock-held duration; it cannot establish a 400 ms writer-lock breach.
+All reported process medians include failed attempts. The fixed-order mode
+contrasts are descriptive, not causal instrumentation-overhead estimates.
+
 ## Provenance and procedure
 
 Campaign started **2026-10-16T08:26:41Z**, base revision
@@ -90,10 +100,10 @@ not just SQLite file open. All values below are milliseconds.
 - Copied lane C=1: queue/accumulation **25.14**, per-record preparation
   **234.33**, batch apply **63.72**, turn preparation/apply/settlement **298.85**,
   submission-through-response **323.99**. Settlement alone was about **0.001**.
-- Copied lane C=18: queue p50/p95 **578.77/663.66**; per-record preparation
+- Copied lane C=18: admission-to-own-Prepare p50/p95 **578.77/663.66**; per-record preparation
   **2.07/260.05** (turn-shared preparation makes its distribution strongly
   asymmetric); four batch applies p50/p95 **77.47/80.47**; four turns
-  **350.51/407.93**. Thirty-six concurrent queue waits totaled **20.31 s**:
+  **350.51/407.93**. Thirty-six concurrent admission-to-own-Prepare delays totaled **20.31 s**:
   that is aggregate waiting, not campaign elapsed time.
 
 Copied C=18 lane cases used four batches, maximum batch size 16. Baseline maximum

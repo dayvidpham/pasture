@@ -58,10 +58,12 @@ type BatchApply func(ctx context.Context, inputs []provenance.OperationInput) (p
 // opaque to the lane: the lane moves bytes and calls a Record, and never knows
 // what a record means.
 type item struct {
-	queueDone func()
-	bytes     int64
-	record    Record
-	result    chan error
+	queueDone              func()
+	admissionToPrepareDone func()
+	batchPrepareWaitDone   func()
+	bytes                  int64
+	record                 Record
+	result                 chan error
 }
 
 // Stats is a read-only snapshot of what the lane has done. It exists so an
@@ -191,6 +193,7 @@ func (l *Lane) Submit(ctx context.Context, bytes int64, record Record) error {
 		l.cond.Wait()
 	}
 	me.queueDone = writeprofile.Timer("lane.queue.accumulation.wait")
+	me.admissionToPrepareDone = writeprofile.Timer("lane.admission.to_own_prepare")
 	l.pending = append(l.pending, me)
 	l.pendingBytes += bytes
 	close(l.arrived)
@@ -391,6 +394,14 @@ func (l *Lane) absorb(batch *[]*item, bytes *int64) (drained, stopped bool, arri
 // guarantee the lane exists to give. The turn counters follow the batch, since
 // they describe the turn and not one record.
 func (l *Lane) commitBatch(batch []*item) {
+	// Queue residence ends for EVERY record when this batch starts, not when
+	// that record's preparation starts after its predecessors' preparation.
+	for _, it := range batch {
+		if it.queueDone != nil {
+			it.queueDone()
+		}
+		it.batchPrepareWaitDone = writeprofile.Timer("lane.within_batch.prepare_wait")
+	}
 	defer writeprofile.Region("lane.turn.prepare.apply.settle")()
 	started := time.Now()
 	reports := l.commitRecords(batch)
@@ -433,8 +444,11 @@ func (l *Lane) commitRecords(batch []*item) []error {
 	// dies with the turn, so nothing learned here outlives the batch apply.
 	turn := ContextWithTurnScope(l.ctx, NewTurnScope())
 	for i, it := range batch {
-		if it.queueDone != nil {
-			it.queueDone()
+		if it.batchPrepareWaitDone != nil {
+			it.batchPrepareWaitDone()
+		}
+		if it.admissionToPrepareDone != nil {
+			it.admissionToPrepareDone()
 		}
 		prepareDone := writeprofile.Region("lane.prepare.blob.identity.definitions.encode")
 		input, err := it.record.Prepare(turn)
