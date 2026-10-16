@@ -89,7 +89,7 @@
             "cmd/pasture-release"
             "cmd/pasture"
           ];
-          env.CGO_ENABLED = "1";
+          env = commonAttrs.env // { CGO_ENABLED = "1"; };
           doCheck = true;
           checkPhase = ''
             runHook preCheck
@@ -110,7 +110,7 @@
         installer-check = pkgs.buildGoModule (commonAttrs // {
           pname = "pasture-installer-integration";
           subPackages = [ "cmd/pasture" ];
-          env.CGO_ENABLED = "1";
+          env = commonAttrs.env // { CGO_ENABLED = "1"; };
           doCheck = true;
           checkPhase = ''
             runHook preCheck
