@@ -143,6 +143,11 @@ func TestSeparateAssetEntryPointsRejectWithoutStageWrites(t *testing.T) {
 			require.NoError(t, err)
 			command := exec.Command("go", "generate", fixture.Generator)
 			command.Dir = root
+			// This copied tree is an independent fixture module. The parent's
+			// integration workspace names the real source tree, not this clone.
+			// Keep the real generator and rejection assertions, but let Go select
+			// the fixture's own go.mod instead of rejecting workspace membership.
+			command.Env = append(os.Environ(), "GOWORK=off")
 			output, err := command.CombinedOutput()
 			require.Error(t, err, string(output))
 			require.Contains(t, string(output), "operational tracker gate rejected")
