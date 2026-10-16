@@ -34,12 +34,21 @@ class SweepTests(unittest.TestCase):
         for n in (0, 1, 36, 99):
             result = SWEEP.distribution(list(range(n)))
             self.assertEqual(result["n"], n)
-            for p in (50, 95, 99):
-                self.assertIsNone(result[f"p{p}_ms"])
+            self.assertIsNone(result["p99_ms"])
+            if n: self.assertIsNotNone(result["p50_ms"])
             self.assertEqual(result["max_ms"], (n-1)/1e6 if n else None)
         result = SWEEP.distribution(list(range(1, 101)))
         self.assertEqual(result["p95_ms"], 95/1e6)
         self.assertEqual(result["p99_ms"], 99/1e6)
+
+    def test_finalists_are_bounded_repeated_real_shapes(self):
+        rows=SWEEP.plan(finalists=[10,20])
+        self.assertEqual(len(rows),18)
+        for corpus in SWEEP.SEED_HASHES:
+            measured=[r for r in rows if r["corpus"]==corpus and r["mode"]=="ON"]
+            self.assertEqual(len(measured),8)
+            self.assertEqual({r["repeat"] for r in measured},{0,1})
+            self.assertEqual({r["load"] for r in measured},{"C18","arrival"})
 
     def result(self, **kwargs):
         return dict(valid_ack=True, successful_response=True, reported_fault=False, **kwargs)
@@ -75,7 +84,7 @@ class SweepTests(unittest.TestCase):
     def test_observers_retain_actual_values_and_caps(self):
         with tempfile.TemporaryDirectory() as directory:
             case = Path(directory)
-            lane = dict(flush_reason="records", batch_records=20, batch_bytes=800, queue_records=36, queue_bytes=1440)
+            lane = dict(reason="full", records=20, bytes=800, max_queue_records=36, max_queue_bytes=1440, full_condition=True)
             (case/"lane.jsonl").write_text(json.dumps(lane)+"\n")
             events = [dict(pid=123, op=1, method="ApplyBatchContext", phase=phase, start_ns=1, end_ns=10_000_001,
                            outcome="committed" if phase == "transaction_scope" else "ok")
@@ -84,7 +93,7 @@ class SweepTests(unittest.TestCase):
             budget = dict(batch_records=20, queue_records=36, queue_bytes=1440)
             result = SWEEP.observer_evidence(case, budget)
             self.assertTrue(result["verified"])
-            self.assertEqual(result["flush_reasons"], {"records": 1})
+            self.assertEqual(result["flush_reasons"], {"full": 1})
             self.assertEqual(result["maxima"]["batch_bytes"], 800)
             self.assertEqual(result["actual_transaction"]["max_ms"], 10)
             self.assertEqual(result["sql_committed_batches"], 1)

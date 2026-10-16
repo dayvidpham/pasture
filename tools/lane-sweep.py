@@ -4,8 +4,8 @@
 Run after integrating the experiment-tagged lane and SQL observers. SQL JSONL
 contract: pid/op/method/phase/start_ns/end_ns/outcome; separate file per process.
 See dependency docs/experiment-sql-timings.md. Lane JSONL
-contract: one object per flush, flush_reason, batch_records, batch_bytes,
-queue_records, queue_bytes (nonnegative integers). Raw observer files are always
+contract: one object per flush, reason, records, bytes,
+max_queue_records, max_queue_bytes (nonnegative integers). Raw observer files are always
 retained; incompatible/missing evidence prevents qualification, never guessed.
 No percentile or optimum claims from this deliberately small pilot.
 """
@@ -41,7 +41,7 @@ LIMITS = {
     "peer_errors": 0, "peer_p95_ms": "min(500, peer-only baseline p95 + 100)",
     "transaction_p95_ms": 400,
     "authority": "proposed design limits, NOT operator approval",
-    "sparse_samples": "n<100: percentiles null; acceptance indeterminate, not pass",
+    "sparse_samples": "n<100: p99 null; p50/p95 descriptive order statistics with n; acceptance indeterminate when peer samples sparse",
 }
 
 
@@ -53,14 +53,20 @@ def distribution(values):
     values = sorted(values)
     result = {"n": len(values), "max_ms": values[-1] / 1e6 if values else None}
     for p in (50, 95, 99):
-        result[f"p{p}_ms"] = values[math.ceil(len(values)*p/100)-1]/1e6 if len(values) >= 100 else None
+        result[f"p{p}_ms"] = values[math.ceil(len(values)*p/100)-1]/1e6 if values and (p != 99 or len(values) >= 100) else None
     return result
 
 
-def plan(seed=20261016):
+def plan(seed=20261016, finalists=None):
     rows = []
     for corpus in SEED_HASHES:
         rows.append(dict(corpus=corpus, load="peer-only", mode="OFF", batch_records=20, flush_ms=25))
+        if finalists:
+            for load in ("C18", "arrival"):
+                for batch in finalists:
+                    for repeat in range(2):
+                        rows.append(dict(corpus=corpus,load=load,mode="ON",batch_records=batch,flush_ms=25,repeat=repeat))
+            continue
         for load in ("C1", "C18", "arrival"):
             for records, flush in [(n, 25) for n in (1, 5, 10, 20, 40)] + [(20, n) for n in (5, 50, 100)]:
                 rows.append(dict(corpus=corpus, load=load, mode="ON", batch_records=records, flush_ms=flush))
@@ -110,6 +116,9 @@ def observer_evidence(case, budget, expected_batches=None, expected_peers=0):
                 errors.append(f"empty {filename}")
         except (OSError, ValueError, TypeError) as exc:
             errors.append(f"cannot decode {filename}: {exc}")
+    lane = [dict(flush_reason=r.get("reason"), batch_records=r.get("records"), batch_bytes=r.get("bytes"),
+                 queue_records=r.get("max_queue_records"), queue_bytes=r.get("max_queue_bytes"),
+                 full_condition=r.get("full_condition")) if isinstance(r,dict) else r for r in lane]
     for row in lane:
         keys = ("batch_records", "batch_bytes", "queue_records", "queue_bytes")
         if not isinstance(row, dict) or not isinstance(row.get("flush_reason"), str) or any(type(row.get(k)) is not int or row[k] < 0 for k in keys):
@@ -158,6 +167,7 @@ def observer_evidence(case, budget, expected_batches=None, expected_peers=0):
             "transaction_definition": "ApplyBatchContext transaction_scope: BEGIN-return to COMMIT/rollback-return reservation proxy ONLY; not strict physical lock duration or fsync attribution",
             "sql_phases": [dict(method=m, phase=p, outcome=o, **distribution(v)) for (m, p, o), v in sorted(phases.items())],
             "sql_committed_batches": committed_batches,
+            "full_condition_count": sum(r.get("full_condition") is True for r in lane if isinstance(r,dict)),
             "maxima": {k: max((r[k] for r in lane if isinstance(r, dict) and type(r.get(k)) is int), default=None)
                        for k in ("batch_records", "batch_bytes", "queue_records", "queue_bytes")},
             "raw": [str(case/"lane.jsonl"), *map(str, sql_paths)]}
@@ -243,6 +253,8 @@ def summarize(manifest):
             unknown.append("peer or peer-only baseline sample n<100 (no p95 claim)")
         elif peer_p95 > min(500, baseline_p95+100):
             errors.append("peer p95 exceeds proposed design limit")
+        if row["peer_latency"]["n"] < 100 or (baseline and baseline["peer_latency"]["n"] < 100):
+            unknown.append("peer p95 is a sparse descriptive statistic, not a reliable budget guarantee")
         row["acceptance"] = dict(verdict="REJECT" if errors else "INDETERMINATE" if unknown else "PASS proposed design limits only",
                                  errors=errors, insufficient_evidence=unknown)
         if row["mode"] == "OFF":
@@ -365,7 +377,11 @@ def run_case(work, row, seed, bins, payload, args, guard):
     faults = sum(len(p.read_text().splitlines()) for p in case.glob("lifecycle-faults.jsonl*"))
     row.update(before=before, after=after, requests=requests, peers=peers,
                accounting=accounting(requests, peers, before, after, faults),
-               hook_latency=distribution([r["ns"] for r in requests]), peer_latency=distribution([r["ns"] for r in peers]),
+                hook_latency=distribution([r["ns"] for r in requests]), peer_latency=distribution([r["ns"] for r in peers]),
+                successful_hook_latency=distribution([r["ns"] for r in requests if r["successful_response"] and r["valid_ack"]]),
+                successful_peer_latency=distribution([r["ns"] for r in peers if r["successful_response"] and r["valid_ack"]]),
+                peer_failure_classes={name:sum(r.get("failure_class")==name for r in peers) for name in {r.get("failure_class") for r in peers if r.get("failure_class")}},
+                deadline_limited=sum(r["deadline_limited"] for r in requests+peers), censored=sum(r["censored"] for r in requests+peers),
                failure_classes=PW.classify_case(case, requests))
     if "EXPERIMENT_METRICS_ERROR" in (case/"daemon.log").read_text():
         row["accounting"]["verified"] = False
@@ -380,7 +396,7 @@ def run_case(work, row, seed, bins, payload, args, guard):
         # this is a second reconciliation, never a replacement for SQL/ACKs.
         if row["observers"]["verified"]:
             batches = [json.loads(line) for line in (case/"lane.jsonl").read_text().splitlines()]
-            if sum(batch["batch_records"] for batch in batches) != len(requests):
+            if sum(batch["records"] for batch in batches) != len(requests):
                 row["observers"]["verified"] = False
                 row["observers"]["errors"].append("observer batch records do not equal offered hooks")
     row["status"] = "measured"
@@ -389,6 +405,9 @@ def run_case(work, row, seed, bins, payload, args, guard):
     if not row["accounting"]["verified"] or not row.get("lane_evidence", {"verified": True})["verified"] or not row.get("observers", {"verified": True})["verified"]:
         row["acceptance"] = "REJECT: accounting/routing/observer evidence failed"
     save(work, args.manifest)
+    print(row["case"], row["label"], "hook commits", row["accounting"]["committed_delta_occurrences"], "/", len(requests),
+          "peer commits", row["accounting"]["committed_delta_tasks"], "/", len(peers),
+          "observers", row.get("observers",{}).get("verified"), flush=True)
 
 
 def campaign(args):
@@ -399,7 +418,7 @@ def campaign(args):
     # Reuse profile-writes' run/stop and its 90s per-subprocess watchdog, while
     # additionally tracking all children against the campaign's hard ceiling.
     PW.subprocess = SimpleNamespace(Popen=guard.spawn, TimeoutExpired=subprocess.TimeoutExpired)
-    manifest = dict(schema="lane-sweep.v1", command=sys.argv, limits=LIMITS, runs=plan(args.order_seed),
+    manifest = dict(schema="lane-sweep.v1", command=sys.argv, limits=LIMITS, runs=plan(args.order_seed,args.finalist_batches),
                     order_seed=args.order_seed, budget_seconds=args.budget_seconds, max_cases=args.max_cases,
                     requests=args.requests, python=sys.version, status="initializing", cleanup="pending",
                     untested="larger corpora, higher concurrency, repetitions and byte/queue grids deferred: bounded small/current pilot; no optimum or p99 inference")
@@ -468,6 +487,7 @@ def parser():
     p.add_argument("--requests", type=int, default=36)
     p.add_argument("--order-seed", type=int, default=20261016)
     p.add_argument("--stages", action="store_true", help="optional corrected queue timing, ON cases only; never render during measurement")
+    p.add_argument("--finalist-batches", type=lambda text:[int(x) for x in text.split(",")], help="two batch-count finalists at 25ms, repeated twice on C18/arrival plus peer baselines; separate bounded campaign")
     # Explicit current production caps, fixed for this experiment; no byte or
     # queue grid is implied. Record these in every daemon's applied JSON budget.
     for key, default in (("batch-bytes", 8 << 20), ("queue-records", 256), ("queue-bytes", 32 << 20)):
@@ -482,6 +502,8 @@ if __name__ == "__main__":
         p.error("budget must be (0,1800], max-cases 1..80, requests >=18; use the bounded pilot")
     if any(getattr(args, k) is not None and getattr(args, k) < 1 for k in ("batch_bytes", "queue_records", "queue_bytes")):
         p.error("optional record/byte caps must be positive")
+    if args.finalist_batches and (len(args.finalist_batches)!=2 or len(set(args.finalist_batches))!=2 or any(x not in (1,5,10,20,40) for x in args.finalist_batches)):
+        p.error("finalists must name two distinct pilot batch counts")
     def interrupted(signum, frame):
         raise KeyboardInterrupt("lane sweep interrupted; retaining evidence and tearing down children")
     signal.signal(signal.SIGTERM, interrupted)

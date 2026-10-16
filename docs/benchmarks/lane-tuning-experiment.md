@@ -24,9 +24,15 @@ neither this experiment nor a favorable p95 makes a hard scheduler/lock bound.
 Bounded pilot: batch records 1/5/10/20/40 at 25 ms, then current 20 records at
 5/50/100 ms. Synthetic and copied starting corpora; C1, C18 and controlled
 20-ms arrivals. Fresh identical seed backups and exact warmed payload for every
-case. Randomized order with seed 20261016, at most 80 cases and 1800 measured
-seconds for the first campaign. Pair instrumentation-off/on current-setting
-controls; peer-only controls establish unloaded CLI delay. Peer writes are
+case. Randomized order with seed 20261016, at most 80 cases and 1800 total
+seconds, split into a 900-second pilot and a 900-second finalist campaign
+(including builds/setup). The pilot is 56 cases: 48 grid, six current-setting
+instrumentation-off pairs and two peer-only baselines. Pair instrumentation-off/on current-setting
+controls; peer-only controls establish unloaded CLI delay. If the pilot leaves
+time, repeat two batch-count finalists at 25 ms twice on C18 and controlled
+arrival, 108 offers per case (18 further cases including peer baselines;
+74 total). Finalist selection is exploratory and disclosed; per-finalist matched
+work is compared separately from the 36-offer pilot. Peer writes are
 actual `pasture task create` transactions, not synthetic lock-holding sleeps
 and not a claim to run an engine workflow. Repeat finalists only if the pilot
 leaves enough budget. An untested full cross-product or larger corpus remains
