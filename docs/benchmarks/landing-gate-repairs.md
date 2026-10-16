@@ -11,14 +11,14 @@ retained release-gate logs. There were thirteen distinct top-level failures:
 
 | Test | Gate(s) | Original diagnostic / disposition |
 |---|---|---|
-| `TestTheDaemonLaneBatchAdvancesTheVerifiedLedgerSoTheNextOpenIsFast` | default | Expected one occurrence; zero found. Investigate native fault/ACK and durable completion, not exit0 alone. |
+| `TestTheDaemonLaneBatchAdvancesTheVerifiedLedgerSoTheNextOpenIsFast` | default | Expected one occurrence; zero found. Definition setup is now separate; empty diagnostic plus current production-kind selectors prove actual receipt settlement. |
 | `TestSeparateAssetEntryPointsRejectWithoutStageWrites` | default/tagged | All three standalone generators stopped at unrelated workspace membership instead of the required operational-gate rejection. Fixed fixture-module environment. |
 | `TestSliceSubWorkflow_HookSliceFailed` | default | Hook condition not met within10s; repaired durable queue-slot synchronization, not best-effort hook timing. |
 | `TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob` | default | Fixture pre-activation expired while leasing a connection; setup now has its own bounded context, with original strict occurrence budget preserved. |
 | `TestSliceStartHonestFailureUnderInjectedDelay` | default | Fixture pre-activation transaction hit caller deadline; definition setup separated from the measured occurrence failure. |
-| `TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown` | default/tagged | Durable occurrence not observed after the hook stopped waiting; durability/fixture synchronization investigation. |
+| `TestALostAnswerLeavesTheRecordCommittedAndTheHookReportingRecordUnknown` | default/tagged | Durable occurrence not observed; disconnect now follows successful preparation and actual settlement is joined and checked using current production kinds. |
 | `TestGoCompilerRejectsTargetNeutralHostContractImport` | default/tagged | External fixture compiler rejected `-mod=mod` in an unrelated workspace before checking internal-import legality. Fixed fixture-module environment. |
-| `TestTheWriteLaneIsNeverAskedWhenDisabled` | tagged | Expected one direct-path occurrence; zero found. Investigate full Outcome, not native fail-open exit0. |
+| `TestTheWriteLaneIsNeverAskedWhenDisabled` | tagged | Expected one direct-path occurrence; zero found. Definition setup separated; empty diagnostics exclude fail-open exit0, and durable current-kind evidence remains required. |
 | `TestMigrateContextRealWriteLockCancelsWithoutReleasingHolder` | tagged |604.328ms exceeded600ms bound; package-serial native timing probe retains exact25ms caller/600ms ceiling and real locked holder. |
 | `TestSliceSubWorkflow_CompleteSignalOverridesResult` | tagged/recovery | Success remained true and forced-failure override absent; repaired durable queue-slot ordering before both signals are sent. |
 | `TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires` | tagged |5.287s exceeded5s ceiling; real wall-clock test now runs before this package's parallel engine load, with unchanged3s budget/5s ceiling. |
@@ -108,6 +108,30 @@ fails both proofs; no broader error was accepted to make the gate pass.
 Published-pin focused real25ms writes measured25.79–28.02ms. These focused
 results do not retrospectively prove the cause of untraced historical scheduler
 delays or clear the original full suites; final combined gates are required.
+
+## Lane receipt and lost-answer fixtures
+
+Native hook exit0 can mean a fail-open fault, not an acknowledged receipt.
+The repaired command fixtures initialize immutable definitions before the
+measured request, using a bounded setup context on a value copy of the service;
+production request budgets and original service settings are unchanged. They
+require empty diagnostic stderr as well as the host's exit and output contract.
+Evidence queries now use the production occurrence/interpretation kinds rather
+than obsolete v1/v2 literals: exactly one occurrence, interpretation and
+consultation must belong to the same receipt operation.
+
+The lost-answer fixture now disconnects transport only after preparation has
+actually succeeded, before the real receipt apply. It captures settlement's
+error, joins it, and checks the real committed operation rather than treating
+the hook's record-unknown answer as proof of commit. The no-answer behavior and
+durability assertions remain separate. Negative controls for stale selectors,
+commit failure, routing bypass and fail-open exit0 each fail. The handoff's
+deliberate undeclared-event mutation was restored before validation. Exact
+strengthened default tests (twice), actual `pasture_experiment` focused tests,
+CGO0 vet/build and formatting pass against the published pin. The worker's
+misnamed tagged log used unrelated profile tags and is not tagged-gate evidence.
+No production defect was established by these fixture failures; final full
+combined gates remain the release criterion.
 
 ## Completion rule
 
