@@ -6,6 +6,9 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +24,52 @@ import (
 )
 
 const writerSchedulingTolerance = 75 * time.Millisecond
+
+// Tests with wall-clock upper bounds run before this package releases its
+// parallel database fixtures. They retain their real holders, clocks, and
+// original bounds. Transaction/content checks remain parallel and concurrency
+// probes retain simultaneous writers; this is not package-wide serialization.
+
+func TestAuditWriterWallClockProbesExcludeParallelFixtures(t *testing.T) {
+	t.Parallel()
+	file, err := parser.ParseFile(token.NewFileSet(), "write_retry_test.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		switch fn.Name.Name {
+		case "TestAuditWriterShortColdRoleBudget", "TestAuditWriterLongHolderRetries",
+			"TestAuditWriterLongHolderOtherModes", "TestAuditWriterIndependentTrailsShareOneRole",
+			"TestAuditWriterPoolWaitAndSessionReadCancellation", "TestAuditWriterReplacementConnectionUsesThisBudget",
+			"TestAuditWriterBudgetIncludesAllAttempts", "TestAuditWriterCancellationDuringBackoff",
+			"TestAuditWriterConnectorSetupHonorsCurrentAcquisitionDeadline":
+		default:
+			continue
+		}
+		checked++
+		// Include nested subtests: a serial parent alone does not isolate a
+		// latency probe if its own cases release each other with t.Parallel.
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if ok && selector.Sel.Name == "Parallel" {
+				t.Errorf("%s releases a wall-clock/native-budget probe alongside competing fixtures", fn.Name.Name)
+			}
+			return true
+		})
+	}
+	if checked != 9 {
+		t.Fatalf("checked %d wall-clock/native-budget probes, want all nine", checked)
+	}
+}
 
 type writerFixtureName string
 
@@ -93,7 +142,6 @@ func writerCacheSize(s *SqliteAuditTrail) int {
 }
 
 func TestAuditWriterShortColdRoleBudget(t *testing.T) {
-	t.Parallel()
 	const cases writerFixtureName = "audit_writer_profiles"
 	var fixtures []struct {
 		Name       string `yaml:"name"`
@@ -102,7 +150,6 @@ func TestAuditWriterShortColdRoleBudget(t *testing.T) {
 	loadWriterFixture(t, cases, &fixtures)
 	for _, f := range fixtures {
 		t.Run(f.Name, func(t *testing.T) {
-			t.Parallel()
 			profile := timeouts.DeadlineTestProfile()
 			if f.Production {
 				profile = timeouts.ProductionProfile()
@@ -139,7 +186,6 @@ func TestAuditWriterShortColdRoleBudget(t *testing.T) {
 }
 
 func TestAuditWriterLongHolderRetries(t *testing.T) {
-	t.Parallel()
 	s, path := writerTrail(t, timeouts.ProductionProfile())
 	holder := writerHolder(t, path)
 	failed := make(chan time.Time, 1)
@@ -168,6 +214,7 @@ func TestAuditWriterLongHolderRetries(t *testing.T) {
 		if failedAt.Sub(start) > ceiling {
 			t.Fatalf("first exhausted attempt took %s, maximum %s including scheduler allowance", failedAt.Sub(start), ceiling)
 		}
+		t.Logf("real exhausted audit attempt: elapsed=%s ceiling=%s", failedAt.Sub(start), ceiling)
 	case <-done:
 		t.Fatalf("completed before observed retry: %v", err)
 	case <-ctx.Done():
@@ -212,7 +259,6 @@ func TestAuditWriterPermanentFailureRollsBackRegistration(t *testing.T) {
 }
 
 func TestAuditWriterLongHolderOtherModes(t *testing.T) {
-	t.Parallel()
 	const cases writerFixtureName = "audit_writer_modes"
 	var fixtures []struct {
 		Mode string `yaml:"mode"`
@@ -220,7 +266,6 @@ func TestAuditWriterLongHolderOtherModes(t *testing.T) {
 	loadWriterFixture(t, cases, &fixtures)
 	for _, f := range fixtures {
 		t.Run(f.Mode, func(t *testing.T) {
-			t.Parallel()
 			s, path := writerTrail(t, timeouts.ProductionProfile())
 			event := writerEvent()
 			var canonical int64
@@ -288,9 +333,11 @@ func TestAuditWriterLongHolderOtherModes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if time.Since(start) >= 3*time.Second {
-				t.Fatal("write exceeded operation deadline")
+			elapsed := time.Since(start)
+			if elapsed >= 3*time.Second {
+				t.Fatalf("write exceeded 3s operation deadline: elapsed=%s", elapsed)
 			}
+			t.Logf("real %s audit write: elapsed=%s, holder released after 750ms", f.Mode, elapsed)
 			if f.Mode == "dedup" && id != canonical {
 				t.Fatalf("canonical %d, replay %d", canonical, id)
 			}
@@ -312,7 +359,8 @@ func TestAuditWriterLongHolderOtherModes(t *testing.T) {
 }
 
 func TestAuditWriterIndependentTrailsShareOneRole(t *testing.T) {
-	t.Parallel()
+	// The two writer goroutines below still overlap on the same store. Keep
+	// unrelated package fixtures out of their explicit 3s caller budget.
 	s, path := writerTrail(t, timeouts.ProductionProfile())
 	peer, err := NewSqliteAuditTrail(path)
 	if err != nil {
@@ -341,14 +389,13 @@ func TestAuditWriterIndependentTrailsShareOneRole(t *testing.T) {
 }
 
 func TestAuditWriterPoolWaitAndSessionReadCancellation(t *testing.T) {
-	t.Parallel()
 	s, _ := writerTrail(t, timeouts.ProductionProfile())
 	conn, err := s.db.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	check := func(operation func(context.Context) error) {
+	check := func(name string, operation func(context.Context) error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 		defer cancel()
 		start := time.Now()
@@ -356,15 +403,17 @@ func TestAuditWriterPoolWaitAndSessionReadCancellation(t *testing.T) {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("pool cancellation cause: %v", err)
 		}
-		if time.Since(start) > 25*time.Millisecond+writerSchedulingTolerance {
-			t.Fatal("pool wait ignored caller budget")
+		elapsed := time.Since(start)
+		if elapsed > 25*time.Millisecond+writerSchedulingTolerance {
+			t.Fatalf("%s pool wait exceeded 25ms caller budget plus %s scheduler allowance: elapsed=%s", name, writerSchedulingTolerance, elapsed)
 		}
+		t.Logf("real %s pool wait: elapsed=%s, reserved connection retained", name, elapsed)
 	}
-	check(func(ctx context.Context) error { return s.RecordEvent(ctx, writerEvent()) })
-	check(func(ctx context.Context) error {
+	check("event", func(ctx context.Context) error { return s.RecordEvent(ctx, writerEvent()) })
+	check("batch", func(ctx context.Context) error {
 		return s.RecordSessionEntries(ctx, []protocol.SessionEntry{{SessionId: "pool"}})
 	})
-	check(func(ctx context.Context) error { _, err := s.QuerySessionEntries(ctx, "pool"); return err })
+	check("read", func(ctx context.Context) error { _, err := s.QuerySessionEntries(ctx, "pool"); return err })
 }
 
 func TestAuditWriterBatchPermanentFailureIsAtomic(t *testing.T) {
@@ -478,10 +527,12 @@ func TestAuditWriterAlreadyCancelledAndExpired(t *testing.T) {
 }
 
 func TestAuditWriterReplacementConnectionUsesThisBudget(t *testing.T) {
-	t.Parallel()
 	s, path := writerTrail(t, timeouts.ProductionProfile())
 	// The constructor is done; force the writer's Conn to perform real first
 	// use of a replacement connection while the independent holder stays locked.
+	// This store is already WAL: contention is at the writer's BEGIN, not
+	// necessarily at connector setup. The separate DELETE-journal probe below
+	// isolates the connector's WAL conversion and caller-deadline clamp.
 	s.db.SetMaxIdleConns(0)
 	holder := writerHolder(t, path)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
@@ -491,13 +542,18 @@ func TestAuditWriterReplacementConnectionUsesThisBudget(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
-	if time.Since(start) > 25*time.Millisecond+writerSchedulingTolerance {
-		t.Fatal("replacement connection lost current acquisition deadline")
+	elapsed := time.Since(start)
+	if elapsed > 25*time.Millisecond+writerSchedulingTolerance {
+		t.Fatalf("replacement connection exceeded 25ms acquisition budget plus %s scheduler allowance: elapsed=%s", writerSchedulingTolerance, elapsed)
 	}
+	t.Logf("real replacement connection: elapsed=%s, holder retained until return", elapsed)
 	if err := holder.Rollback(); err != nil {
 		t.Fatal(err)
 	}
 	s.db.SetMaxIdleConns(1)
+	// MaxIdleConns(0) closed the failed connection. This subsequent write and
+	// read-back prove a NEW retained connection's configuration, not reuse of
+	// the failed connection.
 	if err := s.RecordEvent(context.Background(), writerEvent()); err != nil {
 		t.Fatal(err)
 	}
@@ -507,6 +563,125 @@ func TestAuditWriterReplacementConnectionUsesThisBudget(t *testing.T) {
 	}
 	if busy != timeouts.ProductionProfile().SQLiteBusy().Milliseconds() {
 		t.Fatalf("replacement leaked busy tier %d", busy)
+	}
+}
+
+func TestAuditWriterConnectorSetupHonorsCurrentAcquisitionDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "connector-setup.db")
+	holder, err := dbconn.OpenDefaultDB(path) // no WAL pragmas; retain DELETE mode.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	holder.SetMaxOpenConns(1)
+	if _, err := holder.Exec("CREATE TABLE held (v INTEGER); INSERT INTO held VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+	var journal string
+	if err := holder.QueryRow("PRAGMA journal_mode").Scan(&journal); err != nil || journal != "delete" {
+		t.Fatalf("setup journal=%q error=%v, want DELETE before conversion", journal, err)
+	}
+	if _, err := holder.Exec("BEGIN"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = holder.Exec("ROLLBACK") }()
+	var count int
+	if err := holder.QueryRow("SELECT count(*) FROM held").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("establish held read transaction: count=%d error=%v", count, err)
+	}
+	// The held DELETE read transaction prevents WAL conversion. Unlike the
+	// already-WAL writer probe, no audit BEGIN or writer clamp is involved:
+	// this is the actual shared connector's first-use setup SQL and retry.
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	db, err := dbconn.OpenSharedDBContextWithProfile(ctx, path, timeouts.ProductionProfile())
+	elapsed := time.Since(start)
+	if db != nil {
+		_ = db.Close()
+		t.Fatal("connector published a pool while DELETE-to-WAL conversion was blocked")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("contended connector setup error=%v, want caller DeadlineExceeded", err)
+	}
+	if elapsed > 25*time.Millisecond+writerSchedulingTolerance {
+		t.Fatalf("contended connector setup exceeded 25ms plus %s scheduler allowance: elapsed=%s", writerSchedulingTolerance, elapsed)
+	}
+	t.Logf("real DELETE-to-WAL connector setup: elapsed=%s, read transaction retained", elapsed)
+	if err := holder.QueryRow("PRAGMA journal_mode").Scan(&journal); err != nil || journal != "delete" {
+		t.Fatalf("blocked connector changed journal=%q error=%v", journal, err)
+	}
+	if _, err := holder.Exec("ROLLBACK"); err != nil {
+		t.Fatal(err)
+	}
+	db, err = dbconn.OpenSharedDBContextWithProfile(t.Context(), path, timeouts.ProductionProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var busy int64
+	if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busy); err != nil || busy != 500 {
+		t.Fatalf("new configured connector busy timeout=%d error=%v, want standing 500ms", busy, err)
+	}
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&journal); err != nil || journal != "wal" {
+		t.Fatalf("new configured connector journal=%q error=%v, want WAL after holder release", journal, err)
+	}
+}
+
+type auditAcquisitionConnector struct {
+	base    driver.Driver
+	connect func(context.Context) (driver.Conn, error)
+}
+
+func (c auditAcquisitionConnector) Driver() driver.Driver { return c.base }
+func (c auditAcquisitionConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	return c.connect(ctx)
+}
+
+// The real replacement probe above exercises SQLite setup and lock contention.
+// This separate dependency probe pins the context actually passed by the writer
+// to database/sql acquisition, and delivers cancellation at Connect itself. It
+// does not infer context propagation from how quickly a timer was scheduled.
+func TestAuditWriterAcquisitionReceivesCurrentOperationBudget(t *testing.T) {
+	t.Parallel()
+	s, _ := writerTrail(t, timeouts.ProductionProfile())
+	realDB := s.db
+	type callerKey struct{}
+	marker := &struct{ value int }{value: 1}
+	caller, cancel := context.WithCancel(context.WithValue(t.Context(), callerKey{}, marker))
+	defer cancel()
+	policy := defaultAuditWriterPolicy()
+	s.writerPolicy = policy
+	var earliest time.Time
+	calls := 0
+	probeDB := sql.OpenDB(auditAcquisitionConnector{base: realDB.Driver(), connect: func(ctx context.Context) (driver.Conn, error) {
+		calls++
+		if ctx.Value(callerKey{}) != marker {
+			t.Error("connection acquisition lost the current caller's context value")
+		}
+		deadline, ok := ctx.Deadline()
+		latest := time.Now().Add(policy.ceiling)
+		if !ok || deadline.Before(earliest) || deadline.After(latest) {
+			t.Errorf("connection acquisition deadline=%v present=%v, want the operation ceiling between %v and %v", deadline, ok, earliest, latest)
+		}
+		cancel() // synchronously cancel WHILE acquiring, before any SQL can run.
+		if !errors.Is(ctx.Err(), context.Canceled) {
+			t.Errorf("connection acquisition ignored synchronous caller cancellation: %v", ctx.Err())
+			return nil, errors.New("connection acquisition context did not receive caller cancellation")
+		}
+		return nil, ctx.Err()
+	}})
+	defer probeDB.Close()
+	s.db = probeDB
+	defer func() { s.db = realDB }() // writerTrail cleanup still owns the real pool.
+	opCalled := false
+	earliest = time.Now().Add(policy.ceiling)
+	err := s.withAuditWrite(caller, "acquisition context inspection", func(context.Context, *sql.Tx) error {
+		opCalled = true
+		return errors.New("SQL must not run after cancelled connection acquisition")
+	})
+	if !errors.Is(err, context.Canceled) || calls != 1 || opCalled {
+		t.Fatalf("acquisitions=%d SQL-called=%v error=%v, want one cancelled acquisition and no SQL", calls, opCalled, err)
 	}
 }
 
@@ -838,7 +1013,6 @@ func TestQuerySessionEntriesRefusesNilContext(t *testing.T) {
 }
 
 func TestAuditWriterCancellationDuringBackoff(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	p := defaultAuditWriterPolicy()
 	p.initialDelay = time.Second
@@ -868,9 +1042,11 @@ func TestAuditWriterCancellationDuringBackoff(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || attempts != 1 {
 		t.Fatalf("err %v attempts %d", err, attempts)
 	}
-	if time.Since(start) > writerSchedulingTolerance {
-		t.Fatal("cancelled backoff spent a busy tier")
+	elapsed := time.Since(start)
+	if elapsed > writerSchedulingTolerance {
+		t.Fatalf("cancelled backoff exceeded %s scheduler allowance: elapsed=%s", writerSchedulingTolerance, elapsed)
 	}
+	t.Logf("real backoff cancellation: elapsed=%s", elapsed)
 	if defaultAuditWriterPolicy().initialDelay != 25*time.Millisecond || defaultAuditWriterPolicy().maxDelay != time.Second {
 		t.Fatal("production exponential backoff bounds changed")
 	}
