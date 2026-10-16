@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.1.0] - 2026-10-16
+
+Release-preparation candidate, **not published**. Publication requires integration
+of the separately owned `pasture version` command and `pasture --version` alias,
+the actual published Provenance dependency pin/checksums/Nix vendor closure, and
+final exact-tree gates and review. This metadata-only preparation does not claim
+those pending changes have landed. Minor version proposed for the additive CLI
+surface and optional developer instrumentation; no existing contract is removed.
+
+### Added
+- Opt-in developer write profiling, corrected timing attribution, disposable-store
+  lane experiments and offline analysis with independently reconciled outcomes.
+- Documented matched write-cost and lane-tuning evidence, complete configured
+  budgets, sparse-tail limits and a recommendation to retain 20 records / 25 ms.
+
+### Fixed
+- End queue residence at batch start and report same-batch preparation separately.
+- Refuse successful-work speedup ratios for fault responses, missing routing proof,
+  changed inputs or incomplete offered/committed accounting.
+
+### Performance and compatibility
+- Prepare adoption of guarded upstream exact-replay proof reuse without weakening
+  identity, authority or integrity checks. On the measured copied corpus, serial
+  create median was 1686→101 ms with 72/72 commits on each side; copied C18 create
+  still committed only 28/72 after optimization. These are sandbox observations,
+  not general latency guarantees; hook preparation costs remain.
+- Production batch/flush defaults, timeouts and failure policy remain unchanged.
+  Burst timers were bypassed; measured SQL transaction scope around 66 ms is not
+  whole-turn elapsed around 444 ms or a physical-lock bound. Peer tails are sparse.
+
 ## [0.0.20] - 2026-10-13
 
 ### Fixed
