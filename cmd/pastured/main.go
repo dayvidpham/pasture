@@ -123,6 +123,7 @@ then blocks until SIGINT or SIGTERM. No external workflow server is required.`,
 		showVersion, _ := cmd.Flags().GetBool("version")
 		if showVersion {
 			fmt.Printf("pastured %s\n", version)
+			writeprofile.Stop()
 			os.Exit(0)
 		}
 		return nil
