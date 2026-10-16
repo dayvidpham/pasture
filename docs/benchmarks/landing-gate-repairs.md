@@ -133,6 +133,39 @@ misnamed tagged log used unrelated profile tags and is not tagged-gate evidence.
 No production defect was established by these fixture failures; final full
 combined gates remain the release criterion.
 
+## Additional failures exposed by integrated published-pin gates
+
+The first integrated published-pin default race suite passed on `0f3f4c0`;
+the tagged suite failed. Those results remain distinct, with no full-pass claim.
+Two additional tests were exposed:
+
+* `TestInProcessLaneRuntimeStaysInsideTheTestRuntimeDir` observed a new lock
+  file in the shared operator runtime. Its all-files snapshot could not
+  attribute another process's write to the tested runtime. Both isolation
+  tests now model the inherited ambient runtime with a private sentinel,
+  then require the real runtime to use a separate private destination. Exact
+  socket-path and complete no-growth assertions remain. A deterministic
+  unrelated-writer control breaks the old test and passes the repair;
+  removing the actual overrides still makes both tests fail. The source of
+  the historical foreign file is not proven, and no operator file was removed.
+* `TestAuditWriterBudgetIncludesAllAttempts` exceeded its original115ms
+  allowance. Its2.32s report was whole-test time, not measured write time;
+  the original message did not record elapsed or attempt count. Production
+  derives one deadline before all attempts; no reset was established. The
+  real40ms probe retains its40+75ms ceiling and typed deadline error, now
+  package-serial with measured diagnostics. A new deterministic proof drives
+  three real transactions, checks exactly equal deadlines on every attempt,
+  proves rollback by reusing one primary key, cancels synchronously, and
+  checks zero committed rows. A per-attempt deadline-reset production mutation
+  fails this proof. Focused real probes measured40.07–41.39ms; default/tagged
+  focused repeats passed. The original full-tagged failure remains preserved.
+
+The operator's final version correction is **Pasture v0.0.21**; earlier
+unpublished v0.1.0/v0.10.0 candidate suggestions are superseded. Provenance
+remains the already published v0.10.1. Metadata correction does not turn any
+interrupted or failed gate into a pass; final evidence identifies the corrected
+exact integration tree. No dedicated version-command tests were added.
+
 ## Completion rule
 
 Do not run another full wave while deterministic failures remain. Each remaining
