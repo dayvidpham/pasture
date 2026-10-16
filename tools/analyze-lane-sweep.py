@@ -22,10 +22,14 @@ def analyze(roots):
         seeds=identity
         for row in manifest["runs"]:
             if row.get("status")!="measured": continue
-            key=(row["corpus"],row["load"],row["mode"],row["batch_records"],row["flush_ms"],len(row["requests"]))
+            budget=row.get("budget")
+            if not isinstance(budget,dict) or not {"batch_records","flush_ms","batch_bytes","queue_records","queue_bytes"}.issubset(budget):
+                raise ValueError("missing full configured lane budget in measured case; recover its recorded caps before aggregating")
+            budget_identity=json.dumps(budget,sort_keys=True,separators=(",",":"))
+            key=(row["corpus"],row["load"],row["mode"],row["batch_records"],row["flush_ms"],len(row["requests"]),budget_identity)
             groups[key].append((root,row))
     output=[]
-    for (corpus,load,mode,batch,flush,offers),entries in sorted(groups.items()):
+    for (corpus,load,mode,batch,flush,offers,budget_identity),entries in sorted(groups.items()):
         requests=[r for _,row in entries for r in row["requests"]]
         peers=[r for _,row in entries for r in row["peers"]]
         phases=collections.defaultdict(list);stages=collections.defaultdict(list)
@@ -47,7 +51,7 @@ def analyze(roots):
         wall=sum(row["wall_ns"] for _,row in entries)/1e9
         committed=sum(row["accounting"]["committed_delta_occurrences"] for _,row in entries)
         success=lambda r:r["successful_response"] and r["valid_ack"]
-        output.append(dict(corpus=corpus,load=load,mode=mode,batch_records=batch,flush_ms=flush,offers_per_case=offers,repetitions=len(entries),
+        output.append(dict(corpus=corpus,load=load,mode=mode,batch_records=batch,flush_ms=flush,budget=json.loads(budget_identity),offers_per_case=offers,repetitions=len(entries),
             offered_hooks=len(requests),committed_hooks=committed,failed_hooks=len(requests)-committed,
             offered_peers=len(peers),committed_peers=sum(row["accounting"]["committed_delta_tasks"] for _,row in entries),
             failure_classes=dict(failures),peer_failure_classes=dict(peer_failures),

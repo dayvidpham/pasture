@@ -13,6 +13,7 @@ class AnalysisTests(unittest.TestCase):
     def manifest(self):
         request=dict(successful_response=True,valid_ack=True,ns=1000000,censored=False,deadline_limited=False,start_lateness_ns=0)
         row=dict(status="measured",corpus="copy",load="C18",mode="OFF",batch_records=20,flush_ms=25,
+            budget=dict(batch_records=20,flush_ms=25,batch_bytes=8<<20,queue_records=256,queue_bytes=32<<20),
             requests=[request],peers=[],failure_classes={},wall_ns=1000000,
             accounting=dict(committed_delta_occurrences=1,committed_delta_tasks=0,verified=True),acceptance="unobserved")
         return dict(payload_sha256="same-payload",corpora={"copy":{"sha256":"same-seed"}},runs=[row])
@@ -36,6 +37,37 @@ class AnalysisTests(unittest.TestCase):
             changed=self.manifest();changed["payload_sha256"]="changed"
             (roots[1]/"manifest.json").write_text(json.dumps(changed))
             with self.assertRaisesRegex(ValueError,"changed seed/payload"):ANALYSIS.analyze(roots)
+
+    def test_different_configured_caps_never_pool(self):
+        for cap in ("batch_bytes","queue_records","queue_bytes"):
+            with self.subTest(cap=cap), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);manifest=self.manifest()
+                changed=self.manifest()["runs"][0]
+                changed["budget"][cap]//=2
+                manifest["runs"].append(changed)
+                (root/"manifest.json").write_text(json.dumps(manifest))
+                groups=ANALYSIS.analyze([root])["groups"]
+                self.assertEqual(len(groups),2)
+                self.assertEqual({g["budget"][cap] for g in groups},{r["budget"][cap] for r in manifest["runs"]})
+                self.assertTrue(all(g["repetitions"]==1 for g in groups))
+
+    def test_budget_key_order_does_not_split_identical_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);manifest=self.manifest()
+            same=self.manifest()["runs"][0]
+            same["budget"]=dict(reversed(list(same["budget"].items())))
+            manifest["runs"].append(same)
+            (root/"manifest.json").write_text(json.dumps(manifest))
+            groups=ANALYSIS.analyze([root])["groups"]
+            self.assertEqual(len(groups),1)
+            self.assertEqual(groups[0]["repetitions"],2)
+
+    def test_missing_budget_cannot_inherit_implicit_caps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);manifest=self.manifest()
+            del manifest["runs"][0]["budget"]["queue_bytes"]
+            (root/"manifest.json").write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError,"full configured lane budget"):ANALYSIS.analyze([root])
 
 
 if __name__=="__main__":unittest.main()
