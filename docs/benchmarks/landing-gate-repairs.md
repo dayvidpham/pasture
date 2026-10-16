@@ -63,9 +63,21 @@ Ignoring the actual received override in a production overlay makes both repaire
 signal tests fail. An independent double-spend shutdown mutation still fails
 against the unchanged5s ceiling. Focused published-pin tests pass; full default
 and tagged engine checks passed in the slice, while its recovery check exposed
-another existing expiring-gate recovery fixture. That newly discovered recovery
-failure remains under repair; audit-lock cancellation belongs to the separate
-budget repair. Those full recovery failures are not cleared by focused passes.
+another existing expiring-gate recovery fixture,
+`TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets`: a supposedly
+held slice had already finished, so the attempted pending update affected zero
+rows. That fixture now uses a cancellable durable step on the real slice queue,
+holding execution before the production body. Shutdown joins every old owner;
+read-only assertions confirm truly pending rows before restart. No completed
+work is rewound and no workflow status is rewritten to manufacture recovery.
+The same delayed-observation control breaks the old gate and passes the repair;
+retaining the old queue limit in a production mutation still fails the stored
+limit assertion. Original slice-level recovery failures remain preserved.
+
+After integrating the engine and budget repairs, the complete combined
+`GOWORK=off` published-pin recovery engine package check passes (engine103.074s,
+budget16.635s). This is a new exact-source package result, not reclassification
+of the original failed candidate suites; final whole-tree gates remain required.
 
 ## Cancellation and setup ownership
 
