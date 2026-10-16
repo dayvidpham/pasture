@@ -551,7 +551,9 @@ func TestEngineShutdown_ReturnsNilWhenTheRuntimeStopsInsideItsBudget(t *testing.
 // shutdown costs about one budget; the ceiling below fails if a later runtime
 // starts spending it again on the parts that follow.
 func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.T) {
-	t.Parallel()
+	// This test measures a wall-clock ceiling. Run before the package's parallel
+	// engines so their SQLite polling and shutdown work cannot consume its slack.
+	// The budget and ceiling remain the same as the production contract below.
 	e, entered, release := blockingTransitionEngine(t)
 
 	if _, err := dbos.RunWorkflow(e.DBOS(), e.EpochWorkflow,
@@ -630,12 +632,12 @@ func TestEngineShutdown_NamesTheWorkStillRunningWhenTheBudgetExpires(t *testing.
 	// 2s of slack the ceiling leaves — about twice the worst reading — and a
 	// second spend clears the ceiling by a second or more.
 	//
-	// LIMIT: wall time cannot tell a slow machine from a slow runtime. The
-	// size of the two margins is the only defence, which is why the budget
-	// is large enough to make them wide.
+	// LIMIT: wall time cannot distinguish scheduler delay from another timeout
+	// spend. Keep this test serial, and investigate a ceiling failure rather
+	// than attributing it to either cause from elapsed time alone.
 	if ceiling := budget + budget*2/3; elapsed >= ceiling {
-		t.Errorf("Shutdown took %v, at or beyond the ceiling %v (the %v budget plus two thirds of it): one budget plus the worst measured load is about %v, and a second spend of the budget on a later part is about %v, so this reading is a second spend rather than load",
-			elapsed, ceiling, budget, budget+1021*time.Millisecond, 2*budget)
+		t.Errorf("Shutdown took %v, at or beyond the ceiling %v (the %v budget plus two thirds of it); inspect runtime component waits and scheduler contention before attributing this to another budget spend",
+			elapsed, ceiling, budget)
 	}
 }
 
