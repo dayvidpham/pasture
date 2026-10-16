@@ -38,6 +38,19 @@ class AnalysisTests(unittest.TestCase):
             (roots[1]/"manifest.json").write_text(json.dumps(changed))
             with self.assertRaisesRegex(ValueError,"changed seed/payload"):ANALYSIS.analyze(roots)
 
+    def test_durable_fault_responses_are_not_successful_acks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);manifest=self.manifest();row=manifest["runs"][0]
+            row["requests"].append(dict(row["requests"][0],successful_response=False,deadline_limited=True))
+            row["accounting"]["committed_delta_occurrences"]=2;row["accounting"]["verified"]=False
+            (root/"manifest.json").write_text(json.dumps(manifest))
+            group=ANALYSIS.analyze([root])["groups"][0]
+            self.assertEqual(group["failed_hooks"],0)
+            self.assertEqual(group["failed_hook_responses"],1)
+            self.assertEqual(group["committed_minus_acknowledged"],1)
+            self.assertEqual(group["successful_hook"]["n"],1)
+            self.assertFalse(group["accounting_verified"])
+
     def test_different_configured_caps_never_pool(self):
         for cap in ("batch_bytes","queue_records","queue_bytes","hold_target_ns"):
             with self.subTest(cap=cap), tempfile.TemporaryDirectory() as directory:
