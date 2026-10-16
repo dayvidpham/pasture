@@ -176,7 +176,8 @@ func TestOpenRetryCancellationPreventsAnotherAttempt(t *testing.T) {
 }
 
 func TestMigrateContextRealWriteLockCancelsWithoutReleasingHolder(t *testing.T) {
-	t.Parallel()
+	// Keep the wall-clock cancellation probe out of this package's parallel
+	// migration load; the holder below supplies the only intended contention.
 	path := filepath.Join(t.TempDir(), "migration-lock.db")
 	db, err := dbconn.OpenSharedDBContextWithProfile(t.Context(), path, timeouts.ProductionProfile())
 	require.NoError(t, err)
@@ -194,8 +195,79 @@ func TestMigrateContextRealWriteLockCancelsWithoutReleasingHolder(t *testing.T) 
 	defer cancel()
 	start := time.Now()
 	require.ErrorIs(t, MigrateContext(ctx, db), context.DeadlineExceeded)
-	require.Less(t, time.Since(start), timeouts.ProductionProfile().SQLiteBusy()+100*time.Millisecond)
+	elapsed := time.Since(start)
+	t.Logf("real migration lock: 25ms caller, %s SQLite busy tier, elapsed=%s with holder retained", timeouts.ProductionProfile().SQLiteBusy(), elapsed)
+	require.Less(t, elapsed, timeouts.ProductionProfile().SQLiteBusy()+100*time.Millisecond)
 	version, err := readVersion(db)
 	require.NoError(t, err)
 	require.Equal(t, 1, version, "the waiting migrator must not stamp a partial step")
+}
+
+// Complement the engine's real 25ms deadline probe with cancellation delivered
+// at a known boundary AFTER a real SQLite busy attempt. A timer firing late and
+// a runnable Go goroutine resuming late are different from spending another
+// database busy tier; this barrier removes timer delivery from the experiment.
+func TestAuditCallerCancellationAfterRealBusyAttempt(t *testing.T) {
+	profile := timeouts.DeadlineTestProfile()
+	trail, path := writerTrail(t, profile)
+	require.NoError(t, trail.RecordEvent(t.Context(), writerEvent()))
+	holder := writerHolder(t, path)
+	reached, resume := make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	trail.writerPolicy = defaultAuditWriterPolicy()
+	// A whole busy tier must not be spent after the cancellation below. Keep
+	// the real long backoff so ignoring the caller cannot accidentally pass.
+	trail.writerPolicy.initialDelay = time.Second
+	attempts := 0
+	trail.writerPolicy.afterAttempt = func(_ int, err error) {
+		attempts++
+		if !isAuditWriteContention(err) {
+			t.Errorf("real locked writer returned %v, want typed SQLite contention", err)
+		}
+	}
+	var once sync.Once
+	trail.writerPolicy.onBackoff = func(time.Duration) {
+		once.Do(func() {
+			close(reached)
+			<-resume
+		})
+	}
+	done := make(chan error, 1)
+	joined := false
+	release := sync.OnceFunc(func() { close(resume) })
+	defer func() {
+		cancel()
+		release()
+		_ = holder.Rollback()
+		if !joined {
+			<-done
+		}
+	}()
+	go func() { done <- trail.RecordEvent(ctx, writerEvent()) }()
+	select {
+	case <-reached:
+	case err := <-done:
+		joined = true
+		t.Fatalf("writer returned before the real contention/backoff barrier: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("writer never reached the real contention/backoff barrier")
+	}
+	start := time.Now()
+	cancel() // synchronous Done closure, not an asynchronously delivered timer.
+	release()
+	select {
+	case err := <-done:
+		joined = true
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("writer spent another wait after caller cancellation at the backoff barrier")
+	}
+	elapsed := time.Since(start)
+	t.Logf("real audit busy attempt joined %s after synchronous caller cancellation", elapsed)
+	require.Less(t, elapsed, 100*time.Millisecond)
+	require.Equal(t, 1, attempts, "cancellation must prevent the next transaction attempt")
+	// The independent holder is still locked. Neither cancellation nor the
+	// failed attempt may have published another event or released that lock.
+	require.Equal(t, 1, writerCount(t, trail, "audit_events"))
 }
