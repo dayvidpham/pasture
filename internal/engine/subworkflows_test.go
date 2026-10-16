@@ -2531,6 +2531,51 @@ func runningSliceCount(t *testing.T, e *engine.Engine, ids []string) int {
 	return running
 }
 
+type recoverySliceBarrier struct {
+	engine   *engine.Engine
+	released chan struct{}
+	once     sync.Once
+	active   atomic.Int64
+}
+
+func (b *recoverySliceBarrier) release() { b.once.Do(func() { close(b.released) }) }
+
+func (b *recoverySliceBarrier) run(ctx dbos.Context, in engine.SliceInput) (engine.SliceResult, error) {
+	_, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (struct{}, error) {
+		b.active.Add(1)
+		defer b.active.Add(-1)
+		select {
+		case <-b.released:
+			return struct{}{}, nil
+		case <-stepCtx.Done():
+			return struct{}{}, stepCtx.Err()
+		}
+	})
+	if err != nil {
+		return engine.SliceResult{}, err
+	}
+	return b.engine.SliceSubWorkflow(ctx, in)
+}
+
+// newRecoverySliceEngine registers a fixture workflow that holds a durable step
+// before calling the real slice implementation. Hooks are best-effort and their
+// dispatch deadline cannot safely hold work across a restart. This step instead
+// waits for explicit release OR engine cancellation: Shutdown joins its owner,
+// and DBOS leaves the interrupted operation uncheckpointed for recovery.
+// The fixture runs on the engine's real slice queue with its registered limit.
+func newRecoverySliceEngine(t *testing.T, o queueEngineOpts) (*engine.Engine, *recoverySliceBarrier) {
+	t.Helper()
+	o.skipLaunch = true
+	e := newQueueEngineFrom(t, o)
+	barrier := &recoverySliceBarrier{engine: e, released: make(chan struct{})}
+	t.Cleanup(barrier.release)
+	dbos.RegisterWorkflow(e.DBOS(), barrier.run, dbos.WithWorkflowName("held-recovery-slice"))
+	if err := e.Launch(); err != nil {
+		t.Fatalf("engine.Launch: %v", err)
+	}
+	return e, barrier
+}
+
 // TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets proves which
 // concurrency limit governs slices that come back after a crash.
 //
@@ -2542,11 +2587,10 @@ func runningSliceCount(t *testing.T, e *engine.Engine, ids []string) int {
 // limit for recovered work by restarting at the new limit, and the change takes
 // effect on work that was already interrupted.
 //
-// The bound is measured from the QUEUE's own read-back, not from hook counts. A
-// slice dispatches its start hook inside a durable step, so a recovered slice
-// whose hook step already recorded a result does not fire it again; counting
-// hooks would therefore measure step memoization rather than concurrency. The
-// gate is kept only to hold running slices still long enough to be observed.
+// The bound is measured from the QUEUE's own read-back, not from hook counts.
+// A fixture step holds each queued workflow before the real slice body; engine
+// cancellation interrupts that step without completing or rewriting the row.
+// Recovery must reexecute it on the same queue under the replacement limit.
 func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T) {
 	t.Parallel()
 	const crashedLimit = 4
@@ -2556,14 +2600,10 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 	dbPath := testutil.GoldenUnifiedDBPath(t)
 	executorID, appVersion := testEngineIdentity(t)
 
-	firstGate := &gatingConcurrencyHandler{release: make(chan struct{})}
-	firstMgr := hooks.NewManager(hooks.WithDispatchTimeout(4 * time.Second))
-	firstMgr.Register(firstGate)
-
-	first := newQueueEngineFrom(t, queueEngineOpts{
+	first, firstBarrier := newRecoverySliceEngine(t, queueEngineOpts{
 		dbPath: dbPath, k: crashedLimit,
 		executorID: executorID, appVersion: appVersion,
-		mgr: firstMgr, manualShutdown: true,
+		manualShutdown: true,
 	})
 	firstStopped := false
 	defer func() {
@@ -2577,9 +2617,18 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 	for i := range sliceIds {
 		sliceIds[i] = fmt.Sprintf("%s/gated-%02x", epochId, i)
 	}
-	startGatedSlices(t, first, epochId, slices)
+	for _, sliceId := range sliceIds {
+		// Run the held fixture on the production slice queue. Other tests cover
+		// EnqueueSlice itself; this test isolates queue recovery and its limit.
+		if _, err := dbos.RunWorkflow(first.DBOS(), firstBarrier.run,
+			engine.SliceInput{EpochId: epochId, SliceId: sliceId},
+			dbos.WithWorkflowID(sliceId), dbos.WithQueue(first.SliceQueue())); err != nil {
+			t.Fatalf("enqueue held slice %q: %v", sliceId, err)
+		}
+		sendMockStartSignal(t, first, sliceId, 30*time.Second)
+	}
 	waitUntil(t, 30*time.Second, func() bool {
-		return runningSliceCount(t, first, sliceIds) >= crashedLimit
+		return runningSliceCount(t, first, sliceIds) >= crashedLimit && firstBarrier.active.Load() >= crashedLimit
 	})
 	if got := runningSliceCount(t, first, sliceIds); got != crashedLimit {
 		t.Fatalf("before the crash the queue was running %d slices at once, want %d; the contrast with the limit after recovery is the point of this test",
@@ -2592,36 +2641,27 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 		}
 	}
 
-	// The crash. The engine stops FIRST, then every slice it had dequeued is
-	// marked as still running with no result. The order matters: marking first
-	// would race with a slice that finishes while the engine shuts down and
-	// writes its own result over the mark.
-	//
-	// A real killed process keeps the dequeue time on a queued workflow, which
-	// this mark clears. That difference does not matter to what is asserted
-	// below, because recovery clears the dequeue time itself.
-	first.Shutdown(10 * time.Second)
+	// Cancellation interrupts the held steps. A successful shutdown joins all
+	// old owners before the replacement may recover their genuinely pending
+	// rows. No SQL mark or rewind manufactures the interrupted state.
+	if err := first.Shutdown(10 * time.Second); err != nil {
+		t.Fatalf("stop the first engine and join its interrupted workflows: %v", err)
+	}
 	firstStopped = true
-	crashDB, err := dbconn.OpenSharedDB(dbPath)
-	if err != nil {
-		t.Fatalf("open the database to record the crash: %v", err)
+	if active := firstBarrier.active.Load(); active != 0 {
+		t.Fatalf("shutdown left %d old barrier owners running, want none before recovery", active)
 	}
 	for _, sliceId := range startedIds {
-		markWorkflowPending(t, crashDB, sliceId)
-	}
-	if err := crashDB.Close(); err != nil {
-		t.Fatalf("close the crash-recording handle: %v", err)
+		if started := assertStoppedMidFlight(t, dbPath, sliceId); started.IsZero() {
+			t.Fatalf("interrupted slice %q lost its dequeue time before recovery", sliceId)
+		}
 	}
 
 	// The replacement process registers the queue at the lower limit. Recovery
 	// runs inside Launch, before the queue is served.
-	secondGate := &gatingConcurrencyHandler{release: make(chan struct{})}
-	secondMgr := hooks.NewManager(hooks.WithDispatchTimeout(4 * time.Second))
-	secondMgr.Register(secondGate)
-	second := newQueueEngineFrom(t, queueEngineOpts{
+	second, secondBarrier := newRecoverySliceEngine(t, queueEngineOpts{
 		dbPath: dbPath, k: recoveredLimit,
 		executorID: executorID, appVersion: appVersion,
-		mgr: secondMgr,
 	})
 
 	// Read back the limit that is actually stored, not the one we asked for.
@@ -2644,12 +2684,14 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 		if running := runningSliceCount(t, second, sliceIds); running > highWater {
 			highWater = running
 		}
-		return highWater >= recoveredLimit
+		return highWater >= recoveredLimit && secondBarrier.active.Load() >= recoveredLimit
 	})
 	if highWater > recoveredLimit {
 		t.Errorf("the queue ran %d slices at once after the restart, want at most %d (the limit the restarted engine registered)",
 			highWater, recoveredLimit)
 	}
+	t.Logf("interrupted %d held slices with no old owners left; replacement queue high-water = %d, limit = %d",
+		len(startedIds), highWater, recoveredLimit)
 	for _, sliceId := range startedIds {
 		if got := workflowStatusOf(t, second, sliceId).QueueName; got != engine.SliceQueueName {
 			t.Errorf("recovered slice %q is on queue %q, want %q; the limit only applies on that queue",
@@ -2657,8 +2699,7 @@ func TestRecovery_RecoveredSlicesObeyTheLimitTheRestartedEngineSets(t *testing.T
 		}
 	}
 
-	close(secondGate.release)
-	close(firstGate.release)
+	secondBarrier.release()
 	// The handles the crashed engine returned died with it, so the results are
 	// read back through the restarted engine.
 	for _, sliceId := range sliceIds {
