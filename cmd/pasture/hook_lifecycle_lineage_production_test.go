@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"github.com/dayvidpham/provenance"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -174,29 +172,31 @@ func TestLineageOverCapRefusesAndCommitsNothing(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
+	binary := lifecycleBinary(t)
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 	raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
 
 	const deliveries = 66 // 66 occurrences -> 65 predecessor edges > 64 cap
 	for i := 0; i < deliveries; i++ {
-		require.NoError(t, handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{
-			DBPath: dbPath, Harness: "claude-code", Event: "SessionStart", HostVersion: "2.1.261",
-			Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
-		}))
+		deliverClaudeBuilt(t, binary, dbPath, "SessionStart", raw)
 	}
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind), deliveries)
+	require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind), deliveries,
+		"the cap proof retains all 66 real semantic receipts, not record-only substitutes")
+	require.NoError(t, tracker.Close())
 
-	var out bytes.Buffer
-	code, err := handlers.HookLifecycleLineage(context.Background(), &out, handlers.HookLifecycleLineageInput{
-		DBPath:     dbPath,
-		Binding:    "session:session_id=c02859c0-10ab-49c3-9b93-29280bd45fbb",
-		Clock:      lifecycleCLIClock{},
-		Operations: lifecycleCLIOperations{},
-	}, "text")
-	require.Error(t, err)
+	// Like the other lineage command proofs, drive the actual executable.
+	// This sequential read/derive/refuse path has no concurrency to instrument;
+	// receipt, projection and envelope-owner races remain in their package
+	// suites. Repeating their instrumented SQLite owner reads for all 66
+	// records here duplicated that work, not a distinct race interleaving.
+	out, diagnostics, code := runLineageBuilt(t, binary, dbPath, "session:session_id="+sharedSessionIdentity, "text")
 	require.NotEqual(t, 0, code)
 	require.NotEqual(t, 2, code, "no lifecycle path may emit exit code 2")
-	require.Contains(t, err.Error(), "narrow the scope with --binding")
-	require.Empty(t, out.String(), "an over-cap refusal must print nothing")
+	require.Contains(t, diagnostics, "narrow the scope with --binding")
+	require.Empty(t, out, "an over-cap refusal must print nothing")
 	require.Zero(t, countLinkEvidence(t, dbPath), "an over-cap refusal must commit no links (read-back empty)")
 }

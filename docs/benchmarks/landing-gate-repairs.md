@@ -294,6 +294,60 @@ exact integration tree. No dedicated version-command tests were added.
 
 ## Completion rule
 
+### Hosted-runner failures after the local green candidate
+
+PR221 CI run38978968155 on `13328c7` failed; it was not merged or tagged.
+The cmd/pasture30-minute package timeout caught the lineage cap proof actively
+executing SQLite definition-owner queries under semantic-envelope validation.
+It was past all66 deliveries, inside the lineage read. The listed environment
+subtests were waiting in `testing.waitParallel`, not stuck in their own logic;
+the authentic PostToolBatch case was building an ordinary new store. This
+snapshot establishes active work and queueing, not a deadlock or a measured
+historical runner CPU allocation.
+
+A local GOMAXPROCS2 baseline cap proof took130.56s, with129.74 CPU seconds over
+128.39 sampled wall seconds; `ResolveDefinitionAt` accounted for47.52s and
+`HookLifecycleLineage` for57.90s cumulative CPU, alongside substantial race and
+checkptr overhead. That baseline used Go1.26.3; subsequent repair validation
+uses the actual CI Go1.26.9. No toolchain-regression cause is asserted.
+
+The cap proof now follows the other lineage proofs through the built production
+CLI. All66 authentic deliveries, semantic receipts and65 derived predecessor
+edges remain; no record-only substitute, fake SQL or smaller boundary is used.
+The real command still performs every envelope-owner check before refusing.
+This sequential command path has no distinct concurrent interleaving to lose;
+the full race suite continues to instrument receipt/projection/owner packages,
+including `TestReceiveCommitsBothCompleteEnvelopes`,
+`TestResolveSemanticEnvelopeRefusesCorruptSlots` and
+`TestTurnScopeSharesDefinitionEnsuresAcrossRecords`. The cap command's SQLite
+loops are no longer instrumented a second time across66 records. Raising the
+actual production cap from64 to65 in an overlay makes this proof fail on a
+successful exit, demonstrating the boundary is still enforced.
+
+The authentic Claude transport matrix now copies only its immutable initialized
+store prerequisite. That source is constructed once with the original real
+opener/Create, then closed and WAL-checkpointed before publication. Every
+absent/empty hint case keeps a separate writable copy and invokes the same real
+generated command, with all original fixture/byte/evidence assertions. No
+definition or receipt is pre-seeded. A new proof writes a real receipt to one
+copy and requires another to remain receipt-free; exclusive copy creation
+refuses aliasing. Ordinary opener/bootstrap subjects remain unchanged.
+
+The handler failure was the observation control's cold gated commit deadline,
+not acceptance of the unauthorized gate. Its no-verdict/no-receipt refusal is
+still checked on the cold store first. Only then are immutable owners prepared
+on a bounded service copy; the observation uses the unchanged original budget,
+and the proof precedes unrelated package-parallel load. A controlled1100ms
+definition-commit delay breaks the old fixture at its observation assertion and
+passes the repair; bypassing the real no-verdict refusal still fails. This
+controlled mechanism does not identify the precise historical scheduler delay.
+
+Full affected packages under Go1.26.9, GOMAXPROCS2 and physical CPU affinity0,1
+pass with the actual CI race/count/30m flags: cmd/pasture713.77s and
+internal/handlers256.99s. Focused authentic/copy/cap/handler checks also pass.
+No operation timeout,30-minute suite ceiling, performance band, package/test
+coverage, production20/25 setting, dependency pin or version was widened.
+
 ### Approved separation of measurement and race correctness
 
 On 2026-10-16 the operator explicitly approved separate required phases, not
