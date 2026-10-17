@@ -34,6 +34,25 @@ func cleanupTrail(t *testing.T, logger *slog.Logger) *SqliteAuditTrail {
 	return s
 }
 
+// Some owner handlers reject cancelled work. The already-committed warning
+// must still reach such a handler after the original caller cancels.
+type liveCleanupHandler struct{ slog.Handler }
+
+func (h liveCleanupHandler) Handle(ctx context.Context, record slog.Record) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return h.Handler.Handle(ctx, record)
+}
+
+func (h liveCleanupHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return liveCleanupHandler{h.Handler.WithAttrs(attrs)}
+}
+
+func (h liveCleanupHandler) WithGroup(group string) slog.Handler {
+	return liveCleanupHandler{h.Handler.WithGroup(group)}
+}
+
 // Actual COMMIT, actual expired cleanup context and actual driver retirement.
 // Cancellation after COMMIT cannot undo the row or cancel detached diagnostics.
 func TestCommittedCleanupDeadlineReturnsSuccessWithWarning(t *testing.T) {
@@ -44,7 +63,7 @@ func TestCommittedCleanupDeadlineReturnsSuccessWithWarning(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			var diagnostics bytes.Buffer
-			s := cleanupTrail(t, slog.New(slog.NewJSONHandler(&diagnostics, nil)))
+			s := cleanupTrail(t, slog.New(liveCleanupHandler{slog.NewJSONHandler(&diagnostics, nil)}))
 			conn, err := s.db.Conn(t.Context())
 			if err != nil {
 				t.Fatal(err)
