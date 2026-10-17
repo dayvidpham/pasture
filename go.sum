@@ -2,8 +2,8 @@ github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6N
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/dayvidpham/bestiary v0.1.0 h1:5ovdxMlRgssn3+oJCZqjbhlhX6aQwbYFf981LbMAhII=
-github.com/dayvidpham/bestiary v0.1.0/go.mod h1:Z2/Ax6PmmBqhHomuLDjvf+JQBo0K7TFyrQN7pOCOpKs=
+github.com/dayvidpham/bestiary v0.2.11 h1:DT3A5QK5VOW6c0bhrLXz/inB4oHO2hDKqa5sQc5+h6A=
+github.com/dayvidpham/bestiary v0.2.11/go.mod h1:X+WiGZpdSPIyjIwBcVftqpoXlfXg5YHVEajvcxjh9Ec=
 github.com/dayvidpham/provenance v0.10.0 h1:GmfxFzrlssByYd2jNeuDujA49lcQxLUVEScROn4ZG0g=
 github.com/dayvidpham/provenance v0.10.0/go.mod h1:ao5LwQmM+gQljnlT9ZgG/NUcCxQwLVQKrZtS+a5Nkck=
 github.com/dbos-inc/dbos-transact-golang v1.2.0 h1:o1CaHn+E7FQSBXJ/rUP7vV+yTYZB7vhzd98dnyxLlMA=
