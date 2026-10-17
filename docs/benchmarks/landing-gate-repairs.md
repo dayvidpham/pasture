@@ -294,6 +294,38 @@ exact integration tree. No dedicated version-command tests were added.
 
 ## Completion rule
 
+### Approved committed-audit cleanup outcome, 2026-10-17
+
+PR221 run38996221869 failed only the eight-isolated-engine spike: two workers
+reported a definitely committed audit write followed by restoration deadline
+expiry. Local constrained reproduction can force the same error by allowing the
+existing detached cleanup deadline to expire after the real COMMIT. It proves
+the failure phase, not why the historical runner missed that deadline.
+
+The operator explicitly approved a narrow outcome change: a definitely
+successful COMMIT, an exact expired cleanup-deadline sentinel and confirmed
+driver retirement from database/sql's pool may return committed success, never
+retry, with an explicit structured warning. The real Raw callback must run and
+return ErrBadConn; ErrConnDone alone is not confirmation. This proves pool
+non-reuse, not physical driver Close success or fsync. A replacement still
+passes the original connector's standing-policy verification before use.
+
+Unknown/failed commit, pre-commit rollback, unconfirmed retirement, policy or
+integrity errors, joined/unrecognized restoration errors, and disabled/failed
+warning delivery remain hard errors. Warning emission uses the owning logger:
+engine configuration for engine-created trails, unified-store diagnostics for
+the daemon/CLI including auto-cutover, and the process default for direct audit
+callers. Only fixed operation/outcome/action fields are logged, never payloads,
+actor identities or database paths. Cancellation after COMMIT cannot suppress
+the detached cleanup warning or cause another write attempt.
+
+The cleanup/ingress/operation budgets, performance floors,20records/25ms,
+Pasturev0.0.21 and Provenancev0.10.1 are unchanged. Prior hard-error policy tests
+remain as evidence for unrecognized restoration faults; new regressions cover
+the approved deadline case and fail when retirement or warning emission is
+removed. No standalone final release wave is authorized yet: the operator
+placed publication on hold pending inclusion and combined review of issue220.
+
 ### Hosted-runner failures after the local green candidate
 
 PR221 CI run38978968155 on `13328c7` failed; it was not merged or tagged.

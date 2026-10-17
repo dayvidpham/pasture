@@ -283,10 +283,10 @@ func newEngine(ctx context.Context, cfg Config, beforeAudit func(*sql.DB)) (*Eng
 		var err error
 		if cfg.SkipMigrations {
 			st, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, cfg.DBPath,
-				audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.Timeouts))
+				audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.Timeouts), audit.WithLogger(logger))
 		} else {
 			st, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, cfg.DBPath,
-				audit.WithTimeoutProfile(cfg.Timeouts))
+				audit.WithTimeoutProfile(cfg.Timeouts), audit.WithLogger(logger))
 		}
 		if err != nil {
 			_ = db.Close()

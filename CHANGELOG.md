@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.0.21] - 2026-10-16
+## [0.0.21] - 2026-10-17
 
 Release-preparation candidate, **not published**. The separately owned version
 command and published Provenance v0.10.1 dependency pin/checksums/Nix vendor closure
@@ -17,6 +17,11 @@ candidate versions. No existing contract is removed.
   budgets, sparse-tail limits and a recommendation to retain 20 records / 25 ms.
 
 ### Fixed
+- A definitely committed audit write now returns success with a structured cleanup
+  warning if its cleanup deadline expires and its connection is confirmed retired
+  from the pool. Unknown commits, unconfirmed retirement, unrecognized cleanup
+  failures and unavailable warning delivery remain errors; writes are never blindly
+  retried. This does not claim physical close/fsync confirmation or widen budgets.
 - End queue residence at batch start and report same-batch preparation separately.
 - Refuse successful-work speedup ratios for fault responses, missing routing proof,
   changed inputs or incomplete offered/committed accounting.
@@ -27,7 +32,8 @@ candidate versions. No existing contract is removed.
   create median was 1686→101 ms with 72/72 commits on each side; copied C18 create
   still committed only 28/72 after optimization. These are sandbox observations,
   not general latency guarantees; hook preparation costs remain.
-- Production batch/flush defaults, timeouts and failure policy remain unchanged.
+- Production batch/flush defaults, timeouts and hook failure policy remain unchanged.
+  The narrowly scoped committed-audit cleanup outcome change is described above.
   Burst timers were bypassed; measured SQL transaction scope around 66 ms is not
   whole-turn elapsed around 444 ms or a physical-lock bound. Peer tails are sparse.
 

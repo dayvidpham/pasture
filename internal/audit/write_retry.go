@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -19,6 +20,7 @@ type auditWriterPolicy struct {
 	onBackoff                       func(time.Duration)
 	commit                          func(*sql.Tx) error
 	restore                         func(context.Context, *sql.Conn, int64) error
+	retire                          func(*sql.Conn) error
 }
 
 func defaultAuditWriterPolicy() auditWriterPolicy {
@@ -63,7 +65,7 @@ func (s *SqliteAuditTrail) withAuditWrite(ctx context.Context, operation string,
 	budget, cancel := context.WithTimeout(ctx, p.ceiling)
 	defer cancel()
 	return retryAuditWrite(budget, operation, p, func(ctx context.Context) auditAttemptResult {
-		return s.auditWriteAttempt(ctx, p, op)
+		return s.auditWriteAttempt(ctx, operation, p, op)
 	})
 }
 
@@ -109,7 +111,7 @@ func retryAuditWrite(ctx context.Context, operation string, p auditWriterPolicy,
 	}
 }
 
-func (s *SqliteAuditTrail) auditWriteAttempt(ctx context.Context, p auditWriterPolicy, op func(context.Context, *sql.Tx) error) auditAttemptResult {
+func (s *SqliteAuditTrail) auditWriteAttempt(ctx context.Context, operation string, p auditWriterPolicy, op func(context.Context, *sql.Tx) error) auditAttemptResult {
 	const unchanged = "No transaction committed in this call; failed attempts were rolled back or never started."
 	if err := ctx.Err(); err != nil {
 		return auditAttemptResult{err: err, impact: unchanged}
@@ -177,12 +179,24 @@ func (s *SqliteAuditTrail) auditWriteAttempt(ctx context.Context, p auditWriterP
 	if !uncertain && !discard {
 		cleanupErr = restore(cleanupCtx, conn, tier.Milliseconds())
 	}
+	// Only the exact expired cleanup deadline is the approved degraded-success
+	// case. A policy mismatch, SQLite failure or joined/unrecognized cause is
+	// not made harmless merely by retiring its connection.
+	cleanupDeadline := cleanupErr == context.DeadlineExceeded && cleanupCtx.Err() == context.DeadlineExceeded
+	retired := false
 	if uncertain || discard || cleanupErr != nil {
 		// ErrBadConn from Raw synchronously closes/removes the driver connection.
 		// No reduced busy tier or uncertain transaction is returned to the pool.
-		discardErr := conn.Raw(func(any) error { return driver.ErrBadConn })
-		if !errors.Is(discardErr, driver.ErrBadConn) && !errors.Is(discardErr, sql.ErrConnDone) {
-			cleanupErr = errors.Join(cleanupErr, discardErr)
+		retire := p.retire
+		if retire == nil {
+			retire = retireAuditConnection
+		}
+		retireErr := retire(conn)
+		retired = retireErr == nil
+		if retireErr != nil {
+			// Keep the failure, even if a defensive retirement now succeeds.
+			// Never return a reduced-policy connection after a failed adapter.
+			cleanupErr = errors.Join(cleanupErr, retireErr, retireAuditConnection(conn))
 		}
 	}
 	cancel()
@@ -191,6 +205,13 @@ func (s *SqliteAuditTrail) auditWriteAttempt(ctx context.Context, p auditWriterP
 		closeErr = nil
 	}
 	cleanupErr = errors.Join(cleanupErr, closeErr)
+	if committed && !uncertain && !discard && err == nil && cleanupDeadline && retired && closeErr == nil {
+		if warningErr := s.warnCommittedCleanup(ctx, operation); warningErr == nil {
+			return auditAttemptResult{} // Known durable success; never retry it.
+		} else {
+			cleanupErr = errors.Join(cleanupErr, warningErr)
+		}
+	}
 	impact := unchanged
 	what := ""
 	if discard && !uncertain {
@@ -213,6 +234,40 @@ func (s *SqliteAuditTrail) auditWriteAttempt(ctx context.Context, p auditWriterP
 		impact: impact,
 		what:   what,
 	}
+}
+
+// Raw's ErrBadConn path removes the driver from database/sql's pool before
+// returning. It does not expose the physical driver's Close result; this proves
+// non-reuse, not a filesystem-close or fsync guarantee. ErrConnDone alone says
+// nothing about how the owner released it, so it is NOT confirmation here.
+func retireAuditConnection(conn *sql.Conn) error {
+	entered := false
+	err := conn.Raw(func(any) error { entered = true; return driver.ErrBadConn })
+	if entered && errors.Is(err, driver.ErrBadConn) {
+		return nil
+	}
+	if err == nil {
+		err = errors.New("Raw did not confirm driver invalidation")
+	}
+	return fmt.Errorf("audit cleanup could not confirm connection retirement from the pool: %w", err)
+}
+
+func (s *SqliteAuditTrail) warnCommittedCleanup(ctx context.Context, operation string) error {
+	ctx = context.WithoutCancel(ctx)
+	if s.logger == nil || !s.logger.Enabled(ctx, slog.LevelWarn) {
+		return errors.New("committed audit cleanup warning cannot be delivered; enable warning diagnostics before accepting degraded cleanup")
+	}
+	record := slog.NewRecord(time.Now(), slog.LevelWarn, "Audit write committed; cleanup deadline expired and the connection was retired from the pool", 0)
+	record.AddAttrs(slog.String("event", "audit_cleanup_retired"),
+		slog.String("operation", operation), slog.String("durability", "committed"),
+		slog.String("cleanup", "deadline_exceeded"), slog.String("connection", "retired_from_pool"),
+		slog.String("action", "Do not retry this committed write; inspect storage contention if cleanup warnings recur."))
+	// Unlike Logger.Log, Handle returns sink failures. A disabled or failed
+	// diagnostic must not silently convert a cleanup error into an ACK.
+	if err := s.logger.Handler().Handle(ctx, record); err != nil {
+		return fmt.Errorf("committed audit cleanup warning delivery failed: %w", err)
+	}
+	return nil
 }
 
 func restoreAuditBusyTier(ctx context.Context, conn *sql.Conn, ms int64) error {

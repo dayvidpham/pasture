@@ -30,6 +30,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,8 +109,8 @@ func WithStoreClock(clock receipt.Clock) OpenTaskTrackerOption {
 	return func(o *openTaskTrackerOptions) { o.clock = clock }
 }
 
-// WithDiagnosticSink replaces the stream the store writes its one housekeeping
-// diagnostic to (a failed orphan reclaim). It is a TEST-ONLY option: production
+// WithDiagnosticSink replaces the stream for housekeeping diagnostics and
+// structured committed-cleanup warnings. It is a TEST-ONLY option: production
 // opens with the process stderr. A nil sink is refused at open, not defaulted.
 func WithDiagnosticSink(sink io.Writer) OpenTaskTrackerOption {
 	return func(o *openTaskTrackerOptions) { o.diagnostics = sink }
@@ -262,9 +263,9 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 	} else {
 		// NORMAL: the trail open is a no-op when the store is current.
 		if cfg.skipMigrations {
-			trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.timeouts))
+			trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithSkipMigrations(), audit.WithTimeoutProfile(cfg.timeouts), audit.WithLogger(slog.New(slog.NewJSONHandler(cfg.diagnostics, nil))))
 		} else {
-			trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithTimeoutProfile(cfg.timeouts))
+			trail, err = audit.NewSqliteAuditTrailContextWithOptions(ctx, dbPath, audit.WithTimeoutProfile(cfg.timeouts), audit.WithLogger(slog.New(slog.NewJSONHandler(cfg.diagnostics, nil))))
 		}
 		if err != nil {
 			return nil, wrapOpenError(dbPath, "audit subsystem", err)
@@ -383,6 +384,7 @@ func runAutoCutover(ctx context.Context, dbPath string, poolSize int, cfg openTa
 		StorePath:      dbPath,
 		Now:            time.Now,
 		TimeoutProfile: cfg.timeouts,
+		Logger:         slog.New(slog.NewJSONHandler(cfg.diagnostics, nil)),
 	})
 	if err != nil {
 		return nil, nil, wrapOpenError(dbPath, "archive/catch-up", err)

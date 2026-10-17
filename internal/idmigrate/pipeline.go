@@ -2,6 +2,7 @@ package idmigrate
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/audit"
@@ -21,6 +22,8 @@ type CatchUpOptions struct {
 	// offline command leaves it zero (the audit subsystem's own default); the
 	// first-open auto cutover passes the resolved store profile.
 	TimeoutProfile timeouts.Profile
+	// Logger owns warnings from the returned trail. Nil retains the process default.
+	Logger *slog.Logger
 }
 
 // CatchUpResult is the P1+P2 state both frontends hand to Convert.
@@ -62,6 +65,9 @@ func RunCatchUp(ctx context.Context, opts CatchUpOptions) (CatchUpResult, error)
 	trailOptions := []audit.SqliteAuditTrailOption{audit.WithDeferredCeiling(audit.MaxKnownSchemaVersion - 1)}
 	if !opts.TimeoutProfile.IsZero() {
 		trailOptions = append(trailOptions, audit.WithTimeoutProfile(opts.TimeoutProfile))
+	}
+	if opts.Logger != nil {
+		trailOptions = append(trailOptions, audit.WithLogger(opts.Logger))
 	}
 	trail, err := audit.NewSqliteAuditTrailContextWithOptions(ctx, opts.StorePath, trailOptions...)
 	if err != nil {

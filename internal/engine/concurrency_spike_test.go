@@ -418,17 +418,26 @@ func TestEngineAuditTrailPinsConfiguredProfileSupplier(t *testing.T) {
 		}
 		count++
 		found := false
+		loggerFound := false
 		for _, arg := range call.Args {
 			option, ok := arg.(*ast.CallExpr)
 			if !ok || len(option.Args) != 1 {
 				continue
 			}
 			fun, ok := option.Fun.(*ast.SelectorExpr)
-			if !ok || fun.Sel.Name != "WithTimeoutProfile" {
+			if !ok {
 				continue
 			}
 			pkg, ok := fun.X.(*ast.Ident)
 			if !ok || pkg.Name != "audit" {
+				continue
+			}
+			if fun.Sel.Name == "WithLogger" {
+				value, ok := option.Args[0].(*ast.Ident)
+				loggerFound = ok && value.Name == "logger"
+				continue
+			}
+			if fun.Sel.Name != "WithTimeoutProfile" {
 				continue
 			}
 			value, ok := option.Args[0].(*ast.SelectorExpr)
@@ -440,6 +449,9 @@ func TestEngineAuditTrailPinsConfiguredProfileSupplier(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s drops cfg.Timeouts from forensic trail construction", selector.Sel.Name)
+		}
+		if !loggerFound {
+			t.Errorf("%s drops the owning engine logger from forensic cleanup diagnostics", selector.Sel.Name)
 		}
 		return true
 	})

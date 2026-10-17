@@ -686,6 +686,8 @@ func TestAuditWriterAcquisitionReceivesCurrentOperationBudget(t *testing.T) {
 }
 
 func TestAuditWriterRestoreFailureDiscardsConnection(t *testing.T) {
+	// An unrecognized restoration failure is NOT the approved expired-cleanup
+	// case: it remains an error even after a known commit and safe retirement.
 	t.Parallel()
 	s, _ := writerTrail(t, timeouts.ProductionProfile())
 	conn, err := s.db.Conn(context.Background())
