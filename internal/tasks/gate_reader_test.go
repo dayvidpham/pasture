@@ -749,6 +749,100 @@ func TestGateReaderClaimReadFaultsWhenThePoolStaysBusy(t *testing.T) {
 
 // ─── the claim insert interleave ──────────────────────────────────────────────
 
+type claimSnapshotRun struct {
+	done     chan struct{}
+	snapshot gateauthority.Snapshot
+	err      error
+}
+
+func startClaimSnapshot(t *testing.T, ctx context.Context, reader gateauthority.Reader, release func()) *claimSnapshotRun {
+	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	run := &claimSnapshotRun{done: make(chan struct{})}
+	// Install before launch: a failed writer assertion must release a reader
+	// held at the seam, join it, and close its snapshot before store cleanup.
+	t.Cleanup(func() {
+		release()
+		cancel()
+		select {
+		case <-run.done:
+		case <-time.After(5 * time.Second):
+			t.Error("claim snapshot owner did not join within 5s after release/cancel; retaining its store until it exits")
+			<-run.done
+		}
+		if run.snapshot != nil {
+			require.NoError(t, run.snapshot.Close())
+		}
+	})
+	go func() {
+		defer close(run.done)
+		run.snapshot, run.err = reader.Snapshot(ctx)
+	}()
+	return run
+}
+
+func (run *claimSnapshotRun) awaitClaimRead(ctx context.Context, claimRead <-chan struct{}) error {
+	select {
+	case <-claimRead:
+		return nil
+	case <-run.done:
+		if run.err == nil {
+			return fmt.Errorf("claim snapshot returned successfully without reaching the afterClaimRead boundary")
+		}
+		return fmt.Errorf("claim snapshot returned before the afterClaimRead boundary: %w", run.err)
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for claim snapshot boundary or result: %w", ctx.Err())
+	}
+}
+
+func TestClaimSnapshotBoundaryReportsEarlyFailure(t *testing.T) {
+	store, _ := openGateStore(t)
+	reader, err := NewGateReader(store, gateHarness, "cancelled-before-read")
+	require.NoError(t, err)
+	claimRead := make(chan struct{})
+	reader.(*gateReader).afterClaimRead = func() { close(claimRead) }
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // Actual production Snapshot error before its private read seam.
+	run := startClaimSnapshot(t, ctx, reader, func() {})
+	wait, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
+	err = run.awaitClaimRead(wait, claimRead)
+	require.ErrorContains(t, err, "returned before the afterClaimRead boundary")
+	require.ErrorIs(t, err, context.Canceled)
+	select {
+	case <-run.done:
+	default:
+		t.Fatal("early-error observation must join the actual snapshot owner")
+	}
+}
+
+func TestClaimSnapshotBoundaryCleanupReleasesHeldOwner(t *testing.T) {
+	store, _ := openGateStore(t)
+	var run *claimSnapshotRun
+	t.Run("return while the actual owner is held", func(t *testing.T) {
+		reader, err := NewGateReader(store, gateHarness, "cleanup-boundary")
+		require.NoError(t, err)
+		claimRead, allowSeal := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		release := func() { once.Do(func() { close(allowSeal) }) }
+		reader.(*gateReader).afterClaimRead = func() {
+			close(claimRead)
+			<-allowSeal
+		}
+		run = startClaimSnapshot(t, t.Context(), reader, release)
+		wait, stop := context.WithTimeout(t.Context(), 5*time.Second)
+		defer stop()
+		require.NoError(t, run.awaitClaimRead(wait, claimRead))
+		// No explicit release or join: exercise the same cleanup Go invokes
+		// when a later writer assertion aborts the interleaving proof.
+	})
+	select {
+	case <-run.done:
+	default:
+		t.Fatal("subtest cleanup returned before releasing and joining its snapshot owner")
+	}
+}
+
 // TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt puts a concurrent claim
 // INSERT at the three positions that matter around the claim read and requires
 // one whole answer each time. A snapshot that tore would report a session the
@@ -783,20 +877,16 @@ func TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt(t *testing.T) {
 
 		claimRead := make(chan struct{})
 		allowSeal := make(chan struct{})
+		var once sync.Once
+		release := func() { once.Do(func() { close(allowSeal) }) }
 		concrete.afterClaimRead = func() {
 			close(claimRead)
 			<-allowSeal
 		}
-		type outcome struct {
-			snapshot gateauthority.Snapshot
-			err      error
-		}
-		sealed := make(chan outcome, 1)
-		go func() {
-			snapshot, snapshotErr := reader.Snapshot(t.Context())
-			sealed <- outcome{snapshot, snapshotErr}
-		}()
-		<-claimRead
+		run := startClaimSnapshot(t, t.Context(), reader, release)
+		wait, stop := context.WithTimeout(t.Context(), 5*time.Second)
+		defer stop()
+		require.NoError(t, run.awaitClaimRead(wait, claimRead), "the actual claim read must reach its boundary before the competing insert")
 
 		// A second connection commits the claim while the Reader is stopped
 		// after its completed no-row read and its released claim connection.
@@ -809,11 +899,10 @@ func TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt(t *testing.T) {
 		require.NoError(t, err, "a writer must be able to commit while the Reader is stopped at the read boundary")
 		require.NoError(t, writer.Close())
 
-		close(allowSeal)
-		result := <-sealed
-		require.NoError(t, result.err)
-		t.Cleanup(func() { require.NoError(t, result.snapshot.Close()) })
-		claim, err := result.snapshot.ResolveSession(gateHarness, "boundary-session")
+		release()
+		<-run.done
+		require.NoError(t, run.err)
+		claim, err := run.snapshot.ResolveSession(gateHarness, "boundary-session")
 		require.NoError(t, err)
 		require.False(t, claim.Bound, "the no-row read completed before the insert, so the answer is unbound")
 		require.Equal(t, 1, counts.count(gateClaimReadToken), "the Reader must not re-read the claim to notice the insert")
@@ -824,7 +913,7 @@ func TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, freshClaim.Bound)
 		require.Equal(t, actor, freshClaim.Actor)
-		again, err := result.snapshot.ResolveSession(gateHarness, "boundary-session")
+		again, err := run.snapshot.ResolveSession(gateHarness, "boundary-session")
 		require.NoError(t, err)
 		require.Equal(t, claim, again, "a sealed answer must not change after it is sealed")
 	})
