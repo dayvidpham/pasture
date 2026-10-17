@@ -33,6 +33,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"sort"
@@ -84,13 +85,19 @@ type TaskAgentRegisterInput struct {
 // TaskAgentsRegister registers a new agent of the requested kind and prints its
 // wire-format ID. Returns the standard (exitCode, error) tuple.
 func TaskAgentsRegister(w io.Writer, in TaskAgentRegisterInput, format types.OutputFormat) (int, error) {
+	return TaskAgentsRegisterContext(context.Background(), w, in, format)
+}
+
+// TaskAgentsRegisterContext carries cancellation through catalog refresh and store opening.
+// The existing registration SQL itself is context-free and may finish after cancellation.
+func TaskAgentsRegisterContext(ctx context.Context, w io.Writer, in TaskAgentRegisterInput, format types.OutputFormat) (int, error) {
 	switch in.Kind {
 	case AgentRegisterHuman:
 		return registerHumanAgent(w, in, format)
 	case AgentRegisterSoftware:
 		return registerSoftwareAgent(w, in, format)
 	case AgentRegisterML:
-		return registerMLAgent(w, in, format)
+		return registerMLAgent(ctx, w, in, format, defaultModelCatalog())
 	default:
 		return agentRegisterValidation(
 			fmt.Sprintf("Unknown agent kind %q.", in.Kind),
@@ -194,7 +201,7 @@ func registerSoftwareAgent(w io.Writer, in TaskAgentRegisterInput, format types.
 	}, format)
 }
 
-func registerMLAgent(w io.Writer, in TaskAgentRegisterInput, format types.OutputFormat) (int, error) {
+func registerMLAgent(ctx context.Context, w io.Writer, in TaskAgentRegisterInput, format types.OutputFormat, catalog modelCatalog) (int, error) {
 	roleText := strings.TrimSpace(in.Role)
 	if roleText == "" {
 		return agentRegisterValidation(
@@ -219,52 +226,44 @@ func registerMLAgent(w io.Writer, in TaskAgentRegisterInput, format types.Output
 		)
 	}
 
-	providerText := strings.TrimSpace(in.Provider)
+	providerText := in.Provider
 	if providerText == "" {
 		return agentRegisterValidation(
 			"A provider is required to register a machine-learning agent.",
 			"The --provider flag was missing or empty. The provider names which organisation publishes the model.",
 			"1. Pass the provider with --provider:\n"+
 				"     pasture task agents register ml --role worker --provider anthropic --model claude-opus-4-6\n"+
-				"2. Known providers include: "+listKnownProviders(),
+				"2. For a verified uncatalogued pair, use pasture models allow --provider <provider> --model <model>.",
 			nil,
 		)
 	}
 	provider := provenance.Provider(providerText)
-	if !provider.IsValid() {
-		return agentRegisterValidation(
-			fmt.Sprintf("%q isn't a recognised model provider.", providerText),
-			"The provider must match a provider in the known-model catalog.",
-			"1. Pass one of the known providers (case-sensitive):\n"+
-				"     "+listKnownProviders()+"\n"+
-				"2. Then register with a known model, for example:\n"+
-				"     pasture task agents register ml --role worker --provider <provider> --model <model>",
-			nil,
-		)
-	}
 
-	modelText := strings.TrimSpace(in.Model)
+	modelText := in.Model
 	if modelText == "" {
 		return agentRegisterValidation(
 			"A model is required to register a machine-learning agent.",
 			"The --model flag was missing or empty. The model names which model the agent runs.",
 			"1. Pass the model with --model:\n"+
 				"     pasture task agents register ml --role worker --provider anthropic --model claude-opus-4-6\n"+
-				"2. Known models for "+providerText+": "+listProviderModels(provider),
+				"2. For a verified uncatalogued pair, use pasture models allow --provider <provider> --model <model>.",
 			nil,
 		)
 	}
+	if err := validateModelPair(providerText, modelText); err != nil {
+		return agentRegisterValidation(
+			err.Error(), "Provider and model must be exact base identities.",
+			"Use pasture task agents register ml with separate --provider and --model flags without whitespace or #variant.", err,
+		)
+	}
 	model := provenance.ModelID(modelText)
-	registry := provenance.DefaultModelRegistry()
-	if _, ok := registry.Lookup(provider, modelText); !ok {
+	registry, err := catalog.resolve(ctx, providerText, modelText)
+	if err != nil {
 		return agentRegisterValidation(
 			fmt.Sprintf("The model %q isn't known for provider %q.", modelText, providerText),
-			"A machine-learning identity can only be registered for a model the store knows about, and this provider/model pair isn't in the catalog.",
-			"1. Pass a known model for "+providerText+":\n"+
-				"     "+listProviderModels(provider)+"\n"+
-				"2. Or pick a different provider/model pair:\n"+
-				"     pasture task agents register ml --role worker --provider <provider> --model <model>",
-			nil,
+			err.Error(),
+			fmt.Sprintf("Run pasture models refresh, or explicitly admit the verified exact identity with pasture models allow --provider %q --model %q; then retry registration.", providerText, modelText),
+			err,
 		)
 	}
 
@@ -272,16 +271,19 @@ func registerMLAgent(w io.Writer, in TaskAgentRegisterInput, format types.Output
 	if err != nil {
 		return code, err
 	}
-	tr, err := tasks.OpenTaskTracker(in.DBPath)
+	tr, err := tasks.OpenTaskTrackerContextWithOptions(ctx, in.DBPath, tasks.WithModelRegistry(registry))
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
 	defer tr.Close()
 
-	if code, err := rejectDuplicateAgent(in.DBPath, ns, in); err != nil {
+	if code, err := rejectDuplicateAgentContext(ctx, in.DBPath, ns, in); err != nil {
 		return code, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return agentRegisterStoreError("machine-learning", err)
+	}
 	agent, err := tr.RegisterMLAgent(ns, role, provider, model)
 	if err != nil {
 		return agentRegisterStoreError("machine-learning", err)
@@ -319,7 +321,11 @@ func resolveAgentNamespace(explicit string) (string, int, error) {
 // returns (0, nil) when no match is found, and the actionable duplicate error
 // otherwise.
 func rejectDuplicateAgent(dbPath, namespace string, in TaskAgentRegisterInput) (int, error) {
-	existing, err := findDuplicateAgentID(dbPath, namespace, in)
+	return rejectDuplicateAgentContext(context.Background(), dbPath, namespace, in)
+}
+
+func rejectDuplicateAgentContext(ctx context.Context, dbPath, namespace string, in TaskAgentRegisterInput) (int, error) {
+	existing, err := findDuplicateAgentIDContext(ctx, dbPath, namespace, in)
 	if err != nil {
 		return agentRegisterLookupError(err)
 	}
@@ -329,11 +335,14 @@ func rejectDuplicateAgent(dbPath, namespace string, in TaskAgentRegisterInput) (
 	return 0, nil
 }
 
-// findDuplicateAgentID returns the wire-format ID of an existing agent whose
+// findDuplicateAgentIDContext returns the wire-format ID of an existing agent whose
 // registration tuple and namespace exactly match the requested one, or "" when
 // none exists. The namespace is compared on the parsed AgentID rather than in
 // SQL so a namespace containing LIKE wildcards cannot over-match.
-func findDuplicateAgentID(dbPath, namespace string, in TaskAgentRegisterInput) (string, error) {
+func findDuplicateAgentIDContext(ctx context.Context, dbPath, namespace string, in TaskAgentRegisterInput) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	path := dbPath
 	if path == "" {
 		path = tasks.DefaultDBPath()
@@ -362,12 +371,12 @@ func findDuplicateAgentID(dbPath, namespace string, in TaskAgentRegisterInput) (
 		         JOIN ml_models m ON m.id = ml.model_id
 		         JOIN providers p ON p.id = m.provider_id
 		         WHERE r.name = ? AND p.name = ? AND m.name = ?`
-		args = []any{strings.TrimSpace(in.Role), strings.TrimSpace(in.Provider), strings.TrimSpace(in.Model)}
+		args = []any{strings.TrimSpace(in.Role), in.Provider, in.Model}
 	default:
 		return "", nil
 	}
 
-	rows, err := db.Query(query, args...)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return "", err
 	}
@@ -480,26 +489,10 @@ func listRoleWireValues() string {
 	return strings.Join(values, ", ")
 }
 
-// listKnownProviders returns a stable, comma-separated list of provider names
-// drawn from the default model catalog. It is deliberately bounded so an error
-// message stays readable even though the catalog keeps growing.
-func listKnownProviders() string {
-	seen := map[provenance.Provider]bool{}
-	var providers []string
-	for _, m := range provenance.DefaultModelRegistry().Models() {
-		if !seen[m.Provider] {
-			seen[m.Provider] = true
-			providers = append(providers, string(m.Provider))
-		}
-	}
-	sort.Strings(providers)
-	return strings.Join(providers, ", ")
-}
-
 // listProviderModels renders the known models for one provider as ready-to-run
 // `--model` values.
-func listProviderModels(provider provenance.Provider) string {
-	models := provenance.DefaultModelRegistry().ModelsByProvider(provider)
+func listProviderModels(registry provenance.ModelRegistry, provider provenance.Provider) string {
+	models := registry.ModelsByProvider(provider)
 	values := make([]string, 0, len(models))
 	for _, m := range models {
 		values = append(values, string(m.Name))
