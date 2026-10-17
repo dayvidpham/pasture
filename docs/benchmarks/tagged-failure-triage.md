@@ -71,3 +71,44 @@ quiet window must first determine whether any failure persists. A passing
 focused check cannot erase the original whole-suite failure; final tagged,
 recovery and both race/performance Nix phases remain required on the final
 tree. No production performance or deadline guarantee follows from triage.
+
+## Follow-on pool-of-one fixture boundary
+
+The sequential tagged tasks package next exposed
+`TestGateReaderCompletesOnAPoolOfOne`: `GateReadStageClaim` reported a context
+deadline. That stage precedes the public ownership call, so this was not the
+nested ownership call waiting on a retained claim lease. The21.73s whole-test
+time does not locate the expired read within that test.
+
+All actor/task/assignment/claim preparation already preceded Snapshot. But
+`countGateStore` then replaced the initialized production handle with a new
+**lazy** `sql.OpenDB(gateCountingConnector)` pool. Its first connection was
+not opened until the ingress-bounded claim query. The test connector calls
+modernc's `driver.Open` with DSN PRAGMAs; that is fixture connection
+initialization, not a retained lease or a definition activation. Unlike this
+counting handle, the real production opener has already initialized its pool.
+The original test's comment correctly states that Provenance still borrows the
+original pool; the separate shared-pool hazard proof remains unchanged.
+
+The repair initializes only the counting connection before Snapshot, using a
+separate setup context. It asserts max connections1, exactly one Connect,
+idle1/in-use0 before the actual reader, exactly one claim SELECT, no new
+Connect or queued lease during the reader, and in-use0 afterwards. Snapshot
+still derives the exact original one-second production ingress deadline; the
+existing30-second outer completion ceiling is unchanged. No fixture SQL,
+receipt or definition is manufactured and no production source is changed.
+
+A controlled1100ms connection-initialization cost records these actual phases:
+the old fixture enters Connect with999.99ms remaining, returns after1.132s
+with its context expired, then attempts SQL with negative132ms remaining and
+fails at the same claim-read boundary. The repaired fixture enters Connect
+under the separate30s setup context and SQL with999.99ms of the original
+claim budget still available; it passes. This demonstrates a real fixture
+boundary defect, not the cause of the historical untraced scheduler delay.
+
+An independent held-lease mutation takes the initialized counting pool's only
+connection immediately before Snapshot. The repaired proof still fails after
+1.0008s, reporting exactly one Connect, in-use1 and WaitCount1 instead of
+misidentifying the failure as initialization. Thus preparation cannot hide
+actual pool starvation. The real shared-pool borrowing/release tests remain
+required alongside this regression.

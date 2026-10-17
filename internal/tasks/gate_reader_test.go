@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,8 +49,9 @@ const gateHarness = ir.HarnessClaudeCode
 // a named token. It exists so "exactly one claim SELECT" is a measurement
 // rather than an inference from a result.
 type gateStatementCounter struct {
-	mu     sync.Mutex
-	counts map[string]int
+	mu       sync.Mutex
+	counts   map[string]int
+	connects atomic.Int64
 }
 
 func newGateStatementCounter(tokens ...string) *gateStatementCounter {
@@ -88,6 +90,7 @@ type gateCountingConnector struct {
 }
 
 func (c gateCountingConnector) Connect(context.Context) (driver.Conn, error) {
+	c.counts.connects.Add(1)
 	raw, err := c.inner.Open(c.dsn)
 	if err != nil {
 		return nil, err
@@ -1014,14 +1017,36 @@ func TestGateReaderCompletesOnAPoolOfOne(t *testing.T) {
 	gateClaim(t, store, actor, "pool-one-session")
 	counts := countGateStore(t, store, path, gateClaimReadToken)
 
+	// countGateStore substitutes a LAZY, test-only sql.OpenDB pool after all
+	// real store/actor/assignment setup. Its first Connect calls driver.Open
+	// with the DSN PRAGMAs, unlike the already-open production pool. Complete
+	// that fixture-only connection initialization before Snapshot starts its
+	// unchanged ingress-bounded claim read. Do not make connection setup part
+	// of the pool-starvation subject by accident.
+	setup, finishSetup := context.WithTimeout(t.Context(), timeouts.TestProfile().WorkflowResult())
+	defer finishSetup()
+	require.NoError(t, store.auditDB.PingContext(setup), "initialize the counting fixture's single connection before the measured read")
+	finishSetup()
+	before := store.auditDB.Stats()
+	require.Equal(t, 1, before.MaxOpenConnections)
+	require.Equal(t, 1, before.Idle)
+	require.Zero(t, before.InUse, "fixture setup must return its only connection before Snapshot")
+	require.Equal(t, int64(1), counts.connects.Load())
+
 	bounded, cancel := context.WithTimeout(t.Context(), timeouts.TestProfile().WorkflowResult())
 	defer cancel()
 	reader, err := NewGateReader(store, gateHarness, "pool-one-session")
 	require.NoError(t, err)
+	started := time.Now()
 	snapshot, err := reader.Snapshot(bounded)
-	require.NoError(t, err, "a snapshot on a pool of one must complete; holding the claim lease would deadlock it")
+	after := store.auditDB.Stats()
+	require.NoError(t, err, "Snapshot must complete on the initialized pool of one: elapsed=%s connects=%d before=%+v after=%+v; claim-lease starvation must not be confused with fixture connection initialization", time.Since(started), counts.connects.Load(), before, after)
 	t.Cleanup(func() { require.NoError(t, snapshot.Close()) })
 	require.Equal(t, 1, counts.count(gateClaimReadToken))
+	require.Equal(t, int64(1), counts.connects.Load(), "Snapshot must not pay another fixture connection initialization")
+	require.Equal(t, before.WaitCount, after.WaitCount, "the claim read must not queue behind a fixture-held lease")
+	require.Zero(t, after.InUse, "Snapshot must return its claim connection")
+	require.Equal(t, 1, after.MaxOpenConnections)
 }
 
 // TestGateReaderPublicCallBorrowsTheStoresOwnConnection is the hazard the claim
