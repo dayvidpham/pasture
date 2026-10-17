@@ -26,6 +26,7 @@ import (
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 )
 
 type lifecycleCLIClock struct{}
@@ -399,7 +400,9 @@ func lifecycleOutcomeWithCompletion(
 	// Resolve before starting the worker. Capture, admission, the deadline arm
 	// and panic recovery all read this one observed coordinate, never a value
 	// concurrently updated by the work goroutine.
+	discoveryDone := writeprofile.Region("hook.host_version.resolve")
 	hostVersion, versionErr := resolveLifecycleHostVersion(ctx, cmd, coords)
+	discoveryDone()
 	coords.HostVersion = hostVersion
 	if versionErr != nil {
 		return lifecycleFault(cmd, coords, failure, policy, continuation,

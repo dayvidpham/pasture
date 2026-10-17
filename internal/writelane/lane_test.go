@@ -212,7 +212,16 @@ func TestOversizeRecordIsAdmittedAndCommittedAlone(t *testing.T) {
 	if err := lane.Submit(context.Background(), oversize, commitFunc(func(context.Context) error { return nil })); err != nil {
 		t.Fatalf("an oversize record was refused rather than committed alone: %v", err)
 	}
-	if stats := lane.Stats(); stats.Records != 1 || stats.MaxBatchRecords != 1 {
+	// The record counter precedes its ACK; whole-turn counters deliberately
+	// follow it. Join the real lane before inspecting completed-turn statistics,
+	// while retaining the immediate per-record publication guarantee.
+	if stats := lane.Stats(); stats.Records != 1 {
+		t.Fatalf("stats = %+v, want the committed record visible before its ACK", stats)
+	}
+	if err := lane.Close(context.Background()); err != nil {
+		t.Fatalf("join the completed oversize turn before reading turn statistics: %v", err)
+	}
+	if stats := lane.Stats(); stats.Records != 1 || stats.MaxBatchRecords != 1 || stats.Batches != 1 {
 		t.Fatalf("stats = %+v, want the oversize record committed alone", stats)
 	}
 }
@@ -317,6 +326,11 @@ func TestStatsReportATurnThatOutranItsHoldTarget(t *testing.T) {
 		time.Sleep(15 * time.Millisecond)
 		return nil
 	})); err != nil {
+		t.Fatal(err)
+	}
+	// Submit observes the record ACK, not the end-of-turn counters. Close
+	// drains and joins the owner before observing its completed hold report.
+	if err := lane.Close(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	stats := lane.Stats()

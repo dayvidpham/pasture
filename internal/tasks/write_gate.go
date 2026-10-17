@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 )
 
 // writeGate is a zero-value-ready single-writer semaphore. Both compatibility
@@ -17,6 +18,7 @@ type writeGate struct {
 }
 
 func (g *writeGate) acquire(ctx context.Context) error {
+	defer writeprofile.Region("go.write_gate.wait")()
 	if err := ctx.Err(); err != nil {
 		return err
 	}

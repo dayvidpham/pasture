@@ -54,7 +54,12 @@ func (s *operationSource) NewOperationID() (string, error) {
 // test — rather than a lazy definition activation.
 func preactivateEnvelopeDocuments(t *testing.T, service receipt.Service, contract ir.RuntimeContractID) {
 	t.Helper()
-	ctx := context.Background()
+	// Definition setup is not the occurrence cancellation experiment. Use the
+	// whole-operation setup budget on this VALUE COPY; the caller's appender
+	// retains its strict ingress budget for the actual occurrence below.
+	service.Appender.Deadline = timeouts.ProductionProfile().WorkflowResult()
+	ctx, cancel := context.WithTimeout(t.Context(), service.Appender.Deadline)
+	defer cancel()
 	if _, err := receipt.EnsureActiveMetamodel(ctx, service); err != nil {
 		t.Fatalf("pre-activate metamodel: %v", err)
 	}
@@ -71,6 +76,49 @@ func preactivateEnvelopeDocuments(t *testing.T, service receipt.Service, contrac
 	}
 	if _, err := receipt.EnsureActiveDefinition(ctx, service, documents.Interpreter); err != nil {
 		t.Fatalf("pre-activate interpreter: %v", err)
+	}
+}
+
+type setupContextJournal struct {
+	provenance.Journal
+	deadlines []time.Duration
+}
+
+func (j *setupContextJournal) ApplyContext(ctx context.Context, in provenance.OperationInput) (provenance.CommittedResult, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return provenance.CommittedResult{}, fmt.Errorf("definition setup has no bounded context")
+	}
+	j.deadlines = append(j.deadlines, time.Until(deadline))
+	return j.Journal.(provenance.ContextJournal).ApplyContext(ctx, in)
+}
+
+func TestEnvelopeSetupDoesNotConsumeTheOccurrenceFailureBudget(t *testing.T) {
+	profile := timeouts.DeadlineTestProfile()
+	path := filepath.Join(t.TempDir(), "setup.db")
+	bootstrap(t, path, profile)
+	tracker, err := openTracker(path, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tracker.Close()
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "setup"}, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := &setupContextJournal{Journal: service.Appender.Journal}
+	service.Appender.Journal = journal
+	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode2_1_261().Contract)
+	if len(journal.deadlines) == 0 {
+		t.Fatal("fixture did not exercise real definition activation")
+	}
+	for _, remaining := range journal.deadlines {
+		if remaining <= profile.Ingress() || remaining > timeouts.ProductionProfile().WorkflowResult() {
+			t.Errorf("definition activation got %s remaining, want a bounded setup context independent of the %s occurrence budget", remaining, profile.Ingress())
+		}
+	}
+	if service.Appender.Deadline != profile.Ingress() {
+		t.Fatalf("setup changed the occurrence deadline to %s, want %s", service.Appender.Deadline, profile.Ingress())
 	}
 }
 
@@ -184,6 +232,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = tracker.Close() })
 	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "honest"}, profile)
 	if err != nil {
 		tracker.Close()
@@ -198,11 +247,28 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	lockErr := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	releaseLock := sync.OnceFunc(func() { close(release) })
+	joined := false
+	t.Cleanup(func() {
+		releaseLock()
+		if !joined {
+			if err := <-lockErr; err != nil {
+				t.Error(err)
+			}
+		}
+	})
 	go func() { lockErr <- budget.HoldWriter(ctx, dbPath, timeouts.DeadlineTestProfile(), held, release) }()
-	<-held
+	select {
+	case <-held:
+	case lock := <-lockErr:
+		joined = true
+		t.Fatalf("writer fixture ended before taking its lock: %v", lock)
+	case <-ctx.Done():
+		t.Fatal("writer fixture did not take its lock before the setup context ended")
+	}
 	realStore, ok := service.Blobs.(receipt.SQLiteBlobStore)
 	if !ok {
-		close(release)
+		releaseLock()
 		tracker.Close()
 		t.Fatalf("production blob store type=%T", service.Blobs)
 	}
@@ -214,7 +280,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 		probeErr <- realStore.Put(ctx, digest.FromString("pasture.budget.contention-probe"), []byte("contention probe"))
 	}()
 	if err := waitForStoreConnection(ctx, realStore); err != nil {
-		close(release)
+		releaseLock()
 		tracker.Close()
 		t.Fatal(err)
 	}
@@ -229,12 +295,14 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	_, err = service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
-		close(release)
+		releaseLock()
 		tracker.Close()
 		t.Fatal("contention probe unexpectedly committed while writer lock was held")
 	}
-	close(release)
-	if lock := <-lockErr; lock != nil {
+	releaseLock()
+	lock := <-lockErr
+	joined = true
+	if lock != nil {
 		t.Fatal(lock)
 	}
 	tracker.Close()
@@ -283,11 +351,13 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer tracker.Close()
 	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, budget.RealClock{}, &operationSource{prefix: "orphan"}, profile)
 	if err != nil {
 		tracker.Close()
 		t.Fatal(err)
 	}
+	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode2_1_261().Contract)
 	realStore, ok := service.Blobs.(receipt.SQLiteBlobStore)
 	if !ok {
 		tracker.Close()

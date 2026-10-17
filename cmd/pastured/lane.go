@@ -52,6 +52,10 @@ func startDaemonLane(parent context.Context, tracker protocol.TaskTracker, dbPat
 	if err != nil {
 		return nil, fmt.Errorf("pastured: the lifecycle write lane budget could not be derived from the daemon's timeout profile, so no single-writer lane can be hosted: %w", err)
 	}
+	budget, err = laneExperimentBudget(budget, dbPath)
+	if err != nil {
+		return nil, err
+	}
 
 	host, err := tasks.NewLifecycleLaneHost(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, profile)
 	if err != nil {

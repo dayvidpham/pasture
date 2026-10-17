@@ -271,7 +271,7 @@ func prepareDisposableStore(t *testing.T, cfg loadtestConfig, sandbox string) (s
 	t.Helper()
 	dbPath := filepath.Join(sandbox, "loadtest.db")
 	source := cfg.source
-	if source == "" && os.Getenv("PASTURE_LOADTEST_FORCE_SYNTHETIC") != "1" {
+	if source == "" && os.Getenv("PASTURE_TEST_PHASE") == "" && os.Getenv("PASTURE_LOADTEST_FORCE_SYNTHETIC") != "1" {
 		if live := liveStorePath(); live != "" {
 			if fi, err := os.Stat(live); err == nil && !fi.IsDir() {
 				source = live
@@ -423,6 +423,7 @@ func countOccurrenceEvidence(t *testing.T, dbPath string) int {
 // runs, so one red metric never hides the other four. PASTURE_LOADTEST_
 // REPORT_ONLY=1 prints without failing (exploration, never CI).
 func TestDisposableStoreLoadHarnessIsTheRegressionTripwire(t *testing.T) {
+	timing := performanceTimingEnabled(t)
 	if testing.Short() {
 		t.Skip("the load-test harness builds two binaries, copies a store and starts a daemon; -short skips it")
 	}
@@ -482,7 +483,7 @@ func TestDisposableStoreLoadHarnessIsTheRegressionTripwire(t *testing.T) {
 	// are separate uninstrumented binaries. The non-race run — CI and
 	// tools/loadtest.sh — bands everything.
 	checkInProcess := func(format string, args ...any) {
-		if underRaceDetector {
+		if !timing || underRaceDetector {
 			t.Logf("RACE-BUILD, reported not banded: "+format, args...)
 			return
 		}
@@ -697,11 +698,11 @@ func TestDisposableStoreLoadHarnessIsTheRegressionTripwire(t *testing.T) {
 	if burstFaultsPerSecond != 0 {
 		check("hook faults/second was %.3f in the C=%d burst (%d appended faults), above the zero-fault band", burstFaultsPerSecond, cfg.workers, burstFaults)
 	}
-	if probeP95 > hookP95Band {
+	if timing && probeP95 > hookP95Band {
 		check("hook serial-probe p95 was %s over %d runs at C=%d, above the %s band (%s, %s)", probeP95, len(probeLatencies), cfg.workers, hookP95Band, ciNote, shapeNote)
 	}
 	queued := float64(probeP95) / float64(serialMedian)
-	if queued > loadtestBurstQueueBound {
+	if timing && queued > loadtestBurstQueueBound {
 		check("lane burst p95 was %.2fx the same-run serial served median (%s vs %s), above the %.1f burst-queue bound: the burst queued far beyond one batched turn",
 			queued, probeP95, serialMedian, loadtestBurstQueueBound)
 	}
@@ -741,8 +742,11 @@ func TestDisposableStoreLoadHarnessIsTheRegressionTripwire(t *testing.T) {
 	}
 	evidenceAfter := countOccurrenceEvidence(t, dbPath)
 	committed := evidenceAfter - evidenceBefore
+	if committed != totalOffered {
+		t.Errorf("sustained receipts: committed %d of %d offered; every successful hook must have durable evidence", committed, totalOffered)
+	}
 	eventsPerSecond := float64(committed) / sustainedWindow.Seconds()
-	if eventsPerSecond < throughputFloor {
+	if timing && eventsPerSecond < throughputFloor {
 		check("sustained events/second was %.1f at C=%d (%d committed of %d offered in %s), below the %.0f floor (%s, %s)", eventsPerSecond, cfg.workers, committed, totalOffered, sustainedWindow.Round(time.Millisecond), throughputFloor, ciNote, shapeNote)
 	}
 	sustainedFaults := countFaultLines(t, faultRecord) - baselineFaults - burstFaults

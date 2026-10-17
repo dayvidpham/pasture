@@ -30,6 +30,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/definitions"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -4831,7 +4832,7 @@ func (b panickingCommitBarrier) AfterCommit(context.Context, handlers.CommitBoun
 func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
-	initializeLifecycleTestDatabase(t, dbPath)
+	initializePostCommitTestDatabase(t, dbPath, registration.OpenCode1_18_29().Contract)
 
 	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 	cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))
@@ -4844,12 +4845,24 @@ func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T)
 	select {
 	case <-invoked:
 	default:
-		t.Fatal("post-commit panic seam was not exercised")
+		t.Fatalf("post-commit panic seam was not exercised; actual outcome: exit=%v stdout=%q stderr=%s", outcome.Exit, outcome.Stdout, outcome.Stderr)
 	}
 	require.Equal(t, hostexit.ExitContinue, outcome.Exit,
 		"the already committed Proceed must survive a later panic")
 	require.Equal(t, `{"decision":"proceed"}`, string(outcome.Stdout))
 	require.Empty(t, outcome.Stderr, "the committed Outcome is not replaced by a fault")
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, tracker.Close()) }()
+	occurrences := queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind)
+	interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
+	consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
+	require.Len(t, occurrences, 1, "the panic boundary must follow an actual durable receipt")
+	require.Len(t, interpreted, 1)
+	require.Len(t, consultations, 1)
+	require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), definitions.EvidenceKind), 5, "the request must not publish missing cold owners")
+	require.Equal(t, occurrences[0].ProducingOperationJournalID, interpreted[0].ProducingOperationJournalID)
+	require.Equal(t, interpreted[0].ProducingOperationJournalID, consultations[0].ProducingOperationJournalID)
 }
 
 // TestTheOuterPanicRecoveryNeverClaimsMoreThanItsRegionCanSupport reads the

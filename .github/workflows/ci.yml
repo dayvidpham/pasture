@@ -59,23 +59,22 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test
+      - name: Race correctness then controlled performance (both required)
         # Production-path tests execute generated TypeScript through Bun and
         # run the real CLI as a child process. The explicit -timeout is a
         # guard against the 10-minute default, which reports a slow package as
         # a panic with no per-test attribution; it is not a budget to grow into.
         #
-        # The race detector is OFF in CI so iteration is fast. There is no
-        # second race job: the suite runs exactly ONCE per CI run. Run
-        # `make test-race` locally when a change touches concurrency.
-        env:
-          CGO_ENABLED: "0"
-        run: go test -timeout 30m ./...
+        # Sequential in one job: never race benchmark timing against the
+        # correctness wave. Performance refuses report-only/shape overrides
+        # and explicitly enforces unscaled reference-host thresholds in CI.
+        run: make test-race
 
       - name: Recovery tests
         env:
-          CGO_ENABLED: "0"
-        run: make test-recovery
+          CGO_ENABLED: "1"
+          GOWORK: "off"
+        run: go test -race -count=1 -timeout 30m -tags=recovery ./internal/engine/...
 
   lint:
     name: Lint

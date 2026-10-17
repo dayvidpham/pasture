@@ -1053,7 +1053,7 @@ func TestEnabledClaudeAuthenticFixturesToDurableEvidence(t *testing.T) {
 			for _, hintState := range []string{"absent", "empty"} {
 				t.Run(hintState, func(t *testing.T) {
 					dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
-					initializeLifecycleTestDatabase(t, dbPath)
+					copyInitializedLifecycleTestDatabase(t, dbPath)
 					raw := readProductionClaudeFixtureAt(t, testCase.fixture, testCase.name, testCase.captureVersion, testCase.captureSource)
 
 					path, _ := discoveryPathExecutable(t, "printf '"+testCase.captureVersion+" (Claude Code)\\n'")
@@ -1796,6 +1796,52 @@ func initializeLifecycleTestDatabase(t *testing.T, dbPath string) {
 	_, err = tracker.Create("file://lifecycle-production-test", "bootstrap", "initialize the persisted ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
 	require.NoError(t, err)
 	require.NoError(t, tracker.Close())
+}
+
+var initializedLifecycleSource struct {
+	once sync.Once
+	path string
+}
+
+// Only the unchanged prerequisite is shared, never a delivery or assertion
+// store. Build it with the real opener/Create, close every owner and checkpoint
+// before publishing the immutable bytes. Each authentic transport case still
+// executes its real command/opener against a new independent writable copy.
+func copyInitializedLifecycleTestDatabase(t *testing.T, dbPath string) {
+	t.Helper()
+	initializedLifecycleSource.once.Do(func() {
+		dir, err := os.MkdirTemp("", "pasture-lifecycle-base-")
+		require.NoError(t, err)
+		testutil.RegisterFixtureDir(dir)
+		source := filepath.Join(dir, tasks.DefaultDBFilename.String())
+		initializeLifecycleTestDatabase(t, source)
+		require.NoError(t, testutil.CheckpointWAL(source))
+		initializedLifecycleSource.path = source
+	})
+	require.NotEmpty(t, initializedLifecycleSource.path, "fixture source construction must have completed")
+	require.NoError(t, testutil.CopyFile(dbPath, initializedLifecycleSource.path))
+}
+
+func TestInitializedLifecycleCopiesArePrivateAndReceiptFree(t *testing.T) {
+	first := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	second := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	copyInitializedLifecycleTestDatabase(t, first)
+	copyInitializedLifecycleTestDatabase(t, second)
+	for _, path := range []string{first, second} {
+		tracker, err := tasks.OpenTaskTracker(path)
+		require.NoError(t, err)
+		require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind))
+		require.NoError(t, tracker.Close())
+	}
+	raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
+	deliverClaudeBuilt(t, lifecycleBinary(t), first, "SessionStart", raw)
+	for index, path := range []string{first, second} {
+		tracker, err := tasks.OpenTaskTracker(path)
+		require.NoError(t, err)
+		require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind), 1-index,
+			"writing one copy must not affect another or the reusable source")
+		require.NoError(t, tracker.Close())
+	}
 }
 
 func queryLifecycleEvidence(t *testing.T, journal provenance.Journal, kind provenance.EvidenceKind) []provenance.EvidenceRow {

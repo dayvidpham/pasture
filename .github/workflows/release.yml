@@ -22,8 +22,23 @@ on:
   workflow_dispatch: {}   # manual re-release of the current main version
 
 jobs:
+  verify:
+    name: Required race correctness and controlled performance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+          cache: true
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.13'
+      - run: make test-race
+
   detect:
     name: Detect version bump + tag
+    needs: verify
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.check.outputs.released }}

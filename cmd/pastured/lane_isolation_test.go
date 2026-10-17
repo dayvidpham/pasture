@@ -164,6 +164,11 @@ func TestLaneSocketsStayInsideTheTestRuntimeDir(t *testing.T) {
 	if testing.Short() {
 		t.Skip("the isolation pin starts a real daemon; -short skips it")
 	}
+	// Model an inherited operator runtime with a private sentinel directory.
+	// Observing the actual shared directory races unrelated processes and
+	// cannot attribute a new file to this daemon. Both the path assertion and
+	// the complete no-growth assertion still detect a missing child override.
+	t.Setenv("XDG_RUNTIME_DIR", laneTestRuntimeDir(t))
 	tmp := t.TempDir()
 	realRoot, before := snapshotRealLaneRoot(t)
 
@@ -226,6 +231,9 @@ func TestLaneSocketsStayInsideTheTestRuntimeDir(t *testing.T) {
 // fail. (The lock is never removed and the socket survives until Close, so
 // even a perfectly closed runtime leaves a trace without the override.)
 func TestInProcessLaneRuntimeStaysInsideTheTestRuntimeDir(t *testing.T) {
+	// Keep the ambient-state sentinel private too: another process writing
+	// its own lane must not be mistaken for this runtime escaping isolation.
+	t.Setenv("XDG_RUNTIME_DIR", laneTestRuntimeDir(t))
 	realRoot, before := snapshotRealLaneRoot(t)
 
 	runtimeDir := laneTestRuntimeDir(t)

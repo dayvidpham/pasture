@@ -50,6 +50,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
@@ -838,7 +839,8 @@ func TestReaderConstructionFaultKeepsItsKind(t *testing.T) {
 // that adds a second commit call, or a branch that skips the evaluation, and
 // finds this standing in its way.
 func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
-	t.Parallel()
+	// The subject is the gate/observation distinction, not a receipt latency
+	// probe under unrelated package-parallel bootstrap load.
 	raw := gateFixture(t, gateClaudeGateFixture)
 	dbPath := gateStore(t)
 	service, closeStore := gateService(t, dbPath)
@@ -861,6 +863,10 @@ func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
 	// The same refusal is NOT raised for an observation, and the observation
 	// commits. An observation is answered by the middle end, so demanding a
 	// verdict there would refuse every reporting row on the host.
+	deadline := service.Appender.Deadline
+	testutil.ActivateLaneTestDefinitions(t, service)
+	require.Equal(t, deadline, service.Appender.Deadline, "owner setup must not widen the observation's receipt budget")
+	gateRequireNoReceipt(t, dbPath)
 	observationRaw := gateFixture(t, gateClaudeSessionStartFixture)
 	observationEvent, err := ingress.EventByNativeName(dispatch.manifest, "SessionStart")
 	require.NoError(t, err)
@@ -870,6 +876,8 @@ func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
 
 	require.NoError(t, err, "an observation commits without an evaluated decision")
 	require.NotEmpty(t, gateQueryEvidence(t, dbPath, gateEvidenceKinds()))
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), 1)
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.interpreted.v3"}), 1)
 }
 
 // ─── both committing surfaces, over the real reader ───────────────────────────

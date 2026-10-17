@@ -134,16 +134,33 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 	abandoned.Appender.Journal = journal
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	warrant := deliveryWarrant(t, delivery)
 	failed := make(chan error, 1)
+	joined := false
+	defer func() {
+		cancel()
+		if !joined {
+			<-failed
+		}
+	}()
 	go func() {
-		_, receiveErr := abandoned.Receive(ctx, deliveryWarrant(t, delivery), delivery)
+		_, receiveErr := abandoned.Receive(ctx, warrant, delivery)
 		failed <- receiveErr
 	}()
 
 	// The condition, not a sleep: the append has really begun.
-	<-journal.reached
+	select {
+	case <-journal.reached:
+	case receiveErr := <-failed:
+		joined = true
+		t.Fatalf("Receive ended before reaching the occurrence cancellation barrier: %v", receiveErr)
+	case <-t.Context().Done():
+		t.Fatal("test ended before reaching the occurrence cancellation barrier")
+	}
 	cancel()
 	receiveErr := <-failed
+	joined = true
 
 	if receiveErr == nil {
 		t.Fatal("an abandoned append must return an error, never a receipt")
