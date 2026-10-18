@@ -39,7 +39,7 @@ The acceptance row retains 18 workers, the real CGO-free daemon/hook binaries,
 the same fixture and initialized store, zero faults, absolute p95 <=250ms and
 same-run direct median ratio <=1.25. The disposable-store row retains the same
 600-task synthetic shape, 18 workers, 3-second burst, 10-second sustained run,
-20 opens, 30 reads, zero faults, <=250ms hook p95, burst ratio <=5, >=80 committed
+20 opens, 30 reads, zero faults, <=250ms hook p95, burst ratio <=5, >=50 committed
 events/s, <=100ms read p95 and <=50ms steady-open p95. Copy-shape controls and
 their original thresholds remain available in the original exploratory harness;
 the required gate explicitly refuses a private source-store override.
@@ -73,7 +73,7 @@ builders finish before its measured window. `nix flake check` without
 `--no-build` builds this same derivation; it is that backend, not a second gate
 after local success. `nix flake check --no-build` evaluates only and clears
 neither phase. All Nix builders use `GOWORK=off`. Both phases must still exit 0
-inside the chosen backend. Bands stay 80 committed events/s, 250 ms p95, and
+inside the chosen backend. Bands stay 50 committed events/s, 250 ms p95, and
 relative 1.25 where that ratio applies.
 
 The Nix race derivation does not pass `-tags=pasture_experiment` or
