@@ -106,9 +106,10 @@ GOWORK=off PASTURE_TEST_PHASE=race-correctness CGO_ENABLED=1 \
 Exit 0, `ok github.com/dayvidpham/pasture/cmd/pasture 311.779s`. The complete
 package ran; no test was skipped or filtered. Before that second run, the three
 affected raw parity tests and the new guards passed together in a focused
-10.524s run. Later commits on the same branch add one sidecar-refusal table
-test and clarify copy-mode wording; they change no template, copy, or
-production code.
+10.524s run. Later commits on the same branch rewire the copy path's
+fingerprint guard to the helper its negative control mutates (same bytes, adds
+a size check), add one sidecar-refusal table test, and clarify copy-mode
+wording; they change no template image or production code.
 
 `go test -list '^Test' ./cmd/pasture` gained only:
 
