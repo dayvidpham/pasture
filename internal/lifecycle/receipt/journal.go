@@ -9,6 +9,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
 	"modernc.org/sqlite"
@@ -199,6 +200,7 @@ type JournalAppender struct {
 type CommitObserver interface{ ObserveOccurrenceCommit(time.Duration, error) }
 
 func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInput) (model.OccurrenceID, error) {
+	defer writeprofile.Region("hook.append.pool.lock.fold.integrity.commit")()
 	contextJournal, ok := a.Journal.(provenance.ContextJournal)
 	if !ok {
 		return 0, structured(pasterrors.CategoryValidation, "The lifecycle journal cannot enforce the ingress deadline.", "The configured Provenance journal does not implement ContextJournal.ApplyContext, so using it would silently wait for the connection's longer busy timeout.", "Committing a lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.Append).", "No occurrence was recorded; an already committed payload blob may remain as a reclaimable orphan.", "Use the pinned Provenance journal implementation that provides ContextJournal.ApplyContext.", nil)
@@ -270,6 +272,7 @@ func (a JournalAppender) Append(ctx context.Context, in provenance.OperationInpu
 // batch is many; production wires no observer at all, so this seam is
 // documented rather than given a fabricated per-batch meaning.
 func (a JournalAppender) AppendBatch(ctx context.Context, inputs []provenance.OperationInput) (provenance.BatchResult, error) {
+	defer writeprofile.Region("hook.append_batch.pool.lock.fold.integrity.commit")()
 	const where = "Committing a batched lifecycle occurrence (internal/lifecycle/receipt/journal.go in receipt.JournalAppender.AppendBatch)."
 	batch, ok := a.Journal.(provenance.BatchJournal)
 	if !ok {

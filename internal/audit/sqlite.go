@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,11 +65,13 @@ type SqliteAuditTrail struct {
 	roleToAgentId map[string]string
 	busyTier      time.Duration
 	writerPolicy  auditWriterPolicy
+	logger        *slog.Logger
 }
 
 type sqliteAuditTrailOptions struct {
 	skipMigrations bool
 	timeouts       timeouts.Profile
+	logger         *slog.Logger
 	// ceiling, when non-zero, stops the migrator short of
 	// MaxKnownSchemaVersion so the offline cutover's catch-up runs to the
 	// deferred target and the conversion transaction applies the remaining
@@ -82,6 +85,13 @@ type sqliteAuditTrailOptions struct {
 
 func WithTimeoutProfile(profile timeouts.Profile) SqliteAuditTrailOption {
 	return func(o *sqliteAuditTrailOptions) { o.timeouts = profile }
+}
+
+// WithLogger routes committed-cleanup warnings to the caller's diagnostics.
+// Without this option, the process's default structured logger owns them.
+// Disabled or failed warning delivery retains the committed-cleanup error.
+func WithLogger(logger *slog.Logger) SqliteAuditTrailOption {
+	return func(o *sqliteAuditTrailOptions) { o.logger = logger }
 }
 
 // WithDeferredCeiling stops the audit migrator short of the identity-format
@@ -141,9 +151,12 @@ func NewSqliteAuditTrailContextWithOptions(ctx context.Context, dbPath string, o
 	if err := ctx.Err(); err != nil {
 		return nil, openCancelledError(dbPath, "start audit setup", 0, err, nil)
 	}
-	cfg := sqliteAuditTrailOptions{}
+	cfg := sqliteAuditTrailOptions{logger: slog.Default()}
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+	if cfg.logger == nil {
+		return nil, fmt.Errorf("audit.NewSqliteAuditTrail: cleanup diagnostics require a non-nil logger; omit WithLogger for the process default or supply the owner's logger")
 	}
 	if cfg.timeouts.IsZero() {
 		cfg.timeouts = timeouts.ProductionProfile()
@@ -205,6 +218,7 @@ func NewSqliteAuditTrailContextWithOptions(ctx context.Context, dbPath string, o
 			db:            db,
 			roleToAgentId: make(map[string]string),
 			busyTier:      cfg.timeouts.SQLiteBusy(),
+			logger:        cfg.logger,
 		}, nil
 	}
 
@@ -283,6 +297,7 @@ func NewSqliteAuditTrailContextWithOptions(ctx context.Context, dbPath string, o
 		db:            db,
 		roleToAgentId: make(map[string]string),
 		busyTier:      cfg.timeouts.SQLiteBusy(),
+		logger:        cfg.logger,
 	}, nil
 }
 

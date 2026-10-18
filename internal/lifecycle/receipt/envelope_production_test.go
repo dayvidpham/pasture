@@ -487,6 +487,25 @@ func TestReceiveRecordOnlyMalformedCommitsCompleteOccurrence(t *testing.T) {
 	delivery := parseEnvelopeFixture(t, "session_start_2_1_261.json", "SessionStart")
 	delivery.Capture = model.CaptureMalformed
 
+	// This pin tests a record-only receipt, not cold owner publication. Each
+	// missing owner would otherwise commit through Receive's two-second
+	// definition-activation window while other parallel fixtures bootstrap.
+	// Prepare only occurrence owners with a setup-only copy; keep the actual
+	// receipt service's ingress budget unchanged and never seed an interpreter.
+	setup := store.service
+	setup.Appender.Deadline = timeouts.TestProfile().WorkflowResult()
+	expected, err := receipt.EnsureOccurrenceEnvelope(ctx, setup, delivery.Contract, delivery.Envelope)
+	if err != nil {
+		t.Fatalf("prepare record-only occurrence owners: %v", err)
+	}
+	if store.service.Appender.Deadline != timeouts.TestProfile().Ingress() {
+		t.Fatal("owner setup changed the receipt service's ingress budget")
+	}
+	definitionsBefore := len(queryEnvelopeKind(t, store.tracker, definitions.EvidenceKind))
+	if definitionsBefore != 4 {
+		t.Fatalf("occurrence owner definitions = %d, want four and no interpreter", definitionsBefore)
+	}
+
 	before := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2))
 	committed, err := store.service.Receive(ctx, envelopeWarrant(t, delivery), delivery)
 	if err != nil {
@@ -498,6 +517,12 @@ func TestReceiveRecordOnlyMalformedCommitsCompleteOccurrence(t *testing.T) {
 	}
 	occurrence := decodeEnvelopeOccurrence(t, occurrences[len(occurrences)-1].Payload)
 	requireCompleteOccurrence(t, occurrence.Envelope, delivery.Contract)
+	if occurrence.Envelope != expected {
+		t.Fatalf("record-only receipt changed its prepared owner references: got %+v, want %+v", occurrence.Envelope, expected)
+	}
+	if got := len(queryEnvelopeKind(t, store.tracker, definitions.EvidenceKind)); got != definitionsBefore {
+		t.Fatalf("Receive activated %d new definitions; want only the occurrence append", got-definitionsBefore)
+	}
 	if occurrence.Capture != model.CaptureMalformed {
 		t.Fatalf("occurrence capture = %v, want malformed recorded honestly", occurrence.Capture)
 	}

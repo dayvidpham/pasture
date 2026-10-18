@@ -31,6 +31,9 @@
           vendorHash = "sha256-jYi+cFfCQspEj8cpW42YgRqv+eOaX1vEJzkFBCZ6X+A=";
 
           env.CGO_ENABLED = "0";
+          # Package/check builders resolve the published module closure too;
+          # an outer shell's GOWORK does not propagate into a Nix sandbox.
+          env.GOWORK = "off";
 
           # Stamp the release identity into every main package that declares a
           # `version` var (cmd/pasture and cmd/pastured). The linker silently ignores
@@ -86,16 +89,29 @@
             "cmd/pasture-release"
             "cmd/pasture"
           ];
-          env.CGO_ENABLED = "1";
+          env = commonAttrs.env // { CGO_ENABLED = "1"; };
           doCheck = true;
           checkPhase = ''
             runHook preCheck
+            # Force independent check builders to finish before measurement,
+            # even when nix flake check schedules all checks concurrently.
+            test -d ${installer-check}
+            test -d ${pasture-bundle}
             # buildGoModule adds -trimpath (good for the shipped binary) but it
             # rewrites runtime.Caller() to module-relative paths, which breaks
             # tests that locate repo-root testdata (e.g. skills/protocol/figures)
             # via runtime.Caller. Strip -trimpath for the test run only.
             export GOFLAGS="''${GOFLAGS//-trimpath/}"
-            go test -race ./...
+            # Warm race build/cache state before latency probes execute. This
+            # preparation runs test binaries/TestMain but is NOT suite evidence;
+            # the unchanged full command below must still run every test.
+            # Do not lower throughput bands or restrict runtime parallelism.
+            go test -race -run '^$' ./...
+            PASTURE_TEST_PHASE=race-correctness go test -race -count=1 -timeout 30m ./...
+            # Same production workloads, after all race packages exit. Both
+            # phases are required by this one derivation, never parallel Nix
+            # checks that could contend with each other's measured windows.
+            make test-performance
             runHook postCheck
           '';
         });
@@ -107,7 +123,7 @@
         installer-check = pkgs.buildGoModule (commonAttrs // {
           pname = "pasture-installer-integration";
           subPackages = [ "cmd/pasture" ];
-          env.CGO_ENABLED = "1";
+          env = commonAttrs.env // { CGO_ENABLED = "1"; };
           doCheck = true;
           checkPhase = ''
             runHook preCheck

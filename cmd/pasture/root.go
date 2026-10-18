@@ -11,7 +11,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
-// version is the release identity reported by `pasture --version`. It is a
+// version is the release identity reported by `pasture version` and `pasture --version`. It is a
 // package-level var (not a const) precisely so the linker can stamp it at build
 // time:
 //

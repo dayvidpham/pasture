@@ -1,4 +1,4 @@
-.PHONY: build test test-recovery test-race test-race-ci lint fmt clean release-local release-all generate check-operational-tracker
+.PHONY: build test test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate check-operational-tracker
 
 VERSION ?= devel
 
@@ -77,7 +77,16 @@ test-recovery:
 	CGO_ENABLED=0 go test -tags recovery ./internal/engine/ -run Recovery -v
 
 test-race:
-	CGO_ENABLED=1 go test -race -timeout 30m ./...
+	$(MAKE) test-race-correctness
+	$(MAKE) test-performance
+
+test-race-correctness:
+	GOWORK=off PASTURE_TEST_PHASE=race-correctness CGO_ENABLED=1 go test -race -count=1 -timeout 30m ./...
+
+# Run only after the race wave has exited, with no independent heavy builders.
+# Empty GITHUB_ACTIONS deliberately retains unscaled reference-host thresholds.
+test-performance:
+	GOWORK=off GITHUB_ACTIONS= PASTURE_TEST_PHASE=performance CGO_ENABLED=0 go test -count=1 -timeout 30m -v ./cmd/pastured -run '^(TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow|TestDisposableStoreLoadHarnessIsTheRegressionTripwire)$$'
 
 test-race-ci:
 	CGO_ENABLED=1 go test -race -timeout 30m ./internal/engine/ ./internal/handlers/ ./internal/provadapter/ ./internal/tasks/

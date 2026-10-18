@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -48,8 +49,9 @@ const gateHarness = ir.HarnessClaudeCode
 // a named token. It exists so "exactly one claim SELECT" is a measurement
 // rather than an inference from a result.
 type gateStatementCounter struct {
-	mu     sync.Mutex
-	counts map[string]int
+	mu       sync.Mutex
+	counts   map[string]int
+	connects atomic.Int64
 }
 
 func newGateStatementCounter(tokens ...string) *gateStatementCounter {
@@ -88,6 +90,7 @@ type gateCountingConnector struct {
 }
 
 func (c gateCountingConnector) Connect(context.Context) (driver.Conn, error) {
+	c.counts.connects.Add(1)
 	raw, err := c.inner.Open(c.dsn)
 	if err != nil {
 		return nil, err
@@ -749,6 +752,100 @@ func TestGateReaderClaimReadFaultsWhenThePoolStaysBusy(t *testing.T) {
 
 // ─── the claim insert interleave ──────────────────────────────────────────────
 
+type claimSnapshotRun struct {
+	done     chan struct{}
+	snapshot gateauthority.Snapshot
+	err      error
+}
+
+func startClaimSnapshot(t *testing.T, ctx context.Context, reader gateauthority.Reader, release func()) *claimSnapshotRun {
+	t.Helper()
+	ctx, cancel := context.WithCancel(ctx)
+	run := &claimSnapshotRun{done: make(chan struct{})}
+	// Install before launch: a failed writer assertion must release a reader
+	// held at the seam, join it, and close its snapshot before store cleanup.
+	t.Cleanup(func() {
+		release()
+		cancel()
+		select {
+		case <-run.done:
+		case <-time.After(5 * time.Second):
+			t.Error("claim snapshot owner did not join within 5s after release/cancel; retaining its store until it exits")
+			<-run.done
+		}
+		if run.snapshot != nil {
+			require.NoError(t, run.snapshot.Close())
+		}
+	})
+	go func() {
+		defer close(run.done)
+		run.snapshot, run.err = reader.Snapshot(ctx)
+	}()
+	return run
+}
+
+func (run *claimSnapshotRun) awaitClaimRead(ctx context.Context, claimRead <-chan struct{}) error {
+	select {
+	case <-claimRead:
+		return nil
+	case <-run.done:
+		if run.err == nil {
+			return fmt.Errorf("claim snapshot returned successfully without reaching the afterClaimRead boundary")
+		}
+		return fmt.Errorf("claim snapshot returned before the afterClaimRead boundary: %w", run.err)
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for claim snapshot boundary or result: %w", ctx.Err())
+	}
+}
+
+func TestClaimSnapshotBoundaryReportsEarlyFailure(t *testing.T) {
+	store, _ := openGateStore(t)
+	reader, err := NewGateReader(store, gateHarness, "cancelled-before-read")
+	require.NoError(t, err)
+	claimRead := make(chan struct{})
+	reader.(*gateReader).afterClaimRead = func() { close(claimRead) }
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // Actual production Snapshot error before its private read seam.
+	run := startClaimSnapshot(t, ctx, reader, func() {})
+	wait, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
+	err = run.awaitClaimRead(wait, claimRead)
+	require.ErrorContains(t, err, "returned before the afterClaimRead boundary")
+	require.ErrorIs(t, err, context.Canceled)
+	select {
+	case <-run.done:
+	default:
+		t.Fatal("early-error observation must join the actual snapshot owner")
+	}
+}
+
+func TestClaimSnapshotBoundaryCleanupReleasesHeldOwner(t *testing.T) {
+	store, _ := openGateStore(t)
+	var run *claimSnapshotRun
+	t.Run("return while the actual owner is held", func(t *testing.T) {
+		reader, err := NewGateReader(store, gateHarness, "cleanup-boundary")
+		require.NoError(t, err)
+		claimRead, allowSeal := make(chan struct{}), make(chan struct{})
+		var once sync.Once
+		release := func() { once.Do(func() { close(allowSeal) }) }
+		reader.(*gateReader).afterClaimRead = func() {
+			close(claimRead)
+			<-allowSeal
+		}
+		run = startClaimSnapshot(t, t.Context(), reader, release)
+		wait, stop := context.WithTimeout(t.Context(), 5*time.Second)
+		defer stop()
+		require.NoError(t, run.awaitClaimRead(wait, claimRead))
+		// No explicit release or join: exercise the same cleanup Go invokes
+		// when a later writer assertion aborts the interleaving proof.
+	})
+	select {
+	case <-run.done:
+	default:
+		t.Fatal("subtest cleanup returned before releasing and joining its snapshot owner")
+	}
+}
+
 // TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt puts a concurrent claim
 // INSERT at the three positions that matter around the claim read and requires
 // one whole answer each time. A snapshot that tore would report a session the
@@ -783,20 +880,16 @@ func TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt(t *testing.T) {
 
 		claimRead := make(chan struct{})
 		allowSeal := make(chan struct{})
+		var once sync.Once
+		release := func() { once.Do(func() { close(allowSeal) }) }
 		concrete.afterClaimRead = func() {
 			close(claimRead)
 			<-allowSeal
 		}
-		type outcome struct {
-			snapshot gateauthority.Snapshot
-			err      error
-		}
-		sealed := make(chan outcome, 1)
-		go func() {
-			snapshot, snapshotErr := reader.Snapshot(t.Context())
-			sealed <- outcome{snapshot, snapshotErr}
-		}()
-		<-claimRead
+		run := startClaimSnapshot(t, t.Context(), reader, release)
+		wait, stop := context.WithTimeout(t.Context(), 5*time.Second)
+		defer stop()
+		require.NoError(t, run.awaitClaimRead(wait, claimRead), "the actual claim read must reach its boundary before the competing insert")
 
 		// A second connection commits the claim while the Reader is stopped
 		// after its completed no-row read and its released claim connection.
@@ -809,11 +902,10 @@ func TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt(t *testing.T) {
 		require.NoError(t, err, "a writer must be able to commit while the Reader is stopped at the read boundary")
 		require.NoError(t, writer.Close())
 
-		close(allowSeal)
-		result := <-sealed
-		require.NoError(t, result.err)
-		t.Cleanup(func() { require.NoError(t, result.snapshot.Close()) })
-		claim, err := result.snapshot.ResolveSession(gateHarness, "boundary-session")
+		release()
+		<-run.done
+		require.NoError(t, run.err)
+		claim, err := run.snapshot.ResolveSession(gateHarness, "boundary-session")
 		require.NoError(t, err)
 		require.False(t, claim.Bound, "the no-row read completed before the insert, so the answer is unbound")
 		require.Equal(t, 1, counts.count(gateClaimReadToken), "the Reader must not re-read the claim to notice the insert")
@@ -824,7 +916,7 @@ func TestGateReaderClaimInsertRacingTheSnapshotCannotTearIt(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, freshClaim.Bound)
 		require.Equal(t, actor, freshClaim.Actor)
-		again, err := result.snapshot.ResolveSession(gateHarness, "boundary-session")
+		again, err := run.snapshot.ResolveSession(gateHarness, "boundary-session")
 		require.NoError(t, err)
 		require.Equal(t, claim, again, "a sealed answer must not change after it is sealed")
 	})
@@ -925,14 +1017,36 @@ func TestGateReaderCompletesOnAPoolOfOne(t *testing.T) {
 	gateClaim(t, store, actor, "pool-one-session")
 	counts := countGateStore(t, store, path, gateClaimReadToken)
 
+	// countGateStore substitutes a LAZY, test-only sql.OpenDB pool after all
+	// real store/actor/assignment setup. Its first Connect calls driver.Open
+	// with the DSN PRAGMAs, unlike the already-open production pool. Complete
+	// that fixture-only connection initialization before Snapshot starts its
+	// unchanged ingress-bounded claim read. Do not make connection setup part
+	// of the pool-starvation subject by accident.
+	setup, finishSetup := context.WithTimeout(t.Context(), timeouts.TestProfile().WorkflowResult())
+	defer finishSetup()
+	require.NoError(t, store.auditDB.PingContext(setup), "initialize the counting fixture's single connection before the measured read")
+	finishSetup()
+	before := store.auditDB.Stats()
+	require.Equal(t, 1, before.MaxOpenConnections)
+	require.Equal(t, 1, before.Idle)
+	require.Zero(t, before.InUse, "fixture setup must return its only connection before Snapshot")
+	require.Equal(t, int64(1), counts.connects.Load())
+
 	bounded, cancel := context.WithTimeout(t.Context(), timeouts.TestProfile().WorkflowResult())
 	defer cancel()
 	reader, err := NewGateReader(store, gateHarness, "pool-one-session")
 	require.NoError(t, err)
+	started := time.Now()
 	snapshot, err := reader.Snapshot(bounded)
-	require.NoError(t, err, "a snapshot on a pool of one must complete; holding the claim lease would deadlock it")
+	after := store.auditDB.Stats()
+	require.NoError(t, err, "Snapshot must complete on the initialized pool of one: elapsed=%s connects=%d before=%+v after=%+v; claim-lease starvation must not be confused with fixture connection initialization", time.Since(started), counts.connects.Load(), before, after)
 	t.Cleanup(func() { require.NoError(t, snapshot.Close()) })
 	require.Equal(t, 1, counts.count(gateClaimReadToken))
+	require.Equal(t, int64(1), counts.connects.Load(), "Snapshot must not pay another fixture connection initialization")
+	require.Equal(t, before.WaitCount, after.WaitCount, "the claim read must not queue behind a fixture-held lease")
+	require.Zero(t, after.InUse, "Snapshot must return its claim connection")
+	require.Equal(t, 1, after.MaxOpenConnections)
 }
 
 // TestGateReaderPublicCallBorrowsTheStoresOwnConnection is the hazard the claim
@@ -1034,12 +1148,21 @@ func TestGateReaderPublicCallBorrowsTheStoresOwnConnection(t *testing.T) {
 // needs, and the reader still completes. The hold is released by a condition
 // the subject signals, never by a sleep.
 func TestGateReaderReadsUnderAHeldWriter(t *testing.T) {
-	t.Parallel()
+	// The independent writer below is the intended concurrent participant.
+	// This probe retains the production one-second claim window, so do not
+	// additionally qualify it against unrelated package-parallel bootstrap work.
 	store, path := openGateStore(t)
 	actor := feasibilityActor(t, store, "gate-held-writer")
 	task := createHumanTestTask(t, store, "held-writer")
 	seedAssignmentEpisode(t, store, task, "held-writer-owner", RoleOwnerResponsibility, actor, "held-writer-owner-start")
 	gateClaim(t, store, actor, "held-writer-session")
+	var journalMode string
+	require.NoError(t, store.auditDB.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&journalMode))
+	require.Equal(t, "wal", journalMode)
+	before := store.auditDB.Stats()
+	require.Equal(t, 1, before.MaxOpenConnections)
+	require.Equal(t, 1, before.Idle)
+	require.Zero(t, before.InUse, "setup must return the actual shared connection before the held-writer experiment")
 
 	holder, err := dbconn.OpenSharedDBWithProfile(path, timeouts.TestProfile())
 	require.NoError(t, err)
@@ -1048,36 +1171,84 @@ func TestGateReaderReadsUnderAHeldWriter(t *testing.T) {
 	require.NoError(t, err)
 	held := make(chan struct{})
 	release := make(chan struct{})
-	holderDone := make(chan error, 1)
+	free := sync.OnceFunc(func() { close(release) })
+	holderDone := make(chan struct{})
+	holderCtx, cancelHolder := context.WithCancel(t.Context())
+	var holderErr error
+	t.Cleanup(func() {
+		free()
+		cancelHolder()
+		<-holderDone // Join before the holder/store cleanup may remove resources.
+		if !errors.Is(holderErr, sql.ErrTxDone) && !errors.Is(holderErr, context.Canceled) {
+			require.NoError(t, holderErr)
+		}
+	})
 	go func() {
-		tx, beginErr := holder.BeginTx(t.Context(), nil)
+		defer close(holderDone)
+		tx, beginErr := holder.BeginTx(holderCtx, nil)
 		if beginErr != nil {
-			holderDone <- beginErr
+			holderErr = beginErr
 			return
 		}
-		if _, execErr := tx.Exec(`INSERT INTO gate_held_writer (note) VALUES ('held')`); execErr != nil {
+		if _, execErr := tx.ExecContext(holderCtx, `INSERT INTO gate_held_writer (note) VALUES ('held')`); execErr != nil {
 			_ = tx.Rollback()
-			holderDone <- execErr
+			holderErr = execErr
 			return
 		}
 		close(held)
 		<-release
-		holderDone <- tx.Rollback()
+		holderErr = tx.Rollback()
 	}()
-	<-held
+	select {
+	case <-held:
+	case <-holderDone:
+		t.Fatalf("the independent writer failed before taking the intended hold: %v", holderErr)
+	case <-time.After(timeouts.TestProfile().WorkflowResult()):
+		t.Fatal("the independent writer did not reach its hold boundary")
+	}
 
 	bounded, cancel := context.WithTimeout(t.Context(), timeouts.TestProfile().WorkflowResult())
 	defer cancel()
 	reader, err := NewGateReader(store, gateHarness, "held-writer-session")
 	require.NoError(t, err)
+	started := time.Now()
 	snapshot, err := reader.Snapshot(bounded)
-	close(release)
-	require.NoError(t, <-holderDone)
-	require.NoError(t, err, "a read must not need the file's write lock")
+	readElapsed := time.Since(started)
+	after := store.auditDB.Stats()
+	free()
+	<-holderDone
+	require.NoError(t, holderErr)
+	t.Logf("held-writer Snapshot: elapsed=%s before=%+v after=%+v", readElapsed, before, after)
+	require.NoError(t, err, "a read must not need the file's write lock: elapsed=%s before=%+v after=%+v", readElapsed, before, after)
 	t.Cleanup(func() { require.NoError(t, snapshot.Close()) })
 	authority, err := snapshot.Authority(actor)
 	require.NoError(t, err)
 	require.Len(t, authority.Episodes, 1)
+}
+
+func TestHeldWriterReadProbeKeepsOnlyItsIntendedConcurrency(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "gate_reader_test.go", nil, 0)
+	require.NoError(t, err)
+	checked := 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "TestGateReaderReadsUnderAHeldWriter" {
+			continue
+		}
+		checked++
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if ok && selector.Sel.Name == "Parallel" {
+				t.Error("held-writer read qualification must precede unrelated package-parallel work")
+			}
+			return true
+		})
+	}
+	require.Equal(t, 1, checked)
 }
 
 // TestGateReaderUnmappedPhaseReachesPolicyAsUnset is the reader's own mapping

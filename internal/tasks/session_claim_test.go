@@ -316,7 +316,9 @@ func TestSessionClaimV2SessionCreatedWritesClaim(t *testing.T) {
 // RED when: a lost race becomes an error, reports wrote, or leaves StoredActor
 // empty while a winner row exists.
 func TestSessionClaimLostRaceNamesTheWinner(t *testing.T) {
-	t.Parallel()
+	// The trigger supplies the exact competing-writer interleaving. Unrelated
+	// package fixtures are not participants in this proof, whose claim read
+	// retains the production one-second ingress deadline.
 	tracker, db, _ := claimStore(t)
 	// recursive_triggers stays OFF (the SQLite default): the trigger's own
 	// insert must not fire the trigger again.

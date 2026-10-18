@@ -133,6 +133,15 @@ func TestSeparateAssetEntryPointsRejectWithoutStageWrites(t *testing.T) {
 			for _, dir := range []string{"internal", "tools", "pkg", "artifact", "skills", "agents", "hooks"} {
 				require.NoError(t, os.CopyFS(filepath.Join(root, dir), os.DirFS(filepath.Join(realRoot, dir))))
 			}
+			// Nix supplies a verified offline vendor closure rather than a
+			// downloadable module cache. The independent clone needs that same
+			// closure; do not disable vendor mode or replace the real generator.
+			vendor := filepath.Join(realRoot, "vendor")
+			if _, err := os.Stat(vendor); err == nil {
+				require.NoError(t, os.CopyFS(filepath.Join(root, "vendor"), os.DirFS(vendor)))
+			} else {
+				require.True(t, os.IsNotExist(err), "inspect the parent module's optional vendor closure: %v", err)
+			}
 			for _, file := range []string{"go.mod", "go.sum"} {
 				content, err := os.ReadFile(filepath.Join(realRoot, file))
 				require.NoError(t, err)
@@ -143,6 +152,11 @@ func TestSeparateAssetEntryPointsRejectWithoutStageWrites(t *testing.T) {
 			require.NoError(t, err)
 			command := exec.Command("go", "generate", fixture.Generator)
 			command.Dir = root
+			// This copied tree is an independent fixture module. The parent's
+			// integration workspace names the real source tree, not this clone.
+			// Keep the real generator and rejection assertions, but let Go select
+			// the fixture's own go.mod instead of rejecting workspace membership.
+			command.Env = append(os.Environ(), "GOWORK=off")
 			output, err := command.CombinedOutput()
 			require.Error(t, err, string(output))
 			require.Contains(t, string(output), "operational tracker gate rejected")

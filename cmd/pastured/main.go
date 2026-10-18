@@ -34,6 +34,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/types"
+	"github.com/dayvidpham/pasture/internal/writeprofile"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -74,11 +75,17 @@ var version = "devel"
 const perComponentShutdownTimeout = 10 * time.Second
 
 func main() {
+	if err := writeprofile.StartEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer writeprofile.Stop()
 	if err := newRootCmd().Execute(); err != nil {
 		// Cobra prints the error itself; we only choose the exit code. The
 		// code comes from the error's own category, so an operator's script
 		// can tell a bad configuration from an unreachable database and from
 		// a stop that did not finish. See the table in the package comment.
+		writeprofile.Stop()
 		os.Exit(pasterrors.ExitCode(err))
 	}
 }
@@ -116,6 +123,7 @@ then blocks until SIGINT or SIGTERM. No external workflow server is required.`,
 		showVersion, _ := cmd.Flags().GetBool("version")
 		if showVersion {
 			fmt.Printf("pastured %s\n", version)
+			writeprofile.Stop()
 			os.Exit(0)
 		}
 		return nil

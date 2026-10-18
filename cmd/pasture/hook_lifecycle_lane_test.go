@@ -16,6 +16,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/laneserve"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/writelane"
 )
@@ -36,7 +37,6 @@ func laneTestSocketPath(t *testing.T) string {
 // the production server, lane and store rather than a stub.
 func startHookTestWriteLane(t *testing.T, dbPath string) string {
 	t.Helper()
-	_ = dbPath
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
@@ -72,6 +72,19 @@ func startHookTestWriteLane(t *testing.T, dbPath string) string {
 		require.NoError(t, lane.Close(context.Background()))
 	})
 	return socketPath
+}
+
+func initializeWarmLaneTestDatabase(t *testing.T, dbPath string) {
+	t.Helper()
+	initializeLifecycleTestDatabase(t, dbPath)
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, tracker.Close()) }()
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, timeouts.TestProfile())
+	require.NoError(t, err)
+	testutil.ActivateLaneTestDefinitions(t, service)
+	require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind),
+		"definition setup must never manufacture an occurrence")
 }
 
 // readLastFaultRecordLine returns the newest fault record line as a map, so a
@@ -159,16 +172,17 @@ func TestTheWriteLaneAnswersAndRecordsTheDaemonWriter(t *testing.T) {
 
 	// The direct path, on its own fresh store.
 	directDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
-	initializeLifecycleTestDatabase(t, directDB)
+	initializeWarmLaneTestDatabase(t, directDB)
 	t.Setenv(hookWriteLaneEnv, string(WriteLaneDirect))
 	directCmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.261", directDB)
 	directCmd.SetIn(strings.NewReader(string(raw)))
 	direct := lifecycleTestOutcome(t, directCmd, nil,
 		handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
+	require.Empty(t, direct.Stderr, "exit 0 also describes fail-open; the direct receipt must actually succeed")
 
 	// The served path, against a real in-process daemon lane on its own store.
 	servedDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
-	initializeLifecycleTestDatabase(t, servedDB)
+	initializeWarmLaneTestDatabase(t, servedDB)
 	socketPath := startHookTestWriteLane(t, servedDB)
 	t.Setenv(hookWriteLaneEnv, string(WriteLaneAuto))
 	t.Setenv(hookWriteLaneSocketEnv, socketPath)
@@ -178,6 +192,7 @@ func TestTheWriteLaneAnswersAndRecordsTheDaemonWriter(t *testing.T) {
 	servedCmd.SetErr(&servedDiagnostics)
 	served := lifecycleTestOutcome(t, servedCmd, nil,
 		handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
+	require.Empty(t, served.Stderr, "exit 0 also describes fail-open; the served receipt must actually succeed")
 
 	require.Equal(t, direct.Exit, served.Exit,
 		"the served path must produce the same host exit as the direct path for the same event")
@@ -282,7 +297,7 @@ func TestTheWriteLaneIsNeverAskedWhenDisabled(t *testing.T) {
 	socketPath := startHookTestWriteLane(t, daemonDB)
 
 	hookDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
-	initializeLifecycleTestDatabase(t, hookDB)
+	initializeWarmLaneTestDatabase(t, hookDB)
 	t.Setenv(hookWriteLaneEnv, string(WriteLaneDirect))
 	t.Setenv(hookWriteLaneSocketEnv, socketPath)
 
@@ -291,6 +306,7 @@ func TestTheWriteLaneIsNeverAskedWhenDisabled(t *testing.T) {
 	outcome := lifecycleTestOutcome(t, cmd, nil,
 		handlers.PassThroughCommitBarrier{}, timeouts.ProductionProfile(), context.WithTimeout)
 	require.Equal(t, hostexit.ExitContinue, outcome.Exit)
+	require.Empty(t, outcome.Stderr, "a fail-open timeout is not a successful direct write")
 
 	daemonTracker, err := tasks.OpenTaskTracker(daemonDB)
 	require.NoError(t, err)

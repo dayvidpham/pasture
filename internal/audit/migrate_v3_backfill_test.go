@@ -741,6 +741,24 @@ func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t
 	if err := os.WriteFile(emptyConfig, []byte{}, 0o600); err != nil {
 		t.Fatalf("write empty config file: %v", err)
 	}
+	// Both daemons must elect the SAME lane, but never in the operator's
+	// inherited runtime directory or beside t.TempDir's long test name. Nix
+	// exposes the latter as /build/TestVeryLongName... and exceeds sun_path.
+	// MkdirTemp creates a short private (0700) root; child cleanup, registered
+	// below, runs before this directory is removed.
+	runtimeDir, err := os.MkdirTemp("", "pa-")
+	if err != nil {
+		t.Fatalf("create private daemon runtime directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(runtimeDir); err != nil {
+			t.Errorf("remove private daemon runtime directory: %v", err)
+		}
+	})
+	info, err := os.Stat(runtimeDir)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("daemon runtime directory is not private: info=%v error=%v", info, err)
+	}
 
 	type procResult struct {
 		output string
@@ -758,6 +776,7 @@ func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t
 			"--db", raceDB,
 			"--audit-trail=sqlite",
 		)
+		cmd.Env = append(cmd.Environ(), "XDG_RUNTIME_DIR="+runtimeDir)
 		cmd.Stdout = outBuf
 		cmd.Stderr = outBuf
 		ch := make(chan procResult, 1)
@@ -842,6 +861,16 @@ func TestTwoDaemonsOpeningOneLegacyDatabaseMigrateItOnceAndTheLoserFailsSafely(t
 				outcome.name, exitCode, safeLossSentences(), outcome.exited.output)
 		}
 		t.Logf("%s lost the concurrent open safely (exit %d)", outcome.name, exitCode)
+	}
+	// At least one real lane must still be hosted. Disabling the lane, or
+	// routing both children to some unrelated runtime, is not this repair.
+	sockets, err := filepath.Glob(filepath.Join(runtimeDir, "pasture", "lane-*.sock"))
+	if err != nil || len(sockets) != 1 {
+		t.Fatalf("private shared runtime has sockets=%v error=%v, want exactly one real elected lane", sockets, err)
+	}
+	info, err = os.Stat(sockets[0])
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("elected lane is not a Unix socket: info=%v error=%v", info, err)
 	}
 
 	// Signal both processes to stop.  If a process already exited (a safe

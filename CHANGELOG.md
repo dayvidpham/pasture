@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.0.21] - 2026-10-18
+
+Release-preparation candidate, **not published**. The separately owned version
+command, model-registration fixes and published dependency checksums/Nix vendor
+closure are integrated; publication still requires final combined-tree gates and review.
+This preparation does not claim those pending steps have landed.
+The operator-selected release is v0.0.21, superseding earlier unpublished
+candidate versions. No existing contract is removed.
+
+### Added
+- `pasture version`, using the same version data and rendering as `pasture --version`.
+- Exact local model allowances and model catalog refresh commands, with
+  registration and durable activation using the same accepted provider/model pairs.
+- Opt-in developer write profiling, corrected timing attribution, disposable-store
+  lane experiments and offline analysis with independently reconciled outcomes.
+- Documented matched write-cost and lane-tuning evidence, complete configured
+  budgets, sparse-tail limits and a recommendation to retain 20 records / 25 ms.
+
+### Fixed
+- Include the model-registration fixes from #222: accepted exact model identities
+  can be registered durably without changing their spelling or including execution variants.
+- A definitely committed audit write now returns success with a structured cleanup
+  warning if its cleanup deadline expires and its connection is confirmed retired
+  from the pool. Unknown commits, unconfirmed retirement, unrecognized cleanup
+  failures and unavailable warning delivery remain errors; writes are never blindly
+  retried. This does not claim physical close/fsync confirmation or widen budgets.
+- End queue residence at batch start and report same-batch preparation separately.
+- Refuse successful-work speedup ratios for fault responses, missing routing proof,
+  changed inputs or incomplete offered/committed accounting.
+
+### Performance and compatibility
+- Adopt the publicly available Provenance commit `022003a0a36b` through
+  `v0.10.2-0.20261016221412-022003a0a36b` and Bestiary v0.2.11, preserving the
+  upstream proof-reuse optimization while adding exact model registry injection.
+- Adopt guarded upstream exact-replay proof reuse without weakening
+  identity, authority or integrity checks. On the measured copied corpus, serial
+  create median was 1686→101 ms with 72/72 commits on each side; copied C18 create
+  still committed only 28/72 after optimization. These are sandbox observations,
+  not general latency guarantees; hook preparation costs remain.
+- Production batch/flush defaults, timeouts and hook failure policy remain unchanged.
+  The narrowly scoped committed-audit cleanup outcome change is described above.
+  Burst timers were bypassed; measured SQL transaction scope around 66 ms is not
+  whole-turn elapsed around 444 ms or a physical-lock bound. Peer tails are sparse.
+
 ## [0.0.20] - 2026-10-13
 
 ### Fixed

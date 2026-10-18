@@ -284,7 +284,9 @@ func spikeAuditEvent(role string) protocol.AuditEvent {
 // below. That is what makes the tight half sensitive to the value under test
 // and not merely to the lock.
 func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
-	t.Parallel()
+	// This is a latency assertion, not an overlap test (the spike above owns
+	// overlap). Run before this package releases its parallel engine fixtures:
+	// otherwise runnable goroutine delay is charged to SQLite's caller budget.
 
 	// The generous budget is four seconds and the tight budget is 25 ms. The
 	// generous half releases the lock after generousLockHold, which is a
@@ -317,7 +319,6 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			dbPath := testutil.GoldenUnifiedDBPath(t)
 			executorID, appVersion := testEngineIdentity(t)
 			e, err := engine.New(t.Context(), engine.Config{
@@ -361,6 +362,7 @@ func TestEngineAuditTrail_UsesTheConfiguredSQLiteLockBudget(t *testing.T) {
 			}
 			err = e.Trail().RecordEvent(writeCtx, spikeAuditEvent("supervisor"))
 			waited := time.Since(start)
+			t.Logf("real audit write: caller deadline=%v elapsed=%s lock retained until return=%v", tc.wantLocked, waited, tc.wantLocked)
 			// The tight half holds the lock for the whole write, so releasing
 			// here cannot have helped the write that already returned.
 			release()
@@ -416,17 +418,26 @@ func TestEngineAuditTrailPinsConfiguredProfileSupplier(t *testing.T) {
 		}
 		count++
 		found := false
+		loggerFound := false
 		for _, arg := range call.Args {
 			option, ok := arg.(*ast.CallExpr)
 			if !ok || len(option.Args) != 1 {
 				continue
 			}
 			fun, ok := option.Fun.(*ast.SelectorExpr)
-			if !ok || fun.Sel.Name != "WithTimeoutProfile" {
+			if !ok {
 				continue
 			}
 			pkg, ok := fun.X.(*ast.Ident)
 			if !ok || pkg.Name != "audit" {
+				continue
+			}
+			if fun.Sel.Name == "WithLogger" {
+				value, ok := option.Args[0].(*ast.Ident)
+				loggerFound = ok && value.Name == "logger"
+				continue
+			}
+			if fun.Sel.Name != "WithTimeoutProfile" {
 				continue
 			}
 			value, ok := option.Args[0].(*ast.SelectorExpr)
@@ -438,6 +449,9 @@ func TestEngineAuditTrailPinsConfiguredProfileSupplier(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("%s drops cfg.Timeouts from forensic trail construction", selector.Sel.Name)
+		}
+		if !loggerFound {
+			t.Errorf("%s drops the owning engine logger from forensic cleanup diagnostics", selector.Sel.Name)
 		}
 		return true
 	})

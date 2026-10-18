@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -10,9 +11,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
+	"github.com/dayvidpham/pasture/internal/lifecycle/definitions"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // Invalid native names retain the real pre-storage refusal proof. Stop and
@@ -92,6 +98,41 @@ func (w *erroringWriter) Write(p []byte) (int, error) {
 	return 0, errors.New("closed output")
 }
 
+// initializePostCommitTestDatabase publishes immutable owners for the actual
+// delivery contract, not the Claude-only lane fixture's owners. These tests
+// must reach a post-commit failure; cold definition publication is a separate
+// precondition, not work to race against the hook's unchanged request budget.
+func initializePostCommitTestDatabase(t *testing.T, dbPath string, contract ir.RuntimeContractID) {
+	t.Helper()
+	initializeLifecycleTestDatabase(t, dbPath)
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, tracker.Close()) }()
+	profile := timeouts.ProductionProfile()
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, profile)
+	require.NoError(t, err)
+	setup := service
+	setup.Appender.Deadline = profile.WorkflowResult()
+	ctx, cancel := context.WithTimeout(t.Context(), profile.WorkflowResult())
+	defer cancel()
+	_, err = receipt.EnsureActiveMetamodel(ctx, setup)
+	require.NoError(t, err, "prepare post-commit fixture metamodel")
+	_, err = receipt.EnsureOccurrenceEnvelope(ctx, setup, contract, model.OccurrenceEnvelopeRef{})
+	require.NoError(t, err, "prepare post-commit fixture occurrence owners for %s", contract)
+	runtimeContract, err := definitions.RuntimeContractForDelivery(contract)
+	require.NoError(t, err)
+	documents, err := definitions.ActiveForContract(runtimeContract)
+	require.NoError(t, err)
+	_, err = receipt.EnsureActiveDefinition(ctx, setup, documents.Interpreter)
+	require.NoError(t, err, "prepare post-commit fixture interpreter")
+	require.Equal(t, profile.Ingress(), service.Appender.Deadline, "setup must not widen the request's ingress budget")
+	require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), definitions.EvidenceKind), 5,
+		"setup publishes only the delivery's four occurrence owners and interpreter")
+	require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), occurrenceEvidenceKind), "owner setup must not manufacture a receipt")
+	require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind))
+	require.Empty(t, queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind))
+}
+
 // TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit exercises the
 // harness-neutral native-continuation write-failure branch in the production
 // lifecycle command RunE (cmd/pasture/hook_lifecycle.go): the durable receipt
@@ -107,7 +148,7 @@ func (w *erroringWriter) Write(p []byte) (int, error) {
 func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	t.Setenv("PASTURE_DB_PATH", dbPath)
-	initializeLifecycleTestDatabase(t, dbPath)
+	initializePostCommitTestDatabase(t, dbPath, registration.Codex0_153_0().Contract)
 	raw := readCodexProductionFixture(t, "pre_tool_use_0_153_0.json", "PreToolUse", activation.CaptureProofCodexPreToolUse)
 
 	failing := &erroringWriter{}
@@ -131,6 +172,7 @@ func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.
 	require.NotZero(t, failing.writes, "the failing writer must have been asked to write the native continuation")
 	require.Contains(t, stderr.String(), "could not write its committed host continuation")
 	require.Contains(t, stderr.String(), "the event was recorded but the host received no continuation; inspect the database and retry the hook input")
+	require.NotContains(t, stderr.String(), "could not evaluate", "a fail-open continuation write is not evidence of a committed receipt: %s", stderr.String())
 
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -141,6 +183,8 @@ func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.
 	require.Len(t, occurrences, 1, "durable occurrence evidence must be committed before the failed stdout write")
 	require.Len(t, interpreted, 1)
 	require.Len(t, consultation, 1)
+	require.Len(t, queryLifecycleEvidence(t, tracker.Journal(), definitions.EvidenceKind), 5, "the request must not publish missing cold owners")
+	require.Equal(t, occurrences[0].ProducingOperationJournalID, interpreted[0].ProducingOperationJournalID, "the occurrence and interpretation must belong to one durable operation")
 	require.Equal(t, interpreted[0].ProducingOperationJournalID, consultation[0].ProducingOperationJournalID, "one durable operation groups interpreted and consultation evidence")
 	require.Less(t, interpreted[0].JournalID, consultation[0].JournalID, "interpreted evidence precedes consultation evidence in the committed operation")
 }

@@ -65,6 +65,7 @@ const (
 )
 
 func TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow(t *testing.T) {
+	timing := performanceTimingEnabled(t)
 	if testing.Short() {
 		t.Skip("the built-binary acceptance row builds two binaries and starts a daemon; -short skips it")
 	}
@@ -253,10 +254,10 @@ func TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow(t *testin
 	// even where it is not asserted. Do not widen the constant to fit a slow
 	// runner: that would dilute the reference-host tripwire without adding
 	// any signal the relative bound does not already carry.
-	if os.Getenv("GITHUB_ACTIONS") == "" && p95 > laneAbsoluteP95Target {
+	if timing && os.Getenv("GITHUB_ACTIONS") == "" && p95 > laneAbsoluteP95Target {
 		t.Errorf("serial probe p95 was %s, above the %s acceptance target", p95, laneAbsoluteP95Target)
 	}
-	if relative > laneRelativeP95Bound {
+	if timing && relative > laneRelativeP95Bound {
 		t.Errorf("lane burst p95 was %.2fx the same-run direct median (%s vs %s), above the %.2f relative acceptance bound: the lane added latency beyond one synchronous commit",
 			relative, p95, directMedian, laneRelativeP95Bound)
 	}
