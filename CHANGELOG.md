@@ -1,22 +1,26 @@
 # Changelog
 
-## [0.0.21] - 2026-10-17
+## [0.0.21] - 2026-10-18
 
 Release-preparation candidate, **not published**. The separately owned version
-command and published Provenance v0.10.1 dependency pin/checksums/Nix vendor closure
-are integrated; publication still requires final exact-tree gates and review.
+command, model-registration fixes and published dependency checksums/Nix vendor
+closure are integrated; publication still requires final combined-tree gates and review.
 This preparation does not claim those pending steps have landed.
 The operator-selected release is v0.0.21, superseding earlier unpublished
 candidate versions. No existing contract is removed.
 
 ### Added
 - `pasture version`, using the same version data and rendering as `pasture --version`.
+- Exact local model allowances and model catalog refresh commands, with
+  registration and durable activation using the same accepted provider/model pairs.
 - Opt-in developer write profiling, corrected timing attribution, disposable-store
   lane experiments and offline analysis with independently reconciled outcomes.
 - Documented matched write-cost and lane-tuning evidence, complete configured
   budgets, sparse-tail limits and a recommendation to retain 20 records / 25 ms.
 
 ### Fixed
+- Include the model-registration fixes from #222: accepted exact model identities
+  can be registered durably without changing their spelling or including execution variants.
 - A definitely committed audit write now returns success with a structured cleanup
   warning if its cleanup deadline expires and its connection is confirmed retired
   from the pool. Unknown commits, unconfirmed retirement, unrecognized cleanup
@@ -27,6 +31,9 @@ candidate versions. No existing contract is removed.
   changed inputs or incomplete offered/committed accounting.
 
 ### Performance and compatibility
+- Adopt the publicly available Provenance commit `022003a0a36b` through
+  `v0.10.2-0.20261016221412-022003a0a36b` and Bestiary v0.2.11, preserving the
+  upstream proof-reuse optimization while adding exact model registry injection.
 - Adopt guarded upstream exact-replay proof reuse without weakening
   identity, authority or integrity checks. On the measured copied corpus, serial
   create median was 1686→101 ms with 72/72 commits on each side; copied C18 create

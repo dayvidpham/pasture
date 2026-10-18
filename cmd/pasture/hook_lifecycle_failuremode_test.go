@@ -6070,6 +6070,8 @@ var guardSweepForeign = map[string]string{
 	"integration_test.go":                        "not changed by this slice",
 	"main_test.go":                               "not changed by this slice",
 	"migrate_v8_v9_cli_test.go":                  "audit schema v8 to v9 migration proof on the built binary, outside the lifecycle transport sweep",
+	"models_context_test.go":                     "model catalog command cancellation, outside the lifecycle transport sweep",
+	"models_test.go":                             "offline model allowances and registration, outside the lifecycle transport sweep",
 	"queue_test.go":                              "not changed by this slice",
 	"task_residual_verbs_test.go":                "task agent registration and events/contexts CLI proof, outside the lifecycle transport sweep",
 	"task_well_known_test.go":                    "durable task-store built-in initialization and process-race CLI proof, outside the lifecycle transport sweep",

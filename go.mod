@@ -3,7 +3,8 @@ module github.com/dayvidpham/pasture
 go 1.26.0
 
 require (
-	github.com/dayvidpham/provenance v0.10.1
+	github.com/dayvidpham/bestiary v0.2.11
+	github.com/dayvidpham/provenance v0.10.2-0.20261016221412-022003a0a36b
 	github.com/dbos-inc/dbos-transact-golang v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/opencontainers/go-digest v1.0.0
@@ -22,7 +23,6 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dayvidpham/bestiary v0.1.0 // indirect
 	github.com/dominikbraun/graph v0.23.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect

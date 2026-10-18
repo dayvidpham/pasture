@@ -26,8 +26,11 @@ upstream integration, separately from the accepted restricted benchmark usage.
 
 Publication prerequisite was satisfied on2026-10-16: Provenance v0.10.1 tags the
 actual merge commit `f0572d1a6759f3bd160f85ef487a5a33a4069510`, incorporating the
-reviewed `126f06f` tree. The candidate now adopts the real module and computed
-vendor closure, without a local replacement. All final candidate gates must use
+reviewed `126f06f` tree. That initial candidate adopted the real module and computed
+vendor closure, without a local replacement. The combined v0.0.21 candidate now
+also includes PR222's exact model registration and its publicly downloadable
+Provenance `v0.10.2-0.20261016221412-022003a0a36b` / Bestiary v0.2.11 closure.
+The pseudo-version names the actual public commit, not a new release tag. All final candidate gates must use
 `GOWORK=off`; the workspace recipe below remains only a record of prepublication
 verification and is not substituted for published-pin gates.
 

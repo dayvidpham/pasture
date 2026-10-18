@@ -99,7 +99,7 @@ func newTaskAgentsRegisterMLCmd() *cobra.Command {
 			role, _ := cmd.Flags().GetString("role")
 			provider, _ := cmd.Flags().GetString("provider")
 			model, _ := cmd.Flags().GetString("model")
-			code, err := handlers.TaskAgentsRegister(cmd.OutOrStdout(), handlers.TaskAgentRegisterInput{
+			code, err := handlers.TaskAgentsRegisterContext(cmd.Context(), cmd.OutOrStdout(), handlers.TaskAgentRegisterInput{
 				DBPath:    flagDBPath,
 				Namespace: flagNamespace,
 				Kind:      handlers.AgentRegisterML,

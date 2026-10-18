@@ -70,7 +70,7 @@ func TestCLI_TaskAgentsRegisterValidation(t *testing.T) {
 		{"software missing version", []string{"agents", "register", "software", "--name", "cli"}, "register software"},
 		{"ml missing role", []string{"agents", "register", "ml", "--provider", "anthropic", "--model", "x"}, "register ml"},
 		{"ml unknown role", []string{"agents", "register", "ml", "--role", "wizard", "--provider", "anthropic", "--model", "x"}, "architect"},
-		{"ml unknown provider", []string{"agents", "register", "ml", "--role", "worker", "--provider", "not-a-provider", "--model", "x"}, "provider"},
+		{"ml malformed provider", []string{"agents", "register", "ml", "--role", "worker", "--provider", "not/a-provider", "--model", "x"}, "provider"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

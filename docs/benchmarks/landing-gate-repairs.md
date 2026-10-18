@@ -294,6 +294,26 @@ exact integration tree. No dedicated version-command tests were added.
 
 ## Completion rule
 
+### Combined model-registration integration, 2026-10-18 UTC
+
+After PR222 merged to main at `8890e4a50b098ce524c3d0f609b163c62af7bd04`,
+the operator lifted the release hold. The release branch merges that actual
+main commit without discarding the reviewed cleanup, profiling, fixture or
+separate race/performance work. `open_unified.go` preserves both exact model
+registry injection and the owning cleanup diagnostic routes, including cutover.
+
+Conflicts resolve to the union of `models` and `version` in the existing CLI
+inventory; main's exact module graph/checksums/vendorHash; and dependency
+documentation covering both exact model membership and guarded replay reuse.
+The new closure is publicly downloadable with GOWORK off and the public checksum
+database: Provenance `v0.10.2-0.20261016221412-022003a0a36b` resolves to actual
+commit `022003a0a36b1bf1cf850871b742b0ab095d3887`, alongside Bestiary v0.2.11.
+This is the available pseudo-version adopted by merged main, not an invented
+v0.10.2 release tag. Its exact Nix vendorHash is inherited from main and must
+pass the combined package/check builds. Pasture remains v0.0.21; no local
+replace/workspace or new dedicated version tests are introduced. Old standalone
+gate results do not validate this new combined dependency/source tree.
+
 ### Approved committed-audit cleanup outcome, 2026-10-17
 
 PR221 run38996221869 failed only the eight-isolated-engine spike: two workers
