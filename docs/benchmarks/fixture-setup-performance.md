@@ -113,5 +113,6 @@ affected raw parity tests and the new guards passed together in a focused
 - `TestConcurrentLifecycleCopiesDoNotShareWrites`
 - `TestLifecycleCopyGuardRejectsASharedInode`
 - `TestLifecycleTemplateFingerprintRejectsMutation`
+- `TestRefuseNonEmptySidecar`
 
 No previous test name was removed. The list command was not a race wave.

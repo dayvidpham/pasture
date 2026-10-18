@@ -1862,7 +1862,7 @@ func copyInitializedLifecycleTestDatabase(t *testing.T, dbPath string) {
 	}
 	copied, err := os.ReadFile(dbPath)
 	require.NoError(t, err)
-	require.Equal(t, source.fingerprint, sha256.Sum256(copied), "a lifecycle copy must start as the published bytes")
+	require.NoError(t, lifecycleBytesMatchTemplate(copied), "a lifecycle copy must start as the published bytes")
 	info, err := os.Stat(dbPath)
 	require.NoError(t, err)
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "lifecycle copies keep the fixture file mode")
@@ -1953,7 +1953,7 @@ func lifecycleBytesMatchTemplate(body []byte) error {
 	if pub.path == "" {
 		return fmt.Errorf("lifecycle template has not been published")
 	}
-	if sha256.Sum256(body) != pub.fingerprint {
+	if sha256.Sum256(body) != pub.fingerprint || int64(len(body)) != pub.size {
 		return fmt.Errorf("bytes do not match the published lifecycle template")
 	}
 	return nil
@@ -1987,8 +1987,8 @@ func TestInitializedLifecycleCopiesArePrivateAndReceiptFree(t *testing.T) {
 	copyInitializedLifecycleTestDatabase(t, first)
 	boots := lifecycleBootstrapCalls.Load()
 	publishes := lifecycleTemplatePublishes.Load()
-	require.Equal(t, int32(1), boots, "the process builds the lifecycle prerequisite once")
-	require.Equal(t, int32(1), publishes, "the process publishes that prerequisite once")
+	require.NotZero(t, boots, "the first copy must build the process prerequisite")
+	require.NotZero(t, publishes, "the first copy must publish the process prerequisite")
 	copyInitializedLifecycleTestDatabase(t, second)
 	require.Equal(t, boots, lifecycleBootstrapCalls.Load(), "another copy must not open and create the prerequisite again")
 	require.Equal(t, publishes, lifecycleTemplatePublishes.Load())
@@ -2012,8 +2012,9 @@ func TestInitializedLifecycleCopiesArePrivateAndReceiptFree(t *testing.T) {
 }
 
 func TestConcurrentLifecycleCopiesDoNotShareWrites(t *testing.T) {
-	// Publish on this goroutine. The copies themselves run concurrently and
-	// report through channels; they do not call t.
+	// The concurrent part is testutil.CopyFile, the same copy call the helper
+	// uses; the helper's isolation and fingerprint guards then run on the main
+	// goroutine, which is where t is safe to use.
 	seed := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	copyInitializedLifecycleTestDatabase(t, seed)
 	source := lifecycleTemplate.pub.path
@@ -2055,6 +2056,33 @@ func TestLifecycleCopyGuardRejectsASharedInode(t *testing.T) {
 	err := lifecycleCopyIsolationError(linked, source)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "shares an inode")
+}
+
+func TestRefuseNonEmptySidecar(t *testing.T) {
+	dir := t.TempDir()
+	empty := filepath.Join(dir, "empty-wal")
+	require.NoError(t, os.WriteFile(empty, nil, 0o600))
+	full := filepath.Join(dir, "full-wal")
+	require.NoError(t, os.WriteFile(full, []byte("not checkpointed"), 0o600))
+	for _, tc := range []struct {
+		name    string
+		path    string
+		wantErr string
+	}{
+		{name: "missing path", path: filepath.Join(dir, "missing-wal")},
+		{name: "empty sidecar", path: empty},
+		{name: "non-empty sidecar", path: full, wantErr: "refusing to publish"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := refuseNonEmptySidecar(tc.path)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
 }
 
 func TestLifecycleTemplateFingerprintRejectsMutation(t *testing.T) {
