@@ -107,8 +107,9 @@ jobs:
 
       - name: Controlled performance (required)
         # Runs on a fresh runner after the race job: no concurrent race suite
-        # or independent heavy builder is alive during the measured window.
-        # Unscaled reference-host thresholds; do not add a CI factor.
+        # or independent heavy builder is alive on this runner during the
+        # measured window. Unscaled reference-host thresholds; do not add a CI
+        # factor.
         run: make test-performance
 
   lint:
