@@ -4,8 +4,17 @@ Both phases are release gates. Operator approval on 2026-10-16 separates
 measurement from concurrent race-suite load; it does not relax any band or
 remove any workload. Production remains 20 records / 25 ms.
 
-Run `GOWORK=off make test-race`. Its recipe invokes these **sequentially**,
-including under `make -j`:
+Run the default pair on exactly one backend. The local pair and the Nix race
+derivation execute the same default race-correctness suite and the same
+controlled performance tests; a sitting must not run both. GitHub CI and
+`release.yml` already use the local backend. Do not add a Nix race job to CI.
+Prefer the Nix derivation when that sitting's release vehicle is the hermetic
+builder and the local pair has not already passed on the same tree. An
+interrupted Nix race build is not a pass, and it is not evidence that the
+local backend failed.
+
+Local backend: `GOWORK=off make test-race`. Its recipe invokes these
+**sequentially**, including under `make -j`:
 
 1. `make test-race-correctness`: full `go test -race -count=1 -timeout 30m
    ./...`, with `PASTURE_TEST_PHASE=race-correctness`. Every test still runs,
@@ -38,16 +47,29 @@ the lane, receipt, store and handler implementations with instrumentation.
 Phase 2 additionally enforces the in-process read/open bands without detector
 overhead. Neither a focused success nor phase 1 alone clears the release.
 
-CI `Build & Test` and release `verify` both invoke the combined target; tag
-creation depends on `verify`. Nix `checks.<system>.race` runs the two phases
-in the same derivation in order. It depends on installer and CGO-disabled check
-outputs, so `nix flake check` cannot schedule those independent builders over
-its measured windows. Run `nix build .#checks.x86_64-linux.race --no-link` or
-`nix flake check`; both phases must exit0. All Nix builders use `GOWORK=off`.
+CI `Build & Test` and release `verify` invoke that local target; tag creation
+depends on `verify`.
 
-Additional release integration commands remain required: tagged full race
+Nix hermetic backend: `nix build .#checks.<system>.race --no-link` (on this
+host, `x86_64-linux`). That one derivation runs both phases in order. It
+depends on the installer and CGO-disabled check outputs, so those independent
+builders finish before its measured window. `nix flake check` without
+`--no-build` builds this same derivation; it is that backend, not a second gate
+after local success. `nix flake check --no-build` evaluates only and clears
+neither phase. All Nix builders use `GOWORK=off`. Both phases must still exit 0
+inside the chosen backend. Bands stay 80 committed events/s, 250 ms p95, and
+relative 1.25 where that ratio applies.
+
+The Nix race derivation does not pass `-tags=pasture_experiment` or
+`-tags=recovery`. Whichever default backend is chosen, these local proofs
+remain required: tagged full race
 (`PASTURE_TEST_PHASE=race-correctness CGO_ENABLED=1 go test -race -count=1
--timeout=30m -tags=pasture_experiment ./...`), recovery race, vet, CGO0 build,
-Python, generation/drift and actual packages. Run controlled performance only
-after those race waves and other heavy builders have exited. Every log must
-identify the exact SHA/tree; old failures remain preserved.
+-timeout=30m -tags=pasture_experiment ./...`) and recovery race
+(`CGO_ENABLED=1 go test -race -count=1 -timeout=30m -tags=recovery
+./internal/engine/...`). Vet, CGO-disabled build, Python, generation/drift,
+package builds, the CGO-disabled package check, and the installer check are
+separate. They do not replace the default pair or the tagged/recovery proofs.
+Run controlled performance only inside the chosen backend, after that backend's
+race wave and other heavy builders have exited. Do not schedule a second
+performance wave. Every log must identify the exact SHA/tree; old failures
+remain preserved.
