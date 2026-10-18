@@ -143,6 +143,7 @@ func TestNativeUnenforcedDecisionAgreesWithDurableConsultation(t *testing.T) {
 				outcome, err := handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
 					DBPath: dbPath, Harness: route.harness, Event: route.mapping.NativeName(), HostVersion: route.manifest.Version,
 					Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: operation},
+					TimeoutProfile: timeouts.TestProfile(),
 				})
 				require.NoError(t, err, "a valid but unenforceable decision is not a fault")
 				require.Equal(t, hostexit.ExitContinue, outcome.Exit)
@@ -269,6 +270,7 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 				DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: test.event, HostVersion: registration.OpenCode1_18_29().Version,
 				Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test." + test.name},
+				TimeoutProfile: timeouts.TestProfile(),
 			})
 			require.NoError(t, err)
 			require.Equal(t, test.wantResponse, response.IsValid())

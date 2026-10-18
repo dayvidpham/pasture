@@ -101,10 +101,11 @@ type HookLifecycleRawInput struct {
 	Clock       receipt.Clock
 	Operations  receipt.OperationIDSource
 	Activations []activation.Entry
-	// TimeoutProfile mirrors HookLifecycleInput.TimeoutProfile: the zero value
-	// keeps the production windows, and a supplied profile's Ingress tier
-	// bounds this path's receipt append. The command passes the profile it
-	// resolved from the operator's environment.
+	// TimeoutProfile optionally bounds this path's receipt append, mirroring
+	// HookLifecycleInput.TimeoutProfile. The zero value keeps the production
+	// windows; a caller that needs a different bound supplies its own profile
+	// (the handler tests use timeouts.TestProfile()). The raw command leaves it
+	// zero, so production behavior is unchanged.
 	TimeoutProfile timeouts.Profile
 }
 

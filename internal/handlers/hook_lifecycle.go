@@ -117,9 +117,9 @@ type lifecycleReaderFactory func(protocol.TaskTracker, ir.HarnessID, string) (ga
 // tier and the reclaim window is its WorkflowResult tier. A caller that tunes
 // the ordered profile — the lifecycle command, from the operator's environment —
 // must have that tuning reach this append, not only the hook's own deadline;
-// a caller that does not tune it (every other handler caller, and every test)
-// passes the zero profile and gets the production default, so nothing changes
-// for them.
+// a caller that does not tune it (the raw command, and every caller that
+// supplies no profile) passes the zero profile and gets the production
+// default, so nothing changes for them.
 func lifecycleReceiptServiceFor(tracker protocol.TaskTracker, clock receipt.Clock, operations receipt.OperationIDSource, profile timeouts.Profile) (receipt.Service, error) {
 	if profile.IsZero() {
 		return tasks.NewLifecycleReceiptService(tracker, clock, operations)

@@ -921,14 +921,15 @@ func TestBothCommittingSurfacesRunTheSameGate(t *testing.T) {
 		ClaimGateSession(t, dbPath, ir.HarnessClaudeCode, session)
 
 		result, err := HookLifecycleRaw(t.Context(), HookLifecycleRawInput{
-			DBPath:        dbPath,
-			Harness:       ir.HarnessClaudeCode,
-			Event:         "PreToolUse",
-			HostVersion:   registration.ClaudeCode2_1_261().Version,
-			SchemaVersion: RawSchemaClaudeCode2_1_261,
-			Input:         bytes.NewReader(raw),
-			Clock:         gateClock{},
-			Operations:    &gateOperations{},
+			DBPath:         dbPath,
+			Harness:        ir.HarnessClaudeCode,
+			Event:          "PreToolUse",
+			HostVersion:    registration.ClaudeCode2_1_261().Version,
+			SchemaVersion:  RawSchemaClaudeCode2_1_261,
+			Input:          bytes.NewReader(raw),
+			Clock:          gateClock{},
+			Operations:     &gateOperations{},
+			TimeoutProfile: timeouts.TestProfile(),
 		})
 
 		require.NoError(t, err)

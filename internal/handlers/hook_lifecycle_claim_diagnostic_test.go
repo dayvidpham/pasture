@@ -213,8 +213,9 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 // already claimed by the SAME actor. Neither may emit a diagnostic.
 func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
 	// Claim rendering is not a concurrency experiment. Complete these two
-	// sequential receipts before unrelated package-parallel store fixtures;
-	// the bound test ingress window from gateInput stays in force.
+	// sequential receipts before unrelated package-parallel store fixtures.
+	// The receipts use gateInput's bounded test window; the owner setup below
+	// deliberately keeps the production window to prove it does not widen it.
 	raw := gateFixture(t, gateClaudeSessionStartFixture)
 	dbPath := gateStore(t)
 	operations := &gateOperations{}
