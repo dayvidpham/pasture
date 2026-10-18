@@ -18,6 +18,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/provenance"
 )
 
@@ -70,15 +71,16 @@ func TestRawPreviewShowsTheUnevaluatedDefaultAndTheCommitRunsTheGate(t *testing.
 	require.NoError(t, err)
 	previewDB := filepath.Join(t.TempDir(), "unopened", "pasture.db")
 	input := HookLifecycleRawInput{
-		DBPath:        previewDB,
-		Harness:       ir.HarnessClaudeCode,
-		Event:         "PreToolUse",
-		HostVersion:   registration.ClaudeCode2_1_261().Version,
-		SchemaVersion: RawSchemaClaudeCode2_1_261,
-		DryRun:        true,
-		Input:         bytes.NewReader(raw),
-		Clock:         rawOutcomeClock{},
-		Operations:    rawOutcomeOperation{},
+		DBPath:         previewDB,
+		Harness:        ir.HarnessClaudeCode,
+		Event:          "PreToolUse",
+		HostVersion:    registration.ClaudeCode2_1_261().Version,
+		SchemaVersion:  RawSchemaClaudeCode2_1_261,
+		DryRun:         true,
+		Input:          bytes.NewReader(raw),
+		Clock:          rawOutcomeClock{},
+		Operations:     rawOutcomeOperation{},
+		TimeoutProfile: timeouts.TestProfile(),
 	}
 
 	preview, err := HookLifecycleRaw(context.Background(), input)

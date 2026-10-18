@@ -51,6 +51,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
@@ -259,6 +260,9 @@ func gateInput(t *testing.T, dbPath, event string, raw []byte) HookLifecycleInpu
 		Input:       bytes.NewReader(raw),
 		Clock:       gateClock{},
 		Operations:  &gateOperations{},
+		// Gate subjects are about decisions, not the production receipt
+		// latency on a shared CI disk; the profile stays bounded.
+		TimeoutProfile: timeouts.TestProfile(),
 	}
 }
 
@@ -917,14 +921,15 @@ func TestBothCommittingSurfacesRunTheSameGate(t *testing.T) {
 		ClaimGateSession(t, dbPath, ir.HarnessClaudeCode, session)
 
 		result, err := HookLifecycleRaw(t.Context(), HookLifecycleRawInput{
-			DBPath:        dbPath,
-			Harness:       ir.HarnessClaudeCode,
-			Event:         "PreToolUse",
-			HostVersion:   registration.ClaudeCode2_1_261().Version,
-			SchemaVersion: RawSchemaClaudeCode2_1_261,
-			Input:         bytes.NewReader(raw),
-			Clock:         gateClock{},
-			Operations:    &gateOperations{},
+			DBPath:         dbPath,
+			Harness:        ir.HarnessClaudeCode,
+			Event:          "PreToolUse",
+			HostVersion:    registration.ClaudeCode2_1_261().Version,
+			SchemaVersion:  RawSchemaClaudeCode2_1_261,
+			Input:          bytes.NewReader(raw),
+			Clock:          gateClock{},
+			Operations:     &gateOperations{},
+			TimeoutProfile: timeouts.TestProfile(),
 		})
 
 		require.NoError(t, err)

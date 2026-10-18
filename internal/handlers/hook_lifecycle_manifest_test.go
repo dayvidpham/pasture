@@ -17,6 +17,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/metamodel"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 type metamodelReadView struct {
@@ -68,6 +69,7 @@ func TestHookLifecycleMetamodelReadSurface(t *testing.T) {
 	_, err = handlers.HookLifecycleResponse(ctx, handlers.HookLifecycleInput{
 		DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: "SessionStart", HostVersion: "2.1.261",
 		Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.metamodel.delivery"},
+		TimeoutProfile: timeouts.TestProfile(),
 	})
 	require.NoError(t, err)
 

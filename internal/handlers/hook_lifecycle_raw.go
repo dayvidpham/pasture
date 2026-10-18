@@ -16,6 +16,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 const hookLifecycleRawWhere = "Ingesting a raw lifecycle event (internal/handlers/hook_lifecycle_raw.go in handlers.HookLifecycleRaw)."
@@ -100,6 +101,12 @@ type HookLifecycleRawInput struct {
 	Clock       receipt.Clock
 	Operations  receipt.OperationIDSource
 	Activations []activation.Entry
+	// TimeoutProfile optionally bounds this path's receipt append, mirroring
+	// HookLifecycleInput.TimeoutProfile. The zero value keeps the production
+	// windows; a caller that needs a different bound supplies its own profile
+	// (the handler tests use timeouts.TestProfile()). The raw command leaves it
+	// zero, so production behavior is unchanged.
+	TimeoutProfile timeouts.Profile
 }
 
 // rawSchemaVersionForDispatch derives the accepted wire schema identity from
@@ -256,7 +263,7 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 		return nil, err
 	}
 	defer tracker.Close()
-	service, err := tasks.NewLifecycleReceiptService(tracker, in.Clock, in.Operations)
+	service, err := lifecycleReceiptServiceFor(tracker, in.Clock, in.Operations, in.TimeoutProfile)
 	if err != nil {
 		return nil, err
 	}
