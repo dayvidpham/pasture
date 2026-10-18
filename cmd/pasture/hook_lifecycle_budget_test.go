@@ -48,6 +48,10 @@ func TestTheOperatorBudgetOverrideReachesTheLifecyclePath(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+			// This subject is the invocation knob against the production base.
+			// Clear the harness ingress window TestMain pins for child CLI
+			// subjects so the "unset" case really sees the production tiers.
+			t.Setenv(hookIngressTimeoutEnv, "")
 			t.Setenv(hookInvocationTimeoutEnv, tc.raw)
 
 			cmd := lifecycleTestCommand(t, "claude-code", "SessionStart", "2.1.261", dbPath)

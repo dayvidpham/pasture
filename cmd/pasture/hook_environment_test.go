@@ -233,6 +233,13 @@ func TestHookEnvironmentRefusesAMissingLookup(t *testing.T) {
 	assertActionableEnvError(t, err)
 }
 
+// TestCLITestHarnessPinsTheDocumentedIngressEnv keeps the main_test literal
+// (that package cannot import this package's constant) tied to the production
+// environment name, so a rename cannot silently stop the harness pin applying.
+func TestCLITestHarnessPinsTheDocumentedIngressEnv(t *testing.T) {
+	require.Equal(t, "PASTURE_INGRESS_TIMEOUT", hookIngressTimeoutEnv)
+}
+
 // TestHookEnvironmentZeroValueIsUnusable pins that the parser is the only way
 // in. The zero value carries an unset fault policy, and the fault mapper
 // refuses an unset policy, so code that skips the parser fails loudly instead
