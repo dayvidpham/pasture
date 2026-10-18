@@ -35,7 +35,13 @@ case "$url" in
   */actions/workflows/*/runs\?*) src="$fx/runs.json" ;;
   */actions/runs/*/jobs\?*) src="$fx/jobs.json" ;;
   */actions/runs/*) src="$fx/run.json" ;;
-  */contents/.claude-plugin/plugin.json*) src="$fx/plugin.json" ;;
+  */compare/*) src="$fx/compare.json" ;;
+  */contents/.claude-plugin/plugin.json*)
+    case "$url" in
+      *"ref=$FIXTURE_HEAD_SHA"*) src="$fx/plugin.json" ;;
+      *"ref=$FIXTURE_TAG_SHA"*) src="$fx/plugin-tagged.json" ;;
+      *) src="$fx/plugin.json" ;;
+    esac ;;
   */git/matching-refs/tags/*)
     [ ! -f "$fx/api-fail" ] || { echo "HTTP 502 Bad Gateway" >&2; exit 1; }
     src="$fx/tag-refs.json" ;;
@@ -53,6 +59,8 @@ chmod +x "$root/bin/gh"
 reset_fixtures() {
   rm -f "$fx"/*
   printf '{"version":"0.0.21"}\n' > "$fx/plugin.json"
+  printf '{"version":"0.0.21"}\n' > "$fx/plugin-tagged.json"
+  printf '{"status":"ahead"}\n' > "$fx/compare.json"
   printf '[]\n' > "$fx/tag-refs.json"
   cat > "$fx/run.json" <<JSON
 {"id":42,"head_sha":"$sha","event":"push","head_branch":"main","status":"completed",
@@ -82,6 +90,7 @@ run_case() {
   PATH="$root/bin:$PATH" FIXTURES="$fx" GITHUB_OUTPUT="$out" \
     REPO=dayvidpham/pasture EVENT_NAME=workflow_run RUN_ID=42 RUN_SHA="$sha" \
     DISPATCH_SHA="$sha" REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
+    FIXTURE_HEAD_SHA="$sha" FIXTURE_TAG_SHA="$other" \
     bash "$authority" > "$log" 2>&1 || code=$?
   local ok=1
   [ "$code" = "$want_exit" ] || ok=0
@@ -131,7 +140,19 @@ run_case already-tagged-here 0 false "already released"
 reset_fixtures
 printf '[{"ref":"refs/tags/v0.0.21"}]\n' > "$fx/tag-refs.json"
 printf '{"sha":"%s"}\n' "$other" > "$fx/tag-commit.json"
-run_case moved-tag 1 "" "refusing to move it"
+printf '{"status":"diverged"}\n' > "$fx/compare.json"
+run_case diverged-tag 1 "" "is not an ancestor"
+
+reset_fixtures
+printf '[{"ref":"refs/tags/v0.0.21"}]\n' > "$fx/tag-refs.json"
+printf '{"sha":"%s"}\n' "$other" > "$fx/tag-commit.json"
+jq '.version = "0.0.20"' "$fx/plugin-tagged.json" > "$fx/t" && mv "$fx/t" "$fx/plugin-tagged.json"
+run_case tagged-version-mismatch 1 "" "carries plugin version"
+
+reset_fixtures
+printf '[{"ref":"refs/tags/v0.0.21"}]\n' > "$fx/tag-refs.json"
+printf '{"sha":"%s"}\n' "$other" > "$fx/tag-commit.json"
+run_case released-on-ancestor 0 false "did not bump it"
 
 reset_fixtures
 touch "$fx/api-fail"
@@ -142,6 +163,7 @@ printf '{"workflow_runs":[{"id":9,"head_sha":"%s","created_at":"2026-10-18T01:00
 PATH="$root/bin:$PATH" FIXTURES="$fx" GITHUB_OUTPUT="$root/out-dispatch-none" \
   REPO=dayvidpham/pasture EVENT_NAME=workflow_dispatch RUN_ID="" RUN_SHA="" \
   DISPATCH_SHA="$sha" REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
+  FIXTURE_HEAD_SHA="$sha" FIXTURE_TAG_SHA="$other" \
   bash "$authority" > "$root/log-dispatch-none" 2>&1 \
   && code=0 || code=$?
 if [ "$code" = 1 ] && grep -qF "no completed CI run on main" "$root/log-dispatch-none"; then
@@ -154,6 +176,7 @@ reset_fixtures
 PATH="$root/bin:$PATH" FIXTURES="$fx" GITHUB_OUTPUT="$root/out-dispatch-newest" \
   REPO=dayvidpham/pasture EVENT_NAME=workflow_dispatch RUN_ID="" RUN_SHA="" \
   DISPATCH_SHA="$sha" REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
+  FIXTURE_HEAD_SHA="$sha" FIXTURE_TAG_SHA="$other" \
   bash "$authority" > "$root/log-dispatch-newest" 2>&1 \
   && code=0 || code=$?
 if [ "$code" = 0 ] && grep -qF "CI run 2 is authoritative" "$root/log-dispatch-newest" \
@@ -161,6 +184,28 @@ if [ "$code" = 0 ] && grep -qF "CI run 2 is authoritative" "$root/log-dispatch-n
   echo "PASS dispatch-newest (exit $code)"
 else
   echo "FAIL dispatch-newest (exit $code)"; failures=$((failures + 1))
+fi
+
+# The CI workflow name and job names are a contract with release.yml. Renaming
+# a CI job, changing the workflow name, or bumping the Go matrix must fail here,
+# at PR time, instead of at release time.
+ci="$here/../.github/workflows/ci.yml"
+release="$here/../.github/workflows/release.yml"
+contract=0
+grep -qx 'name: CI' "$ci" || { echo "FAIL ci.yml no longer names the workflow CI"; contract=1; }
+grep -qF 'workflows: ["CI"]' "$release" || { echo "FAIL release.yml no longer triggers on CI"; contract=1; }
+while IFS= read -r job; do
+  if grep -qF "name: $job" "$ci"; then continue; fi
+  base="${job%% (*}"
+  version="${job##* (}"; version="${version%)}"
+  if grep -qF "name: $base" "$ci" && grep -qF "\"$version\"" "$ci"; then continue; fi
+  echo "FAIL required job '$job' is not rendered by ci.yml"
+  contract=1
+done < <(jq -r '.[]' <<<"$required")
+if [ "$contract" -eq 0 ]; then
+  echo "PASS ci contract"
+else
+  failures=$((failures + 1))
 fi
 
 if [ "$failures" -ne 0 ]; then

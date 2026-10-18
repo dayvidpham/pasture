@@ -80,14 +80,28 @@ printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
 # transient API failure cannot be mistaken for "no tag yet".
 refs="$(gh api "repos/$REPO/git/matching-refs/tags/v$version")"
 present="$(jq -r --arg ref "refs/tags/v$version" '[.[] | select(.ref == $ref)] | length' <<<"$refs")"
-if [ "$present" != "0" ]; then
-  tagged="$(gh api "repos/$REPO/commits/v$version" --jq .sha)"
-  [ "$tagged" = "$sha" ] \
-    || fail "tag v$version already points at $tagged, not $sha; refusing to move it"
-  echo "v$version already released at $sha"
-  echo "released=false" >> "$out"
-else
+if [ "$present" = "0" ]; then
   echo "released=true" >> "$out"
+else
+  tagged="$(gh api "repos/$REPO/commits/v$version" --jq .sha)"
+  if [ "$tagged" = "$sha" ]; then
+    echo "v$version already released at $sha"
+    echo "released=false" >> "$out"
+  else
+    # A later, non-bump commit still carries the released version. Comparing
+    # the tag commit against this one keeps that ordinary case a no-op instead
+    # of a red release, while a tag that moved off this commit's history still
+    # refuses.
+    relation="$(gh api "repos/$REPO/compare/$tagged...$sha" --jq .status)"
+    [ "$relation" = "ahead" ] \
+      || fail "tag v$version at $tagged is not an ancestor of $sha ($relation); refusing to move it"
+    tagged_version="$(gh api -H 'Accept: application/vnd.github.raw' \
+      "repos/$REPO/contents/.claude-plugin/plugin.json?ref=$tagged" | jq -r .version)"
+    [ "$tagged_version" = "$version" ] \
+      || fail "tag v$version at $tagged carries plugin version '$tagged_version', not '$version'; refusing"
+    echo "v$version already released at ancestor $tagged; this commit did not bump it"
+    echo "released=false" >> "$out"
+  fi
 fi
 echo "sha=$sha" >> "$out"
 echo "version=$version" >> "$out"
