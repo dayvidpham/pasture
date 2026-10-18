@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1789,44 +1790,209 @@ func raceLifecycleBinary(t *testing.T) string {
 	return raceLifecycleChild.resolve(t)
 }
 
-func initializeLifecycleTestDatabase(t *testing.T, dbPath string) {
-	t.Helper()
-	tracker, err := tasks.OpenTaskTracker(dbPath)
-	require.NoError(t, err)
-	_, err = tracker.Create("file://lifecycle-production-test", "bootstrap", "initialize the persisted ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
-	require.NoError(t, err)
-	require.NoError(t, tracker.Close())
+// lifecycleBootstrapCalls counts real OpenTaskTracker+Create builds of the
+// neutral lifecycle prerequisite. Repeated copies must not increment it.
+// lifecycleTemplatePublishes counts process-cache publications. Both stay at 1
+// after the first successful publish in this test process.
+var (
+	lifecycleBootstrapCalls    atomic.Int32
+	lifecycleTemplatePublishes atomic.Int32
+)
+
+type publishedLifecycleTemplate struct {
+	path        string
+	fingerprint [32]byte
+	size        int64
 }
 
-var initializedLifecycleSource struct {
+var lifecycleTemplate struct {
 	once sync.Once
-	path string
+	pub  publishedLifecycleTemplate
+	err  error
+}
+
+// bootstrapLifecycleTestDatabase is the real opener and Create. It is the cold
+// path: the process template uses it once, and tests whose subject is creation,
+// migration, an absent path, or an open refusal do not call it to pre-seed a
+// file they must not find. Callers that need an already-initialized store use
+// initializeLifecycleTestDatabase, which copies the published image.
+func bootstrapLifecycleTestDatabase(dbPath string) error {
+	lifecycleBootstrapCalls.Add(1)
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	if err != nil {
+		return fmt.Errorf("open lifecycle prerequisite %q: %w", dbPath, err)
+	}
+	if _, err := tracker.Create("file://lifecycle-production-test", "bootstrap", "initialize the persisted ingress identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped); err != nil {
+		_ = tracker.Close()
+		return fmt.Errorf("create lifecycle prerequisite task in %q: %w", dbPath, err)
+	}
+	if err := tracker.Close(); err != nil {
+		return fmt.Errorf("close lifecycle prerequisite %q: %w", dbPath, err)
+	}
+	return nil
+}
+
+// initializeLifecycleTestDatabase gives the caller a private copy of the one
+// real initialized store built for this process. The destination must not
+// already exist. The copy is not a hardlink and does not share a handle with
+// the source. Commands that later open dbPath still use the production opener.
+func initializeLifecycleTestDatabase(t *testing.T, dbPath string) {
+	t.Helper()
+	copyInitializedLifecycleTestDatabase(t, dbPath)
 }
 
 // Only the unchanged prerequisite is shared, never a delivery or assertion
 // store. Build it with the real opener/Create, close every owner and checkpoint
-// before publishing the immutable bytes. Each authentic transport case still
-// executes its real command/opener against a new independent writable copy.
+// before publishing the immutable bytes. Each case still executes its real
+// command/opener against a new independent writable copy.
 func copyInitializedLifecycleTestDatabase(t *testing.T, dbPath string) {
 	t.Helper()
-	initializedLifecycleSource.once.Do(func() {
+	source := publishedLifecycleTemplatePath(t)
+	// The production opener creates the parent directory before creating a
+	// store. Match that so a nested prerequisite path is not a new refusal.
+	// Callers that assert the path must not exist do not call this helper.
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatalf("create parent for lifecycle copy %q: %v", dbPath, err)
+	}
+	if err := testutil.CopyFile(dbPath, source.path); err != nil {
+		t.Fatalf("copy lifecycle prerequisite to %q: %v", dbPath, err)
+	}
+	if err := lifecycleCopyIsolationError(dbPath, source.path); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := os.ReadFile(dbPath)
+	require.NoError(t, err)
+	require.Equal(t, source.fingerprint, sha256.Sum256(copied), "a lifecycle copy must start as the published bytes")
+	info, err := os.Stat(dbPath)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "lifecycle copies keep the fixture file mode")
+}
+
+func publishedLifecycleTemplatePath(t *testing.T) publishedLifecycleTemplate {
+	t.Helper()
+	lifecycleTemplate.once.Do(func() {
+		lifecycleTemplatePublishes.Add(1)
 		dir, err := os.MkdirTemp("", "pasture-lifecycle-base-")
-		require.NoError(t, err)
+		if err != nil {
+			lifecycleTemplate.err = err
+			return
+		}
 		testutil.RegisterFixtureDir(dir)
 		source := filepath.Join(dir, tasks.DefaultDBFilename.String())
-		initializeLifecycleTestDatabase(t, source)
-		require.NoError(t, testutil.CheckpointWAL(source))
-		initializedLifecycleSource.path = source
+		if err := bootstrapLifecycleTestDatabase(source); err != nil {
+			lifecycleTemplate.err = err
+			return
+		}
+		if err := testutil.CheckpointWAL(source); err != nil {
+			lifecycleTemplate.err = err
+			return
+		}
+		if err := refuseNonEmptySidecar(source + "-wal"); err != nil {
+			lifecycleTemplate.err = err
+			return
+		}
+		if err := refuseNonEmptySidecar(source + "-shm"); err != nil {
+			lifecycleTemplate.err = err
+			return
+		}
+		body, err := os.ReadFile(source)
+		if err != nil {
+			lifecycleTemplate.err = err
+			return
+		}
+		if err := os.Chmod(source, 0o400); err != nil {
+			lifecycleTemplate.err = fmt.Errorf("make lifecycle template read-only: %w", err)
+			return
+		}
+		lifecycleTemplate.pub = publishedLifecycleTemplate{
+			path:        source,
+			fingerprint: sha256.Sum256(body),
+			size:        int64(len(body)),
+		}
 	})
-	require.NotEmpty(t, initializedLifecycleSource.path, "fixture source construction must have completed")
-	require.NoError(t, testutil.CopyFile(dbPath, initializedLifecycleSource.path))
+	if lifecycleTemplate.err != nil {
+		t.Fatalf("publish lifecycle prerequisite: %v", lifecycleTemplate.err)
+	}
+	if lifecycleTemplate.pub.path == "" {
+		t.Fatal("lifecycle prerequisite publication did not record a path")
+	}
+	return lifecycleTemplate.pub
+}
+
+func refuseNonEmptySidecar(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat lifecycle sidecar %q: %w", path, err)
+	}
+	if info.Size() != 0 {
+		return fmt.Errorf("lifecycle template sidecar %q still has %d bytes after checkpoint; refusing to publish an incomplete image", path, info.Size())
+	}
+	return nil
+}
+
+func lifecycleCopyIsolationError(dst, src string) error {
+	dstInfo, err := os.Stat(dst)
+	if err != nil {
+		return fmt.Errorf("stat lifecycle copy %q: %w", dst, err)
+	}
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("stat lifecycle template %q: %w", src, err)
+	}
+	if os.SameFile(dstInfo, srcInfo) {
+		return fmt.Errorf("lifecycle copy %q shares an inode with template %q; copies must be independent files, not hardlinks", dst, src)
+	}
+	return nil
+}
+
+func lifecycleBytesMatchTemplate(body []byte) error {
+	pub := lifecycleTemplate.pub
+	if pub.path == "" {
+		return fmt.Errorf("lifecycle template has not been published")
+	}
+	if sha256.Sum256(body) != pub.fingerprint {
+		return fmt.Errorf("bytes do not match the published lifecycle template")
+	}
+	return nil
+}
+
+func lifecycleTemplateUnchanged() error {
+	pub := lifecycleTemplate.pub
+	if pub.path == "" {
+		return fmt.Errorf("lifecycle template has not been published")
+	}
+	body, err := os.ReadFile(pub.path)
+	if err != nil {
+		return fmt.Errorf("read lifecycle template: %w", err)
+	}
+	if sha256.Sum256(body) != pub.fingerprint || int64(len(body)) != pub.size {
+		return fmt.Errorf("lifecycle template %q changed after publication", pub.path)
+	}
+	info, err := os.Stat(pub.path)
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm() != 0o400 {
+		return fmt.Errorf("lifecycle template mode = %o, want 0400", info.Mode().Perm())
+	}
+	return nil
 }
 
 func TestInitializedLifecycleCopiesArePrivateAndReceiptFree(t *testing.T) {
 	first := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	second := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	copyInitializedLifecycleTestDatabase(t, first)
+	boots := lifecycleBootstrapCalls.Load()
+	publishes := lifecycleTemplatePublishes.Load()
+	require.Equal(t, int32(1), boots, "the process builds the lifecycle prerequisite once")
+	require.Equal(t, int32(1), publishes, "the process publishes that prerequisite once")
 	copyInitializedLifecycleTestDatabase(t, second)
+	require.Equal(t, boots, lifecycleBootstrapCalls.Load(), "another copy must not open and create the prerequisite again")
+	require.Equal(t, publishes, lifecycleTemplatePublishes.Load())
+	require.NoError(t, lifecycleTemplateUnchanged())
 	for _, path := range []string{first, second} {
 		tracker, err := tasks.OpenTaskTracker(path)
 		require.NoError(t, err)
@@ -1835,6 +2001,7 @@ func TestInitializedLifecycleCopiesArePrivateAndReceiptFree(t *testing.T) {
 	}
 	raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
 	deliverClaudeBuilt(t, lifecycleBinary(t), first, "SessionStart", raw)
+	require.NoError(t, lifecycleTemplateUnchanged(), "a delivery into a copy must not change the published template")
 	for index, path := range []string{first, second} {
 		tracker, err := tasks.OpenTaskTracker(path)
 		require.NoError(t, err)
@@ -1842,6 +2009,66 @@ func TestInitializedLifecycleCopiesArePrivateAndReceiptFree(t *testing.T) {
 			"writing one copy must not affect another or the reusable source")
 		require.NoError(t, tracker.Close())
 	}
+}
+
+func TestConcurrentLifecycleCopiesDoNotShareWrites(t *testing.T) {
+	// Publish on this goroutine. The copies themselves run concurrently and
+	// report through channels; they do not call t.
+	seed := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	copyInitializedLifecycleTestDatabase(t, seed)
+	source := lifecycleTemplate.pub.path
+	left := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	right := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	started := make(chan struct{})
+	errs := make(chan error, 2)
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for _, path := range []string{left, right} {
+		path := path
+		go func() {
+			ready.Done()
+			<-started
+			errs <- testutil.CopyFile(path, source)
+		}()
+	}
+	ready.Wait()
+	close(started)
+	require.NoError(t, <-errs)
+	require.NoError(t, <-errs)
+	require.NoError(t, lifecycleCopyIsolationError(left, right))
+	require.NoError(t, lifecycleCopyIsolationError(left, source))
+	raw := readProductionClaudeFixture(t, "session_start_2_1_261.json", "SessionStart")
+	deliverClaudeBuilt(t, lifecycleBinary(t), left, "SessionStart", raw)
+	rightTracker, err := tasks.OpenTaskTracker(right)
+	require.NoError(t, err)
+	require.Empty(t, queryLifecycleEvidence(t, rightTracker.Journal(), occurrenceEvidenceKind))
+	require.NoError(t, rightTracker.Close())
+	require.NoError(t, lifecycleTemplateUnchanged())
+}
+
+func TestLifecycleCopyGuardRejectsASharedInode(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source")
+	require.NoError(t, os.WriteFile(source, []byte("not a database"), 0o600))
+	linked := filepath.Join(dir, "linked")
+	require.NoError(t, os.Link(source, linked))
+	err := lifecycleCopyIsolationError(linked, source)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shares an inode")
+}
+
+func TestLifecycleTemplateFingerprintRejectsMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	copyInitializedLifecycleTestDatabase(t, path)
+	body, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.NoError(t, lifecycleBytesMatchTemplate(body))
+	mutated := append([]byte(nil), body...)
+	mutated[len(mutated)-1] ^= 0xff
+	err = lifecycleBytesMatchTemplate(mutated)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "do not match")
+	require.NoError(t, lifecycleTemplateUnchanged(), "the negative control must not rewrite the published template")
 }
 
 func queryLifecycleEvidence(t *testing.T, journal provenance.Journal, kind provenance.EvidenceKind) []provenance.EvidenceRow {
