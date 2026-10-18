@@ -1,10 +1,26 @@
 name: Release
 
-# Tag-on-merge: when a version bump lands on main (plugin.json version changes),
-# create the v<version> tag on that exact merged commit, then build + publish —
-# all in ONE run, so there is no fragile cross-workflow trigger to rely on.
+# Release consumes the successful CI result for one exact main commit instead
+# of re-running the test suite here. CI is the single authority: race
+# correctness, controlled performance, recovery, lint and codegen drift must
+# already be green for that commit.
 #
-# Flow: `pasture-release <bump> --no-tag` on a branch -> PR -> merge -> this runs.
+# Flow: a version bump lands on main -> CI runs -> this workflow starts when CI
+# completes, verifies the CI run is a trusted push-to-main success for the exact
+# commit, then tags that commit, builds the binaries and publishes. A missing,
+# failed, cancelled, stale, foreign or partial CI result fails closed.
+#
+# The tag lands on the newest CI-verified main commit whose plugin version is
+# not yet tagged. It does not require that commit to be the version bump itself:
+# that is what lets a pushed but untagged version (for example after a failed
+# CI run on the bump commit) be released by a later green commit without
+# another bump. Once released, a later commit that carries the same version is
+# a successful no-op when the tag is on its history; a tag that moved off that
+# history is refused. The manual dispatch applies the same check to the current
+# main commit (main only).
+#
+# Tools/release-authority.sh makes the decision and is covered by
+# tools/release-authority-test.sh.
 #
 # Requires two repo secrets for the tag push (a GitHub App, preferred):
 #   RELEASE_APP_ID           — the App's ID
@@ -16,42 +32,81 @@ name: Release
 # sets GH_TOKEN from secrets.RELEASE_TOKEN.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    paths: ['.claude-plugin/plugin.json']
-  workflow_dispatch: {}   # manual re-release of the current main version
+  workflow_dispatch: {}   # manual recovery of the current main version
+
+permissions:
+  contents: read
+  actions: read
+
+# One release decision at a time. A second completion for the same commit waits,
+# then finds the tag already created and does nothing; a tag that moved off the
+# commit's history refuses.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  REQUIRED_CI_WORKFLOW: ci.yml
+  REQUIRED_CI_JOBS: '["Build & Test (1.26)","Lint","Codegen Drift"]'
 
 jobs:
   verify:
-    name: Required race correctness and controlled performance
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
-        with:
-          go-version: '1.26'
-          cache: true
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.3.13'
-      - run: make test-race
-
-  detect:
-    name: Detect version bump + tag
-    needs: verify
+    name: Verify CI authority for the exact commit
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     outputs:
-      released: ${{ steps.check.outputs.released }}
-      version: ${{ steps.check.outputs.version }}
+      sha: ${{ steps.authority.outputs.sha }}
+      version: ${{ steps.authority.outputs.version }}
+      released: ${{ steps.authority.outputs.released }}
     steps:
-      - name: Checkout
+      # The tooling comes from the default branch, the same trust base as this
+      # workflow file. It only reads API records for the event's exact commit.
+      - name: Checkout release tooling
         uses: actions/checkout@v7
         with:
-          fetch-depth: 2   # HEAD + parent, to diff the version
-          # Don't persist the default GITHUB_TOKEN as a git credential — its
-          # http.extraheader would override the App token in the tag-push URL
-          # below (causing a 403 as github-actions[bot]). With this false, the
-          # App token minted next is the only credential used for the push.
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: tools
+          persist-credentials: false
+
+      - name: Verify CI authority
+        id: authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          DISPATCH_REF: ${{ github.ref }}
+          REQUIRED_WORKFLOW: ${{ env.REQUIRED_CI_WORKFLOW }}
+          REQUIRED_JOBS: ${{ env.REQUIRED_CI_JOBS }}
+        run: bash tools/release-authority.sh
+
+  tag:
+    name: Tag the verified commit
+    needs: verify
+    if: needs.verify.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ needs.verify.outputs.version }}
+      sha: ${{ needs.verify.outputs.sha }}
+    steps:
+      - name: Checkout the verified commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          fetch-depth: 1
+          # Keep the default token out of git credentials so the App token is
+          # the only credential used for the tag push.
           persist-credentials: false
 
       - name: Mint GitHub App token
@@ -61,48 +116,32 @@ jobs:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-      - name: Detect bump and push tag
-        id: check
+      - name: Create the tag on the verified commit
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          VERIFIED_SHA: ${{ needs.verify.outputs.sha }}
         run: |
           set -euo pipefail
-          new="$(jq -r .version .claude-plugin/plugin.json)"
-          echo "version=$new" >> "$GITHUB_OUTPUT"
+          sha="$(git rev-parse HEAD)"
+          [ "$sha" = "$VERIFIED_SHA" ] \
+            || { echo "::error::checked out $sha, not the verified $VERIFIED_SHA"; exit 1; }
 
-          # Already released? Nothing to do (idempotent / safe re-runs).
-          if git rev-parse "v$new" >/dev/null 2>&1 \
-             || git ls-remote --tags origin "refs/tags/v$new" | grep -q .; then
-            echo "v$new already tagged — skipping"
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # On push: only release if the version actually changed vs the parent.
-          # On manual dispatch: release whenever the tag is missing.
-          changed=true
-          if [ "${{ github.event_name }}" = "push" ] && git rev-parse HEAD~1 >/dev/null 2>&1; then
-            old="$(git show HEAD~1:.claude-plugin/plugin.json | jq -r .version 2>/dev/null || echo '')"
-            [ "$new" = "$old" ] && changed=false
-          fi
-
-          if [ "$changed" != "true" ]; then
-            echo "version unchanged ($new) — skipping"
-            echo "released=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          if existing="$(gh api "repos/$REPO/commits/v$VERSION" --jq .sha 2>/dev/null)"; then
+            echo "::error::v$VERSION appeared after verification at $existing; refusing to move or duplicate it"
+            exit 1
           fi
 
           git config user.name  "pasture-release[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v$new" -m "Release v$new"
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" "v$new"
-          echo "tagged v$new on $(git rev-parse --short HEAD)"
-          echo "released=true" >> "$GITHUB_OUTPUT"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/$REPO.git" "v$VERSION"
+          echo "tagged v$VERSION on $sha"
 
   build:
     name: Build ${{ matrix.suffix }}
-    needs: detect
-    if: needs.detect.outputs.released == 'true'
+    needs: tag
     strategy:
       matrix:
         include:
@@ -125,8 +164,11 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - name: Checkout
+      - name: Checkout the verified commit
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.tag.outputs.sha }}
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -140,7 +182,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          TAG="v${{ needs.detect.outputs.version }}"
+          TAG="v${{ needs.tag.outputs.version }}"
           LDFLAGS="-s -w -X main.version=${TAG}"
           for cmd in pastured pasture pasture-release; do
             go build -ldflags "${LDFLAGS}" -o "${cmd}-${{ matrix.suffix }}" ./cmd/${cmd}
@@ -155,8 +197,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [detect, build]
-    if: needs.detect.outputs.released == 'true'
+    needs: [tag, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -186,7 +227,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ needs.detect.outputs.version }}
+          tag_name: v${{ needs.tag.outputs.version }}
           files: |
             checksums.txt
             pastured-*

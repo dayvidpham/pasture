@@ -8,6 +8,10 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Job names below are part of the release contract:
+  # .github/workflows/release.yml (REQUIRED_CI_JOBS) refuses to publish unless
+  # every one of them is present and green for the exact commit. Renaming a job
+  # here without updating that list fails the release closed, loudly.
   build:
     name: Build & Test
     runs-on: ubuntu-latest
@@ -118,6 +122,11 @@ jobs:
         # Behavioral and hermetic: a failing cp or chmod during staging must
         # leave no `.pasture-install.*` file and must install neither binary.
         run: bash tools/install-staging-test.sh
+
+      - name: Release authority contract test
+        # The release gate consumes this decision; it must refuse failed,
+        # foreign, stale or partial CI evidence. Hermetic: stub gh, canned JSON.
+        run: bash tools/release-authority-test.sh
 
   codegen-drift:
     name: Codegen Drift

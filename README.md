@@ -217,13 +217,14 @@ production-path proofs exist. See
 
 ## Releasing
 
-Releases are cut with `pasture-release` and tagged automatically on merge.
+Releases are cut with `pasture-release` and tagged automatically after merge
+once CI on the merged commit is green.
 
 ```bash
 # On a non-`release/*` branch (the `release/**` pattern is ruleset-protected):
 pasture-release patch --no-tag      # bump plugin.json + CHANGELOG, commit (no tag)
-# → open a PR → merge to main → release.yml tags vX.Y.Z, builds the static
-#   binaries (linux/darwin × amd64/arm64), and publishes the GitHub Release.
+# → open a PR → merge to main → green CI → release.yml tags vX.Y.Z, builds the
+#   static binaries (linux/darwin × amd64/arm64), and publishes the GitHub Release.
 ```
 
 The tag-on-merge workflow needs the release GitHub App secrets (`RELEASE_APP_ID`,
