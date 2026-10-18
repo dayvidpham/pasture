@@ -1865,7 +1865,7 @@ func copyInitializedLifecycleTestDatabase(t *testing.T, dbPath string) {
 	require.NoError(t, lifecycleBytesMatchTemplate(copied), "a lifecycle copy must start as the published bytes")
 	info, err := os.Stat(dbPath)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "lifecycle copies keep the fixture file mode")
+	require.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "lifecycle copies are private 0600 files")
 }
 
 func publishedLifecycleTemplatePath(t *testing.T) publishedLifecycleTemplate {
@@ -2017,7 +2017,7 @@ func TestConcurrentLifecycleCopiesDoNotShareWrites(t *testing.T) {
 	// goroutine, which is where t is safe to use.
 	seed := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	copyInitializedLifecycleTestDatabase(t, seed)
-	source := lifecycleTemplate.pub.path
+	source := publishedLifecycleTemplatePath(t).path
 	left := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	right := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	started := make(chan struct{})
