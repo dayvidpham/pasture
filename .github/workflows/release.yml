@@ -83,6 +83,7 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
           DISPATCH_SHA: ${{ github.sha }}
+          DISPATCH_REF: ${{ github.ref }}
           REQUIRED_WORKFLOW: ${{ env.REQUIRED_CI_WORKFLOW }}
           REQUIRED_JOBS: ${{ env.REQUIRED_CI_JOBS }}
         run: bash tools/release-authority.sh

@@ -36,6 +36,8 @@ if [ "${EVENT_NAME:-}" = "workflow_run" ]; then
 else
   sha="${DISPATCH_SHA:-}"
   run_id=""
+  [ "${DISPATCH_REF:-}" = "refs/heads/main" ] \
+    || fail "manual dispatch must target main, got '${DISPATCH_REF:-}'"
 fi
 printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$' \
   || fail "commit '$sha' is not an exact 40-character lowercase SHA"
@@ -44,7 +46,7 @@ if [ -z "$run_id" ]; then
   # Manual recovery: the newest completed push run of the CI workflow for this
   # exact main commit. Selecting the newest run for the commit means an older
   # success cannot hide a newer failure. A commit with no completed run refuses.
-  run_id="$(gh api "repos/$REPO/actions/workflows/$REQUIRED_WORKFLOW/runs?branch=main&event=push&status=completed&per_page=100" \
+  run_id="$(gh api "repos/$REPO/actions/workflows/$REQUIRED_WORKFLOW/runs?branch=main&event=push&status=completed&head_sha=$sha&per_page=100" \
     --jq "[.workflow_runs[] | select(.head_sha == \"$sha\")] | sort_by(.created_at) | last | .id // empty")"
   [ -n "$run_id" ] || fail "no completed CI run on main for commit $sha"
 fi

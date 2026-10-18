@@ -89,7 +89,7 @@ run_case() {
   local code=0
   PATH="$root/bin:$PATH" FIXTURES="$fx" GITHUB_OUTPUT="$out" \
     REPO=dayvidpham/pasture EVENT_NAME=workflow_run RUN_ID=42 RUN_SHA="$sha" \
-    DISPATCH_SHA="$sha" REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
+    DISPATCH_SHA="$sha" DISPATCH_REF=refs/heads/main REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
     FIXTURE_HEAD_SHA="$sha" FIXTURE_TAG_SHA="$other" \
     bash "$authority" > "$log" 2>&1 || code=$?
   local ok=1
@@ -162,7 +162,7 @@ reset_fixtures
 printf '{"workflow_runs":[{"id":9,"head_sha":"%s","created_at":"2026-10-18T01:00:00Z"}]}\n' "$other" > "$fx/runs.json"
 PATH="$root/bin:$PATH" FIXTURES="$fx" GITHUB_OUTPUT="$root/out-dispatch-none" \
   REPO=dayvidpham/pasture EVENT_NAME=workflow_dispatch RUN_ID="" RUN_SHA="" \
-  DISPATCH_SHA="$sha" REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
+  DISPATCH_SHA="$sha" DISPATCH_REF=refs/heads/main REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
   FIXTURE_HEAD_SHA="$sha" FIXTURE_TAG_SHA="$other" \
   bash "$authority" > "$root/log-dispatch-none" 2>&1 \
   && code=0 || code=$?
@@ -175,7 +175,7 @@ fi
 reset_fixtures
 PATH="$root/bin:$PATH" FIXTURES="$fx" GITHUB_OUTPUT="$root/out-dispatch-newest" \
   REPO=dayvidpham/pasture EVENT_NAME=workflow_dispatch RUN_ID="" RUN_SHA="" \
-  DISPATCH_SHA="$sha" REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
+  DISPATCH_SHA="$sha" DISPATCH_REF=refs/heads/main REQUIRED_WORKFLOW=ci.yml REQUIRED_JOBS="$required" \
   FIXTURE_HEAD_SHA="$sha" FIXTURE_TAG_SHA="$other" \
   bash "$authority" > "$root/log-dispatch-newest" 2>&1 \
   && code=0 || code=$?
@@ -206,6 +206,19 @@ if [ "$contract" -eq 0 ]; then
   echo "PASS ci contract"
 else
   failures=$((failures + 1))
+fi
+
+reset_fixtures
+PATH="$root/bin:$PATH" FIXTURES="$fx" GITHUB_OUTPUT="$root/out-dispatch-branch" \
+  REPO=dayvidpham/pasture EVENT_NAME=workflow_dispatch RUN_ID="" RUN_SHA="" \
+  DISPATCH_SHA="$sha" DISPATCH_REF=refs/heads/other REQUIRED_WORKFLOW=ci.yml \
+  REQUIRED_JOBS="$required" FIXTURE_HEAD_SHA="$sha" FIXTURE_TAG_SHA="$other" \
+  bash "$authority" > "$root/log-dispatch-branch" 2>&1 \
+  && code=0 || code=$?
+if [ "$code" = 1 ] && grep -qF "must target main" "$root/log-dispatch-branch"; then
+  echo "PASS dispatch-non-main (exit $code)"
+else
+  echo "FAIL dispatch-non-main (exit $code)"; failures=$((failures + 1))
 fi
 
 if [ "$failures" -ne 0 ]; then
