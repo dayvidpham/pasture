@@ -1148,12 +1148,21 @@ func TestGateReaderPublicCallBorrowsTheStoresOwnConnection(t *testing.T) {
 // needs, and the reader still completes. The hold is released by a condition
 // the subject signals, never by a sleep.
 func TestGateReaderReadsUnderAHeldWriter(t *testing.T) {
-	t.Parallel()
+	// The independent writer below is the intended concurrent participant.
+	// This probe retains the production one-second claim window, so do not
+	// additionally qualify it against unrelated package-parallel bootstrap work.
 	store, path := openGateStore(t)
 	actor := feasibilityActor(t, store, "gate-held-writer")
 	task := createHumanTestTask(t, store, "held-writer")
 	seedAssignmentEpisode(t, store, task, "held-writer-owner", RoleOwnerResponsibility, actor, "held-writer-owner-start")
 	gateClaim(t, store, actor, "held-writer-session")
+	var journalMode string
+	require.NoError(t, store.auditDB.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&journalMode))
+	require.Equal(t, "wal", journalMode)
+	before := store.auditDB.Stats()
+	require.Equal(t, 1, before.MaxOpenConnections)
+	require.Equal(t, 1, before.Idle)
+	require.Zero(t, before.InUse, "setup must return the actual shared connection before the held-writer experiment")
 
 	holder, err := dbconn.OpenSharedDBWithProfile(path, timeouts.TestProfile())
 	require.NoError(t, err)
@@ -1162,36 +1171,84 @@ func TestGateReaderReadsUnderAHeldWriter(t *testing.T) {
 	require.NoError(t, err)
 	held := make(chan struct{})
 	release := make(chan struct{})
-	holderDone := make(chan error, 1)
+	free := sync.OnceFunc(func() { close(release) })
+	holderDone := make(chan struct{})
+	holderCtx, cancelHolder := context.WithCancel(t.Context())
+	var holderErr error
+	t.Cleanup(func() {
+		free()
+		cancelHolder()
+		<-holderDone // Join before the holder/store cleanup may remove resources.
+		if !errors.Is(holderErr, sql.ErrTxDone) && !errors.Is(holderErr, context.Canceled) {
+			require.NoError(t, holderErr)
+		}
+	})
 	go func() {
-		tx, beginErr := holder.BeginTx(t.Context(), nil)
+		defer close(holderDone)
+		tx, beginErr := holder.BeginTx(holderCtx, nil)
 		if beginErr != nil {
-			holderDone <- beginErr
+			holderErr = beginErr
 			return
 		}
-		if _, execErr := tx.Exec(`INSERT INTO gate_held_writer (note) VALUES ('held')`); execErr != nil {
+		if _, execErr := tx.ExecContext(holderCtx, `INSERT INTO gate_held_writer (note) VALUES ('held')`); execErr != nil {
 			_ = tx.Rollback()
-			holderDone <- execErr
+			holderErr = execErr
 			return
 		}
 		close(held)
 		<-release
-		holderDone <- tx.Rollback()
+		holderErr = tx.Rollback()
 	}()
-	<-held
+	select {
+	case <-held:
+	case <-holderDone:
+		t.Fatalf("the independent writer failed before taking the intended hold: %v", holderErr)
+	case <-time.After(timeouts.TestProfile().WorkflowResult()):
+		t.Fatal("the independent writer did not reach its hold boundary")
+	}
 
 	bounded, cancel := context.WithTimeout(t.Context(), timeouts.TestProfile().WorkflowResult())
 	defer cancel()
 	reader, err := NewGateReader(store, gateHarness, "held-writer-session")
 	require.NoError(t, err)
+	started := time.Now()
 	snapshot, err := reader.Snapshot(bounded)
-	close(release)
-	require.NoError(t, <-holderDone)
-	require.NoError(t, err, "a read must not need the file's write lock")
+	readElapsed := time.Since(started)
+	after := store.auditDB.Stats()
+	free()
+	<-holderDone
+	require.NoError(t, holderErr)
+	t.Logf("held-writer Snapshot: elapsed=%s before=%+v after=%+v", readElapsed, before, after)
+	require.NoError(t, err, "a read must not need the file's write lock: elapsed=%s before=%+v after=%+v", readElapsed, before, after)
 	t.Cleanup(func() { require.NoError(t, snapshot.Close()) })
 	authority, err := snapshot.Authority(actor)
 	require.NoError(t, err)
 	require.Len(t, authority.Episodes, 1)
+}
+
+func TestHeldWriterReadProbeKeepsOnlyItsIntendedConcurrency(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "gate_reader_test.go", nil, 0)
+	require.NoError(t, err)
+	checked := 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "TestGateReaderReadsUnderAHeldWriter" {
+			continue
+		}
+		checked++
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if ok && selector.Sel.Name == "Parallel" {
+				t.Error("held-writer read qualification must precede unrelated package-parallel work")
+			}
+			return true
+		})
+	}
+	require.Equal(t, 1, checked)
 }
 
 // TestGateReaderUnmappedPhaseReachesPolicyAsUnset is the reader's own mapping

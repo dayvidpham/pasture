@@ -296,6 +296,21 @@ exact integration tree. No dedicated version-command tests were added.
 
 ### Combined model-registration integration, 2026-10-18 UTC
 
+The next combined default wave on `e9e3b64` passed the regenerated owners but
+failed only `TestGateReaderReadsUnderAHeldWriter` at its production-bounded
+claim read. Its23.69s whole-test report did not record read elapsed/pool state
+and does not establish the historical cause. This qualification proof now runs
+before unrelated package-parallel fixtures, retaining its real concurrent
+independent writer and all original caller/profile windows. It verifies the
+actual shared pool is initialized, WAL and idle before the hold, records actual
+Snapshot elapsed/pool state, and releases/cancels/joins its holder on failure
+as well as success. No production SQL/read or global test parallelism changed.
+Making the actual claim read require a write lock still fails with typed
+SQLITE_BUSY while the independent writer stays held; the restored reader
+completes on the same pool. Full tasks race passes after this narrowly scoped
+fixture correction; that package result alone does not clear the retained
+whole-suite failure. The final wave must cover this actual combined tree.
+
 The first combined default gate on `18fe53f` exited1 solely because the approved
 engine logger wiring changed an inventoried source hash. The failure remains
 retained. `make generate` updates the actual epoch source inventory and body;
