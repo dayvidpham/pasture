@@ -13,6 +13,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
@@ -48,6 +49,7 @@ func TestHookLifecycleRetainsVersionSourceOnValidAndRefusedCapture(t *testing.T)
 					Input:             bytes.NewReader(raw),
 					Clock:             fixedLifecycleClock{},
 					Operations:        fixedLifecycleOperations{id: "version-source"},
+					TimeoutProfile:    timeouts.TestProfile(),
 				})
 				if valid {
 					require.NoError(t, err)

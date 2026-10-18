@@ -26,6 +26,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 type fixedLifecycleClock struct{}
@@ -61,14 +62,15 @@ func TestNativePostCommitFailurePreservesBothOutcomeAndError(t *testing.T) {
 	cause := errors.New("post-commit observer failed")
 
 	outcome, err := handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
-		DBPath:      dbPath,
-		Harness:     ir.HarnessClaudeCode,
-		Event:       "PreToolUse",
-		HostVersion: registration.ClaudeCode2_1_261().Version,
-		Input:       bytes.NewReader(raw),
-		Clock:       fixedLifecycleClock{},
-		Operations:  fixedLifecycleOperations{id: "test.post-commit-error"},
-		Barrier:     failedAfterCommit{cause: cause},
+		DBPath:         dbPath,
+		Harness:        ir.HarnessClaudeCode,
+		Event:          "PreToolUse",
+		HostVersion:    registration.ClaudeCode2_1_261().Version,
+		Input:          bytes.NewReader(raw),
+		Clock:          fixedLifecycleClock{},
+		Operations:     fixedLifecycleOperations{id: "test.post-commit-error"},
+		TimeoutProfile: timeouts.TestProfile(),
+		Barrier:        failedAfterCommit{cause: cause},
 	})
 
 	require.ErrorIs(t, err, cause)

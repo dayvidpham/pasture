@@ -214,7 +214,7 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
 	// Claim rendering is not a concurrency experiment. Complete these two
 	// sequential receipts before unrelated package-parallel store fixtures;
-	// their original production ingress deadline remains in force.
+	// the bound test ingress window from gateInput stays in force.
 	raw := gateFixture(t, gateClaudeSessionStartFixture)
 	dbPath := gateStore(t)
 	operations := &gateOperations{}
