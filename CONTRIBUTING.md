@@ -402,13 +402,13 @@ nix-shell -p go --run "go test ./internal/codegen/... -count=1"
 
 ## Releasing
 
-Releases are cut by `pasture-release` and **tagged automatically on merge** by the
-`Release` workflow (`.github/workflows/release.yml`). A git tag is the unit of
-release. For the **versioning policy** — what counts as MAJOR / MINOR / PATCH on
-each consumption channel — see [docs/VERSIONING.md](docs/VERSIONING.md). This
-section is the operational how-to.
+Releases are cut by `pasture-release` and **tagged automatically after merge,
+once CI is green** by the `Release` workflow (`.github/workflows/release.yml`).
+A git tag is the unit of release. For the **versioning policy** — what counts as
+MAJOR / MINOR / PATCH on each consumption channel — see
+[docs/VERSIONING.md](docs/VERSIONING.md). This section is the operational how-to.
 
-### The flow (tag-on-merge)
+### The flow (tag after green CI)
 
 ```bash
 # 1. Branch off main. Do NOT use a release/* name — the `release/**` ref pattern
@@ -425,11 +425,20 @@ git push -u origin chore/release-vX.Y.Z
 gh pr create --base main --fill
 #   → merge the PR
 
-# 4. On merge, release.yml fires (it triggers on a push to main that changes
-#    .claude-plugin/plugin.json): it tags vX.Y.Z on the merged commit, builds the
-#    static binaries (linux/darwin × amd64/arm64 for pastured/pasture/
-#    pasture-release), and publishes the GitHub Release with those assets.
+# 4. After merge, CI runs on the merged commit. When that CI run completes
+#    successfully, release.yml verifies the run belongs to that exact commit
+#    (same repository, push to main, every job green) and then tags vX.Y.Z,
+#    builds the static binaries (linux/darwin × amd64/arm64 for pastured/
+#    pasture/pasture-release), and publishes the GitHub Release. It does not
+#    rerun the test suite; CI is the single authority for correctness and
+#    performance.
 ```
+
+The tag lands on the newest CI-verified `main` commit that carries an untagged
+plugin version. It does not have to be the bump commit itself: if the bump
+commit's CI fails, a later green commit with the same version is tagged, so no
+second bump is needed. `tools/release-authority.sh` makes this decision and
+`tools/release-authority-test.sh` covers its denials.
 
 Replace `patch` with `minor` / `major` as the change warrants (policy in
 docs/VERSIONING.md).
@@ -471,20 +480,26 @@ is a change in the **parent** repo, committed there). `pasture-release
 The workflow is idempotent and also accepts `workflow_dispatch`:
 
 - If `plugin.json` is already at the new version on `main` but the tag is missing
-  (e.g. the first run failed), re-run with `gh workflow run release.yml --ref main`
-  — on manual dispatch it tags whenever the tag is absent.
-- If `vX.Y.Z` is already tagged, the workflow detects it and skips (safe re-runs).
+  (e.g. the first CI run failed), wait for a green CI run on `main`, then run
+  `gh workflow run release.yml --ref main`. Dispatch requires a completed,
+  successful CI run on `main` for the current commit; it refuses while CI is
+  still running or red.
+- If `vX.Y.Z` is already tagged at the verified commit, the workflow detects it
+  and skips (safe re-runs).
+- If `vX.Y.Z` exists at a different commit, the run refuses rather than moving
+  or duplicating the tag. Resolve that by hand.
 
 ### Troubleshooting
 
 - **Tag push fails `403 ... denied to github-actions[bot]`** — the checkout
   persisted the default `GITHUB_TOKEN` as a git `http.extraheader`, which
-  overrides the App token in the push URL. The detect job's `actions/checkout`
+  overrides the App token in the push URL. The tag job's `actions/checkout`
   must set `persist-credentials: false` so the minted App token is the only
   credential. (If it instead 403s as the *App* identity, the App is missing
   `Contents: write`.)
 - **Branch push rejected "creations being restricted"** — you used a `release/*`
   branch name, which the ruleset blocks. Rename to `chore/*`.
-- **No release fired after merge** — the trigger is a change to
-  `.claude-plugin/plugin.json` on `main`. A merge that didn't change that file
-  (e.g. a workflow-only fix) won't trigger; use `workflow_dispatch`.
+- **Release did not run after merge** — it starts when the `CI` workflow
+  completes for a push to `main`. A red or still-running CI run, a CI run from
+  another repository, or a run with a missing/failed/skipped job leaves the
+  release unpublished on purpose. Fix CI, then dispatch once it is green.

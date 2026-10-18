@@ -1336,13 +1336,14 @@ git agent-commit -m "feat(pastured): add epoch start workflow"
 
 ## Releasing
 
-Releases are cut by `pasture-release` and **tagged automatically on merge** (a git
-tag is the unit of release). The short form:
+Releases are cut by `pasture-release` and **tagged automatically after merge,
+once CI on the merged commit is green** (a git tag is the unit of release). The
+short form:
 
 ```bash
 git checkout -b chore/release-vX.Y.Z main   # NOT release/* — that pattern is ruleset-protected
 pasture-release patch --no-tag              # bump plugin.json + CHANGELOG, commit (no local tag)
-# → PR → merge to main → release.yml tags vX.Y.Z, builds the static binaries, publishes the Release
+# → PR → merge to main → green CI → release.yml tags vX.Y.Z, builds the static binaries, publishes the Release
 ```
 
 The tag-on-merge workflow needs the release GitHub App secrets (`RELEASE_APP_ID`,

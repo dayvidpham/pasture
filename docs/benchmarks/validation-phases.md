@@ -54,8 +54,13 @@ trusted CI run for the exact commit has every job green, including the named
 required jobs, and only then tags that commit, builds its binaries and
 publishes. A missing, failed, cancelled, skipped, stale or foreign CI result
 fails closed. Manual dispatch applies the same check to the current main
-commit, which also recovers a pushed version whose tag was never created.
+commit, which also recovers a pushed version whose tag was never created. The
+tag lands on the newest CI-verified main commit carrying an untagged version,
+not necessarily on the bump commit.
 Pull-request CI remains the pre-merge proof.
+
+Fixture-setup work behind this suite is measured in
+[fixture-setup-performance.md](fixture-setup-performance.md).
 
 Nix hermetic backend: `nix build .#checks.<system>.race --no-link` (on this
 host, `x86_64-linux`). That one derivation runs both phases in order. It

@@ -1,9 +1,8 @@
 # Lifecycle fixture setup
 
-Measured on this worktree, not carried from the release logs. The release
-diagnosis remains at `/tmp/opencode/pasture-v0.0.21-release-diagnosis.md`. Those
-CI package times are not restated here as new measurements. No calibration
-factor was measured, so these numbers are not scaled.
+Measured on this worktree, not carried from the release logs. CI package
+times are not restated here as new measurements. No calibration factor was
+measured, so these numbers are not scaled.
 
 ## What changed
 
@@ -33,8 +32,9 @@ These subjects still do not receive a prepared file:
   assert no database file. They never call the helper.
 - `migrate_v8_v9_cli_test.go` and `integration_test.go` — fresh create and
   migration. They do not use this helper.
-- `hook_lifecycle_ledger_pin_test.go` uses `initializeWarmLaneTestDatabase`.
-  The ledger advance is that test's subject. It was not converted.
+- `hook_lifecycle_ledger_pin_test.go` uses `initializeWarmLaneTestDatabase`,
+  which now copies the neutral prerequisite through this helper. The ledger
+  advance, which is the test's subject, still runs against a real opened copy.
 - `initializePostCommitTestDatabase` still publishes the caller's contract
   after the copy. That publication is not part of the neutral template.
 - Lane, hold, and cancellation tests that need an initialized store copy the
@@ -82,21 +82,31 @@ Load was lower on the after run. User+sys fell from 66.52s to 22.80s, which is
 work in the process, not only a shorter queue. This is a local 32-core box, not
 a CI runner, and it does not prove the release host's CPU count.
 
-## Package attempt
+## Package runs
 
-One `cmd/pasture` race package was run after the first conversion and before
-the parent-directory fix:
+Two full `cmd/pasture` race packages, both with the unchanged 30-minute
+timeout, `GOWORK=off`, `PASTURE_TEST_PHASE=race-correctness`,
+`CGO_ENABLED=1`, and `GOMAXPROCS`/`-parallel` unset.
+
+The first is historical. It ran after the conversion but before the
+parent-directory fix, starting 2026-10-18T07:14:44Z at load 2.10. GNU time:
+wall 5:43.65, user 787.73s, sys 43.58s, 241% CPU, exit 1. The test binary
+reported 342.63s and failed three raw parity tests because `CopyFile` did not
+create a missing parent directory. The production opener does. That is fixed.
+
+The second is the integrated-tree run on the committed change (`d34e26e` plus
+the release-workflow commit), inside the `nix develop` dev shell with Go
+1.26.3 rather than the 1.26.9 used above:
 
 ```
-go test -race -count=1 -timeout 30m -json ./cmd/pasture
+GOWORK=off PASTURE_TEST_PHASE=race-correctness CGO_ENABLED=1 \
+  go test -race -count=1 -timeout 30m ./cmd/pasture
 ```
 
-Start 2026-10-18T07:14:44Z, load 2.10, `GOMAXPROCS` unset, `-parallel` unset.
-GNU time: wall 5:43.65, user 787.73s, sys 43.58s, 241% CPU, exit 1. The test
-binary reported 342.63s and failed three raw parity tests because `CopyFile`
-did not create a missing parent directory. The production opener does. That
-was fixed. Those three tests, the new guards, and the named absent-path tests
-then passed together in 10.524s. The full package was not run again.
+Exit 0, `ok github.com/dayvidpham/pasture/cmd/pasture 311.779s`. The complete
+package ran; no test was skipped or filtered. Before that second run, the three
+affected raw parity tests and the new guards passed together in a focused
+10.524s run.
 
 `go test -list '^Test' ./cmd/pasture` gained only:
 
