@@ -199,7 +199,14 @@ while IFS= read -r job; do
   if grep -qF "name: $job" "$ci"; then continue; fi
   base="${job%% (*}"
   version="${job##* (}"; version="${version%)}"
-  if grep -qF "name: $base" "$ci" && grep -qF "\"$version\"" "$ci"; then continue; fi
+  # The matrix value must live in the same job block as the name. A bare file
+  # grep would be satisfied by unrelated go-version settings in other jobs.
+  block="$(awk -v want="    name: $base" '
+    $0 == want { grab = 1 }
+    grab && /^  [^ ]/ { exit }
+    grab { print }
+  ' "$ci")"
+  if [ -n "$block" ] && printf '%s\n' "$block" | grep -qF "\"$version\""; then continue; fi
   echo "FAIL required job '$job' is not rendered by ci.yml"
   contract=1
 done < <(jq -r '.[]' <<<"$required")
