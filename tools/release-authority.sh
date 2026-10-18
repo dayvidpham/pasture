@@ -13,6 +13,7 @@
 #   RUN_ID             github.event.workflow_run.id (workflow_run only)
 #   RUN_SHA            github.event.workflow_run.head_sha (workflow_run only)
 #   DISPATCH_SHA       github.sha (workflow_dispatch only)
+#   DISPATCH_REF       github.ref (workflow_dispatch only; must be refs/heads/main)
 #   REQUIRED_WORKFLOW  CI workflow file name, e.g. ci.yml (required)
 #   REQUIRED_JOBS      JSON array of job names that must exist and be green
 #   GITHUB_OUTPUT      when set, outputs are appended there; stdout otherwise

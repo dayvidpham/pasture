@@ -42,8 +42,9 @@ permissions:
   contents: read
   actions: read
 
-# One release decision at a time. A second CI completion waits, then finds the
-# tag already created and does nothing.
+# One release decision at a time. A second completion for the same commit waits,
+# then finds the tag already created and does nothing; a tag that moved off the
+# commit's history refuses.
 concurrency:
   group: release
   cancel-in-progress: false

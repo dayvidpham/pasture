@@ -146,6 +146,12 @@ run_case diverged-tag 1 "" "is not an ancestor"
 reset_fixtures
 printf '[{"ref":"refs/tags/v0.0.21"}]\n' > "$fx/tag-refs.json"
 printf '{"sha":"%s"}\n' "$other" > "$fx/tag-commit.json"
+printf '{"status":"behind"}\n' > "$fx/compare.json"
+run_case behind-tag 1 "" "is not an ancestor"
+
+reset_fixtures
+printf '[{"ref":"refs/tags/v0.0.21"}]\n' > "$fx/tag-refs.json"
+printf '{"sha":"%s"}\n' "$other" > "$fx/tag-commit.json"
 jq '.version = "0.0.20"' "$fx/plugin-tagged.json" > "$fx/t" && mv "$fx/t" "$fx/plugin-tagged.json"
 run_case tagged-version-mismatch 1 "" "carries plugin version"
 
@@ -206,7 +212,13 @@ while IFS= read -r job; do
     grab && /^  [^ ]/ { exit }
     grab { print }
   ' "$ci")"
-  if [ -n "$block" ] && printf '%s\n' "$block" | grep -qF "\"$version\""; then continue; fi
+  if [ -n "$block" ] && printf '%s\n' "$block" | grep -qF "\"$version\""; then
+    if [ "$base" = "Build & Test" ] && ! printf '%s\n' "$block" | grep -qF "make test-race"; then
+      echo "FAIL '$job' no longer runs make test-race"
+      contract=1
+    fi
+    continue
+  fi
   echo "FAIL required job '$job' is not rendered by ci.yml"
   contract=1
 done < <(jq -r '.[]' <<<"$required")
