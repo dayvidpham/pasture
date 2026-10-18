@@ -8,6 +8,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // TestDispatchLifecycleRejectsUnsupportedHarness is the relocated home of the
@@ -37,7 +38,10 @@ func TestDispatchLifecycleRejectsUnsupportedHarness(t *testing.T) {
 	require.Nil(t, dispatch.activations, "an unsupported harness yields no activations constructor")
 	require.Nil(t, dispatch.encode, "an unsupported harness yields no native encoder")
 
-	native, err := HookLifecycleNative(context.Background(), HookLifecycleInput{Harness: ir.HarnessID("grok-build")})
+	native, err := HookLifecycleNative(context.Background(), HookLifecycleInput{
+		Harness:        ir.HarnessID("grok-build"),
+		TimeoutProfile: timeouts.TestProfile(),
+	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "grok-build",
 		"HookLifecycleNative must surface the unsupported-harness error naming the harness")

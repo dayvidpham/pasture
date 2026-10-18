@@ -169,6 +169,7 @@ func TestRawHostVersionSourcePreviewCommitAndLegacy(t *testing.T) {
 				Input:             bytes.NewReader(raw),
 				Clock:             rawOutcomeClock{},
 				Operations:        rawOutcomeOperation{},
+				TimeoutProfile:    timeouts.TestProfile(),
 			}
 
 			preview, err := HookLifecycleRaw(context.Background(), input)
@@ -259,6 +260,7 @@ func TestRawUnknownHostVersionSourceRefusesBeforeIO(t *testing.T) {
 				Input:             reader,
 				Clock:             rawOutcomeClock{},
 				Operations:        rawOutcomeOperation{},
+				TimeoutProfile:    timeouts.TestProfile(),
 			}
 
 			result, err := HookLifecycleRaw(context.Background(), input)
@@ -314,14 +316,15 @@ func TestRawHatchRoutesOpenCodeByObservedVersion(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			input := HookLifecycleRawInput{
-				DBPath:        filepath.Join(t.TempDir(), "unopened", "pasture.db"),
-				Harness:       ir.HarnessOpenCode,
-				Event:         tc.event,
-				HostVersion:   tc.hostVersion,
-				SchemaVersion: tc.schema,
-				Input:         bytes.NewReader([]byte(`{}`)),
-				Clock:         rawOutcomeClock{},
-				Operations:    rawOutcomeOperation{},
+				DBPath:         filepath.Join(t.TempDir(), "unopened", "pasture.db"),
+				Harness:        ir.HarnessOpenCode,
+				Event:          tc.event,
+				HostVersion:    tc.hostVersion,
+				SchemaVersion:  tc.schema,
+				Input:          bytes.NewReader([]byte(`{}`)),
+				Clock:          rawOutcomeClock{},
+				Operations:     rawOutcomeOperation{},
+				TimeoutProfile: timeouts.TestProfile(),
 			}
 			_, err := HookLifecycleRaw(context.Background(), input)
 			require.Error(t, err)

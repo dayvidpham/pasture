@@ -43,6 +43,28 @@ func TestMain(m *testing.M) {
 		envCleanup()
 		os.Exit(1)
 	}
+	// Test children run the production lifecycle path but not the production
+	// latency subject. The 1s ingress window is a real-host tolerance, not a
+	// property of these gate/admission assertions, so children get the
+	// documented operator window instead of failing on a shared runner's write
+	// queue. Production defaults are unchanged and stay pinned by
+	// internal/timeouts and internal/handlers' profile tests; a test that needs
+	// a different window appends its own entry to a child's environment (the
+	// last value for a duplicate key wins).
+	if err := os.Setenv("PASTURE_INGRESS_TIMEOUT", "2s"); err != nil {
+		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not pin the test ingress window: %v\n", err)
+		envCleanup()
+		os.Exit(1)
+	}
+	// Keep the timeout trio hermetic: a developer shell exporting a sibling
+	// deadline could invert the profile against the pinned ingress window.
+	for _, name := range []string{"PASTURE_HOOK_INVOCATION_TIMEOUT", "PASTURE_START_SLICE_TIMEOUT"} {
+		if err := os.Unsetenv(name); err != nil {
+			fmt.Fprintf(os.Stderr, "pasture cli smoke: could not clear %s: %v\n", name, err)
+			envCleanup()
+			os.Exit(1)
+		}
+	}
 	tmpDir, err := os.MkdirTemp("", "pasture-cli-smoke-*")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "pasture cli smoke: could not create temp dir: %v\n", err)

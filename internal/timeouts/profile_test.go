@@ -78,6 +78,17 @@ func TestNewRejectsAWorkflowResultWaitBelowTheInnerWindows(t *testing.T) {
 	}
 }
 
+// TestProductionIngressWaitIsUnchangedAtOneSecond pins the production receipt
+// append budget independently of any test harness override. Tests that are not
+// about latency may run under TestProfile; this keeps the product's own value
+// asserted where it is defined.
+func TestProductionIngressWaitIsUnchangedAtOneSecond(t *testing.T) {
+	t.Parallel()
+	if got := ProductionProfile().Ingress(); got != time.Second {
+		t.Fatalf("production ingress wait = %s, want 1s", got)
+	}
+}
+
 func TestProductionWorkflowResultWaitIsUnchangedAtThirtySeconds(t *testing.T) {
 	t.Parallel()
 	if got := ProductionProfile().WorkflowResult(); got != 30*time.Second {

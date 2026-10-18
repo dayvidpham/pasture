@@ -44,6 +44,7 @@ import (
 	opencodetarget "github.com/dayvidpham/pasture/internal/target/opencode"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // This is an installed-transport compatibility proof, not a live host capture.
@@ -1432,7 +1433,11 @@ func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
 	t.Parallel()
 
 	dbPath := filepath.Join(t.TempDir(), "missing", tasks.DefaultDBFilename.String())
-	err := handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{DBPath: dbPath, Harness: "claude-code", Event: "Unknown", HostVersion: "2.1.220", Input: bytes.NewBufferString("{}"), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{}})
+	err := handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{
+		DBPath: dbPath, Harness: "claude-code", Event: "Unknown", HostVersion: "2.1.220",
+		Input: bytes.NewBufferString("{}"), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+		TimeoutProfile: timeouts.TestProfile(),
+	})
 	require.Error(t, err)
 	_, statErr := os.Stat(dbPath)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
@@ -2519,7 +2524,8 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_153_0().Version,
 				Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
-				Activations: activations,
+				TimeoutProfile: timeouts.TestProfile(),
+				Activations:    activations,
 			})
 			require.NoError(t, err)
 			require.Equal(t, tc.wantResponse, response.IsValid())
@@ -2576,7 +2582,8 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	codexResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: registration.Codex0_153_0().Version,
 		Input: bytes.NewReader(codexRaw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
-		Activations: codexActivations,
+		TimeoutProfile: timeouts.TestProfile(),
+		Activations:    codexActivations,
 	})
 	require.NoError(t, err)
 	codexIdentities, codexSemantic := readBackGate(t, codexDB, registration.Codex0_153_0().Contract, runtime.Codex0_153_0().ID(), registration.EventCodexPreToolUse)
@@ -2590,6 +2597,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	openCodeResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_29().Version,
 		Input: bytes.NewReader(openCodeWire), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+		TimeoutProfile: timeouts.TestProfile(),
 	})
 	require.NoError(t, err)
 	openCodeIdentities, openCodeSemantic := readBackGate(t, openCodeDB, registration.OpenCode1_18_29().Contract, runtime.OpenCode1_18_29().ID(), registration.EventOpenCodeToolExecuteBefore)

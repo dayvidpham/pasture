@@ -216,6 +216,7 @@ func TestHookLifecycleResponseRejectsWithheldOpenCodeBeforeInputAndStorage(t *te
 	response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 		DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: "session.updated", HostVersion: registration.OpenCode1_18_29().Version,
 		Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld"},
+		TimeoutProfile: timeouts.TestProfile(),
 	})
 	require.ErrorContains(t, err, `OpenCode event "session.updated" is withheld (reason outside-target-set)`)
 	require.False(t, response.IsValid())
@@ -235,6 +236,7 @@ func TestHookLifecycleResponseRejectsUncorrelatedClaudeElicitationBeforeInputAnd
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 				DBPath: dbPath, Harness: ir.HarnessClaudeCode, Event: event, HostVersion: "2.1.261",
 				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.claude"},
+				TimeoutProfile: timeouts.TestProfile(),
 			})
 			require.ErrorContains(t, err, `Claude event "`+event+`" is withheld (reason missing-request-correlation)`)
 			require.False(t, response.IsValid(), "withheld elicitation must emit no host response")
@@ -323,6 +325,7 @@ func TestHookLifecycleResponsePersistenceFailureReturnsNoResponse(t *testing.T) 
 	response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 		DBPath: directory, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_29().Version,
 		Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.failure"},
+		TimeoutProfile: timeouts.TestProfile(),
 	})
 	require.Error(t, err)
 	require.False(t, response.IsValid(), "a response must not escape when persistence fails")

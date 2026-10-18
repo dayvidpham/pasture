@@ -91,6 +91,9 @@ type HookLifecycleInput struct {
 	// The zero value keeps the production profile, so a caller that does not tune
 	// it is unaffected. The lifecycle command passes the profile it resolved from
 	// the operator's environment, so a tuned Ingress window reaches this append.
+	// Tests whose subject is not receipt latency set timeouts.TestProfile();
+	// tests that assert the production window keep the zero value (see
+	// hook_lifecycle_timeout_profile_test.go and the command budget test).
 	TimeoutProfile timeouts.Profile
 }
 

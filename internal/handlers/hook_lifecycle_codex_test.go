@@ -42,6 +42,7 @@ func TestHookLifecycleResponseRejectsUnsupportedCodexBeforeInputAndStorage(t *te
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 				DBPath: dbPath, Harness: ir.HarnessCodex, Event: event, HostVersion: registration.Codex0_153_0().Version,
 				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.codex"},
+				TimeoutProfile: timeouts.TestProfile(),
 			})
 			require.ErrorContains(t, err, `declares no native event named "`+event+`"`)
 			require.False(t, response.IsValid(), "withheld Codex event must emit no host response")
