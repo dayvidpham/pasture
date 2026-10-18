@@ -84,6 +84,7 @@ func OpenTaskTrackerContext(ctx context.Context, dbPath string) (protocol.TaskTr
 }
 
 type openTaskTrackerOptions struct {
+	modelRegistry      provenance.ModelRegistry
 	skipMigrations     bool
 	maxOpenConns       int
 	afterGenesisCommit func(provenance.JournalID) error
@@ -92,6 +93,11 @@ type openTaskTrackerOptions struct {
 	diagnostics        io.Writer
 	beforeActivation   func(context.Context, *sql.DB) error
 	activationObserver func(string)
+}
+
+// WithModelRegistry admits the same exact identities used by the caller's validation.
+func WithModelRegistry(registry provenance.ModelRegistry) OpenTaskTrackerOption {
+	return func(o *openTaskTrackerOptions) { o.modelRegistry = registry }
 }
 
 func WithTimeoutProfile(profile timeouts.Profile) OpenTaskTrackerOption {

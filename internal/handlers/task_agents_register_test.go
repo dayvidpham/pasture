@@ -274,8 +274,8 @@ func TestTaskAgentsRegister_ValidationErrorsRejectBeforeStoreOpen(t *testing.T) 
 			wantFixHas: "provider",
 		},
 		{
-			name:       "ml unknown provider",
-			in:         handlers.TaskAgentRegisterInput{Kind: handlers.AgentRegisterML, Role: "worker", Provider: "not-a-provider", Model: "x"},
+			name:       "ml malformed provider",
+			in:         handlers.TaskAgentRegisterInput{Kind: handlers.AgentRegisterML, Role: "worker", Provider: "not/a-provider", Model: "x"},
 			wantFixHas: "provider",
 		},
 		{
@@ -284,8 +284,8 @@ func TestTaskAgentsRegister_ValidationErrorsRejectBeforeStoreOpen(t *testing.T) 
 			wantFixHas: "--model",
 		},
 		{
-			name:        "ml unknown model",
-			in:          handlers.TaskAgentRegisterInput{Kind: handlers.AgentRegisterML, Role: "worker", Provider: string(model.Provider), Model: "not-a-model"},
+			name:        "ml execution variant",
+			in:          handlers.TaskAgentRegisterInput{Kind: handlers.AgentRegisterML, Role: "worker", Provider: string(model.Provider), Model: "not-a-model#high"},
 			wantFixHas:  "pasture task agents register ml",
 			wantWhatHas: "not-a-model",
 		},
