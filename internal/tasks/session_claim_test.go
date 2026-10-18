@@ -176,14 +176,15 @@ func TestSessionStartStoresClaimAndKeepsSystemReceiptAuthor(t *testing.T) {
 			defer cancel()
 			invoke := func(id string) (hostexit.Outcome, error) {
 				return handlers.HookLifecycleNative(ctx, handlers.HookLifecycleInput{
-					DBPath:      path,
-					Harness:     tc.harness,
-					Event:       tc.event,
-					HostVersion: tc.version,
-					Input:       bytes.NewReader(raw),
-					Clock:       claimClock{},
-					Operations:  claimOperation(id),
-					ActorClaim:  tasks.ActorClaim(claimedActor.ID.String()),
+					DBPath:         path,
+					Harness:        tc.harness,
+					Event:          tc.event,
+					HostVersion:    tc.version,
+					Input:          bytes.NewReader(raw),
+					Clock:          claimClock{},
+					Operations:     claimOperation(id),
+					ActorClaim:     tasks.ActorClaim(claimedActor.ID.String()),
+					TimeoutProfile: timeouts.TestProfile(),
 				})
 			}
 			firstOutcome, err := invoke("claim.first")
