@@ -484,10 +484,13 @@ The workflow is idempotent and also accepts `workflow_dispatch`:
   `gh workflow run release.yml --ref main`. Dispatch requires a completed,
   successful CI run on `main` for the current commit; it refuses while CI is
   still running or red.
-- If `vX.Y.Z` is already tagged at the verified commit, the workflow detects it
-  and skips (safe re-runs).
-- If `vX.Y.Z` exists at a different commit, the run refuses rather than moving
-  or duplicating the tag. Resolve that by hand.
+- If `vX.Y.Z` is already tagged at the verified commit, the workflow skips.
+  It also skips when the tag sits on an ancestor of the verified commit and
+  that tag records the same plugin version. That is the normal case for every
+  merge after a release: nothing is moved or republished.
+- If `vX.Y.Z` points off the verified commit's history (diverged or behind), or
+  an ancestor tag records a different plugin version, the run refuses rather
+  than moving or duplicating the tag. Resolve that by hand.
 
 ### Troubleshooting
 

@@ -14,8 +14,10 @@ name: Release
 # not yet tagged. It does not require that commit to be the version bump itself:
 # that is what lets a pushed but untagged version (for example after a failed
 # CI run on the bump commit) be released by a later green commit without
-# another bump. The manual dispatch applies the same check to the current main
-# commit.
+# another bump. Once released, a later commit that carries the same version is
+# a successful no-op when the tag is on its history; a tag that moved off that
+# history is refused. The manual dispatch applies the same check to the current
+# main commit (main only).
 #
 # Tools/release-authority.sh makes the decision and is covered by
 # tools/release-authority-test.sh.

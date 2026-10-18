@@ -194,6 +194,7 @@ release="$here/../.github/workflows/release.yml"
 contract=0
 grep -qx 'name: CI' "$ci" || { echo "FAIL ci.yml no longer names the workflow CI"; contract=1; }
 grep -qF 'workflows: ["CI"]' "$release" || { echo "FAIL release.yml no longer triggers on CI"; contract=1; }
+grep -qF "$required" "$release" || { echo "FAIL release.yml REQUIRED_CI_JOBS differs from this test"; contract=1; }
 while IFS= read -r job; do
   if grep -qF "name: $job" "$ci"; then continue; fi
   base="${job%% (*}"
