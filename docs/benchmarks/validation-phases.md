@@ -7,8 +7,11 @@ remove any workload. Production remains 20 records / 25 ms.
 Run the default pair on exactly one backend. The local pair and the Nix race
 derivation execute the same default race-correctness suite and the same
 controlled performance tests; a sitting must not run both. GitHub CI uses the
-local backend, and release consumes that CI result rather than running the pair
-again. Do not add a Nix race job to CI.
+local backend as two dependent jobs: `Build & Test` runs race correctness and
+recovery, then `Controlled performance` runs on a fresh runner after it. The
+measured window therefore stays quiet, and a miss on a slow runner is retried
+without rerunning the race suite. Release consumes that CI result rather than
+running the pair again. Do not add a Nix race job to CI.
 Prefer the Nix derivation when that sitting's release vehicle is the hermetic
 builder and the local pair has not already passed on the same tree. An
 interrupted Nix race build is not a pass, and it is not evidence that the
@@ -48,8 +51,9 @@ the lane, receipt, store and handler implementations with instrumentation.
 Phase 2 additionally enforces the in-process read/open bands without detector
 overhead. Neither a focused success nor phase 1 alone clears the release.
 
-CI `Build & Test` invokes that local target. Release does not run it a second
-time: after CI completes for a push to main, `release.yml` verifies that the
+CI invokes that local pair in the two dependent jobs above. Release does not
+run it a second time: after CI completes for a push to main, `release.yml`
+verifies that the
 trusted CI run for the exact commit has every job green, including the named
 required jobs, and only then tags that commit, builds its binaries and
 publishes. A missing, failed, cancelled, skipped, stale or foreign CI result

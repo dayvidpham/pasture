@@ -12,6 +12,12 @@ jobs:
   # .github/workflows/release.yml (REQUIRED_CI_JOBS) refuses to publish unless
   # every one of them is present and green for the exact commit. Renaming a job
   # here without updating that list fails the release closed, loudly.
+  #
+  # The pair is split on purpose: race correctness and recovery run here, and
+  # controlled performance runs in its own job that starts only after this one
+  # finishes. The measured window stays quiet (the documented ordering), a slow
+  # runner's throughput miss is retryable without rerunning the 30-minute race
+  # suite, and the performance job gets a fresh VM.
   build:
     name: Build & Test
     runs-on: ubuntu-latest
@@ -63,22 +69,47 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Race correctness then controlled performance (both required)
+      - name: Race correctness (required)
         # Production-path tests execute generated TypeScript through Bun and
         # run the real CLI as a child process. The explicit -timeout is a
         # guard against the 10-minute default, which reports a slow package as
         # a panic with no per-test attribution; it is not a budget to grow into.
         #
-        # Sequential in one job: never race benchmark timing against the
-        # correctness wave. Performance refuses report-only/shape overrides
-        # and explicitly enforces unscaled reference-host thresholds in CI.
-        run: make test-race
+        # Performance is the dependent job below: the measured window must not
+        # overlap this wave, and it keeps the unscaled reference-host
+        # thresholds unchanged.
+        run: make test-race-correctness
 
       - name: Recovery tests
         env:
           CGO_ENABLED: "1"
           GOWORK: "off"
         run: go test -race -count=1 -timeout 30m -tags=recovery ./internal/engine/...
+
+  performance:
+    name: Controlled performance
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Controlled performance (required)
+        # Runs on a fresh runner after the race job: no concurrent race suite
+        # or independent heavy builder is alive during the measured window.
+        # Unscaled reference-host thresholds; do not add a CI factor.
+        run: make test-performance
 
   lint:
     name: Lint

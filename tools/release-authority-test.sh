@@ -14,7 +14,7 @@ mkdir -p "$root/bin" "$root/fixtures"
 fx="$root/fixtures"
 sha="0123456789abcdef0123456789abcdef01234567"
 other="89abcdef0123456789abcdef0123456789abcdef"
-required='["Build & Test (1.26)","Lint","Codegen Drift"]'
+required='["Build & Test (1.26)","Controlled performance","Lint","Codegen Drift"]'
 
 cat > "$root/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -71,6 +71,7 @@ JSON
   cat > "$fx/jobs.json" <<'JSON'
 {"jobs":[
  {"name":"Build & Test (1.26)","status":"completed","conclusion":"success"},
+ {"name":"Controlled performance","status":"completed","conclusion":"success"},
  {"name":"Lint","status":"completed","conclusion":"success"},
  {"name":"Codegen Drift","status":"completed","conclusion":"success"}]}
 JSON
