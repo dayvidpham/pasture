@@ -1,8 +1,15 @@
 # Required correctness and controlled performance
 
 Both phases are release gates. Operator approval on 2026-10-16 separates
-measurement from concurrent race-suite load; it does not relax any band or
-remove any workload. Production remains 20 records / 25 ms.
+measurement from concurrent race-suite load; it did not relax a band or remove
+a workload at that sitting. Production remains 20 records / 25 ms.
+
+On 2026-10-18 the operator lowered the synthetic sustained-throughput floor
+from 80/s to 50/s. The same harness measured 52.8-92.6/s on shared 4-vCPU CI
+runners across a day (reference host: 111.9/s), and the 80/s floor failed most
+CI runs with no product change. 50/s stays below the slowest healthy CI sample
+and remains a collapse tripwire. The copy floor (10/s), p95 bands, burst-ratio
+bound and zero-fault rule are unchanged.
 
 Run the default pair on exactly one backend. The local pair and the Nix race
 derivation execute the same default race-correctness suite and the same

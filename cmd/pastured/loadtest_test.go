@@ -128,7 +128,12 @@ const (
 	// harness on shared 4-vCPU CI runners measured a healthy range of
 	// 52.8-92.6/s across a day; an 80/s floor failed most of those runs
 	// without any product change. 50/s stays below the slowest observed
-	// healthy run while still tripping a collapse. These are COLLAPSE
+	// healthy run while still tripping a collapse. The required performance
+	// target clears GITHUB_ACTIONS, so this floor is unscaled on CI; a direct
+	// invocation with GITHUB_ACTIONS set still divides it by
+	// loadtestCIFactor. On the reference host (111.9/s) the 50/s floor leaves
+	// a ~2.2x margin, so this is a deliberate global relaxation, not only a
+	// CI one. These are COLLAPSE
 	// tripwires (a dead lane commits ~0/s), not batching-loss tripwires: on
 	// a populated store the batched and per-record lanes are
 	// indistinguishable (both hook-bound), so lost batching is caught by the
