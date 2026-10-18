@@ -296,6 +296,16 @@ exact integration tree. No dedicated version-command tests were added.
 
 ### Combined model-registration integration, 2026-10-18 UTC
 
+The first combined default gate on `18fe53f` exited1 solely because the approved
+engine logger wiring changed an inventoried source hash. The failure remains
+retained. `make generate` updates the actual epoch source inventory and body;
+the initial unreleased ledger digest is refreshed under its existing pre-release
+rule. This epoch owner first appeared in `a1031ad` on2026-10-15 and does not
+exist in the last published v0.0.20 tag (released2026-10-13). No released body or
+decoder contract is replaced, no source is excluded, and the source/ledger
+guards remain unchanged. Final combined gates must include the regenerated
+artifacts; earlier source hashes are not successful results for this tree.
+
 After PR222 merged to main at `8890e4a50b098ce524c3d0f609b163c62af7bd04`,
 the operator lifted the release hold. The release branch merges that actual
 main commit without discarding the reviewed cleanup, profiling, fixture or
