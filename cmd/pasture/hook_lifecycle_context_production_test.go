@@ -17,6 +17,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 const (
@@ -173,6 +174,7 @@ func TestContextDisclosurePostCommitStdoutFailureReportsStderrWithTrailIntact(t 
 		require.NoError(t, handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{
 			DBPath: dbPath, Harness: "claude-code", Event: "SessionStart", HostVersion: "2.1.261",
 			Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+			TimeoutProfile: timeouts.TestProfile(),
 		}))
 	}
 

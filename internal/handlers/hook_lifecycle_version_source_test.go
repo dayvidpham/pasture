@@ -106,6 +106,7 @@ func TestHookLifecycleRejectsUnknownVersionSourceBeforeOpeningStore(t *testing.T
 		Input:             input,
 		Clock:             fixedLifecycleClock{},
 		Operations:        fixedLifecycleOperations{id: "invalid-version-source"},
+		TimeoutProfile:    timeouts.TestProfile(),
 	})
 	require.ErrorContains(t, err, "host version source is not a declared provenance value")
 	require.ErrorIs(t, err, handlers.ErrLifecycleBeforeDurableWrite)

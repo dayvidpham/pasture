@@ -1433,7 +1433,11 @@ func TestInvalidLifecycleInvocationCreatesNoDatabase(t *testing.T) {
 	t.Parallel()
 
 	dbPath := filepath.Join(t.TempDir(), "missing", tasks.DefaultDBFilename.String())
-	err := handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{DBPath: dbPath, Harness: "claude-code", Event: "Unknown", HostVersion: "2.1.220", Input: bytes.NewBufferString("{}"), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{}})
+	err := handlers.HookLifecycle(context.Background(), handlers.HookLifecycleInput{
+		DBPath: dbPath, Harness: "claude-code", Event: "Unknown", HostVersion: "2.1.220",
+		Input: bytes.NewBufferString("{}"), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+		TimeoutProfile: timeouts.TestProfile(),
+	})
 	require.Error(t, err)
 	_, statErr := os.Stat(dbPath)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
@@ -2520,7 +2524,8 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_153_0().Version,
 				Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
-				Activations: activations,
+				TimeoutProfile: timeouts.TestProfile(),
+				Activations:    activations,
 			})
 			require.NoError(t, err)
 			require.Equal(t, tc.wantResponse, response.IsValid())
