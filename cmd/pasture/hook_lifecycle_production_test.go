@@ -44,6 +44,7 @@ import (
 	opencodetarget "github.com/dayvidpham/pasture/internal/target/opencode"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 // This is an installed-transport compatibility proof, not a live host capture.
@@ -2576,7 +2577,8 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	codexResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: registration.Codex0_153_0().Version,
 		Input: bytes.NewReader(codexRaw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
-		Activations: codexActivations,
+		TimeoutProfile: timeouts.TestProfile(),
+		Activations:    codexActivations,
 	})
 	require.NoError(t, err)
 	codexIdentities, codexSemantic := readBackGate(t, codexDB, registration.Codex0_153_0().Contract, runtime.Codex0_153_0().ID(), registration.EventCodexPreToolUse)
@@ -2590,6 +2592,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	openCodeResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
 		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_29().Version,
 		Input: bytes.NewReader(openCodeWire), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
+		TimeoutProfile: timeouts.TestProfile(),
 	})
 	require.NoError(t, err)
 	openCodeIdentities, openCodeSemantic := readBackGate(t, openCodeDB, registration.OpenCode1_18_29().Contract, runtime.OpenCode1_18_29().ID(), registration.EventOpenCodeToolExecuteBefore)
