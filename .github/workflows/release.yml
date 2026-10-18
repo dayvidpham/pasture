@@ -8,9 +8,17 @@ name: Release
 # Flow: a version bump lands on main -> CI runs -> this workflow starts when CI
 # completes, verifies the CI run is a trusted push-to-main success for the exact
 # commit, then tags that commit, builds the binaries and publishes. A missing,
-# failed, cancelled, stale, foreign or partial CI result fails closed. The
-# manual dispatch applies the same check to the current main commit, which also
-# recovers a pushed version whose tag was never created.
+# failed, cancelled, stale, foreign or partial CI result fails closed.
+#
+# The tag lands on the newest CI-verified main commit whose plugin version is
+# not yet tagged. It does not require that commit to be the version bump itself:
+# that is what lets a pushed but untagged version (for example after a failed
+# CI run on the bump commit) be released by a later green commit without
+# another bump. The manual dispatch applies the same check to the current main
+# commit.
+#
+# Tools/release-authority.sh makes the decision and is covered by
+# tools/release-authority-test.sh.
 #
 # Requires two repo secrets for the tag push (a GitHub App, preferred):
 #   RELEASE_APP_ID           — the App's ID
@@ -57,6 +65,15 @@ jobs:
       version: ${{ steps.authority.outputs.version }}
       released: ${{ steps.authority.outputs.released }}
     steps:
+      # The tooling comes from the default branch, the same trust base as this
+      # workflow file. It only reads API records for the event's exact commit.
+      - name: Checkout release tooling
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: tools
+          persist-credentials: false
+
       - name: Verify CI authority
         id: authority
         env:
@@ -68,69 +85,7 @@ jobs:
           DISPATCH_SHA: ${{ github.sha }}
           REQUIRED_WORKFLOW: ${{ env.REQUIRED_CI_WORKFLOW }}
           REQUIRED_JOBS: ${{ env.REQUIRED_CI_JOBS }}
-        run: |
-          set -euo pipefail
-          fail() { echo "::error::$*"; exit 1; }
-
-          if [ "$EVENT_NAME" = "workflow_run" ]; then
-            sha="$RUN_SHA"; run_id="$RUN_ID"
-          else
-            sha="$DISPATCH_SHA"; run_id=""
-          fi
-          printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$' \
-            || fail "commit '$sha' is not an exact 40-character lowercase SHA"
-
-          if [ -z "$run_id" ]; then
-            # Manual recovery: the newest completed push run of the CI workflow
-            # for this exact main commit. Selecting the newest run for the commit
-            # means an older success cannot hide a newer failure.
-            run_id="$(gh api "repos/$REPO/actions/workflows/$REQUIRED_WORKFLOW/runs?branch=main&event=push&status=completed&per_page=100" \
-              --jq "[.workflow_runs[] | select(.head_sha == \"$sha\")] | sort_by(.created_at) | last | .id // empty")"
-            [ -n "$run_id" ] || fail "no completed CI run on main for commit $sha"
-          fi
-
-          gh api "repos/$REPO/actions/runs/$run_id" > "$RUNNER_TEMP/run.json"
-          jq -e --arg repo "$REPO" --arg sha "$sha" --arg path ".github/workflows/$REQUIRED_WORKFLOW" '
-            .id != null
-            and .head_sha == $sha
-            and .event == "push"
-            and .head_branch == "main"
-            and .status == "completed"
-            and .conclusion == "success"
-            and .path == $path
-            and (.head_repository.full_name // "") == $repo
-            and (.repository.full_name // "") == $repo
-          ' "$RUNNER_TEMP/run.json" >/dev/null \
-            || fail "CI run $run_id is not a successful push-to-main run of $REQUIRED_WORKFLOW for $sha"
-
-          # Every job of that run must be green in its latest attempt, and the
-          # named required jobs must actually exist. A run that lost or skipped
-          # a required job is not authority.
-          gh api "repos/$REPO/actions/runs/$run_id/jobs?filter=latest&per_page=100" > "$RUNNER_TEMP/jobs.json"
-          jq -e --argjson required "$REQUIRED_JOBS" '
-            (.jobs | length) > 0
-            and all(.jobs[]; .status == "completed" and .conclusion == "success")
-            and (($required - [.jobs[].name]) | length) == 0
-          ' "$RUNNER_TEMP/jobs.json" >/dev/null \
-            || fail "CI run $run_id does not have every required job green"
-
-          version="$(gh api -H 'Accept: application/vnd.github.raw' \
-            "repos/$REPO/contents/.claude-plugin/plugin.json?ref=$sha" | jq -r .version)"
-          printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
-            || fail "plugin version '$version' at $sha is not x.y.z"
-
-          tag_commit="$(gh api "repos/$REPO/commits/v$version" --jq .sha 2>/dev/null || true)"
-          if [ -n "$tag_commit" ]; then
-            [ "$tag_commit" = "$sha" ] \
-              || fail "tag v$version already points at $tag_commit, not $sha; refusing to move it"
-            echo "v$version already released at $sha"
-            echo "released=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "released=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "CI run $run_id is authoritative for $sha (v$version)"
+        run: bash tools/release-authority.sh
 
   tag:
     name: Tag the verified commit
