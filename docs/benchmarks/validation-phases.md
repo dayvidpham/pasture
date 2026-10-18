@@ -1,14 +1,24 @@
 # Required correctness and controlled performance
 
 Both phases are release gates. Operator approval on 2026-10-16 separates
-measurement from concurrent race-suite load; it does not relax any band or
-remove any workload. Production remains 20 records / 25 ms.
+measurement from concurrent race-suite load; it did not relax a band or remove
+a workload at that sitting. Production remains 20 records / 25 ms.
+
+On 2026-10-18 the operator lowered the synthetic sustained-throughput floor
+from 80/s to 50/s. The same harness measured 52.8-92.6/s on shared 4-vCPU CI
+runners across a day (reference host: 111.9/s), and the 80/s floor failed most
+CI runs with no product change. 50/s stays below the slowest healthy CI sample
+and remains a collapse tripwire. The copy floor (10/s), p95 bands, burst-ratio
+bound and zero-fault rule are unchanged.
 
 Run the default pair on exactly one backend. The local pair and the Nix race
 derivation execute the same default race-correctness suite and the same
 controlled performance tests; a sitting must not run both. GitHub CI uses the
-local backend, and release consumes that CI result rather than running the pair
-again. Do not add a Nix race job to CI.
+local backend as two dependent jobs: `Build & Test` runs race correctness and
+recovery, then `Controlled performance` runs on a fresh runner after it. The
+measured window therefore stays quiet, and a miss on a slow runner is retried
+without rerunning the race suite. Release consumes that CI result rather than
+running the pair again. Do not add a Nix race job to CI.
 Prefer the Nix derivation when that sitting's release vehicle is the hermetic
 builder and the local pair has not already passed on the same tree. An
 interrupted Nix race build is not a pass, and it is not evidence that the
@@ -36,7 +46,7 @@ The acceptance row retains 18 workers, the real CGO-free daemon/hook binaries,
 the same fixture and initialized store, zero faults, absolute p95 <=250ms and
 same-run direct median ratio <=1.25. The disposable-store row retains the same
 600-task synthetic shape, 18 workers, 3-second burst, 10-second sustained run,
-20 opens, 30 reads, zero faults, <=250ms hook p95, burst ratio <=5, >=80 committed
+20 opens, 30 reads, zero faults, <=250ms hook p95, burst ratio <=5, >=50 committed
 events/s, <=100ms read p95 and <=50ms steady-open p95. Copy-shape controls and
 their original thresholds remain available in the original exploratory harness;
 the required gate explicitly refuses a private source-store override.
@@ -48,8 +58,9 @@ the lane, receipt, store and handler implementations with instrumentation.
 Phase 2 additionally enforces the in-process read/open bands without detector
 overhead. Neither a focused success nor phase 1 alone clears the release.
 
-CI `Build & Test` invokes that local target. Release does not run it a second
-time: after CI completes for a push to main, `release.yml` verifies that the
+CI invokes that local pair in the two dependent jobs above. Release does not
+run it a second time: after CI completes for a push to main, `release.yml`
+verifies that the
 trusted CI run for the exact commit has every job green, including the named
 required jobs, and only then tags that commit, builds its binaries and
 publishes. A missing, failed, cancelled, skipped, stale or foreign CI result
@@ -69,7 +80,7 @@ builders finish before its measured window. `nix flake check` without
 `--no-build` builds this same derivation; it is that backend, not a second gate
 after local success. `nix flake check --no-build` evaluates only and clears
 neither phase. All Nix builders use `GOWORK=off`. Both phases must still exit 0
-inside the chosen backend. Bands stay 80 committed events/s, 250 ms p95, and
+inside the chosen backend. Bands stay 50 committed events/s, 250 ms p95, and
 relative 1.25 where that ratio applies.
 
 The Nix race derivation does not pass `-tags=pasture_experiment` or

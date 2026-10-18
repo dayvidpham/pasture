@@ -14,7 +14,7 @@ mkdir -p "$root/bin" "$root/fixtures"
 fx="$root/fixtures"
 sha="0123456789abcdef0123456789abcdef01234567"
 other="89abcdef0123456789abcdef0123456789abcdef"
-required='["Build & Test (1.26)","Lint","Codegen Drift"]'
+required='["Build & Test (1.26)","Controlled performance","Lint","Codegen Drift"]'
 
 cat > "$root/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -71,6 +71,7 @@ JSON
   cat > "$fx/jobs.json" <<'JSON'
 {"jobs":[
  {"name":"Build & Test (1.26)","status":"completed","conclusion":"success"},
+ {"name":"Controlled performance","status":"completed","conclusion":"success"},
  {"name":"Lint","status":"completed","conclusion":"success"},
  {"name":"Codegen Drift","status":"completed","conclusion":"success"}]}
 JSON
@@ -213,15 +214,27 @@ while IFS= read -r job; do
     grab { print }
   ' "$ci")"
   if [ -n "$block" ] && printf '%s\n' "$block" | grep -qF "\"$version\""; then
-    if [ "$base" = "Build & Test" ] && ! printf '%s\n' "$block" | grep -qF "make test-race"; then
-      echo "FAIL '$job' no longer runs make test-race"
-      contract=1
-    fi
     continue
   fi
   echo "FAIL required job '$job' is not rendered by ci.yml"
   contract=1
 done < <(jq -r '.[]' <<<"$required")
+# Pin the exact workload each required job runs. A substring match is not
+# enough: "make test-race" is a prefix of "make test-race-correctness", and a
+# no-op step would otherwise satisfy the contract while the measured workload
+# never ran.
+block_for() {
+  awk -v k="  $1:" '$0==k{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{f=0} f' "$ci"
+}
+if ! block_for build | grep -qE '^[[:space:]]+run:[[:space:]]+make test-race-correctness[[:space:]]*$'; then
+  echo "FAIL Build & Test no longer runs 'make test-race-correctness'"
+  contract=1
+fi
+if ! block_for performance | grep -qE '^[[:space:]]+run:[[:space:]]+make test-performance[[:space:]]*$'; then
+  echo "FAIL Controlled performance no longer runs 'make test-performance'"
+  contract=1
+fi
+
 if [ "$contract" -eq 0 ]; then
   echo "PASS ci contract"
 else

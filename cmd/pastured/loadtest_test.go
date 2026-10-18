@@ -122,15 +122,25 @@ const (
 	// synthetic 600-task shape sustained 111.9/s hook-cost-bound
 	// (offered == committed: the lane is not saturated, each hook costs
 	// ~65 ms serial, ~160 ms under C=18 load); copy shape sustained
-	// ~29-30/s. The floors sit ~30% (synthetic) and ~3x (copy) below the
-	// observed rates. They are COLLAPSE tripwires (a dead lane commits
-	// ~0/s), not batching-loss tripwires: on a populated store the batched
-	// and per-record lanes are indistinguishable (both hook-bound), so
-	// lost batching is caught by the burst-queue bound instead — an
-	// unbatched burst serialises the probe behind ~workers turns
-	// (ratio ~10+), far above the 5.0 bound.
+	// ~29-30/s. The copy floor sits ~3x below the observed rate.
+	//
+	// The synthetic floor is 50/s (operator decision 2026-10-18). The same
+	// harness on shared 4-vCPU CI runners measured a healthy range of
+	// 52.8-92.6/s across a day; an 80/s floor failed most of those runs
+	// without any product change. 50/s stays below the slowest observed
+	// healthy run while still tripping a collapse. The required performance
+	// target clears GITHUB_ACTIONS, so this floor is unscaled on CI; a direct
+	// invocation with GITHUB_ACTIONS set still divides it by
+	// loadtestCIFactor. On the reference host (111.9/s) the 50/s floor leaves
+	// a ~2.2x margin, so this is a deliberate global relaxation, not only a
+	// CI one. These are COLLAPSE
+	// tripwires (a dead lane commits ~0/s), not batching-loss tripwires: on
+	// a populated store the batched and per-record lanes are
+	// indistinguishable (both hook-bound), so lost batching is caught by the
+	// burst-queue bound instead — an unbatched burst serialises the probe
+	// behind ~workers turns (ratio ~10+), far above the 5.0 bound.
 	loadtestThroughputFloorCopy      = 10.0
-	loadtestThroughputFloorSynthetic = 80.0
+	loadtestThroughputFloorSynthetic = 50.0
 	// loadtestCIFactor scales the absolute bands on shared CI runners
 	// (GITHUB_ACTIONS), where the lane acceptance row measured 4-5x
 	// end-to-end variance against the reference host. Upper bands multiply,

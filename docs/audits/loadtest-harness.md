@@ -107,6 +107,9 @@ direct hook served in ~1.7 s (replay fits in the deadline on a small store).
 
 ## Bands (in code, with derivation comments)
 
+The synthetic sustained-throughput floor became 50/s on 2026-10-18 (was 80/s);
+the rest of this table records the 2026-10-16 bands.
+
 | metric | copy band | synthetic band | everywhere |
 |---|---|---|---|
 | read p95 | 250 ms | 100 ms | — |
@@ -114,7 +117,7 @@ direct hook served in ~1.7 s (replay fits in the deadline on a small store).
 | hook faults/s | 0 | 0 | 0 |
 | burst probe p95 | 1.5 s | 250 ms | — |
 | burst queued ratio | — | — | <= 5.0 |
-| sustained events/s floor | 10 | 80 | — |
+| sustained events/s floor | 10 | 50 | — |
 
 ## What is NOT measured here
 
