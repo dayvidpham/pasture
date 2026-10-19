@@ -1,4 +1,4 @@
-.PHONY: build test test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate check-operational-tracker
+.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate check-operational-tracker
 
 VERSION ?= devel
 
@@ -68,13 +68,25 @@ bin/pasture-migrate-crash:
 # Test
 # --------------------------------------------------------------------------
 
-# CGO_ENABLED=0 for pure-Go build. Note: -race requires CGo; use
-# CGO_ENABLED=1 make test-race when the race detector is needed.
+# Local non-race path. The two measured daemon/load rows are skipped because
+# Controlled performance owns them; that also keeps a developer's live store
+# out of the unit run.
 test:
-	CGO_ENABLED=0 go test ./...
+	GOWORK=off CGO_ENABLED=0 go test -count=1 -timeout 30m -p=4 -parallel=4 \
+		-skip '^(TestDisposableStoreLoadHarnessIsTheRegressionTripwire|TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow)$$' \
+		./...
+
+# Pull-request fast path. In addition to the measured daemon/load rows, the
+# two broad executable-discovery tables run only in the main-push race suite;
+# their focused discovery cases remain here. This keeps PR feedback under six
+# minutes without removing the tables from the release authority.
+test-pr:
+	GOWORK=off CGO_ENABLED=0 go test -count=1 -timeout 30m -p=4 -parallel=4 \
+		-skip '^(TestDisposableStoreLoadHarnessIsTheRegressionTripwire|TestEighteenConcurrentHooksThroughTheDaemonLaneIsTheAcceptanceRow|TestClaudeDefaultDiscoverySelectsOneExecutable|TestNativeVersionSelectionAndRefusal)$$' \
+		./...
 
 test-recovery:
-	CGO_ENABLED=0 go test -tags recovery ./internal/engine/ -run Recovery -v
+	GOWORK=off CGO_ENABLED=0 go test -count=1 -timeout 30m -tags recovery ./internal/engine/...
 
 test-race:
 	$(MAKE) test-race-correctness

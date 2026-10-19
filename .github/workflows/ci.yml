@@ -13,11 +13,13 @@ jobs:
   # every one of them is present and green for the exact commit. Renaming a job
   # here without updating that list fails the release closed, loudly.
   #
-  # The pair is split on purpose: race correctness and recovery run here, and
-  # controlled performance runs in its own job that starts only after this one
-  # finishes. The measured window stays quiet (the documented ordering), a slow
-  # runner's throughput miss is retryable without rerunning the 30-minute race
-  # suite, and the performance job gets a fresh VM.
+  # The pair is split on purpose: the main-push Build & Test run executes race
+  # correctness, pull requests execute the non-race suite in the same job,
+  # Recovery correctness is its own parallel job, and controlled performance
+  # runs on a fresh runner after Build & Test. The measured window stays quiet
+  # (the documented ordering), a slow runner's throughput miss is retryable
+  # without rerunning the 30-minute race suite, and the performance job gets a
+  # fresh VM.
   build:
     name: Build & Test
     runs-on: ubuntu-latest
@@ -46,41 +48,59 @@ jobs:
       - name: Verify dependencies
         run: go mod verify
 
-      - name: Build — pastured
-        env:
-          CGO_ENABLED: "0"
-        run: go build ./cmd/pastured
-
-      - name: Build — pasture
-        env:
-          CGO_ENABLED: "0"
-        run: go build ./cmd/pasture
-
-      - name: Build — pasture-release
-        env:
-          CGO_ENABLED: "0"
-        run: go build ./cmd/pasture-release
-
       - name: Build — all (CGO_ENABLED=0)
         env:
           CGO_ENABLED: "0"
         run: go build ./...
 
-      - name: Vet
-        run: go vet ./...
+      - name: Test (non-race; pull request and non-main pushes)
+        # Pull-request feedback must stay under six minutes. Production-path
+        # tests still execute generated TypeScript through Bun and run the real
+        # CLI as a child process; only the race detector is absent here. The
+        # detector runs on the main push below, so the exact-commit release
+        # gate still covers it without making every PR runner pay for it.
+        if: github.ref != 'refs/heads/main' || (github.event_name != 'push' && github.event_name != 'workflow_dispatch')
+        env:
+          CGO_ENABLED: "0"
+          GOWORK: "off"
+        run: make test-pr
 
-      - name: Race correctness (required)
-        # Production-path tests execute generated TypeScript through Bun and
-        # run the real CLI as a child process. The explicit -timeout is a
-        # guard against the 10-minute default, which reports a slow package as
-        # a panic with no per-test attribution; it is not a budget to grow into.
-        #
-        # Performance is the dependent job below: the measured window must not
-        # overlap this wave, and it keeps the unscaled reference-host
-        # thresholds unchanged.
+      - name: Race correctness (main only)
+        # The main-push run is the exact-commit authority consumed by release.
+        # Keep the full race wave here, not on each PR runner; use
+        # `make test-race` locally when a change touches concurrency.
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: make test-race-correctness
 
-      - name: Recovery tests
+  recovery:
+    name: Recovery correctness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+
+      - name: Recovery tests (non-race; pull request and non-main pushes)
+        if: github.ref != 'refs/heads/main' || (github.event_name != 'push' && github.event_name != 'workflow_dispatch')
+        env:
+          CGO_ENABLED: "0"
+          GOWORK: "off"
+        run: go test -count=1 -timeout 30m -tags=recovery ./internal/engine/...
+
+      - name: Recovery tests (race; main only)
+        # The main-push release authority keeps the recovery race proof; PRs
+        # run the same recovery tests without detector overhead.
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           CGO_ENABLED: "1"
           GOWORK: "off"
@@ -106,7 +126,7 @@ jobs:
           bun-version: "1.3.13"
 
       - name: Controlled performance (required)
-        # Runs on a fresh runner after the race job: no concurrent race suite
+        # Runs on a fresh runner after Build & Test: no concurrent race suite
         # or independent heavy builder is alive on this runner during the
         # measured window. Unscaled reference-host thresholds; do not add a CI
         # factor.

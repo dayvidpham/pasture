@@ -33,7 +33,7 @@ func TestGoCompilerRejectsTargetNeutralHostContractImport(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module boundary.invalid\n\ngo 1.25\n\nrequire github.com/dayvidpham/pasture v0.0.0\nreplace github.com/dayvidpham/pasture => "+moduleRoot(t)+"\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "violation.go"), []byte("package violation\nimport _ \"github.com/dayvidpham/pasture/internal/lifecycle/ingress/internal/hostcontract\"\n"), 0o600))
-	command := exec.Command("go", "test", "-race", "-shuffle=on", "-fullpath", "-timeout=30m", "-mod=mod", "./...")
+	command := exec.Command("go", "test", "-shuffle=on", "-fullpath", "-timeout=30m", "-mod=mod", "./...")
 	command.Dir = dir
 	// The deliberately external module must be compiled as that module, not
 	// through the unrelated workspace of the process running this test.
