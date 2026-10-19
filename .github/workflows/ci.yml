@@ -155,6 +155,12 @@ jobs:
         # leave no `.pasture-install.*` file and must install neither binary.
         run: bash tools/install-staging-test.sh
 
+      - name: Installer config and user service
+        # Behavioral and hermetic: the config is created only when absent, and
+        # the marked unit is installed and started only when the installer owns
+        # it and a user systemd session exists.
+        run: bash tools/install-config-service-test.sh
+
       - name: Release authority contract test
         # The release gate consumes this decision; it must refuse failed,
         # foreign, stale or partial CI evidence. Hermetic: stub gh, canned JSON.

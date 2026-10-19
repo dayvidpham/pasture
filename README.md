@@ -37,6 +37,14 @@ the prompt), verifies both downloads against the release's `checksums.txt` befor
 replacing either, and prints PATH advice without editing a shell profile. Pin a
 release with `PASTURE_VERSION=vX.Y.Z`.
 
+It also creates the daemon's minimal config at `~/.config/pasture/config.yaml`
+when one does not exist; an existing file, including a symlink managed by a
+dotfiles system, is left untouched. On Linux with a user systemd session it
+installs and starts `~/.config/systemd/user/pastured.service`. The unit runs
+`~/.local/bin/pastured`, so it does not name a release and never needs to be
+rewritten by an upgrade. Set `PASTURE_NO_SERVICE=1` to skip the unit; the
+binaries and config still install.
+
 Once installed, upgrade in place:
 
 ```bash
@@ -47,7 +55,12 @@ pasture upgrade --yes      # skip the prompt
 
 `pasture upgrade` (also `pasture update` and `pasture --upgrade`) replaces a raw
 `pasture` and co-located `pastured` pair after checksum verification;
-package-managed installs are advised, never modified.
+package-managed installs are advised, never modified. The user unit keeps the
+same `ExecStart` path, so after an upgrade restart it to run the new build:
+
+```bash
+systemctl --user restart pastured
+```
 
 ## Running With The DBOS Backend
 

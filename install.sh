@@ -8,13 +8,20 @@
 # Says what it is about to do and waits for a yes before doing any of it. Then
 # downloads the release builds for this machine, verifies each against the
 # release's own checksums.txt, and installs pasture and pastured to
-# ~/.local/bin. Both binaries are downloaded and verified before either is
-# replaced, so the CLI and the daemon always match. It never escalates and never
-# edits a shell profile; where PATH needs a line added, it prints the line for
-# you to add. The internal release tool (pasture-release) is never fetched.
+# ~/.local/bin. It also creates the daemon's minimal config at
+# ~/.config/pasture/config.yaml when one does not exist, and on Linux with a
+# user systemd session installs, enables and starts the pastured user unit at
+# ~/.config/systemd/user/pastured.service. The unit runs
+# ~/.local/bin/pastured, so `pasture upgrade` replaces the binaries without
+# rewriting the unit; restart the unit after an upgrade. Both binaries are
+# downloaded and verified before either is replaced, so the CLI and the daemon
+# always match. It never escalates and never edits a shell profile; where PATH
+# needs a line added, it prints the line for you to add. The internal release
+# tool (pasture-release) is never fetched.
 #
-#   PASTURE_YES=1        install without the prompt (for CI and scripts)
-#   PASTURE_VERSION=vX   install a specific release instead of the newest
+#   PASTURE_YES=1         install without the prompt (for CI and scripts)
+#   PASTURE_VERSION=vX    install a specific release instead of the newest
+#   PASTURE_NO_SERVICE=1  skip the user unit (binaries and config still install)
 #
 # The whole script is a set of functions with `main` called on the very last
 # line. Piped into a shell, a script executes whatever bytes have arrived — so a
@@ -25,6 +32,11 @@ set -euo pipefail
 
 REPO="dayvidpham/pasture"
 BIN_DIR="${HOME}/.local/bin"
+CONFIG_DIR="${HOME}/.config/pasture"
+CONFIG_FILE="${CONFIG_DIR}/config.yaml"
+SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+SERVICE_FILE="${SYSTEMD_USER_DIR}/pastured.service"
+SERVICE_MARKER="# Managed by the Pasture installer."
 
 # The co-located pair, installed together so the CLI and daemon never diverge.
 # pasture-release is an internal tool and is deliberately absent.
@@ -37,6 +49,8 @@ BINARIES=(pasture pastured)
 WORK_DIR=""
 STAGED=()
 VERIFIED=()
+CONFIG_CREATED=0
+SERVICE_STATUS=""
 
 say() { printf '%s\n' "$*"; }
 err() { printf '%s\n' "$*" >&2; }
@@ -122,11 +136,20 @@ latest_tag() {
     sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/'
 }
 
+# A user systemd session is the only supervisor the installer knows how to
+# wire. `systemctl --user show-environment` is the cheapest probe that works
+# without starting anything; a container or a WSL image without systemd says
+# no here, and the install continues without a unit.
+systemd_user_available() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl --user show-environment >/dev/null 2>&1
+}
+
 # Everything that is about to happen, before any of it does. Reading a plan is
 # the only way to consent to one, and an installer that has already started is
 # not asking.
 show_plan() {
-  local tag="$1" os="$2" arch="$3" sums_url="$4"
+  local tag="$1" os="$2" arch="$3" sums_url="$4" service="$5"
   local b verb
 
   say ""
@@ -144,11 +167,25 @@ show_plan() {
     [ -e "${BIN_DIR}/${b}" ] && verb="replace"
     say "  ${verb}     ${BIN_DIR}/${b}"
   done
+  say "  config         ${CONFIG_FILE}  (create if absent)"
+  if [ "$service" -eq 1 ]; then
+    say "  service        ${SERVICE_FILE}  (install, enable, start)"
+  elif [ "${PASTURE_NO_SERVICE:-}" = "1" ]; then
+    say "  service        skipped (PASTURE_NO_SERVICE=1)"
+  elif [ "$os" != "linux" ]; then
+    say "  service        skipped (systemd is Linux-only)"
+  else
+    say "  service        skipped (no user systemd session)"
+  fi
   say ""
   say "  here are the steps we will take to install on your machine:"
   say "    1. download  pasture-${os}-${arch} and pastured-${os}-${arch}"
   say "    2. verify    both against checksums.txt published with the release"
   say "    3. install   ${BIN_DIR}/pasture and ${BIN_DIR}/pastured"
+  say "    4. create    ${CONFIG_FILE} if it does not exist"
+  if [ "$service" -eq 1 ]; then
+    say "    5. install   ${SERVICE_FILE}, then enable and start pastured"
+  fi
   say ""
 }
 
@@ -246,6 +283,99 @@ stage_binary() {
   chmod 0755 "$staged"
 }
 
+# Create the daemon's minimal config only when the user has none. An existing
+# file, including a symlink managed by a dotfiles system, is left untouched:
+# the daemon only needs a readable YAML file, and the installer must not
+# clobber a config the user owns.
+install_config() {
+  if [ -e "$CONFIG_FILE" ] || [ -L "$CONFIG_FILE" ]; then
+    return 0
+  fi
+
+  mkdir -p "$CONFIG_DIR"
+  local staged="${CONFIG_FILE}.pasture-install.$$"
+  STAGED+=("$staged")
+  cat > "$staged" <<'YAML'
+# Pasture configuration. Defaults apply for anything not set here.
+# db_path defaults to ~/.local/share/pasture/pasture.db.
+audit_trail: sqlite
+YAML
+  chmod 0600 "$staged"
+  mv "$staged" "$CONFIG_FILE"
+  CONFIG_CREATED=1
+}
+
+# Install the user unit that keeps the daemon running. The unit names the
+# stable BIN_DIR path, not a versioned store path, so `pasture upgrade` can
+# replace the binary without touching the unit; restarting the unit is the
+# only step an upgrade needs.
+#
+# An existing unit is adopted only when it carries this installer's marker.
+# A symlink (Home Manager, for example) or a hand-written unit is left alone:
+# the user has another owner for it, and silently clobbering that would make
+# the installer a second, invisible manager.
+install_service() {
+  local os="$1"
+
+  if [ "$os" != "linux" ]; then
+    SERVICE_STATUS="skipped (systemd is Linux-only)"
+    return 0
+  fi
+  if [ "${PASTURE_NO_SERVICE:-}" = "1" ]; then
+    SERVICE_STATUS="skipped (PASTURE_NO_SERVICE=1)"
+    return 0
+  fi
+  if ! systemd_user_available; then
+    SERVICE_STATUS="skipped (no user systemd session)"
+    return 0
+  fi
+  if [ -L "$SERVICE_FILE" ] || { [ -e "$SERVICE_FILE" ] && ! grep -qF "$SERVICE_MARKER" "$SERVICE_FILE"; }; then
+    SERVICE_STATUS="kept (existing unit is not installer-managed)"
+    return 0
+  fi
+
+  mkdir -p "$SYSTEMD_USER_DIR"
+  local staged="${SERVICE_FILE}.pasture-install.$$"
+  STAGED+=("$staged")
+  cat > "$staged" <<UNIT
+${SERVICE_MARKER}
+[Unit]
+Description=Pasture DBOS durable engine and lifecycle write lane
+After=default.target
+
+[Service]
+Type=simple
+ExecStart="${BIN_DIR}/pastured"
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+  chmod 0644 "$staged"
+  mv "$staged" "$SERVICE_FILE"
+
+  if ! systemctl --user daemon-reload; then
+    SERVICE_STATUS="installed, but the user systemd manager did not reload"
+    err "  warning: ${SERVICE_FILE} was installed, but systemd did not reload."
+    err "  run: systemctl --user daemon-reload && systemctl --user enable --now pastured"
+    return 0
+  fi
+  if ! systemctl --user enable pastured; then
+    SERVICE_STATUS="installed, but could not be enabled"
+    err "  warning: ${SERVICE_FILE} was installed, but pastured.service could not be enabled."
+    err "  run: systemctl --user enable --now pastured"
+    return 0
+  fi
+  if ! systemctl --user restart pastured; then
+    SERVICE_STATUS="installed, but could not be started"
+    err "  warning: ${SERVICE_FILE} was installed, but pastured.service could not be started."
+    err "  run: systemctl --user restart pastured"
+    return 0
+  fi
+  SERVICE_STATUS="installed, enabled and started"
+}
+
 # What happened, in the same shape as what was promised.
 show_result() {
   local b size sum
@@ -260,6 +390,14 @@ show_result() {
   for sum in "${VERIFIED[@]:-}"; do
     [ -n "$sum" ] && say "  verified   sha256 ${sum}"
   done
+  if [ "$CONFIG_CREATED" -eq 1 ]; then
+    say "  created    ${CONFIG_FILE}"
+  else
+    say "  kept       ${CONFIG_FILE}"
+  fi
+  if [ -n "$SERVICE_STATUS" ]; then
+    say "  service    pastured.service: ${SERVICE_STATUS}"
+  fi
   say ""
 
   case ":${PATH}:" in
@@ -300,9 +438,13 @@ main() {
   need curl
   need uname
 
-  local os arch tag sums_url b asset sum
+  local os arch tag sums_url b asset sum service
   os="$(detect_os)"
   arch="$(detect_arch)"
+  service=0
+  if [ "$os" = "linux" ] && [ "${PASTURE_NO_SERVICE:-}" != "1" ] && systemd_user_available; then
+    service=1
+  fi
 
   # `|| true` is load-bearing. Under `set -e`, a command substitution that fails
   # inside an assignment exits the shell then and there — so when GitHub rate
@@ -321,7 +463,7 @@ main() {
   }
 
   sums_url="https://github.com/${REPO}/releases/download/${tag}/checksums.txt"
-  show_plan "$tag" "$os" "$arch" "$sums_url"
+  show_plan "$tag" "$os" "$arch" "$sums_url" "$service"
   confirm
 
   WORK_DIR="$(mktemp -d)"
@@ -356,6 +498,8 @@ main() {
     mv -f "${BIN_DIR}/.pasture-install.$$.${b}" "${BIN_DIR}/${b}"
   done
 
+  install_config
+  install_service "$os"
   show_result
 }
 
