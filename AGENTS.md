@@ -1388,9 +1388,15 @@ curl -fsSL https://raw.githubusercontent.com/dayvidpham/pasture/main/install.sh 
 It plans, confirms through the terminal (or `PASTURE_YES=1`), verifies both
 downloads against `checksums.txt` before replacing either, installs `pasture` and
 `pastured` to `~/.local/bin`, and prints PATH advice without editing a profile.
+It also creates the daemon config at `~/.config/pasture/config.yaml` when absent
+and, on Linux with a user systemd session, installs a marked
+`~/.config/systemd/user/pastured.service` running the stable installed path and
+enables/starts it (`PASTURE_NO_SERVICE=1` skips the unit). Existing configs and
+units owned by another manager, including Home Manager symlinks, are preserved.
 `PASTURE_VERSION=vX.Y.Z` pins a release. The script is functions-only with
 `main "$@"` on its last line, so a truncated transfer runs nothing; CI checks the
-syntax and that last line, while behavior is covered by the acceptance recipes.
+syntax and that last line and runs the hermetic
+`tools/install-staging-test.sh` and `tools/install-config-service-test.sh`.
 
 Releases publish `checksums.txt` (one `sha256sum` line per asset) from the
 `release` job. Both the command and the installer verify against it, and the
