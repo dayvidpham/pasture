@@ -14,7 +14,7 @@ mkdir -p "$root/bin" "$root/fixtures"
 fx="$root/fixtures"
 sha="0123456789abcdef0123456789abcdef01234567"
 other="89abcdef0123456789abcdef0123456789abcdef"
-required='["Build & Test (1.26)","Controlled performance","Lint","Codegen Drift"]'
+required='["Build & Test (1.26)","Recovery correctness","Controlled performance","Lint","Codegen Drift"]'
 
 cat > "$root/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -71,6 +71,7 @@ JSON
   cat > "$fx/jobs.json" <<'JSON'
 {"jobs":[
  {"name":"Build & Test (1.26)","status":"completed","conclusion":"success"},
+ {"name":"Recovery correctness","status":"completed","conclusion":"success"},
  {"name":"Controlled performance","status":"completed","conclusion":"success"},
  {"name":"Lint","status":"completed","conclusion":"success"},
  {"name":"Codegen Drift","status":"completed","conclusion":"success"}]}
@@ -227,7 +228,15 @@ block_for() {
   awk -v k="  $1:" '$0==k{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{f=0} f' "$ci"
 }
 if ! block_for build | grep -qE '^[[:space:]]+run:[[:space:]]+make test-race-correctness[[:space:]]*$'; then
-  echo "FAIL Build & Test no longer runs 'make test-race-correctness'"
+  echo "FAIL Build & Test no longer runs 'make test-race-correctness' on main"
+  contract=1
+fi
+if ! block_for build | grep -qE '^[[:space:]]+run:[[:space:]]+make test-pr[[:space:]]*$'; then
+  echo "FAIL Build & Test no longer runs 'make test-pr' for non-main/PR CI"
+  contract=1
+fi
+if ! block_for recovery | grep -qF -- '-tags=recovery ./internal/engine/...'; then
+  echo "FAIL Recovery correctness no longer runs the recovery cohort"
   contract=1
 fi
 if ! block_for performance | grep -qE '^[[:space:]]+run:[[:space:]]+make test-performance[[:space:]]*$'; then

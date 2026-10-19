@@ -14,11 +14,20 @@ bound and zero-fault rule are unchanged.
 Run the default pair on exactly one backend. The local pair and the Nix race
 derivation execute the same default race-correctness suite and the same
 controlled performance tests; a sitting must not run both. GitHub CI uses the
-local backend as two dependent jobs: `Build & Test` runs race correctness and
-recovery, then `Controlled performance` runs on a fresh runner after it. The
-measured window therefore stays quiet, and a miss on a slow runner is retried
-without rerunning the race suite. Release consumes that CI result rather than
-running the pair again. Do not add a Nix race job to CI.
+local backend as independent jobs. On pull requests, `Build & Test` runs the
+non-race suite and `Recovery correctness` runs the non-race recovery cohort in
+parallel; then `Controlled performance` runs on a fresh runner. On a push to
+main, `Build & Test` runs the full race correctness suite and `Recovery
+correctness` runs the race recovery cohort; those main-push results are the
+exact-commit authority consumed by release. The measured window therefore stays
+quiet, and a miss on a slow runner is retried without rerunning the race suite.
+The race detector is deliberately local and main-only: PR runners use the
+non-race suite so feedback stays below six minutes. The PR fast path,
+`make test-pr`, also moves the two broad executable-discovery tables and the
+measured daemon/load rows out of the unit job; the main-push race suite still
+runs the discovery tables, and Controlled performance still runs the measured
+rows. Release consumes the main-push CI result rather than running the pair
+again. Do not add a Nix race job to CI.
 Prefer the Nix derivation when that sitting's release vehicle is the hermetic
 builder and the local pair has not already passed on the same tree. An
 interrupted Nix race build is not a pass, and it is not evidence that the
@@ -68,7 +77,8 @@ fails closed. Manual dispatch applies the same check to the current main
 commit, which also recovers a pushed version whose tag was never created. The
 tag lands on the newest CI-verified main commit carrying an untagged version,
 not necessarily on the bump commit.
-Pull-request CI remains the pre-merge proof.
+Pull-request CI remains the pre-merge proof; it runs the non-race suite. The
+race detector stays local and on the main-push release authority.
 
 Fixture-setup work behind this suite is measured in
 [fixture-setup-performance.md](fixture-setup-performance.md).
