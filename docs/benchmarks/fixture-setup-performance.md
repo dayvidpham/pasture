@@ -119,3 +119,47 @@ wording; they change no template image or production code.
 - `TestRefuseNonEmptySidecar`
 
 No previous test name was removed. The list command was not a race wave.
+
+## Store-free lifecycle slice
+
+`internal/handlers/hook_lifecycle_pure_test.go` is the next slice of the
+hybrid boundary. It drives the production admission, dry-run preview, gate
+decision and registry encoder directly, with no store opener, database path or
+receipt service. The durable subjects stay where they were: migrations, WAL,
+ledger/replay, claims, concurrency/deadlines and the daemon lane still run
+against the real SQLite opener and the real receipt service.
+
+The new subjects are:
+
+- `TestPrepareLifecycleDeliveryRefusesBeforeAnyStore` — missing host version,
+  invalid version provenance, unknown event, withheld Claude/OpenCode events,
+  read failure, zero-length payload and over-limit payload. Pre-read refusals
+  are asserted not to touch the input reader.
+- `TestRawDryRunPreviewRendersFromThePreparedDeliveryWithoutAStore` — the
+  preview document from the same prepared delivery, including derived effects
+  and the unevaluated Proceed default.
+- `TestPreparedAdmissionFeedsGateAndEncoderWithoutAStore` — the admitted event
+  class and mapping feed `gatepolicy.Decide`; the registry encoder turns the
+  unbound-session Proceed into a Claude continuation. `gatepolicy` and
+  `nativeresponse` already have their own pure package suites.
+- `TestPrepareLifecycleDeliveryHonoursTheActivationOverride` — the supplied
+  activation catalog is consulted before the payload is read.
+
+Measurements on 2026-10-19, Go 1.26.7, `GOWORK=off`, in the new worktree:
+
+```
+CGO_ENABLED=0 go test ./internal/handlers \
+  -run '^(TestPrepareLifecycleDeliveryRefusesBeforeAnyStore|TestRawDryRunPreviewRendersFromThePreparedDeliveryWithoutAStore|TestPreparedAdmissionFeedsGateAndEncoderWithoutAStore|TestPrepareLifecycleDeliveryHonoursTheActivationOverride)$' \
+  -count=1
+ok github.com/dayvidpham/pasture/internal/handlers 0.019s
+```
+
+The focused race run, with `CGO_ENABLED=1`, reported `ok ... 1.065s`. The full
+`internal/handlers` package remained `ok ... 26.876s` with `CGO_ENABLED=0`,
+which is the durable cohort still doing its real-store work. The pure
+`gatepolicy` and `nativeresponse` package suites were `0.007s` and `0.009s`.
+
+No production file changed, no test was removed, and the new tests do not call
+`initializeLifecycleTestDatabase`. The admission function has no store field,
+so a future change that tries to open a store before admission cannot hide
+behind this seam without changing its signature.
