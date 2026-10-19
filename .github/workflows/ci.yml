@@ -156,9 +156,9 @@ jobs:
         run: bash tools/install-staging-test.sh
 
       - name: Installer config and user service
-        # Behavioral and hermetic: the config is created only when absent, and
-        # the marked unit is installed and started only when the installer owns
-        # it and a user systemd session exists.
+        # Behavioral and hermetic: absent-only config creation, marked-unit
+        # refresh, foreign/symlink preservation, opt-out, no-systemd, XDG
+        # placement, service-step failures, and the manual-daemon guard.
         run: bash tools/install-config-service-test.sh
 
       - name: Release authority contract test

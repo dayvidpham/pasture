@@ -34,7 +34,16 @@ REPO="dayvidpham/pasture"
 BIN_DIR="${HOME}/.local/bin"
 CONFIG_DIR="${HOME}/.config/pasture"
 CONFIG_FILE="${CONFIG_DIR}/config.yaml"
-SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+# systemd reads its user units under an absolute XDG_CONFIG_HOME; a relative
+# value is ignored, so fall back to ~/.config. The config file itself stays at
+# ~/.config/pasture because pastured's default is fixed there and does not
+# consult XDG_CONFIG_HOME.
+config_home="${XDG_CONFIG_HOME:-}"
+case "$config_home" in
+  /*) config_home="${config_home%/}" ;;
+  *) config_home="${HOME}/.config" ;;
+esac
+SYSTEMD_USER_DIR="${config_home}/systemd/user"
 SERVICE_FILE="${SYSTEMD_USER_DIR}/pastured.service"
 SERVICE_MARKER="# Managed by the Pasture installer."
 
@@ -50,6 +59,7 @@ WORK_DIR=""
 STAGED=()
 VERIFIED=()
 CONFIG_CREATED=0
+CONFIG_USABLE=1
 SERVICE_STATUS=""
 
 say() { printf '%s\n' "$*"; }
@@ -145,11 +155,54 @@ systemd_user_available() {
   systemctl --user show-environment >/dev/null 2>&1
 }
 
+# One decision, used by the plan, the installer, and the result. The plan is
+# the consent surface: it must not promise a start that install_service will
+# deliberately skip.
+#
+# `keep-running` is the manual-daemon case. Two pastured processes on one
+# pasture.db share the same DBOS executor identity and recovery cohort, so the
+# installer refuses to add a unit-managed one behind a manual one.
+service_disposition() {
+  local os="$1"
+
+  if [ "$os" != "linux" ]; then
+    printf 'skip-nonlinux'
+    return 0
+  fi
+  if [ "${PASTURE_NO_SERVICE:-}" = "1" ]; then
+    printf 'skip-optout'
+    return 0
+  fi
+  if [ -L "$CONFIG_FILE" ] && [ ! -e "$CONFIG_FILE" ]; then
+    printf 'skip-config'
+    return 0
+  fi
+  if [ -e "$CONFIG_FILE" ] && { [ ! -f "$CONFIG_FILE" ] || [ ! -r "$CONFIG_FILE" ]; }; then
+    printf 'skip-config'
+    return 0
+  fi
+  if ! systemd_user_available; then
+    printf 'skip-no-systemd'
+    return 0
+  fi
+  if [ -L "$SERVICE_FILE" ] || { [ -e "$SERVICE_FILE" ] && ! grep -qF "$SERVICE_MARKER" "$SERVICE_FILE" 2>/dev/null; }; then
+    printf 'keep-foreign'
+    return 0
+  fi
+  if ! systemctl --user is-active --quiet pastured >/dev/null 2>&1; then
+    if command -v pgrep >/dev/null 2>&1 && pgrep -x pastured >/dev/null 2>&1; then
+      printf 'keep-running'
+      return 0
+    fi
+  fi
+  printf 'install'
+}
+
 # Everything that is about to happen, before any of it does. Reading a plan is
 # the only way to consent to one, and an installer that has already started is
 # not asking.
 show_plan() {
-  local tag="$1" os="$2" arch="$3" sums_url="$4" service="$5"
+  local tag="$1" os="$2" arch="$3" sums_url="$4" disposition="$5"
   local b verb
 
   say ""
@@ -168,22 +221,36 @@ show_plan() {
     say "  ${verb}     ${BIN_DIR}/${b}"
   done
   say "  config         ${CONFIG_FILE}  (create if absent)"
-  if [ "$service" -eq 1 ]; then
-    say "  service        ${SERVICE_FILE}  (install, enable, start)"
-  elif [ "${PASTURE_NO_SERVICE:-}" = "1" ]; then
-    say "  service        skipped (PASTURE_NO_SERVICE=1)"
-  elif [ "$os" != "linux" ]; then
-    say "  service        skipped (systemd is Linux-only)"
-  else
-    say "  service        skipped (no user systemd session)"
-  fi
+  case "$disposition" in
+    install)
+      say "  service        ${SERVICE_FILE}  (install, enable, start; set PASTURE_NO_SERVICE=1 to skip)"
+      ;;
+    keep-foreign)
+      say "  service        ${SERVICE_FILE}  (kept: existing unit is not installer-managed)"
+      ;;
+    keep-running)
+      say "  service        ${SERVICE_FILE}  (kept: a pastured process already runs outside the installer)"
+      ;;
+    skip-optout)
+      say "  service        skipped (PASTURE_NO_SERVICE=1)"
+      ;;
+    skip-nonlinux)
+      say "  service        skipped (systemd is Linux-only)"
+      ;;
+    skip-no-systemd)
+      say "  service        skipped (no user systemd session)"
+      ;;
+    skip-config)
+      say "  service        skipped (the daemon config is not readable)"
+      ;;
+  esac
   say ""
   say "  here are the steps we will take to install on your machine:"
   say "    1. download  pasture-${os}-${arch} and pastured-${os}-${arch}"
   say "    2. verify    both against checksums.txt published with the release"
   say "    3. install   ${BIN_DIR}/pasture and ${BIN_DIR}/pastured"
   say "    4. create    ${CONFIG_FILE} if it does not exist"
-  if [ "$service" -eq 1 ]; then
+  if [ "$disposition" = "install" ]; then
     say "    5. install   ${SERVICE_FILE}, then enable and start pastured"
   fi
   say ""
@@ -287,84 +354,140 @@ stage_binary() {
 # file, including a symlink managed by a dotfiles system, is left untouched:
 # the daemon only needs a readable YAML file, and the installer must not
 # clobber a config the user owns.
+#
+# The DB path is deliberately not a config key here: pastured takes it from
+# --db / PASTURE_DB_PATH and overwrites the config value with that resolved
+# path, so advertising `db_path` would document a key the daemon ignores.
 install_config() {
-  if [ -e "$CONFIG_FILE" ] || [ -L "$CONFIG_FILE" ]; then
+  if [ -L "$CONFIG_FILE" ] && [ ! -e "$CONFIG_FILE" ]; then
+    CONFIG_USABLE=0
+    return 0
+  fi
+  if [ -e "$CONFIG_FILE" ]; then
+    if [ -f "$CONFIG_FILE" ] && [ -r "$CONFIG_FILE" ]; then
+      CONFIG_USABLE=1
+    else
+      CONFIG_USABLE=0
+    fi
     return 0
   fi
 
-  mkdir -p "$CONFIG_DIR"
+  mkdir -p "$CONFIG_DIR" || return 1
   local staged="${CONFIG_FILE}.pasture-install.$$"
   STAGED+=("$staged")
-  cat > "$staged" <<'YAML'
+  cat > "$staged" <<'YAML' || return 1
 # Pasture configuration. Defaults apply for anything not set here.
-# db_path defaults to ~/.local/share/pasture/pasture.db.
+# The daemon's DB path comes from --db / PASTURE_DB_PATH (default:
+# ~/.local/share/pasture/pasture.db); it is not read from this file.
 audit_trail: sqlite
 YAML
-  chmod 0600 "$staged"
-  mv "$staged" "$CONFIG_FILE"
+  chmod 0600 "$staged" || return 1
+  # Re-check immediately before the rename: if another owner created the file
+  # while we were staging, keep theirs rather than clobbering it.
+  if [ -e "$CONFIG_FILE" ] || [ -L "$CONFIG_FILE" ]; then
+    if [ -f "$CONFIG_FILE" ] && [ -r "$CONFIG_FILE" ]; then
+      CONFIG_USABLE=1
+    else
+      CONFIG_USABLE=0
+    fi
+    return 0
+  fi
+  mv "$staged" "$CONFIG_FILE" || return 1
   CONFIG_CREATED=1
+  CONFIG_USABLE=1
 }
 
 # Install the user unit that keeps the daemon running. The unit names the
 # stable BIN_DIR path, not a versioned store path, so `pasture upgrade` can
 # replace the binary without touching the unit; restarting the unit is the
-# only step an upgrade needs.
+# only step an upgrade needs. An optional EnvironmentFile lets a user put
+# PASTURE_DB_PATH (or another variable) in ~/.config/pasture/pastured.env
+# without editing the installer-owned unit.
 #
-# An existing unit is adopted only when it carries this installer's marker.
-# A symlink (Home Manager, for example) or a hand-written unit is left alone:
-# the user has another owner for it, and silently clobbering that would make
-# the installer a second, invisible manager.
+# The disposition was decided once before the plan, so the plan, the action,
+# and the result cannot drift. An existing unit is adopted only when it carries
+# this installer's marker; a symlink (Home Manager, for example) or a
+# hand-written unit is left alone. Marked units are installer-owned: local
+# edits to the unit are replaced on the next run; use a drop-in for local
+# additions.
 install_service() {
-  local os="$1"
+  local disposition="$1"
 
-  if [ "$os" != "linux" ]; then
-    SERVICE_STATUS="skipped (systemd is Linux-only)"
-    return 0
-  fi
-  if [ "${PASTURE_NO_SERVICE:-}" = "1" ]; then
-    SERVICE_STATUS="skipped (PASTURE_NO_SERVICE=1)"
-    return 0
-  fi
-  if ! systemd_user_available; then
-    SERVICE_STATUS="skipped (no user systemd session)"
-    return 0
-  fi
-  if [ -L "$SERVICE_FILE" ] || { [ -e "$SERVICE_FILE" ] && ! grep -qF "$SERVICE_MARKER" "$SERVICE_FILE"; }; then
-    SERVICE_STATUS="kept (existing unit is not installer-managed)"
-    return 0
+  if [ "$CONFIG_USABLE" -eq 0 ]; then
+    disposition="skip-config"
   fi
 
-  mkdir -p "$SYSTEMD_USER_DIR"
+  case "$disposition" in
+    install) ;;
+    keep-foreign)
+      SERVICE_STATUS="kept (existing unit is not installer-managed)"
+      return 0
+      ;;
+    keep-running)
+      SERVICE_STATUS="kept (a pastured process is already running outside the installer)"
+      err "  warning: a pastured process is already running outside the installer."
+      err "  stop it, or set PASTURE_NO_SERVICE=1, before re-running: two daemons on one pasture.db share the same executor cohort."
+      return 0
+      ;;
+    skip-optout)
+      SERVICE_STATUS="skipped (PASTURE_NO_SERVICE=1)"
+      return 0
+      ;;
+    skip-nonlinux)
+      SERVICE_STATUS="skipped (systemd is Linux-only)"
+      return 0
+      ;;
+    skip-no-systemd)
+      SERVICE_STATUS="skipped (no user systemd session)"
+      return 0
+      ;;
+    skip-config)
+      SERVICE_STATUS="skipped (the daemon config is not readable; fix ${CONFIG_FILE} and re-run)"
+      return 0
+      ;;
+    *)
+      SERVICE_STATUS="skipped (unknown disposition: ${disposition})"
+      return 0
+      ;;
+  esac
+
+  mkdir -p "$SYSTEMD_USER_DIR" || return 1
   local staged="${SERVICE_FILE}.pasture-install.$$"
   STAGED+=("$staged")
-  cat > "$staged" <<UNIT
+  cat > "$staged" <<UNIT || return 1
 ${SERVICE_MARKER}
 [Unit]
 Description=Pasture DBOS durable engine and lifecycle write lane
-After=default.target
 
 [Service]
 Type=simple
 ExecStart="${BIN_DIR}/pastured"
+EnvironmentFile=-%h/.config/pasture/pastured.env
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=default.target
 UNIT
-  chmod 0644 "$staged"
-  mv "$staged" "$SERVICE_FILE"
+  chmod 0644 "$staged" || return 1
+  # Re-check immediately before the rename for the same reason as the config:
+  # a foreign unit created during staging must not be clobbered.
+  if [ -L "$SERVICE_FILE" ] || { [ -e "$SERVICE_FILE" ] && ! grep -qF "$SERVICE_MARKER" "$SERVICE_FILE" 2>/dev/null; }; then
+    SERVICE_STATUS="kept (existing unit is not installer-managed)"
+    return 0
+  fi
+  mv "$staged" "$SERVICE_FILE" || return 1
 
   if ! systemctl --user daemon-reload; then
     SERVICE_STATUS="installed, but the user systemd manager did not reload"
     err "  warning: ${SERVICE_FILE} was installed, but systemd did not reload."
-    err "  run: systemctl --user daemon-reload && systemctl --user enable --now pastured"
+    err "  run: systemctl --user daemon-reload"
     return 0
   fi
   if ! systemctl --user enable pastured; then
     SERVICE_STATUS="installed, but could not be enabled"
     err "  warning: ${SERVICE_FILE} was installed, but pastured.service could not be enabled."
-    err "  run: systemctl --user enable --now pastured"
+    err "  run: systemctl --user enable pastured"
     return 0
   fi
   if ! systemctl --user restart pastured; then
@@ -373,7 +496,13 @@ UNIT
     err "  run: systemctl --user restart pastured"
     return 0
   fi
-  SERVICE_STATUS="installed, enabled and started"
+  if ! systemctl --user is-active --quiet pastured; then
+    SERVICE_STATUS="installed and enabled, but not active (check: journalctl --user -u pastured)"
+    err "  warning: pastured.service was installed and enabled, but it is not active."
+    err "  run: systemctl --user status pastured; journalctl --user -u pastured -n 50"
+    return 0
+  fi
+  SERVICE_STATUS="installed, enabled and running"
 }
 
 # What happened, in the same shape as what was promised.
@@ -392,8 +521,10 @@ show_result() {
   done
   if [ "$CONFIG_CREATED" -eq 1 ]; then
     say "  created    ${CONFIG_FILE}"
-  else
+  elif [ "$CONFIG_USABLE" -eq 1 ]; then
     say "  kept       ${CONFIG_FILE}"
+  else
+    say "  kept       ${CONFIG_FILE} (not readable)"
   fi
   if [ -n "$SERVICE_STATUS" ]; then
     say "  service    pastured.service: ${SERVICE_STATUS}"
@@ -438,13 +569,10 @@ main() {
   need curl
   need uname
 
-  local os arch tag sums_url b asset sum service
+  local os arch tag sums_url b asset sum disposition
   os="$(detect_os)"
   arch="$(detect_arch)"
-  service=0
-  if [ "$os" = "linux" ] && [ "${PASTURE_NO_SERVICE:-}" != "1" ] && systemd_user_available; then
-    service=1
-  fi
+  disposition="$(service_disposition "$os")"
 
   # `|| true` is load-bearing. Under `set -e`, a command substitution that fails
   # inside an assignment exits the shell then and there — so when GitHub rate
@@ -463,7 +591,7 @@ main() {
   }
 
   sums_url="https://github.com/${REPO}/releases/download/${tag}/checksums.txt"
-  show_plan "$tag" "$os" "$arch" "$sums_url" "$service"
+  show_plan "$tag" "$os" "$arch" "$sums_url" "$disposition"
   confirm
 
   WORK_DIR="$(mktemp -d)"
@@ -498,8 +626,16 @@ main() {
     mv -f "${BIN_DIR}/.pasture-install.$$.${b}" "${BIN_DIR}/${b}"
   done
 
-  install_config
-  install_service "$os"
+  if ! install_config; then
+    err "pasture: both binaries were installed, but the daemon config at ${CONFIG_FILE} could not be created."
+    err "  fix the path and re-run install.sh."
+    exit 1
+  fi
+  if ! install_service "$disposition"; then
+    err "pasture: both binaries and the daemon config were installed, but the user service step failed."
+    err "  fix the error above and re-run install.sh."
+    exit 1
+  fi
   show_result
 }
 

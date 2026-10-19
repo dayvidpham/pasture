@@ -42,8 +42,17 @@ when one does not exist; an existing file, including a symlink managed by a
 dotfiles system, is left untouched. On Linux with a user systemd session it
 installs and starts `~/.config/systemd/user/pastured.service`. The unit runs
 `~/.local/bin/pastured`, so it does not name a release and never needs to be
-rewritten by an upgrade. Set `PASTURE_NO_SERVICE=1` to skip the unit; the
-binaries and config still install.
+rewritten by an upgrade.
+
+The unit reads an optional `~/.config/pasture/pastured.env` (`KEY=VALUE`), which
+is how `PASTURE_DB_PATH` and similar settings reach a user service; a user unit
+does not inherit the shell environment. The unit is installer-owned: a re-run
+refreshes it, so put local additions in a `pastured.service.d/*.conf` drop-in.
+An existing symlinked or unmarked unit is left in place and is **not** enabled
+or restarted; remove or hand over the other manager first, then re-run. On
+macOS the installer installs the binaries and config only (no launchd
+integration). Set `PASTURE_NO_SERVICE=1` to skip the unit; the binaries and
+config still install.
 
 Once installed, upgrade in place:
 
