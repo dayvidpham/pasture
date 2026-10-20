@@ -592,15 +592,25 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	// the two handlers.
 	// A WRITE IS ATTEMPTED HERE. See durablePossible.
 	durablePossible = true
-	committed, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery, decision)
+	committed, committedReceipt, err := deliveryCommit(ctx, service, dispatch, event, capture.delivery, decision)
 	if err != nil {
 		return backend.HostResponse{}, err
 	}
-	claimOutcome, err := tasks.RecordLifecycleSessionClaim(ctx, tracker, in.Harness, event.Kind, capture.delivery.Bindings, in.ActorClaim, in.Clock)
+	tail, err := tasks.RecordLifecycleSessionTail(ctx, tracker, tasks.SessionTailInput{
+		Harness:      in.Harness,
+		Contract:     capture.delivery.Contract,
+		EventKind:    event.Kind,
+		Bindings:     capture.delivery.Bindings,
+		OccurrenceID: committedReceipt.OccurrenceID,
+		RecordedAt:   committedReceipt.RecordedAt,
+		ActorClaim:   in.ActorClaim,
+		Clock:        in.Clock,
+		Diagnostics:  in.Diagnostics,
+	})
 	if err != nil {
 		return backend.HostResponse{}, fmt.Errorf("%w: %w", ErrLifecycleCommittedWithoutContinuation, err)
 	}
-	if line := sessionClaimMismatchDiagnostic(in.Harness, in.ActorClaim, capture.delivery.Bindings, claimOutcome); line != "" && in.Diagnostics != nil {
+	if line := sessionClaimMismatchDiagnostic(in.Harness, in.ActorClaim, capture.delivery.Bindings, tail.Claim); line != "" && in.Diagnostics != nil {
 		fmt.Fprintln(in.Diagnostics, line)
 	}
 	response = committed
@@ -765,11 +775,11 @@ func evaluateGate(
 // arrives without one is refused HERE, before the metamodel is journalled and
 // before the receipt is written, because a gate that commits the default Proceed
 // has claimed a policy evaluation that never ran.
-func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery, decision *backend.Decision) (backend.HostResponse, error) {
+func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifecycleDispatch, event registration.Event, delivery receipt.Delivery, decision *backend.Decision) (backend.HostResponse, receipt.Receipt, error) {
 	if decision == nil {
 		mapping, err := dispatch.mapping(event.NativeName)
 		if err != nil {
-			return backend.HostResponse{}, err
+			return backend.HostResponse{}, receipt.Receipt{}, err
 		}
 		if mapping.Semantic() != pastureruntime.SemanticObservation {
 			// IT WRAPS ITS OWN SENTINEL, FOR THE SAME REASON THE WARRANT
@@ -779,7 +789,7 @@ func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifec
 			// both below it. Without the sentinel this refusal would fall to the
 			// command's weakest claim and tell an operator their occurrence "may
 			// or may not exist" when the invocation is one that wrote nothing.
-			return backend.HostResponse{}, fmt.Errorf(
+			return backend.HostResponse{}, receipt.Receipt{}, fmt.Errorf(
 				"%w: lifecycle delivery: the %s gate event %q reached the commit without an evaluated decision; "+
 					"no receipt committed; the verdict is taken from the store by evaluateGate and is not optional on a gate",
 				ErrLifecycleBeforeDurableWrite, dispatch.name, event.NativeName)
@@ -800,7 +810,7 @@ func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifec
 	// raised rather than where it is caught.
 	warrant, err := deliveryWarrant(delivery)
 	if err != nil {
-		return backend.HostResponse{}, fmt.Errorf("%w: %w", ErrLifecycleBeforeDurableWrite, err)
+		return backend.HostResponse{}, receipt.Receipt{}, fmt.Errorf("%w: %w", ErrLifecycleBeforeDurableWrite, err)
 	}
 	// On the valid-capture path, lazily journal the active metamodel BEFORE the
 	// delivery receipt is written. The definition-activation operation commits
@@ -809,21 +819,22 @@ func deliveryCommit(ctx context.Context, service receipt.Service, dispatch lifec
 	// idempotent and race-safe (deterministic content-derived operation ID), so
 	// steady state is one single lookup and zero writes.
 	if _, err := receipt.EnsureActiveMetamodel(ctx, service); err != nil {
-		return backend.HostResponse{}, err
+		return backend.HostResponse{}, receipt.Receipt{}, err
 	}
 	derivation, err := deliveryDerive(dispatch, event, delivery)
 	if err != nil {
-		return backend.HostResponse{}, err
+		return backend.HostResponse{}, receipt.Receipt{}, err
 	}
 	prepared, err := prepareDelivery(dispatch, event, derivation, decision)
 	if err != nil {
-		return backend.HostResponse{}, err
+		return backend.HostResponse{}, receipt.Receipt{}, err
 	}
 	service.Outcome = prepared.outcome
-	if _, err := service.Receive(ctx, warrant, delivery, prepared.effects...); err != nil {
-		return backend.HostResponse{}, err
+	committed, err := service.Receive(ctx, warrant, delivery, prepared.effects...)
+	if err != nil {
+		return backend.HostResponse{}, receipt.Receipt{}, err
 	}
-	return prepared.response, nil
+	return prepared.response, committed, nil
 }
 
 type preparedDelivery struct {

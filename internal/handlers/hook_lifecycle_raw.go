@@ -287,7 +287,7 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 	if err != nil {
 		return nil, err
 	}
-	_, err = deliveryCommit(ctx, service, dispatch, event, capture.delivery, decision)
+	_, _, err = deliveryCommit(ctx, service, dispatch, event, capture.delivery, decision)
 	if err != nil {
 		if outcome, committed := in.Settlement.CommittedOutcome(); committed {
 			return &RawLifecycleResult{outcome: outcome, committed: true}, nil
@@ -303,6 +303,10 @@ func HookLifecycleRaw(ctx context.Context, in HookLifecycleRawInput) (*RawLifecy
 	if !committed {
 		return nil, fmt.Errorf("%s raw lifecycle has no settled Outcome; do not claim a commit; preserve the shared settlement fence", dispatch.name)
 	}
+	// Raw imports commit occurrences without the claim tail. Mark the session
+	// cache dirty so the next serve rebuilds it; the receipt is authoritative,
+	// and a cache-marker failure must not fail the import.
+	_ = tasks.MarkSessionStateDirty(ctx, tracker)
 	return &RawLifecycleResult{outcome: outcome, committed: true}, nil
 }
 

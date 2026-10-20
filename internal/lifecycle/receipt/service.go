@@ -33,7 +33,13 @@ type Delivery struct {
 	Origin origin.CaptureOrigin
 }
 
-type Receipt struct{ OccurrenceID model.OccurrenceID }
+type Receipt struct {
+	OccurrenceID model.OccurrenceID
+	// RecordedAt is the instant the occurrence was admitted, carried from the
+	// prepared operation. Session activity stores this value so a rebuild can
+	// reproduce last_seen without inventing a fresh clock read.
+	RecordedAt time.Time
+}
 
 func (r Receipt) JournalID() provenance.JournalID { return r.OccurrenceID.JournalID() }
 
@@ -109,7 +115,7 @@ func (s Service) Receive(ctx context.Context, warrant gate.Warrant, delivery Del
 	if err != nil {
 		return Receipt{}, err
 	}
-	return Receipt{OccurrenceID: id}, nil
+	return Receipt{OccurrenceID: id, RecordedAt: time.Unix(0, pending.Operation().RecordedAt).UTC()}, nil
 }
 
 // PendingReceipt is one delivery's durable work up to (but not including) the
@@ -135,7 +141,7 @@ func (p PendingReceipt) Append(ctx context.Context) (Receipt, error) {
 	if err != nil {
 		return Receipt{}, err
 	}
-	return Receipt{OccurrenceID: id}, nil
+	return Receipt{OccurrenceID: id, RecordedAt: time.Unix(0, p.input.RecordedAt).UTC()}, nil
 }
 
 // Settle maps a committed batch result back to this receipt. It returns the
@@ -145,7 +151,7 @@ func (p PendingReceipt) Append(ctx context.Context) (Receipt, error) {
 func (p PendingReceipt) Settle(result provenance.CommittedResult) (Receipt, error) {
 	for _, slot := range result.ResultSlots {
 		if slot.Slot == receiptSlot && slot.ProducedJournalID > 0 {
-			return Receipt{OccurrenceID: model.OccurrenceID(slot.ProducedJournalID)}, nil
+			return Receipt{OccurrenceID: model.OccurrenceID(slot.ProducedJournalID), RecordedAt: time.Unix(0, p.input.RecordedAt).UTC()}, nil
 		}
 	}
 	return Receipt{}, structured(pasterrors.CategoryStorage, "The lifecycle occurrence committed without its receipt identity.", "The journal result did not contain the mandatory occurrence result slot.", "Settling a batched lifecycle occurrence (internal/lifecycle/receipt/service.go in receipt.PendingReceipt.Settle).", "The caller cannot claim a receipt even though the operation reported success.", "Use a compatible Provenance journal and inspect the committed operation before retrying.", fmt.Errorf("missing result slot %q", receiptSlot))

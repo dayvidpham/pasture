@@ -63,3 +63,26 @@ func (m Manifest) Entries() []Event {
 	}
 	return out
 }
+
+// NativeName resolves the exact native event spelling for one pinned contract
+// and typed event kind. A rebuild reads committed occurrences, which carry the
+// contract and event kind but not the native name; this accessor is the one
+// place that maps those back to the spelling a live delivery carries.
+func NativeName(contract ir.RuntimeContractID, kind model.ContractEventKind) (string, bool) {
+	for _, m := range []Manifest{
+		ClaudeCode2_1_261(),
+		Codex0_153_0(),
+		OpenCode1_18_29(),
+		OpenCode2_0_20(),
+	} {
+		if m.Contract != contract {
+			continue
+		}
+		for _, e := range m.Events {
+			if e.Kind == kind {
+				return e.NativeName, true
+			}
+		}
+	}
+	return "", false
+}
