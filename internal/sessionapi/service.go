@@ -72,8 +72,8 @@ joined AS (
 	       c.claimed_at AS claimed_at,
 	       b.binding_id, b.epoch_id, b.role, b.bound_at, b.unbound_at, b.unbound_reason,
 	       t.title AS epoch_title,
-	       MAX(COALESCE(s.last_seen, 0), COALESCE(b.bound_at, 0), COALESCE(c.claimed_at, 0)) AS last_seen,
-	       MAX(COALESCE(s.updated_at, 0), COALESCE(b.bound_at, 0), COALESCE(c.claimed_at, 0)) AS updated
+	       MAX(COALESCE(s.last_seen, 0), COALESCE(b.bound_at, 0), COALESCE(b.unbound_at, 0), COALESCE(c.claimed_at, 0)) AS last_seen,
+	       MAX(COALESCE(s.updated_at, 0), COALESCE(b.bound_at, 0), COALESCE(b.unbound_at, 0), COALESCE(c.claimed_at, 0)) AS updated
 	FROM inventory i
 	LEFT JOIN pasture_session_state s ON s.harness = i.harness AND s.session = i.session
 	LEFT JOIN pasture_session_claim c ON c.harness = i.harness AND c.session = i.session

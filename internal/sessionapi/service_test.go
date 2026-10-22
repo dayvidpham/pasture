@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,4 +207,55 @@ func TestHTTPHandlerLoopbackAndErrors(t *testing.T) {
 	require.NoError(t, err)
 	defer response.Body.Close()
 	require.Equal(t, http.StatusForbidden, response.StatusCode)
+}
+
+type fixedClock struct{ now time.Time }
+
+func (c fixedClock) Now() time.Time { return c.now }
+
+func TestHTTPBindAndUnbind(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	clock := fixedClock{now: f.now}
+	store := tasks.NewSessionAPIStoreWithDB(f.db, timeouts.TestProfile(), clock)
+	server := httptest.NewServer(sessionapi.NewHandler(f.service(), store))
+	t.Cleanup(server.Close)
+
+	bind := func(session, body string) *http.Response {
+		t.Helper()
+		request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/sessions/claude-code/"+session+"/bind", strings.NewReader(body))
+		require.NoError(t, err)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+		return response
+	}
+	response := bind("new-session", `{"epochId":"`+f.epoch+`","role":"worker"}`)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var detail sessionapi.Detail
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&detail))
+	require.NotNil(t, detail.Session.Binding)
+	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+	require.Nil(t, detail.Session.End)
+
+	response = bind("new-session", `{"epochId":"`+f.epoch+`","role":"worker","expectedBinding":"missing"}`)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusConflict, response.StatusCode)
+
+	response = bind("new-session", `{"epochId":"file://missing","role":"worker"}`)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusNotFound, response.StatusCode)
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/sessions/claude-code/new-session/unbind", strings.NewReader(`{}`))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err = http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&detail))
+	require.NotNil(t, detail.Session.End)
+	require.Equal(t, "unbind", detail.Session.End.EndReason)
+	require.Equal(t, sessionapi.StateEnded, detail.Session.Activity.State)
 }

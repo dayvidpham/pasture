@@ -80,7 +80,11 @@ func runServe(cmd *cobra.Command) error {
 		_, _, err := tasks.EnsureSessionState(ctx, tracker)
 		return err
 	}
-	handler := sessionapi.NewHandler(service)
+	store, err := tasks.NewSessionAPIStore(tracker)
+	if err != nil {
+		return err
+	}
+	handler := sessionapi.NewHandler(service, store)
 
 	listener, err := net.Listen("tcp", listen)
 	if err != nil {

@@ -10,6 +10,31 @@
         ],
         "type": "string"
       },
+      "BindRequest": {
+        "properties": {
+          "epochId": {
+            "type": "string"
+          },
+          "expectedBinding": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "epochId",
+          "role"
+        ],
+        "type": "object"
+      },
       "Detail": {
         "properties": {
           "asOf": {
@@ -189,6 +214,15 @@
           "nativeSessionId",
           "activity"
         ],
+        "type": "object"
+      },
+      "UnbindRequest": {
+        "properties": {
+          "expectedBinding": {
+            "type": "string"
+          }
+        },
+        "required": [],
         "type": "object"
       }
     }
@@ -402,6 +436,216 @@
           }
         },
         "summary": "Get one session"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/bind": {
+      "post": {
+        "operationId": "bindSession",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown epoch"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale or writes are unavailable"
+          }
+        },
+        "summary": "Bind a session to an epoch"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/unbind": {
+      "post": {
+        "operationId": "unbindSession",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnbindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "No open binding or binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale or writes are unavailable"
+          }
+        },
+        "summary": "Unbind a session from its epoch"
       }
     }
   }

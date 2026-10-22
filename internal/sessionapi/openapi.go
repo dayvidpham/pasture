@@ -66,6 +66,45 @@ func openAPIDocument() map[string]any {
 					},
 				},
 			},
+			"/api/v1/sessions/{harness}/{nativeSessionId}/bind": map[string]any{
+				"post": map[string]any{
+					"operationId": "bindSession",
+					"summary":     "Bind a session to an epoch",
+					"parameters": []any{
+						pathParameter("harness", "Harness id"),
+						pathParameter("nativeSessionId", "Native session id"),
+					},
+					"requestBody": jsonBody(ref("BindRequest")),
+					"responses": map[string]any{
+						"200": jsonResponse(ref("Detail")),
+						"400": errorResponse("Invalid session key or body"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"404": errorResponse("Unknown epoch"),
+						"409": errorResponse("Binding conflict"),
+						"503": errorResponse("The session cache is stale or writes are unavailable"),
+						"500": errorResponse("The session store could not be written"),
+					},
+				},
+			},
+			"/api/v1/sessions/{harness}/{nativeSessionId}/unbind": map[string]any{
+				"post": map[string]any{
+					"operationId": "unbindSession",
+					"summary":     "Unbind a session from its epoch",
+					"parameters": []any{
+						pathParameter("harness", "Harness id"),
+						pathParameter("nativeSessionId", "Native session id"),
+					},
+					"requestBody": jsonBody(ref("UnbindRequest")),
+					"responses": map[string]any{
+						"200": jsonResponse(ref("Detail")),
+						"400": errorResponse("Invalid session key or body"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"409": errorResponse("No open binding or binding conflict"),
+						"503": errorResponse("The session cache is stale or writes are unavailable"),
+						"500": errorResponse("The session store could not be written"),
+					},
+				},
+			},
 			"/api/v1/sessions/{harness}/{nativeSessionId}": map[string]any{
 				"get": map[string]any{
 					"operationId": "getSession",
@@ -154,6 +193,19 @@ func openAPIDocument() map[string]any {
 					},
 					"revision", "asOf", "session",
 				),
+				"BindRequest": objectSchema(
+					map[string]any{
+						"epochId":         map[string]any{"type": "string"},
+						"role":            map[string]any{"type": "string", "enum": []string{"epoch", "architect", "reviewer", "supervisor", "worker"}},
+						"expectedBinding": map[string]any{"type": "string"},
+					},
+					"epochId", "role",
+				),
+				"UnbindRequest": objectSchema(
+					map[string]any{
+						"expectedBinding": map[string]any{"type": "string"},
+					},
+				),
 				"ErrorBody": objectSchema(
 					map[string]any{
 						"code":    map[string]any{"type": "string"},
@@ -166,6 +218,15 @@ func openAPIDocument() map[string]any {
 					"error",
 				),
 			},
+		},
+	}
+}
+
+func jsonBody(schema map[string]any) map[string]any {
+	return map[string]any{
+		"required": true,
+		"content": map[string]any{
+			"application/json": map[string]any{"schema": schema},
 		},
 	}
 }
