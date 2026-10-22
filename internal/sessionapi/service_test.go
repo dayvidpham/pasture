@@ -194,6 +194,11 @@ func TestHTTPHandlerLoopbackAndErrors(t *testing.T) {
 	defer response.Body.Close()
 	require.Equal(t, http.StatusNotFound, response.StatusCode)
 
+	response, err = http.Get(server.URL + "/openapi.json")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
 	request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/sessions", nil)
 	require.NoError(t, err)
 	request.Host = "example.com"

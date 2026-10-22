@@ -26,6 +26,7 @@ func NewHandler(service *Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/sessions", h.list)
 	mux.HandleFunc("GET /api/v1/sessions/{harness}/{nativeSessionId}", h.get)
+	mux.HandleFunc("GET /openapi.json", h.openapi)
 	return loopbackOnly(mux)
 }
 
@@ -56,6 +57,12 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
+}
+
+func (h *handler) openapi(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(OpenAPIBytes())
 }
 
 func (h *handler) get(w http.ResponseWriter, r *http.Request) {
