@@ -116,6 +116,9 @@ func RecordLifecycleSessionTail(ctx context.Context, tracker protocol.TaskTracke
 		return out, sessionClaimError("the store refused the session-state savepoint: "+err.Error(), "release other store writers or repair the database, then retry the delivery")
 	}
 	stateErr := writer.UpsertSessionState(bounded, tx, in, session)
+	if stateErr == nil && isSessionEnd(in.Harness, in.Contract, in.EventKind) {
+		stateErr = closeSessionBindingTx(bounded, tx, in.Harness, session, in.RecordedAt.UnixNano())
+	}
 	if stateErr != nil {
 		// The savepoint is still open when UpsertSessionState fails. Roll it
 		// back and preserve the claim, then mark the cache dirty in the same
@@ -218,6 +221,27 @@ func upsertSessionStateTx(ctx context.Context, tx *sql.Tx, in SessionTailInput, 
 		string(in.Harness), session, recordedAt, recordedAt, nativeName, journalID, recordedAt)
 	if err != nil {
 		return sessionClaimError("the store refused the session-state write: "+err.Error(), "repair the database before retrying the delivery")
+	}
+	return nil
+}
+
+// isSessionEnd names the one host lifecycle event that ends an open binding.
+// OpenCode's sessionless end events never carry a session binding and are not
+// part of this predicate; an OpenCode session ends through explicit unbind.
+func isSessionEnd(harness ir.HarnessID, contract ir.RuntimeContractID, kind model.ContractEventKind) bool {
+	if harness != ir.HarnessClaudeCode && harness != ir.HarnessCodex {
+		return false
+	}
+	name, ok := registration.NativeName(contract, kind)
+	return ok && name == "SessionEnd"
+}
+
+func closeSessionBindingTx(ctx context.Context, tx *sql.Tx, harness ir.HarnessID, session string, at int64) error {
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE pasture_session_epoch_binding
+		SET unbound_at = ?, unbound_reason = 'session_end'
+		WHERE harness = ? AND session = ? AND unbound_at IS NULL`, at, string(harness), session); err != nil {
+		return sessionClaimError("the store refused to close the session binding: "+err.Error(), "repair the database before retrying the delivery")
 	}
 	return nil
 }
