@@ -192,8 +192,16 @@ export interface components {
             /** @enum {string} */
             role: "epoch" | "architect" | "reviewer" | "supervisor" | "worker";
         };
-        /** @enum {string} */
+        /**
+         * @description explicit rows are written by bind, unbind, or the session-end tail and are authoritative. inferred rows are derived from store observations, never override an explicit binding, and are absent when the derivation is ambiguous.
+         * @enum {string}
+         */
         BindingSource: "explicit" | "inferred";
+        /**
+         * @description How strongly the binding claims to be true, using the lifecycle confidence vocabulary. Explicit bindings are verified. An inferred binding is observed unless the store recorded a stronger derivation; the claim-ownership rule is observed, because it correlates a session claim with active ownership rather than a command that recorded this session's intent.
+         * @enum {string}
+         */
+        Confidence: "observed" | "correlated" | "verified";
         Detail: {
             /** Format: date-time */
             asOf: string;
@@ -270,14 +278,19 @@ export interface components {
             bindingId: string;
             /** Format: date-time */
             boundAt: string;
+            confidence: components["schemas"]["Confidence"];
+            /** @description The protocol session role the bind recorded (epoch, architect, reviewer, supervisor, or worker). */
             role: string;
+            source: components["schemas"]["BindingSource"];
         };
         SessionBindingInterval: {
             bindingId: string;
             /** Format: date-time */
             boundAt: string;
+            confidence: components["schemas"]["Confidence"];
             endReason?: string;
             epoch?: components["schemas"]["EpochRef"];
+            /** @description For an explicit interval, the protocol session role a bind command recorded. For an inferred interval, the assignment slot the derivation read (currently owner-responsibility), because no command gave the session a role; clients must not read an inferred role as a protocol session role. */
             role: string;
             source: components["schemas"]["BindingSource"];
             /** Format: date-time */
@@ -286,7 +299,7 @@ export interface components {
         SessionView: {
             activity: components["schemas"]["SessionActivity"];
             binding?: components["schemas"]["SessionBinding"];
-            /** @description Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` remains the current explicit binding. */
+            /** @description Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` is the effective current binding: the latest explicit binding when one exists, otherwise the open inferred derivation. */
             bindings: components["schemas"]["SessionBindingInterval"][];
             end?: components["schemas"]["EndMarker"];
             epoch?: components["schemas"]["EpochRef"];

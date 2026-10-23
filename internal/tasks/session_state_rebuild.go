@@ -202,9 +202,18 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 	if _, err := tx.ExecContext(bounded, `SAVEPOINT session_inference`); err != nil {
 		return SessionStateRebuildOutcome{}, sessionClaimError("the store refused the session inference savepoint: "+err.Error(), "release other store writers or repair the database, then retry")
 	}
-	if _, inferenceWriteErr := replaceSessionInferredBindings(bounded, tx, inferred, explicitBindings, ended); inferenceWriteErr != nil {
+	if inferenceWriteErr := replaceSessionInferredBindings(bounded, tx, inferred, explicitBindings, ended); inferenceWriteErr != nil {
 		if _, err := tx.ExecContext(bounded, `ROLLBACK TO SAVEPOINT session_inference`); err != nil {
 			return SessionStateRebuildOutcome{}, sessionClaimError("the store refused to roll back the failed session inference write: "+err.Error(), "repair the database before rebuilding the session cache")
+		}
+		// The rollback restores the pre-savepoint cache, which may hold an open
+		// interval for a session this rebuild already saw end. Clearing the
+		// cache AFTER the rollback is what keeps "an ended session keeps no
+		// inferred interval" true even when the inference write fails. The cache
+		// is disposable, so clearing all of it is honest: this rebuild could not
+		// establish today's derivation and presents none rather than a guess.
+		if _, err := tx.ExecContext(bounded, `DELETE FROM pasture_session_inferred_binding`); err != nil {
+			return SessionStateRebuildOutcome{}, sessionClaimError("the store refused to clear the inferred session bindings after a failed inference write: "+err.Error(), "repair the database before rebuilding the session cache")
 		}
 		writeSessionInferenceDiagnostic(storeWithJournal, inferenceWriteErr)
 	}

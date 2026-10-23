@@ -208,6 +208,14 @@ func (s *SessionAPIStore) Unbind(ctx context.Context, harness, session, expected
 		WHERE binding_id = ?`, unboundAt, openID); err != nil {
 		return SessionBindingResult{}, fmt.Errorf("close binding: %w", err)
 	}
+	// Defense in depth: a session that is explicitly unbound must not keep an
+	// inferred derivation. Inference never writes for a session with explicit
+	// history and the explicit-binding trigger clears it on write, but an
+	// operator's unbind is authoritative enough that the write path says so
+	// itself rather than relying on those invariants holding.
+	if err := clearSessionInferredBindings(bounded, tx, harness, session); err != nil {
+		return SessionBindingResult{}, fmt.Errorf("clear inferred binding: %w", err)
+	}
 	revision, err := bumpSessionAPIRevision(bounded, tx)
 	if err != nil {
 		return SessionBindingResult{}, err

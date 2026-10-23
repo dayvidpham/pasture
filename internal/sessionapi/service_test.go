@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -102,36 +103,43 @@ func (f fixture) bindingEpoch(t *testing.T, id, session, epochID string, boundAt
 	require.NoError(t, err)
 }
 
-// inferredTable creates the inference table S3 owns. The read path must work
-// with or without it.
-func (f fixture) inferredTable(t *testing.T) {
+// dropInferredTable models a store whose inference cache is absent: the read
+// path must serve explicit history and never fail.
+func (f fixture) dropInferredTable(t *testing.T) {
 	t.Helper()
+	_, err := f.db.Exec(`DROP TABLE pasture_session_inferred_binding`)
+	require.NoError(t, err)
+}
+
+// breakInferredTable models a present but incompatible inference cache. The
+// table keeps the columns a careless reader would query but loses confidence,
+// so a reader that trusts the name alone would fail the whole session read.
+func (f fixture) breakInferredTable(t *testing.T) {
+	t.Helper()
+	f.dropInferredTable(t)
 	_, err := f.db.Exec(`
 		CREATE TABLE pasture_session_inferred_binding (
-			binding_id    TEXT PRIMARY KEY,
-			harness       TEXT NOT NULL,
-			session       TEXT NOT NULL,
-			epoch_id      TEXT NOT NULL,
-			role          TEXT NOT NULL,
-			bound_at      INTEGER NOT NULL,
-			unbound_at    INTEGER,
-			unbound_reason TEXT,
-			inferred_at   INTEGER NOT NULL,
-			reason        TEXT NOT NULL
+			binding_id TEXT PRIMARY KEY,
+			harness    TEXT NOT NULL,
+			session    TEXT NOT NULL,
+			epoch_id   TEXT NOT NULL,
+			role       TEXT NOT NULL,
+			bound_at   INTEGER NOT NULL,
+			unbound_at INTEGER
 		)`)
 	require.NoError(t, err)
 }
 
-func (f fixture) inferredBinding(t *testing.T, id, session, epochID string, boundAt int64, unboundAt sql.NullInt64, reason string) {
+func (f fixture) inferredBinding(t *testing.T, id, session, epochID string, boundAt int64, unboundAt sql.NullInt64, reason, confidence string) {
 	t.Helper()
 	var reasonValue any
 	if unboundAt.Valid {
 		reasonValue = reason
 	}
 	_, err := f.db.Exec(`
-		INSERT INTO pasture_session_inferred_binding(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason, inferred_at, reason)
-		VALUES (?, 'claude-code', ?, ?, 'implementer', ?, ?, ?, ?, 'claim ownership')`,
-		id, session, epochID, boundAt, unboundAt, reasonValue, f.now.UnixNano())
+		INSERT INTO pasture_session_inferred_binding(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason, inferred_at, reason, confidence)
+		VALUES (?, 'claude-code', ?, ?, 'owner-responsibility', ?, ?, ?, ?, 'claim-ownership', ?)`,
+		id, session, epochID, boundAt, unboundAt, reasonValue, f.now.UnixNano(), confidence)
 	require.NoError(t, err)
 }
 
@@ -315,6 +323,8 @@ func TestHTTPBindAndUnbind(t *testing.T) {
 	var detail sessionapi.Detail
 	require.NoError(t, json.NewDecoder(response.Body).Decode(&detail))
 	require.NotNil(t, detail.Session.Binding)
+	require.Equal(t, sessionapi.BindingSourceExplicit, detail.Session.Binding.Source)
+	require.Equal(t, sessionapi.ConfidenceVerified, detail.Session.Binding.Confidence)
 	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
 	require.Nil(t, detail.Session.End)
 
@@ -325,6 +335,16 @@ func TestHTTPBindAndUnbind(t *testing.T) {
 	response = bind("new-session", `{"epochId":"file://missing","role":"worker"}`)
 	defer response.Body.Close()
 	require.Equal(t, http.StatusNotFound, response.StatusCode)
+
+	// Defense in depth: an explicitly unbound session must not keep an inferred
+	// derivation, even though the explicit write already clears it elsewhere.
+	// The row is seeded after the bind so the test proves the unbind path owns
+	// the clear rather than inheriting it from the bind trigger.
+	f.inferredBinding(t, "inferred-unbind", "new-session", f.epoch, f.now.UnixNano(), sql.NullInt64{}, "", "observed")
+	var inferredBefore int
+	require.NoError(t, f.db.QueryRow(`
+		SELECT count(*) FROM pasture_session_inferred_binding WHERE session = 'new-session'`).Scan(&inferredBefore))
+	require.Equal(t, 1, inferredBefore)
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/sessions/claude-code/new-session/unbind", strings.NewReader(`{}`))
 	require.NoError(t, err)
@@ -337,6 +357,10 @@ func TestHTTPBindAndUnbind(t *testing.T) {
 	require.NotNil(t, detail.Session.End)
 	require.Equal(t, "unbind", detail.Session.End.EndReason)
 	require.Equal(t, sessionapi.StateEnded, detail.Session.Activity.State)
+	var inferredAfter int
+	require.NoError(t, f.db.QueryRow(`
+		SELECT count(*) FROM pasture_session_inferred_binding WHERE session = 'new-session'`).Scan(&inferredAfter))
+	require.Zero(t, inferredAfter, "explicit unbind must clear the session's inferred derivation")
 }
 
 func TestEpochEndpointsAndInspect(t *testing.T) {
@@ -426,47 +450,181 @@ func TestBindingsChronologicalAcrossEpochs(t *testing.T) {
 	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
 }
 
-func TestBindingsWithoutInferredTable(t *testing.T) {
+// TestUnusableInferredTableDegrades is the fault-containment contract: a
+// missing or differently shaped inference cache must never fail List, Get, or
+// Epochs, and must leave the explicit history visible.
+func TestUnusableInferredTableDegrades(t *testing.T) {
 	t.Parallel()
-	f := seedSessions(t)
-	detail, err := f.service().Get(context.Background(), "claude-code", "active")
-	require.NoError(t, err, "an absent inferred table is not an error")
-	require.Len(t, detail.Session.Bindings, 2)
-	for _, interval := range detail.Session.Bindings {
-		require.Equal(t, sessionapi.BindingSourceExplicit, interval.Source)
+	for _, testCase := range []struct {
+		name       string
+		breakTable func(t *testing.T, f fixture)
+	}{
+		{name: "absent table", breakTable: func(t *testing.T, f fixture) { f.dropInferredTable(t) }},
+		{name: "incompatible table", breakTable: func(t *testing.T, f fixture) { f.breakInferredTable(t) }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			f := seedSessions(t)
+			testCase.breakTable(t, f)
+
+			detail, err := f.service().Get(context.Background(), "claude-code", "active")
+			require.NoError(t, err, "the explicit read model must survive a bad inference cache")
+			require.Len(t, detail.Session.Bindings, 2)
+			require.Equal(t, "binding-active", detail.Session.Binding.BindingID)
+			require.Equal(t, sessionapi.BindingSourceExplicit, detail.Session.Binding.Source)
+			require.Equal(t, sessionapi.ConfidenceVerified, detail.Session.Binding.Confidence)
+			for _, interval := range detail.Session.Bindings {
+				require.Equal(t, sessionapi.BindingSourceExplicit, interval.Source)
+				require.Equal(t, sessionapi.ConfidenceVerified, interval.Confidence)
+			}
+
+			page, err := f.service().List(context.Background(), sessionapi.ListOptions{Limit: 10})
+			require.NoError(t, err)
+			require.Len(t, page.Items, 4)
+			states := map[string]sessionapi.ActivityState{}
+			for _, item := range page.Items {
+				states[item.NativeSessionID] = item.Activity.State
+			}
+			require.Equal(t, sessionapi.StateActive, states["active"])
+			require.Equal(t, sessionapi.StateUnknown, states["unknown"])
+
+			epochs, err := f.service().Epochs(context.Background())
+			require.NoError(t, err)
+			require.Len(t, epochs.Items, 1)
+			require.Equal(t, 3, epochs.Items[0].SessionCount)
+		})
 	}
 }
 
 func TestInferredBindingsMergeWithoutOverridingExplicit(t *testing.T) {
 	t.Parallel()
 	f := seedSessions(t)
-	f.inferredTable(t)
 	now := f.now.UnixNano()
 	// The inferred open interval is newer than the explicit one, so it sorts
 	// last; the current binding must still come from the explicit table.
-	f.inferredBinding(t, "inferred-active", "active", f.epoch, now-int64(30*time.Second), sql.NullInt64{}, "")
-	// An inferred-only session never becomes a page row.
-	f.inferredBinding(t, "inferred-ghost", "ghost", f.epoch, now-int64(time.Minute), sql.NullInt64{}, "")
+	f.inferredBinding(t, "inferred-active", "active", f.epoch, now-int64(30*time.Second), sql.NullInt64{}, "", "observed")
+	// An inferred-only session is a real observation and must surface as a page
+	// row, labelled as inferred rather than as an explicit binding.
+	f.inferredBinding(t, "inferred-ghost", "ghost", f.epoch, now-int64(time.Minute), sql.NullInt64{}, "", "correlated")
 
 	page, err := f.service().List(context.Background(), sessionapi.ListOptions{Limit: 10})
 	require.NoError(t, err)
-	require.Len(t, page.Items, 4, "inferred rows must not add page rows")
-	for _, item := range page.Items {
-		require.NotEqual(t, "ghost", item.NativeSessionID)
+	require.Len(t, page.Items, 5, "an inferred-only session is a page row")
+	var ghost *sessionapi.SessionView
+	for i := range page.Items {
+		if page.Items[i].NativeSessionID == "ghost" {
+			ghost = &page.Items[i]
+		}
 	}
+	require.NotNil(t, ghost, "the inferred-only session must be listed")
+	require.NotNil(t, ghost.Binding)
+	require.Equal(t, "inferred-ghost", ghost.Binding.BindingID)
+	require.Equal(t, sessionapi.BindingSourceInferred, ghost.Binding.Source)
+	require.Equal(t, sessionapi.ConfidenceCorrelated, ghost.Binding.Confidence)
+	require.NotNil(t, ghost.Epoch)
+	require.Equal(t, f.epoch, ghost.Epoch.ID)
+	require.Equal(t, sessionapi.StateActive, ghost.Activity.State)
 
 	detail, err := f.service().Get(context.Background(), "claude-code", "active")
 	require.NoError(t, err)
 	require.NotNil(t, detail.Session.Binding)
 	require.Equal(t, "binding-active", detail.Session.Binding.BindingID, "the explicit binding stays current")
+	require.Equal(t, sessionapi.BindingSourceExplicit, detail.Session.Binding.Source)
+	require.Equal(t, sessionapi.ConfidenceVerified, detail.Session.Binding.Confidence)
 	require.Len(t, detail.Session.Bindings, 3)
 	last := detail.Session.Bindings[2]
 	require.Equal(t, "inferred-active", last.BindingID)
 	require.Equal(t, sessionapi.BindingSourceInferred, last.Source)
+	require.Equal(t, sessionapi.ConfidenceObserved, last.Confidence)
 	require.Nil(t, last.UnboundAt)
 	require.NotNil(t, last.Epoch)
 	require.Equal(t, f.epoch, last.Epoch.ID)
 	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+}
+
+// TestInferredOnlySessionIsThePrimaryView is the acceptance row for a
+// provisional binding: no explicit binding exists, so the open inferred
+// interval must fill the current epoch, binding, source, confidence and state
+// instead of leaving the session as epoch:null / state:unknown. The same
+// binding must appear in the session page, the epoch counts, and the epoch's
+// session list.
+func TestInferredOnlySessionIsThePrimaryView(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	now := f.now.UnixNano()
+	f.state(t, "provisional", now-2*int64(time.Minute), now-30*int64(time.Second), "PreToolUse", 1)
+	f.claim(t, "provisional", now-2*int64(time.Minute))
+	f.inferredBinding(t, "inferred-provisional", "provisional", f.epoch, now-2*int64(time.Minute), sql.NullInt64{}, "", "observed")
+
+	service := f.service()
+	ctx := context.Background()
+
+	detail, err := service.Get(ctx, "claude-code", "provisional")
+	require.NoError(t, err)
+	require.NotNil(t, detail.Session.Epoch, "an inferred binding must fill the current epoch")
+	require.Equal(t, f.epoch, detail.Session.Epoch.ID)
+	require.NotNil(t, detail.Session.Binding, "an inferred binding must fill the current binding")
+	require.Equal(t, "inferred-provisional", detail.Session.Binding.BindingID)
+	require.Equal(t, sessionapi.BindingSourceInferred, detail.Session.Binding.Source)
+	require.Equal(t, sessionapi.ConfidenceObserved, detail.Session.Binding.Confidence)
+	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+	require.Nil(t, detail.Session.End)
+
+	page, err := service.List(ctx, sessionapi.ListOptions{State: sessionapi.StateActive})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "provisional", page.Items[0].NativeSessionID)
+
+	unknown, err := service.List(ctx, sessionapi.ListOptions{State: sessionapi.StateUnknown})
+	require.NoError(t, err)
+	require.Empty(t, unknown.Items, "a session with an open inferred binding is not unknown")
+
+	byEpoch, err := service.List(ctx, sessionapi.ListOptions{Epoch: f.epoch})
+	require.NoError(t, err)
+	require.Len(t, byEpoch.Items, 1)
+
+	epochs, err := service.Epochs(ctx)
+	require.NoError(t, err)
+	require.Len(t, epochs.Items, 1)
+	require.Equal(t, 1, epochs.Items[0].SessionCount)
+	require.Equal(t, 1, epochs.Items[0].ActiveCount)
+
+	sessions, err := service.EpochSessions(ctx, f.epoch, sessionapi.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, sessions.Items, 1)
+	require.Equal(t, "provisional", sessions.Items[0].NativeSessionID)
+}
+
+// TestNewServiceDefaults pins the production default active window. A caller
+// that constructs the service directly must get the documented 15-minute
+// window, and the clock seam must be live.
+func TestNewServiceDefaults(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	service := sessionapi.NewService(f.db)
+	require.Same(t, f.db, service.DB)
+	require.NotNil(t, service.Now)
+	require.Equal(t, 15*time.Minute, service.ActiveWindow)
+}
+
+// TestConfidenceVocabularyMatchesLifecycle pins the wire tokens to the
+// lifecycle confidence ordinal order, so the API cannot invent a fourth label
+// or reorder the three it shares with the journal.
+func TestConfidenceVocabularyMatchesLifecycle(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "observed", string(sessionapi.ConfidenceObserved))
+	require.Equal(t, "correlated", string(sessionapi.ConfidenceCorrelated))
+	require.Equal(t, "verified", string(sessionapi.ConfidenceVerified))
+
+	ordered := []string{
+		"observed", "correlated", "verified",
+	}
+	require.Equal(t, ordered[0], string(sessionapi.ConfidenceObserved))
+	require.Equal(t, ordered[1], string(sessionapi.ConfidenceCorrelated))
+	require.Equal(t, ordered[2], string(sessionapi.ConfidenceVerified))
+	require.Equal(t, uint8(1), uint8(model.ConfidenceObserved))
+	require.Equal(t, uint8(2), uint8(model.ConfidenceCorrelated))
+	require.Equal(t, uint8(3), uint8(model.ConfidenceVerified))
 }
 
 func TestBindingIntervalClampsInvertedEnd(t *testing.T) {

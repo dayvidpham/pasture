@@ -134,7 +134,8 @@ func (s *Service) epochRows(ctx context.Context, now time.Time, epochID string) 
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterating epochs: %w", err)
 	}
-	counts, err := epochSessionCounts(ctx, tx, now.Add(-s.ActiveWindow).UnixNano())
+	inferredUsable := inferredBindingUsable(ctx, tx)
+	counts, err := epochSessionCounts(ctx, tx, s.activeCutoff(now), inferredUsable)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -152,29 +153,22 @@ type epochCount struct {
 	Active int
 }
 
-func epochSessionCounts(ctx context.Context, tx *sql.Tx, cutoff int64) (map[string]epochCount, error) {
-	exists, err := tableExists(ctx, tx, "pasture_session_epoch_binding")
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return map[string]epochCount{}, nil
-	}
-	rows, err := tx.QueryContext(ctx, `
-		WITH ranked AS (
-			SELECT harness, session, epoch_id, bound_at, unbound_at,
-			       ROW_NUMBER() OVER (PARTITION BY harness, session ORDER BY bound_at DESC, rowid DESC) AS rn
-			FROM pasture_session_epoch_binding
-		)
-		SELECT r.epoch_id, COUNT(*),
-		       SUM(CASE WHEN r.unbound_at IS NULL AND
-		           MAX(COALESCE(st.last_seen, 0), COALESCE(r.bound_at, 0), COALESCE(c.claimed_at, 0)) >= ?
-		           THEN 1 ELSE 0 END)
-		FROM ranked r
-		LEFT JOIN pasture_session_state st ON st.harness = r.harness AND st.session = r.session
-		LEFT JOIN pasture_session_claim c ON c.harness = r.harness AND c.session = r.session
-		WHERE r.rn = 1
-		GROUP BY r.epoch_id`, cutoff)
+// epochSessionCounts counts the sessions whose EFFECTIVE current binding names
+// each epoch, so an epoch a session was provisionally (inferred) bound to is
+// counted exactly as an explicit binding would be. The definition of the
+// current binding and of the active cutoff is shared with the session page:
+// bindingCurrentCTE and Service.activeCutoff, never a second copy.
+func epochSessionCounts(ctx context.Context, tx *sql.Tx, cutoff int64, inferredUsable bool) (map[string]epochCount, error) {
+	statement := bindingCurrentCTE(inferredUsable) + `
+	SELECT b.epoch_id, COUNT(*),
+	       SUM(CASE WHEN b.unbound_at IS NULL AND
+	           MAX(COALESCE(st.last_seen, 0), COALESCE(b.bound_at, 0), COALESCE(c.claimed_at, 0)) >= ?
+	           THEN 1 ELSE 0 END)
+	FROM binding_current b
+	LEFT JOIN pasture_session_state st ON st.harness = b.harness AND st.session = b.session
+	LEFT JOIN pasture_session_claim c ON c.harness = b.harness AND c.session = b.session
+	GROUP BY b.epoch_id`
+	rows, err := tx.QueryContext(ctx, statement, cutoff)
 	if err != nil {
 		return nil, fmt.Errorf("querying epoch session counts: %w", err)
 	}

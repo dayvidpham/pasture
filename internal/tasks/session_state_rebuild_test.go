@@ -319,8 +319,9 @@ func TestSessionEndClearsInferredBinding(t *testing.T) {
 	require.Equal(t, epoch.String(), inferredEpoch)
 
 	// The read model is the consumer of this table, so the derivation is
-	// asserted through it: the session carries exactly one inferred interval
-	// and no explicit binding was fabricated.
+	// asserted through it: with no explicit binding, the open inferred interval
+	// is the primary view (epoch, binding, source, confidence, state) and the
+	// interval history carries the same labels.
 	service := &sessionapi.Service{
 		DB:           db,
 		Now:          func() time.Time { return claimClock{}.Now() },
@@ -330,9 +331,20 @@ func TestSessionEndClearsInferredBinding(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, detail.Session.Bindings, 1)
 	require.Equal(t, sessionapi.BindingSourceInferred, detail.Session.Bindings[0].Source)
-	require.Nil(t, detail.Session.Binding, "an inferred interval must not masquerade as the explicit binding")
+	require.Equal(t, sessionapi.ConfidenceObserved, detail.Session.Bindings[0].Confidence)
 	require.NotNil(t, detail.Session.Bindings[0].Epoch)
 	require.Equal(t, epoch.String(), detail.Session.Bindings[0].Epoch.ID)
+	require.NotNil(t, detail.Session.Binding, "an inferred interval fills the primary binding when no explicit binding exists")
+	require.Equal(t, sessionapi.BindingSourceInferred, detail.Session.Binding.Source)
+	require.Equal(t, sessionapi.ConfidenceObserved, detail.Session.Binding.Confidence)
+	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+	require.NotNil(t, detail.Session.Epoch)
+	require.Equal(t, epoch.String(), detail.Session.Epoch.ID)
+	var confidence string
+	require.NoError(t, db.QueryRowContext(t.Context(), `
+		SELECT confidence FROM pasture_session_inferred_binding
+		WHERE harness = 'claude-code' AND session = ?`, rebuildClaudeSession).Scan(&confidence))
+	require.Equal(t, "observed", confidence, "the claim-ownership rule is stored as observed confidence")
 
 	end, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_end_2_1_261.json"))
 	require.NoError(t, err)
@@ -358,6 +370,87 @@ func TestSessionEndClearsInferredBinding(t *testing.T) {
 	detail, err = service.Get(t.Context(), "claude-code", rebuildClaudeSession)
 	require.NoError(t, err)
 	require.Empty(t, detail.Session.Bindings, "an ended session keeps no inferred interval")
+	require.Nil(t, detail.Session.Binding, "an ended session has no current binding")
+	require.Nil(t, detail.Session.Epoch)
+	require.Equal(t, sessionapi.StateUnknown, detail.Session.Activity.State,
+		"a session with no explicit OR inferred binding is unknown")
+}
+
+// TestEndedSessionKeepsNoInferredRowAcrossAFailedInferenceWrite pins the
+// interaction between the two failure paths: a session-end clear must survive a
+// rollback of a failed inference write. A stale open row is seeded after the
+// tail cleared the session, a second live session forces the inference INSERT
+// to fail, and the rebuild must still commit with no open inferred row for the
+// ended session.
+func TestEndedSessionKeepsNoInferredRowAcrossAFailedInferenceWrite(t *testing.T) {
+	t.Parallel()
+	tracker, db, path := claimStore(t)
+	actor, err := tracker.RegisterHumanAgent("infer-end-fault", "Inference End Fault", "infer-end-fault@example.test")
+	require.NoError(t, err)
+	seedInferenceOwnedEpoch(t, tracker, db, actor.ID, "Inference end fault epoch", "infer-end-fault-owner")
+	_, err = db.ExecContext(t.Context(), `
+		INSERT INTO pasture_session_claim (harness, session, actor, claimed_at)
+		VALUES ('claude-code', 'session-live-peer', ?, ?)`, actor.ID.String(), claimClock{}.Now().UnixNano())
+	require.NoError(t, err)
+
+	start, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
+	require.NoError(t, err)
+	_, err = handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
+		DBPath: path, Harness: "claude-code", Event: "SessionStart", HostVersion: "2.1.261",
+		Input: bytes.NewReader(start), Clock: claimClock{}, Operations: claimOperation("infer-end-fault.start"),
+		ActorClaim: tasks.ActorClaim(actor.ID.String()), TimeoutProfile: timeouts.TestProfile(),
+	})
+	require.NoError(t, err)
+	_, err = tasks.RebuildSessionState(t.Context(), tracker)
+	require.NoError(t, err)
+	var inferred int
+	require.NoError(t, db.QueryRowContext(t.Context(), `
+		SELECT count(*) FROM pasture_session_inferred_binding`).Scan(&inferred))
+	require.Equal(t, 2, inferred, "both claimed sessions infer from the same unique owned epoch")
+
+	// Break the inference cache so the next rebuild's INSERT fails while its
+	// DELETE still works.
+	_, err = db.ExecContext(t.Context(), `DROP TABLE pasture_session_inferred_binding`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(t.Context(), `
+		CREATE TABLE pasture_session_inferred_binding (
+			binding_id TEXT PRIMARY KEY, harness TEXT NOT NULL, session TEXT NOT NULL,
+			epoch_id TEXT NOT NULL, role TEXT NOT NULL, bound_at INTEGER NOT NULL,
+			unbound_at INTEGER, unbound_reason TEXT, inferred_at INTEGER NOT NULL, reason TEXT NOT NULL)`)
+	require.NoError(t, err)
+
+	end, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_end_2_1_261.json"))
+	require.NoError(t, err)
+	_, err = handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
+		DBPath: path, Harness: "claude-code", Event: "SessionEnd", HostVersion: "2.1.261",
+		Input: bytes.NewReader(end), Clock: claimClock{}, Operations: claimOperation("infer-end-fault.end"),
+		ActorClaim: tasks.ActorClaim(actor.ID.String()), TimeoutProfile: timeouts.TestProfile(),
+	})
+	require.NoError(t, err)
+
+	// A stale open row for the ended session, as if an earlier writer or a crash
+	// left it behind. The rebuild must not leave it open.
+	_, err = db.ExecContext(t.Context(), `
+		INSERT INTO pasture_session_inferred_binding
+			(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason, inferred_at, reason)
+		VALUES ('stale-ended', 'claude-code', ?, 'file://stale', 'owner-responsibility', ?, NULL, NULL, ?, 'claim-ownership')`,
+		rebuildClaudeSession, claimClock{}.Now().UnixNano(), claimClock{}.Now().UnixNano())
+	require.NoError(t, err)
+
+	_, err = tasks.RebuildSessionState(t.Context(), tracker)
+	require.NoError(t, err, "a failed inference write must not fail the rebuild")
+
+	var openEnded int
+	require.NoError(t, db.QueryRowContext(t.Context(), `
+		SELECT count(*) FROM pasture_session_inferred_binding
+		WHERE harness = 'claude-code' AND session = ? AND unbound_at IS NULL`,
+		rebuildClaudeSession).Scan(&openEnded))
+	require.Zero(t, openEnded, "an ended session can never retain an open inferred interval, even after a rolled-back inference write")
+	var sessions int
+	require.NoError(t, db.QueryRowContext(t.Context(), `
+		SELECT count(*) FROM pasture_session_state WHERE harness = 'claude-code' AND session = ?`,
+		rebuildClaudeSession).Scan(&sessions))
+	require.Equal(t, 1, sessions, "the activity cache still commits")
 }
 
 func TestEnsureSessionStateDetectsCommittedOccurrence(t *testing.T) {

@@ -26,14 +26,19 @@ type SessionActivity struct {
 	LastEvent string        `json:"lastEvent,omitempty"`
 }
 
-// SessionBinding is the latest explicit binding for a session.
+// SessionBinding is the effective current binding for a session. It is the
+// latest explicit binding when the session has one, otherwise the open inferred
+// derivation. Source and Confidence label which it is, so a client never has to
+// guess whether the epoch is provisional.
 type SessionBinding struct {
-	BindingID string    `json:"bindingId"`
-	Role      string    `json:"role"`
-	BoundAt   time.Time `json:"boundAt"`
+	BindingID  string        `json:"bindingId"`
+	Role       string        `json:"role"`
+	BoundAt    time.Time     `json:"boundAt"`
+	Source     BindingSource `json:"source"`
+	Confidence Confidence    `json:"confidence"`
 }
 
-// BindingSource identifies the store that produced a binding interval.
+// BindingSource identifies the store that produced a binding.
 // Explicit rows are written by bind/unbind and the session-end tail. Inferred
 // rows are derived from store observations and never override explicit ones.
 type BindingSource string
@@ -45,21 +50,48 @@ const (
 	BindingSourceInferred BindingSource = "inferred"
 )
 
+// Confidence is how strongly a binding claims to be true. The three tokens are
+// the lifecycle confidence vocabulary (internal/lifecycle/model.Confidence):
+// observed facts are seen but not related by a recorded command, correlated
+// facts link two observations, and verified facts are backed by a command that
+// recorded the relation. Explicit bindings are verified; an inferred binding is
+// observed unless the store stamped a stronger derivation on it.
+type Confidence string
+
+const (
+	// ConfidenceObserved is a fact seen without recorded intent.
+	ConfidenceObserved Confidence = "observed"
+	// ConfidenceCorrelated relates two observations.
+	ConfidenceCorrelated Confidence = "correlated"
+	// ConfidenceVerified is backed by a command that recorded the relation.
+	ConfidenceVerified Confidence = "verified"
+)
+
 // SessionBindingInterval is one historical binding for one session. Intervals
 // are ordered by BoundAt ascending, then BindingID, so the last interval is the
 // most recently established one. UnboundAt is nil while the binding is open.
+//
+// Role means the same thing on both sources but comes from different evidence:
+// an explicit interval carries the protocol session role a bind command
+// recorded; an inferred interval carries the assignment slot the derivation
+// read (for the claim-ownership rule, owner-responsibility), because no command
+// gave that session a role.
 type SessionBindingInterval struct {
-	BindingID string        `json:"bindingId"`
-	Role      string        `json:"role"`
-	BoundAt   time.Time     `json:"boundAt"`
-	UnboundAt *time.Time    `json:"unboundAt,omitempty"`
-	EndReason string        `json:"endReason,omitempty"`
-	Source    BindingSource `json:"source"`
-	Epoch     *EpochRef     `json:"epoch,omitempty"`
+	BindingID  string        `json:"bindingId"`
+	Role       string        `json:"role"`
+	BoundAt    time.Time     `json:"boundAt"`
+	UnboundAt  *time.Time    `json:"unboundAt,omitempty"`
+	EndReason  string        `json:"endReason,omitempty"`
+	Source     BindingSource `json:"source"`
+	Confidence Confidence    `json:"confidence"`
+	Epoch      *EpochRef     `json:"epoch,omitempty"`
 }
 
 // EpochRef is the epoch half of the session view. Phase 0 deliberately omits
 // phase because a freshly created epoch has no projection row to source it.
+// Source and confidence belong to the binding that names the epoch (the current
+// SessionBinding or the interval's own fields), not to the epoch identity, so
+// the same epoch referenced twice never carries two labels.
 type EpochRef struct {
 	ID    string `json:"id"`
 	Title string `json:"title,omitempty"`
@@ -72,8 +104,10 @@ type EndMarker struct {
 }
 
 // SessionView is one session mapped to the latest known epoch binding.
-// Binding and Epoch describe the current explicit binding. Bindings carries
-// every known interval in chronological order without changing page rows.
+// Binding and Epoch describe the EFFECTIVE current binding: the latest explicit
+// binding when the session has one, otherwise the open inferred derivation.
+// Bindings carries every known interval in chronological order without changing
+// page rows.
 type SessionView struct {
 	Harness         string                   `json:"harness"`
 	NativeSessionID string                   `json:"nativeSessionId"`

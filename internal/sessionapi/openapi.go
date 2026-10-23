@@ -241,26 +241,45 @@ func openAPIDocument() map[string]any {
 				"SessionBinding": objectSchema(
 					map[string]any{
 						"bindingId": map[string]any{"type": "string"},
-						"role":      map[string]any{"type": "string"},
-						"boundAt":   map[string]any{"type": "string", "format": "date-time"},
+						"role": map[string]any{
+							"type":        "string",
+							"description": "The protocol session role the bind recorded (epoch, architect, reviewer, supervisor, or worker).",
+						},
+						"boundAt":    map[string]any{"type": "string", "format": "date-time"},
+						"source":     ref("BindingSource"),
+						"confidence": ref("Confidence"),
 					},
-					"bindingId", "role", "boundAt",
+					"bindingId", "role", "boundAt", "source", "confidence",
 				),
 				"BindingSource": map[string]any{
 					"type": "string",
 					"enum": []string{"explicit", "inferred"},
+					"description": "explicit rows are written by bind, unbind, or the session-end tail and are authoritative. " +
+						"inferred rows are derived from store observations, never override an explicit binding, and are absent when the derivation is ambiguous.",
+				},
+				"Confidence": map[string]any{
+					"type": "string",
+					"enum": []string{"observed", "correlated", "verified"},
+					"description": "How strongly the binding claims to be true, using the lifecycle confidence vocabulary. " +
+						"Explicit bindings are verified. An inferred binding is observed unless the store recorded a stronger derivation; " +
+						"the claim-ownership rule is observed, because it correlates a session claim with active ownership rather than a command that recorded this session's intent.",
 				},
 				"SessionBindingInterval": objectSchema(
 					map[string]any{
 						"bindingId": map[string]any{"type": "string"},
-						"role":      map[string]any{"type": "string"},
-						"boundAt":   map[string]any{"type": "string", "format": "date-time"},
-						"unboundAt": map[string]any{"type": "string", "format": "date-time"},
-						"endReason": map[string]any{"type": "string"},
-						"source":    ref("BindingSource"),
-						"epoch":     ref("EpochRef"),
+						"role": map[string]any{
+							"type": "string",
+							"description": "For an explicit interval, the protocol session role a bind command recorded. " +
+								"For an inferred interval, the assignment slot the derivation read (currently owner-responsibility), because no command gave the session a role; clients must not read an inferred role as a protocol session role.",
+						},
+						"boundAt":    map[string]any{"type": "string", "format": "date-time"},
+						"unboundAt":  map[string]any{"type": "string", "format": "date-time"},
+						"endReason":  map[string]any{"type": "string"},
+						"source":     ref("BindingSource"),
+						"confidence": ref("Confidence"),
+						"epoch":      ref("EpochRef"),
 					},
-					"bindingId", "role", "boundAt", "source",
+					"bindingId", "role", "boundAt", "source", "confidence",
 				),
 				"SessionActivity": objectSchema(
 					map[string]any{
@@ -288,7 +307,7 @@ func openAPIDocument() map[string]any {
 						"bindings": map[string]any{
 							"type":        "array",
 							"items":       ref("SessionBindingInterval"),
-							"description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` remains the current explicit binding.",
+							"description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` is the effective current binding: the latest explicit binding when one exists, otherwise the open inferred derivation.",
 						},
 						"end": ref("EndMarker"),
 					},

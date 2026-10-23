@@ -619,12 +619,6 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 			name: "pasture_session_epoch_binding_open",
 			ddl:  `CREATE UNIQUE INDEX IF NOT EXISTS pasture_session_epoch_binding_open ON pasture_session_epoch_binding (harness, session) WHERE unbound_at IS NULL`,
 		},
-		// The inferred binding table is created by the inference rebuild, not
-		// here: it is a disposable derivation cache that exists only once a
-		// rebuild has derived something, and the read model already treats its
-		// absence as normal (see internal/sessionapi/service.go). Its partial
-		// unique index and its explicit-binding trigger are created with it, in
-		// the rebuild's own transaction. See internal/tasks/session_infer.go.
 		{
 			// The live session cache. The binding table owns the end; this table
 			// owns the activity fields the API reads.
@@ -643,6 +637,49 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 		{
 			name: "pasture_session_state_order",
 			ddl:  `CREATE INDEX IF NOT EXISTS pasture_session_state_order ON pasture_session_state (last_journal_id DESC, updated_at DESC, harness, session)`,
+		},
+		{
+			// The derived session→epoch probe. It is a disposable cache of the
+			// claim/ownership derivation, never an authority: explicit bindings
+			// live in pasture_session_epoch_binding and are never written here.
+			// The table is created at open, beside the live session cache, so
+			// every production reader meets one schema and no read path has to
+			// create it. confidence is the derivation's own label, using the
+			// lifecycle confidence vocabulary; the claim-ownership rule writes
+			// observed because it correlates a claim with active ownership
+			// rather than verifying a command's intent.
+			name: "pasture_session_inferred_binding",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_session_inferred_binding (
+				binding_id     TEXT PRIMARY KEY,
+				harness        TEXT NOT NULL,
+				session        TEXT NOT NULL,
+				epoch_id       TEXT NOT NULL,
+				role           TEXT NOT NULL,
+				bound_at       INTEGER NOT NULL,
+				unbound_at     INTEGER,
+				unbound_reason TEXT,
+				inferred_at    INTEGER NOT NULL,
+				reason         TEXT NOT NULL,
+				confidence     TEXT NOT NULL CHECK (confidence IN ('observed','correlated','verified'))
+			)`,
+		},
+		{
+			name: "pasture_session_inferred_binding_open",
+			ddl:  `CREATE UNIQUE INDEX IF NOT EXISTS pasture_session_inferred_binding_open ON pasture_session_inferred_binding (harness, session) WHERE unbound_at IS NULL`,
+		},
+		{
+			// An explicit binding is authoritative the moment it is written, so
+			// the trigger clears the session's inferred derivation in the same
+			// transaction as the explicit write. Without it a bind committed
+			// between a rebuild and the next read would leave a stale inferred
+			// interval visible beside the explicit one.
+			name: "pasture_session_inferred_binding_explicit",
+			ddl: `CREATE TRIGGER IF NOT EXISTS pasture_session_inferred_binding_explicit
+				AFTER INSERT ON pasture_session_epoch_binding
+				BEGIN
+					DELETE FROM pasture_session_inferred_binding
+					WHERE harness = NEW.harness AND session = NEW.session;
+				END`,
 		},
 		{
 			// The cache marker and API revision. The house singleton shape uses
