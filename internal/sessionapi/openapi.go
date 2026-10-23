@@ -42,7 +42,7 @@ func openAPIDocument() map[string]any {
 		"info": map[string]any{
 			"title":   "Pasture Local Session API",
 			"version": PastureLocalAPIVersion,
-			"description": "Loopback-only read API for active harness sessions mapped to " +
+			"description": "Loopback-only session and epoch API for active harness sessions mapped to " +
 				"epoch bindings. The transcript route proxies one durable Peasant " +
 				"SessionDetailPayload; Pasture does not reshape transcript content.",
 		},

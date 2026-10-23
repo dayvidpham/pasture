@@ -526,7 +526,7 @@
     }
   },
   "info": {
-    "description": "Loopback-only read API for active harness sessions mapped to epoch bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
+    "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
     "title": "Pasture Local Session API",
     "version": "0.3.0"
   },

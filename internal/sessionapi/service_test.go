@@ -885,9 +885,10 @@ func postError(t *testing.T, url, body string) (int, string) {
 
 // TestHTTPBindUnbindErrorMapping pins the bind/unbind status taxonomy: a request
 // mistake is 400 invalid_body, a session key with an escaped slash is 400
-// invalid_session_key, a missing write plane is 503, a second unbind is the
-// domain 409, and a closed store handle is 500 storage_fault rather than a
-// client error.
+// invalid_session_key, an unknown epoch is 404 unknown_epoch, a stale expected
+// binding is 409 binding_conflict, a second unbind is 409 no_open_binding, a
+// missing write plane is 503 write_unavailable, and a closed store handle is 500
+// storage_fault rather than a client error.
 func TestHTTPBindUnbindErrorMapping(t *testing.T) {
 	t.Parallel()
 	f := seedSessions(t)
@@ -915,6 +916,8 @@ func TestHTTPBindUnbindErrorMapping(t *testing.T) {
 		{"malformed body", bindURL("request-session"), `{`, http.StatusBadRequest, "invalid_body"},
 		{"two JSON objects", bindURL("request-session"), `{"epochId":"` + f.epoch + `","role":"worker"}{}`, http.StatusBadRequest, "invalid_body"},
 		{"escaped slash key", bindURL("a%2Fb"), `{"epochId":"` + f.epoch + `","role":"worker"}`, http.StatusBadRequest, "invalid_session_key"},
+		{"unknown epoch", bindURL("request-session"), `{"epochId":"file://missing","role":"worker"}`, http.StatusNotFound, "unknown_epoch"},
+		{"stale expected binding", bindURL("active"), `{"epochId":"` + f.epoch + `","role":"worker","expectedBinding":"binding-does-not-exist"}`, http.StatusConflict, "binding_conflict"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
