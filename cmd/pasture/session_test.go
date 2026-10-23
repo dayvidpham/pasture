@@ -26,6 +26,25 @@ func TestCLI_SessionInventoryHasListAndShowOnly(t *testing.T) {
 	}
 }
 
+func TestCLI_SessionHelpStatesTheStoreRequirement(t *testing.T) {
+	t.Parallel()
+
+	help := runCLI(t, "session", "--help")
+	if help.exitCode != 0 {
+		t.Fatalf("session help exit %d: %s", help.exitCode, help.stderr)
+	}
+	for _, want := range []string{
+		"require an existing store and never create one",
+		"pasture task list",
+		"auto-on-open",
+		"does not require a separate",
+	} {
+		if !strings.Contains(help.stdout, want) {
+			t.Errorf("session help is missing %q:\n%s", want, help.stdout)
+		}
+	}
+}
+
 func TestCLI_SessionListAndShow(t *testing.T) {
 	t.Parallel()
 

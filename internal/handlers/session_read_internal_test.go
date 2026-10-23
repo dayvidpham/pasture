@@ -69,3 +69,39 @@ func TestSessionReadErrorPreservesAnAlreadyStructuredCause(t *testing.T) {
 	}
 	require.Same(t, original, sessionReadError(original, "/tmp/pasture.db"))
 }
+
+func TestSessionCacheErrorMapsStorageFaults(t *testing.T) {
+	t.Parallel()
+
+	mapped := sessionCacheError("/tmp/pasture.db", errors.New("boom"))
+	require.Equal(t, 5, pasterrors.ExitCode(mapped), "a cache-refresh failure is a storage error")
+	require.Contains(t, mapped.Error(), "Couldn't refresh the session cache")
+}
+
+func TestSessionCacheErrorPreservesAnAlreadyStructuredCause(t *testing.T) {
+	t.Parallel()
+
+	original := &pasterrors.StructuredError{
+		Category: pasterrors.CategoryValidation,
+		What:     "already classified",
+	}
+	require.Same(t, original, sessionCacheError("/tmp/pasture.db", original))
+}
+
+func TestSessionOpenErrorMapsConnectionFaults(t *testing.T) {
+	t.Parallel()
+
+	mapped := sessionOpenError("/tmp/pasture.db", errors.New("boom"))
+	require.Equal(t, 2, pasterrors.ExitCode(mapped), "a store-open failure is a connection error")
+	require.Contains(t, mapped.Error(), "Couldn't open the pasture database")
+}
+
+func TestSessionOpenErrorPreservesAnAlreadyStructuredCause(t *testing.T) {
+	t.Parallel()
+
+	original := &pasterrors.StructuredError{
+		Category: pasterrors.CategoryStorage,
+		What:     "already classified",
+	}
+	require.Same(t, original, sessionOpenError("/tmp/pasture.db", original))
+}

@@ -21,10 +21,16 @@ same JSON page the local API returns. "show" renders one session identified by
 its harness and native session ID, including every historical binding interval
 and whether each was explicit or inferred.
 
-Every invocation refreshes the disposable session cache from the lifecycle
-journal, so it can rewrite cache rows and close a cache binding the journal
-already ended. It never records an explicit bind or unbind, starts a workflow,
-creates a missing store, or contacts a running daemon.`,
+These commands require an existing store and never create one: run any write
+command first, for example
+  pasture task list --namespace <namespace>
+Opening an existing older store follows the ordinary auto-on-open migration, so
+the read does not require a separate "pasture migrate".
+
+Every invocation also refreshes the disposable session cache from the lifecycle
+journal. That rewrite can close a cache binding the journal already ended, but
+the command never records an explicit bind or unbind, starts a workflow, or
+contacts a running daemon.`,
 }
 
 var sessionListCmd = &cobra.Command{
