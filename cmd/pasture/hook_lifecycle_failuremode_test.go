@@ -5997,8 +5997,8 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 
 	returned := ""
 	ast.Inspect(warrantArm, func(node ast.Node) bool {
-		if statement, isReturn := node.(*ast.ReturnStmt); isReturn && len(statement.Results) == 2 {
-			returned = sourceOf(statement.Results[1])
+		if statement, isReturn := node.(*ast.ReturnStmt); isReturn && len(statement.Results) >= 2 {
+			returned = sourceOf(statement.Results[len(statement.Results)-1])
 		}
 		return true
 	})
@@ -6073,6 +6073,7 @@ var guardSweepForeign = map[string]string{
 	"models_context_test.go":                     "model catalog command cancellation, outside the lifecycle transport sweep",
 	"models_test.go":                             "offline model allowances and registration, outside the lifecycle transport sweep",
 	"queue_test.go":                              "not changed by this slice",
+	"serve_test.go":                              "session serve loopback and shutdown proof, outside the lifecycle transport sweep",
 	"task_residual_verbs_test.go":                "task agent registration and events/contexts CLI proof, outside the lifecycle transport sweep",
 	"task_well_known_test.go":                    "durable task-store built-in initialization and process-race CLI proof, outside the lifecycle transport sweep",
 	"task_workflow_test.go":                      "task workflow CLI proof, outside the lifecycle transport sweep",

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -237,6 +238,8 @@ func (s *HookLifecycleServer) Serve(ctx context.Context, in HookLifecycleServeIn
 		clock:           s.clock,
 		harness:         in.Harness,
 		eventKind:       event.Kind,
+		contract:        capture.delivery.Contract,
+		diagnostics:     s.diagnostics,
 	}
 	if commitErr := submitToLane(ctx, s.lane, int64(len(in.Payload)), record); commitErr != nil {
 		return HookLifecycleServed{}, commitErr
@@ -266,15 +269,17 @@ func (s *HookLifecycleServer) Serve(ctx context.Context, in HookLifecycleServeIn
 // still commits BEFORE the receipt's operation, because Prepare runs it before
 // it returns the operation the batch will fold.
 type servedLifecycleRecord struct {
-	service   receipt.Service
-	tracker   protocol.TaskTracker
-	warrant   gate.Warrant
-	delivery  receipt.Delivery
-	effects   []provenance.Effect
-	claim     tasks.ActorClaim
-	clock     receipt.Clock
-	harness   ir.HarnessID
-	eventKind model.ContractEventKind
+	service     receipt.Service
+	tracker     protocol.TaskTracker
+	warrant     gate.Warrant
+	delivery    receipt.Delivery
+	effects     []provenance.Effect
+	claim       tasks.ActorClaim
+	clock       receipt.Clock
+	harness     ir.HarnessID
+	eventKind   model.ContractEventKind
+	contract    ir.RuntimeContractID
+	diagnostics io.Writer
 
 	// ensureMetamodel is set on the valid-capture arm, whose interpreted.v2
 	// record must never cite an unjournaled metamodel. The invalid-capture arm
@@ -326,11 +331,21 @@ func (r *servedLifecycleRecord) Settle(ctx context.Context, outcome provenance.B
 	if r.tracker == nil {
 		return nil
 	}
-	claim, err := tasks.RecordLifecycleSessionClaim(ctx, r.tracker, r.harness, r.eventKind, r.delivery.Bindings, r.claim, r.clock)
+	tail, err := tasks.RecordLifecycleSessionTail(ctx, r.tracker, tasks.SessionTailInput{
+		Harness:      r.harness,
+		Contract:     r.contract,
+		EventKind:    r.eventKind,
+		Bindings:     r.delivery.Bindings,
+		OccurrenceID: r.occurrence,
+		RecordedAt:   time.Unix(0, r.pending.Operation().RecordedAt).UTC(),
+		ActorClaim:   r.claim,
+		Clock:        r.clock,
+		Diagnostics:  r.diagnostics,
+	})
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrLifecycleCommittedWithoutContinuation, err)
 	}
-	r.claimOutcome = claim
+	r.claimOutcome = tail.Claim
 	return nil
 }
 

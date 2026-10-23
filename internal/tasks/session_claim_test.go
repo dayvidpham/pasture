@@ -261,7 +261,7 @@ func TestSessionClaimCommandWiringAndSingleCall(t *testing.T) {
 					}
 				}
 				if call, ok := n.(*ast.CallExpr); ok {
-					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "RecordLifecycleSessionClaim" {
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "RecordLifecycleSessionTail" || sel.Sel.Name == "RecordLifecycleSessionClaim") {
 						calls++
 					}
 				}
@@ -269,6 +269,7 @@ func TestSessionClaimCommandWiringAndSingleCall(t *testing.T) {
 				case *ast.ForStmt, *ast.RangeStmt:
 					ast.Inspect(n, func(child ast.Node) bool {
 						if sel, ok := child.(*ast.SelectorExpr); ok {
+							require.NotEqual(t, "RecordLifecycleSessionTail", sel.Sel.Name, "claim write must not run in a loop")
 							require.NotEqual(t, "RecordLifecycleSessionClaim", sel.Sel.Name, "claim write must not run in a loop")
 						}
 						return true

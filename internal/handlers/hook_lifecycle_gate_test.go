@@ -855,7 +855,7 @@ func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
 	require.NoError(t, err)
 	gateCapture := dispatch.parse(raw, gateEvent, registration.ClaudeCode2_1_261().Version)
 
-	_, err = deliveryCommit(t.Context(), service, dispatch, gateEvent, gateCapture.delivery, nil)
+	_, _, err = deliveryCommit(t.Context(), service, dispatch, gateEvent, gateCapture.delivery, nil)
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "without an evaluated decision")
@@ -876,7 +876,7 @@ func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
 	require.NoError(t, err)
 	observation := dispatch.parse(observationRaw, observationEvent, registration.ClaudeCode2_1_261().Version)
 
-	_, err = deliveryCommit(t.Context(), service, dispatch, observationEvent, observation.delivery, nil)
+	_, _, err = deliveryCommit(t.Context(), service, dispatch, observationEvent, observation.delivery, nil)
 
 	require.NoError(t, err, "an observation commits without an evaluated decision")
 	require.NotEmpty(t, gateQueryEvidence(t, dbPath, gateEvidenceKinds()))

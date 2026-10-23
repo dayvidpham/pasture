@@ -601,6 +601,59 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 			)`,
 		},
 		{
+			// The session API's explicit epoch binding. One open binding per
+			// (harness, session) is enforced by the partial unique index below.
+			name: "pasture_session_epoch_binding",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_session_epoch_binding (
+				binding_id     TEXT PRIMARY KEY,
+				harness        TEXT NOT NULL,
+				session        TEXT NOT NULL,
+				epoch_id       TEXT NOT NULL,
+				role           TEXT NOT NULL,
+				bound_at       INTEGER NOT NULL,
+				unbound_at     INTEGER,
+				unbound_reason TEXT CHECK (unbound_reason IN ('unbind','session_end'))
+			)`,
+		},
+		{
+			name: "pasture_session_epoch_binding_open",
+			ddl:  `CREATE UNIQUE INDEX IF NOT EXISTS pasture_session_epoch_binding_open ON pasture_session_epoch_binding (harness, session) WHERE unbound_at IS NULL`,
+		},
+		{
+			// The live session cache. The binding table owns the end; this table
+			// owns the activity fields the API reads.
+			name: "pasture_session_state",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_session_state (
+				harness         TEXT NOT NULL,
+				session         TEXT NOT NULL,
+				first_seen      INTEGER NOT NULL,
+				last_seen       INTEGER NOT NULL,
+				last_event      TEXT NOT NULL,
+				last_journal_id INTEGER NOT NULL,
+				updated_at      INTEGER NOT NULL,
+				PRIMARY KEY (harness, session)
+			)`,
+		},
+		{
+			name: "pasture_session_state_order",
+			ddl:  `CREATE INDEX IF NOT EXISTS pasture_session_state_order ON pasture_session_state (last_journal_id DESC, updated_at DESC, harness, session)`,
+		},
+		{
+			// The cache marker and API revision. The house singleton shape uses
+			// singleton_id = 0; the row is created once and updated in place.
+			name: "pasture_session_api_state",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_session_api_state (
+				singleton_id          INTEGER PRIMARY KEY CHECK (singleton_id = 0),
+				revision              INTEGER NOT NULL,
+				dirty                 INTEGER NOT NULL CHECK (dirty IN (0,1)),
+				completed_through_jid INTEGER NOT NULL
+			)`,
+		},
+		{
+			name: "pasture_session_api_state_singleton",
+			ddl:  `INSERT OR IGNORE INTO pasture_session_api_state (singleton_id, revision, dirty, completed_through_jid) VALUES (0, 0, 0, 0)`,
+		},
+		{
 			// pasture_system_identity persists the resolved committing actor and
 			// genesis bootstrap-authority JournalID that the journaled task backend
 			// binds every mutation to (Tracker.As → Session). It is a singleton
