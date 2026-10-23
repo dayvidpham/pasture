@@ -97,7 +97,7 @@ export function describeTranscriptError(error: unknown): TranscriptFailure {
             error.code === 'transcript_incomplete'
               ? 'Peasant is holding a newer incomplete attempt beside the last-good transcript for this session, so Pasture will not serve either as the session. Finish or re-run the capture in Peasant, or export the last-good transcript explicitly with `peasant export sessions --last-good`, then retry.'
               : error.code === 'transcript_unsupported'
-                ? 'The installed Peasant cannot read this session (incompatible store or a native session id the shared contract rejects). Install the Peasant version that wrote its store, then retry.'
+                ? 'Peasant refused this session for a reason Pasture cannot serve: an incompatible store, a native session id the shared contract rejects, or an export that did not record a harness. Install the Peasant version that wrote its store, or re-harvest the session in Peasant so the harness is recorded, then retry.'
                 : `Peasant answered with a different session identity, so Pasture refused the transcript. ${error.message}`,
           retry: true,
         }
