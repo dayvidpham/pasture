@@ -37,12 +37,14 @@ it never migrates the schema or accepts non-loopback hosts.`,
 func init() {
 	serveCmd.Flags().String("listen", "127.0.0.1:0", "Loopback TCP address to listen on")
 	serveCmd.Flags().Duration("active-window", 15*time.Minute, "Age after which an open session is idle")
+	serveCmd.Flags().Bool("backfill", false, "Rebuild historical session state before serving (can be slow on a large journal)")
 	rootCmd.AddCommand(serveCmd)
 }
 
 func runServe(cmd *cobra.Command) error {
 	listen, _ := cmd.Flags().GetString("listen")
 	activeWindow, _ := cmd.Flags().GetDuration("active-window")
+	backfill, _ := cmd.Flags().GetBool("backfill")
 	if activeWindow <= 0 {
 		return fmt.Errorf("active window must be positive")
 	}
@@ -78,8 +80,10 @@ func runServe(cmd *cobra.Command) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if _, _, err := tasks.EnsureSessionState(ctx, tracker); err != nil {
-		return err
+	if backfill {
+		if _, _, err := tasks.EnsureSessionState(ctx, tracker); err != nil {
+			return err
+		}
 	}
 	readDB, err := dbconn.OpenReadOnlyDB(dbPath)
 	if err != nil {
@@ -92,9 +96,11 @@ func runServe(cmd *cobra.Command) error {
 
 	service := sessionapi.NewService(readDB)
 	service.ActiveWindow = activeWindow
-	service.Ensure = func(ctx context.Context) error {
-		_, _, err := tasks.EnsureSessionState(ctx, tracker)
-		return err
+	if backfill {
+		service.Ensure = func(ctx context.Context) error {
+			_, _, err := tasks.EnsureSessionState(ctx, tracker)
+			return err
+		}
 	}
 	store, err := tasks.NewSessionAPIStore(tracker)
 	if err != nil {
