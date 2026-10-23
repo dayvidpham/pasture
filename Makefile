@@ -1,4 +1,4 @@
-.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate check-operational-tracker
+.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate web-install web-generate web-build check-operational-tracker
 
 VERSION ?= devel
 
@@ -28,6 +28,15 @@ generate:
 	go generate ./internal/lifecycle/metamodel/...
 	go run ./cmd/pasture-specgen -out internal/sessionapi/openapi/pasture-local-api-0.2.0.json
 	$(MAKE) check-operational-tracker
+
+web-install:
+	cd web && pnpm install
+
+web-generate: web-install
+	cd web && pnpm generate:api
+
+web-build: web-install
+	cd web && pnpm build
 
 # Unconditional read-only sweep; also runs through Codegen Drift's make generate
 # and the race suite's shipped-tree test. No environment bypass or baseline.
