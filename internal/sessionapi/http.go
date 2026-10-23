@@ -79,7 +79,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if raw := query.Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
-		if err != nil {
+		if err != nil || parsed < 1 || parsed > 100 {
 			writeError(w, http.StatusBadRequest, "invalid_filter", "limit must be an integer between 1 and 100")
 			return
 		}
@@ -208,7 +208,7 @@ func (h *handler) epochRoute(w http.ResponseWriter, r *http.Request) {
 		limit := 50
 		if raw := query.Get("limit"); raw != "" {
 			parsed, err := strconv.Atoi(raw)
-			if err != nil {
+			if err != nil || parsed < 1 || parsed > 100 {
 				writeError(w, http.StatusBadRequest, "invalid_filter", "limit must be an integer between 1 and 100")
 				return
 			}

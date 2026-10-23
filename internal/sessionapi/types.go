@@ -67,6 +67,24 @@ const (
 	ConfidenceVerified Confidence = "verified"
 )
 
+// confidenceTokens returns every Confidence token in ordinal order. It is the
+// single source for the wire vocabulary: the OpenAPI enum, the read-path
+// fallback, and the interval default expression all derive from it, so a fourth
+// label cannot appear in one surface and not another.
+func confidenceTokens() []Confidence {
+	return []Confidence{ConfidenceObserved, ConfidenceCorrelated, ConfidenceVerified}
+}
+
+// confidenceTokenStrings renders the vocabulary for the OpenAPI enum.
+func confidenceTokenStrings() []string {
+	tokens := confidenceTokens()
+	out := make([]string, len(tokens))
+	for i, token := range tokens {
+		out[i] = string(token)
+	}
+	return out
+}
+
 // SessionBindingInterval is one historical binding for one session. Intervals
 // are ordered by BoundAt ascending, then BindingID, so the last interval is the
 // most recently established one. UnboundAt is nil while the binding is open.

@@ -259,7 +259,7 @@ func openAPIDocument() map[string]any {
 				},
 				"Confidence": map[string]any{
 					"type": "string",
-					"enum": []string{"observed", "correlated", "verified"},
+					"enum": confidenceTokenStrings(),
 					"description": "How strongly the binding claims to be true, using the lifecycle confidence vocabulary. " +
 						"Explicit bindings are verified. An inferred binding is observed unless the store recorded a stronger derivation; " +
 						"the claim-ownership rule is observed, because it correlates a session claim with active ownership rather than a command that recorded this session's intent.",

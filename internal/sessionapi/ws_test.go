@@ -3,6 +3,8 @@ package sessionapi_test
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,4 +114,38 @@ func TestWebSocketRejectsNonLoopbackOrigin(t *testing.T) {
 	require.Error(t, err)
 	require.NotNil(t, response)
 	require.Equal(t, http.StatusForbidden, response.StatusCode)
+}
+
+// TestWebSocketStaleCacheErrorIsDeduplicated pins two things at once: a dirty
+// cache reaches the client as the documented stale_session_cache error frame,
+// and the per-subscription error suppression means the one-second refresh does
+// not repeat the same frame forever.
+func TestWebSocketStaleCacheErrorIsDeduplicated(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	_, err := f.db.Exec(`UPDATE pasture_session_api_state SET dirty = 1 WHERE singleton_id = 0`)
+	require.NoError(t, err)
+	server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+	t.Cleanup(server.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	require.Equal(t, "ready", readWSFrame(t, conn).Type)
+	require.NoError(t, conn.WriteJSON(map[string]string{"type": "subscribe", "topic": "sessions"}))
+	first := readWSFrameOfType(t, conn, "error")
+	require.NotNil(t, first.Error)
+	require.Equal(t, "stale_session_cache", first.Error.Code)
+
+	// The refresh ticker fires once a second. Waiting past one tick must not
+	// produce a duplicate frame because publishError suppresses the same
+	// code+message per subscription.
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(1600*time.Millisecond)))
+	_, _, readErr := conn.ReadMessage()
+	require.Error(t, readErr, "a duplicate error frame arrived")
+	var netErr net.Error
+	require.True(t, errors.As(readErr, &netErr) && netErr.Timeout(),
+		"expected the read deadline to expire with no frame, got %v", readErr)
 }
