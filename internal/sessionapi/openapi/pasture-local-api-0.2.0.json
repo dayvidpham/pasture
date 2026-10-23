@@ -35,6 +35,13 @@
         ],
         "type": "object"
       },
+      "BindingSource": {
+        "enum": [
+          "explicit",
+          "inferred"
+        ],
+        "type": "string"
+      },
       "Detail": {
         "properties": {
           "asOf": {
@@ -298,6 +305,40 @@
         ],
         "type": "object"
       },
+      "SessionBindingInterval": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "endReason": {
+            "type": "string"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "role": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/BindingSource"
+          },
+          "unboundAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source"
+        ],
+        "type": "object"
+      },
       "SessionView": {
         "properties": {
           "activity": {
@@ -305,6 +346,13 @@
           },
           "binding": {
             "$ref": "#/components/schemas/SessionBinding"
+          },
+          "bindings": {
+            "description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` remains the current explicit binding.",
+            "items": {
+              "$ref": "#/components/schemas/SessionBindingInterval"
+            },
+            "type": "array"
           },
           "end": {
             "$ref": "#/components/schemas/EndMarker"
@@ -322,7 +370,8 @@
         "required": [
           "harness",
           "nativeSessionId",
-          "activity"
+          "activity",
+          "bindings"
         ],
         "type": "object"
       },

@@ -172,6 +172,8 @@ export interface components {
             /** @enum {string} */
             role: "epoch" | "architect" | "reviewer" | "supervisor" | "worker";
         };
+        /** @enum {string} */
+        BindingSource: "explicit" | "inferred";
         Detail: {
             /** Format: date-time */
             asOf: string;
@@ -250,9 +252,22 @@ export interface components {
             boundAt: string;
             role: string;
         };
+        SessionBindingInterval: {
+            bindingId: string;
+            /** Format: date-time */
+            boundAt: string;
+            endReason?: string;
+            epoch?: components["schemas"]["EpochRef"];
+            role: string;
+            source: components["schemas"]["BindingSource"];
+            /** Format: date-time */
+            unboundAt?: string;
+        };
         SessionView: {
             activity: components["schemas"]["SessionActivity"];
             binding?: components["schemas"]["SessionBinding"];
+            /** @description Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` remains the current explicit binding. */
+            bindings: components["schemas"]["SessionBindingInterval"][];
             end?: components["schemas"]["EndMarker"];
             epoch?: components["schemas"]["EpochRef"];
             harness: string;

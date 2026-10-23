@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -24,9 +25,10 @@ import (
 )
 
 type fixture struct {
-	db    *sql.DB
-	epoch string
-	now   time.Time
+	db      *sql.DB
+	tracker protocol.TaskTracker
+	epoch   string
+	now     time.Time
 }
 
 func newFixture(t *testing.T) fixture {
@@ -38,12 +40,7 @@ func newFixture(t *testing.T) fixture {
 	db, err := dbconn.OpenSharedDBWithProfile(path, timeouts.TestProfile())
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
-	epoch, err := tracker.Create("file://sessionapi-test", "Session API epoch", "epoch title", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
-	require.NoError(t, err)
 	now := time.Unix(1700000000, 0).UTC()
-	state := protocol.EpochState{EpochId: epoch.ID.String(), CurrentPhase: protocol.PhaseId("p3-plan"), CurrentRole: protocol.RoleId("architect")}
-	stateJSON, err := json.Marshal(state)
-	require.NoError(t, err)
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS epoch_state_projection (
 			epoch_id      TEXT PRIMARY KEY,
@@ -52,16 +49,30 @@ func newFixture(t *testing.T) fixture {
 			updated_at    INTEGER NOT NULL
 		)`)
 	require.NoError(t, err)
-	_, err = db.Exec(`
-		INSERT INTO epoch_state_projection(epoch_id, current_phase, state_json, updated_at)
-		VALUES (?, ?, ?, ?)`, epoch.ID.String(), string(state.CurrentPhase), string(stateJSON), now.UnixNano())
-	require.NoError(t, err)
+	f := fixture{db: db, tracker: tracker, now: now}
+	f.epoch = f.addEpoch(t, "Session API epoch")
 	_, err = db.Exec(`
 		INSERT INTO pasture_session_api_state(singleton_id, revision, dirty, completed_through_jid)
 		VALUES (0, 7, 0, 0)
 		ON CONFLICT(singleton_id) DO UPDATE SET revision=excluded.revision, dirty=excluded.dirty, completed_through_jid=excluded.completed_through_jid`)
 	require.NoError(t, err)
-	return fixture{db: db, epoch: epoch.ID.String(), now: now}
+	return f
+}
+
+// addEpoch creates a second epoch with a projection row, so interval tests can
+// move a session across epochs without hand-writing task rows.
+func (f fixture) addEpoch(t *testing.T, title string) string {
+	t.Helper()
+	epoch, err := f.tracker.Create("file://sessionapi-test", title, "epoch title", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	state := protocol.EpochState{EpochId: epoch.ID.String(), CurrentPhase: protocol.PhaseId("p3-plan"), CurrentRole: protocol.RoleId("architect")}
+	stateJSON, err := json.Marshal(state)
+	require.NoError(t, err)
+	_, err = f.db.Exec(`
+		INSERT INTO epoch_state_projection(epoch_id, current_phase, state_json, updated_at)
+		VALUES (?, ?, ?, ?)`, epoch.ID.String(), string(state.CurrentPhase), string(stateJSON), f.now.UnixNano())
+	require.NoError(t, err)
+	return epoch.ID.String()
 }
 
 func (f fixture) state(t *testing.T, session string, first, last int64, lastEvent string, journal int64) {
@@ -75,6 +86,11 @@ func (f fixture) state(t *testing.T, session string, first, last int64, lastEven
 
 func (f fixture) binding(t *testing.T, id, session string, boundAt int64, unboundAt sql.NullInt64, reason string) {
 	t.Helper()
+	f.bindingEpoch(t, id, session, f.epoch, boundAt, unboundAt, reason)
+}
+
+func (f fixture) bindingEpoch(t *testing.T, id, session, epochID string, boundAt int64, unboundAt sql.NullInt64, reason string) {
+	t.Helper()
 	var reasonValue any
 	if unboundAt.Valid {
 		reasonValue = reason
@@ -82,7 +98,40 @@ func (f fixture) binding(t *testing.T, id, session string, boundAt int64, unboun
 	_, err := f.db.Exec(`
 		INSERT INTO pasture_session_epoch_binding(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason)
 		VALUES (?, 'claude-code', ?, ?, 'implementer', ?, ?, ?)`,
-		id, session, f.epoch, boundAt, unboundAt, reasonValue)
+		id, session, epochID, boundAt, unboundAt, reasonValue)
+	require.NoError(t, err)
+}
+
+// inferredTable creates the inference table S3 owns. The read path must work
+// with or without it.
+func (f fixture) inferredTable(t *testing.T) {
+	t.Helper()
+	_, err := f.db.Exec(`
+		CREATE TABLE pasture_session_inferred_binding (
+			binding_id    TEXT PRIMARY KEY,
+			harness       TEXT NOT NULL,
+			session       TEXT NOT NULL,
+			epoch_id      TEXT NOT NULL,
+			role          TEXT NOT NULL,
+			bound_at      INTEGER NOT NULL,
+			unbound_at    INTEGER,
+			unbound_reason TEXT,
+			inferred_at   INTEGER NOT NULL,
+			reason        TEXT NOT NULL
+		)`)
+	require.NoError(t, err)
+}
+
+func (f fixture) inferredBinding(t *testing.T, id, session, epochID string, boundAt int64, unboundAt sql.NullInt64, reason string) {
+	t.Helper()
+	var reasonValue any
+	if unboundAt.Valid {
+		reasonValue = reason
+	}
+	_, err := f.db.Exec(`
+		INSERT INTO pasture_session_inferred_binding(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason, inferred_at, reason)
+		VALUES (?, 'claude-code', ?, ?, 'implementer', ?, ?, ?, ?, 'claim ownership')`,
+		id, session, epochID, boundAt, unboundAt, reasonValue, f.now.UnixNano())
 	require.NoError(t, err)
 }
 
@@ -103,6 +152,7 @@ func seedSessions(t *testing.T) fixture {
 	f := newFixture(t)
 	now := f.now.UnixNano()
 	f.state(t, "active", now-1*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
+	f.binding(t, "binding-active-old", "active", now-40*int64(time.Minute), sql.NullInt64{Int64: now - 25*int64(time.Minute), Valid: true}, "session_end")
 	f.binding(t, "binding-active", "active", now-1*int64(time.Minute), sql.NullInt64{}, "")
 	f.state(t, "idle", now-20*int64(time.Minute), now-20*int64(time.Minute), "SessionStart", 2)
 	f.binding(t, "binding-idle", "idle", now-20*int64(time.Minute), sql.NullInt64{}, "")
@@ -134,6 +184,18 @@ func TestListStatesOrderingAndPaging(t *testing.T) {
 	require.Equal(t, sessionapi.StateUnknown, page.Items[3].Activity.State)
 	require.NotNil(t, page.Items[2].Epoch)
 	require.Equal(t, "Session API epoch", page.Items[2].Epoch.Title)
+	require.Len(t, page.Items[2].Bindings, 2, "historical intervals are nested, not extra page rows")
+	require.Equal(t, []string{"binding-active-old", "binding-active"}, []string{
+		page.Items[2].Bindings[0].BindingID, page.Items[2].Bindings[1].BindingID,
+	})
+	require.Equal(t, sessionapi.BindingSourceExplicit, page.Items[2].Bindings[0].Source)
+	require.NotNil(t, page.Items[2].Bindings[0].UnboundAt)
+	require.Equal(t, "session_end", page.Items[2].Bindings[0].EndReason)
+	require.Nil(t, page.Items[2].Bindings[1].UnboundAt)
+	require.Empty(t, page.Items[2].Bindings[1].EndReason)
+	require.Equal(t, page.Items[2].Binding.BindingID, page.Items[2].Bindings[1].BindingID)
+	require.Empty(t, page.Items[3].Bindings, "a claim-only session has no binding interval")
+	require.NotNil(t, page.Items[3].Bindings)
 
 	first, err := service.List(ctx, sessionapi.ListOptions{Limit: 2})
 	require.NoError(t, err)
@@ -328,4 +390,143 @@ func TestEpochEndpointsAndInspect(t *testing.T) {
 	require.NoError(t, err)
 	defer response.Body.Close()
 	require.Equal(t, http.StatusNotFound, response.StatusCode)
+}
+
+func TestBindingsChronologicalAcrossEpochs(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	now := f.now.UnixNano()
+	secondEpoch := f.addEpoch(t, "Second epoch")
+	f.state(t, "rebound", now-40*int64(time.Minute), now-2*int64(time.Minute), "PreToolUse", 1)
+	f.bindingEpoch(t, "binding-a", "rebound", f.epoch, now-40*int64(time.Minute), sql.NullInt64{Int64: now - 25*int64(time.Minute), Valid: true}, "unbind")
+	f.bindingEpoch(t, "binding-b", "rebound", secondEpoch, now-10*int64(time.Minute), sql.NullInt64{}, "")
+
+	detail, err := f.service().Get(context.Background(), "claude-code", "rebound")
+	require.NoError(t, err)
+	require.NotNil(t, detail.Session.Binding)
+	require.Equal(t, "binding-b", detail.Session.Binding.BindingID, "the latest binding is the current one")
+	require.NotNil(t, detail.Session.Epoch)
+	require.Equal(t, secondEpoch, detail.Session.Epoch.ID)
+	require.Equal(t, "Second epoch", detail.Session.Epoch.Title)
+	require.Len(t, detail.Session.Bindings, 2)
+
+	first, second := detail.Session.Bindings[0], detail.Session.Bindings[1]
+	require.Equal(t, "binding-a", first.BindingID)
+	require.Equal(t, sessionapi.BindingSourceExplicit, first.Source)
+	require.NotNil(t, first.Epoch)
+	require.Equal(t, f.epoch, first.Epoch.ID)
+	require.Equal(t, time.Unix(0, now-40*int64(time.Minute)).UTC(), first.BoundAt)
+	require.NotNil(t, first.UnboundAt)
+	require.Equal(t, time.Unix(0, now-25*int64(time.Minute)).UTC(), *first.UnboundAt)
+	require.Equal(t, "unbind", first.EndReason)
+
+	require.Equal(t, "binding-b", second.BindingID)
+	require.Equal(t, time.Unix(0, now-10*int64(time.Minute)).UTC(), second.BoundAt)
+	require.Nil(t, second.UnboundAt, "the current binding stays open")
+	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+}
+
+func TestBindingsWithoutInferredTable(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	detail, err := f.service().Get(context.Background(), "claude-code", "active")
+	require.NoError(t, err, "an absent inferred table is not an error")
+	require.Len(t, detail.Session.Bindings, 2)
+	for _, interval := range detail.Session.Bindings {
+		require.Equal(t, sessionapi.BindingSourceExplicit, interval.Source)
+	}
+}
+
+func TestInferredBindingsMergeWithoutOverridingExplicit(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	f.inferredTable(t)
+	now := f.now.UnixNano()
+	// The inferred open interval is newer than the explicit one, so it sorts
+	// last; the current binding must still come from the explicit table.
+	f.inferredBinding(t, "inferred-active", "active", f.epoch, now-int64(30*time.Second), sql.NullInt64{}, "")
+	// An inferred-only session never becomes a page row.
+	f.inferredBinding(t, "inferred-ghost", "ghost", f.epoch, now-int64(time.Minute), sql.NullInt64{}, "")
+
+	page, err := f.service().List(context.Background(), sessionapi.ListOptions{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 4, "inferred rows must not add page rows")
+	for _, item := range page.Items {
+		require.NotEqual(t, "ghost", item.NativeSessionID)
+	}
+
+	detail, err := f.service().Get(context.Background(), "claude-code", "active")
+	require.NoError(t, err)
+	require.NotNil(t, detail.Session.Binding)
+	require.Equal(t, "binding-active", detail.Session.Binding.BindingID, "the explicit binding stays current")
+	require.Len(t, detail.Session.Bindings, 3)
+	last := detail.Session.Bindings[2]
+	require.Equal(t, "inferred-active", last.BindingID)
+	require.Equal(t, sessionapi.BindingSourceInferred, last.Source)
+	require.Nil(t, last.UnboundAt)
+	require.NotNil(t, last.Epoch)
+	require.Equal(t, f.epoch, last.Epoch.ID)
+	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+}
+
+func TestBindingIntervalClampsInvertedEnd(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	now := f.now.UnixNano()
+	f.binding(t, "binding-inverted", "inverted", now-10*int64(time.Minute), sql.NullInt64{Int64: now - 20*int64(time.Minute), Valid: true}, "unbind")
+
+	detail, err := f.service().Get(context.Background(), "claude-code", "inverted")
+	require.NoError(t, err)
+	require.Len(t, detail.Session.Bindings, 1)
+	interval := detail.Session.Bindings[0]
+	require.NotNil(t, interval.UnboundAt)
+	require.Equal(t, interval.BoundAt, *interval.UnboundAt, "an inverted end clamps to a zero-length interval")
+	require.Equal(t, "unbind", interval.EndReason)
+	require.NotNil(t, detail.Session.End)
+	require.Equal(t, interval.BoundAt, detail.Session.End.EndedAt)
+	require.Equal(t, sessionapi.StateEnded, detail.Session.Activity.State)
+}
+
+func TestPaginationCountsSessionsNotIntervals(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	now := f.now.UnixNano()
+	for i := 0; i < 5; i++ {
+		boundAt := now - int64(60-i*5)*int64(time.Minute)
+		f.binding(t, fmt.Sprintf("binding-history-%d", i), "active", boundAt, sql.NullInt64{Int64: boundAt + int64(time.Minute), Valid: true}, "unbind")
+	}
+	service := f.service()
+	ctx := context.Background()
+
+	first, err := service.List(ctx, sessionapi.ListOptions{Limit: 2})
+	require.NoError(t, err)
+	require.Len(t, first.Items, 2)
+	require.NotEmpty(t, first.Next)
+	second, err := service.List(ctx, sessionapi.ListOptions{Limit: 2, Cursor: first.Next})
+	require.NoError(t, err)
+	require.Len(t, second.Items, 2)
+	require.Empty(t, second.Next)
+	require.Equal(t, []string{"active", "unknown"}, []string{second.Items[0].NativeSessionID, second.Items[1].NativeSessionID})
+	require.Len(t, second.Items[0].Bindings, 7, "history stays nested under one session row")
+}
+
+func TestEpochCountsStayCurrentOnly(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	now := f.now.UnixNano()
+	historical := f.addEpoch(t, "Historical epoch")
+	f.state(t, "moving", now-30*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
+	f.bindingEpoch(t, "binding-old", "moving", historical, now-30*int64(time.Minute), sql.NullInt64{Int64: now - 20*int64(time.Minute), Valid: true}, "unbind")
+	f.bindingEpoch(t, "binding-new", "moving", f.epoch, now-10*int64(time.Minute), sql.NullInt64{}, "")
+
+	page, err := f.service().Epochs(context.Background())
+	require.NoError(t, err)
+	require.Len(t, page.Items, 2)
+	counts := map[string]sessionapi.EpochView{}
+	for _, epoch := range page.Items {
+		counts[epoch.ID] = epoch
+	}
+	require.Equal(t, 1, counts[f.epoch].SessionCount)
+	require.Equal(t, 1, counts[f.epoch].ActiveCount)
+	require.Equal(t, 0, counts[historical].SessionCount, "an ended historical binding is not an ever-bound count")
 }

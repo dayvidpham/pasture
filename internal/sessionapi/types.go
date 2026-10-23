@@ -33,6 +33,31 @@ type SessionBinding struct {
 	BoundAt   time.Time `json:"boundAt"`
 }
 
+// BindingSource identifies the store that produced a binding interval.
+// Explicit rows are written by bind/unbind and the session-end tail. Inferred
+// rows are derived from store observations and never override explicit ones.
+type BindingSource string
+
+const (
+	// BindingSourceExplicit is an authoritative bind, unbind, or session-end row.
+	BindingSourceExplicit BindingSource = "explicit"
+	// BindingSourceInferred is a derived row from the inference rebuild.
+	BindingSourceInferred BindingSource = "inferred"
+)
+
+// SessionBindingInterval is one historical binding for one session. Intervals
+// are ordered by BoundAt ascending, then BindingID, so the last interval is the
+// most recently established one. UnboundAt is nil while the binding is open.
+type SessionBindingInterval struct {
+	BindingID string        `json:"bindingId"`
+	Role      string        `json:"role"`
+	BoundAt   time.Time     `json:"boundAt"`
+	UnboundAt *time.Time    `json:"unboundAt,omitempty"`
+	EndReason string        `json:"endReason,omitempty"`
+	Source    BindingSource `json:"source"`
+	Epoch     *EpochRef     `json:"epoch,omitempty"`
+}
+
 // EpochRef is the epoch half of the session view. Phase 0 deliberately omits
 // phase because a freshly created epoch has no projection row to source it.
 type EpochRef struct {
@@ -47,13 +72,16 @@ type EndMarker struct {
 }
 
 // SessionView is one session mapped to the latest known epoch binding.
+// Binding and Epoch describe the current explicit binding. Bindings carries
+// every known interval in chronological order without changing page rows.
 type SessionView struct {
-	Harness         string          `json:"harness"`
-	NativeSessionID string          `json:"nativeSessionId"`
-	Epoch           *EpochRef       `json:"epoch,omitempty"`
-	Activity        SessionActivity `json:"activity"`
-	Binding         *SessionBinding `json:"binding,omitempty"`
-	End             *EndMarker      `json:"end,omitempty"`
+	Harness         string                   `json:"harness"`
+	NativeSessionID string                   `json:"nativeSessionId"`
+	Epoch           *EpochRef                `json:"epoch,omitempty"`
+	Activity        SessionActivity          `json:"activity"`
+	Binding         *SessionBinding          `json:"binding,omitempty"`
+	Bindings        []SessionBindingInterval `json:"bindings"`
+	End             *EndMarker               `json:"end,omitempty"`
 }
 
 // Page is the list response. Items are ordered by the cache journal and

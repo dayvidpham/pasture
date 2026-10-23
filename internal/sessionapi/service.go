@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -49,6 +50,15 @@ type joinedRow struct {
 	epochTitle    sql.NullString
 	lastSeen      int64
 	updated       int64
+	bindings      []SessionBindingInterval
+}
+
+// bindingKey identifies one session for a batched interval read. The read path
+// fetches every page's intervals in a bounded number of queries, never once per
+// session.
+type bindingKey struct {
+	harness string
+	session string
 }
 
 const joinedSelect = `
@@ -231,11 +241,162 @@ func (s *Service) query(ctx context.Context, now time.Time, where string, args [
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterating sessions: %w", err)
 	}
+	if err := attachBindingIntervals(ctx, tx, out); err != nil {
+		return nil, 0, err
+	}
 	return out, revision, nil
+}
+
+// attachBindingIntervals loads every interval for the page's sessions. One
+// bounded query per interval table keeps the read path free of per-session
+// queries while leaving page cardinality untouched.
+func attachBindingIntervals(ctx context.Context, tx *sql.Tx, rows []joinedRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	keys := make([]bindingKey, 0, len(rows))
+	seen := make(map[bindingKey]struct{}, len(rows))
+	for _, row := range rows {
+		key := bindingKey{harness: row.harness, session: row.session}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	intervals, err := loadBindingIntervals(ctx, tx, keys)
+	if err != nil {
+		return err
+	}
+	for i := range rows {
+		rows[i].bindings = intervals[bindingKey{harness: rows[i].harness, session: rows[i].session}]
+	}
+	return nil
+}
+
+// loadBindingIntervals reads explicit intervals, then inferred intervals when
+// the inference table exists. An absent inferred table is normal: inference is
+// additive, and a store that has never run the inference rebuild has no table.
+func loadBindingIntervals(ctx context.Context, tx *sql.Tx, keys []bindingKey) (map[bindingKey][]SessionBindingInterval, error) {
+	out := make(map[bindingKey][]SessionBindingInterval, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	if err := queryBindingIntervals(ctx, tx, "pasture_session_epoch_binding", BindingSourceExplicit, keys, out); err != nil {
+		return nil, err
+	}
+	exists, err := tableExists(ctx, tx, "pasture_session_inferred_binding")
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		if err := queryBindingIntervals(ctx, tx, "pasture_session_inferred_binding", BindingSourceInferred, keys, out); err != nil {
+			return nil, err
+		}
+	}
+	for key := range out {
+		sortBindingIntervals(out[key])
+	}
+	return out, nil
+}
+
+// bindingIntervalSelect reads the shared column shape of both interval tables.
+// The table name is a package constant, never caller input.
+const bindingIntervalSelect = `
+SELECT b.harness, b.session, b.binding_id, b.role, b.bound_at, b.unbound_at, b.unbound_reason,
+       b.epoch_id, COALESCE(t.title, '')
+FROM %s AS b
+JOIN keys k ON k.harness = b.harness AND k.session = b.session
+LEFT JOIN tasks t ON t.id = b.epoch_id`
+
+func queryBindingIntervals(ctx context.Context, tx *sql.Tx, table string, source BindingSource, keys []bindingKey, out map[bindingKey][]SessionBindingInterval) error {
+	keyClause, args := bindingKeyValues(keys)
+	rows, err := tx.QueryContext(ctx, keyClause+fmt.Sprintf(bindingIntervalSelect, table), args...)
+	if err != nil {
+		return fmt.Errorf("querying %s binding intervals: %w — verify the table matches the session interval contract", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key bindingKey
+		var bindingID, role, epochID, epochTitle string
+		var boundAt int64
+		var unboundAt sql.NullInt64
+		var unboundReason sql.NullString
+		if err := rows.Scan(&key.harness, &key.session, &bindingID, &role, &boundAt,
+			&unboundAt, &unboundReason, &epochID, &epochTitle); err != nil {
+			return fmt.Errorf("scanning %s binding interval: %w", table, err)
+		}
+		interval := SessionBindingInterval{
+			BindingID: bindingID,
+			Role:      role,
+			BoundAt:   time.Unix(0, boundAt).UTC(),
+			Source:    source,
+		}
+		if epochID != "" {
+			interval.Epoch = &EpochRef{ID: epochID, Title: epochTitle}
+		}
+		if unboundAt.Valid {
+			end := unboundAt.Int64
+			if end < boundAt {
+				// A legacy or corrupt row can end before it begins. Clamp to a
+				// zero-length interval so the projection stays well ordered
+				// instead of panicking or emitting an inverted range.
+				end = boundAt
+			}
+			unbound := time.Unix(0, end).UTC()
+			interval.UnboundAt = &unbound
+			interval.EndReason = unboundReason.String
+			if interval.EndReason == "" && source == BindingSourceExplicit {
+				interval.EndReason = "unbind"
+			}
+		}
+		out[key] = append(out[key], interval)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating %s binding intervals: %w", table, err)
+	}
+	return nil
+}
+
+// bindingKeyValues renders the requested sessions as one VALUES CTE, so both
+// interval reads stay bounded by page size instead of one query per session.
+func bindingKeyValues(keys []bindingKey) (string, []any) {
+	var values strings.Builder
+	values.WriteString("WITH keys(harness, session) AS (VALUES ")
+	args := make([]any, 0, len(keys)*2)
+	for i, key := range keys {
+		if i > 0 {
+			values.WriteString(", ")
+		}
+		values.WriteString("(?, ?)")
+		args = append(args, key.harness, key.session)
+	}
+	values.WriteString(")")
+	return values.String(), args
+}
+
+// sortBindingIntervals orders intervals by boundAt ascending, then bindingId.
+// Explicit rows sort before inferred rows only when both keys tie, which keeps
+// the order total without changing the documented ordering.
+func sortBindingIntervals(intervals []SessionBindingInterval) {
+	sort.SliceStable(intervals, func(i, j int) bool {
+		left, right := intervals[i], intervals[j]
+		if !left.BoundAt.Equal(right.BoundAt) {
+			return left.BoundAt.Before(right.BoundAt)
+		}
+		if left.BindingID != right.BindingID {
+			return left.BindingID < right.BindingID
+		}
+		return left.Source == BindingSourceExplicit && right.Source != BindingSourceExplicit
+	})
 }
 
 func (s *Service) view(row joinedRow, now time.Time) SessionView {
 	view := SessionView{Harness: row.harness, NativeSessionID: row.session}
+	view.Bindings = row.bindings
+	if view.Bindings == nil {
+		view.Bindings = []SessionBindingInterval{}
+	}
 	first := firstPositive(row.firstSeen, row.boundAt, row.claimedAt)
 	if first > 0 {
 		t := time.Unix(0, first).UTC()
@@ -262,7 +423,11 @@ func (s *Service) view(row joinedRow, now time.Time) SessionView {
 		if reason == "" {
 			reason = "unbind"
 		}
-		view.End = &EndMarker{EndedAt: time.Unix(0, row.unboundAt.Int64).UTC(), EndReason: reason}
+		endedAt := row.unboundAt.Int64
+		if row.boundAt.Valid && endedAt < row.boundAt.Int64 {
+			endedAt = row.boundAt.Int64
+		}
+		view.End = &EndMarker{EndedAt: time.Unix(0, endedAt).UTC(), EndReason: reason}
 	case !row.bindingID.Valid:
 		view.Activity.State = StateUnknown
 	case row.lastSeen >= now.Add(-s.ActiveWindow).UnixNano():

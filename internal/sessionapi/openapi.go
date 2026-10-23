@@ -224,6 +224,22 @@ func openAPIDocument() map[string]any {
 					},
 					"bindingId", "role", "boundAt",
 				),
+				"BindingSource": map[string]any{
+					"type": "string",
+					"enum": []string{"explicit", "inferred"},
+				},
+				"SessionBindingInterval": objectSchema(
+					map[string]any{
+						"bindingId": map[string]any{"type": "string"},
+						"role":      map[string]any{"type": "string"},
+						"boundAt":   map[string]any{"type": "string", "format": "date-time"},
+						"unboundAt": map[string]any{"type": "string", "format": "date-time"},
+						"endReason": map[string]any{"type": "string"},
+						"source":    ref("BindingSource"),
+						"epoch":     ref("EpochRef"),
+					},
+					"bindingId", "role", "boundAt", "source",
+				),
 				"SessionActivity": objectSchema(
 					map[string]any{
 						"state":     ref("ActivityState"),
@@ -247,9 +263,14 @@ func openAPIDocument() map[string]any {
 						"epoch":           ref("EpochRef"),
 						"activity":        ref("SessionActivity"),
 						"binding":         ref("SessionBinding"),
-						"end":             ref("EndMarker"),
+						"bindings": map[string]any{
+							"type":        "array",
+							"items":       ref("SessionBindingInterval"),
+							"description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` remains the current explicit binding.",
+						},
+						"end": ref("EndMarker"),
 					},
-					"harness", "nativeSessionId", "activity",
+					"harness", "nativeSessionId", "activity", "bindings",
 				),
 				"Page": objectSchema(
 					map[string]any{
