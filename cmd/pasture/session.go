@@ -7,21 +7,24 @@ import (
 )
 
 // sessionCmd inspects the harness sessions recorded in the local pasture
-// database. It is a read-only surface: it refreshes the session cache from the
-// lifecycle journal, then renders the projection. Explicit bind and unbind are
-// served by the local API, not by this command.
+// database. It refreshes the disposable session cache from the lifecycle
+// journal, then renders the projection. Explicit bind and unbind are served by
+// the local API, not by this command.
 var sessionCmd = &cobra.Command{
 	Use:   "session",
 	Short: "Inspect recorded harness sessions",
 	Long: `Inspect the harness sessions recorded in the local pasture database.
 
-Sessions come from the lifecycle journal and from explicit epoch bindings.
-"list" shows one page as a compact table, or as the same JSON page the local
-API returns. "show" renders one session identified by its harness and native
-session ID.
+Sessions come from the lifecycle journal, explicit epoch bindings, and inferred
+claim-ownership bindings. "list" shows one page as a compact table, or as the
+same JSON page the local API returns. "show" renders one session identified by
+its harness and native session ID, including every historical binding interval
+and whether each was explicit or inferred.
 
-These commands read the local database; they never contact a running daemon
-and never change a session's binding or activity state.`,
+Every invocation refreshes the disposable session cache from the lifecycle
+journal, so it can rewrite cache rows and close a cache binding the journal
+already ended. It never records an explicit bind or unbind, starts a workflow,
+creates a missing store, or contacts a running daemon.`,
 }
 
 var sessionListCmd = &cobra.Command{
@@ -65,9 +68,9 @@ var sessionShowCmd = &cobra.Command{
 
 func init() {
 	sessionListCmd.Flags().String("harness", "", "Only sessions for this harness (for example claude-code)")
-	sessionListCmd.Flags().String("epoch", "", "Only sessions whose latest binding is this epoch ID")
+	sessionListCmd.Flags().String("epoch", "", "Only sessions whose effective epoch binding is this epoch ID")
 	sessionListCmd.Flags().String("state", "", "Only sessions in this activity state: active, idle, ended, or unknown")
-	sessionListCmd.Flags().Int("limit", 50, "Maximum number of sessions to return (1-100)")
+	sessionListCmd.Flags().Int("limit", 50, "Maximum number of sessions to return (1-100; an explicit 0 is rejected)")
 	sessionListCmd.Flags().String("cursor", "", "Resume after the cursor printed by a previous page")
 
 	sessionCmd.AddCommand(sessionListCmd, sessionShowCmd)

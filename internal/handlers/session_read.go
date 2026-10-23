@@ -6,8 +6,13 @@
 // The read path mirrors the serve setup: open the unified store so the
 // journal-aware cache rebuild can run, ensure the session cache is current,
 // then reopen the same file read-only and serve the projection from
-// internal/sessionapi. Nothing here writes session state, starts a workflow,
-// or contacts a daemon.
+// internal/sessionapi.
+//
+// "Read-only" describes the operator surface, not the bytes on disk: refreshing
+// the cache rewrites the disposable pasture_session_state rows from the journal
+// and may close a binding the journal already ended. These commands never
+// record an explicit bind or unbind, start a workflow, or contact a daemon, and
+// they refuse to create a store that does not already exist.
 package handlers
 
 import (
@@ -15,7 +20,9 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
@@ -33,11 +40,13 @@ type SessionListInput struct {
 	DBPath string
 	// Harness filters by harness identity (for example claude-code).
 	Harness string
-	// Epoch filters by the session's latest epoch binding.
+	// Epoch filters by the session's effective epoch binding (explicit when the
+	// session has one, otherwise the open inferred derivation).
 	Epoch string
 	// State filters by derived activity state. Empty means every state.
 	State string
-	// Limit caps the returned page. Zero uses the session API default.
+	// Limit caps the returned page. It must be between 1 and 100; an explicit
+	// zero is rejected rather than silently replaced by a default.
 	Limit int
 	// Cursor resumes after a previous page's next cursor.
 	Cursor string
@@ -72,14 +81,14 @@ func SessionList(ctx context.Context, in SessionListInput, format types.OutputFo
 	if err != nil {
 		return pasterrors.ExitCode(err), err
 	}
-	if in.Limit < 0 || in.Limit > 100 {
+	if in.Limit < 1 || in.Limit > 100 {
 		e := &pasterrors.StructuredError{
 			Category: pasterrors.CategoryValidation,
 			What:     fmt.Sprintf("The --limit value %d is outside the supported range.", in.Limit),
-			Why:      "One session page carries between 1 and 100 rows.",
+			Why:      "One session page carries between 1 and 100 rows; zero is not a request for the default.",
 			Where:    "Listing sessions (internal/handlers/session_read.go in handlers.SessionList).",
 			Impact:   "No sessions were read.",
-			Fix:      "Pass --limit with a value from 1 to 100, or omit it to use the default.",
+			Fix:      "Pass --limit with a value from 1 to 100, or omit it to use the default of 50.",
 		}
 		return pasterrors.ExitCode(e), e
 	}
@@ -170,9 +179,16 @@ func SessionShow(ctx context.Context, in SessionShowInput, format types.OutputFo
 // openSessionReadService mirrors the serve read setup: open the store so the
 // journal-aware rebuild can run, ensure the cache is current, then open the
 // same file read-only for the projection reads.
+//
+// The caller must already have an existing store. These commands never create
+// one: a read against an absent --db exits before the tracker opener, which
+// would otherwise migrate a brand-new file into existence.
 func openSessionReadService(ctx context.Context, dbPath string) (*sessionapi.Service, func(), error) {
 	if dbPath == "" {
 		dbPath = tasks.DefaultDBPath()
+	}
+	if err := requireExistingStore(dbPath); err != nil {
+		return nil, nil, err
 	}
 	workCtx := nonNilContext(ctx)
 
@@ -200,6 +216,69 @@ func openSessionReadService(ctx context.Context, dbPath string) (*sessionapi.Ser
 		_ = readDB.Close()
 		_ = tracker.Close()
 	}, nil
+}
+
+// requireExistingStore refuses to start a session read against a path that is
+// not already a readable file. The tracker opener creates and migrates missing
+// stores, so without this check a mistyped --db would leave a brand-new 1 MB
+// database behind and exit 0 with an empty list.
+func requireExistingStore(dbPath string) error {
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		if stderrors.Is(err, fs.ErrNotExist) {
+			return &pasterrors.StructuredError{
+				Category: pasterrors.CategoryConnection,
+				What:     fmt.Sprintf("No pasture database exists at %q.", dbPath),
+				Why:      "The session commands read an existing store; they never create one.",
+				Where:    "Checking for the database before reading sessions (internal/handlers/session_read.go in handlers.requireExistingStore).",
+				Impact:   "No sessions can be listed or shown until a store exists at that path.",
+				Fix: fmt.Sprintf("1. Create and initialize the store with any write command, for example:\n"+
+					"     pasture task list --namespace <namespace>\n"+
+					"2. Or point --db or PASTURE_DB_PATH at an existing pasture database.\n"+
+					"   Checked path: %q", dbPath),
+				Cause: err,
+			}
+		}
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConnection,
+			What:     fmt.Sprintf("Couldn't inspect the pasture database path %q.", dbPath),
+			Why:      "The path, or one of its parent directories, is not accessible.",
+			Where:    "Checking for the database before reading sessions (internal/handlers/session_read.go in handlers.requireExistingStore).",
+			Impact:   "No sessions can be listed or shown until the path is accessible.",
+			Fix: fmt.Sprintf("1. Confirm the path and every parent directory exist and are searchable:\n"+
+				"     ls -ld %q\n"+
+				"2. Correct the permission or path problem, then retry.\n"+
+				"3. Or point --db or PASTURE_DB_PATH at an existing pasture database.", dbPath),
+			Cause: err,
+		}
+	}
+	if info.IsDir() {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConnection,
+			What:     fmt.Sprintf("The pasture database path %q is a directory.", dbPath),
+			Why:      "A directory cannot be opened as a SQLite database.",
+			Where:    "Checking for the database before reading sessions (internal/handlers/session_read.go in handlers.requireExistingStore).",
+			Impact:   "No sessions can be listed or shown from that path.",
+			Fix: fmt.Sprintf("Point --db or PASTURE_DB_PATH at the database file itself, for example:\n"+
+				"     %q", filepath.Join(dbPath, "pasture.db")),
+		}
+	}
+	file, err := os.Open(dbPath)
+	if err != nil {
+		return &pasterrors.StructuredError{
+			Category: pasterrors.CategoryConnection,
+			What:     fmt.Sprintf("The pasture database at %q is not readable.", dbPath),
+			Why:      "The file exists but this user cannot open it for reading.",
+			Where:    "Checking for the database before reading sessions (internal/handlers/session_read.go in handlers.requireExistingStore).",
+			Impact:   "No sessions can be listed or shown until the file is readable.",
+			Fix: fmt.Sprintf("1. Confirm the file permissions allow reading:\n"+
+				"     ls -l %q\n"+
+				"2. Correct the permissions or run the command as the file's owner, then retry.", dbPath),
+			Cause: err,
+		}
+	}
+	_ = file.Close()
+	return nil
 }
 
 func sessionStateFilter(value string) (sessionapi.ActivityState, error) {
@@ -302,7 +381,7 @@ func sessionReadError(err error, dbPath string) error {
 			Why:      "The cache changed between the refresh and the read, so the projection cannot be trusted for this request.",
 			Where:    "Reading sessions (internal/handlers/session_read.go in handlers.sessionReadError).",
 			Impact:   "No session list was returned.",
-			Fix:      "Retry the command; if it keeps failing, run `pasture serve --backfill` to rebuild the cache from the journal.",
+			Fix:      "Retry the command, which refreshes the cache; if it keeps failing, run `pasture serve --backfill` to rebuild the cache from the journal.",
 			Cause:    err,
 		}
 	default:
