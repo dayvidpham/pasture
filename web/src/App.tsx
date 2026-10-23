@@ -108,8 +108,9 @@ export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[
       <p className="eyebrow">binding history</p>
       {segments.length === 0 ? (
         <p className="rail-copy muted">
-          no binding intervals are recorded for this session. If it predates this
-          console's history, restart `pasture serve` with `--backfill`.
+          no binding interval is recorded for this session. A band appears after an
+          explicit bind; an inferred band appears only while an assignment epoch is
+          currently derived.
         </p>
       ) : (
         <ol className="timeline-list" aria-label="binding timeline">
@@ -117,11 +118,15 @@ export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[
             <li
               key={segment.bindingId}
               className="timeline-band"
+              data-binding-id={segment.bindingId}
               data-source={segment.source}
               data-open={segment.open ? 'true' : 'false'}
+              data-inverted={segment.inverted ? 'true' : 'false'}
             >
               <div className="timeline-band-head">
-                <span className="timeline-epoch">{segment.epochLabel}</span>
+                <span className="timeline-epoch" title={segment.epochId ?? undefined}>
+                  {segment.epochLabel}
+                </span>
                 <span className="timeline-marker">{segment.open ? 'open' : 'closed'}</span>
               </div>
               <div className="timeline-chips">
@@ -133,14 +138,28 @@ export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[
                 </span>
                 <span className="timeline-chip timeline-chip-role">{segment.role}</span>
               </div>
-              <p className="timeline-range">
-                {formatTime(segment.start)} → {segment.open ? 'open' : formatTime(segment.end)}
-              </p>
-              <p className="timeline-duration">
-                {formatTimelineDuration(segment.durationMs)}
-                {segment.endReason ? ` · ended: ${segment.endReason}` : ''}
-              </p>
-              {segment.epochId && segment.epochId !== segment.epochLabel && (
+              {segment.startMs === null ? (
+                <p className="timeline-range">start unknown</p>
+              ) : (
+                <p className="timeline-range">
+                  {formatTime(segment.start)} → {segment.open ? 'open' : formatTime(segment.end)}
+                </p>
+              )}
+              {segment.startMs === null && segment.end && (
+                <p className="timeline-note">recorded end: {formatTime(segment.end)}</p>
+              )}
+              {!segment.open && segment.durationMs !== null ? (
+                <p className="timeline-duration">
+                  {formatTimelineDuration(segment.durationMs)}
+                  {segment.endReason ? ` · ended: ${segment.endReason}` : ''}
+                </p>
+              ) : segment.endReason ? (
+                <p className="timeline-duration">ended: {segment.endReason}</p>
+              ) : null}
+              {segment.inverted && (
+                <p className="timeline-note">end precedes start; clamped to zero duration</p>
+              )}
+              {segment.epochId && segment.epochTitle === null && (
                 <p className="timeline-epoch-id">epoch id: {segment.epochId}</p>
               )}
             </li>
@@ -435,7 +454,7 @@ export default function App() {
                     data-selected={epochFilter === epoch.id ? 'true' : 'false'}
                     onClick={() => setEpochFilter(epochFilter === epoch.id ? null : epoch.id)}
                   >
-                    <span>{epoch.title?.trim() || epoch.id}</span>
+                    <span>{epochLabel(epoch)}</span>
                     <span className="tnum">{epoch.sessionCount}</span>
                   </button>
                 ))}

@@ -279,8 +279,8 @@ body {
   position: absolute;
   top: var(--sp-3);
   left: -5px;
-  width: 8px;
-  height: 8px;
+  width: var(--sp-2);
+  height: var(--sp-2);
   border: 2px solid var(--ink-4);
   border-radius: 50%;
   background: var(--surface-2);
@@ -332,6 +332,9 @@ body {
   gap: var(--sp-1);
 }
 
+/* Border-only rail chip: fairtrade's Tag is heavier than this dense 320px rail
+   wants, and a hairline border plus mono text keeps source/confidence/role
+   scannable without a filled pill. */
 .timeline-chip {
   padding: 0 var(--sp-1);
   color: var(--ink-2);
@@ -347,7 +350,8 @@ body {
 
 .timeline-range,
 .timeline-duration,
-.timeline-epoch-id {
+.timeline-epoch-id,
+.timeline-note {
   margin: 0;
   color: var(--ink-2);
   font: var(--fs-sm)/var(--lh-body) var(--font-mono);
@@ -355,8 +359,13 @@ body {
 }
 
 .timeline-duration,
-.timeline-epoch-id {
+.timeline-epoch-id,
+.timeline-note {
   color: var(--ink-3);
+}
+
+.timeline-note {
+  font-size: var(--fs-label);
 }
 
 @media (max-width: 880px) {

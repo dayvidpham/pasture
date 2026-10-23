@@ -6,18 +6,23 @@ export type TimelineConfidence = SessionBindingInterval['confidence']
 
 /**
  * One chronological segment of a session's binding history. `endMs` and
- * `durationMs` are null while the interval is open: the projection is pure and
- * does not invent a clock, so an open segment has no known duration.
+ * `durationMs` are null while the interval is open, and also when the start
+ * cannot be parsed: the projection is pure and does not invent a clock or a
+ * 1970 epoch. `end` is the clamped end instant for a known start; for an
+ * unknown start it preserves the raw recorded end so the rail can show it as
+ * evidence without implying a duration.
  */
 export type TimelineSegment = {
   bindingId: string
   start: string
   end: string | null
-  startMs: number
+  startMs: number | null
   endMs: number | null
   durationMs: number | null
   open: boolean
+  inverted: boolean
   epochId: string | null
+  epochTitle: string | null
   epochLabel: string
   source: TimelineSource
   confidence: TimelineConfidence
@@ -42,28 +47,43 @@ export function epochLabel(epoch?: { id: string; title?: string }): string {
 
 /**
  * projectSessionTimeline turns the wire intervals into chronological timeline
- * segments. Ordering is boundAt ascending, then bindingId ascending; an end
- * before its start is clamped to a zero-duration closed segment rather than
- * producing a negative band.
+ * segments. Ordering is boundAt ascending, then bindingId ascending, with an
+ * unparseable start sorted last. The API already orders intervals; this client
+ * sort is defense in depth for callers that hand the projection an unsorted
+ * array (tests, a future route).
+ *
+ * An end before its start is clamped to a zero-duration closed segment. The
+ * segment's `end` is derived from that clamp, so the rail can never display a
+ * start after its own end. An unparseable start keeps `end` as the raw recorded
+ * value but reports null timing, so no 1970-based duration is invented.
  */
 export function projectSessionTimeline(
   bindings: SessionBindingInterval[],
 ): TimelineSegment[] {
   return bindings
     .map((interval) => {
-      const startMs = parseTimestamp(interval.boundAt) ?? 0
+      const startMs = parseTimestamp(interval.boundAt)
       const open = !interval.unboundAt
       const parsedEnd = open ? null : parseTimestamp(interval.unboundAt)
-      const endMs = open ? null : Math.max(startMs, parsedEnd ?? startMs)
+      const inverted = startMs !== null && parsedEnd !== null && parsedEnd < startMs
+      const endMs = startMs === null || open ? null : Math.max(startMs, parsedEnd ?? startMs)
+      const end = open
+        ? null
+        : endMs !== null
+          ? new Date(endMs).toISOString()
+          : interval.unboundAt ?? null
+      const epochTitle = interval.epoch?.title?.trim() || null
       return {
         bindingId: interval.bindingId,
         start: interval.boundAt,
-        end: open ? null : interval.unboundAt ?? null,
+        end,
         startMs,
         endMs,
-        durationMs: endMs === null ? null : endMs - startMs,
+        durationMs: startMs === null || endMs === null ? null : endMs - startMs,
         open,
+        inverted,
         epochId: interval.epoch?.id ?? null,
+        epochTitle,
         epochLabel: epochLabel(interval.epoch),
         source: interval.source,
         confidence: interval.confidence,
@@ -72,7 +92,11 @@ export function projectSessionTimeline(
       }
     })
     .sort((left, right) => {
-      if (left.startMs !== right.startMs) return left.startMs - right.startMs
+      if (left.startMs !== null && right.startMs !== null && left.startMs !== right.startMs) {
+        return left.startMs - right.startMs
+      }
+      if (left.startMs === null && right.startMs !== null) return 1
+      if (left.startMs !== null && right.startMs === null) return -1
       if (left.bindingId === right.bindingId) return 0
       return left.bindingId < right.bindingId ? -1 : 1
     })
@@ -81,7 +105,8 @@ export function projectSessionTimeline(
 /** formatTimelineDuration renders a closed duration in the rail's short form. */
 export function formatTimelineDuration(durationMs: number | null): string {
   if (durationMs === null) return 'open'
-  if (!Number.isFinite(durationMs) || durationMs <= 0) return '0ms'
+  if (!Number.isFinite(durationMs)) return 'unknown'
+  if (durationMs <= 0) return '0ms'
   if (durationMs < 1000) return `${Math.round(durationMs)}ms`
   const totalSeconds = Math.floor(durationMs / 1000)
   const hours = Math.floor(totalSeconds / 3600)
