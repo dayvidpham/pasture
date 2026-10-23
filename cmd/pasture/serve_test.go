@@ -40,6 +40,8 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 		"503",
 		"bind",
 		"unbind",
+		"/api/v1/epochs",
+		"/api/v1/epochs/{id}/sessions",
 		"/api/v1/inspect",
 		"/api/v1/ws",
 		"/openapi.json",
@@ -51,6 +53,10 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 	} {
 		require.Contains(t, help, want)
 	}
+	require.Equal(t, "Serve the local session and epoch API", serveCmd.Short,
+		"the command writes as well as reads; the short line must not call it a read API")
+	require.Contains(t, help, "session and epoch API")
+	require.NotContains(t, help, "read API")
 	require.NotContains(t, help, "never migrates the schema")
 }
 

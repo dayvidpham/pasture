@@ -866,3 +866,92 @@ func TestConfidenceVocabularyMatchesStoreAndContract(t *testing.T) {
 	require.Equal(t, tokens, document.Components.Schemas["Confidence"].Enum,
 		"the OpenAPI enum must be the same vocabulary, in the same order")
 }
+
+// postError sends one JSON POST and returns the status and the error code from
+// the wire envelope. A successful response decodes to an empty code, which the
+// caller asserts against explicitly rather than treating as a failure.
+func postError(t *testing.T, url, body string) (int, string) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	var envelope apiErrorEnvelope
+	_ = json.NewDecoder(response.Body).Decode(&envelope)
+	return response.StatusCode, envelope.Error.Code
+}
+
+// TestHTTPBindUnbindErrorMapping pins the bind/unbind status taxonomy: a request
+// mistake is 400 invalid_body, a session key with an escaped slash is 400
+// invalid_session_key, a missing write plane is 503, a second unbind is the
+// domain 409, and a closed store handle is 500 storage_fault rather than a
+// client error.
+func TestHTTPBindUnbindErrorMapping(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	store := tasks.NewSessionAPIStoreWithDB(f.db, timeouts.TestProfile(), fixedClock{now: f.now})
+	server := httptest.NewServer(sessionapi.NewHandler(f.service(), store))
+	t.Cleanup(server.Close)
+	bindURL := func(session string) string {
+		return server.URL + "/api/v1/sessions/claude-code/" + session + "/bind"
+	}
+	unbindURL := func(session string) string {
+		return server.URL + "/api/v1/sessions/claude-code/" + session + "/unbind"
+	}
+
+	cases := []struct {
+		name       string
+		url        string
+		body       string
+		wantStatus int
+		wantCode   string
+	}{
+		{"missing epochId", bindURL("request-session"), `{"role":"worker"}`, http.StatusBadRequest, "invalid_body"},
+		{"invalid role", bindURL("request-session"), `{"epochId":"` + f.epoch + `","role":"implementer"}`, http.StatusBadRequest, "invalid_body"},
+		{"padded expectedBinding", bindURL("request-session"), `{"epochId":"` + f.epoch + `","role":"worker","expectedBinding":" padded "}`, http.StatusBadRequest, "invalid_body"},
+		{"padded unbind expectedBinding", unbindURL("request-session"), `{"expectedBinding":" padded "}`, http.StatusBadRequest, "invalid_body"},
+		{"malformed body", bindURL("request-session"), `{`, http.StatusBadRequest, "invalid_body"},
+		{"two JSON objects", bindURL("request-session"), `{"epochId":"` + f.epoch + `","role":"worker"}{}`, http.StatusBadRequest, "invalid_body"},
+		{"escaped slash key", bindURL("a%2Fb"), `{"epochId":"` + f.epoch + `","role":"worker"}`, http.StatusBadRequest, "invalid_session_key"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			status, code := postError(t, testCase.url, testCase.body)
+			require.Equal(t, testCase.wantStatus, status)
+			require.Equal(t, testCase.wantCode, code)
+		})
+	}
+
+	// A handler without the write plane refuses the route before parsing a body.
+	bare := httptest.NewServer(sessionapi.NewHandler(f.service()))
+	t.Cleanup(bare.Close)
+	status, code := postError(t, bare.URL+"/api/v1/sessions/claude-code/request-session/bind",
+		`{"epochId":"`+f.epoch+`","role":"worker"}`)
+	require.Equal(t, http.StatusServiceUnavailable, status)
+	require.Equal(t, "write_unavailable", code)
+
+	// A second unbind is the domain's no-open-binding conflict.
+	status, _ = postError(t, bindURL("second-unbind"), `{"epochId":"`+f.epoch+`","role":"worker"}`)
+	require.Equal(t, http.StatusOK, status)
+	status, _ = postError(t, unbindURL("second-unbind"), `{}`)
+	require.Equal(t, http.StatusOK, status)
+	status, code = postError(t, unbindURL("second-unbind"), `{}`)
+	require.Equal(t, http.StatusConflict, status)
+	require.Equal(t, "no_open_binding", code)
+
+	// A closed store handle is a server fault, not an invalid request.
+	t.Run("closed store handle", func(t *testing.T) {
+		closed := seedSessions(t)
+		closedStore := tasks.NewSessionAPIStoreWithDB(closed.db, timeouts.TestProfile(), fixedClock{now: closed.now})
+		closedServer := httptest.NewServer(sessionapi.NewHandler(closed.service(), closedStore))
+		t.Cleanup(closedServer.Close)
+		require.NoError(t, closed.db.Close())
+
+		status, code := postError(t, closedServer.URL+"/api/v1/sessions/claude-code/closed-handle/bind",
+			`{"epochId":"`+closed.epoch+`","role":"worker"}`)
+		require.Equal(t, http.StatusInternalServerError, status)
+		require.Equal(t, "storage_fault", code)
+	})
+}

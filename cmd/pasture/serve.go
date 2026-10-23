@@ -21,7 +21,7 @@ import (
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Serve the local session-to-epoch read API",
+	Short: "Serve the local session and epoch API",
 	Long: `Serve the loopback-only session and epoch API from the local pasture database.
 
 Routes:
@@ -31,6 +31,7 @@ Routes:
   POST /api/v1/sessions/{harness}/{nativeSessionId}/bind
   POST /api/v1/sessions/{harness}/{nativeSessionId}/unbind
   GET  /api/v1/epochs and /api/v1/epochs/{id}
+  GET  /api/v1/epochs/{id}/sessions
   GET  /api/v1/inspect
   GET  /api/v1/ws
   GET  /openapi.json

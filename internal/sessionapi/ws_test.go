@@ -138,6 +138,10 @@ func TestWebSocketStaleCacheErrorIsDeduplicated(t *testing.T) {
 	first := readWSFrameOfType(t, conn, "error")
 	require.NotNil(t, first.Error)
 	require.Equal(t, "stale_session_cache", first.Error.Code)
+	require.Contains(t, first.Error.Message, "pasture session list",
+		"the remediation must name the command that rebuilds the cache")
+	require.Contains(t, first.Error.Message, "pasture serve --backfill",
+		"the remediation must name the rebuild flag; a plain restart does not repair it")
 
 	// The refresh ticker fires once a second. Waiting past one tick must not
 	// produce a duplicate frame because publishError suppresses the same
@@ -145,6 +149,40 @@ func TestWebSocketStaleCacheErrorIsDeduplicated(t *testing.T) {
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(1600*time.Millisecond)))
 	_, _, readErr := conn.ReadMessage()
 	require.Error(t, readErr, "a duplicate error frame arrived")
+	var netErr net.Error
+	require.True(t, errors.As(readErr, &netErr) && netErr.Timeout(),
+		"expected the read deadline to expire with no frame, got %v", readErr)
+}
+
+// TestWebSocketStorageFaultFrameIsDeduplicated pins the WS side of the shared
+// HTTP mapping: a storage failure becomes one storage_fault frame, and the next
+// refresh tick does not repeat it. The api-state table is dropped after the
+// server exists, which is the same kind of fault the HTTP handler reports as
+// 500 storage_fault.
+func TestWebSocketStorageFaultFrameIsDeduplicated(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+	t.Cleanup(server.Close)
+	_, err := f.db.Exec(`DROP TABLE pasture_session_api_state`)
+	require.NoError(t, err)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	require.Equal(t, "ready", readWSFrame(t, conn).Type)
+	require.NoError(t, conn.WriteJSON(map[string]string{"type": "subscribe", "topic": "sessions"}))
+	first := readWSFrameOfType(t, conn, "error")
+	require.NotNil(t, first.Error)
+	require.Equal(t, "storage_fault", first.Error.Code)
+	require.Contains(t, first.Error.Message, "could not be read",
+		"the WS fault must carry the same wording the HTTP storage_fault carries")
+
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(1600*time.Millisecond)))
+	_, _, readErr := conn.ReadMessage()
+	require.Error(t, readErr, "a duplicate storage_fault frame arrived")
 	var netErr net.Error
 	require.True(t, errors.As(readErr, &netErr) && netErr.Timeout(),
 		"expected the read deadline to expire with no frame, got %v", readErr)

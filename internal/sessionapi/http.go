@@ -169,16 +169,23 @@ func decodeBody(w http.ResponseWriter, r *http.Request, value any) error {
 	return nil
 }
 
+// writeStoreError maps the bind/unbind taxonomy onto the wire. A request the
+// caller can fix is 400; a domain outcome keeps 404/409; a store or transaction
+// failure is 500. Nothing the store returns is blamed on the request body.
 func writeStoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, tasks.ErrBindingRequest):
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
 	case errors.Is(err, tasks.ErrUnknownEpoch):
 		writeError(w, http.StatusNotFound, "unknown_epoch", err.Error())
 	case errors.Is(err, tasks.ErrNoOpenBinding):
 		writeError(w, http.StatusConflict, "no_open_binding", "the session has no open binding to unbind")
 	case errors.Is(err, tasks.ErrBindingConflict):
 		writeError(w, http.StatusConflict, "binding_conflict", err.Error())
+	case errors.Is(err, tasks.ErrBindingStoreFault):
+		writeError(w, http.StatusInternalServerError, "storage_fault", err.Error())
 	default:
-		writeError(w, http.StatusBadRequest, "invalid_binding", err.Error())
+		writeError(w, http.StatusInternalServerError, "storage_fault", "the session binding write failed without a classified cause; inspect the serve log and retry")
 	}
 }
 
@@ -376,6 +383,12 @@ func validSessionKey(value string) bool {
 	return true
 }
 
+// staleSessionCacheMessage is the ONE remediation sentence every stale-cache
+// surface carries. A plain serve restart does not repair a dirty cache; both the
+// HTTP error body and the WebSocket error frame must name the two commands that
+// do, so the two surfaces cannot drift into different advice.
+const staleSessionCacheMessage = "the session cache is behind the journal; run `pasture session list` or `pasture serve --backfill` to rebuild it"
+
 func writeServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -385,7 +398,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrInvalidFilter):
 		writeError(w, http.StatusBadRequest, "invalid_filter", err.Error())
 	case errors.Is(err, ErrStaleCache):
-		writeError(w, http.StatusServiceUnavailable, "stale_session_cache", "the session cache is behind the journal; run `pasture session list` or `pasture serve --backfill` to rebuild it")
+		writeError(w, http.StatusServiceUnavailable, "stale_session_cache", staleSessionCacheMessage)
 	default:
 		writeError(w, http.StatusInternalServerError, "storage_fault", "the session store could not be read; inspect the serve log and repair the database")
 	}

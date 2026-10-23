@@ -222,7 +222,7 @@ func (c *wsClient) publishError(topic wsTopic, sub *wsSubscription, err error) {
 func wsErrorFor(err error) (string, string) {
 	switch {
 	case errors.Is(err, ErrStaleCache):
-		return "stale_session_cache", "the session cache is behind the journal; restart serve or run the rebuild"
+		return "stale_session_cache", staleSessionCacheMessage
 	case errors.Is(err, ErrInvalidFilter):
 		return "invalid_filter", err.Error()
 	default:
