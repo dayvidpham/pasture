@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 type fixture struct {
@@ -39,6 +41,21 @@ func newFixture(t *testing.T) fixture {
 	epoch, err := tracker.Create("file://sessionapi-test", "Session API epoch", "epoch title", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
 	require.NoError(t, err)
 	now := time.Unix(1700000000, 0).UTC()
+	state := protocol.EpochState{EpochId: epoch.ID.String(), CurrentPhase: protocol.PhaseId("p3-plan"), CurrentRole: protocol.RoleId("architect")}
+	stateJSON, err := json.Marshal(state)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS epoch_state_projection (
+			epoch_id      TEXT PRIMARY KEY,
+			current_phase TEXT NOT NULL,
+			state_json    TEXT NOT NULL,
+			updated_at    INTEGER NOT NULL
+		)`)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+		INSERT INTO epoch_state_projection(epoch_id, current_phase, state_json, updated_at)
+		VALUES (?, ?, ?, ?)`, epoch.ID.String(), string(state.CurrentPhase), string(stateJSON), now.UnixNano())
+	require.NoError(t, err)
 	_, err = db.Exec(`
 		INSERT INTO pasture_session_api_state(singleton_id, revision, dirty, completed_through_jid)
 		VALUES (0, 7, 0, 0)
@@ -258,4 +275,57 @@ func TestHTTPBindAndUnbind(t *testing.T) {
 	require.NotNil(t, detail.Session.End)
 	require.Equal(t, "unbind", detail.Session.End.EndReason)
 	require.Equal(t, sessionapi.StateEnded, detail.Session.Activity.State)
+}
+
+func TestEpochEndpointsAndInspect(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+	t.Cleanup(server.Close)
+
+	response, err := http.Get(server.URL + "/api/v1/epochs")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var page sessionapi.EpochPage
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&page))
+	require.Len(t, page.Items, 1)
+	require.Equal(t, f.epoch, page.Items[0].ID)
+	require.Equal(t, "Session API epoch", page.Items[0].Title)
+	require.Equal(t, "p3-plan", page.Items[0].Phase)
+	require.Equal(t, "architect", page.Items[0].Role)
+	require.Equal(t, 3, page.Items[0].SessionCount)
+	require.Equal(t, 1, page.Items[0].ActiveCount)
+
+	detailURL := server.URL + "/api/v1/epochs/" + url.PathEscape(f.epoch)
+	response, err = http.Get(detailURL)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var detail sessionapi.EpochDetail
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&detail))
+	require.Equal(t, f.epoch, detail.Epoch.ID)
+
+	response, err = http.Get(detailURL + "/sessions")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var sessions sessionapi.Page
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&sessions))
+	require.Len(t, sessions.Items, 3)
+
+	response, err = http.Get(server.URL + "/api/v1/inspect")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	var inspect sessionapi.InspectPayload
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&inspect))
+	require.Len(t, inspect.Epochs, 1)
+	require.Len(t, inspect.Sessions, 4)
+	require.False(t, inspect.Truncated)
+
+	response, err = http.Get(server.URL + "/api/v1/epochs/" + url.PathEscape("file://missing"))
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusNotFound, response.StatusCode)
 }

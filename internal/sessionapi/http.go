@@ -36,6 +36,9 @@ func NewHandler(service *Service, stores ...*tasks.SessionAPIStore) http.Handler
 	mux.HandleFunc("GET /api/v1/sessions/{harness}/{nativeSessionId}", h.get)
 	mux.HandleFunc("POST /api/v1/sessions/{harness}/{nativeSessionId}/bind", h.bind)
 	mux.HandleFunc("POST /api/v1/sessions/{harness}/{nativeSessionId}/unbind", h.unbind)
+	mux.HandleFunc("GET /api/v1/epochs", h.epochs)
+	mux.HandleFunc("GET /api/v1/epochs/", h.epochRoute)
+	mux.HandleFunc("GET /api/v1/inspect", h.inspect)
 	mux.HandleFunc("GET /openapi.json", h.openapi)
 	return loopbackOnly(mux)
 }
@@ -151,6 +154,84 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_binding", err.Error())
 	}
+}
+
+func (h *handler) epochs(w http.ResponseWriter, r *http.Request) {
+	page, err := h.service.Epochs(r.Context())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+func (h *handler) epochRoute(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/epochs/")
+	rest = strings.TrimSuffix(rest, "/")
+	if rest == "" {
+		writeError(w, http.StatusNotFound, "not_found", "epoch id is required")
+		return
+	}
+	if strings.HasSuffix(rest, "/sessions") {
+		epochID := strings.TrimSuffix(rest, "/sessions")
+		if !validEpochID(epochID) {
+			writeError(w, http.StatusBadRequest, "invalid_epoch_id", "epoch id is invalid")
+			return
+		}
+		query := r.URL.Query()
+		limit := 50
+		if raw := query.Get("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_filter", "limit must be an integer between 1 and 100")
+				return
+			}
+			limit = parsed
+		}
+		page, err := h.service.EpochSessions(r.Context(), epochID, ListOptions{
+			State:   ActivityState(query.Get("state")),
+			Harness: query.Get("harness"),
+			Limit:   limit,
+			Cursor:  query.Get("cursor"),
+		})
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, page)
+		return
+	}
+	if !validEpochID(rest) {
+		writeError(w, http.StatusBadRequest, "invalid_epoch_id", "epoch id is invalid")
+		return
+	}
+	detail, err := h.service.Epoch(r.Context(), rest)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (h *handler) inspect(w http.ResponseWriter, r *http.Request) {
+	payload, err := h.service.Inspect(r.Context())
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+func validEpochID(value string) bool {
+	if value == "" || len(value) > 2048 {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *handler) openapi(w http.ResponseWriter, _ *http.Request) {

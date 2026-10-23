@@ -88,3 +88,36 @@ var (
 	ErrInvalidFilter    = errors.New("invalid filter")
 	ErrStaleCache       = errors.New("session cache is stale")
 )
+
+// EpochView is one projected epoch and its current session population.
+type EpochView struct {
+	ID           string `json:"id"`
+	Title        string `json:"title,omitempty"`
+	Phase        string `json:"phase"`
+	Role         string `json:"role"`
+	SessionCount int    `json:"sessionCount"`
+	ActiveCount  int    `json:"activeCount"`
+}
+
+// EpochPage is the epoch list response.
+type EpochPage struct {
+	Revision int64       `json:"revision"`
+	AsOf     time.Time   `json:"asOf"`
+	Items    []EpochView `json:"items"`
+}
+
+// EpochDetail is the single-epoch response.
+type EpochDetail struct {
+	Revision int64     `json:"revision"`
+	AsOf     time.Time `json:"asOf"`
+	Epoch    EpochView `json:"epoch"`
+}
+
+// InspectPayload is the combined epoch and session snapshot.
+type InspectPayload struct {
+	Revision  int64         `json:"revision"`
+	AsOf      time.Time     `json:"asOf"`
+	Truncated bool          `json:"truncated"`
+	Epochs    []EpochView   `json:"epochs"`
+	Sessions  []SessionView `json:"sessions"`
+}

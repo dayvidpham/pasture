@@ -46,6 +46,68 @@ func openAPIDocument() map[string]any {
 				"epoch bindings. Transcripts are not served by this API.",
 		},
 		"paths": map[string]any{
+			"/api/v1/epochs": map[string]any{
+				"get": map[string]any{
+					"operationId": "listEpochs",
+					"summary":     "List projected epochs",
+					"responses": map[string]any{
+						"200": jsonResponse(ref("EpochPage")),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"503": errorResponse("The session cache is stale"),
+						"500": errorResponse("The epoch store could not be read"),
+					},
+				},
+			},
+			"/api/v1/epochs/{epochId}": map[string]any{
+				"get": map[string]any{
+					"operationId": "getEpoch",
+					"summary":     "Get one projected epoch",
+					"parameters": []any{
+						pathParameter("epochId", "Epoch task id (URL-encode it when it contains slashes)"),
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(ref("EpochDetail")),
+						"400": errorResponse("Invalid epoch id"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"404": errorResponse("Epoch not found"),
+						"503": errorResponse("The session cache is stale"),
+						"500": errorResponse("The epoch store could not be read"),
+					},
+				},
+			},
+			"/api/v1/epochs/{epochId}/sessions": map[string]any{
+				"get": map[string]any{
+					"operationId": "listEpochSessions",
+					"summary":     "List sessions bound to an epoch",
+					"parameters": []any{
+						pathParameter("epochId", "Epoch task id (URL-encode it when it contains slashes)"),
+						queryParameter("state", "Filter by derived activity state", "string", []string{"active", "idle", "ended", "unknown"}),
+						queryParameter("harness", "Filter by harness id", "string", nil),
+						queryParameter("limit", "Page size (default 50, maximum 100)", "integer", nil),
+						queryParameter("cursor", "Opaque page token from a previous response", "string", nil),
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(ref("Page")),
+						"400": errorResponse("Invalid filter or page token"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"404": errorResponse("Epoch not found"),
+						"503": errorResponse("The session cache is stale"),
+						"500": errorResponse("The session store could not be read"),
+					},
+				},
+			},
+			"/api/v1/inspect": map[string]any{
+				"get": map[string]any{
+					"operationId": "inspectSessionAPI",
+					"summary":     "Snapshot epochs and sessions together",
+					"responses": map[string]any{
+						"200": jsonResponse(ref("InspectPayload")),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"503": errorResponse("The session cache is stale"),
+						"500": errorResponse("The session store could not be read"),
+					},
+				},
+			},
 			"/api/v1/sessions": map[string]any{
 				"get": map[string]any{
 					"operationId": "listSessions",
@@ -192,6 +254,43 @@ func openAPIDocument() map[string]any {
 						"session":  ref("SessionView"),
 					},
 					"revision", "asOf", "session",
+				),
+				"EpochView": objectSchema(
+					map[string]any{
+						"id":           map[string]any{"type": "string"},
+						"title":        map[string]any{"type": "string"},
+						"phase":        map[string]any{"type": "string"},
+						"role":         map[string]any{"type": "string"},
+						"sessionCount": map[string]any{"type": "integer"},
+						"activeCount":  map[string]any{"type": "integer"},
+					},
+					"id", "phase", "role", "sessionCount", "activeCount",
+				),
+				"EpochPage": objectSchema(
+					map[string]any{
+						"revision": map[string]any{"type": "integer", "format": "int64"},
+						"asOf":     map[string]any{"type": "string", "format": "date-time"},
+						"items":    map[string]any{"type": "array", "items": ref("EpochView")},
+					},
+					"revision", "asOf", "items",
+				),
+				"EpochDetail": objectSchema(
+					map[string]any{
+						"revision": map[string]any{"type": "integer", "format": "int64"},
+						"asOf":     map[string]any{"type": "string", "format": "date-time"},
+						"epoch":    ref("EpochView"),
+					},
+					"revision", "asOf", "epoch",
+				),
+				"InspectPayload": objectSchema(
+					map[string]any{
+						"revision":  map[string]any{"type": "integer", "format": "int64"},
+						"asOf":      map[string]any{"type": "string", "format": "date-time"},
+						"truncated": map[string]any{"type": "boolean"},
+						"epochs":    map[string]any{"type": "array", "items": ref("EpochView")},
+						"sessions":  map[string]any{"type": "array", "items": ref("SessionView")},
+					},
+					"revision", "asOf", "truncated", "epochs", "sessions",
 				),
 				"BindRequest": objectSchema(
 					map[string]any{
