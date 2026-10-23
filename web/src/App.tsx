@@ -36,6 +36,11 @@ import {
   type TranscriptFailure,
   type TranscriptViewModel,
 } from './transcript'
+import {
+  epochLabel,
+  formatTimelineDuration,
+  projectSessionTimeline,
+} from './timeline'
 
 type Connection = 'connecting' | 'live' | 'disconnected'
 type StateFilter = 'all' | 'active' | 'idle' | 'ended' | 'unknown'
@@ -83,45 +88,61 @@ function sessionKey(session: SessionView): string {
   return `${session.harness}/${session.nativeSessionId}`
 }
 
-function formatTime(value?: string): string {
+function formatTime(value?: string | null): string {
   if (!value) return '—'
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return value
   return parsed.toLocaleString()
 }
 
-function epochLabel(epoch?: { id: string; title?: string }): string {
-  if (!epoch) return 'unbound'
-  return epoch.title?.trim() || epoch.id
-}
-
 /**
- * BindingHistory keeps every recorded interval, including inferred ones, so a
- * provisional epoch never looks authoritative. It is exported for the
- * provenance render test.
+ * BindingHistory is the selected session's historical timeline: one band per
+ * interval, chronologically ordered by the pure projection in timeline.ts. It
+ * keeps inferred bands visually distinct so a provisional epoch never looks
+ * authoritative. It is exported for the provenance render test.
  */
 export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[] }) {
+  const segments = projectSessionTimeline(bindings)
   return (
     <div className="binding-history">
       <p className="eyebrow">binding history</p>
-      {bindings.length === 0 ? (
-        <p className="rail-copy muted">no recorded binding intervals.</p>
+      {segments.length === 0 ? (
+        <p className="rail-copy muted">
+          no binding intervals are recorded for this session. If it predates this
+          console's history, restart `pasture serve` with `--backfill`.
+        </p>
       ) : (
-        <ol className="binding-list">
-          {bindings.map((interval) => (
-            <li key={interval.bindingId} className="binding-item" data-source={interval.source}>
-              <div className="binding-item-head">
-                <span className="binding-source">{interval.source}</span>
-                <span className="binding-confidence">{interval.confidence ?? '—'}</span>
-                <span className="binding-role">{interval.role}</span>
+        <ol className="timeline-list" aria-label="binding timeline">
+          {segments.map((segment) => (
+            <li
+              key={segment.bindingId}
+              className="timeline-band"
+              data-source={segment.source}
+              data-open={segment.open ? 'true' : 'false'}
+            >
+              <div className="timeline-band-head">
+                <span className="timeline-epoch">{segment.epochLabel}</span>
+                <span className="timeline-marker">{segment.open ? 'open' : 'closed'}</span>
               </div>
-              <p className="binding-when">
-                {formatTime(interval.boundAt)}
-                {interval.unboundAt
-                  ? ` → ${formatTime(interval.unboundAt)}${interval.endReason ? ` · ${interval.endReason}` : ''}`
-                  : ' · open'}
+              <div className="timeline-chips">
+                <span className="timeline-chip timeline-chip-source" data-source={segment.source}>
+                  {segment.source}
+                </span>
+                <span className="timeline-chip timeline-chip-confidence">
+                  {segment.confidence}
+                </span>
+                <span className="timeline-chip timeline-chip-role">{segment.role}</span>
+              </div>
+              <p className="timeline-range">
+                {formatTime(segment.start)} → {segment.open ? 'open' : formatTime(segment.end)}
               </p>
-              <p className="binding-epoch">epoch: {epochLabel(interval.epoch)}</p>
+              <p className="timeline-duration">
+                {formatTimelineDuration(segment.durationMs)}
+                {segment.endReason ? ` · ended: ${segment.endReason}` : ''}
+              </p>
+              {segment.epochId && segment.epochId !== segment.epochLabel && (
+                <p className="timeline-epoch-id">epoch id: {segment.epochId}</p>
+              )}
             </li>
           ))}
         </ol>

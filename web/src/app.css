@@ -241,8 +241,9 @@ body {
 }
 
 /* Binding provenance: the current source/confidence live in the detail list;
-   the history below keeps every interval, including inferred ones, so a
-   provisional epoch never looks authoritative. */
+   the timeline below keeps every interval, including inferred ones, so a
+   provisional epoch never looks authoritative. Bands are a vertical timeline:
+   a dot and left rule mark the start, and the band body carries the range. */
 .binding-history {
   margin-top: var(--sp-4);
   padding-top: var(--sp-3);
@@ -253,56 +254,108 @@ body {
   margin-bottom: var(--sp-2);
 }
 
-.binding-list {
+.timeline-list {
   display: grid;
   gap: var(--sp-2);
+  min-width: 0;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.binding-item {
+.timeline-band {
+  position: relative;
   display: grid;
   gap: var(--sp-1);
-  padding: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  overflow-wrap: anywhere;
   background: var(--surface-2);
   border-left: 2px solid var(--ink-4);
 }
 
-.binding-item[data-source='inferred'] {
+.timeline-band::before {
+  content: '';
+  position: absolute;
+  top: var(--sp-3);
+  left: -5px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--ink-4);
+  border-radius: 50%;
+  background: var(--surface-2);
+}
+
+.timeline-band[data-source='inferred'] {
   border-left-color: var(--warning);
 }
 
-.binding-item-head {
+.timeline-band[data-source='inferred']::before {
+  border-color: var(--warning);
+}
+
+.timeline-band[data-open='true']::before {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.timeline-band-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.timeline-epoch {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink-strong);
+  font: var(--fs-sm)/var(--lh-body) var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.timeline-marker {
+  flex: none;
+  color: var(--ink-3);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+  text-transform: lowercase;
+}
+
+.timeline-band[data-open='true'] .timeline-marker {
+  color: var(--success);
+}
+
+.timeline-chips {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--sp-2);
-  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+  gap: var(--sp-1);
 }
 
-.binding-source {
-  color: var(--ink-strong);
+.timeline-chip {
+  padding: 0 var(--sp-1);
+  color: var(--ink-2);
+  border: var(--bd);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+  text-transform: lowercase;
 }
 
-.binding-confidence,
-.binding-role {
-  color: var(--ink-3);
+.timeline-chip-source[data-source='inferred'] {
+  color: var(--warning);
+  border-color: var(--warning);
 }
 
-.binding-role {
-  margin-left: auto;
-}
-
-.binding-when,
-.binding-epoch {
+.timeline-range,
+.timeline-duration,
+.timeline-epoch-id {
   margin: 0;
   color: var(--ink-2);
   font: var(--fs-sm)/var(--lh-body) var(--font-mono);
   overflow-wrap: anywhere;
 }
 
-.binding-epoch {
+.timeline-duration,
+.timeline-epoch-id {
   color: var(--ink-3);
 }
 
