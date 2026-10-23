@@ -436,3 +436,44 @@ func compareBindingRows(ctx context.Context, tx *sql.Tx, expected map[provenance
 	}
 	return nil
 }
+
+// OccurrenceFact is the journal-truth subset the session cache needs: the
+// occurrence identity, contract, event kind, recorded time, and verified native
+// bindings. It intentionally omits the semantic envelope validation and the
+// projection rows; the session cache is a separate rebuildable read model and
+// must not pay for another read model's replay.
+type OccurrenceFact struct {
+	JournalID  provenance.JournalID
+	Contract   ir.RuntimeContractID
+	Event      model.ContractEventKind
+	ReceivedAt int64
+	Bindings   []model.NativeBinding
+}
+
+// ReadOccurrenceFacts reads committed occurrence evidence in journal order.
+// The semantic envelope checks remain the projection rebuild's job; this entry
+// is only for consumers that derive a non-projection view from the same facts.
+func ReadOccurrenceFacts(journal provenance.Journal) ([]OccurrenceFact, error) {
+	if journal == nil {
+		return nil, projectionError("The lifecycle occurrence facts cannot be read.", "A Provenance journal is required.", "No occurrence facts were read.", "Open the unified store and retry.", nil)
+	}
+	rows, _, err := readOccurrenceRows(journalResolver{Journal: journal})
+	if err != nil {
+		return nil, err
+	}
+	facts := make([]OccurrenceFact, 0, len(rows))
+	for _, row := range rows {
+		contract, err := parseOccurrenceContract(row.payload.Contract)
+		if err != nil {
+			return nil, projectionError("A lifecycle occurrence journal row carries an invalid contract.", fmt.Sprintf("Evidence row %d does not name a runtime contract.", row.journalID), "No occurrence facts were returned.", "Repair the malformed journal row before rebuilding.", err)
+		}
+		facts = append(facts, OccurrenceFact{
+			JournalID:  row.journalID,
+			Contract:   contract,
+			Event:      row.payload.Event,
+			ReceivedAt: row.recordedAt,
+			Bindings:   append([]model.NativeBinding(nil), row.payload.Bindings...),
+		})
+	}
+	return facts, nil
+}

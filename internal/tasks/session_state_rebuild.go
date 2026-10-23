@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
@@ -129,6 +128,24 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 	if !ok || store.auditDBHandle() == nil {
 		return SessionStateRebuildOutcome{}, sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}
+	storeWithJournal, ok := tracker.(lifecycleReceiptStore)
+	if !ok || storeWithJournal.Journal() == nil {
+		return SessionStateRebuildOutcome{}, sessionClaimError("the tracker has no lifecycle journal", "use tasks.OpenTaskTracker")
+	}
+	// Read journal truth BEFORE taking the write transaction. The tracker's
+	// pool is size one in production, so a pooled journal read issued inside
+	// the transaction would wait on the transaction's own connection.
+	facts, err := projection.ReadOccurrenceFacts(storeWithJournal.Journal())
+	if err != nil {
+		return SessionStateRebuildOutcome{}, err
+	}
+	completedThrough := int64(0)
+	for _, fact := range facts {
+		if int64(fact.JournalID) > completedThrough {
+			completedThrough = int64(fact.JournalID)
+		}
+	}
+
 	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().WorkflowResult())
 	defer cancel()
 	tx, err := store.auditDBHandle().BeginTx(bounded, nil)
@@ -142,25 +159,7 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 		}
 	}()
 
-	reader, err := provenance.NewTransactionEvidenceReader(bounded, tx)
-	if err != nil {
-		return SessionStateRebuildOutcome{}, sessionClaimError("the transaction-bound journal reader could not start: "+err.Error(), "repair the journal before rebuilding the session cache")
-	}
-	if err := projection.RebuildOccurrencesInTx(bounded, tx, reader); err != nil {
-		return SessionStateRebuildOutcome{}, err
-	}
-
-	page, err := reader.QueryEvidence(provenance.EvidenceQuery{
-		Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-		Kinds:  sessionOccurrenceEvidenceKinds,
-		Page:   provenance.FactPageRequest{Limit: 1},
-	})
-	if err != nil {
-		return SessionStateRebuildOutcome{}, sessionClaimError("the store refused the rebuild watermark read: "+err.Error(), "repair the journal before rebuilding the session cache")
-	}
-	completedThrough := int64(page.SnapshotMaxJournalID)
-
-	rows, err := readSessionRebuildRows(bounded, tx)
+	rows, err := readSessionRebuildRows(bounded, tx, facts)
 	if err != nil {
 		return SessionStateRebuildOutcome{}, err
 	}
@@ -198,7 +197,7 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 	return SessionStateRebuildOutcome{Sessions: len(rows), Revision: revision, CompletedThroughJournalID: completedThrough}, nil
 }
 
-func readSessionRebuildRows(ctx context.Context, tx *sql.Tx) ([]*sessionRebuildRow, error) {
+func readSessionRebuildRows(ctx context.Context, tx *sql.Tx, facts []projection.OccurrenceFact) ([]*sessionRebuildRow, error) {
 	byKey := make(map[string]*sessionRebuildRow)
 	get := func(harness, session string) *sessionRebuildRow {
 		key := harness + "\x00" + session
@@ -210,53 +209,42 @@ func readSessionRebuildRows(ctx context.Context, tx *sql.Tx) ([]*sessionRebuildR
 		return row
 	}
 
-	// The occurrence join is restricted to session bindings. The projection
-	// enforces one session identity per occurrence, but the rebuild still
-	// detects a second one rather than silently choosing.
-	occurrenceRows, err := tx.QueryContext(ctx, `
-		SELECT o.journal_id, o.contract, o.event_kind, o.received_at, b.binding_value
-		FROM lifecycle_occurrences o
-		JOIN lifecycle_occurrence_bindings b ON b.journal_id = o.journal_id
-		WHERE b.binding_kind = ?
-		ORDER BY o.journal_id, b.binding_index`, uint8(model.BindingSession))
-	if err != nil {
-		return nil, sessionClaimError("the store refused the occurrence rebuild read: "+err.Error(), "repair the projection before rebuilding the session cache")
-	}
-	defer occurrenceRows.Close()
+	// The facts are already journal-ordered and carry verified native bindings;
+	// this loop only selects the session identity and folds activity.
 	lastJournal := int64(-1)
-	for occurrenceRows.Next() {
-		var journalID, receivedAt, eventKind int64
-		var contract string
-		var session []byte
-		if err := occurrenceRows.Scan(&journalID, &contract, &eventKind, &receivedAt, &session); err != nil {
-			return nil, sessionClaimError("a rebuilt occurrence row could not be decoded: "+err.Error(), "repair the projection before rebuilding the session cache")
+	for _, fact := range facts {
+		var session string
+		for _, binding := range fact.Bindings {
+			if binding.Kind != model.BindingSession {
+				continue
+			}
+			if session != "" {
+				return nil, sessionClaimError("an occurrence declares more than one session identity", "repair the occurrence bindings before rebuilding the session cache")
+			}
+			session = binding.Value
 		}
+		if session == "" {
+			continue
+		}
+		journalID := int64(fact.JournalID)
 		if journalID == lastJournal {
 			return nil, sessionClaimError("an occurrence declares more than one session identity", "repair the occurrence bindings before rebuilding the session cache")
 		}
 		lastJournal = journalID
-		contractID, err := artifact.ParseRuntimeContractID(contract)
-		if err != nil {
-			return nil, sessionClaimError("a rebuilt occurrence cites an invalid runtime contract: "+err.Error(), "repair the projection before rebuilding the session cache")
-		}
-		harness := string(ir.HarnessID(contractID.Harness()))
-		row := get(harness, string(session))
-		row.addTimestamp(receivedAt)
-		row.lastSeen = maxInt64(row.lastSeen, receivedAt)
+		harness := string(fact.Contract.Harness())
+		row := get(harness, session)
+		row.addTimestamp(fact.ReceivedAt)
+		row.lastSeen = maxInt64(row.lastSeen, fact.ReceivedAt)
 		if journalID >= row.lastJournalID {
 			row.lastJournalID = journalID
 			row.endAt = 0
-			kind := model.ContractEventKind(eventKind)
-			if nativeName, ok := registration.NativeName(contractID, kind); ok {
+			if nativeName, ok := registration.NativeName(fact.Contract, fact.Event); ok {
 				row.lastEvent = nativeName
 			}
-			if isSessionEnd(ir.HarnessID(harness), contractID, kind) {
-				row.endAt = receivedAt
+			if isSessionEnd(ir.HarnessID(harness), fact.Contract, fact.Event) {
+				row.endAt = fact.ReceivedAt
 			}
 		}
-	}
-	if err := occurrenceRows.Err(); err != nil {
-		return nil, sessionClaimError("the occurrence rebuild read failed: "+err.Error(), "repair the projection before rebuilding the session cache")
 	}
 
 	bindingRows, err := tx.QueryContext(ctx, `
