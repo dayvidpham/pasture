@@ -88,7 +88,81 @@ func TestSessionAPIStoreRejectsUnknownEpochAndRole(t *testing.T) {
 	_, err = store.Bind(context.Background(), "claude-code", "unknown-epoch", tasks.SessionBindRequest{EpochID: "file://missing", Role: "worker"})
 	require.True(t, errors.Is(err, tasks.ErrUnknownEpoch))
 	_, err = store.Bind(context.Background(), "claude-code", "bad-role", tasks.SessionBindRequest{EpochID: epoch.ID.String(), Role: "implementer"})
-	require.Error(t, err)
+	require.True(t, errors.Is(err, tasks.ErrBindingRequest), "an unknown role is a request fault, not a store outcome: %v", err)
+}
+
+// TestSessionAPIStoreClassifiesRequestAndStoreErrors pins the two sentinels the
+// HTTP layer keys its status codes on: request mistakes are ErrBindingRequest
+// (400), and transaction/handle failures are ErrBindingStoreFault (500). The
+// domain outcomes (unknown epoch, conflict, no open binding) stay distinct.
+func TestSessionAPIStoreClassifiesRequestAndStoreErrors(t *testing.T) {
+	t.Parallel()
+	tracker, db, _ := claimStore(t)
+	epoch, err := tracker.Create("file://session-api-store", "Epoch", "epoch", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	store := tasks.NewSessionAPIStoreWithDB(db, timeouts.TestProfile(), claimClock{})
+	ctx := context.Background()
+
+	requestCases := []struct {
+		name string
+		call func() error
+	}{
+		{name: "missing epoch", call: func() error {
+			_, err := store.Bind(ctx, "claude-code", "request", tasks.SessionBindRequest{Role: "worker"})
+			return err
+		}},
+		{name: "invalid role", call: func() error {
+			_, err := store.Bind(ctx, "claude-code", "request", tasks.SessionBindRequest{EpochID: epoch.ID.String(), Role: "implementer"})
+			return err
+		}},
+		{name: "padded bind expectedBinding", call: func() error {
+			_, err := store.Bind(ctx, "claude-code", "request", tasks.SessionBindRequest{EpochID: epoch.ID.String(), Role: "worker", ExpectedBinding: " padded "})
+			return err
+		}},
+		{name: "padded unbind expectedBinding", call: func() error {
+			_, err := store.Unbind(ctx, "claude-code", "request", " padded ")
+			return err
+		}},
+		{name: "invalid session key", call: func() error {
+			_, err := store.Bind(ctx, "claude-code", "bad/key", tasks.SessionBindRequest{EpochID: epoch.ID.String(), Role: "worker"})
+			return err
+		}},
+	}
+	for _, testCase := range requestCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := testCase.call()
+			require.Error(t, err)
+			require.True(t, errors.Is(err, tasks.ErrBindingRequest), "want ErrBindingRequest, got %v", err)
+			require.False(t, errors.Is(err, tasks.ErrBindingStoreFault), "a request fault must not be classified as a store fault: %v", err)
+		})
+	}
+
+	// An expired caller deadline is a transaction failure, not a request fault.
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	_, err = store.Bind(cancelled, "claude-code", "store-fault", tasks.SessionBindRequest{EpochID: epoch.ID.String(), Role: "worker"})
+	require.True(t, errors.Is(err, tasks.ErrBindingStoreFault), "want ErrBindingStoreFault, got %v", err)
+	require.True(t, errors.Is(err, context.Canceled), "the cause must stay reachable: %v", err)
+	require.False(t, errors.Is(err, tasks.ErrBindingRequest))
+}
+
+// TestSessionAPIStoreClosedHandleIsAStoreFault pins the closed-handle route: no
+// statement can run, and the caller is told the store failed rather than that
+// its request was invalid.
+func TestSessionAPIStoreClosedHandleIsAStoreFault(t *testing.T) {
+	t.Parallel()
+	tracker, db, _ := claimStore(t)
+	epoch, err := tracker.Create("file://session-api-store", "Epoch", "epoch", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	store := tasks.NewSessionAPIStoreWithDB(db, timeouts.TestProfile(), claimClock{})
+	require.NoError(t, db.Close())
+
+	_, err = store.Bind(context.Background(), "claude-code", "closed-handle", tasks.SessionBindRequest{EpochID: epoch.ID.String(), Role: "worker"})
+	require.True(t, errors.Is(err, tasks.ErrBindingStoreFault), "want ErrBindingStoreFault, got %v", err)
+	require.False(t, errors.Is(err, tasks.ErrBindingRequest))
+
+	_, err = store.Unbind(context.Background(), "claude-code", "closed-handle", "")
+	require.True(t, errors.Is(err, tasks.ErrBindingStoreFault), "want ErrBindingStoreFault, got %v", err)
 }
 
 func TestSessionAPIStoreConcurrentBindsKeepOneOpenRow(t *testing.T) {
