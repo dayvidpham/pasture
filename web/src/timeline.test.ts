@@ -80,6 +80,7 @@ describe('projectSessionTimeline', () => {
     expect(segment.end).toBeNull()
     expect(segment.startMs).toBe(Date.parse('2026-01-01T10:00:00Z'))
     expect(segment.endMs).toBeNull()
+    expect(segment.endKnown).toBe(false)
     expect(segment.durationMs).toBeNull()
     expect(segment.endReason).toBeNull()
     expect(segment.inverted).toBe(false)
@@ -100,6 +101,7 @@ describe('projectSessionTimeline', () => {
     expect(segment.open).toBe(false)
     expect(segment.end).toBe('2026-01-01T11:30:00.000Z')
     expect(segment.endMs).toBe(Date.parse('2026-01-01T11:30:00Z'))
+    expect(segment.endKnown).toBe(true)
     expect(segment.durationMs).toBe(90 * 60 * 1000)
     expect(segment.endReason).toBe('unbind')
     expect(segment.inverted).toBe(false)
@@ -149,6 +151,7 @@ describe('projectSessionTimeline', () => {
 
     expect(segment.open).toBe(false)
     expect(segment.inverted).toBe(true)
+    expect(segment.endKnown).toBe(true)
     expect(segment.endMs).toBe(Date.parse('2026-01-01T12:00:00Z'))
     expect(segment.end).toBe('2026-01-01T12:00:00.000Z')
     expect(segment.end).not.toBe('2026-01-01T11:00:00Z')
@@ -169,10 +172,28 @@ describe('projectSessionTimeline', () => {
     const unknown = segments[1]
     expect(unknown.startMs).toBeNull()
     expect(unknown.endMs).toBeNull()
+    expect(unknown.endKnown).toBe(true)
     expect(unknown.durationMs).toBeNull()
     expect(unknown.end).toBe('2026-01-01T11:00:00Z')
     expect(unknown.endReason).toBe('unbind')
     expect(formatTimelineDuration(unknown.durationMs)).toBe('open')
+  })
+
+  it('keeps an unparseable end unknown instead of claiming a zero-length close', () => {
+    const [segment] = projectSessionTimeline([
+      interval('b-unknown-end', '2026-01-01T10:00:00Z', {
+        unboundAt: 'not-a-time',
+        endReason: 'unbind',
+      }),
+    ])
+
+    expect(segment.open).toBe(false)
+    expect(segment.endKnown).toBe(false)
+    expect(segment.endMs).toBeNull()
+    expect(segment.durationMs).toBeNull()
+    expect(segment.end).toBe('not-a-time')
+    expect(segment.inverted).toBe(false)
+    expect(segment.endReason).toBe('unbind')
   })
 
   it('returns an empty projection for no intervals', () => {
@@ -241,27 +262,43 @@ describe('BindingHistory render', () => {
     ])
 
     const closed = band(html, 'explicit-closed')
-    expect(closed).toContain('data-source="explicit"')
-    expect(closed).toContain('data-open="false"')
+    expect(closed).toMatch(/^<li[^>]*data-source="explicit"/)
+    expect(closed).toMatch(/^<li[^>]*data-open="false"/)
     expect(closed).toContain('Titled Epoch')
     expect(closed).toContain('>closed<')
     expect(closed).toContain('1h 30m')
     expect(closed).toContain('ended: unbind')
-    expect(closed).not.toContain('epoch id:')
+    expect(closed).toContain('epoch id: file://epoch/titled')
 
     const open = band(html, 'inferred-open')
-    expect(open).toContain('data-source="inferred"')
-    expect(open).toContain('data-open="true"')
+    expect(open).toMatch(/^<li[^>]*data-source="inferred"/)
+    expect(open).toMatch(/^<li[^>]*data-open="true"/)
     expect(open).toContain('owner-responsibility')
     expect(open).toContain('>open<')
-    expect(open).toContain('epoch id: file://epoch/raw')
+    expect(open).not.toContain('epoch id:')
     expect(open).not.toContain('timeline-duration')
 
     const blank = band(html, 'explicit-blank')
-    expect(blank).toContain('data-open="false"')
+    expect(blank).toMatch(/^<li[^>]*data-open="false"/)
     expect(blank).toContain('1h 0m')
     expect(blank).not.toContain('ended:')
-    expect(blank).toContain('epoch id: file://epoch/blank')
+    expect(blank).not.toContain('epoch id:')
+  })
+
+  it('renders an unparseable end as raw evidence without a duration line', () => {
+    const html = renderBindings([
+      interval('explicit-unknown-end', '2026-01-01T10:00:00Z', {
+        unboundAt: 'not-a-time',
+        endReason: 'unbind',
+      }),
+    ])
+
+    const unknownEnd = band(html, 'explicit-unknown-end')
+    expect(unknownEnd).toContain('end unknown')
+    expect(unknownEnd).toContain('recorded end: not-a-time')
+    expect(unknownEnd).toContain('ended: unbind')
+    expect(unknownEnd).not.toContain('timeline-duration')
+    expect(unknownEnd).not.toContain('0ms')
   })
 
   it('renders start unknown and the inverted clamp instead of a false range', () => {

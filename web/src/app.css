@@ -290,10 +290,9 @@ body {
   border-left-color: var(--warning);
 }
 
-.timeline-band[data-source='inferred']::before {
-  border-color: var(--warning);
-}
-
+/* Open state owns the dot: inferred intervals are always open, so a separate
+   inferred dot color would be unreachable behind this rule. The inferred left
+   rule and source chip still carry the provenance. */
 .timeline-band[data-open='true']::before {
   border-color: var(--success);
   background: var(--success);

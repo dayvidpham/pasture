@@ -124,9 +124,7 @@ export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[
               data-inverted={segment.inverted ? 'true' : 'false'}
             >
               <div className="timeline-band-head">
-                <span className="timeline-epoch" title={segment.epochId ?? undefined}>
-                  {segment.epochLabel}
-                </span>
+                <span className="timeline-epoch">{segment.epochLabel}</span>
                 <span className="timeline-marker">{segment.open ? 'open' : 'closed'}</span>
               </div>
               <div className="timeline-chips">
@@ -142,24 +140,30 @@ export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[
                 <p className="timeline-range">start unknown</p>
               ) : (
                 <p className="timeline-range">
-                  {formatTime(segment.start)} → {segment.open ? 'open' : formatTime(segment.end)}
+                  {formatTime(segment.start)} →{' '}
+                  {segment.open
+                    ? 'open'
+                    : segment.endKnown
+                      ? formatTime(segment.end)
+                      : 'end unknown'}
                 </p>
               )}
-              {segment.startMs === null && segment.end && (
+              {segment.end !== null && (segment.startMs === null || !segment.endKnown) && (
                 <p className="timeline-note">recorded end: {formatTime(segment.end)}</p>
               )}
-              {!segment.open && segment.durationMs !== null ? (
+              {!segment.open && segment.durationMs !== null && (
                 <p className="timeline-duration">
                   {formatTimelineDuration(segment.durationMs)}
                   {segment.endReason ? ` · ended: ${segment.endReason}` : ''}
                 </p>
-              ) : segment.endReason ? (
-                <p className="timeline-duration">ended: {segment.endReason}</p>
-              ) : null}
+              )}
+              {segment.endReason && segment.durationMs === null && (
+                <p className="timeline-note">ended: {segment.endReason}</p>
+              )}
               {segment.inverted && (
                 <p className="timeline-note">end precedes start; clamped to zero duration</p>
               )}
-              {segment.epochId && segment.epochTitle === null && (
+              {segment.epochId && segment.epochId !== segment.epochLabel && (
                 <p className="timeline-epoch-id">epoch id: {segment.epochId}</p>
               )}
             </li>

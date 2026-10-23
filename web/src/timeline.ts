@@ -6,11 +6,12 @@ export type TimelineConfidence = SessionBindingInterval['confidence']
 
 /**
  * One chronological segment of a session's binding history. `endMs` and
- * `durationMs` are null while the interval is open, and also when the start
- * cannot be parsed: the projection is pure and does not invent a clock or a
- * 1970 epoch. `end` is the clamped end instant for a known start; for an
- * unknown start it preserves the raw recorded end so the rail can show it as
- * evidence without implying a duration.
+ * `durationMs` are null while the interval is open, when the start cannot be
+ * parsed, and when a present end cannot be parsed: the projection is pure and
+ * does not invent a clock, a zero-length close, or a 1970 epoch. `endKnown`
+ * separates a usable end instant from a raw recorded end. `end` is the clamped
+ * end instant for a known start/end pair; otherwise it preserves the raw
+ * recorded end so the rail can show it as evidence without implying a duration.
  */
 export type TimelineSegment = {
   bindingId: string
@@ -18,6 +19,7 @@ export type TimelineSegment = {
   end: string | null
   startMs: number | null
   endMs: number | null
+  endKnown: boolean
   durationMs: number | null
   open: boolean
   inverted: boolean
@@ -54,8 +56,9 @@ export function epochLabel(epoch?: { id: string; title?: string }): string {
  *
  * An end before its start is clamped to a zero-duration closed segment. The
  * segment's `end` is derived from that clamp, so the rail can never display a
- * start after its own end. An unparseable start keeps `end` as the raw recorded
- * value but reports null timing, so no 1970-based duration is invented.
+ * start after its own end. An unparseable start (or a present but unparseable
+ * end) keeps `end` as the raw recorded value but reports null timing and
+ * `endKnown=false`, so no 1970-based or false zero-length duration is invented.
  */
 export function projectSessionTimeline(
   bindings: SessionBindingInterval[],
@@ -65,8 +68,9 @@ export function projectSessionTimeline(
       const startMs = parseTimestamp(interval.boundAt)
       const open = !interval.unboundAt
       const parsedEnd = open ? null : parseTimestamp(interval.unboundAt)
+      const endKnown = !open && parsedEnd !== null
       const inverted = startMs !== null && parsedEnd !== null && parsedEnd < startMs
-      const endMs = startMs === null || open ? null : Math.max(startMs, parsedEnd ?? startMs)
+      const endMs = startMs !== null && parsedEnd !== null ? Math.max(startMs, parsedEnd) : null
       const end = open
         ? null
         : endMs !== null
@@ -79,6 +83,7 @@ export function projectSessionTimeline(
         end,
         startMs,
         endMs,
+        endKnown,
         durationMs: startMs === null || endMs === null ? null : endMs - startMs,
         open,
         inverted,
