@@ -15,6 +15,11 @@ func TestOpenAPIIsFresh(t *testing.T) {
 	path := filepath.Join("openapi", "pasture-local-api-"+sessionapi.PastureLocalAPIVersion+".json")
 	want, err := os.ReadFile(path)
 	require.NoError(t, err, "run `make generate` after changing the API contract")
-	require.Equal(t, string(want), string(sessionapi.OpenAPIBytes()),
+	document := string(sessionapi.OpenAPIBytes())
+	require.Equal(t, string(want), document,
 		"the committed OpenAPI artifact is stale; run `make generate`")
+	require.Contains(t, document, "session and epoch API",
+		"the API description must name the write surface; bind/unbind are not read-only")
+	require.NotContains(t, document, "read API",
+		"the API is not read-only; bind/unbind are writes")
 }
