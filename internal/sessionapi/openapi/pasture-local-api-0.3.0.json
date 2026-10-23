@@ -36,9 +36,19 @@
         "type": "object"
       },
       "BindingSource": {
+        "description": "explicit rows are written by bind, unbind, or the session-end tail and are authoritative. inferred rows are derived from store observations, never override an explicit binding, and are absent when the derivation is ambiguous.",
         "enum": [
           "explicit",
           "inferred"
+        ],
+        "type": "string"
+      },
+      "Confidence": {
+        "description": "How strongly the binding claims to be true, using the lifecycle confidence vocabulary. Explicit bindings are verified. An inferred binding is observed unless the store recorded a stronger derivation; the claim-ownership rule is observed, because it correlates a session claim with active ownership rather than a command that recorded this session's intent.",
+        "enum": [
+          "observed",
+          "correlated",
+          "verified"
         ],
         "type": "string"
       },
@@ -294,14 +304,23 @@
             "format": "date-time",
             "type": "string"
           },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
           "role": {
+            "description": "The protocol session role the bind recorded (epoch, architect, reviewer, supervisor, or worker).",
             "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/BindingSource"
           }
         },
         "required": [
           "bindingId",
           "role",
-          "boundAt"
+          "boundAt",
+          "source",
+          "confidence"
         ],
         "type": "object"
       },
@@ -314,6 +333,9 @@
             "format": "date-time",
             "type": "string"
           },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
           "endReason": {
             "type": "string"
           },
@@ -321,6 +343,7 @@
             "$ref": "#/components/schemas/EpochRef"
           },
           "role": {
+            "description": "For an explicit interval, the protocol session role a bind command recorded. For an inferred interval, the assignment slot the derivation read (currently owner-responsibility), because no command gave the session a role; clients must not read an inferred role as a protocol session role.",
             "type": "string"
           },
           "source": {
@@ -335,7 +358,8 @@
           "bindingId",
           "role",
           "boundAt",
-          "source"
+          "source",
+          "confidence"
         ],
         "type": "object"
       },
@@ -348,7 +372,7 @@
             "$ref": "#/components/schemas/SessionBinding"
           },
           "bindings": {
-            "description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` remains the current explicit binding.",
+            "description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` is the effective current binding: the latest explicit binding when one exists, otherwise the open inferred derivation.",
             "items": {
               "$ref": "#/components/schemas/SessionBindingInterval"
             },

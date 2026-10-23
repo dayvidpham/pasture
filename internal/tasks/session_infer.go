@@ -58,6 +58,12 @@ const (
 	// session a role, and inventing one would be a guess. A test pins the token
 	// against the gate vocabulary so the two cannot drift.
 	sessionInferenceRole = "owner-responsibility"
+
+	// sessionInferenceConfidence is the lifecycle confidence the claim-ownership
+	// rule earns. The rule correlates a first-claim-wins claim with an active
+	// ownership episode; no command recorded this session's intent, so calling
+	// it "verified" would overstate it. The read model carries the same token.
+	sessionInferenceConfidence = "observed"
 )
 
 // errSessionInferenceUnsupported reports a build whose store cannot answer the
@@ -77,6 +83,7 @@ type sessionInferredBinding struct {
 	BoundAt    int64
 	InferredAt int64
 	Reason     string
+	Confidence string
 }
 
 // sessionKey identifies one session without a binding row.
@@ -172,6 +179,7 @@ func planSessionInference(ctx context.Context, store lifecycleReceiptStore) ([]s
 			BoundAt:    claim.claimedAt,
 			InferredAt: now,
 			Reason:     sessionInferenceReason,
+			Confidence: sessionInferenceConfidence,
 		})
 	}
 	return out, nil
@@ -298,10 +306,10 @@ func sessionInferredBindingID(harness, session, epochID string) string {
 func sessionInferenceFailureLine(err error) string {
 	return fmt.Sprintf(
 		"pasture: session binding inference was skipped for this rebuild: %v. "+
-			"Why: either the claim actor's active owner-responsibility episodes could not be read before the rebuild's write transaction, or the derived rows could not be written. "+
+			"Why: either the claim actor's active owner-responsibility episodes could not be read before the rebuild's write transaction, or the derived rows could not be stored. "+
 			"Where: internal/tasks/session_infer.go, in planSessionInference or replaceSessionInferredBindings. "+
 			"When: during the session cache rebuild, while deriving or writing the inferred bindings. "+
-			"Impact: this rebuild produced no new inferred bindings; explicit bindings and session activity are unaffected, and the session cache is still usable. "+
+			"Impact: this rebuild cleared the inferred binding cache and wrote no replacement, so a provisional session-to-epoch binding is absent until the next successful rebuild; explicit bindings and session activity are unaffected, and the session cache is still usable. "+
 			"Fix: retry the rebuild; if it keeps failing, release other writers on the database file, then run `pasture migrate` and check the store's journal integrity.",
 		err)
 }
@@ -319,66 +327,22 @@ func writeSessionInferenceDiagnostic(store lifecycleReceiptStore, err error) {
 	fmt.Fprintln(sink, sessionInferenceFailureLine(err))
 }
 
-// sessionInferredBindingDDL creates the inference cache, its partial unique
-// index, and the trigger that makes an explicit binding authoritative the
-// moment it is written.
-//
-// The schema is created HERE rather than at store open because the table is a
-// disposable derivation cache: a store that has never rebuilt has nothing to
-// infer and nothing to inspect, and the read model treats the table's absence as
-// normal. Creating it in the rebuild's transaction also means the index and the
-// trigger cannot exist without the table they guard.
-var sessionInferredBindingDDL = []string{
-	`CREATE TABLE IF NOT EXISTS pasture_session_inferred_binding (
-		binding_id     TEXT PRIMARY KEY,
-		harness        TEXT NOT NULL,
-		session        TEXT NOT NULL,
-		epoch_id       TEXT NOT NULL,
-		role           TEXT NOT NULL,
-		bound_at       INTEGER NOT NULL,
-		unbound_at     INTEGER,
-		unbound_reason TEXT,
-		inferred_at    INTEGER NOT NULL,
-		reason         TEXT NOT NULL
-	)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS pasture_session_inferred_binding_open
-		ON pasture_session_inferred_binding (harness, session) WHERE unbound_at IS NULL`,
-	`CREATE TRIGGER IF NOT EXISTS pasture_session_inferred_binding_explicit
-		AFTER INSERT ON pasture_session_epoch_binding
-		BEGIN
-			DELETE FROM pasture_session_inferred_binding
-			WHERE harness = NEW.harness AND session = NEW.session;
-		END`,
-}
-
-// ensureSessionInferredBindings creates the inference schema if it is absent.
-// It runs inside the rebuild's transaction and therefore inside its savepoint.
-func ensureSessionInferredBindings(ctx context.Context, tx *sql.Tx) error {
-	for _, ddl := range sessionInferredBindingDDL {
-		if _, err := tx.ExecContext(ctx, ddl); err != nil {
-			return fmt.Errorf("the store refused to create the inferred session binding schema: %w — repair the database before rebuilding the session cache", err)
-		}
-	}
-	return nil
-}
-
 // replaceSessionInferredBindings replaces the inference cache inside the
 // rebuild's write transaction. The cache is disposable: it holds today's
 // derivation and nothing else, so a full replacement is the only operation that
 // cannot leave a stale guess behind.
 //
+// The table itself is created at store open (see ensurePastureTablesContext),
+// so a read-only or rebuild path never has to create schema mid-transaction.
+//
 // A session is skipped when an explicit binding row exists in any state
 // (explicit wins, dated or not) and when its latest occurrence ended the
 // session. Both filters are applied from the transaction's own read, so a
 // concurrent explicit bind committed before this transaction opened is seen.
-func replaceSessionInferredBindings(ctx context.Context, tx *sql.Tx, planned []sessionInferredBinding, explicit, ended map[sessionKey]struct{}) (int, error) {
-	if err := ensureSessionInferredBindings(ctx, tx); err != nil {
-		return 0, err
-	}
+func replaceSessionInferredBindings(ctx context.Context, tx *sql.Tx, planned []sessionInferredBinding, explicit, ended map[sessionKey]struct{}) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM `+sessionInferredBindingTable); err != nil {
-		return 0, fmt.Errorf("the store refused to clear the inferred session bindings: %w — repair the database before rebuilding the session cache", err)
+		return fmt.Errorf("the store refused to clear the inferred session bindings: %w — repair the database before rebuilding the session cache", err)
 	}
-	written := 0
 	for _, row := range planned {
 		key := sessionKey{harness: row.Harness, session: row.Session}
 		if _, authoritative := explicit[key]; authoritative {
@@ -389,14 +353,13 @@ func replaceSessionInferredBindings(ctx context.Context, tx *sql.Tx, planned []s
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO `+sessionInferredBindingTable+`
-				(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason, inferred_at, reason)
-			VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
-			row.BindingID, row.Harness, row.Session, row.EpochID, row.Role, row.BoundAt, row.InferredAt, row.Reason); err != nil {
-			return written, fmt.Errorf("the store refused an inferred session binding row for harness %q session %q: %w — repair the database before rebuilding the session cache", row.Harness, row.Session, err)
+				(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason, inferred_at, reason, confidence)
+			VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
+			row.BindingID, row.Harness, row.Session, row.EpochID, row.Role, row.BoundAt, row.InferredAt, row.Reason, row.Confidence); err != nil {
+			return fmt.Errorf("the store refused an inferred session binding row for harness %q session %q: %w — repair the database before rebuilding the session cache", row.Harness, row.Session, err)
 		}
-		written++
 	}
-	return written, nil
+	return nil
 }
 
 // clearSessionInferredBindings removes one session's inferred derivation. It is
@@ -405,13 +368,6 @@ func replaceSessionInferredBindings(ctx context.Context, tx *sql.Tx, planned []s
 // would state an end instant the store only knows as an upper bound, and the
 // next rebuild keeps no inferred history anyway.
 func clearSessionInferredBindings(ctx context.Context, tx *sql.Tx, harness, session string) error {
-	exists, err := sessionTableExists(ctx, tx, sessionInferredBindingTable)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM `+sessionInferredBindingTable+` WHERE harness = ? AND session = ?`,
 		harness, session); err != nil {

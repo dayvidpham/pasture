@@ -53,6 +53,7 @@ type inferredSnapshot struct {
 	UnboundAt     sql.NullInt64
 	UnboundReason sql.NullString
 	Reason        string
+	Confidence    string
 }
 
 // newInferenceStore opens the production store with a fixed store clock and a
@@ -120,7 +121,7 @@ func readInferredBindings(t *testing.T, store *trackerImpl) []inferredSnapshot {
 	t.Helper()
 	rows, err := store.auditDB.Query(`
 		SELECT binding_id, harness, session, epoch_id, role, bound_at,
-		       inferred_at, unbound_at, unbound_reason, reason
+		       inferred_at, unbound_at, unbound_reason, reason, confidence
 		FROM pasture_session_inferred_binding
 		ORDER BY harness, session`)
 	require.NoError(t, err)
@@ -130,7 +131,8 @@ func readInferredBindings(t *testing.T, store *trackerImpl) []inferredSnapshot {
 		var row inferredSnapshot
 		require.NoError(t, rows.Scan(
 			&row.BindingID, &row.Harness, &row.Session, &row.EpochID, &row.Role,
-			&row.BoundAt, &row.InferredAt, &row.UnboundAt, &row.UnboundReason, &row.Reason))
+			&row.BoundAt, &row.InferredAt, &row.UnboundAt, &row.UnboundReason, &row.Reason,
+			&row.Confidence))
 		out = append(out, row)
 	}
 	require.NoError(t, rows.Err())
@@ -164,6 +166,8 @@ func TestSessionInferenceDerivesUniqueOwnedEpoch(t *testing.T) {
 	require.Equal(t, epoch.String(), row.EpochID)
 	require.Equal(t, sessionInferenceRole, row.Role)
 	require.Equal(t, sessionInferenceReason, row.Reason)
+	require.Equal(t, sessionInferenceConfidence, row.Confidence,
+		"the claim-ownership rule is observed, not verified by a recorded command")
 	require.Equal(t, gateClock{}.Now().UnixNano(), row.BoundAt,
 		"the interval starts at the claim instant, the earliest store fact the derivation rests on")
 	require.Equal(t, gateClock{}.Now().UnixNano(), row.InferredAt)
@@ -312,32 +316,31 @@ func TestSessionInferenceNeverOverridesExplicitBinding(t *testing.T) {
 // TestSessionInferenceSkipsUnknownAndMalformedActors: a claim that names an
 // actor the store never registered, and a claim whose actor is not a canonical
 // actor identifier, both yield no inference. Neither is a rebuild fault.
+//
+// A projected epoch owned by a DIFFERENT actor is seeded first, and a control
+// session claimed by that owner is rebuilt in the same pass. The control row is
+// what proves the derivation actually ran: without it, an empty result would
+// also be explained by the epoch inventory being empty (the derivation's early
+// return) and the actor branches below would never execute.
 func TestSessionInferenceSkipsUnknownAndMalformedActors(t *testing.T) {
 	t.Parallel()
+	store, diagnostics := newInferenceStore(t)
+	owner := feasibilityActor(t, store, "infer-actor-owner")
+	seedOwnedEpochTask(t, store, owner, "infer-actor-owner")
+	gateClaim(t, store, owner, "session-control-owner")
+	unknown, err := provenance.ParseActorID("human-service/0193f1c0-0000-7000-8000-0000000000aa")
+	require.NoError(t, err)
+	claimAs(t, store, unknown.String(), "session-unknown-actor")
+	claimAs(t, store, "not-an-actor", "session-malformed-actor")
 
-	t.Run("unknown actor", func(t *testing.T) {
-		t.Parallel()
-		store, diagnostics := newInferenceStore(t)
-		unknown, err := provenance.ParseActorID("human-service/0193f1c0-0000-7000-8000-0000000000aa")
-		require.NoError(t, err)
-		claimAs(t, store, unknown.String(), "session-unknown-actor")
+	rebuildForInference(t, store)
 
-		rebuildForInference(t, store)
-
-		require.Empty(t, readInferredBindings(t, store))
-		require.Empty(t, diagnostics.String())
-	})
-
-	t.Run("malformed actor", func(t *testing.T) {
-		t.Parallel()
-		store, diagnostics := newInferenceStore(t)
-		claimAs(t, store, "not-an-actor", "session-malformed-actor")
-
-		rebuildForInference(t, store)
-
-		require.Empty(t, readInferredBindings(t, store))
-		require.Empty(t, diagnostics.String())
-	})
+	rows := readInferredBindings(t, store)
+	require.Len(t, rows, 1, "only the control session's unambiguous ownership is inferred")
+	require.Equal(t, "session-control-owner", rows[0].Session)
+	require.NotEqual(t, "session-unknown-actor", rows[0].Session)
+	require.NotEqual(t, "session-malformed-actor", rows[0].Session)
+	require.Empty(t, diagnostics.String())
 }
 
 // TestSessionInferenceSurvivesAbsentOwnershipAPI: a store whose journal does
@@ -371,10 +374,20 @@ func TestSessionInferenceWriteFaultLeavesTheCacheUsable(t *testing.T) {
 	actor := feasibilityActor(t, store, "infer-write-fault")
 	seedOwnedEpochTask(t, store, actor, "infer-write-fault")
 	gateClaim(t, store, actor, "session-write-fault")
-	// A same-named table with an incompatible shape makes the inference DDL's
-	// CREATE IF NOT EXISTS a no-op and its index/insert fail, which is exactly
-	// the fault the savepoint exists for.
-	_, err := store.auditDB.Exec(`CREATE TABLE pasture_session_inferred_binding (wrong TEXT)`)
+	// Derive once so the cache holds a real row the failed rebuild must not
+	// resurrect from its rollback.
+	rebuildForInference(t, store)
+	require.Len(t, readInferredBindings(t, store), 1)
+	// The table is created at open. Replace it with a shape that keeps every
+	// column the clear needs but loses confidence, so DELETE succeeds and the
+	// INSERT fails: exactly the fault the savepoint exists for.
+	_, err := store.auditDB.Exec(`DROP TABLE pasture_session_inferred_binding`)
+	require.NoError(t, err)
+	_, err = store.auditDB.Exec(`
+		CREATE TABLE pasture_session_inferred_binding (
+			binding_id TEXT PRIMARY KEY, harness TEXT NOT NULL, session TEXT NOT NULL,
+			epoch_id TEXT NOT NULL, role TEXT NOT NULL, bound_at INTEGER NOT NULL,
+			unbound_at INTEGER, unbound_reason TEXT, inferred_at INTEGER NOT NULL, reason TEXT NOT NULL)`)
 	require.NoError(t, err)
 
 	_, err = RebuildSessionState(t.Context(), store)
@@ -384,8 +397,13 @@ func TestSessionInferenceWriteFaultLeavesTheCacheUsable(t *testing.T) {
 	require.NoError(t, store.auditDB.QueryRow(`
 		SELECT count(*) FROM pasture_session_state WHERE harness = 'claude-code' AND session = 'session-write-fault'`).Scan(&sessions))
 	require.Equal(t, 1, sessions, "the activity cache still commits")
+	var inferred int
+	require.NoError(t, store.auditDB.QueryRow(`
+		SELECT count(*) FROM pasture_session_inferred_binding`).Scan(&inferred))
+	require.Zero(t, inferred, "a failed inference write commits no derivation rather than a stale one")
 	line := diagnostics.String()
 	require.Contains(t, line, "session binding inference was skipped")
+	require.Contains(t, line, "cleared the inferred binding cache")
 	require.Contains(t, line, "the session cache is still usable")
 }
 
@@ -423,6 +441,54 @@ func TestSessionInferenceSkipsUnclaimedSessions(t *testing.T) {
 	rebuildForInference(t, store)
 
 	require.Empty(t, readInferredBindings(t, store))
+}
+
+// TestSessionInferenceTreatsDuplicateOwnedEpisodesAsOneCandidate: the ownership
+// read can name the same epoch task from more than one row (a transfer or a
+// replayed episode). One task is one candidate, not ambiguity, so the
+// derivation still answers.
+func TestSessionInferenceTreatsDuplicateOwnedEpisodesAsOneCandidate(t *testing.T) {
+	t.Parallel()
+	epoch, err := provenance.ParseTaskID("file://epoch/00000000-0000-7000-8000-000000000001")
+	require.NoError(t, err)
+	other, err := provenance.ParseTaskID("file://epoch/00000000-0000-7000-8000-000000000002")
+	require.NoError(t, err)
+	epochs := map[string]struct{}{epoch.String(): {}, other.String(): {}}
+
+	duplicates := []provenance.OwnedTaskRow{
+		{TaskID: epoch, AssignmentID: "assignment-a"},
+		{TaskID: epoch, AssignmentID: "assignment-b"},
+	}
+	candidate, unambiguous := unambiguousOwnedEpoch(duplicates, epochs)
+	require.True(t, unambiguous, "two episode rows on one epoch task are one candidate")
+	require.Equal(t, epoch.String(), candidate)
+
+	ambiguous := []provenance.OwnedTaskRow{{TaskID: epoch}, {TaskID: other}}
+	_, unambiguous = unambiguousOwnedEpoch(ambiguous, epochs)
+	require.False(t, unambiguous, "two distinct epoch tasks are still ambiguous")
+}
+
+// TestSessionInferenceSkipsZeroClaimInstant: a claim with no instant cannot date
+// an interval, so the derivation never backdates one from a zero value. A
+// control session claimed with a real instant proves the rebuild ran.
+func TestSessionInferenceSkipsZeroClaimInstant(t *testing.T) {
+	t.Parallel()
+	store, diagnostics := newInferenceStore(t)
+	actor := feasibilityActor(t, store, "infer-zero-claim")
+	seedOwnedEpochTask(t, store, actor, "infer-zero-claim")
+	gateClaim(t, store, actor, "session-live-claim")
+	_, err := store.auditDB.Exec(`
+		INSERT INTO pasture_session_claim (harness, session, actor, claimed_at)
+		VALUES ('claude-code', 'session-zero-claim', ?, 0)`, actor.String())
+	require.NoError(t, err)
+
+	rebuildForInference(t, store)
+
+	rows := readInferredBindings(t, store)
+	require.Len(t, rows, 1)
+	require.Equal(t, "session-live-claim", rows[0].Session)
+	require.NotEqual(t, "session-zero-claim", rows[0].Session)
+	require.Empty(t, diagnostics.String())
 }
 
 // TestSessionInferenceRoleMatchesGateVocabulary pins the stored role token to
