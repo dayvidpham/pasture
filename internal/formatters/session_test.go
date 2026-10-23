@@ -166,8 +166,36 @@ func TestFormatSessionDetailTextAndJSON(t *testing.T) {
 				LastSeen:  &last,
 				LastEvent: "SessionEnd",
 			},
-			Binding: &sessionapi.SessionBinding{BindingID: "binding-detail", Role: "reviewer", BoundAt: first},
-			End:     &sessionapi.EndMarker{EndedAt: ended, EndReason: "unbind"},
+			Binding: &sessionapi.SessionBinding{
+				BindingID:  "binding-detail",
+				Role:       "reviewer",
+				BoundAt:    first,
+				Source:     sessionapi.BindingSourceExplicit,
+				Confidence: sessionapi.ConfidenceVerified,
+			},
+			Bindings: []sessionapi.SessionBindingInterval{
+				{
+					BindingID:  "binding-detail-previous",
+					Role:       "owner-responsibility",
+					BoundAt:    sessionTestTime(90),
+					UnboundAt:  ptrTime(sessionTestTime(45)),
+					EndReason:  "session_end",
+					Source:     sessionapi.BindingSourceInferred,
+					Confidence: sessionapi.ConfidenceObserved,
+					Epoch:      &sessionapi.EpochRef{ID: "file://epoch/previous", Title: "Previous epoch"},
+				},
+				{
+					BindingID:  "binding-detail",
+					Role:       "reviewer",
+					BoundAt:    first,
+					UnboundAt:  ptrTime(ended),
+					EndReason:  "unbind",
+					Source:     sessionapi.BindingSourceExplicit,
+					Confidence: sessionapi.ConfidenceVerified,
+					Epoch:      &sessionapi.EpochRef{ID: "file://epoch/detail", Title: "Detail epoch"},
+				},
+			},
+			End: &sessionapi.EndMarker{EndedAt: ended, EndReason: "unbind"},
 		},
 	}
 
@@ -183,9 +211,15 @@ func TestFormatSessionDetailTextAndJSON(t *testing.T) {
 		"Epoch title: Detail epoch",
 		"Role:       reviewer",
 		"Binding:    binding-detail",
+		"Source:     explicit",
+		"Confidence: verified",
 		"Last event: SessionEnd",
 		"End reason: unbind",
 		"Revision:   9",
+		// Every historical interval, with provenance and the end state.
+		"Bindings:   2",
+		"1. bound 2026-10-23T10:30:00Z; unbound 2026-10-23T11:15:00Z; endReason=session_end; source=inferred; confidence=observed; role=owner-responsibility; epoch=file://epoch/previous; title=Previous epoch",
+		"2. bound 2026-10-23T11:30:00Z; unbound 2026-10-23T11:59:00Z; endReason=unbind; source=explicit; confidence=verified; role=reviewer; epoch=file://epoch/detail; title=Detail epoch",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("detail text is missing %q:\n%s", want, text)
@@ -206,7 +240,42 @@ func TestFormatSessionDetailTextAndJSON(t *testing.T) {
 	if decoded.Session.End == nil || decoded.Session.End.EndReason != "unbind" {
 		t.Errorf("json detail lost the end marker: %+v", decoded.Session)
 	}
+	if got, want := len(decoded.Session.Bindings), len(detail.Session.Bindings); got != want {
+		t.Fatalf("json detail bindings = %d, want %d", got, want)
+	}
+	if decoded.Session.Bindings[0].Source != sessionapi.BindingSourceInferred || decoded.Session.Bindings[0].Confidence != sessionapi.ConfidenceObserved {
+		t.Errorf("json detail lost the inferred interval provenance: %+v", decoded.Session.Bindings[0])
+	}
+	if decoded.Session.Bindings[1].UnboundAt == nil || decoded.Session.Bindings[1].EndReason != "unbind" {
+		t.Errorf("json detail lost the closed interval end: %+v", decoded.Session.Bindings[1])
+	}
 }
+
+func TestFormatSessionDetailWithoutBindingHistory(t *testing.T) {
+	t.Parallel()
+
+	detail := sessionapi.Detail{
+		Revision: 1,
+		AsOf:     sessionTestTime(0),
+		Session: sessionapi.SessionView{
+			Harness:         "codex",
+			NativeSessionID: "unbound-session",
+			Activity:        sessionapi.SessionActivity{State: sessionapi.StateUnknown},
+		},
+	}
+	text, err := formatters.FormatSessionDetail(detail, types.OutputText)
+	if err != nil {
+		t.Fatalf("text render: %v", err)
+	}
+	if !strings.Contains(text, "Bindings:   (none)") {
+		t.Errorf("detail text must explain the absence of binding history:\n%s", text)
+	}
+	if !strings.Contains(text, "Binding:    -") {
+		t.Errorf("detail text must mark the missing current binding:\n%s", text)
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 func TestFormatSessionRejectsUnknownFormat(t *testing.T) {
 	t.Parallel()

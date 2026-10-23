@@ -361,7 +361,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrInvalidFilter):
 		writeError(w, http.StatusBadRequest, "invalid_filter", err.Error())
 	case errors.Is(err, ErrStaleCache):
-		writeError(w, http.StatusServiceUnavailable, "stale_session_cache", "the session cache is behind the journal; the next serve startup or rebuild repairs it")
+		writeError(w, http.StatusServiceUnavailable, "stale_session_cache", "the session cache is behind the journal; run `pasture session list` or `pasture serve --backfill` to rebuild it")
 	default:
 		writeError(w, http.StatusInternalServerError, "storage_fault", "the session store could not be read; inspect the serve log and repair the database")
 	}

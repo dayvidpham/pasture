@@ -2,74 +2,14 @@ package main_test
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
-	"github.com/dayvidpham/pasture/internal/tasks"
-	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/internal/sessionapi/sessionapitest"
 )
-
-// newSessionCLIDB builds a fresh unified store through the production opener and
-// seeds the bindings and claims the session cache is derived from. The command
-// itself runs the journal-aware rebuild, so the CLI tests exercise the same read
-// path an operator runs.
-func newSessionCLIDB(t *testing.T) string {
-	t.Helper()
-
-	path := filepath.Join(t.TempDir(), "pasture.db")
-	tracker, err := tasks.OpenTaskTracker(path)
-	if err != nil {
-		t.Fatalf("open tracker: %v", err)
-	}
-	if err := tracker.Close(); err != nil {
-		t.Fatalf("close tracker: %v", err)
-	}
-
-	db, err := dbconn.OpenSharedDBWithProfile(path, timeouts.TestProfile())
-	if err != nil {
-		t.Fatalf("open seeded store: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	now := time.Now().UnixNano()
-	minute := int64(time.Minute)
-	endedAt := now - 5*minute
-	endedReason := "session_end"
-
-	bindings := []struct {
-		id        string
-		harness   string
-		session   string
-		epoch     string
-		role      string
-		boundAt   int64
-		unboundAt *int64
-		reason    *string
-	}{
-		{id: "binding-active", harness: "claude-code", session: "active-session", epoch: "file://epoch/one", role: "implementer", boundAt: now - minute},
-		{id: "binding-idle", harness: "claude-code", session: "idle-session", epoch: "file://epoch/two", role: "reviewer", boundAt: now - 20*minute},
-		{id: "binding-ended", harness: "opencode", session: "ended-session", epoch: "file://epoch/two", role: "worker", boundAt: now - 30*minute, unboundAt: &endedAt, reason: &endedReason},
-	}
-	for _, b := range bindings {
-		if _, err := db.ExecContext(t.Context(), `
-			INSERT INTO pasture_session_epoch_binding
-				(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			b.id, b.harness, b.session, b.epoch, b.role, b.boundAt, b.unboundAt, b.reason); err != nil {
-			t.Fatalf("seed binding %s: %v", b.id, err)
-		}
-	}
-	if _, err := db.ExecContext(t.Context(), `
-		INSERT INTO pasture_session_claim (harness, session, actor, claimed_at)
-		VALUES ('codex', 'unknown-session', 'file://actor/session-cli', ?)`, now-2*minute); err != nil {
-		t.Fatalf("seed claim: %v", err)
-	}
-	return path
-}
 
 func TestCLI_SessionInventoryHasListAndShowOnly(t *testing.T) {
 	t.Parallel()
@@ -89,13 +29,13 @@ func TestCLI_SessionInventoryHasListAndShowOnly(t *testing.T) {
 func TestCLI_SessionListAndShow(t *testing.T) {
 	t.Parallel()
 
-	db := newSessionCLIDB(t)
+	db := sessionapitest.SeedStore(t)
 
 	list := runCLI(t, "--db", db, "session", "list")
 	if list.exitCode != 0 {
 		t.Fatalf("session list exit %d: %s", list.exitCode, list.stderr)
 	}
-	for _, want := range []string{"STATE", "active-session", "idle-session", "ended-session", "unknown-session"} {
+	for _, want := range []string{"STATE", sessionapitest.ActiveSession, sessionapitest.IdleSession, sessionapitest.EndedSession, sessionapitest.UnknownSession} {
 		if !strings.Contains(list.stdout, want) {
 			t.Errorf("text list is missing %q:\n%s", want, list.stdout)
 		}
@@ -117,10 +57,10 @@ func TestCLI_SessionListAndShow(t *testing.T) {
 		states[item.NativeSessionID] = item.Activity.State
 	}
 	wantStates := map[string]sessionapi.ActivityState{
-		"active-session":  sessionapi.StateActive,
-		"idle-session":    sessionapi.StateIdle,
-		"ended-session":   sessionapi.StateEnded,
-		"unknown-session": sessionapi.StateUnknown,
+		sessionapitest.ActiveSession:  sessionapi.StateActive,
+		sessionapitest.IdleSession:    sessionapi.StateIdle,
+		sessionapitest.EndedSession:   sessionapi.StateEnded,
+		sessionapitest.UnknownSession: sessionapi.StateUnknown,
 	}
 	for session, want := range wantStates {
 		if states[session] != want {
@@ -128,17 +68,26 @@ func TestCLI_SessionListAndShow(t *testing.T) {
 		}
 	}
 
-	show := runCLI(t, "--db", db, "session", "show", "claude-code", "active-session")
+	show := runCLI(t, "--db", db, "session", "show", sessionapitest.HarnessClaudeCode, sessionapitest.ActiveSession)
 	if show.exitCode != 0 {
 		t.Fatalf("session show exit %d: %s", show.exitCode, show.stderr)
 	}
-	for _, want := range []string{"Harness:    claude-code", "Session:    active-session", "State:      active", "file://epoch/one"} {
+	for _, want := range []string{
+		"Harness:    claude-code",
+		"Session:    active-session",
+		"State:      active",
+		"Source:     explicit",
+		"Confidence: verified",
+		"Bindings:   2",
+		sessionapitest.EpochOne,
+		sessionapitest.EpochTwo,
+	} {
 		if !strings.Contains(show.stdout, want) {
 			t.Errorf("detail text is missing %q:\n%s", want, show.stdout)
 		}
 	}
 
-	jsonShow := runCLI(t, "--db", db, "--format", "json", "session", "show", "claude-code", "active-session")
+	jsonShow := runCLI(t, "--db", db, "--format", "json", "session", "show", sessionapitest.HarnessClaudeCode, sessionapitest.ActiveSession)
 	if jsonShow.exitCode != 0 {
 		t.Fatalf("json session show exit %d: %s", jsonShow.exitCode, jsonShow.stderr)
 	}
@@ -146,11 +95,14 @@ func TestCLI_SessionListAndShow(t *testing.T) {
 	if err := json.Unmarshal([]byte(jsonShow.stdout), &detail); err != nil {
 		t.Fatalf("decode session detail: %v\n%s", err, jsonShow.stdout)
 	}
-	if detail.Session.NativeSessionID != "active-session" {
+	if detail.Session.NativeSessionID != sessionapitest.ActiveSession {
 		t.Errorf("detail session = %q", detail.Session.NativeSessionID)
 	}
+	if len(detail.Session.Bindings) != 2 {
+		t.Errorf("detail bindings = %d, want 2", len(detail.Session.Bindings))
+	}
 
-	missing := runCLI(t, "--db", db, "session", "show", "claude-code", "missing-session")
+	missing := runCLI(t, "--db", db, "session", "show", sessionapitest.HarnessClaudeCode, "missing-session")
 	if missing.exitCode == 0 {
 		t.Fatalf("missing session must exit non-zero:\n%s", missing.stdout)
 	}
@@ -161,5 +113,97 @@ func TestCLI_SessionListAndShow(t *testing.T) {
 	invalid := runCLI(t, "--db", db, "session", "list", "--state", "bogus")
 	if invalid.exitCode != 1 {
 		t.Fatalf("invalid state exit = %d, want validation exit 1\n%s", invalid.exitCode, invalid.stderr)
+	}
+
+	zeroLimit := runCLI(t, "--db", db, "session", "list", "--limit", "0")
+	if zeroLimit.exitCode != 1 {
+		t.Fatalf("--limit 0 exit = %d, want validation exit 1\n%s", zeroLimit.exitCode, zeroLimit.stderr)
+	}
+	if !strings.Contains(zeroLimit.stderr, "outside the supported range") {
+		t.Errorf("--limit 0 error is not actionable:\n%s", zeroLimit.stderr)
+	}
+}
+
+func TestCLI_SessionListFlagsAndCursorRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	db := sessionapitest.SeedStore(t)
+
+	first := runCLI(t, "--db", db, "--format", "json", "session", "list",
+		"--harness", sessionapitest.HarnessClaudeCode, "--limit", "1")
+	if first.exitCode != 0 {
+		t.Fatalf("first page exit %d: %s", first.exitCode, first.stderr)
+	}
+	var firstPage sessionapi.Page
+	if err := json.Unmarshal([]byte(first.stdout), &firstPage); err != nil {
+		t.Fatalf("decode first page: %v\n%s", err, first.stdout)
+	}
+	if len(firstPage.Items) != 1 {
+		t.Fatalf("first page items = %d, want 1\n%s", len(firstPage.Items), first.stdout)
+	}
+	if firstPage.Items[0].Harness != sessionapitest.HarnessClaudeCode {
+		t.Errorf("first page harness = %q, want claude-code", firstPage.Items[0].Harness)
+	}
+	if firstPage.Next == "" {
+		t.Fatalf("first page must carry a next cursor for the second claude-code session\n%s", first.stdout)
+	}
+
+	second := runCLI(t, "--db", db, "--format", "json", "session", "list",
+		"--harness", sessionapitest.HarnessClaudeCode, "--limit", "1", "--cursor", firstPage.Next)
+	if second.exitCode != 0 {
+		t.Fatalf("second page exit %d: %s", second.exitCode, second.stderr)
+	}
+	var secondPage sessionapi.Page
+	if err := json.Unmarshal([]byte(second.stdout), &secondPage); err != nil {
+		t.Fatalf("decode second page: %v\n%s", err, second.stdout)
+	}
+	if len(secondPage.Items) != 1 {
+		t.Fatalf("second page items = %d, want 1\n%s", len(secondPage.Items), second.stdout)
+	}
+	if secondPage.Items[0].Harness != sessionapitest.HarnessClaudeCode {
+		t.Errorf("second page harness = %q, want claude-code", secondPage.Items[0].Harness)
+	}
+	if secondPage.Items[0].NativeSessionID == firstPage.Items[0].NativeSessionID {
+		t.Errorf("cursor round-trip repeated %q", secondPage.Items[0].NativeSessionID)
+	}
+	if secondPage.Next != "" {
+		t.Errorf("second page should be the last claude-code page, got next %q", secondPage.Next)
+	}
+
+	badCursor := runCLI(t, "--db", db, "session", "list", "--cursor", "not-a-cursor")
+	if badCursor.exitCode != 1 {
+		t.Fatalf("invalid cursor exit = %d, want validation exit 1\n%s", badCursor.exitCode, badCursor.stderr)
+	}
+	if !strings.Contains(badCursor.stderr, "cursor") {
+		t.Errorf("invalid cursor error is not actionable:\n%s", badCursor.stderr)
+	}
+}
+
+func TestCLI_SessionReadDoesNotCreateAMissingStore(t *testing.T) {
+	t.Parallel()
+
+	db := filepath.Join(t.TempDir(), "missing", "pasture.db")
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Fatalf("precondition: %q must not exist: %v", db, err)
+	}
+
+	list := runCLI(t, "--db", db, "session", "list")
+	if list.exitCode != 2 {
+		t.Fatalf("session list exit = %d, want connection exit 2\n%s", list.exitCode, list.stderr)
+	}
+	if !strings.Contains(list.stderr, "No pasture database exists") {
+		t.Errorf("missing-store error is not actionable:\n%s", list.stderr)
+	}
+	if !strings.Contains(list.stderr, "pasture task") {
+		t.Errorf("missing-store error does not name the creation command:\n%s", list.stderr)
+	}
+
+	show := runCLI(t, "--db", db, "session", "show", sessionapitest.HarnessClaudeCode, "any")
+	if show.exitCode != 2 {
+		t.Fatalf("session show exit = %d, want connection exit 2\n%s", show.exitCode, show.stderr)
+	}
+
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Fatalf("a session read created the store at %q: %v", db, err)
 	}
 }

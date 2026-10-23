@@ -56,9 +56,11 @@ func FormatSessionPage(page sessionapi.Page, format types.OutputFormat) (string,
 
 // FormatSessionDetail renders one session.
 //
-// JSON mode: the sessionapi.Detail shape.
-// Text mode: a labelled block including the epoch, binding, activity instants,
-// and the end marker when the session has ended.
+// JSON mode: the sessionapi.Detail shape, including every historical binding
+// interval.
+// Text mode: a labelled block with the effective current binding, the activity
+// instants, and one line per historical interval carrying boundAt,
+// unboundAt/open, source, confidence, end reason, and epoch identity.
 func FormatSessionDetail(detail sessionapi.Detail, format types.OutputFormat) (string, error) {
 	switch format {
 	case types.OutputJSON:
@@ -79,8 +81,8 @@ func FormatSessionDetail(detail sessionapi.Detail, format types.OutputFormat) (s
 func formatSessionPageText(page sessionapi.Page) string {
 	if len(page.Items) == 0 {
 		return "No sessions recorded yet.\n\n" +
-			"A session appears after its harness records a lifecycle event, or\n" +
-			"after an explicit session bind."
+			"A session appears after its harness records a lifecycle event, an\n" +
+			"explicit session bind, or an inferred claim-ownership binding."
 	}
 	var b strings.Builder
 	tw := tabwriter.NewWriter(&b, 0, 4, 2, ' ', 0)
@@ -119,15 +121,22 @@ func formatSessionDetailText(detail sessionapi.Detail) string {
 		lines = append(lines, "Epoch:      "+sessionMissing)
 	}
 	if s.Binding != nil {
-		lines = append(lines, fmt.Sprintf("Role:       %s", s.Binding.Role))
-		lines = append(lines, fmt.Sprintf("Binding:    %s", s.Binding.BindingID))
-		lines = append(lines, fmt.Sprintf("Bound at:   %s", sessionInstant(&s.Binding.BoundAt)))
+		lines = append(lines,
+			fmt.Sprintf("Role:       %s", s.Binding.Role),
+			fmt.Sprintf("Binding:    %s", s.Binding.BindingID),
+			fmt.Sprintf("Bound at:   %s", sessionInstant(&s.Binding.BoundAt)),
+			fmt.Sprintf("Source:     %s", s.Binding.Source),
+			fmt.Sprintf("Confidence: %s", s.Binding.Confidence),
+		)
+	} else {
+		lines = append(lines, "Binding:    "+sessionMissing)
 	}
 	lines = append(lines,
 		fmt.Sprintf("First seen: %s", sessionInstant(s.Activity.FirstSeen)),
 		fmt.Sprintf("Last seen:  %s", sessionInstant(s.Activity.LastSeen)),
 		fmt.Sprintf("Last event: %s", sessionTextOrMissing(s.Activity.LastEvent)),
 	)
+	lines = append(lines, formatSessionBindingIntervals(s.Bindings)...)
 	if s.End != nil {
 		lines = append(lines,
 			fmt.Sprintf("Ended at:   %s", sessionInstant(&s.End.EndedAt)),
@@ -139,6 +148,49 @@ func formatSessionDetailText(detail sessionapi.Detail) string {
 		fmt.Sprintf("As of:      %s", detail.AsOf.UTC().Format(sessionTimeLayout)),
 	)
 	return strings.Join(lines, "\n")
+}
+
+// formatSessionBindingIntervals renders every historical binding, not only the
+// effective current one. Provenance is part of the operator answer: an inferred
+// interval and an explicit interval mean different things even when they name
+// the same epoch.
+func formatSessionBindingIntervals(intervals []sessionapi.SessionBindingInterval) []string {
+	if len(intervals) == 0 {
+		return []string{"Bindings:   (none)"}
+	}
+	lines := []string{fmt.Sprintf("Bindings:   %d", len(intervals))}
+	for i, interval := range intervals {
+		lines = append(lines, fmt.Sprintf("  %d. %s", i+1, formatSessionBindingInterval(interval)))
+	}
+	return lines
+}
+
+func formatSessionBindingInterval(interval sessionapi.SessionBindingInterval) string {
+	unbound := "open"
+	if interval.UnboundAt != nil {
+		unbound = "unbound " + sessionInstant(interval.UnboundAt)
+	}
+	epoch := sessionMissing
+	title := sessionMissing
+	if interval.Epoch != nil {
+		if interval.Epoch.ID != "" {
+			epoch = interval.Epoch.ID
+		}
+		if interval.Epoch.Title != "" {
+			title = interval.Epoch.Title
+		}
+	}
+	return fmt.Sprintf(
+		"bound %s; %s; endReason=%s; source=%s; confidence=%s; role=%s; epoch=%s; title=%s",
+		sessionInstant(&interval.BoundAt),
+		unbound,
+		sessionTextOrMissing(interval.EndReason),
+		interval.Source,
+		interval.Confidence,
+		sessionTextOrMissing(interval.Role),
+		epoch,
+		title,
+	)
 }
 
 func sessionEpochCell(s sessionapi.SessionView) string {
