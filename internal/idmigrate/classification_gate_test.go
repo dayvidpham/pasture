@@ -62,10 +62,17 @@ func storeSchema(t *testing.T, path string) []schemaColumn {
 
 // classifiedStore builds a current production store: the combined Provenance
 // and pasture schema with every table the conversion or the dry run can meet.
+//
+// The inference cache is created only by a session-state rebuild, not at store
+// open, so the fixture runs that production path once. Without it the walk would
+// miss a table production can create, and an unclassified identity-shaped column
+// inside it would pass the gate silently.
 func classifiedStore(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "classified.db")
 	tracker, err := tasks.OpenTaskTracker(path)
+	require.NoError(t, err)
+	_, err = tasks.RebuildSessionState(context.Background(), tracker)
 	require.NoError(t, err)
 	require.NoError(t, tracker.Close())
 	return path

@@ -27,6 +27,14 @@ var pastureIdentityColumns = []struct{ table, column string }{
 	{"pasture_well_known_agents", "agent_id"},
 	{"pasture_system_identity", "committer_actor_id"},
 	{"pasture_session_claim", "actor"},
+	// epoch_id names a task in both binding relations: the explicit bind
+	// refuses an epoch that does not exist in tasks, and the inferred row is
+	// derived from a Provenance ownership TaskID. A task id is a declared
+	// namespace-plus-UUID identity, so both columns convert with the tasks they
+	// name. The sibling binding_id handles are minted or derived labels, not
+	// identities, and are recorded in pasturePreservedColumns.
+	{"pasture_session_epoch_binding", "epoch_id"},
+	{"pasture_session_inferred_binding", "epoch_id"},
 }
 
 // pastureIdentityArrayColumns is the CLOSED set of pasture-owned TEXT columns
@@ -53,6 +61,13 @@ var pasturePreservedColumns = []struct{ table, column, reason string }{
 	{"session_entries", "parent_entry_id", "opaque audit session-entry key"},
 	{"session_entries", "session_id", "opaque audit session key"},
 	{"session_entries", "tool_call_id", "opaque vendor tool-call handle"},
+	// The explicit bind mints a bare UUID and the inference rebuild derives a
+	// deterministic "inferred-<sha256>" handle; neither carries a namespace and
+	// neither is ever parsed or resolved. Rewriting one would rename a binding
+	// that no owner identifies as an identity and would break the deterministic
+	// handle's stability across a conversion.
+	{"pasture_session_epoch_binding", "binding_id", "minted UUID binding handle; equality-only projection key, never parsed or resolved"},
+	{"pasture_session_inferred_binding", "binding_id", "derived deterministic binding handle; equality-only projection key, never parsed or resolved"},
 }
 
 // pastureSpecialColumns is the CLOSED set of pasture-owned identity-bearing
