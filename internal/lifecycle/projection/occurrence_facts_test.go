@@ -1,6 +1,7 @@
 package projection_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ func TestReadOccurrenceFactsReturnsJournalTruth(t *testing.T) {
 		{Kind: model.BindingSession, NativeName: "session_id", Value: "facts-session"},
 	})
 
-	facts, err := projection.ReadOccurrenceFacts(tracker.Journal())
+	facts, err := projection.ReadOccurrenceFacts(context.Background(), tracker.Journal())
 	require.NoError(t, err)
 	require.Len(t, facts, 1)
 	require.NotEmpty(t, facts[0].Contract.String())

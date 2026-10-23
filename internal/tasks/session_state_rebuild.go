@@ -119,10 +119,12 @@ func EnsureSessionState(ctx context.Context, tracker protocol.TaskTracker) (Sess
 	return out, true, err
 }
 
-// RebuildSessionState rebuilds the disposable occurrence projection and the
-// session cache in ONE immediate transaction. The binding rows own the end;
-// activity fields are derived from the latest occurrence plus the first/last
-// timestamps of bindings and the first-claim-wins claim.
+// RebuildSessionState rebuilds the disposable session cache from journal truth
+// in ONE immediate transaction. It deliberately reads occurrence facts without
+// replaying the occurrence projection or its semantic envelope checks. The
+// binding rows own the end; activity fields are derived from the latest
+// occurrence plus the first/last timestamps of bindings and the first-claim-
+// wins claim.
 func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (SessionStateRebuildOutcome, error) {
 	store, ok := tracker.(sessionTailStore)
 	if !ok || store.auditDBHandle() == nil {
@@ -132,10 +134,12 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 	if !ok || storeWithJournal.Journal() == nil {
 		return SessionStateRebuildOutcome{}, sessionClaimError("the tracker has no lifecycle journal", "use tasks.OpenTaskTracker")
 	}
+	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().WorkflowResult())
+	defer cancel()
 	// Read journal truth BEFORE taking the write transaction. The tracker's
 	// pool is size one in production, so a pooled journal read issued inside
 	// the transaction would wait on the transaction's own connection.
-	facts, err := projection.ReadOccurrenceFacts(storeWithJournal.Journal())
+	facts, err := projection.ReadOccurrenceFacts(bounded, storeWithJournal.Journal())
 	if err != nil {
 		return SessionStateRebuildOutcome{}, err
 	}
@@ -146,8 +150,6 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 		}
 	}
 
-	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().WorkflowResult())
-	defer cancel()
 	tx, err := store.auditDBHandle().BeginTx(bounded, nil)
 	if err != nil {
 		return SessionStateRebuildOutcome{}, sessionClaimError("the store refused the session-state rebuild transaction: "+err.Error(), "release other store writers or repair the database, then retry")

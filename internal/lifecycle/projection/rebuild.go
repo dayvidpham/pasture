@@ -74,10 +74,24 @@ type occurrenceRow struct {
 // validate every supplied ref. Validation failure rolls the caller back
 // before any projection row is exposed.
 func readOccurrenceRows(reader DefinitionResolver) ([]occurrenceRow, provenance.JournalID, error) {
+	return readOccurrenceRowsWithValidation(context.Background(), reader, true)
+}
+
+// readOccurrenceFactsRows reads the same journal truth without the semantic
+// envelope checks. The projection rebuild owns those checks; the session cache
+// is a separate disposable read model that must not pay for them.
+func readOccurrenceFactsRows(ctx context.Context, reader DefinitionResolver) ([]occurrenceRow, provenance.JournalID, error) {
+	return readOccurrenceRowsWithValidation(ctx, reader, false)
+}
+
+func readOccurrenceRowsWithValidation(ctx context.Context, reader DefinitionResolver, validate bool) ([]occurrenceRow, provenance.JournalID, error) {
 	query := provenance.EvidenceQuery{Kinds: occurrenceEvidenceKinds, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
 	var rows []occurrenceRow
 	watermark := provenance.JournalID(0)
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, projectionError("Lifecycle occurrence evidence read was canceled.", "The caller's deadline expired before the bounded journal query completed.", "No projection rows were changed.", "Retry with a larger --backfill budget or a smaller journal.", err)
+		}
 		page, err := reader.QueryEvidence(query)
 		if err != nil {
 			return nil, 0, projectionError("Lifecycle occurrence evidence could not be read for projection rebuild.", "The bounded journal query failed before the disposable projection was touched.", "No projection rows were changed.", "Repair the journal query failure and retry the rebuild.", err)
@@ -94,8 +108,10 @@ func readOccurrenceRows(reader DefinitionResolver) ([]occurrenceRow, provenance.
 			if err != nil {
 				return nil, 0, projectionError("A lifecycle occurrence journal row carries an invalid contract.", fmt.Sprintf("Evidence row %d does not name a runtime contract.", evidence.JournalID), "No projection rows were changed.", "Repair or restore the malformed journal row before rebuilding.", err)
 			}
-			if err := receipt.ValidateStoredOccurrenceEnvelope(reader, evidence.EvidenceKind, contract, payload.Envelope, watermark); err != nil {
-				return nil, 0, projectionError("A lifecycle occurrence journal row failed envelope validation.", fmt.Sprintf("Evidence row %d is not a complete owner-resolved envelope.", evidence.JournalID), "No projection rows were changed.", "Restore the damaged journal row from a verified backup before rebuilding.", err)
+			if validate {
+				if err := receipt.ValidateStoredOccurrenceEnvelope(reader, evidence.EvidenceKind, contract, payload.Envelope, watermark); err != nil {
+					return nil, 0, projectionError("A lifecycle occurrence journal row failed envelope validation.", fmt.Sprintf("Evidence row %d is not a complete owner-resolved envelope.", evidence.JournalID), "No projection rows were changed.", "Restore the damaged journal row from a verified backup before rebuilding.", err)
+				}
 			}
 			rows = append(rows, occurrenceRow{journalID: evidence.JournalID, operation: evidence.ProducingOperationID, kind: evidence.EvidenceKind, recordedAt: evidence.RecordedAt.UnixNano(), actor: evidence.EffectiveActorID.String(), payload: payload})
 		}
@@ -453,11 +469,11 @@ type OccurrenceFact struct {
 // ReadOccurrenceFacts reads committed occurrence evidence in journal order.
 // The semantic envelope checks remain the projection rebuild's job; this entry
 // is only for consumers that derive a non-projection view from the same facts.
-func ReadOccurrenceFacts(journal provenance.Journal) ([]OccurrenceFact, error) {
+func ReadOccurrenceFacts(ctx context.Context, journal provenance.Journal) ([]OccurrenceFact, error) {
 	if journal == nil {
 		return nil, projectionError("The lifecycle occurrence facts cannot be read.", "A Provenance journal is required.", "No occurrence facts were read.", "Open the unified store and retry.", nil)
 	}
-	rows, _, err := readOccurrenceRows(journalResolver{Journal: journal})
+	rows, _, err := readOccurrenceFactsRows(ctx, journalResolver{Journal: journal})
 	if err != nil {
 		return nil, err
 	}
