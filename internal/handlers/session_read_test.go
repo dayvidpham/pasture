@@ -263,7 +263,7 @@ func TestSessionReadsRejectUnopenableStorePaths(t *testing.T) {
 	})
 }
 
-func TestSessionReadsOnAnUnwritableStoreExitStorageOrConnection(t *testing.T) {
+func TestSessionReadsOnAnUnwritableStoreExitConnection(t *testing.T) {
 	t.Parallel()
 
 	if os.Geteuid() == 0 {
@@ -275,8 +275,49 @@ func TestSessionReadsOnAnUnwritableStoreExitStorageOrConnection(t *testing.T) {
 
 	code, err := handlers.SessionList(t.Context(), handlers.SessionListInput{DBPath: dbPath, Limit: 50, Output: &bytes.Buffer{}}, types.OutputText)
 	require.Error(t, err)
-	require.Contains(t, []int{2, 5}, code, "an unwritable store must fail as connection or storage")
+	require.Equal(t, 2, code, "the tracker's structured store-open failure is a connection error")
 	require.Equal(t, pasterrors.ExitCode(err), code)
+	require.Contains(t, err.Error(), "Couldn't open")
+}
+
+// The cache refresh is a write. A trigger that aborts its DELETE makes the
+// failure deterministic after the cache has been populated once, so this pins
+// sessionCacheError's exact category and message rather than accepting either
+// of two exit codes.
+func TestSessionListReportsACacheRefreshFailureAsStorageExit(t *testing.T) {
+	t.Parallel()
+
+	dbPath := sessionapitest.SeedStore(t)
+
+	// Warm the cache: the rebuild's DELETE only fires a row trigger when the
+	// disposable table already holds rows.
+	var warm bytes.Buffer
+	code, err := handlers.SessionList(t.Context(), handlers.SessionListInput{DBPath: dbPath, Limit: 50, Output: &warm}, types.OutputText)
+	require.NoError(t, err)
+	require.Equal(t, 0, code)
+
+	db, err := dbconn.OpenSharedDBWithProfile(dbPath, timeouts.TestProfile())
+	require.NoError(t, err)
+	_, err = db.ExecContext(t.Context(), `
+		CREATE TRIGGER deny_session_rebuild
+		BEFORE DELETE ON pasture_session_state
+		BEGIN
+			SELECT RAISE(ABORT, 'denied');
+		END`)
+	require.NoError(t, err)
+	// Mark the cache dirty so the next command rebuilds it and meets the trigger.
+	_, err = db.ExecContext(t.Context(), `
+		UPDATE pasture_session_api_state SET dirty = 1 WHERE singleton_id = 0`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	var out bytes.Buffer
+	code, err = handlers.SessionList(t.Context(), handlers.SessionListInput{DBPath: dbPath, Limit: 50, Output: &out}, types.OutputText)
+	require.Error(t, err)
+	require.Equal(t, 5, code, "a failed cache refresh is exactly a storage error")
+	require.Equal(t, pasterrors.ExitCode(err), code)
+	require.Contains(t, err.Error(), "Couldn't refresh the session cache")
+	require.Empty(t, out.String())
 }
 
 func TestSessionShowRendersHistoricalBindingIntervals(t *testing.T) {
