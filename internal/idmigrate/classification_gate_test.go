@@ -62,6 +62,8 @@ func storeSchema(t *testing.T, path string) []schemaColumn {
 
 // classifiedStore builds a current production store: the combined Provenance
 // and pasture schema with every table the conversion or the dry run can meet.
+// The inference cache is part of the open-time pasture schema (created beside
+// pasture_session_state), so it is visible here without running a rebuild.
 func classifiedStore(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "classified.db")

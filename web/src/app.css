@@ -1,0 +1,426 @@
+:root {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--canvas);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  width: 100%;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--ink-3);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--sp-6);
+  padding: var(--sp-6) 0 var(--sp-5);
+  border-bottom: var(--bd);
+}
+
+.hero h1 {
+  margin: var(--sp-2) 0 var(--sp-3);
+  color: var(--ink-strong);
+  font: var(--fs-display)/var(--lh-tight) var(--font-display);
+  letter-spacing: -0.03em;
+  text-transform: lowercase;
+}
+
+.lede {
+  max-width: var(--measure-prose);
+  margin: 0;
+  color: var(--ink-2);
+  font: var(--fs-body)/var(--lh-body) var(--font-body);
+}
+
+.hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+}
+
+.mono-meta {
+  color: var(--ink-3);
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+  white-space: nowrap;
+}
+
+.sessions-panel {
+  padding: var(--sp-5) 0 var(--sp-8);
+}
+
+.section-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+
+.section-head h2 {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-strong);
+  font: var(--fs-lg)/var(--lh-tight) var(--font-display);
+  text-transform: lowercase;
+}
+
+.clear-filter {
+  min-height: var(--target-min);
+  padding: 0;
+  color: var(--amber);
+  background: transparent;
+  border: 0;
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.error-line {
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-3);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+  font: var(--fs-sm)/var(--lh-body) var(--font-mono);
+}
+
+.session-cell {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.session-harness {
+  flex: 0 0 auto;
+  color: var(--ink-3);
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+}
+
+.session-link {
+  min-height: var(--target-min);
+  padding: 0;
+  overflow: hidden;
+  color: var(--ink-strong);
+  background: transparent;
+  border: 0;
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+  text-align: left;
+  text-overflow: ellipsis;
+  text-decoration: underline;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.session-link:hover {
+  color: var(--amber);
+}
+
+.event-value {
+  color: var(--ink-2);
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+}
+
+.epoch-value {
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--ink-3);
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-copy {
+  margin: 0;
+  color: var(--ink-3);
+  font: var(--fs-sm)/var(--lh-body) var(--font-body);
+}
+
+.epoch-list {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.epoch-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: var(--target-comfortable);
+  padding: var(--sp-2);
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.epoch-option:hover {
+  background: var(--surface-hover);
+}
+
+.epoch-option[data-selected='true'] {
+  color: var(--ink-strong);
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+
+.epoch-option span:first-child {
+  overflow-wrap: anywhere;
+}
+
+.detail-title {
+  margin: 0 0 var(--sp-3);
+  color: var(--ink-strong);
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.detail-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.detail-list > div {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+
+.detail-list dt {
+  color: var(--ink-3);
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+}
+
+.detail-list dd {
+  margin: 0;
+  color: var(--ink-2);
+  font: var(--fs-sm)/var(--lh-body) var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.mono-wrap {
+  word-break: break-all;
+}
+
+/* Binding provenance: the current source/confidence live in the detail list;
+   the timeline below keeps every interval, including inferred ones, so a
+   provisional epoch never looks authoritative. Bands are a vertical timeline:
+   a dot and left rule mark the start, and the band body carries the range. */
+.binding-history {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: var(--bd);
+}
+
+.binding-history .eyebrow {
+  margin-bottom: var(--sp-2);
+}
+
+.timeline-list {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-band {
+  position: relative;
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  overflow-wrap: anywhere;
+  background: var(--surface-2);
+  border-left: 2px solid var(--ink-4);
+}
+
+.timeline-band::before {
+  content: '';
+  position: absolute;
+  top: var(--sp-3);
+  left: -5px;
+  width: var(--sp-2);
+  height: var(--sp-2);
+  border: 2px solid var(--ink-4);
+  border-radius: 50%;
+  background: var(--surface-2);
+}
+
+.timeline-band[data-source='inferred'] {
+  border-left-color: var(--warning);
+}
+
+/* Open state owns the dot: inferred intervals are always open, so a separate
+   inferred dot color would be unreachable behind this rule. The inferred left
+   rule and source chip still carry the provenance. */
+.timeline-band[data-open='true']::before {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.timeline-band-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.timeline-epoch {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink-strong);
+  font: var(--fs-sm)/var(--lh-body) var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.timeline-marker {
+  flex: none;
+  color: var(--ink-3);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+  text-transform: lowercase;
+}
+
+.timeline-band[data-open='true'] .timeline-marker {
+  color: var(--success);
+}
+
+.timeline-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* Border-only rail chip: fairtrade's Tag is heavier than this dense 320px rail
+   wants, and a hairline border plus mono text keeps source/confidence/role
+   scannable without a filled pill. */
+.timeline-chip {
+  padding: 0 var(--sp-1);
+  color: var(--ink-2);
+  border: var(--bd);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+  text-transform: lowercase;
+}
+
+.timeline-chip-source[data-source='inferred'] {
+  color: var(--warning);
+  border-color: var(--warning);
+}
+
+.timeline-range,
+.timeline-duration,
+.timeline-epoch-id,
+.timeline-note {
+  margin: 0;
+  color: var(--ink-2);
+  font: var(--fs-sm)/var(--lh-body) var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.timeline-duration,
+.timeline-epoch-id,
+.timeline-note {
+  color: var(--ink-3);
+}
+
+.timeline-note {
+  font-size: var(--fs-label);
+}
+
+@media (max-width: 880px) {
+  .hero {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .hero-meta {
+    justify-content: flex-start;
+  }
+
+  .detail-list > div {
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+  }
+}
+
+.section-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.last-seen {
+  white-space: nowrap;
+}
+
+/* The transcript rail is a bounded reading pane: the fairtrade composite owns
+   its own single inner scroller, so the host must give it a definite height and
+   never grow with the session length. */
+.transcript-host {
+  display: flex;
+  flex-direction: column;
+  height: clamp(22rem, 58vh, 38rem);
+  min-width: 0;
+  overflow: hidden;
+  border: var(--bd);
+  background: var(--surface);
+}
+
+.transcript-host > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.transcript-state .empty {
+  padding: 0;
+}
+
+.sessions-table .tbl {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.sessions-table .tbl-td {
+  overflow: hidden;
+}

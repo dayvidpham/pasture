@@ -51,7 +51,7 @@ concurrency:
 
 env:
   REQUIRED_CI_WORKFLOW: ci.yml
-  REQUIRED_CI_JOBS: '["Build & Test (1.26)","Recovery correctness","Controlled performance","Lint","Codegen Drift"]'
+  REQUIRED_CI_JOBS: '["Build & Test (1.26)","Recovery correctness","Controlled performance","Lint","Codegen Drift","Web contract"]'
 
 jobs:
   verify:

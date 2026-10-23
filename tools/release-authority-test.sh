@@ -14,7 +14,7 @@ mkdir -p "$root/bin" "$root/fixtures"
 fx="$root/fixtures"
 sha="0123456789abcdef0123456789abcdef01234567"
 other="89abcdef0123456789abcdef0123456789abcdef"
-required='["Build & Test (1.26)","Recovery correctness","Controlled performance","Lint","Codegen Drift"]'
+required='["Build & Test (1.26)","Recovery correctness","Controlled performance","Lint","Codegen Drift","Web contract"]'
 
 cat > "$root/bin/gh" <<'STUB'
 #!/usr/bin/env bash
@@ -74,7 +74,8 @@ JSON
  {"name":"Recovery correctness","status":"completed","conclusion":"success"},
  {"name":"Controlled performance","status":"completed","conclusion":"success"},
  {"name":"Lint","status":"completed","conclusion":"success"},
- {"name":"Codegen Drift","status":"completed","conclusion":"success"}]}
+ {"name":"Codegen Drift","status":"completed","conclusion":"success"},
+ {"name":"Web contract","status":"completed","conclusion":"success"}]}
 JSON
   cat > "$fx/runs.json" <<JSON
 {"workflow_runs":[
@@ -241,6 +242,18 @@ if ! block_for recovery | grep -qF -- '-tags=recovery ./internal/engine/...'; th
 fi
 if ! block_for performance | grep -qE '^[[:space:]]+run:[[:space:]]+make test-performance[[:space:]]*$'; then
   echo "FAIL Controlled performance no longer runs 'make test-performance'"
+  contract=1
+fi
+if ! block_for web | grep -qE '^[[:space:]]+run:[[:space:]]+cd web && pnpm test[[:space:]]*$'; then
+  echo "FAIL Web contract no longer runs 'cd web && pnpm test'"
+  contract=1
+fi
+if ! block_for web | grep -qE '^[[:space:]]+run:[[:space:]]+make web-verify-generated[[:space:]]*$'; then
+  echo "FAIL Web contract no longer runs 'make web-verify-generated'"
+  contract=1
+fi
+if ! block_for web | grep -qE '^[[:space:]]+run:[[:space:]]+cd web && pnpm build[[:space:]]*$'; then
+  echo "FAIL Web contract no longer runs 'cd web && pnpm build'"
   contract=1
 fi
 

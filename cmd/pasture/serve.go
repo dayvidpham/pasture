@@ -21,13 +21,32 @@ import (
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Serve the local session-to-epoch read API",
-	Long: `Serve the loopback-only session API from the local pasture database.
+	Short: "Serve the local session and epoch API",
+	Long: `Serve the loopback-only session and epoch API from the local pasture database.
 
-The server exposes GET /api/v1/sessions and
-GET /api/v1/sessions/{harness}/{nativeSessionId}. It rebuilds the disposable
-session cache from the lifecycle journal when the cache is dirty or behind, and
-it never migrates the schema or accepts non-loopback hosts.`,
+Routes:
+  GET  /api/v1/sessions
+  GET  /api/v1/sessions/{harness}/{nativeSessionId}
+  GET  /api/v1/sessions/{harness}/{nativeSessionId}/transcript
+  POST /api/v1/sessions/{harness}/{nativeSessionId}/bind
+  POST /api/v1/sessions/{harness}/{nativeSessionId}/unbind
+  GET  /api/v1/epochs and /api/v1/epochs/{id}
+  GET  /api/v1/epochs/{id}/sessions
+  GET  /api/v1/inspect
+  GET  /api/v1/ws
+  GET  /openapi.json
+
+The transcript route streams the durable transcript that "peasant export
+sessions" produces. It runs the peasant executable from this process's PATH;
+without peasant, transcript requests answer 503 and the session, epoch,
+bind/unbind, inspect, WebSocket, and OpenAPI routes keep working.
+
+Opening the store follows the ordinary auto-on-open path: a missing database
+file is created and an existing older schema is migrated. serve never runs a
+separate "pasture migrate", and it refuses non-loopback hosts.
+
+The server starts from the existing session cache; pass --backfill to rebuild
+historical session state from the lifecycle journal before serving.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runServe(cmd)
@@ -37,12 +56,14 @@ it never migrates the schema or accepts non-loopback hosts.`,
 func init() {
 	serveCmd.Flags().String("listen", "127.0.0.1:0", "Loopback TCP address to listen on")
 	serveCmd.Flags().Duration("active-window", 15*time.Minute, "Age after which an open session is idle")
+	serveCmd.Flags().Bool("backfill", false, "Rebuild historical session state before serving (can be slow on a large journal)")
 	rootCmd.AddCommand(serveCmd)
 }
 
 func runServe(cmd *cobra.Command) error {
 	listen, _ := cmd.Flags().GetString("listen")
 	activeWindow, _ := cmd.Flags().GetDuration("active-window")
+	backfill, _ := cmd.Flags().GetBool("backfill")
 	if activeWindow <= 0 {
 		return fmt.Errorf("active window must be positive")
 	}
@@ -78,8 +99,10 @@ func runServe(cmd *cobra.Command) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if _, _, err := tasks.EnsureSessionState(ctx, tracker); err != nil {
-		return err
+	if backfill {
+		if _, _, err := tasks.EnsureSessionState(ctx, tracker); err != nil {
+			return err
+		}
 	}
 	readDB, err := dbconn.OpenReadOnlyDB(dbPath)
 	if err != nil {
@@ -92,9 +115,11 @@ func runServe(cmd *cobra.Command) error {
 
 	service := sessionapi.NewService(readDB)
 	service.ActiveWindow = activeWindow
-	service.Ensure = func(ctx context.Context) error {
-		_, _, err := tasks.EnsureSessionState(ctx, tracker)
-		return err
+	if backfill {
+		service.Ensure = func(ctx context.Context) error {
+			_, _, err := tasks.EnsureSessionState(ctx, tracker)
+			return err
+		}
 	}
 	store, err := tasks.NewSessionAPIStore(tracker)
 	if err != nil {

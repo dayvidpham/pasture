@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -13,6 +14,51 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 )
+
+// The serve help is the operator's route map. It must name the transcript
+// proxy, the peasant dependency that rail has, and the ordinary auto-on-open
+// migration path; the old text claimed serve never migrated the schema, which
+// the tracker open contradicts.
+func TestServeHelpDescribesEverySurface(t *testing.T) {
+	var out bytes.Buffer
+	previousOut := serveCmd.OutOrStdout()
+	previousErr := serveCmd.ErrOrStderr()
+	serveCmd.SetOut(&out)
+	serveCmd.SetErr(&out)
+	t.Cleanup(func() {
+		serveCmd.SetOut(previousOut)
+		serveCmd.SetErr(previousErr)
+	})
+
+	require.NoError(t, serveCmd.Help())
+	help := out.String()
+	for _, want := range []string{
+		"/api/v1/sessions",
+		"/transcript",
+		"peasant",
+		"PATH",
+		"503",
+		"bind",
+		"unbind",
+		"/api/v1/epochs",
+		"/api/v1/epochs/{id}/sessions",
+		"/api/v1/inspect",
+		"/api/v1/ws",
+		"/openapi.json",
+		"auto-on-open",
+		"never runs a",
+		"pasture migrate",
+		"non-loopback",
+		"--backfill",
+	} {
+		require.Contains(t, help, want)
+	}
+	require.Equal(t, "Serve the local session and epoch API", serveCmd.Short,
+		"the command writes as well as reads; the short line must not call it a read API")
+	require.Contains(t, help, "session and epoch API")
+	require.NotContains(t, help, "read API")
+	require.NotContains(t, help, "never migrates the schema")
+}
 
 func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	previous := flagDBPath

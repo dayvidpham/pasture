@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/dayvidpham/pasture/artifact"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
@@ -18,7 +17,7 @@ var sessionOccurrenceEvidenceKinds = []provenance.EvidenceKind{
 	"pasture.lifecycle.occurrence.v2",
 }
 
-// SessionStateStatus is the cache marker the read API and the serve startup
+// SessionStateStatus is the cache marker the session API and the serve startup
 // use to decide whether the session state table still reflects the journal.
 type SessionStateStatus struct {
 	Found                     bool
@@ -120,17 +119,49 @@ func EnsureSessionState(ctx context.Context, tracker protocol.TaskTracker) (Sess
 	return out, true, err
 }
 
-// RebuildSessionState rebuilds the disposable occurrence projection and the
-// session cache in ONE immediate transaction. The binding rows own the end;
-// activity fields are derived from the latest occurrence plus the first/last
-// timestamps of bindings and the first-claim-wins claim.
+// RebuildSessionState rebuilds the disposable session cache from journal truth
+// in ONE immediate transaction. It deliberately reads occurrence facts without
+// replaying the occurrence projection or its semantic envelope checks. The
+// binding rows own the end; activity fields are derived from the latest
+// occurrence plus the first/last timestamps of bindings and the first-claim-
+// wins claim.
 func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (SessionStateRebuildOutcome, error) {
 	store, ok := tracker.(sessionTailStore)
 	if !ok || store.auditDBHandle() == nil {
 		return SessionStateRebuildOutcome{}, sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}
+	storeWithJournal, ok := tracker.(lifecycleReceiptStore)
+	if !ok || storeWithJournal.Journal() == nil {
+		return SessionStateRebuildOutcome{}, sessionClaimError("the tracker has no lifecycle journal", "use tasks.OpenTaskTracker")
+	}
 	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().WorkflowResult())
 	defer cancel()
+	// Derive the inferred bindings BEFORE the journal facts and the write
+	// transaction. The derivation reads the claim table and one provenance
+	// ownership snapshot per claim actor, and the tracker's pool is size one in
+	// production, so a pooled ownership read issued inside the transaction
+	// would wait on the transaction's own connection. A derivation fault is not
+	// a rebuild fault: the previous inferred cache is left in place (this
+	// rebuild has nothing better to publish), one diagnostic is written, and
+	// the read model stays usable.
+	inferred, inferenceErr := planSessionInference(bounded, storeWithJournal)
+	inferencePlanned := inferenceErr == nil
+	if inferenceErr != nil {
+		writeSessionInferenceDiagnostic(storeWithJournal, sessionInferenceStagePlan, inferenceErr)
+	}
+	// Read journal truth BEFORE taking the write transaction, for the same
+	// pool reason as the derivation above.
+	facts, err := projection.ReadOccurrenceFacts(bounded, storeWithJournal.Journal())
+	if err != nil {
+		return SessionStateRebuildOutcome{}, err
+	}
+	completedThrough := int64(0)
+	for _, fact := range facts {
+		if int64(fact.JournalID) > completedThrough {
+			completedThrough = int64(fact.JournalID)
+		}
+	}
+
 	tx, err := store.auditDBHandle().BeginTx(bounded, nil)
 	if err != nil {
 		return SessionStateRebuildOutcome{}, sessionClaimError("the store refused the session-state rebuild transaction: "+err.Error(), "release other store writers or repair the database, then retry")
@@ -142,33 +173,17 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 		}
 	}()
 
-	reader, err := provenance.NewTransactionEvidenceReader(bounded, tx)
-	if err != nil {
-		return SessionStateRebuildOutcome{}, sessionClaimError("the transaction-bound journal reader could not start: "+err.Error(), "repair the journal before rebuilding the session cache")
-	}
-	if err := projection.RebuildOccurrencesInTx(bounded, tx, reader); err != nil {
-		return SessionStateRebuildOutcome{}, err
-	}
-
-	page, err := reader.QueryEvidence(provenance.EvidenceQuery{
-		Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-		Kinds:  sessionOccurrenceEvidenceKinds,
-		Page:   provenance.FactPageRequest{Limit: 1},
-	})
-	if err != nil {
-		return SessionStateRebuildOutcome{}, sessionClaimError("the store refused the rebuild watermark read: "+err.Error(), "repair the journal before rebuilding the session cache")
-	}
-	completedThrough := int64(page.SnapshotMaxJournalID)
-
-	rows, err := readSessionRebuildRows(bounded, tx)
+	rows, explicitBindings, err := readSessionRebuildRows(bounded, tx, facts)
 	if err != nil {
 		return SessionStateRebuildOutcome{}, err
 	}
 	if _, err := tx.ExecContext(bounded, `DELETE FROM pasture_session_state`); err != nil {
 		return SessionStateRebuildOutcome{}, sessionClaimError("the store refused to clear the session-state cache: "+err.Error(), "repair the database before rebuilding the session cache")
 	}
+	ended := make(map[sessionKey]struct{}, len(rows))
 	for _, row := range rows {
 		if row.endAt > 0 {
+			ended[sessionKey{harness: row.harness, session: row.session}] = struct{}{}
 			if err := closeSessionBindingTx(bounded, tx, ir.HarnessID(row.harness), row.session, row.endAt); err != nil {
 				return SessionStateRebuildOutcome{}, err
 			}
@@ -179,6 +194,35 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			row.harness, row.session, row.firstSeen, row.lastSeen, row.lastEvent, row.lastJournalID, row.lastSeen); err != nil {
 			return SessionStateRebuildOutcome{}, sessionClaimError("the store refused a rebuilt session-state row: "+err.Error(), "repair the database before rebuilding the session cache")
+		}
+	}
+	// The inferred rows are written under their own savepoint: the inference
+	// cache is additive, so a fault writing it must not roll back the activity
+	// cache that the read model depends on. The derivation ran before the
+	// transaction; this is only the write. A failed plan skips this block
+	// entirely, which is what leaves the previous derivation in place.
+	if inferencePlanned {
+		if _, err := tx.ExecContext(bounded, `SAVEPOINT session_inference`); err != nil {
+			return SessionStateRebuildOutcome{}, sessionClaimError("the store refused the session inference savepoint: "+err.Error(), "release other store writers or repair the database, then retry")
+		}
+		if inferenceWriteErr := replaceSessionInferredBindings(bounded, tx, inferred, explicitBindings, ended); inferenceWriteErr != nil {
+			if _, err := tx.ExecContext(bounded, `ROLLBACK TO SAVEPOINT session_inference`); err != nil {
+				return SessionStateRebuildOutcome{}, sessionClaimError("the store refused to roll back the failed session inference write: "+err.Error(), "repair the database before rebuilding the session cache")
+			}
+			// The rollback restores the pre-savepoint cache, which may hold an
+			// open interval for a session this rebuild already saw end. Clearing
+			// the cache AFTER the rollback is what keeps "an ended session keeps
+			// no inferred interval" true even when the inference write fails.
+			// The cache is disposable, so clearing all of it is honest: this
+			// rebuild could not establish today's derivation and presents none
+			// rather than a guess.
+			if _, err := tx.ExecContext(bounded, `DELETE FROM pasture_session_inferred_binding`); err != nil {
+				return SessionStateRebuildOutcome{}, sessionClaimError("the store refused to clear the inferred session bindings after a failed inference write: "+err.Error(), "repair the database before rebuilding the session cache")
+			}
+			writeSessionInferenceDiagnostic(storeWithJournal, sessionInferenceStageWrite, inferenceWriteErr)
+		}
+		if _, err := tx.ExecContext(bounded, `RELEASE SAVEPOINT session_inference`); err != nil {
+			return SessionStateRebuildOutcome{}, sessionClaimError("the store refused to release the session inference savepoint: "+err.Error(), "repair the database before rebuilding the session cache")
 		}
 	}
 	if _, err := tx.ExecContext(bounded, `
@@ -198,7 +242,13 @@ func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (Ses
 	return SessionStateRebuildOutcome{Sessions: len(rows), Revision: revision, CompletedThroughJournalID: completedThrough}, nil
 }
 
-func readSessionRebuildRows(ctx context.Context, tx *sql.Tx) ([]*sessionRebuildRow, error) {
+// readSessionRebuildRows folds the journal facts and the store's binding/claim
+// tables into the rebuild rows. It also returns the sessions that carry an
+// explicit binding row in ANY state, which is the authoritative set inference
+// may never override; reading both from the transaction's own snapshot is what
+// closes the window between the pre-transaction inference derivation and this
+// commit.
+func readSessionRebuildRows(ctx context.Context, tx *sql.Tx, facts []projection.OccurrenceFact) ([]*sessionRebuildRow, map[sessionKey]struct{}, error) {
 	byKey := make(map[string]*sessionRebuildRow)
 	get := func(harness, session string) *sessionRebuildRow {
 		key := harness + "\x00" + session
@@ -210,61 +260,51 @@ func readSessionRebuildRows(ctx context.Context, tx *sql.Tx) ([]*sessionRebuildR
 		return row
 	}
 
-	// The occurrence join is restricted to session bindings. The projection
-	// enforces one session identity per occurrence, but the rebuild still
-	// detects a second one rather than silently choosing.
-	occurrenceRows, err := tx.QueryContext(ctx, `
-		SELECT o.journal_id, o.contract, o.event_kind, o.received_at, b.binding_value
-		FROM lifecycle_occurrences o
-		JOIN lifecycle_occurrence_bindings b ON b.journal_id = o.journal_id
-		WHERE b.binding_kind = ?
-		ORDER BY o.journal_id, b.binding_index`, uint8(model.BindingSession))
-	if err != nil {
-		return nil, sessionClaimError("the store refused the occurrence rebuild read: "+err.Error(), "repair the projection before rebuilding the session cache")
-	}
-	defer occurrenceRows.Close()
+	// The facts are already journal-ordered and carry verified native bindings;
+	// this loop only selects the session identity and folds activity.
 	lastJournal := int64(-1)
-	for occurrenceRows.Next() {
-		var journalID, receivedAt, eventKind int64
-		var contract string
-		var session []byte
-		if err := occurrenceRows.Scan(&journalID, &contract, &eventKind, &receivedAt, &session); err != nil {
-			return nil, sessionClaimError("a rebuilt occurrence row could not be decoded: "+err.Error(), "repair the projection before rebuilding the session cache")
+	for _, fact := range facts {
+		var session string
+		for _, binding := range fact.Bindings {
+			if binding.Kind != model.BindingSession {
+				continue
+			}
+			if session != "" {
+				return nil, nil, sessionClaimError("an occurrence declares more than one session identity", "repair the occurrence bindings before rebuilding the session cache")
+			}
+			session = binding.Value
 		}
+		if session == "" {
+			continue
+		}
+		journalID := int64(fact.JournalID)
 		if journalID == lastJournal {
-			return nil, sessionClaimError("an occurrence declares more than one session identity", "repair the occurrence bindings before rebuilding the session cache")
+			return nil, nil, sessionClaimError("an occurrence declares more than one session identity", "repair the occurrence bindings before rebuilding the session cache")
 		}
 		lastJournal = journalID
-		contractID, err := artifact.ParseRuntimeContractID(contract)
-		if err != nil {
-			return nil, sessionClaimError("a rebuilt occurrence cites an invalid runtime contract: "+err.Error(), "repair the projection before rebuilding the session cache")
-		}
-		harness := string(ir.HarnessID(contractID.Harness()))
-		row := get(harness, string(session))
-		row.addTimestamp(receivedAt)
-		row.lastSeen = maxInt64(row.lastSeen, receivedAt)
+		harness := string(fact.Contract.Harness())
+		row := get(harness, session)
+		row.addTimestamp(fact.ReceivedAt)
+		row.lastSeen = maxInt64(row.lastSeen, fact.ReceivedAt)
 		if journalID >= row.lastJournalID {
 			row.lastJournalID = journalID
 			row.endAt = 0
-			kind := model.ContractEventKind(eventKind)
-			if nativeName, ok := registration.NativeName(contractID, kind); ok {
+			if nativeName, ok := registration.NativeName(fact.Contract, fact.Event); ok {
 				row.lastEvent = nativeName
 			}
-			if isSessionEnd(ir.HarnessID(harness), contractID, kind) {
-				row.endAt = receivedAt
+			if isSessionEnd(ir.HarnessID(harness), fact.Contract, fact.Event) {
+				row.endAt = fact.ReceivedAt
 			}
 		}
 	}
-	if err := occurrenceRows.Err(); err != nil {
-		return nil, sessionClaimError("the occurrence rebuild read failed: "+err.Error(), "repair the projection before rebuilding the session cache")
-	}
 
+	explicit := make(map[sessionKey]struct{}, 8)
 	bindingRows, err := tx.QueryContext(ctx, `
 		SELECT harness, session, bound_at, unbound_at
 		FROM pasture_session_epoch_binding
 		ORDER BY bound_at, rowid`)
 	if err != nil {
-		return nil, sessionClaimError("the store refused the binding rebuild read: "+err.Error(), "repair the database before rebuilding the session cache")
+		return nil, nil, sessionClaimError("the store refused the binding rebuild read: "+err.Error(), "repair the database before rebuilding the session cache")
 	}
 	defer bindingRows.Close()
 	for bindingRows.Next() {
@@ -272,8 +312,9 @@ func readSessionRebuildRows(ctx context.Context, tx *sql.Tx) ([]*sessionRebuildR
 		var boundAt int64
 		var unboundAt sql.NullInt64
 		if err := bindingRows.Scan(&harness, &session, &boundAt, &unboundAt); err != nil {
-			return nil, sessionClaimError("a rebuilt binding row could not be decoded: "+err.Error(), "repair the database before rebuilding the session cache")
+			return nil, nil, sessionClaimError("a rebuilt binding row could not be decoded: "+err.Error(), "repair the database before rebuilding the session cache")
 		}
+		explicit[sessionKey{harness: harness, session: session}] = struct{}{}
 		row := get(harness, session)
 		row.addTimestamp(boundAt)
 		if unboundAt.Valid {
@@ -281,26 +322,26 @@ func readSessionRebuildRows(ctx context.Context, tx *sql.Tx) ([]*sessionRebuildR
 		}
 	}
 	if err := bindingRows.Err(); err != nil {
-		return nil, sessionClaimError("the binding rebuild read failed: "+err.Error(), "repair the database before rebuilding the session cache")
+		return nil, nil, sessionClaimError("the binding rebuild read failed: "+err.Error(), "repair the database before rebuilding the session cache")
 	}
 
 	claimRows, err := tx.QueryContext(ctx, `
 		SELECT harness, session, claimed_at
 		FROM pasture_session_claim`)
 	if err != nil {
-		return nil, sessionClaimError("the store refused the claim rebuild read: "+err.Error(), "repair the database before rebuilding the session cache")
+		return nil, nil, sessionClaimError("the store refused the claim rebuild read: "+err.Error(), "repair the database before rebuilding the session cache")
 	}
 	defer claimRows.Close()
 	for claimRows.Next() {
 		var harness, session string
 		var claimedAt int64
 		if err := claimRows.Scan(&harness, &session, &claimedAt); err != nil {
-			return nil, sessionClaimError("a rebuilt claim row could not be decoded: "+err.Error(), "repair the database before rebuilding the session cache")
+			return nil, nil, sessionClaimError("a rebuilt claim row could not be decoded: "+err.Error(), "repair the database before rebuilding the session cache")
 		}
 		get(harness, session).addTimestamp(claimedAt)
 	}
 	if err := claimRows.Err(); err != nil {
-		return nil, sessionClaimError("the claim rebuild read failed: "+err.Error(), "repair the database before rebuilding the session cache")
+		return nil, nil, sessionClaimError("the claim rebuild read failed: "+err.Error(), "repair the database before rebuilding the session cache")
 	}
 
 	out := make([]*sessionRebuildRow, 0, len(byKey))
@@ -313,7 +354,7 @@ func readSessionRebuildRows(ctx context.Context, tx *sql.Tx) ([]*sessionRebuildR
 		}
 		out = append(out, row)
 	}
-	return out, nil
+	return out, explicit, nil
 }
 
 func maxInt64(a, b int64) int64 {

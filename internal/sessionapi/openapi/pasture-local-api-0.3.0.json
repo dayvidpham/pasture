@@ -1,0 +1,1394 @@
+{
+  "components": {
+    "schemas": {
+      "ActivityState": {
+        "enum": [
+          "active",
+          "idle",
+          "ended",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "BindRequest": {
+        "properties": {
+          "epochId": {
+            "type": "string"
+          },
+          "expectedBinding": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "epochId",
+          "role"
+        ],
+        "type": "object"
+      },
+      "BindingSource": {
+        "description": "explicit rows are written by bind, unbind, or the session-end tail and are authoritative. inferred rows are derived from store observations, never override an explicit binding, and are absent when the derivation is ambiguous.",
+        "enum": [
+          "explicit",
+          "inferred"
+        ],
+        "type": "string"
+      },
+      "Confidence": {
+        "description": "How strongly the binding claims to be true, using the lifecycle confidence vocabulary. Explicit bindings are verified. An inferred binding is observed unless the store recorded a stronger derivation; the claim-ownership rule is observed, because it correlates a session claim with active ownership rather than a command that recorded this session's intent.",
+        "enum": [
+          "observed",
+          "correlated",
+          "verified"
+        ],
+        "type": "string"
+      },
+      "Detail": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionView"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "session"
+        ],
+        "type": "object"
+      },
+      "EndMarker": {
+        "properties": {
+          "endReason": {
+            "$ref": "#/components/schemas/EndReason"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endedAt",
+          "endReason"
+        ],
+        "type": "object"
+      },
+      "EndReason": {
+        "enum": [
+          "unbind",
+          "session_end"
+        ],
+        "type": "string"
+      },
+      "EpochDetail": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochView"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "epoch"
+        ],
+        "type": "object"
+      },
+      "EpochPage": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EpochView"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "items"
+        ],
+        "type": "object"
+      },
+      "EpochRef": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "EpochView": {
+        "properties": {
+          "activeCount": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "sessionCount": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phase",
+          "role",
+          "sessionCount",
+          "activeCount"
+        ],
+        "type": "object"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "InspectPayload": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "epochs": {
+            "items": {
+              "$ref": "#/components/schemas/EpochView"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionView"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "truncated",
+          "epochs",
+          "sessions"
+        ],
+        "type": "object"
+      },
+      "Page": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionView"
+            },
+            "type": "array"
+          },
+          "next": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "items"
+        ],
+        "type": "object"
+      },
+      "SessionActivity": {
+        "properties": {
+          "firstSeen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastEvent": {
+            "type": "string"
+          },
+          "lastSeen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ActivityState"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "type": "object"
+      },
+      "SessionBinding": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "role": {
+            "description": "The protocol session role the bind recorded (epoch, architect, reviewer, supervisor, or worker).",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/BindingSource"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "SessionBindingInterval": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "endReason": {
+            "type": "string"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "role": {
+            "description": "For an explicit interval, the protocol session role a bind command recorded. For an inferred interval, the assignment slot the derivation read (currently owner-responsibility), because no command gave the session a role; clients must not read an inferred role as a protocol session role.",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/BindingSource"
+          },
+          "unboundAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "SessionView": {
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/SessionActivity"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/SessionBinding"
+          },
+          "bindings": {
+            "description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` is the effective current binding: the latest explicit binding when one exists, otherwise the open inferred derivation.",
+            "items": {
+              "$ref": "#/components/schemas/SessionBindingInterval"
+            },
+            "type": "array"
+          },
+          "end": {
+            "$ref": "#/components/schemas/EndMarker"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "nativeSessionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "harness",
+          "nativeSessionId",
+          "activity",
+          "bindings"
+        ],
+        "type": "object"
+      },
+      "TranscriptPayload": {
+        "additionalProperties": true,
+        "description": "The durable Peasant SessionDetailPayload document, proxied unchanged. Pasture guarantees only the identity fields; every other field belongs to the shared @peasant-labs/schema session contract and is validated by the browser.",
+        "properties": {
+          "harness": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "turns": {
+            "items": {
+              "description": "One Peasant TurnDetail; validated by the browser against the shared contract"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "harness",
+          "turns"
+        ],
+        "type": "object"
+      },
+      "UnbindRequest": {
+        "properties": {
+          "expectedBinding": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "WebSocketClientMessage": {
+        "properties": {
+          "topic": {
+            "enum": [
+              "sessions",
+              "epochs"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "subscribe",
+              "unsubscribe",
+              "ping"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "WebSocketErrorFrame": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          },
+          "type": {
+            "enum": [
+              "error"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "error"
+        ],
+        "type": "object"
+      },
+      "WebSocketReadyFrame": {
+        "properties": {
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "ready"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "topics"
+        ],
+        "type": "object"
+      },
+      "WebSocketSnapshotFrame": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "sessions",
+              "epochs"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "revision",
+          "asOf",
+          "payload"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
+    "title": "Pasture Local Session API",
+    "version": "0.3.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/epochs": {
+      "get": {
+        "operationId": "listEpochs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpochPage"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The epoch store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "List projected epochs"
+      }
+    },
+    "/api/v1/epochs/{epochId}": {
+      "get": {
+        "operationId": "getEpoch",
+        "parameters": [
+          {
+            "description": "Epoch task id (URL-encode it when it contains slashes)",
+            "in": "path",
+            "name": "epochId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpochDetail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid epoch id"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Epoch not found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The epoch store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "Get one projected epoch"
+      }
+    },
+    "/api/v1/epochs/{epochId}/sessions": {
+      "get": {
+        "operationId": "listEpochSessions",
+        "parameters": [
+          {
+            "description": "Epoch task id (URL-encode it when it contains slashes)",
+            "in": "path",
+            "name": "epochId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by derived activity state",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "idle",
+                "ended",
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by harness id",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (default 50, maximum 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque page token from a previous response",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid filter or page token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Epoch not found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "List sessions bound to an epoch"
+      }
+    },
+    "/api/v1/inspect": {
+      "get": {
+        "operationId": "inspectSessionAPI",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InspectPayload"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "Snapshot epochs and sessions together"
+      }
+    },
+    "/api/v1/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "parameters": [
+          {
+            "description": "Filter by the latest binding epoch id",
+            "in": "query",
+            "name": "epoch",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by derived activity state",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "idle",
+                "ended",
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by harness id",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (default 50, maximum 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque page token from a previous response",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid filter or page token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "List sessions"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}": {
+      "get": {
+        "operationId": "getSession",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Session not found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "Get one session"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/bind": {
+      "post": {
+        "operationId": "bindSession",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown epoch"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale or writes are unavailable"
+          }
+        },
+        "summary": "Bind a session to an epoch"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/transcript": {
+      "get": {
+        "description": "Validates the harness and native session id against the shared @peasant-labs/schema contract, runs `peasant export sessions --session \u003cnativeSessionId\u003e` beside the API in a private temporary directory, and streams the durable SessionDetailPayload document unchanged. The route never returns a last-good transcript when Peasant refuses a newer incomplete attempt. The browser validates the body against the same shared contract before rendering it.",
+        "operationId": "getSessionTranscript",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptPayload"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key, harness, or native session id under the shared schema contract"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Peasant has no transcript for that session"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Peasant refused an incomplete attempt, cannot express the session id, or returned a different identity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Peasant failed, or returned a malformed or oversized document"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The peasant executable is absent or cannot be started"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bounded Peasant export wait ended"
+          }
+        },
+        "summary": "Fetch the durable Peasant transcript for one session"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/unbind": {
+      "post": {
+        "operationId": "unbindSession",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnbindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "No open binding or binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale or writes are unavailable"
+          }
+        },
+        "summary": "Unbind a session from its epoch"
+      }
+    },
+    "/api/v1/ws": {
+      "get": {
+        "description": "Upgrades to a WebSocket. The server sends a ready frame, then a snapshot frame for each subscribed topic. Snapshots carry revision and asOf at the frame level. A newer frame replaces an unread frame, so a slow client always sees the latest snapshot.",
+        "operationId": "sessionWebSocket",
+        "responses": {
+          "101": {
+            "description": "Switching Protocols; subsequent frames are JSON text messages."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is not a valid WebSocket upgrade"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          }
+        },
+        "summary": "Subscribe to bounded latest-frame session and epoch snapshots"
+      }
+    }
+  }
+}
