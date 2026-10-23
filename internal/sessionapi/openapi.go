@@ -4,7 +4,7 @@ import "encoding/json"
 
 // PastureLocalAPIVersion is the frozen document-surface version for the local
 // session API. It changes only when a route or wire shape changes.
-const PastureLocalAPIVersion = "0.2.0"
+const PastureLocalAPIVersion = "0.3.0"
 
 // OpenAPIBytes returns the canonical OpenAPI 3.1 document. The generator and
 // the freshness test call this same function, so the committed artifact cannot
@@ -43,7 +43,8 @@ func openAPIDocument() map[string]any {
 			"title":   "Pasture Local Session API",
 			"version": PastureLocalAPIVersion,
 			"description": "Loopback-only read API for active harness sessions mapped to " +
-				"epoch bindings. Transcripts are not served by this API.",
+				"epoch bindings. The transcript route proxies one durable Peasant " +
+				"SessionDetailPayload; Pasture does not reshape transcript content.",
 		},
 		"paths": map[string]any{
 			"/api/v1/epochs": map[string]any{
@@ -195,6 +196,27 @@ func openAPIDocument() map[string]any {
 						"404": errorResponse("Session not found"),
 						"503": errorResponse("The session cache is stale"),
 						"500": errorResponse("The session store could not be read"),
+					},
+				},
+			},
+			"/api/v1/sessions/{harness}/{nativeSessionId}/transcript": map[string]any{
+				"get": map[string]any{
+					"operationId": "getSessionTranscript",
+					"summary":     "Fetch the durable Peasant transcript for one session",
+					"description": "Runs `peasant export sessions --session <nativeSessionId>` beside the API in a private temporary directory and returns the durable SessionDetailPayload document unchanged. The route never returns a last-good transcript when Peasant refuses a newer incomplete attempt. The browser validates the body against the shared @peasant-labs/schema contract before rendering it.",
+					"parameters": []any{
+						pathParameter("harness", "Harness id"),
+						pathParameter("nativeSessionId", "Native session id"),
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(ref("TranscriptPayload")),
+						"400": errorResponse("Invalid session key"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"404": errorResponse("Peasant has no transcript for that session"),
+						"409": errorResponse("Peasant refused an incomplete attempt, cannot express the session id, or returned a different identity"),
+						"500": errorResponse("Peasant failed, or returned a malformed or oversized document"),
+						"503": errorResponse("The peasant executable is absent or cannot be started"),
+						"504": errorResponse("The bounded Peasant export wait ended"),
 					},
 				},
 			},
@@ -369,6 +391,19 @@ func openAPIDocument() map[string]any {
 						"expectedBinding": map[string]any{"type": "string"},
 					},
 				),
+				"TranscriptPayload": map[string]any{
+					"type": "object",
+					"description": "The durable Peasant SessionDetailPayload document, proxied unchanged. " +
+						"Pasture guarantees only the identity fields; every other field belongs to " +
+						"the shared @peasant-labs/schema session contract and is validated by the browser.",
+					"properties": map[string]any{
+						"id":      map[string]any{"type": "string"},
+						"harness": map[string]any{"type": "string"},
+						"turns":   map[string]any{"type": "array", "items": map[string]any{"description": "One Peasant TurnDetail; validated by the browser against the shared contract"}},
+					},
+					"required":             []string{"id", "harness", "turns"},
+					"additionalProperties": true,
+				},
 				"ErrorBody": objectSchema(
 					map[string]any{
 						"code":    map[string]any{"type": "string"},

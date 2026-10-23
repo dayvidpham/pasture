@@ -266,6 +266,29 @@ body {
   white-space: nowrap;
 }
 
+/* The transcript rail is a bounded reading pane: the fairtrade composite owns
+   its own single inner scroller, so the host must give it a definite height and
+   never grow with the session length. */
+.transcript-host {
+  display: flex;
+  flex-direction: column;
+  height: clamp(22rem, 58vh, 38rem);
+  min-width: 0;
+  overflow: hidden;
+  border: var(--bd);
+  background: var(--surface);
+}
+
+.transcript-host > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.transcript-state .empty {
+  padding: 0;
+}
+
 .sessions-table .tbl {
   table-layout: fixed;
   width: 100%;
