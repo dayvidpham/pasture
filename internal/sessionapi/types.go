@@ -135,6 +135,11 @@ type SessionView struct {
 	Binding         *SessionBinding          `json:"binding,omitempty"`
 	Bindings        []SessionBindingInterval `json:"bindings"`
 	End             *EndMarker               `json:"end,omitempty"`
+	// Project and ProjectHash are Peasant-owned project identity, present only
+	// when the operator enabled project enrichment and Peasant mapped this
+	// session. They are omitted otherwise; Pasture never derives a project.
+	Project     string `json:"project,omitempty"`
+	ProjectHash string `json:"projectHash,omitempty"`
 }
 
 // Page is the list response. Items are ordered by the cache journal and
@@ -194,11 +199,32 @@ type EpochDetail struct {
 	Epoch    EpochView `json:"epoch"`
 }
 
+// PeasantIntegrationStatus is the tri-state health of the opt-in Peasant
+// project enrichment. Disabled is distinct from unavailable: disabled means the
+// operator did not enable a source, so no Peasant dependency is expected.
+type PeasantIntegrationStatus string
+
+const (
+	PeasantIntegrationDisabled    PeasantIntegrationStatus = "disabled"
+	PeasantIntegrationOK          PeasantIntegrationStatus = "ok"
+	PeasantIntegrationUnavailable PeasantIntegrationStatus = "unavailable"
+)
+
+// PeasantIntegration reports whether project enrichment is configured and, when
+// it is, whether the source is currently answering.
+type PeasantIntegration struct {
+	Enabled bool                     `json:"enabled"`
+	Source  string                   `json:"source"`
+	Status  PeasantIntegrationStatus `json:"status"`
+	Message string                   `json:"message"`
+}
+
 // InspectPayload is the combined epoch and session snapshot.
 type InspectPayload struct {
-	Revision  int64         `json:"revision"`
-	AsOf      time.Time     `json:"asOf"`
-	Truncated bool          `json:"truncated"`
-	Epochs    []EpochView   `json:"epochs"`
-	Sessions  []SessionView `json:"sessions"`
+	Revision           int64              `json:"revision"`
+	AsOf               time.Time          `json:"asOf"`
+	Truncated          bool               `json:"truncated"`
+	Epochs             []EpochView        `json:"epochs"`
+	Sessions           []SessionView      `json:"sessions"`
+	PeasantIntegration PeasantIntegration `json:"peasantIntegration"`
 }

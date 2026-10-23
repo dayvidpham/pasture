@@ -10,9 +10,20 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/dayvidpham/pasture/internal/peasantproject"
 )
 
 const defaultActiveWindow = 15 * time.Minute
+
+// projectLookupTimeout bounds one project-enrichment lookup. Project labels are
+// optional decoration on a session view: a slow Peasant must not hold a Pasture
+// read open, and a failure simply leaves the fields empty.
+const projectLookupTimeout = 2 * time.Second
+
+// peasantDisabledMessage is the actionable disabled state /api/v1/inspect
+// reports. Disabled is the default and is distinct from unavailable.
+const peasantDisabledMessage = "Peasant project enrichment is disabled; pass --peasant-db or --peasant-url to `pasture serve` to enable it"
 
 // Service reads the session cache. Ensure is supplied by the serve command and
 // runs the journal-aware rebuild when the cache is dirty or behind.
@@ -21,6 +32,9 @@ type Service struct {
 	Now          func() time.Time
 	ActiveWindow time.Duration
 	Ensure       func(context.Context) error
+	// ProjectSource is the opt-in Peasant project enrichment. Nil means the
+	// integration is disabled: no Peasant database or network access happens.
+	ProjectSource peasantproject.Source
 }
 
 func NewService(db *sql.DB) *Service {
@@ -243,6 +257,7 @@ func (s *Service) List(ctx context.Context, opts ListOptions) (Page, error) {
 	for _, row := range rows {
 		items = append(items, s.view(row, now))
 	}
+	s.enrichWithProjects(ctx, items)
 	return Page{Revision: revision, AsOf: now, Items: items, Next: next}, nil
 }
 
@@ -266,7 +281,66 @@ func (s *Service) Get(ctx context.Context, harness, session string) (Detail, err
 	if len(rows) == 0 {
 		return Detail{}, ErrNotFound
 	}
-	return Detail{Revision: revision, AsOf: now, Session: s.view(rows[0], now)}, nil
+	sessions := []SessionView{s.view(rows[0], now)}
+	s.enrichWithProjects(ctx, sessions)
+	return Detail{Revision: revision, AsOf: now, Session: sessions[0]}, nil
+}
+
+// enrichWithProjects applies the optional Peasant project mapping in one batch.
+// A disabled source, a missing mapping, and any source failure all leave the
+// project fields empty; enrichment never fails or changes the session read.
+func (s *Service) enrichWithProjects(ctx context.Context, sessions []SessionView) {
+	if s.ProjectSource == nil || len(sessions) == 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	keys := make([]peasantproject.Key, 0, len(sessions))
+	for i := range sessions {
+		keys = append(keys, peasantproject.Key{Harness: sessions[i].Harness, Session: sessions[i].NativeSessionID})
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, projectLookupTimeout)
+	defer cancel()
+	projects, err := s.ProjectSource.Lookup(lookupCtx, keys)
+	if err != nil {
+		return
+	}
+	for i := range sessions {
+		project, ok := projects[peasantproject.Key{Harness: sessions[i].Harness, Session: sessions[i].NativeSessionID}]
+		if !ok {
+			continue
+		}
+		sessions[i].Project = project.Name
+		sessions[i].ProjectHash = project.Hash
+	}
+}
+
+// peasantIntegrationState reports the tri-state integration health for
+// /api/v1/inspect. A nil source is disabled and never reported as unavailable.
+func (s *Service) peasantIntegrationState() PeasantIntegration {
+	if s.ProjectSource == nil {
+		return PeasantIntegration{
+			Enabled: false,
+			Source:  peasantproject.SourceDisabled,
+			Status:  PeasantIntegrationDisabled,
+			Message: peasantDisabledMessage,
+		}
+	}
+	status := s.ProjectSource.Status()
+	state := PeasantIntegrationUnavailable
+	switch status.State {
+	case peasantproject.StateOK:
+		state = PeasantIntegrationOK
+	case peasantproject.StateDisabled:
+		state = PeasantIntegrationDisabled
+	}
+	return PeasantIntegration{
+		Enabled: status.Enabled,
+		Source:  status.Source,
+		Status:  state,
+		Message: status.Message,
+	}
 }
 
 func (s *Service) now() time.Time {

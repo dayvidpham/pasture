@@ -223,6 +223,9 @@
             },
             "type": "array"
           },
+          "peasantIntegration": {
+            "$ref": "#/components/schemas/PeasantIntegration"
+          },
           "revision": {
             "format": "int64",
             "type": "integer"
@@ -242,7 +245,8 @@
           "asOf",
           "truncated",
           "epochs",
-          "sessions"
+          "sessions",
+          "peasantIntegration"
         ],
         "type": "object"
       },
@@ -270,6 +274,43 @@
           "revision",
           "asOf",
           "items"
+        ],
+        "type": "object"
+      },
+      "PeasantIntegration": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the operator enabled Peasant project enrichment. Disabled is the default and is distinct from unavailable.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "Actionable detail for disabled or unavailable; empty when the source is ok.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Which opt-in backend is configured: none when disabled, db for --peasant-db, api for --peasant-url.",
+            "enum": [
+              "none",
+              "db",
+              "api"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "description": "disabled when the integration is off, ok when the configured source opened or answered, unavailable when it could not be reached or read.",
+            "enum": [
+              "disabled",
+              "ok",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "source",
+          "status",
+          "message"
         ],
         "type": "object"
       },
@@ -388,6 +429,14 @@
             "type": "string"
           },
           "nativeSessionId": {
+            "type": "string"
+          },
+          "project": {
+            "description": "Peasant-owned project display name for the session (canonical remote, else canonical cwd, else the project hash). Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never derives it.",
+            "type": "string"
+          },
+          "projectHash": {
+            "description": "Peasant-owned salted project hash for the session, preserved exactly. Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never recomputes it.",
             "type": "string"
           }
         },
@@ -528,7 +577,7 @@
   "info": {
     "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
     "title": "Pasture Local Session API",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "openapi": "3.1.0",
   "paths": {

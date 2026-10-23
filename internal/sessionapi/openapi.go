@@ -4,7 +4,7 @@ import "encoding/json"
 
 // PastureLocalAPIVersion is the frozen document-surface version for the local
 // session API. It changes only when a route or wire shape changes.
-const PastureLocalAPIVersion = "0.3.0"
+const PastureLocalAPIVersion = "0.4.0"
 
 // OpenAPIBytes returns the canonical OpenAPI 3.1 document. The generator and
 // the freshness test call this same function, so the committed artifact cannot
@@ -310,6 +310,16 @@ func openAPIDocument() map[string]any {
 							"description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` is the effective current binding: the latest explicit binding when one exists, otherwise the open inferred derivation.",
 						},
 						"end": ref("EndMarker"),
+						"project": map[string]any{
+							"type": "string",
+							"description": "Peasant-owned project display name for the session (canonical remote, else canonical cwd, else the project hash). " +
+								"Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never derives it.",
+						},
+						"projectHash": map[string]any{
+							"type": "string",
+							"description": "Peasant-owned salted project hash for the session, preserved exactly. " +
+								"Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never recomputes it.",
+						},
 					},
 					"harness", "nativeSessionId", "activity", "bindings",
 				),
@@ -357,15 +367,39 @@ func openAPIDocument() map[string]any {
 					},
 					"revision", "asOf", "epoch",
 				),
+				"PeasantIntegration": objectSchema(
+					map[string]any{
+						"enabled": map[string]any{
+							"type":        "boolean",
+							"description": "Whether the operator enabled Peasant project enrichment. Disabled is the default and is distinct from unavailable.",
+						},
+						"source": map[string]any{
+							"type":        "string",
+							"enum":        []string{"none", "db", "api"},
+							"description": "Which opt-in backend is configured: none when disabled, db for --peasant-db, api for --peasant-url.",
+						},
+						"status": map[string]any{
+							"type":        "string",
+							"enum":        []string{"disabled", "ok", "unavailable"},
+							"description": "disabled when the integration is off, ok when the configured source opened or answered, unavailable when it could not be reached or read.",
+						},
+						"message": map[string]any{
+							"type":        "string",
+							"description": "Actionable detail for disabled or unavailable; empty when the source is ok.",
+						},
+					},
+					"enabled", "source", "status", "message",
+				),
 				"InspectPayload": objectSchema(
 					map[string]any{
-						"revision":  map[string]any{"type": "integer", "format": "int64"},
-						"asOf":      map[string]any{"type": "string", "format": "date-time"},
-						"truncated": map[string]any{"type": "boolean"},
-						"epochs":    map[string]any{"type": "array", "items": ref("EpochView")},
-						"sessions":  map[string]any{"type": "array", "items": ref("SessionView")},
+						"revision":           map[string]any{"type": "integer", "format": "int64"},
+						"asOf":               map[string]any{"type": "string", "format": "date-time"},
+						"truncated":          map[string]any{"type": "boolean"},
+						"epochs":             map[string]any{"type": "array", "items": ref("EpochView")},
+						"sessions":           map[string]any{"type": "array", "items": ref("SessionView")},
+						"peasantIntegration": ref("PeasantIntegration"),
 					},
-					"revision", "asOf", "truncated", "epochs", "sessions",
+					"revision", "asOf", "truncated", "epochs", "sessions", "peasantIntegration",
 				),
 				"WebSocketClientMessage": objectSchema(
 					map[string]any{

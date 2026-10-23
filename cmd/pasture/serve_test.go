@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,6 +51,11 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 		"pasture migrate",
 		"non-loopback",
 		"--backfill",
+		"--peasant-db",
+		"--peasant-url",
+		"Peasant project enrichment is opt-in",
+		"setting both is an",
+		"never opens a Peasant database",
 	} {
 		require.Contains(t, help, want)
 	}
@@ -68,6 +74,9 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("listen", "127.0.0.1:0", "")
 	cmd.Flags().Duration("active-window", 15*time.Minute, "")
+	cmd.Flags().Bool("backfill", false, "")
+	cmd.Flags().String("peasant-db", "", "")
+	cmd.Flags().String("peasant-url", "", "")
 	cmd.SetArgs(nil)
 	reader, writer := io.Pipe()
 	cmd.SetOut(writer)
@@ -103,5 +112,81 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 		require.NoError(t, err)
 	case <-time.After(10 * time.Second):
 		t.Fatal("serve did not shut down after context cancellation")
+	}
+}
+
+// TestServePeasantProjectSource pins the opt-in source selection: empty flags
+// are disabled, both flags are a configuration error, and each single flag
+// builds the matching source without touching Peasant for the other.
+func TestServePeasantProjectSource(t *testing.T) {
+	t.Parallel()
+
+	source, closeSource, err := newPeasantProjectSource("", "")
+	require.NoError(t, err)
+	require.Nil(t, source, "the disabled default must not construct a source")
+	require.Nil(t, closeSource)
+
+	_, _, err = newPeasantProjectSource("/tmp/peasant.db", "http://127.0.0.1:8787")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--peasant-db")
+	require.Contains(t, err.Error(), "--peasant-url")
+	require.Contains(t, err.Error(), "not both")
+
+	missingDB := filepath.Join(t.TempDir(), "missing-peasant.db")
+	source, closeSource, err = newPeasantProjectSource(missingDB, "")
+	require.NoError(t, err, "a missing Peasant database is unavailable, not a startup failure")
+	require.NotNil(t, source)
+	status := source.Status()
+	require.True(t, status.Enabled)
+	require.Equal(t, "db", status.Source)
+	require.Equal(t, "unavailable", string(status.State))
+	require.NotNil(t, closeSource)
+	require.NoError(t, closeSource())
+	require.NoError(t, closeSource(), "closing the source twice is harmless")
+
+	source, closeSource, err = newPeasantProjectSource("", "http://127.0.0.1:8787")
+	require.NoError(t, err)
+	require.NotNil(t, source)
+	status = source.Status()
+	require.True(t, status.Enabled)
+	require.Equal(t, "api", status.Source)
+	require.Equal(t, "ok", string(status.State))
+	require.NotNil(t, closeSource)
+	require.NoError(t, closeSource())
+
+	_, _, err = newPeasantProjectSource("", "not-a-url")
+	require.Error(t, err)
+}
+
+// TestServeRejectsBothPeasantSources proves the mutual-exclusion check runs
+// before the store is opened: the requested database path is never created.
+func TestServeRejectsBothPeasantSources(t *testing.T) {
+	previous := flagDBPath
+	flagDBPath = filepath.Join(t.TempDir(), "pasture.db")
+	t.Cleanup(func() { flagDBPath = previous })
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("listen", "127.0.0.1:0", "")
+	cmd.Flags().Duration("active-window", 15*time.Minute, "")
+	cmd.Flags().Bool("backfill", false, "")
+	cmd.Flags().String("peasant-db", "/tmp/peasant.db", "")
+	cmd.Flags().String("peasant-url", "http://127.0.0.1:8787", "")
+	require.NoError(t, cmd.Flags().Set("peasant-db", "/tmp/peasant.db"))
+	require.NoError(t, cmd.Flags().Set("peasant-url", "http://127.0.0.1:8787"))
+
+	err := runServe(cmd)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not both")
+	_, statErr := os.Stat(flagDBPath)
+	require.True(t, os.IsNotExist(statErr), "validation must run before the pasture store is opened")
+}
+
+// TestServePeasantFlagsAreOptInDefaults pins the flag defaults: an operator who
+// never passes either flag gets the disabled integration.
+func TestServePeasantFlagsAreOptInDefaults(t *testing.T) {
+	for _, name := range []string{"peasant-db", "peasant-url"} {
+		flag := serveCmd.Flags().Lookup(name)
+		require.NotNil(t, flag, name)
+		require.Empty(t, flag.DefValue, "%s must default to disabled", name)
 	}
 }
