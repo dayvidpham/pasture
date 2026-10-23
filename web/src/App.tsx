@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   Clock3,
   Database,
+  Folder,
   Radio,
   RefreshCw,
   Waypoints,
@@ -15,6 +16,7 @@ import {
   FilterChip,
   RailSection,
   RailShell,
+  Select,
   StatGrid,
   StatusDot,
   TranscriptViewer,
@@ -41,6 +43,15 @@ import {
   formatTimelineDuration,
   projectSessionTimeline,
 } from './timeline'
+import {
+  filterSessionsByProject,
+  peasantIntegrationPresentation,
+  projectLabel,
+  projectOptions,
+  type PeasantIntegration,
+  type ProjectIdentity,
+  type ProjectOption,
+} from './project'
 
 type Connection = 'connecting' | 'live' | 'disconnected'
 type StateFilter = 'all' | 'active' | 'idle' | 'ended' | 'unknown'
@@ -68,6 +79,9 @@ type SessionRow = {
   harness: string
   nativeSessionId: string
   state: string
+  project?: string
+  projectHash?: string
+  projectSort: string
   epoch: string
   epochId: string
   lastEvent: string
@@ -174,6 +188,118 @@ export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[
   )
 }
 
+/**
+ * ProjectCell is the table cell for Peasant-owned project identity. It shows the
+ * name, the hash when no name was recorded, or an honest unknown marker; the
+ * full value stays available as a title for a clipped wide hash.
+ */
+export function ProjectCell({ project, projectHash }: ProjectIdentity) {
+  const label = projectLabel({ project, projectHash })
+  const unknown = !project?.trim() && !projectHash
+  return (
+    <span
+      className={unknown ? 'project-cell is-unknown' : 'project-cell'}
+      title={projectHash || project || undefined}
+    >
+      {label}
+    </span>
+  )
+}
+
+/**
+ * ProjectDetail is the selected-session rail block for Peasant-owned project
+ * identity. It is deliberately separate from the epoch binding: project fields
+ * come from Peasant and are not a Pasture binding.
+ */
+export function ProjectDetail({ session }: { session: ProjectIdentity }) {
+  const label = projectLabel(session)
+  const unknown = !session.project?.trim() && !session.projectHash
+  return (
+    <div className="project-detail">
+      <p className="eyebrow">peasant-owned project</p>
+      <dl className="detail-list">
+        <div><dt>project</dt><dd>{label}</dd></div>
+        {session.projectHash && label !== session.projectHash && (
+          <div><dt>hash</dt><dd className="mono-wrap">{session.projectHash}</dd></div>
+        )}
+      </dl>
+      <p className="rail-copy muted">
+        {unknown
+          ? 'Peasant has not mapped this session to a project.'
+          : 'Project identity comes from Peasant; it is not a Pasture epoch binding.'}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * ProjectFilter is the toolbar project selector. Options are keyed by the exact
+ * Peasant project hash; an empty value is the unfiltered inventory.
+ */
+export function ProjectFilter({
+  options,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  options: ProjectOption[]
+  value: string | null
+  onChange: (hash: string | null) => void
+  disabled?: boolean
+}) {
+  const selectId = useId()
+  return (
+    <div className="toolbar-group project-filter">
+      <label className="eyebrow" htmlFor={selectId}>project</label>
+      <Select
+        id={selectId}
+        value={value ?? ''}
+        onChange={(event) => onChange(event.currentTarget.value || null)}
+        options={[
+          { value: '', label: 'all projects' },
+          ...options.map((option) => ({ value: option.hash, label: option.label })),
+        ]}
+        disabled={disabled}
+      />
+    </div>
+  )
+}
+
+/**
+ * PeasantIntegrationState renders the tri-state opt-in project integration from
+ * /api/v1/inspect. Disabled is a configuration choice, unavailable is a failed
+ * configured source, and ok is the quiet normal state.
+ */
+export function PeasantIntegrationState({
+  integration,
+}: {
+  integration: PeasantIntegration | null
+}) {
+  if (!integration) {
+    return <p className="rail-copy muted">reading the Peasant project source…</p>
+  }
+  const state = peasantIntegrationPresentation(integration)
+  return (
+    <div className="peasant-integration" data-status={state.status}>
+      <div className="peasant-integration-head">
+        <span className="peasant-integration-title">{state.title}</span>
+        <span className="peasant-integration-status">{state.status}</span>
+      </div>
+      {state.sourceLabel !== 'none' && (
+        <p className="rail-copy muted">source: {state.sourceLabel}</p>
+      )}
+      {state.message && <p className="rail-copy">{state.message}</p>}
+      {state.commands.length > 0 && (
+        <ul className="peasant-integration-commands">
+          {state.commands.map((command) => (
+            <li key={command}><code>{command}</code></li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export default function App() {
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [epochs, setEpochs] = useState<EpochView[]>([])
@@ -185,6 +311,8 @@ export default function App() {
   const [truncated, setTruncated] = useState(false)
   const [stateFilter, setStateFilter] = useState<StateFilter>('all')
   const [epochFilter, setEpochFilter] = useState<string | null>(null)
+  const [projectFilter, setProjectFilter] = useState<string | null>(null)
+  const [peasantIntegration, setPeasantIntegration] = useState<PeasantIntegration | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [transcript, setTranscript] = useState<TranscriptState>({ status: 'idle' })
   const [transcriptRetry, setTranscriptRetry] = useState(0)
@@ -202,6 +330,7 @@ export default function App() {
       setRevision(payload.revision)
       setAsOf(payload.asOf)
       setTruncated(payload.truncated)
+      setPeasantIntegration(payload.peasantIntegration ?? null)
     } catch (error) {
       if (!signal?.aborted) {
         setLoadError(error instanceof Error ? error.message : 'the local API did not answer')
@@ -277,28 +406,39 @@ export default function App() {
     }
   }, [])
 
+  // Project options come from the current inventory and are keyed by the exact
+  // Peasant project hash. A selected hash that no longer appears falls back to
+  // the unfiltered inventory rather than showing an impossible filter.
+  const projects = useMemo(() => projectOptions(sessions), [sessions])
+  const activeProject =
+    projectFilter && projects.some((project) => project.hash === projectFilter)
+      ? projectFilter
+      : null
+
   const rows = useMemo<SessionRow[]>(() => {
-    return sessions
-      .filter((session) => {
-        if (stateFilter !== 'all' && session.activity.state !== stateFilter) return false
-        if (epochFilter && session.epoch?.id !== epochFilter) return false
-        return true
-      })
-      .map((session) => ({
-        id: sessionKey(session),
-        harness: session.harness,
-        nativeSessionId: session.nativeSessionId,
-        state: session.activity.state,
-        // session.epoch is the effective binding projection: the latest
-        // explicit binding, or the open inferred derivation. Inferred-only
-        // sessions therefore show their epoch here without a table change.
-        epoch: epochLabel(session.epoch),
-        epochId: session.epoch?.id ?? '',
-        lastEvent: session.activity.lastEvent ?? '—',
-        lastSeen: formatTime(session.activity.lastSeen),
-        lastSeenSort: session.activity.lastSeen ? Date.parse(session.activity.lastSeen) || 0 : 0,
-      }))
-  }, [sessions, stateFilter, epochFilter])
+    const filtered = sessions.filter((session) => {
+      if (stateFilter !== 'all' && session.activity.state !== stateFilter) return false
+      if (epochFilter && session.epoch?.id !== epochFilter) return false
+      return true
+    })
+    return filterSessionsByProject(filtered, activeProject).map((session) => ({
+      id: sessionKey(session),
+      harness: session.harness,
+      nativeSessionId: session.nativeSessionId,
+      state: session.activity.state,
+      project: session.project,
+      projectHash: session.projectHash,
+      projectSort: projectLabel(session),
+      // session.epoch is the effective binding projection: the latest
+      // explicit binding, or the open inferred derivation. Inferred-only
+      // sessions therefore show their epoch here without a table change.
+      epoch: epochLabel(session.epoch),
+      epochId: session.epoch?.id ?? '',
+      lastEvent: session.activity.lastEvent ?? '—',
+      lastSeen: formatTime(session.activity.lastSeen),
+      lastSeenSort: session.activity.lastSeen ? Date.parse(session.activity.lastSeen) || 0 : 0,
+    }))
+  }, [sessions, stateFilter, epochFilter, activeProject])
 
   const selectedSession = useMemo(
     () => sessions.find((session) => sessionKey(session) === selectedId) ?? null,
@@ -357,6 +497,15 @@ export default function App() {
               {row.nativeSessionId}
             </button>
           </div>
+        ),
+      },
+      {
+        key: 'projectSort',
+        label: 'project',
+        sortable: true,
+        width: '14rem',
+        render: (_: unknown, row: SessionRow) => (
+          <ProjectCell project={row.project} projectHash={row.projectHash} />
         ),
       },
       {
@@ -421,6 +570,12 @@ export default function App() {
               </FilterChip>
             ))}
           </div>
+          <ProjectFilter
+            options={projects}
+            value={activeProject}
+            onChange={setProjectFilter}
+            disabled={projects.length === 0}
+          />
           <Button
             variant="ghost"
             size="sm"
@@ -434,6 +589,14 @@ export default function App() {
       }
       rail={
         <>
+          <RailSection
+            title="peasant projects"
+            icon={Folder}
+            meta={peasantIntegration?.status ?? 'loading'}
+          >
+            <PeasantIntegrationState integration={peasantIntegration} />
+          </RailSection>
+
           <RailSection title="epochs" icon={Waypoints} meta={String(epochs.length)}>
             {epochs.length === 0 ? (
               <p className="rail-copy muted">
@@ -484,6 +647,8 @@ export default function App() {
                     <div><dt>ended</dt><dd>{formatTime(selectedSession.end.endedAt)} · {selectedSession.end.endReason}</dd></div>
                   )}
                 </dl>
+
+                <ProjectDetail session={selectedSession} />
 
                 <BindingHistory bindings={selectedSession.bindings ?? []} />
               </div>
@@ -575,6 +740,11 @@ export default function App() {
                 clear epoch filter
               </button>
             )}
+            {activeProject && (
+              <button type="button" className="clear-filter" onClick={() => setProjectFilter(null)}>
+                clear project filter
+              </button>
+            )}
           </div>
         </div>
 
@@ -588,7 +758,7 @@ export default function App() {
             message={
               sessions.length === 0
                 ? 'The local store has no claimed or bound sessions yet. Start a harness session, or restart serve with --backfill to load history.'
-                : 'Adjust the state or epoch filter to widen the inventory.'
+                : 'Adjust the state, epoch, or project filter to widen the inventory.'
             }
           />
         ) : (
