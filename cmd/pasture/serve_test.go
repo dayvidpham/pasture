@@ -150,7 +150,8 @@ func TestServePeasantProjectSource(t *testing.T) {
 	status = source.Status()
 	require.True(t, status.Enabled)
 	require.Equal(t, "api", status.Source)
-	require.Equal(t, "ok", string(status.State))
+	require.Equal(t, "unavailable", string(status.State), "a configured API source is unavailable until its first lookup")
+	require.Contains(t, status.Message, "not been contacted")
 	require.NotNil(t, closeSource)
 	require.NoError(t, closeSource())
 

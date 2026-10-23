@@ -14,15 +14,11 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 )
 
-// dbSchemaTimeout bounds the constructor's probe and shape guard. The source is
-// optional integration state: a slow or missing Peasant database must not delay
-// serve startup indefinitely.
+// dbSchemaTimeout bounds the constructor's probe and shape guard, and each
+// re-probe after a missing database. The source is optional integration state:
+// a slow or missing Peasant database must not delay serve startup or a session
+// read indefinitely.
 const dbSchemaTimeout = 2 * time.Second
-
-// maxDBLookupKeys is a backstop on the VALUES list. The session API requests at
-// most one page (100 sessions) or one detail, so production never approaches
-// it; a larger direct caller is refused instead of building an unbounded query.
-const maxDBLookupKeys = 1000
 
 // The Peasant database contract this integration reads. Peasant owns these
 // tables and columns; Pasture only reads them and never migrates or writes.
@@ -37,88 +33,59 @@ var dbTableContract = []struct {
 // dbSource reads project mappings from a Peasant SQLite database over a
 // read-only handle. It never writes, migrates, or creates the file.
 type dbSource struct {
-	db *sql.DB
+	path string
 
-	mu     sync.Mutex
-	status Status
+	connectMu sync.Mutex
+	mu        sync.Mutex
+	db        *sql.DB
+
+	status statusHolder
 }
 
 // NewDBSource opens path read-only and verifies the Peasant schema. A missing
 // file, an unreadable file, or an incompatible schema produces an unavailable
 // source, never an error: serve must still start and sessions must still read.
+// The source is not latched: a later Lookup retries the probe, so a Peasant
+// database created after serve started becomes available without a restart.
 func NewDBSource(path string) Source {
-	source := &dbSource{status: Status{Enabled: true, Source: SourceDB, State: StateOK}}
-	if strings.TrimSpace(path) == "" {
-		source.markUnavailable("the Peasant database path is empty")
+	source := &dbSource{path: strings.TrimSpace(path), status: newStatusHolder(SourceDB)}
+	if source.path == "" {
+		source.status.set(StateUnavailable, "the Peasant database path is empty")
 		return source
 	}
-	// mode=ro refuses to create the file; query_only is a second fence against
-	// any statement that would write to an existing one.
-	db, err := sql.Open("sqlite", dbconn.ReadOnlyDSN(path)+"&_pragma=query_only(1)")
-	if err != nil {
-		source.markUnavailable("the Peasant database could not be opened: " + err.Error())
-		return source
-	}
-	// One connection keeps the per-connection query_only pragma and the
-	// read-only handle coherent; the source is a low-rate optional reader.
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
 	ctx, cancel := context.WithTimeout(context.Background(), dbSchemaTimeout)
 	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		source.markUnavailable("the Peasant database is unavailable: " + err.Error())
-		return source
+	if problem := source.ensureConnected(ctx); problem != "" {
+		source.status.set(StateUnavailable, problem)
 	}
-	if problem, ok := dbSchemaProblem(ctx, db); !ok {
-		_ = db.Close()
-		source.markUnavailable(problem)
-		return source
-	}
-	source.db = db
 	return source
 }
 
 // Status reports the integration state. The source starts ok once the file and
-// schema are readable, and flips to unavailable only when a lookup fails.
-func (s *dbSource) Status() Status {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.status
-}
-
-func (s *dbSource) markUnavailable(message string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.status.State = StateUnavailable
-	s.status.Message = message
-}
-
-func (s *dbSource) markOK() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.status.State = StateOK
-	s.status.Message = ""
-}
+// schema are readable and recovers to ok after any successful lookup.
+func (s *dbSource) Status() Status { return s.status.get() }
 
 // Lookup resolves every requested session in ONE query joining the requested
-// (session_id, harness) pairs to Peer's sessions and projects rows. It returns
-// only verified mappings; a missing session, a harness mismatch, or a malformed
-// project hash simply produces no project for that key.
+// (session_id, harness) pairs to Peasant's sessions and projects rows. It
+// returns only verified mappings; a missing session, a harness mismatch, or a
+// malformed project hash simply produces no project for that key.
 func (s *dbSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, error) {
 	out := make(map[Key]Project, len(keys))
 	if len(keys) == 0 {
 		return out, nil
 	}
-	s.mu.Lock()
-	db := s.db
-	unavailableMessage := ""
-	if s.status.State != StateOK {
-		unavailableMessage = s.status.Message
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	s.mu.Unlock()
-	if db == nil || unavailableMessage != "" {
-		return nil, fmt.Errorf("the Peasant project source is unavailable: %s", unavailableMessage)
+	db, problem := s.handle(ctx)
+	if problem != "" {
+		if err := ctx.Err(); err != nil {
+			// A canceled caller is not evidence that the Peasant database is
+			// unavailable; leave the status untouched.
+			return nil, err
+		}
+		s.status.set(StateUnavailable, problem)
+		return nil, fmt.Errorf("the Peasant project source is unavailable: %s", problem)
 	}
 
 	unique := make([]Key, 0, len(keys))
@@ -130,8 +97,8 @@ func (s *dbSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, err
 		seen[key] = struct{}{}
 		unique = append(unique, key)
 	}
-	if len(unique) > maxDBLookupKeys {
-		return nil, fmt.Errorf("the Peasant project lookup requested %d sessions, above the %d-session bound; request one page at a time", len(unique), maxDBLookupKeys)
+	if len(unique) > maxLookupKeys {
+		return nil, fmt.Errorf("the Peasant project lookup requested %d sessions, above the %d-session bound; request one page at a time", len(unique), maxLookupKeys)
 	}
 
 	requested := make(map[string]Key, len(unique))
@@ -153,7 +120,10 @@ func (s *dbSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, err
 
 	rows, err := db.QueryContext(ctx, statement, args...)
 	if err != nil {
-		s.markUnavailable("the Peasant database could not be read: " + err.Error())
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		s.status.markFailure(ctx, "the Peasant database could not be read: "+err.Error())
 		return nil, fmt.Errorf("reading the Peasant project mapping: %w", err)
 	}
 	defer rows.Close()
@@ -161,7 +131,10 @@ func (s *dbSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, err
 		var sessionID string
 		var storedHarness, projectHash, canonicalRemote, canonicalCWD sql.NullString
 		if err := rows.Scan(&sessionID, &storedHarness, &projectHash, &canonicalRemote, &canonicalCWD); err != nil {
-			s.markUnavailable("a Peasant project mapping row could not be decoded: " + err.Error())
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			s.status.markFailure(ctx, "a Peasant project mapping row could not be decoded: "+err.Error())
 			return nil, fmt.Errorf("decoding a Peasant project mapping row: %w", err)
 		}
 		key, ok := requested[sessionID]
@@ -179,14 +152,85 @@ func (s *dbSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, err
 			// a project identity; leave the session without project fields.
 			continue
 		}
-		out[key] = Project{Name: firstNonEmpty(canonicalRemote.String, canonicalCWD.String, hash.String()), Hash: hash.String()}
+		out[key] = Project{
+			Name: projectDisplayName(canonicalRemote.String, canonicalCWD.String, hash.String()),
+			Hash: hash.String(),
+		}
 	}
 	if err := rows.Err(); err != nil {
-		s.markUnavailable("iterating Peasant project mappings failed: " + err.Error())
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		s.status.markFailure(ctx, "iterating Peasant project mappings failed: "+err.Error())
 		return nil, fmt.Errorf("iterating Peasant project mappings: %w", err)
 	}
-	s.markOK()
+	s.status.markOK()
 	return out, nil
+}
+
+// handle returns the live read-only handle, re-running the open and shape probe
+// under the caller's bounded context when the initial probe found no database.
+func (s *dbSource) handle(ctx context.Context) (*sql.DB, string) {
+	s.mu.Lock()
+	db := s.db
+	s.mu.Unlock()
+	if db != nil {
+		return db, ""
+	}
+	if s.path == "" {
+		return nil, "the Peasant database path is empty"
+	}
+	if problem := s.ensureConnected(ctx); problem != "" {
+		return nil, problem
+	}
+	s.mu.Lock()
+	db = s.db
+	s.mu.Unlock()
+	if db == nil {
+		return nil, "the Peasant database handle is closed"
+	}
+	return db, ""
+}
+
+// ensureConnected opens the Peasant database read-only and verifies its schema.
+// It returns an operator-facing problem and "" on success. The probe is
+// serialized so concurrent lookups do not open several handles.
+func (s *dbSource) ensureConnected(ctx context.Context) string {
+	s.connectMu.Lock()
+	defer s.connectMu.Unlock()
+
+	s.mu.Lock()
+	if s.db != nil {
+		s.mu.Unlock()
+		return ""
+	}
+	s.mu.Unlock()
+
+	probeCtx, cancel := context.WithTimeout(ctx, dbSchemaTimeout)
+	defer cancel()
+
+	// mode=ro refuses to create the file; query_only is a second fence against
+	// any statement that would write to an existing one.
+	db, err := sql.Open("sqlite", dbconn.ReadOnlyDSN(s.path)+"&_pragma=query_only(1)")
+	if err != nil {
+		return "the Peasant database could not be opened: " + err.Error()
+	}
+	// One connection keeps the per-connection query_only pragma and the
+	// read-only handle coherent; the source is a low-rate optional reader.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if err := db.PingContext(probeCtx); err != nil {
+		_ = db.Close()
+		return "the Peasant database is unavailable: " + err.Error()
+	}
+	if problem, ok := dbSchemaProblem(probeCtx, db); !ok {
+		_ = db.Close()
+		return problem
+	}
+	s.mu.Lock()
+	s.db = db
+	s.mu.Unlock()
+	return ""
 }
 
 // Close releases the read-only handle. It is safe to call more than once.
@@ -201,13 +245,17 @@ func (s *dbSource) Close() error {
 	return nil
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
+// projectDisplayName resolves the same display label Peasant records: the
+// canonical remote label when the remote is recognizable, else the canonical
+// cwd, else the project hash.
+func projectDisplayName(canonicalRemote, canonicalCWD, hash string) string {
+	if label, ok := schema.RemoteLabel(strings.TrimSpace(canonicalRemote)); ok {
+		return label
 	}
-	return ""
+	if cwd := strings.TrimSpace(canonicalCWD); cwd != "" {
+		return cwd
+	}
+	return hash
 }
 
 // dbSchemaProblem checks the Peasant table/column contract. It returns the

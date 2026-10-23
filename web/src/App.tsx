@@ -45,7 +45,9 @@ import {
 } from './timeline'
 import {
   filterSessionsByProject,
+  integrationFromSessionsFrame,
   peasantIntegrationPresentation,
+  projectDetailMessage,
   projectLabel,
   projectOptions,
   type PeasantIntegration,
@@ -190,16 +192,19 @@ export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[
 
 /**
  * ProjectCell is the table cell for Peasant-owned project identity. It shows the
- * name, the hash when no name was recorded, or an honest unknown marker; the
- * full value stays available as a title for a clipped wide hash.
+ * name, the hash when no name was recorded, or an honest unknown marker. The
+ * title carries the label and the full hash, so a clipped label or hash stays
+ * inspectable.
  */
 export function ProjectCell({ project, projectHash }: ProjectIdentity) {
   const label = projectLabel({ project, projectHash })
-  const unknown = !project?.trim() && !projectHash
+  const name = project?.trim()
+  const unknown = !name && !projectHash
+  const title = name && projectHash ? `${name} · ${projectHash}` : projectHash || name || undefined
   return (
     <span
       className={unknown ? 'project-cell is-unknown' : 'project-cell'}
-      title={projectHash || project || undefined}
+      title={title}
     >
       {label}
     </span>
@@ -209,11 +214,18 @@ export function ProjectCell({ project, projectHash }: ProjectIdentity) {
 /**
  * ProjectDetail is the selected-session rail block for Peasant-owned project
  * identity. It is deliberately separate from the epoch binding: project fields
- * come from Peasant and are not a Pasture binding.
+ * come from Peasant and are not a Pasture binding. It also receives the
+ * integration state so a missing project is never blamed on Peasant when the
+ * source is disabled or unavailable.
  */
-export function ProjectDetail({ session }: { session: ProjectIdentity }) {
+export function ProjectDetail({
+  session,
+  integration,
+}: {
+  session: ProjectIdentity
+  integration: PeasantIntegration | null
+}) {
   const label = projectLabel(session)
-  const unknown = !session.project?.trim() && !session.projectHash
   return (
     <div className="project-detail">
       <p className="eyebrow">peasant-owned project</p>
@@ -223,11 +235,7 @@ export function ProjectDetail({ session }: { session: ProjectIdentity }) {
           <div><dt>hash</dt><dd className="mono-wrap">{session.projectHash}</dd></div>
         )}
       </dl>
-      <p className="rail-copy muted">
-        {unknown
-          ? 'Peasant has not mapped this session to a project.'
-          : 'Project identity comes from Peasant; it is not a Pasture epoch binding.'}
-      </p>
+      <p className="rail-copy muted">{projectDetailMessage(session, integration)}</p>
     </div>
   )
 }
@@ -375,6 +383,7 @@ export default function App() {
             setRevision(frame.revision)
             setAsOf(frame.asOf)
             setTruncated(Boolean(frame.payload.next))
+            setPeasantIntegration(integrationFromSessionsFrame(frame.payload))
             setLoading(false)
             break
           case 'epochs':
@@ -648,7 +657,7 @@ export default function App() {
                   )}
                 </dl>
 
-                <ProjectDetail session={selectedSession} />
+                <ProjectDetail session={selectedSession} integration={peasantIntegration} />
 
                 <BindingHistory bindings={selectedSession.bindings ?? []} />
               </div>

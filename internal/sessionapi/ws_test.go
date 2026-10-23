@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 )
 
@@ -54,7 +55,14 @@ func readWSFrameOfType(t *testing.T, conn *websocket.Conn, want string) testWSFr
 func TestWebSocketSnapshotsAndLatestFrame(t *testing.T) {
 	t.Parallel()
 	f := seedSessions(t)
-	server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+	service := f.service()
+	service.ProjectSource = &fakePeasantSource{status: peasantproject.Status{
+		Enabled: true,
+		Source:  peasantproject.SourceDB,
+		State:   peasantproject.StateUnavailable,
+		Message: "database is locked",
+	}}
+	server := httptest.NewServer(sessionapi.NewHandler(service))
 	t.Cleanup(server.Close)
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
@@ -71,11 +79,18 @@ func TestWebSocketSnapshotsAndLatestFrame(t *testing.T) {
 	require.Equal(t, int64(7), sessions.Revision)
 	require.Equal(t, f.now, sessions.AsOf)
 	var sessionPayload struct {
-		Items []sessionapi.SessionView `json:"items"`
-		Next  string                   `json:"next,omitempty"`
+		Items              []sessionapi.SessionView      `json:"items"`
+		Next               string                        `json:"next,omitempty"`
+		PeasantIntegration sessionapi.PeasantIntegration `json:"peasantIntegration"`
 	}
 	require.NoError(t, json.Unmarshal(sessions.Payload, &sessionPayload))
 	require.Len(t, sessionPayload.Items, 4)
+	// The sessions frame carries the integration state, so a live client does
+	// not have to wait for a separate inspect refresh to learn it changed.
+	require.True(t, sessionPayload.PeasantIntegration.Enabled)
+	require.Equal(t, peasantproject.SourceDB, sessionPayload.PeasantIntegration.Source)
+	require.Equal(t, sessionapi.PeasantIntegrationUnavailable, sessionPayload.PeasantIntegration.Status)
+	require.Equal(t, "database is locked", sessionPayload.PeasantIntegration.Message)
 
 	require.NoError(t, conn.WriteJSON(map[string]string{"type": "subscribe", "topic": "epochs"}))
 	epochs := readWSFrameOfType(t, conn, "epochs")

@@ -53,8 +53,10 @@ historical session state from the lifecycle journal before serving.
 Peasant project enrichment is opt-in and disabled by default. Pass
 --peasant-db <path> to read Peasant's project mapping from a read-only SQLite
 handle, or --peasant-url <url> to ask the Peasant HTTP API; setting both is an
-error. When disabled, serve never opens a Peasant database and never contacts
-Peasant.`,
+error. With --peasant-db the reported label is the canonical remote label when
+the remote is recognizable, else the canonical cwd, else the project hash; with
+--peasant-url it is Peasant's resolved project label. When disabled, serve
+never opens a Peasant database and never contacts Peasant.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runServe(cmd)
@@ -204,11 +206,7 @@ func newPeasantProjectSource(dbPath, apiURL string) (peasantproject.Source, func
 		return nil, nil, nil
 	}
 	cached := peasantproject.NewCached(raw)
-	closer, _ := cached.(interface{ Close() error })
-	if closer == nil {
-		return cached, nil, nil
-	}
-	return cached, closer.Close, nil
+	return cached, cached.Close, nil
 }
 
 func listenIsLoopback(listen string) bool {

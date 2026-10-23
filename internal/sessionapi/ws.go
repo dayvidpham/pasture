@@ -175,9 +175,10 @@ func (c *wsClient) refresh(ctx context.Context, topic wsTopic) {
 			return
 		}
 		payload := struct {
-			Items []SessionView `json:"items"`
-			Next  string        `json:"next,omitempty"`
-		}{Items: page.Items, Next: page.Next}
+			Items              []SessionView      `json:"items"`
+			Next               string             `json:"next,omitempty"`
+			PeasantIntegration PeasantIntegration `json:"peasantIntegration"`
+		}{Items: page.Items, Next: page.Next, PeasantIntegration: c.service.peasantIntegrationState()}
 		c.publish(topic, sub, page.Revision, page.AsOf, payload)
 	case wsTopicEpochs:
 		page, err := c.service.Epochs(ctx)

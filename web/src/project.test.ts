@@ -8,10 +8,13 @@ import App, {
   ProjectDetail,
   ProjectFilter,
 } from './App'
+import type { SessionsFrame } from './api'
 import {
   filterSessionsByProject,
+  integrationFromSessionsFrame,
   integrationSourceLabel,
   peasantIntegrationPresentation,
+  projectDetailMessage,
   projectLabel,
   projectOptions,
   UNKNOWN_PROJECT_LABEL,
@@ -173,9 +176,9 @@ describe('project rendering', () => {
   })
 
   it('renders the project column honestly, including unknown', () => {
-    expect(render(createElement(ProjectCell, { project: 'pasture', projectHash: 'hash-1' }))).toContain(
-      'pasture',
-    )
+    const named = render(createElement(ProjectCell, { project: 'pasture', projectHash: 'hash-1' }))
+    expect(named).toContain('pasture')
+    expect(named).toContain('title="pasture · hash-1"')
     expect(render(createElement(ProjectCell, { projectHash: 'hash-only' }))).toContain('hash-only')
 
     const unknown = render(createElement(ProjectCell, {}))
@@ -187,6 +190,7 @@ describe('project rendering', () => {
     const html = render(
       createElement(ProjectDetail, {
         session: { project: 'pasture', projectHash: 'hash-1' },
+        integration: okIntegration,
       }),
     )
 
@@ -197,17 +201,56 @@ describe('project rendering', () => {
   })
 
   it('does not repeat a hash-only project identity', () => {
-    const html = render(createElement(ProjectDetail, { session: { projectHash: 'hash-only' } }))
+    const html = render(
+      createElement(ProjectDetail, {
+        session: { projectHash: 'hash-only' },
+        integration: okIntegration,
+      }),
+    )
 
     expect(html).toContain('hash-only')
     expect(html.match(/hash-only/g)).toHaveLength(1)
   })
 
   it('renders the detail unknown state without inventing a project', () => {
-    const html = render(createElement(ProjectDetail, { session: {} }))
+    const html = render(
+      createElement(ProjectDetail, { session: {}, integration: okIntegration }),
+    )
 
     expect(html).toContain(UNKNOWN_PROJECT_LABEL)
     expect(html).toContain('Peasant has not mapped this session to a project.')
+  })
+
+  it('does not claim Peasant failed to map a session when enrichment is off', () => {
+    const disabled = render(
+      createElement(ProjectDetail, { session: {}, integration: disabledIntegration }),
+    )
+    expect(disabled).toContain('enrichment is disabled')
+    expect(disabled).toContain('--peasant-db')
+    expect(disabled).not.toContain('Peasant has not mapped this session')
+
+    const unavailable = render(
+      createElement(ProjectDetail, { session: {}, integration: unavailableIntegration }),
+    )
+    expect(unavailable).toContain('source is unavailable')
+    expect(unavailable).toContain('database is locked')
+    expect(unavailable).not.toContain('Peasant has not mapped this session')
+
+    const unknownIntegration = render(
+      createElement(ProjectDetail, { session: {}, integration: null }),
+    )
+    expect(unknownIntegration).toContain('Reading the Peasant project source')
+    expect(unknownIntegration).not.toContain('Peasant has not mapped this session')
+  })
+
+  it('explains a missing project per integration state', () => {
+    expect(projectDetailMessage({}, okIntegration)).toContain('has not mapped')
+    expect(projectDetailMessage({}, disabledIntegration)).toContain('disabled')
+    expect(projectDetailMessage({}, unavailableIntegration)).toContain('unavailable')
+    expect(projectDetailMessage({}, null)).toContain('Reading')
+    expect(
+      projectDetailMessage({ project: 'pasture', projectHash: 'hash-1' }, disabledIntegration),
+    ).toContain('not a Pasture epoch binding')
   })
 
   it('renders all projects plus duplicate-name options keyed by hash', () => {
@@ -263,5 +306,21 @@ describe('project rendering', () => {
     expect(html).toContain('Peasant project enrichment is on')
     expect(html).toContain('source: Peasant HTTP API')
     expect(html).not.toContain('peasant-integration-commands')
+  })
+
+  it('updates the integration state from a live sessions frame', () => {
+    const frame: SessionsFrame = {
+      type: 'sessions',
+      revision: 3,
+      asOf: '2026-01-01T00:00:00Z',
+      payload: { items: [], peasantIntegration: unavailableIntegration },
+    }
+    const integration = integrationFromSessionsFrame(frame.payload)
+    expect(integration).toEqual(unavailableIntegration)
+    expect(integrationFromSessionsFrame({ items: [] })).toBeNull()
+
+    const html = render(createElement(PeasantIntegrationState, { integration }))
+    expect(html).toContain('data-status="unavailable"')
+    expect(html).toContain('database is locked')
   })
 })

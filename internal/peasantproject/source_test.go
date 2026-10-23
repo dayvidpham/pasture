@@ -18,22 +18,30 @@ import (
 
 // ─── fixtures ─────────────────────────────────────────────────────────────────
 
-func openTestDB(t *testing.T) (*sql.DB, string) {
+func openTestDBAt(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "peasant.db")
 	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(500)")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
-	return db, path
+	return db
 }
 
+func openTestDB(t *testing.T) (*sql.DB, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "peasant.db")
+	return openTestDBAt(t, path), path
+}
+
+// createPeasantSchema mirrors the Peasant-owned projects/sessions shape: both
+// canonical project columns are nullable, because a project may be identified
+// only by its hash.
 func createPeasantSchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 	_, err := db.Exec(`
 		CREATE TABLE projects (
 			project_hash     TEXT PRIMARY KEY,
-			canonical_cwd    TEXT NOT NULL,
-			canonical_remote TEXT NOT NULL
+			canonical_cwd    TEXT,
+			canonical_remote TEXT
 		);
 		CREATE TABLE sessions (
 			session_id    TEXT PRIMARY KEY,
@@ -44,7 +52,7 @@ func createPeasantSchema(t *testing.T, db *sql.DB) {
 	require.NoError(t, err)
 }
 
-func seedPeasantProject(t *testing.T, db *sql.DB, hash, cwd, remote string) {
+func seedPeasantProject(t *testing.T, db *sql.DB, hash string, cwd, remote any) {
 	t.Helper()
 	_, err := db.Exec(`INSERT INTO projects (project_hash, canonical_cwd, canonical_remote) VALUES (?, ?, ?)`, hash, cwd, remote)
 	require.NoError(t, err)
@@ -64,13 +72,19 @@ func TestDBSourceMapsProjectsBySessionAndHarness(t *testing.T) {
 	t.Parallel()
 	db, path := openTestDB(t)
 	createPeasantSchema(t, db)
-	seedPeasantProject(t, db, validHash('a'), "/work/repo", "git@github.com:org/repo.git")
+	seedPeasantProject(t, db, validHash('a'), "/work/repo", "github.com/org/repo")
 	seedPeasantProject(t, db, validHash('b'), "/work/local", "")
 	seedPeasantProject(t, db, validHash('c'), "", "")
+	seedPeasantProject(t, db, validHash('d'), nil, "github.com/org/null-cwd")
+	seedPeasantProject(t, db, validHash('e'), "/work/null-remote", nil)
+	seedPeasantProject(t, db, validHash('f'), nil, nil)
 	seedPeasantProject(t, db, "not-a-hash", "/work/bad", "")
 	seedPeasantSession(t, db, "s-remote", "claude-code", validHash('a'))
 	seedPeasantSession(t, db, "s-cwd", "codex", validHash('b'))
 	seedPeasantSession(t, db, "s-hash", "claude-code", validHash('c'))
+	seedPeasantSession(t, db, "s-null-cwd", "claude-code", validHash('d'))
+	seedPeasantSession(t, db, "s-null-remote", "claude-code", validHash('e'))
+	seedPeasantSession(t, db, "s-null-both", "claude-code", validHash('f'))
 	seedPeasantSession(t, db, "s-mismatch", "codex", validHash('a'))
 	seedPeasantSession(t, db, "s-badhash", "claude-code", "not-a-hash")
 
@@ -85,15 +99,22 @@ func TestDBSourceMapsProjectsBySessionAndHarness(t *testing.T) {
 		{Harness: "claude-code", Session: "s-remote"},
 		{Harness: "codex", Session: "s-cwd"},
 		{Harness: "claude-code", Session: "s-hash"},
+		{Harness: "claude-code", Session: "s-null-cwd"},
+		{Harness: "claude-code", Session: "s-null-remote"},
+		{Harness: "claude-code", Session: "s-null-both"},
 		{Harness: "claude-code", Session: "s-mismatch"},
 		{Harness: "claude-code", Session: "s-badhash"},
 		{Harness: "claude-code", Session: "s-missing"},
 	})
 	require.NoError(t, err)
 	require.Equal(t, map[Key]Project{
-		{Harness: "claude-code", Session: "s-remote"}: {Name: "git@github.com:org/repo.git", Hash: validHash('a')},
-		{Harness: "codex", Session: "s-cwd"}:          {Name: "/work/local", Hash: validHash('b')},
-		{Harness: "claude-code", Session: "s-hash"}:   {Name: validHash('c'), Hash: validHash('c')},
+		// The stored bare remote normalizes to Peasant's host:owner/repo label.
+		{Harness: "claude-code", Session: "s-remote"}:      {Name: "github.com:org/repo", Hash: validHash('a')},
+		{Harness: "codex", Session: "s-cwd"}:               {Name: "/work/local", Hash: validHash('b')},
+		{Harness: "claude-code", Session: "s-hash"}:        {Name: validHash('c'), Hash: validHash('c')},
+		{Harness: "claude-code", Session: "s-null-cwd"}:    {Name: "github.com:org/null-cwd", Hash: validHash('d')},
+		{Harness: "claude-code", Session: "s-null-remote"}: {Name: "/work/null-remote", Hash: validHash('e')},
+		{Harness: "claude-code", Session: "s-null-both"}:   {Name: validHash('f'), Hash: validHash('f')},
 	}, projects)
 	// The harness mismatch, the malformed hash, and the unknown session are
 	// absent rather than guessed from the stored row.
@@ -119,6 +140,53 @@ func TestDBSourceMissingDatabaseIsUnavailable(t *testing.T) {
 	require.True(t, os.IsNotExist(statErr), "a missing Peasant database must never be created")
 }
 
+// TestDBSourceRecoversWhenDatabaseAppearsAfterStartup pins the non-latching
+// rule: the constructor's failed probe must not be permanent, because Peasant
+// may create its database after serve starts.
+func TestDBSourceRecoversWhenDatabaseAppearsAfterStartup(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "peasant.db")
+	source := NewDBSource(path)
+	require.Equal(t, StateUnavailable, source.Status().State)
+
+	db := openTestDBAt(t, path)
+	createPeasantSchema(t, db)
+	seedPeasantProject(t, db, validHash('a'), "/work/repo", "github.com/org/repo")
+	seedPeasantSession(t, db, "s1", "claude-code", validHash('a'))
+
+	key := Key{Harness: "claude-code", Session: "s1"}
+	projects, err := source.Lookup(context.Background(), []Key{key})
+	require.NoError(t, err)
+	require.Equal(t, Project{Name: "github.com:org/repo", Hash: validHash('a')}, projects[key])
+	require.Equal(t, StateOK, source.Status().State)
+}
+
+// TestDBSourceCanceledLookupDoesNotMarkUnavailable pins the cancellation rule:
+// a caller context ending is not a source fault, so the status is unchanged and
+// a later caller still reads successfully.
+func TestDBSourceCanceledLookupDoesNotMarkUnavailable(t *testing.T) {
+	t.Parallel()
+	db, path := openTestDB(t)
+	createPeasantSchema(t, db)
+	seedPeasantProject(t, db, validHash('a'), "/work/repo", "github.com/org/repo")
+	seedPeasantSession(t, db, "s1", "claude-code", validHash('a'))
+
+	source := NewDBSource(path)
+	require.Equal(t, StateOK, source.Status().State)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	key := Key{Harness: "claude-code", Session: "s1"}
+	_, err := source.Lookup(ctx, []Key{key})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, StateOK, source.Status().State, "a caller cancellation must not mark the source unavailable")
+
+	projects, err := source.Lookup(context.Background(), []Key{key})
+	require.NoError(t, err)
+	require.Equal(t, Project{Name: "github.com:org/repo", Hash: validHash('a')}, projects[key])
+	require.Equal(t, StateOK, source.Status().State)
+}
+
 func TestDBSourceRejectsIncompatibleSchema(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -129,13 +197,13 @@ func TestDBSourceRejectsIncompatibleSchema(t *testing.T) {
 		{
 			name: "missing sessions table",
 			ddl: `CREATE TABLE projects (
-				project_hash TEXT PRIMARY KEY, canonical_cwd TEXT NOT NULL, canonical_remote TEXT NOT NULL)`,
+				project_hash TEXT PRIMARY KEY, canonical_cwd TEXT, canonical_remote TEXT)`,
 			wantContains: []string{"has no", "sessions"},
 		},
 		{
 			name: "projects missing canonical_remote",
 			ddl: `CREATE TABLE projects (
-				project_hash TEXT PRIMARY KEY, canonical_cwd TEXT NOT NULL);
+				project_hash TEXT PRIMARY KEY, canonical_cwd TEXT);
 				CREATE TABLE sessions (
 					session_id TEXT PRIMARY KEY, model_harness TEXT NOT NULL, project_hash TEXT NOT NULL)`,
 			wantContains: []string{"projects", "canonical_remote"},
@@ -206,6 +274,7 @@ func TestAPISourceBatchesAndVerifiesSummaries(t *testing.T) {
 
 	source, err := NewAPISource(server.URL)
 	require.NoError(t, err)
+	require.Equal(t, StateUnavailable, source.Status().State, "a configured API source starts uncontacted")
 	projects, err := source.Lookup(context.Background(), []Key{
 		{Harness: "claude-code", Session: "s1"},
 		{Harness: "claude-code", Session: "s2"},
@@ -269,6 +338,65 @@ func TestAPISourceUnavailableAndMalformed(t *testing.T) {
 	})
 }
 
+// TestAPISourceCanceledLookupDoesNotMarkUnavailable pins the cancellation rule
+// for the HTTP backend, including the uncontacted initial state.
+func TestAPISourceCanceledLookupDoesNotMarkUnavailable(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(apiEnvelope{})
+	}))
+	t.Cleanup(server.Close)
+	source, err := NewAPISource(server.URL)
+	require.NoError(t, err)
+	initial := source.Status()
+	require.Equal(t, StateUnavailable, initial.State)
+	require.Contains(t, initial.Message, "not been contacted")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	key := Key{Harness: "claude-code", Session: "s1"}
+	_, err = source.Lookup(ctx, []Key{key})
+	require.ErrorIs(t, err, context.Canceled)
+	status := source.Status()
+	require.Equal(t, StateUnavailable, status.State)
+	require.Equal(t, initial.Message, status.Message, "a caller cancellation must not rewrite the status message")
+
+	_, err = source.Lookup(context.Background(), []Key{key})
+	require.NoError(t, err)
+	require.Equal(t, StateOK, source.Status().State)
+}
+
+// TestAPISourceEnforcesSharedKeyBound pins the same batch bound the DB source
+// uses, and that a caller error does not masquerade as a source failure.
+func TestAPISourceEnforcesSharedKeyBound(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(apiEnvelope{})
+	}))
+	t.Cleanup(server.Close)
+	source, err := NewAPISource(server.URL)
+	require.NoError(t, err)
+
+	keys := make([]Key, maxLookupKeys+1)
+	for i := range keys {
+		keys[i] = Key{Harness: "claude-code", Session: "s" + strings.Repeat("x", i+1)}
+	}
+	_, err = source.Lookup(context.Background(), keys)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "above the 1000-session bound")
+	require.Equal(t, StateUnavailable, source.Status().State)
+	require.Contains(t, source.Status().Message, "not been contacted")
+	mu.Lock()
+	require.Zero(t, requests, "an over-bound request must not reach Peasant")
+	mu.Unlock()
+}
+
 func TestAPISourceRejectsMalformedURL(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{"", "   ", "://bad", "ftp://example.com", "http://"} {
@@ -278,6 +406,38 @@ func TestAPISourceRejectsMalformedURL(t *testing.T) {
 	source, err := NewAPISource("http://127.0.0.1:8787/")
 	require.NoError(t, err)
 	require.Equal(t, SourceAPI, source.Status().Source)
+}
+
+// TestProjectLabelsAgreeAcrossSources pins that the DB fallback chain and
+// Peasant's own resolved API label describe the same project identically.
+func TestProjectLabelsAgreeAcrossSources(t *testing.T) {
+	t.Parallel()
+	db, path := openTestDB(t)
+	createPeasantSchema(t, db)
+	seedPeasantProject(t, db, validHash('a'), "/work/repo", "github.com/org/repo")
+	seedPeasantSession(t, db, "s1", "claude-code", validHash('a'))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(apiEnvelope{Sessions: []apiSummary{
+			{ID: "s1", Harness: "claude-code", Project: "github.com:org/repo", ProjectHash: validHash('a')},
+		}})
+	}))
+	t.Cleanup(server.Close)
+
+	key := Key{Harness: "claude-code", Session: "s1"}
+	dbSource := NewDBSource(path)
+	dbProjects, err := dbSource.Lookup(context.Background(), []Key{key})
+	require.NoError(t, err)
+
+	apiSource, err := NewAPISource(server.URL)
+	require.NoError(t, err)
+	apiProjects, err := apiSource.Lookup(context.Background(), []Key{key})
+	require.NoError(t, err)
+
+	require.Equal(t, "github.com:org/repo", dbProjects[key].Name)
+	require.Equal(t, dbProjects[key].Name, apiProjects[key].Name)
+	require.Equal(t, dbProjects[key].Hash, apiProjects[key].Hash)
 }
 
 // ─── cache/coalescing ─────────────────────────────────────────────────────────
@@ -387,6 +547,75 @@ func TestCachedSourceCachesFailures(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 1, inner.callCount(), "a cached failure must not be retried on every refresh tick")
 	require.Equal(t, StateUnavailable, source.Status().State)
+}
+
+// TestCachedSourceDoesNotCacheCallerCancellation pins that a canceled caller
+// neither poisons the cache nor strands the coalesced waiter.
+func TestCachedSourceDoesNotCacheCallerCancellation(t *testing.T) {
+	t.Parallel()
+	key := Key{Harness: "claude-code", Session: "s1"}
+	inner := &countingSource{
+		projects: map[Key]Project{key: {Name: "org/repo", Hash: validHash('a')}},
+		status:   Status{Enabled: true, Source: SourceAPI, State: StateOK},
+		started:  make(chan struct{}, 1),
+		release:  make(chan struct{}),
+	}
+	source := newCached(inner, time.Minute, time.Now)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := source.Lookup(ctx, []Key{key})
+		result <- err
+	}()
+	select {
+	case <-inner.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the cache never reached the underlying source")
+	}
+	cancel()
+	require.ErrorIs(t, <-result, context.Canceled)
+
+	close(inner.release)
+	projects, err := source.Lookup(context.Background(), []Key{key})
+	require.NoError(t, err)
+	require.Equal(t, Project{Name: "org/repo", Hash: validHash('a')}, projects[key])
+	require.Equal(t, 2, inner.callCount(), "a canceled result must not be served from the cache")
+}
+
+// TestCachedSourcePrunesExpiredEntriesAndHonorsBound pins the bounded cache:
+// expired entries are dropped on write and the entry count never exceeds the
+// configured limit.
+func TestCachedSourcePrunesExpiredEntriesAndHonorsBound(t *testing.T) {
+	t.Parallel()
+	inner := &countingSource{status: Status{Enabled: true, Source: SourceAPI, State: StateOK}}
+	now := time.Unix(1700000000, 0)
+	source := newCachedWithLimit(inner, 30*time.Second, func() time.Time { return now }, 4)
+
+	for i, key := range []Key{
+		{Harness: "claude-code", Session: "k1"},
+		{Harness: "claude-code", Session: "k2"},
+		{Harness: "claude-code", Session: "k3"},
+		{Harness: "claude-code", Session: "k4"},
+	} {
+		_, err := source.Lookup(context.Background(), []Key{key})
+		require.NoError(t, err)
+		require.Len(t, source.entries, i+1)
+	}
+
+	now = now.Add(31 * time.Second)
+	k5 := Key{Harness: "claude-code", Session: "k5"}
+	_, err := source.Lookup(context.Background(), []Key{k5})
+	require.NoError(t, err)
+	require.Len(t, source.entries, 1, "expired entries must be pruned on write")
+	require.Contains(t, source.entries, k5)
+
+	for i := 0; i < 6; i++ {
+		key := Key{Harness: "claude-code", Session: "bound-" + strings.Repeat("x", i+1)}
+		_, err := source.Lookup(context.Background(), []Key{key})
+		require.NoError(t, err)
+		require.LessOrEqual(t, len(source.entries), source.limit)
+	}
 }
 
 func TestCachedSourceCoalescesConcurrentLookups(t *testing.T) {

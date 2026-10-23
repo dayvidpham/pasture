@@ -312,12 +312,14 @@ func openAPIDocument() map[string]any {
 						"end": ref("EndMarker"),
 						"project": map[string]any{
 							"type": "string",
-							"description": "Peasant-owned project display name for the session (canonical remote, else canonical cwd, else the project hash). " +
+							"description": "Peasant-owned project display label for the session. The label depends on the configured source: " +
+								"with --peasant-db it is the canonical remote label when the remote is recognizable, else the canonical cwd, else the project hash; " +
+								"with --peasant-url it is Peasant's resolved project label. " +
 								"Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never derives it.",
 						},
 						"projectHash": map[string]any{
 							"type": "string",
-							"description": "Peasant-owned salted project hash for the session, preserved exactly. " +
+							"description": "Peasant-owned opaque project hash for the session, preserved exactly. " +
 								"Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never recomputes it.",
 						},
 					},
@@ -381,7 +383,7 @@ func openAPIDocument() map[string]any {
 						"status": map[string]any{
 							"type":        "string",
 							"enum":        []string{"disabled", "ok", "unavailable"},
-							"description": "disabled when the integration is off, ok when the configured source opened or answered, unavailable when it could not be reached or read.",
+							"description": "disabled when the integration is off; ok after the configured source has answered a lookup successfully; unavailable when it has not been contacted yet or could not be opened, reached, or read.",
 						},
 						"message": map[string]any{
 							"type":        "string",

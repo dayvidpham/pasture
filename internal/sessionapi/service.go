@@ -329,11 +329,8 @@ func (s *Service) peasantIntegrationState() PeasantIntegration {
 	}
 	status := s.ProjectSource.Status()
 	state := PeasantIntegrationUnavailable
-	switch status.State {
-	case peasantproject.StateOK:
+	if status.State == peasantproject.StateOK {
 		state = PeasantIntegrationOK
-	case peasantproject.StateDisabled:
-		state = PeasantIntegrationDisabled
 	}
 	return PeasantIntegration{
 		Enabled: status.Enabled,

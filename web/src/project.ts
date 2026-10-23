@@ -1,4 +1,4 @@
-import type { InspectPayload, SessionView } from './api'
+import type { InspectPayload, SessionsFrame, SessionView } from './api'
 
 /** The tri-state Peasant project integration reported by /api/v1/inspect. */
 export type PeasantIntegration = InspectPayload['peasantIntegration']
@@ -83,6 +83,49 @@ export function filterSessionsByProject<T extends ProjectIdentity>(
 ): T[] {
   if (!projectHash) return sessions
   return sessions.filter((session) => session.projectHash === projectHash)
+}
+
+/**
+ * integrationFromSessionsFrame reads the integration health carried by a live
+ * sessions frame. A frame from an older server omits it, which is honestly
+ * "unknown" rather than a claim that the integration is disabled.
+ */
+export function integrationFromSessionsFrame(
+  payload: SessionsFrame['payload'] | null | undefined,
+): PeasantIntegration | null {
+  return payload?.peasantIntegration ?? null
+}
+
+/**
+ * projectDetailMessage explains a missing project without blaming Peasant when
+ * the integration is disabled or unavailable. A known project identity always
+ * keeps the provenance note.
+ */
+export function projectDetailMessage(
+  session: ProjectIdentity,
+  integration: PeasantIntegration | null,
+): string {
+  if (session.project?.trim() || session.projectHash) {
+    return 'Project identity comes from Peasant; it is not a Pasture epoch binding.'
+  }
+  if (integration === null) {
+    return 'Reading the Peasant project source…'
+  }
+  switch (integration.status) {
+    case 'disabled':
+      return 'Peasant project enrichment is disabled, so no project is loaded for this session. Restart pasture serve with --peasant-db or --peasant-url to enable it.'
+    case 'unavailable': {
+      const detail = integration.message?.trim()
+      const suffix = detail ? ` (${detail})` : ''
+      return `The configured Peasant project source is unavailable${suffix}, so a project may be missing for this session. Check the Peasant source and refresh.`
+    }
+    case 'ok':
+      return 'Peasant has not mapped this session to a project.'
+    default:
+      return `Pasture reported an unrecognized Peasant integration state (${String(
+        integration.status,
+      )}), so a missing project cannot be explained. Refresh after upgrading Pasture.`
+  }
 }
 
 /** A human label for the configured Peasant project source. */
