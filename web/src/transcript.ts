@@ -77,6 +77,12 @@ export function describeTranscriptError(error: unknown): TranscriptFailure {
   }
   if (error instanceof ApiError) {
     switch (error.status) {
+      case 400:
+        return {
+          title: 'session identity rejected',
+          message: `${error.message}. Pasture keeps host session ids it cannot express to Peasant, so retrying will not change this result; export the transcript from Peasant directly.`,
+          retry: false,
+        }
       case 404:
         return {
           title: 'no transcript for this session',

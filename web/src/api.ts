@@ -1,6 +1,7 @@
 import type { components } from './generated/api'
 
 export type SessionView = components['schemas']['SessionView']
+export type SessionBindingInterval = components['schemas']['SessionBindingInterval']
 export type EpochView = components['schemas']['EpochView']
 export type InspectPayload = components['schemas']['InspectPayload']
 export type SessionPage = components['schemas']['Page']

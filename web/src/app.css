@@ -240,6 +240,72 @@ body {
   word-break: break-all;
 }
 
+/* Binding provenance: the current source/confidence live in the detail list;
+   the history below keeps every interval, including inferred ones, so a
+   provisional epoch never looks authoritative. */
+.binding-history {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: var(--bd);
+}
+
+.binding-history .eyebrow {
+  margin-bottom: var(--sp-2);
+}
+
+.binding-list {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.binding-item {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  background: var(--surface-2);
+  border-left: 2px solid var(--ink-4);
+}
+
+.binding-item[data-source='inferred'] {
+  border-left-color: var(--warning);
+}
+
+.binding-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+}
+
+.binding-source {
+  color: var(--ink-strong);
+}
+
+.binding-confidence,
+.binding-role {
+  color: var(--ink-3);
+}
+
+.binding-role {
+  margin-left: auto;
+}
+
+.binding-when,
+.binding-epoch {
+  margin: 0;
+  color: var(--ink-2);
+  font: var(--fs-sm)/var(--lh-body) var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.binding-epoch {
+  color: var(--ink-3);
+}
+
 @media (max-width: 880px) {
   .hero {
     grid-template-columns: 1fr;

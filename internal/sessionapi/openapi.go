@@ -203,14 +203,14 @@ func openAPIDocument() map[string]any {
 				"get": map[string]any{
 					"operationId": "getSessionTranscript",
 					"summary":     "Fetch the durable Peasant transcript for one session",
-					"description": "Runs `peasant export sessions --session <nativeSessionId>` beside the API in a private temporary directory and returns the durable SessionDetailPayload document unchanged. The route never returns a last-good transcript when Peasant refuses a newer incomplete attempt. The browser validates the body against the shared @peasant-labs/schema contract before rendering it.",
+					"description": "Validates the harness and native session id against the shared @peasant-labs/schema contract, runs `peasant export sessions --session <nativeSessionId>` beside the API in a private temporary directory, and streams the durable SessionDetailPayload document unchanged. The route never returns a last-good transcript when Peasant refuses a newer incomplete attempt. The browser validates the body against the same shared contract before rendering it.",
 					"parameters": []any{
 						pathParameter("harness", "Harness id"),
 						pathParameter("nativeSessionId", "Native session id"),
 					},
 					"responses": map[string]any{
 						"200": jsonResponse(ref("TranscriptPayload")),
-						"400": errorResponse("Invalid session key"),
+						"400": errorResponse("Invalid session key, harness, or native session id under the shared schema contract"),
 						"403": errorResponse("Non-loopback Host or Origin"),
 						"404": errorResponse("Peasant has no transcript for that session"),
 						"409": errorResponse("Peasant refused an incomplete attempt, cannot express the session id, or returned a different identity"),
