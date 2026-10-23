@@ -1,6 +1,7 @@
-// Package sessionapi serves the local, read-only projection of active harness
-// sessions mapped to epoch bindings. It never reads the lifecycle journal
-// directly; tasks.EnsureSessionState owns the rebuild and writes the cache.
+// Package sessionapi serves the local session/epoch projection and the
+// bind/unbind write surface over the loopback HTTP API. It never reads the
+// lifecycle journal directly; tasks.EnsureSessionState owns the rebuild and
+// writes the cache.
 package sessionapi
 
 import (

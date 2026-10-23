@@ -17,7 +17,7 @@ var sessionOccurrenceEvidenceKinds = []provenance.EvidenceKind{
 	"pasture.lifecycle.occurrence.v2",
 }
 
-// SessionStateStatus is the cache marker the read API and the serve startup
+// SessionStateStatus is the cache marker the session API and the serve startup
 // use to decide whether the session state table still reflects the journal.
 type SessionStateStatus struct {
 	Found                     bool

@@ -934,6 +934,9 @@ func TestHTTPBindUnbindErrorMapping(t *testing.T) {
 		`{"epochId":"`+f.epoch+`","role":"worker"}`)
 	require.Equal(t, http.StatusServiceUnavailable, status)
 	require.Equal(t, "write_unavailable", code)
+	status, code = postError(t, bare.URL+"/api/v1/sessions/claude-code/active/unbind", `{}`)
+	require.Equal(t, http.StatusServiceUnavailable, status)
+	require.Equal(t, "write_unavailable", code, "the unbind route must refuse a nil write plane too")
 
 	// A second unbind is the domain's no-open-binding conflict.
 	status, _ = postError(t, bindURL("second-unbind"), `{"epochId":"`+f.epoch+`","role":"worker"}`)
