@@ -63,6 +63,12 @@ const (
 	// rule earns. The rule correlates a first-claim-wins claim with an active
 	// ownership episode; no command recorded this session's intent, so calling
 	// it "verified" would overstate it. The read model carries the same token.
+	//
+	// The token is repeated here (and in the table's CHECK) because tasks cannot
+	// import sessionapi without a cycle. The sessionapi confidence test inserts
+	// every wire token into this production table and rejects an unknown one, so
+	// the three copies are pinned together by a failing test rather than left to
+	// drift.
 	sessionInferenceConfidence = "observed"
 )
 
@@ -300,23 +306,63 @@ func sessionInferredBindingID(harness, session, epochID string) string {
 	return "inferred-" + hex.EncodeToString(sum[:])
 }
 
-// sessionInferenceFailureLine renders the ONE diagnostic line a skipped
-// inference earns. It never fails the rebuild: the activity cache and the
-// explicit bindings are still correct, and the next rebuild retries.
-func sessionInferenceFailureLine(err error) string {
-	return fmt.Sprintf(
-		"pasture: session binding inference was skipped for this rebuild: %v. "+
-			"Why: either the claim actor's active owner-responsibility episodes could not be read before the rebuild's write transaction, or the derived rows could not be stored. "+
-			"Where: internal/tasks/session_infer.go, in planSessionInference or replaceSessionInferredBindings. "+
-			"When: during the session cache rebuild, while deriving or writing the inferred bindings. "+
-			"Impact: this rebuild cleared the inferred binding cache and wrote no replacement, so a provisional session-to-epoch binding is absent until the next successful rebuild; explicit bindings and session activity are unaffected, and the session cache is still usable. "+
-			"Fix: retry the rebuild; if it keeps failing, release other writers on the database file, then run `pasture migrate` and check the store's journal integrity.",
-		err)
+// sessionInferenceFailureStage names where inference failed. The two stages
+// have different consequences for the cache, so the diagnostic must not collapse
+// them into one sentence.
+type sessionInferenceFailureStage uint8
+
+const (
+	sessionInferenceStageUnset sessionInferenceFailureStage = iota
+	// sessionInferenceStagePlan means the derivation itself did not complete.
+	// The previous cache is left untouched: this rebuild has nothing better to
+	// publish, and the next rebuild retries.
+	sessionInferenceStagePlan
+	// sessionInferenceStageWrite means the derivation completed but could not be
+	// stored. The savepoint rolled back, the cache was cleared afterwards, and
+	// no replacement was written.
+	sessionInferenceStageWrite
+)
+
+func (s sessionInferenceFailureStage) String() string {
+	switch s {
+	case sessionInferenceStagePlan:
+		return "plan"
+	case sessionInferenceStageWrite:
+		return "write"
+	default:
+		return fmt.Sprintf("sessionInferenceFailureStage(%d)", uint8(s))
+	}
 }
 
-// writeSessionInferenceDiagnostic writes the one line a skipped inference
-// earns. A nil sink loses the line rather than the rebuild.
-func writeSessionInferenceDiagnostic(store lifecycleReceiptStore, err error) {
+// sessionInferenceFailureLine renders the diagnostic text for one failed
+// stage. It never fails the rebuild: the activity cache and the explicit
+// bindings are still correct, and the next rebuild retries.
+func sessionInferenceFailureLine(stage sessionInferenceFailureStage, err error) string {
+	var why, where, impact string
+	switch stage {
+	case sessionInferenceStagePlan:
+		why = "the claim actor's active owner-responsibility episodes could not be read before the rebuild's write transaction"
+		where = "planSessionInference"
+		impact = "this rebuild published no new inferred derivation and left the previous inferred cache in place apart from session-end cleanup, so a provisional binding may be stale; explicit bindings and session activity are unaffected, and the session cache is still usable"
+	case sessionInferenceStageWrite:
+		why = "the derived rows could not be stored in the rebuild's write transaction"
+		where = "replaceSessionInferredBindings"
+		impact = "this rebuild cleared the inferred binding cache and wrote no replacement, so a provisional session-to-epoch binding is absent until the next successful rebuild; explicit bindings and session activity are unaffected, and the session cache is still usable"
+	default:
+		why = "inference failed in an unstated stage"
+		where = "internal/tasks/session_infer.go"
+		impact = "the inferred binding cache was not refreshed; explicit bindings and session activity are unaffected, and the session cache is still usable"
+	}
+	return fmt.Sprintf(
+		"pasture: session binding inference was skipped for this rebuild (stage %s): %v. Why: %s. Where: internal/tasks/session_infer.go, in %s. When: during the session cache rebuild. Impact: %s. Fix: retry the rebuild; if it keeps failing, release other writers on the database file, then run `pasture migrate` and check the store's journal integrity.",
+		stage, err, why, where, impact)
+}
+
+// writeSessionInferenceDiagnostic is the ONLY diagnostic writer for inference.
+// The rebuild calls it at most once: the plan and write stages are mutually
+// exclusive, so one failed rebuild can never emit two lines. A nil sink loses
+// the line rather than the rebuild.
+func writeSessionInferenceDiagnostic(store lifecycleReceiptStore, stage sessionInferenceFailureStage, err error) {
 	if err == nil {
 		return
 	}
@@ -324,7 +370,7 @@ func writeSessionInferenceDiagnostic(store lifecycleReceiptStore, err error) {
 	if sink == nil {
 		return
 	}
-	fmt.Fprintln(sink, sessionInferenceFailureLine(err))
+	fmt.Fprintln(sink, sessionInferenceFailureLine(stage, err))
 }
 
 // replaceSessionInferredBindings replaces the inference cache inside the

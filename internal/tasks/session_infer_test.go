@@ -11,6 +11,7 @@ package tasks
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -232,14 +233,24 @@ func TestSessionInferenceCountsOnlyProjectedEpochs(t *testing.T) {
 	t.Run("only plain owned tasks", func(t *testing.T) {
 		t.Parallel()
 		store, _ := newInferenceStore(t)
+		// A projected epoch owned by a DIFFERENT actor keeps the epoch inventory
+		// non-empty and gives the derivation a control row: without it, "no
+		// inference" would also be explained by the empty-epoch early return and
+		// the ownership read below would never run.
+		owner := feasibilityActor(t, store, "infer-projected-plain-owner")
+		seedOwnedEpochTask(t, store, owner, "infer-projected-plain-owner")
+		gateClaim(t, store, owner, "session-projected-plain-owner")
 		actor := feasibilityActor(t, store, "infer-projected-plain")
 		seedOwnedPlainTask(t, store, actor, "infer-projected-plain")
 		gateClaim(t, store, actor, "session-projected-plain")
 
 		rebuildForInference(t, store)
 
-		require.Empty(t, readInferredBindings(t, store),
-			"a task with no epoch projection row is not an epoch")
+		rows := readInferredBindings(t, store)
+		require.Len(t, rows, 1, "only the control owner's projected epoch is an epoch candidate")
+		require.Equal(t, "session-projected-plain-owner", rows[0].Session)
+		require.NotEqual(t, "session-projected-plain", rows[0].Session,
+			"a task with no epoch projection row is not an epoch, even though the ownership read ran")
 	})
 }
 
@@ -344,8 +355,8 @@ func TestSessionInferenceSkipsUnknownAndMalformedActors(t *testing.T) {
 }
 
 // TestSessionInferenceSurvivesAbsentOwnershipAPI: a store whose journal does
-// not expose the ownership read still rebuilds the session cache, writes no
-// inferred row, and says why on the diagnostic sink.
+// not expose the ownership read still rebuilds the session cache, publishes no
+// new derivation, and says so at the PLAN stage on the diagnostic sink.
 func TestSessionInferenceSurvivesAbsentOwnershipAPI(t *testing.T) {
 	t.Parallel()
 	store, diagnostics := newInferenceStore(t)
@@ -359,8 +370,55 @@ func TestSessionInferenceSurvivesAbsentOwnershipAPI(t *testing.T) {
 	require.Empty(t, readInferredBindings(t, store))
 	line := diagnostics.String()
 	require.Contains(t, line, "session binding inference was skipped")
+	require.Contains(t, line, "stage plan")
 	require.Contains(t, line, "provenance.ActorOwnershipQueryAPI")
+	require.Contains(t, line, "published no new inferred derivation and left the previous inferred cache in place")
 	require.Contains(t, line, "the session cache is still usable")
+	require.Equal(t, 1, bytes.Count([]byte(line), []byte("\n")), "exactly one diagnostic line")
+}
+
+// TestSessionInferencePlanFailureKeepsThePreviousCache: a derivation fault must
+// not destroy the last good derivation. The diagnostic for the plan stage says
+// so, and the previous rows are byte-for-byte unchanged.
+func TestSessionInferencePlanFailureKeepsThePreviousCache(t *testing.T) {
+	t.Parallel()
+	store, diagnostics := newInferenceStore(t)
+	actor := feasibilityActor(t, store, "infer-plan-keeps")
+	seedOwnedEpochTask(t, store, actor, "infer-plan-keeps")
+	gateClaim(t, store, actor, "session-plan-keeps")
+	rebuildForInference(t, store)
+	before := readInferredBindings(t, store)
+	require.Len(t, before, 1)
+
+	gateJournal(t, store, gateHiddenJournal{Journal: store.Journal()})
+	rebuildForInference(t, store)
+
+	require.Equal(t, before, readInferredBindings(t, store),
+		"a plan failure leaves the previous inferred cache in place")
+	line := diagnostics.String()
+	require.Contains(t, line, "stage plan")
+	require.Contains(t, line, "left the previous inferred cache in place")
+	require.Equal(t, 1, bytes.Count([]byte(line), []byte("\n")), "exactly one diagnostic line")
+}
+
+// TestSessionInferenceOwnershipReadFaultIsDiagnosed: the ownership read is the
+// one provenance call inference makes. A fault there must be diagnosed by name
+// and must not write a row.
+func TestSessionInferenceOwnershipReadFaultIsDiagnosed(t *testing.T) {
+	t.Parallel()
+	store, diagnostics := newInferenceStore(t)
+	actor := feasibilityActor(t, store, "infer-read-fault")
+	seedOwnedEpochTask(t, store, actor, "infer-read-fault")
+	gateClaim(t, store, actor, "session-read-fault")
+	gateJournal(t, store, gateFaultJournal{Journal: store.Journal(), err: errors.New("ownership read exploded")})
+
+	rebuildForInference(t, store)
+
+	require.Empty(t, readInferredBindings(t, store))
+	line := diagnostics.String()
+	require.Contains(t, line, "reading the active ownership of the session's claim actor")
+	require.Contains(t, line, "ownership read exploded")
+	require.Contains(t, line, "stage plan")
 	require.Equal(t, 1, bytes.Count([]byte(line), []byte("\n")), "exactly one diagnostic line")
 }
 
@@ -403,8 +461,10 @@ func TestSessionInferenceWriteFaultLeavesTheCacheUsable(t *testing.T) {
 	require.Zero(t, inferred, "a failed inference write commits no derivation rather than a stale one")
 	line := diagnostics.String()
 	require.Contains(t, line, "session binding inference was skipped")
+	require.Contains(t, line, "stage write")
 	require.Contains(t, line, "cleared the inferred binding cache")
 	require.Contains(t, line, "the session cache is still usable")
+	require.Equal(t, 1, bytes.Count([]byte(line), []byte("\n")), "exactly one diagnostic line")
 }
 
 // TestSessionInferenceClearsWhenOwnershipBecomesAmbiguous: the cache holds

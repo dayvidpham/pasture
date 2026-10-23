@@ -688,3 +688,181 @@ func TestEpochCountsStayCurrentOnly(t *testing.T) {
 	require.Equal(t, 1, counts[f.epoch].ActiveCount)
 	require.Equal(t, 0, counts[historical].SessionCount, "an ended historical binding is not an ever-bound count")
 }
+
+// apiErrorEnvelope is the wire error body every failing route returns.
+type apiErrorEnvelope struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// getErrorCode performs one GET and returns its status and error code. A
+// non-error response decodes to an empty code, which fails the caller's
+// assertion rather than hiding the route's behavior.
+func getErrorCode(t *testing.T, url string) (int, string) {
+	t.Helper()
+	response, err := http.Get(url)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	var envelope apiErrorEnvelope
+	if err := json.NewDecoder(response.Body).Decode(&envelope); err != nil {
+		return response.StatusCode, ""
+	}
+	return response.StatusCode, envelope.Error.Code
+}
+
+// TestHTTPRejectsOutOfRangeLimits pins the transport contract the OpenAPI
+// documents (minimum 1, maximum 100): a parsed value outside that range is a
+// 400, not the service's internal default. Service.List keeps its default for
+// direct callers, asserted at the end.
+func TestHTTPRejectsOutOfRangeLimits(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+	t.Cleanup(server.Close)
+	epochSessions := server.URL + "/api/v1/epochs/" + url.PathEscape(f.epoch) + "/sessions"
+
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{name: "sessions non-numeric", url: server.URL + "/api/v1/sessions?limit=abc"},
+		{name: "sessions zero", url: server.URL + "/api/v1/sessions?limit=0"},
+		{name: "sessions over maximum", url: server.URL + "/api/v1/sessions?limit=101"},
+		{name: "epoch sessions zero", url: epochSessions + "?limit=0"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			status, code := getErrorCode(t, testCase.url)
+			require.Equal(t, http.StatusBadRequest, status)
+			require.Equal(t, "invalid_filter", code)
+		})
+	}
+
+	// The service is the internal caller boundary: zero still means "default".
+	page, err := f.service().List(context.Background(), sessionapi.ListOptions{})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 4)
+}
+
+// TestHTTPErrorContract covers the routes' non-2xx bodies: a malformed page
+// token, a dirty cache, and a storage fault each map to their documented code.
+func TestHTTPErrorContract(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invalid cursor", func(t *testing.T) {
+		t.Parallel()
+		f := seedSessions(t)
+		server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+		t.Cleanup(server.Close)
+
+		status, code := getErrorCode(t, server.URL+"/api/v1/sessions?cursor=not-base64")
+		require.Equal(t, http.StatusBadRequest, status)
+		require.Equal(t, "invalid_page_token", code)
+	})
+
+	t.Run("dirty cache", func(t *testing.T) {
+		t.Parallel()
+		f := seedSessions(t)
+		server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+		t.Cleanup(server.Close)
+		_, err := f.db.Exec(`UPDATE pasture_session_api_state SET dirty = 1 WHERE singleton_id = 0`)
+		require.NoError(t, err)
+
+		status, code := getErrorCode(t, server.URL+"/api/v1/sessions")
+		require.Equal(t, http.StatusServiceUnavailable, status)
+		require.Equal(t, "stale_session_cache", code)
+	})
+
+	t.Run("storage fault", func(t *testing.T) {
+		t.Parallel()
+		f := newFixture(t)
+		server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+		t.Cleanup(server.Close)
+		_, err := f.db.Exec(`DROP TABLE pasture_session_api_state`)
+		require.NoError(t, err)
+
+		status, code := getErrorCode(t, server.URL+"/api/v1/sessions")
+		require.Equal(t, http.StatusInternalServerError, status)
+		require.Equal(t, "storage_fault", code)
+	})
+}
+
+// TestEpochActiveCountMatchesActiveSessions pins the liveness rule shared by
+// the session page and the epoch active count: the two must agree session for
+// session, including an inferred-only session.
+func TestEpochActiveCountMatchesActiveSessions(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	now := f.now.UnixNano()
+	f.state(t, "explicit-active", now-2*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
+	f.binding(t, "binding-explicit-active", "explicit-active", now-2*int64(time.Minute), sql.NullInt64{}, "")
+	f.state(t, "explicit-idle", now-21*int64(time.Minute), now-20*int64(time.Minute), "SessionStart", 2)
+	f.binding(t, "binding-explicit-idle", "explicit-idle", now-21*int64(time.Minute), sql.NullInt64{}, "")
+	f.state(t, "explicit-ended", now-30*int64(time.Minute), now-5*int64(time.Minute), "SessionEnd", 3)
+	f.binding(t, "binding-explicit-ended", "explicit-ended", now-30*int64(time.Minute), sql.NullInt64{Int64: now - 5*int64(time.Minute), Valid: true}, "session_end")
+	f.state(t, "inferred-active", now-2*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 4)
+	f.claim(t, "inferred-active", now-2*int64(time.Minute))
+	f.inferredBinding(t, "inferred-active", "inferred-active", f.epoch, now-2*int64(time.Minute), sql.NullInt64{}, "", "observed")
+
+	service := f.service()
+	ctx := context.Background()
+	epochPage, err := service.Epochs(ctx)
+	require.NoError(t, err)
+	require.Len(t, epochPage.Items, 1)
+	epoch := epochPage.Items[0]
+
+	activePage, err := service.List(ctx, sessionapi.ListOptions{State: sessionapi.StateActive})
+	require.NoError(t, err)
+	activeByEpoch := map[string]int{}
+	for _, item := range activePage.Items {
+		if item.Epoch != nil {
+			activeByEpoch[item.Epoch.ID]++
+		}
+	}
+	require.Equal(t, 2, activeByEpoch[f.epoch], "both the explicit and the inferred open binding are active")
+	require.Equal(t, activeByEpoch[f.epoch], epoch.ActiveCount,
+		"the epoch active count must equal the number of sessions the page labels active")
+
+	allPage, err := service.List(ctx, sessionapi.ListOptions{})
+	require.NoError(t, err)
+	allByEpoch := map[string]int{}
+	for _, item := range allPage.Items {
+		if item.Epoch != nil {
+			allByEpoch[item.Epoch.ID]++
+		}
+	}
+	require.Equal(t, allByEpoch[f.epoch], epoch.SessionCount)
+}
+
+// TestConfidenceVocabularyMatchesStoreAndContract pins the three confidence
+// tokens across the two surfaces that can drift: the production inferred table's
+// CHECK constraint and the generated OpenAPI enum. Every token is inserted, and
+// a token outside the contract is refused by the store.
+func TestConfidenceVocabularyMatchesStoreAndContract(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	tokens := []string{"observed", "correlated", "verified"}
+	for i, token := range tokens {
+		f.inferredBinding(t, fmt.Sprintf("confidence-%d", i), fmt.Sprintf("confidence-session-%d", i),
+			f.epoch, f.now.UnixNano(), sql.NullInt64{}, "", token)
+	}
+	_, err := f.db.Exec(`
+		INSERT INTO pasture_session_inferred_binding
+			(binding_id, harness, session, epoch_id, role, bound_at, unbound_at, unbound_reason, inferred_at, reason, confidence)
+		VALUES ('confidence-unknown', 'claude-code', 'confidence-session-unknown', ?, 'owner-responsibility', ?, NULL, NULL, ?, 'claim-ownership', 'invented')`,
+		f.epoch, f.now.UnixNano(), f.now.UnixNano())
+	require.Error(t, err, "the production table must reject a confidence token outside the contract")
+
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	require.NoError(t, json.Unmarshal(sessionapi.OpenAPIBytes(), &document))
+	require.Equal(t, tokens, document.Components.Schemas["Confidence"].Enum,
+		"the OpenAPI enum must be the same vocabulary, in the same order")
+}

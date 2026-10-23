@@ -161,11 +161,10 @@ type epochCount struct {
 func epochSessionCounts(ctx context.Context, tx *sql.Tx, cutoff int64, inferredUsable bool) (map[string]epochCount, error) {
 	statement := bindingCurrentCTE(inferredUsable) + `
 	SELECT b.epoch_id, COUNT(*),
-	       SUM(CASE WHEN b.unbound_at IS NULL AND
-	           MAX(COALESCE(st.last_seen, 0), COALESCE(b.bound_at, 0), COALESCE(c.claimed_at, 0)) >= ?
+	       SUM(CASE WHEN b.unbound_at IS NULL AND ` + currentBindingLastSeenExpr + ` >= ?
 	           THEN 1 ELSE 0 END)
 	FROM binding_current b
-	LEFT JOIN pasture_session_state st ON st.harness = b.harness AND st.session = b.session
+	LEFT JOIN pasture_session_state s ON s.harness = b.harness AND s.session = b.session
 	LEFT JOIN pasture_session_claim c ON c.harness = b.harness AND c.session = b.session
 	GROUP BY b.epoch_id`
 	rows, err := tx.QueryContext(ctx, statement, cutoff)

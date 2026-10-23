@@ -74,6 +74,20 @@ var inferredBindingColumns = []string{
 	"unbound_at", "unbound_reason", "inferred_at", "reason", "confidence",
 }
 
+// currentBindingLastSeenExpr is the ONE definition of a session's liveness
+// instant. The session page, the active/idle view, and the epoch active count
+// all measure against it, so an explicit and an inferred binding cannot drift
+// into two different notions of "last seen". The aliases are part of the
+// contract: every caller joins pasture_session_state AS s, binding_current AS b,
+// and pasture_session_claim AS c.
+const currentBindingLastSeenExpr = `MAX(COALESCE(s.last_seen, 0), COALESCE(b.bound_at, 0), COALESCE(b.unbound_at, 0), COALESCE(c.claimed_at, 0))`
+
+// currentBindingUpdatedExpr is the freshness twin of
+// currentBindingLastSeenExpr, used for the page's deterministic ordering. It is
+// separate on purpose: updated_at answers "when did this row last change" while
+// last_seen answers "when was this session last alive".
+const currentBindingUpdatedExpr = `MAX(COALESCE(s.updated_at, 0), COALESCE(b.bound_at, 0), COALESCE(b.unbound_at, 0), COALESCE(c.claimed_at, 0))`
+
 // bindingCurrentCTE is the one definition of the effective current binding.
 // Explicit wins in every state: a session with any explicit binding row is
 // described by its latest explicit row, even when that row is closed. Only a
@@ -145,8 +159,8 @@ joined AS (
 	       c.claimed_at AS claimed_at,
 	       b.inferred, b.binding_id, b.epoch_id, b.role, b.bound_at, b.unbound_at,
 	       b.unbound_reason, b.confidence, t.title AS epoch_title,
-	       MAX(COALESCE(s.last_seen, 0), COALESCE(b.bound_at, 0), COALESCE(b.unbound_at, 0), COALESCE(c.claimed_at, 0)) AS last_seen,
-	       MAX(COALESCE(s.updated_at, 0), COALESCE(b.bound_at, 0), COALESCE(b.unbound_at, 0), COALESCE(c.claimed_at, 0)) AS updated
+	       ` + currentBindingLastSeenExpr + ` AS last_seen,
+	       ` + currentBindingUpdatedExpr + ` AS updated
 	FROM inventory i
 	LEFT JOIN pasture_session_state s ON s.harness = i.harness AND s.session = i.session
 	LEFT JOIN pasture_session_claim c ON c.harness = i.harness AND c.session = i.session
@@ -422,9 +436,9 @@ LEFT JOIN tasks t ON t.id = b.epoch_id`
 // NULLIF keeps an empty label from leaking through as a valid token.
 func intervalConfidenceExpr(source BindingSource) string {
 	if source == BindingSourceExplicit {
-		return `'verified'`
+		return "'" + string(ConfidenceVerified) + "'"
 	}
-	return `COALESCE(NULLIF(b.confidence, ''), 'observed')`
+	return "COALESCE(NULLIF(b.confidence, ''), '" + string(ConfidenceObserved) + "')"
 }
 
 func queryBindingIntervals(ctx context.Context, tx *sql.Tx, table string, source BindingSource, keys []bindingKey, out map[bindingKey][]SessionBindingInterval) error {
@@ -485,12 +499,13 @@ func normalizeConfidence(raw string, source BindingSource) Confidence {
 	if source == BindingSourceExplicit {
 		return ConfidenceVerified
 	}
-	switch Confidence(raw) {
-	case ConfidenceObserved, ConfidenceCorrelated, ConfidenceVerified:
-		return Confidence(raw)
-	default:
-		return ConfidenceObserved
+	parsed := Confidence(raw)
+	for _, token := range confidenceTokens() {
+		if parsed == token {
+			return parsed
+		}
 	}
+	return ConfidenceObserved
 }
 
 // bindingKeyValues renders the requested sessions as one VALUES CTE, so both
