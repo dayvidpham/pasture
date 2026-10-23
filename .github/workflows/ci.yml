@@ -72,6 +72,42 @@ jobs:
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: make test-race-correctness
 
+  web:
+    name: Web contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web dependencies
+        run: cd web && pnpm install --frozen-lockfile
+
+      - name: Web boundary tests
+        # Hermetic: the Vitest suite exercises the schema parse, adaptTranscript
+        # hand-off, and actionable transcript error copy without a network or a
+        # Peasant store.
+        run: cd web && pnpm test
+
+      - name: Generated TypeScript freshness
+        # Regenerates src/generated/api.ts to a temp path and diffs it, so the
+        # committed OpenAPI artifact and the TypeScript consumers cannot drift.
+        run: make web-verify-generated
+
+      - name: Typecheck and build
+        run: cd web && pnpm build
+
   recovery:
     name: Recovery correctness
     runs-on: ubuntu-latest

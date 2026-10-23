@@ -1149,7 +1149,7 @@
     },
     "/api/v1/sessions/{harness}/{nativeSessionId}/transcript": {
       "get": {
-        "description": "Runs `peasant export sessions --session \u003cnativeSessionId\u003e` beside the API in a private temporary directory and returns the durable SessionDetailPayload document unchanged. The route never returns a last-good transcript when Peasant refuses a newer incomplete attempt. The browser validates the body against the shared @peasant-labs/schema contract before rendering it.",
+        "description": "Validates the harness and native session id against the shared @peasant-labs/schema contract, runs `peasant export sessions --session \u003cnativeSessionId\u003e` beside the API in a private temporary directory, and streams the durable SessionDetailPayload document unchanged. The route never returns a last-good transcript when Peasant refuses a newer incomplete attempt. The browser validates the body against the same shared contract before rendering it.",
         "operationId": "getSessionTranscript",
         "parameters": [
           {
@@ -1192,7 +1192,7 @@
                 }
               }
             },
-            "description": "Invalid session key"
+            "description": "Invalid session key, harness, or native session id under the shared schema contract"
           },
           "403": {
             "content": {

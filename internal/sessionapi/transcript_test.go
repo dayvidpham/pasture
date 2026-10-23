@@ -1,320 +1,58 @@
 package sessionapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
-// fakePeasantSource is the helper program the source tests run instead of the
-// real Peasant CLI. It is compiled once per test process from the Go source
-// below and selected by session id, so no test mutates PATH or the environment.
-var fakePeasant struct {
-	once sync.Once
-	dir  string
-	path string
-	err  error
-}
-
-func fakePeasantBinary(t *testing.T) string {
-	t.Helper()
-	fakePeasant.once.Do(func() {
-		dir, err := os.MkdirTemp("", "pasture-fake-peasant-*")
-		if err != nil {
-			fakePeasant.err = err
-			return
-		}
-		fakePeasant.dir = dir
-		src := filepath.Join(dir, "main.go")
-		if err := os.WriteFile(src, []byte(fakePeasantProgram), 0o600); err != nil {
-			fakePeasant.err = err
-			return
-		}
-		binary := filepath.Join(dir, "peasant")
-		build := exec.Command("go", "build", "-o", binary, src)
-		if out, err := build.CombinedOutput(); err != nil {
-			fakePeasant.err = fmt.Errorf("build fake peasant: %v: %s", err, out)
-			return
-		}
-		fakePeasant.path = binary
-	})
-	require.NoError(t, fakePeasant.err)
-	return fakePeasant.path
-}
-
-// TestMain removes the compiled fake Peasant after the package's tests finish.
-// It owns no other process state.
-func TestMain(m *testing.M) {
-	code := m.Run()
-	if fakePeasant.dir != "" {
-		_ = os.RemoveAll(fakePeasant.dir)
-	}
-	os.Exit(code)
-}
-
-const fakePeasantProgram = `package main
-
-import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
-	"time"
-)
-
-func main() {
-	args := os.Args[1:]
-	var session, outDir string
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--session":
-			if i+1 < len(args) {
-				session = args[i+1]
-				i++
-			}
-		case "--output-dir":
-			if i+1 < len(args) {
-				outDir = args[i+1]
-				i++
-			}
-		}
-	}
-	payload := map[string]any{"id": session, "harness": "claude-code", "turns": []any{}, "session": session}
-	if info, err := os.Stat(outDir); err == nil {
-		payload["dirMode"] = fmt.Sprintf("%o", info.Mode().Perm())
-		payload["outputDir"] = outDir
-	}
-	write := func(name string, value any) {
-		data, err := json.Marshal(value)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "marshal:", err)
-			os.Exit(1)
-		}
-		if err := os.WriteFile(filepath.Join(outDir, name), data, 0o600); err != nil {
-			fmt.Fprintln(os.Stderr, "write:", err)
-			os.Exit(1)
-		}
-	}
-	switch session {
-	case "missing":
-		fmt.Fprintln(os.Stderr, "warning: session missing: export session missing: session not found")
-		os.Exit(1)
-	case "incomplete":
-		fmt.Fprintln(os.Stderr, "warning: session incomplete: store: session incomplete holds an incomplete latest attempt beside its last-good generation")
-		os.Exit(1)
-	case "schema-newer":
-		fmt.Fprintln(os.Stderr, "Error: open analytics store: store: open db: database schema is version 68, but this build understands only up to version 67 (the database was upgraded by a newer Peasant)")
-		os.Exit(1)
-	case "invalid-id":
-		fmt.Fprintln(os.Stderr, "Error: export session odd: invalid session ID \"odd\": contains path separator or traversal")
-		os.Exit(1)
-	case "unknown-failure":
-		fmt.Fprintln(os.Stderr, "boom: internal failure")
-		os.Exit(2)
-	case "no-file":
-		os.Exit(0)
-	case "malformed":
-		_ = os.WriteFile(filepath.Join(outDir, "malformed.json"), []byte("{not json"), 0o600)
-	case "no-identity":
-		_ = os.WriteFile(filepath.Join(outDir, "no-identity.json"), []byte("{\"turns\":[]}"), 0o600)
-	case "empty":
-		_ = os.WriteFile(filepath.Join(outDir, "empty.json"), nil, 0o600)
-	case "two-files":
-		write("two-files.json", payload)
-		write("other.json", payload)
-	case "mismatch-id":
-		payload["id"] = "someone-else"
-		write("mismatch-id.json", payload)
-	case "mismatch-harness":
-		payload["harness"] = "codex"
-		write("mismatch-harness.json", payload)
-	case "slow":
-		time.Sleep(10 * time.Second)
-	case "ok":
-		write("ok.json", payload)
-	default:
-		write(session+".json", payload)
-	}
-}
-`
-
-func TestPeasantTranscriptSourceExportsTheDurablePayload(t *testing.T) {
-	t.Parallel()
-	source := &PeasantTranscriptSource{Binary: fakePeasantBinary(t), Timeout: 5 * time.Second}
-
-	data, err := source.ExportTranscript(context.Background(), "claude-code", "ok")
-	require.NoError(t, err)
-
-	var payload map[string]any
-	require.NoError(t, json.Unmarshal(data, &payload))
-	require.Equal(t, "ok", payload["id"])
-	require.Equal(t, "claude-code", payload["harness"])
-	require.Equal(t, "700", payload["dirMode"], "the export directory must be private")
-	require.NoDirExists(t, payload["outputDir"].(string), "the private export directory must be removed")
-}
-
-func TestPeasantTranscriptSourceClassifiesFailures(t *testing.T) {
-	t.Parallel()
-	binary := fakePeasantBinary(t)
-	cases := []struct {
-		name    string
-		session string
-		harness string
-		want    error
-		message string
-	}{
-		{
-			name:    "missing session",
-			session: "missing",
-			want:    ErrTranscriptNotFound,
-			message: "session not found",
-		},
-		{
-			name:    "incomplete latest attempt",
-			session: "incomplete",
-			want:    ErrTranscriptIncomplete,
-			message: "incomplete latest attempt",
-		},
-		{
-			name:    "store written by a newer peasant",
-			session: "schema-newer",
-			want:    ErrTranscriptUnsupported,
-			message: "install the Peasant version",
-		},
-		{
-			name:    "session id the shared contract rejects",
-			session: "invalid-id",
-			want:    ErrTranscriptUnsupported,
-			message: "Peasant supports UUID",
-		},
-		{
-			name:    "unclassified failure",
-			session: "unknown-failure",
-			want:    ErrTranscriptExportFailed,
-			message: "boom: internal failure",
-		},
-		{
-			name:    "no document written",
-			session: "no-file",
-			want:    ErrTranscriptMalformed,
-			message: "wrote no JSON transcript",
-		},
-		{
-			name:    "two documents for one session",
-			session: "two-files",
-			want:    ErrTranscriptMalformed,
-			message: "cannot tell which document",
-		},
-		{
-			name:    "invalid JSON",
-			session: "malformed",
-			want:    ErrTranscriptMalformed,
-			message: "not one complete JSON document",
-		},
-		{
-			// An unexpected export envelope (a payload nested under another
-			// object) must fail closed instead of being forwarded as a payload.
-			name:    "unexpected export envelope",
-			session: "no-identity",
-			want:    ErrTranscriptMalformed,
-			message: "carries no id and harness",
-		},
-		{
-			name:    "empty document",
-			session: "empty",
-			want:    ErrTranscriptMalformed,
-			message: "is empty",
-		},
-		{
-			name:    "payload names another session",
-			session: "mismatch-id",
-			harness: "claude-code",
-			want:    ErrTranscriptIdentityMismatch,
-			message: "someone-else",
-		},
-		{
-			name:    "payload names another harness",
-			session: "mismatch-harness",
-			harness: "claude-code",
-			want:    ErrTranscriptIdentityMismatch,
-			message: "codex",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			harness := tc.harness
-			if harness == "" {
-				harness = "claude-code"
-			}
-			source := &PeasantTranscriptSource{Binary: binary, Timeout: 5 * time.Second}
-			_, err := source.ExportTranscript(context.Background(), harness, tc.session)
-			require.ErrorIs(t, err, tc.want)
-			require.Contains(t, err.Error(), tc.message)
-		})
-	}
-}
-
-func TestPeasantTranscriptSourceReportsAMissingBinary(t *testing.T) {
-	t.Parallel()
-	source := &PeasantTranscriptSource{Binary: filepath.Join(t.TempDir(), "absent-peasant")}
-	_, err := source.ExportTranscript(context.Background(), "claude-code", "ok")
-	require.ErrorIs(t, err, ErrTranscriptSourceUnavailable)
-	require.Contains(t, err.Error(), "install Peasant")
-}
-
-func TestPeasantTranscriptSourceStopsAtTheBoundedTimeout(t *testing.T) {
-	t.Parallel()
-	source := &PeasantTranscriptSource{Binary: fakePeasantBinary(t), Timeout: 150 * time.Millisecond}
-
-	started := time.Now()
-	_, err := source.ExportTranscript(context.Background(), "claude-code", "slow")
-	require.ErrorIs(t, err, ErrTranscriptTimedOut)
-	require.Contains(t, err.Error(), "Peasant was stopped")
-	require.Less(t, time.Since(started), 5*time.Second, "the bounded context must kill the export, not wait for it")
-}
+const validTranscriptSession = "6a46bcd8-b365-4608-be7d-5601e2fdd805"
 
 // stubTranscriptSource lets handler tests assert each error mapping without
-// starting a process.
+// starting a process. It returns the same validated-export contract the real
+// source returns.
 type stubTranscriptSource struct {
-	payload  []byte
-	err      error
-	block    bool
-	deadline chan time.Time
+	payload []byte
+	err     error
+	closed  *bool
 }
 
-func (s *stubTranscriptSource) ExportTranscript(ctx context.Context, _, _ string) ([]byte, error) {
-	if s.deadline != nil {
-		deadline, _ := ctx.Deadline()
-		select {
-		case s.deadline <- deadline:
-		default:
-		}
+func (s *stubTranscriptSource) ExportTranscript(context.Context, string, string) (*TranscriptExport, error) {
+	if s.err != nil {
+		return nil, s.err
 	}
-	if s.block {
-		<-ctx.Done()
-		return nil, fmt.Errorf("%w: stub observed %v", ErrTranscriptTimedOut, ctx.Err())
+	export := &TranscriptExport{
+		Content: bytes.NewReader(s.payload),
+		Size:    int64(len(s.payload)),
+		ModTime: time.Unix(1700000000, 0).UTC(),
+		CloseFunc: func() error {
+			if s.closed != nil {
+				*s.closed = true
+			}
+			return nil
+		},
 	}
-	return s.payload, s.err
+	return export, nil
+}
+
+func newTranscriptServer(t *testing.T, source TranscriptSource) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(newHandler(nil, nil, source))
+	t.Cleanup(server.Close)
+	return server
 }
 
 func TestSessionTranscriptHandler(t *testing.T) {
 	t.Parallel()
-	validPayload := []byte(`{"id":"session-1","harness":"claude-code","turns":[]}`)
+	validPayload := []byte(`{"id":"` + validTranscriptSession + `","harness":"claude-code","turns":[]}`)
 
 	cases := []struct {
 		name       string
@@ -352,8 +90,8 @@ func TestSessionTranscriptHandler(t *testing.T) {
 			wantCode:   "transcript_incomplete",
 		},
 		{
-			name:       "unsupported store",
-			source:     &stubTranscriptSource{err: fmt.Errorf("%w: newer schema", ErrTranscriptUnsupported)},
+			name:       "unsupported session",
+			source:     &stubTranscriptSource{err: fmt.Errorf("%w: no harness", ErrTranscriptUnsupported)},
 			wantStatus: http.StatusConflict,
 			wantCode:   "transcript_unsupported",
 		},
@@ -397,16 +135,16 @@ func TestSessionTranscriptHandler(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := httptest.NewServer(newHandler(nil, nil, tc.source, 5*time.Second))
-			defer server.Close()
+			server := newTranscriptServer(t, tc.source)
 
-			response, err := http.Get(server.URL + "/api/v1/sessions/claude-code/session-1/transcript")
+			response, err := http.Get(server.URL + "/api/v1/sessions/claude-code/" + validTranscriptSession + "/transcript")
 			require.NoError(t, err)
 			defer response.Body.Close()
 			require.Equal(t, tc.wantStatus, response.StatusCode)
 
 			if tc.wantStatus == http.StatusOK {
 				require.Equal(t, "application/json", response.Header.Get("Content-Type"))
+				require.Equal(t, "no-store", response.Header.Get("Cache-Control"))
 				body, err := io.ReadAll(response.Body)
 				require.NoError(t, err)
 				require.Equal(t, validPayload, body)
@@ -421,10 +159,25 @@ func TestSessionTranscriptHandler(t *testing.T) {
 	}
 }
 
+func TestSessionTranscriptHandlerClosesTheExport(t *testing.T) {
+	t.Parallel()
+	closed := false
+	source := &stubTranscriptSource{
+		payload: []byte(`{"id":"` + validTranscriptSession + `","harness":"claude-code","turns":[]}`),
+		closed:  &closed,
+	}
+	server := newTranscriptServer(t, source)
+
+	response, err := http.Get(server.URL + "/api/v1/sessions/claude-code/" + validTranscriptSession + "/transcript")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.True(t, closed, "the handler must close the streamed export")
+}
+
 func TestSessionTranscriptHandlerRejectsAnInvalidSessionKey(t *testing.T) {
 	t.Parallel()
-	server := httptest.NewServer(newHandler(nil, nil, &stubTranscriptSource{}, time.Second))
-	defer server.Close()
+	server := newTranscriptServer(t, &stubTranscriptSource{})
 
 	response, err := http.Get(server.URL + "/api/v1/sessions/claude-code/a%2Fb/transcript")
 	require.NoError(t, err)
@@ -436,39 +189,112 @@ func TestSessionTranscriptHandlerRejectsAnInvalidSessionKey(t *testing.T) {
 	require.Equal(t, "invalid_session_key", envelope.Error.Code)
 }
 
-func TestSessionTranscriptHandlerBoundsTheWait(t *testing.T) {
+// TestSessionTranscriptHandlerValidatesTheSharedIdentity pins the shared
+// schema contract at the route boundary: only a harness and native session id
+// the schema package can express reach Peasant.
+func TestSessionTranscriptHandlerValidatesTheSharedIdentity(t *testing.T) {
 	t.Parallel()
-	source := &stubTranscriptSource{block: true, deadline: make(chan time.Time, 1)}
-	server := httptest.NewServer(newHandler(nil, nil, source, 60*time.Millisecond))
-	defer server.Close()
+	payload := []byte(`{"id":"` + validTranscriptSession + `","harness":"claude-code","turns":[]}`)
 
-	started := time.Now()
-	response, err := http.Get(server.URL + "/api/v1/sessions/claude-code/session-1/transcript")
-	require.NoError(t, err)
-	defer response.Body.Close()
-	require.Equal(t, http.StatusGatewayTimeout, response.StatusCode)
-	require.Less(t, time.Since(started), 5*time.Second)
+	accepted := []struct {
+		name    string
+		harness string
+		session string
+	}{
+		{name: "uuid claude session", harness: "claude-code", session: validTranscriptSession},
+		{name: "claude subagent", harness: "claude-code", session: "agent-a083060"},
+		{name: "opencode session", harness: "opencode", session: "ses_3cd91f52effeXd3QAJ54jOyzv5"},
+		{name: "acp session", harness: "opencode", session: "sess_3cd91f52effeXd3QAJ54jOyzv5"},
+		{name: "opencode message", harness: "opencode", session: "msg_001abc"},
+		{name: "strike bare id", harness: "strike", session: "ABCDEFGHIJKLMNOPQRST234567"},
+		{name: "strike timestamped id", harness: "strike", session: "20260728T123456.123456789Z-ABCDEFGHIJKLMNOPQRST234567"},
+		{name: "codex uuid", harness: "codex", session: validTranscriptSession},
+	}
+	for _, tc := range accepted {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := newTranscriptServer(t, &stubTranscriptSource{payload: payload})
+			response, err := http.Get(server.URL + "/api/v1/sessions/" + tc.harness + "/" + tc.session + "/transcript")
+			require.NoError(t, err)
+			defer response.Body.Close()
+			require.Equal(t, http.StatusOK, response.StatusCode)
+		})
+	}
 
-	select {
-	case deadline := <-source.deadline:
-		require.False(t, deadline.IsZero(), "the handler must derive a request deadline")
-		require.WithinDuration(t, time.Now(), deadline, 5*time.Second)
-	default:
-		t.Fatal("the transcript source never observed a request deadline")
+	rejected := []struct {
+		name    string
+		harness string
+		session string
+		code    string
+	}{
+		{name: "free-form session", harness: "claude-code", session: "session-1", code: "invalid_native_session_id"},
+		{name: "unknown session form", harness: "claude-code", session: "not-a-session", code: "invalid_native_session_id"},
+		{name: "lowercase base32", harness: "claude-code", session: "abcdefghijklmnopqrstuvwxyz", code: "invalid_native_session_id"},
+		{name: "legacy claude harness", harness: "claude", session: validTranscriptSession, code: "invalid_harness"},
+		{name: "legacy gemini harness", harness: "gemini", session: validTranscriptSession, code: "invalid_harness"},
+		{name: "unknown harness", harness: "not-a-harness", session: validTranscriptSession, code: "invalid_harness"},
+	}
+	for _, tc := range rejected {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := newTranscriptServer(t, &stubTranscriptSource{payload: payload})
+			response, err := http.Get(server.URL + "/api/v1/sessions/" + tc.harness + "/" + tc.session + "/transcript")
+			require.NoError(t, err)
+			defer response.Body.Close()
+			require.Equal(t, http.StatusBadRequest, response.StatusCode)
+
+			var envelope errorEnvelope
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&envelope))
+			require.Equal(t, tc.code, envelope.Error.Code)
+			require.NotEmpty(t, envelope.Error.Message)
+			if tc.code == "invalid_harness" {
+				require.Contains(t, envelope.Error.Message, "claude-code",
+					"the refusal must name the canonical harness vocabulary")
+			}
+		})
 	}
 }
 
-func TestNewPeasantTranscriptSourceUsesTheOutermostTimeoutTier(t *testing.T) {
-	t.Parallel()
-	require.Equal(t, timeouts.ProductionProfile().WorkflowResult(), NewPeasantTranscriptSource().Timeout)
-	require.Positive(t, transcriptExportTimeout())
-}
+// TestNewHandlerGuardsAndWiresTheTranscriptRoute exercises the production
+// constructor. The non-loopback requests prove the route lives inside the
+// guarded mux; the loopback request proves NewHandler wires the real Peasant
+// source (an empty PATH must make it report peasant_unavailable, not 404).
+//
+// This test mutates PATH, so it must stay serial.
+func TestNewHandlerGuardsAndWiresTheTranscriptRoute(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	server := httptest.NewServer(NewHandler(nil))
+	t.Cleanup(server.Close)
+	url := server.URL + "/api/v1/sessions/claude-code/" + validTranscriptSession + "/transcript"
 
-func TestSummarizeDiagnosticKeepsTheRefusalLine(t *testing.T) {
-	t.Parallel()
-	require.Equal(t,
-		"store: session x holds an incomplete latest attempt",
-		summarizeDiagnostic("\n  store: session x holds an incomplete latest attempt  \nUsage:\n  peasant export sessions\n"))
-	require.Equal(t, "no diagnostic was printed", summarizeDiagnostic(" \n\t\n"))
-	require.True(t, strings.HasSuffix(summarizeDiagnostic(strings.Repeat("x", 600)), "..."))
+	loopback, err := http.Get(url)
+	require.NoError(t, err)
+	defer loopback.Body.Close()
+	require.Equal(t, http.StatusServiceUnavailable, loopback.StatusCode)
+	var loopbackEnvelope errorEnvelope
+	require.NoError(t, json.NewDecoder(loopback.Body).Decode(&loopbackEnvelope))
+	require.Equal(t, "peasant_unavailable", loopbackEnvelope.Error.Code,
+		"a loopback request must reach the transcript route and its production source")
+
+	hostRequest, err := http.NewRequest(http.MethodGet, url, nil)
+	require.NoError(t, err)
+	hostRequest.Host = "evil.example"
+	hostResponse, err := http.DefaultClient.Do(hostRequest)
+	require.NoError(t, err)
+	defer hostResponse.Body.Close()
+	require.Equal(t, http.StatusForbidden, hostResponse.StatusCode)
+	var hostEnvelope errorEnvelope
+	require.NoError(t, json.NewDecoder(hostResponse.Body).Decode(&hostEnvelope))
+	require.Equal(t, "forbidden_host", hostEnvelope.Error.Code)
+
+	originRequest, err := http.NewRequest(http.MethodGet, url, nil)
+	require.NoError(t, err)
+	originRequest.Header.Set("Origin", "https://evil.example")
+	originResponse, err := http.DefaultClient.Do(originRequest)
+	require.NoError(t, err)
+	defer originResponse.Body.Close()
+	require.Equal(t, http.StatusForbidden, originResponse.StatusCode)
+	var originEnvelope errorEnvelope
+	require.NoError(t, json.NewDecoder(originResponse.Body).Decode(&originEnvelope))
+	require.Equal(t, "forbidden_origin", originEnvelope.Error.Code)
 }

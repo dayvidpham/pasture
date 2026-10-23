@@ -1,4 +1,4 @@
-.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate web-install web-generate web-build check-operational-tracker
+.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate web-install web-generate web-build web-test web-verify-generated check-operational-tracker
 
 VERSION ?= devel
 
@@ -37,6 +37,22 @@ web-generate: web-install
 
 web-build: web-install
 	cd web && pnpm build
+
+web-test: web-install
+	cd web && pnpm test
+
+# Regenerate the TypeScript bindings to a temporary path and diff them with the
+# committed file. This is the web half of the contract freshness gate: the Go
+# JSON source cannot drift from the committed OpenAPI artifact without failing
+# the Go freshness test, and the artifact cannot drift from the TypeScript
+# without failing this target.
+web-verify-generated: web-install
+	cd web && tmp=$$(mktemp) && trap 'rm -f "$$tmp"' EXIT && \
+		pnpm exec openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.3.0.json -o "$$tmp" >/dev/null && \
+		if ! cmp -s "$$tmp" src/generated/api.ts; then \
+			echo "web/src/generated/api.ts is stale; run 'make web-generate' and commit the result."; \
+			exit 1; \
+		fi
 
 # Unconditional read-only sweep; also runs through Codegen Drift's make generate
 # and the race suite's shipped-tree test. No environment bypass or baseline.

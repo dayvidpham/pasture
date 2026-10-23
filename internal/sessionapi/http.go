@@ -1,17 +1,18 @@
 package sessionapi
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
+
+	"github.com/peasant-labs/schema"
 
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
@@ -34,17 +35,16 @@ func NewHandler(service *Service, stores ...*tasks.SessionAPIStore) http.Handler
 	if len(stores) > 0 {
 		store = stores[0]
 	}
-	return loopbackOnly(newHandler(service, store, NewPeasantTranscriptSource(), transcriptExportTimeout()))
+	return loopbackOnly(newHandler(service, store, newPeasantTranscriptSource()))
 }
 
 // newHandler builds the mux with explicit dependencies so tests can inject a
 // transcript source without mutating PATH or the process environment.
-func newHandler(service *Service, store *tasks.SessionAPIStore, transcript TranscriptSource, transcriptTimeout time.Duration) *handler {
+func newHandler(service *Service, store *tasks.SessionAPIStore, transcript TranscriptSource) *handler {
 	h := &handler{
-		service:           service,
-		store:             store,
-		transcript:        transcript,
-		transcriptTimeout: transcriptTimeout,
+		service:    service,
+		store:      store,
+		transcript: transcript,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/sessions", h.list)
@@ -62,11 +62,10 @@ func newHandler(service *Service, store *tasks.SessionAPIStore, transcript Trans
 }
 
 type handler struct {
-	service           *Service
-	store             *tasks.SessionAPIStore
-	transcript        TranscriptSource
-	transcriptTimeout time.Duration
-	mux               *http.ServeMux
+	service    *Service
+	store      *tasks.SessionAPIStore
+	transcript TranscriptSource
+	mux        *http.ServeMux
 }
 
 // ServeHTTP routes through the mux built in newHandler. NewHandler wraps the
@@ -285,6 +284,11 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 // sessionTranscript serves the durable Peasant transcript for one session. The
 // body is Peasant's SessionDetailPayload document unchanged; the browser
 // validates it against @peasant-labs/schema before rendering.
+//
+// The route validates the requested identity against the shared schema before
+// invoking Peasant: a native id the shared contract cannot express is never
+// partly coerced into a subprocess argument. The validated document is streamed
+// from the export file, so one transcript never becomes a 128 MiB buffer.
 func (h *handler) sessionTranscript(w http.ResponseWriter, r *http.Request) {
 	harness := r.PathValue("harness")
 	session := r.PathValue("nativeSessionId")
@@ -292,29 +296,31 @@ func (h *handler) sessionTranscript(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_session_key", "harness and nativeSessionId must be non-empty, at most 512 bytes, and contain no controls or slashes")
 		return
 	}
+	if _, err := schema.NewSessionID(session); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_native_session_id", fmt.Sprintf("the shared session contract rejects native session id %q: %v; retain the host form and export it from Peasant directly", session, err))
+		return
+	}
+	if !schema.Harness(harness).IsKnown() {
+		writeError(w, http.StatusBadRequest, "invalid_harness", fmt.Sprintf("harness %q is not in the shared schema harness vocabulary (%s); use the canonical harness id Pasture lists for this session", harness, knownHarnessNames()))
+		return
+	}
 	if h.transcript == nil {
 		writeError(w, http.StatusServiceUnavailable, "transcript_unavailable", "this serve process has no transcript source; restart `pasture serve` with Peasant installed, then retry")
 		return
 	}
-	timeout := h.transcriptTimeout
-	if timeout <= 0 {
-		timeout = transcriptExportTimeout()
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-	payload, err := h.transcript.ExportTranscript(ctx, harness, session)
+	export, err := h.transcript.ExportTranscript(r.Context(), harness, session)
 	if err != nil {
 		writeTranscriptError(w, err)
 		return
 	}
-	if len(payload) == 0 {
-		writeError(w, http.StatusInternalServerError, "malformed_transcript", "Peasant returned an empty transcript document; export the session directly with `peasant export sessions` and retry")
+	if export == nil || export.Content == nil || export.Size <= 0 {
+		writeError(w, http.StatusInternalServerError, "malformed_transcript", "Peasant returned no readable transcript document; export the session directly with `peasant export sessions` and retry")
 		return
 	}
+	defer func() { _ = export.Close() }()
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(payload)
+	http.ServeContent(w, r, "", export.ModTime, export.Content)
 }
 
 func writeTranscriptError(w http.ResponseWriter, err error) {
@@ -338,6 +344,17 @@ func writeTranscriptError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, "peasant_export_failed", err.Error())
 	}
+}
+
+// knownHarnessNames lists the shared schema harness vocabulary for an
+// actionable 400, so a caller can correct the value without reading the schema.
+func knownHarnessNames() string {
+	harnesses := schema.Harnesses()
+	names := make([]string, len(harnesses))
+	for i, harness := range harnesses {
+		names[i] = harness.String()
+	}
+	return strings.Join(names, ", ")
 }
 
 func validSessionKey(value string) bool {

@@ -26,6 +26,7 @@ import {
   socketURL,
   subscribe,
   type EpochView,
+  type SessionBindingInterval,
   type SessionView,
   type WireFrame,
 } from './api'
@@ -92,6 +93,41 @@ function formatTime(value?: string): string {
 function epochLabel(epoch?: { id: string; title?: string }): string {
   if (!epoch) return 'unbound'
   return epoch.title?.trim() || epoch.id
+}
+
+/**
+ * BindingHistory keeps every recorded interval, including inferred ones, so a
+ * provisional epoch never looks authoritative. It is exported for the
+ * provenance render test.
+ */
+export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[] }) {
+  return (
+    <div className="binding-history">
+      <p className="eyebrow">binding history</p>
+      {bindings.length === 0 ? (
+        <p className="rail-copy muted">no recorded binding intervals.</p>
+      ) : (
+        <ol className="binding-list">
+          {bindings.map((interval) => (
+            <li key={interval.bindingId} className="binding-item" data-source={interval.source}>
+              <div className="binding-item-head">
+                <span className="binding-source">{interval.source}</span>
+                <span className="binding-confidence">{interval.confidence ?? '—'}</span>
+                <span className="binding-role">{interval.role}</span>
+              </div>
+              <p className="binding-when">
+                {formatTime(interval.boundAt)}
+                {interval.unboundAt
+                  ? ` → ${formatTime(interval.unboundAt)}${interval.endReason ? ` · ${interval.endReason}` : ''}`
+                  : ' · open'}
+              </p>
+              <p className="binding-epoch">epoch: {epochLabel(interval.epoch)}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
 }
 
 export default function App() {
@@ -209,6 +245,9 @@ export default function App() {
         harness: session.harness,
         nativeSessionId: session.nativeSessionId,
         state: session.activity.state,
+        // session.epoch is the effective binding projection: the latest
+        // explicit binding, or the open inferred derivation. Inferred-only
+        // sessions therefore show their epoch here without a table change.
         epoch: epochLabel(session.epoch),
         epochId: session.epoch?.id ?? '',
         lastEvent: session.activity.lastEvent ?? '—',
@@ -393,12 +432,16 @@ export default function App() {
                   <div><dt>epoch</dt><dd>{epochLabel(selectedSession.epoch)}</dd></div>
                   <div><dt>role</dt><dd>{selectedSession.binding?.role ?? '—'}</dd></div>
                   <div><dt>binding</dt><dd className="mono-wrap">{selectedSession.binding?.bindingId ?? '—'}</dd></div>
+                  <div><dt>source</dt><dd>{selectedSession.binding?.source ?? '—'}</dd></div>
+                  <div><dt>confidence</dt><dd>{selectedSession.binding?.confidence ?? '—'}</dd></div>
                   <div><dt>first seen</dt><dd>{formatTime(selectedSession.activity.firstSeen)}</dd></div>
                   <div><dt>last seen</dt><dd>{formatTime(selectedSession.activity.lastSeen)}</dd></div>
                   {selectedSession.end && (
                     <div><dt>ended</dt><dd>{formatTime(selectedSession.end.endedAt)} · {selectedSession.end.endReason}</dd></div>
                   )}
                 </dl>
+
+                <BindingHistory bindings={selectedSession.bindings ?? []} />
               </div>
             ) : (
               <p className="rail-copy muted">choose a session in the table to inspect its binding.</p>
