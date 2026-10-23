@@ -226,7 +226,7 @@ func wsErrorFor(err error) (string, string) {
 	case errors.Is(err, ErrInvalidFilter):
 		return "invalid_filter", err.Error()
 	default:
-		return "storage_fault", "the session store could not be read; inspect the serve log and repair the database"
+		return "storage_fault", storageReadFaultMessage
 	}
 }
 

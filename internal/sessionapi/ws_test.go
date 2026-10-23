@@ -167,6 +167,16 @@ func TestWebSocketStorageFaultFrameIsDeduplicated(t *testing.T) {
 	_, err := f.db.Exec(`DROP TABLE pasture_session_api_state`)
 	require.NoError(t, err)
 
+	// The HTTP 500 body for the same broken store is the reference wording; the
+	// WS frame must carry exactly it.
+	response, err := http.Get(server.URL + "/api/v1/sessions")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, response.StatusCode)
+	var httpFault apiErrorEnvelope
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&httpFault))
+	require.Equal(t, "storage_fault", httpFault.Error.Code)
+
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	require.NoError(t, err)
@@ -177,8 +187,9 @@ func TestWebSocketStorageFaultFrameIsDeduplicated(t *testing.T) {
 	first := readWSFrameOfType(t, conn, "error")
 	require.NotNil(t, first.Error)
 	require.Equal(t, "storage_fault", first.Error.Code)
-	require.Contains(t, first.Error.Message, "could not be read",
-		"the WS fault must carry the same wording the HTTP storage_fault carries")
+	require.Equal(t, httpFault.Error.Message, first.Error.Message,
+		"the WS storage_fault must carry the same wording the HTTP storage_fault carries")
+	require.Contains(t, first.Error.Message, "could not be read")
 
 	require.NoError(t, conn.SetReadDeadline(time.Now().Add(1600*time.Millisecond)))
 	_, _, readErr := conn.ReadMessage()

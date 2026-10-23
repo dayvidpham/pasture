@@ -389,6 +389,12 @@ func validSessionKey(value string) bool {
 // do, so the two surfaces cannot drift into different advice.
 const staleSessionCacheMessage = "the session cache is behind the journal; run `pasture session list` or `pasture serve --backfill` to rebuild it"
 
+// storageReadFaultMessage is the ONE wording a read-side storage failure carries
+// on every surface. The HTTP 500 body and the WebSocket storage_fault frame use
+// the same text, so a client that learns the remediation from one surface reads
+// the same instruction from the other and neither copy can drift.
+const storageReadFaultMessage = "the session store could not be read; inspect the serve log and repair the database"
+
 func writeServiceError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -400,7 +406,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrStaleCache):
 		writeError(w, http.StatusServiceUnavailable, "stale_session_cache", staleSessionCacheMessage)
 	default:
-		writeError(w, http.StatusInternalServerError, "storage_fault", "the session store could not be read; inspect the serve log and repair the database")
+		writeError(w, http.StatusInternalServerError, "storage_fault", storageReadFaultMessage)
 	}
 }
 
