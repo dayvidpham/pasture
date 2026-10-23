@@ -16,6 +16,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
 var serveCmd = &cobra.Command{
@@ -52,7 +53,22 @@ func runServe(cmd *cobra.Command) error {
 	if dbPath == "" {
 		dbPath = tasks.DefaultDBPath()
 	}
-	tracker, err := tasks.OpenTaskTracker(dbPath)
+	// A first serve may rebuild the complete occurrence projection. Keep the
+	// hook-facing tiers unchanged, but give that one bounded whole-operation
+	// wait room for a large existing journal.
+	baseProfile := timeouts.ProductionProfile()
+	serveProfile, err := timeouts.New(
+		timeouts.Production,
+		baseProfile.SQLiteBusy(),
+		baseProfile.Ingress(),
+		baseProfile.StartSlice(),
+		baseProfile.HookInvocation(),
+		10*time.Minute,
+	)
+	if err != nil {
+		return err
+	}
+	tracker, err := tasks.OpenTaskTrackerWithOptions(dbPath, tasks.WithTimeoutProfile(serveProfile))
 	if err != nil {
 		return err
 	}
