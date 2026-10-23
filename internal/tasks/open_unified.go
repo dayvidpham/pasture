@@ -619,6 +619,12 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 			name: "pasture_session_epoch_binding_open",
 			ddl:  `CREATE UNIQUE INDEX IF NOT EXISTS pasture_session_epoch_binding_open ON pasture_session_epoch_binding (harness, session) WHERE unbound_at IS NULL`,
 		},
+		// The inferred binding table is created by the inference rebuild, not
+		// here: it is a disposable derivation cache that exists only once a
+		// rebuild has derived something, and the read model already treats its
+		// absence as normal (see internal/sessionapi/service.go). Its partial
+		// unique index and its explicit-binding trigger are created with it, in
+		// the rebuild's own transaction. See internal/tasks/session_infer.go.
 		{
 			// The live session cache. The binding table owns the end; this table
 			// owns the activity fields the API reads.

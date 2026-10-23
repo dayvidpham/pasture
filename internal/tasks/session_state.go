@@ -243,5 +243,12 @@ func closeSessionBindingTx(ctx context.Context, tx *sql.Tx, harness ir.HarnessID
 		WHERE harness = ? AND session = ? AND unbound_at IS NULL`, at, string(harness), session); err != nil {
 		return sessionClaimError("the store refused to close the session binding: "+err.Error(), "repair the database before retrying the delivery")
 	}
+	// An inferred binding never outlives the session it was derived for. The
+	// row is cleared here rather than merely closed: inference keeps no history,
+	// and a closed interval would state an end instant the store only knows as
+	// an upper bound.
+	if err := clearSessionInferredBindings(ctx, tx, string(harness), session); err != nil {
+		return err
+	}
 	return nil
 }

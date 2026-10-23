@@ -9,12 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/provenance"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 const rebuildClaudeSession = "c02859c0-10ab-49c3-9b93-29280bd45fbb"
@@ -223,6 +226,138 @@ func TestRebuildSessionStateRepairsASessionEndBinding(t *testing.T) {
 		Scan(&reason, &unbound))
 	require.Equal(t, "session_end", reason)
 	require.True(t, unbound.Valid)
+}
+
+// seedInferenceOwnedEpoch builds the inference fixture shape through this
+// black-box package: one task, one epoch projection row, and one
+// owner-responsibility episode held by actor. Everything goes through public
+// store APIs except the projection row, which the engine owns and no task
+// command writes.
+func seedInferenceOwnedEpoch(t *testing.T, tracker protocol.TaskTracker, db *sql.DB, actor provenance.ActorID, title, operation string) provenance.TaskID {
+	t.Helper()
+	epoch, err := tracker.Create("file://inference-test", title, "", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	_, err = db.ExecContext(t.Context(), `
+		CREATE TABLE IF NOT EXISTS epoch_state_projection (
+			epoch_id      TEXT PRIMARY KEY,
+			current_phase TEXT NOT NULL,
+			state_json    TEXT NOT NULL,
+			updated_at    INTEGER NOT NULL
+		)`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(t.Context(), `
+		INSERT INTO epoch_state_projection (epoch_id, current_phase, state_json, updated_at)
+		VALUES (?, 'p3-plan', '{}', 1)`, epoch.ID.String())
+	require.NoError(t, err)
+
+	var committer string
+	var authorityJournalID int64
+	require.NoError(t, db.QueryRowContext(t.Context(), `
+		SELECT committer_actor_id, genesis_authority_journal_id
+		FROM pasture_system_identity WHERE singleton_id = 0`).Scan(&committer, &authorityJournalID))
+	authority := provenance.JournalID(authorityJournalID)
+	_, err = tracker.Journal().Apply(provenance.OperationInput{
+		OperationID:        provenance.OperationID(operation),
+		ActorID:            actor,
+		AuthorityJournalID: &authority,
+		CommandDigest:      []byte(operation),
+		Effects: []provenance.Effect{{
+			Sort:         provenance.EffectAssignmentStart,
+			ResultSlot:   "authority",
+			TaskID:       epoch.ID,
+			AssignmentID: provenance.AssignmentID(operation + "-assignment"),
+			SlotID:       provenance.SlotOwnerResponsibility,
+			Occupant:     actor,
+		}},
+	})
+	require.NoError(t, err)
+	return epoch.ID
+}
+
+func countInferredBindings(t *testing.T, db *sql.DB, session string) int {
+	t.Helper()
+	var count int
+	require.NoError(t, db.QueryRowContext(t.Context(), `
+		SELECT count(*) FROM pasture_session_inferred_binding
+		WHERE harness = 'claude-code' AND session = ?`, session).Scan(&count))
+	return count
+}
+
+// TestSessionEndClearsInferredBinding is the end-to-end cleanup contract: a
+// rebuild derives an inferred binding from the claim's actor, the host's
+// session-end event clears it in the same transaction that closes the explicit
+// binding, and a later rebuild does not resurrect it.
+func TestSessionEndClearsInferredBinding(t *testing.T) {
+	t.Parallel()
+	tracker, db, path := claimStore(t)
+	actor, err := tracker.RegisterHumanAgent("infer-end-holder", "Inference End Holder", "infer-end-holder@example.test")
+	require.NoError(t, err)
+	epoch := seedInferenceOwnedEpoch(t, tracker, db, actor.ID, "Inference end epoch", "infer-end-owner")
+
+	start, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
+	require.NoError(t, err)
+	_, err = handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
+		DBPath:         path,
+		Harness:        "claude-code",
+		Event:          "SessionStart",
+		HostVersion:    "2.1.261",
+		Input:          bytes.NewReader(start),
+		Clock:          claimClock{},
+		Operations:     claimOperation("infer-end.start"),
+		ActorClaim:     tasks.ActorClaim(actor.ID.String()),
+		TimeoutProfile: timeouts.TestProfile(),
+	})
+	require.NoError(t, err)
+
+	_, err = tasks.RebuildSessionState(t.Context(), tracker)
+	require.NoError(t, err)
+	require.Equal(t, 1, countInferredBindings(t, db, rebuildClaudeSession), "the unique owned epoch is inferred")
+	var inferredEpoch string
+	require.NoError(t, db.QueryRowContext(t.Context(), `
+		SELECT epoch_id FROM pasture_session_inferred_binding
+		WHERE harness = 'claude-code' AND session = ?`, rebuildClaudeSession).Scan(&inferredEpoch))
+	require.Equal(t, epoch.String(), inferredEpoch)
+
+	// The read model is the consumer of this table, so the derivation is
+	// asserted through it: the session carries exactly one inferred interval
+	// and no explicit binding was fabricated.
+	service := &sessionapi.Service{
+		DB:           db,
+		Now:          func() time.Time { return claimClock{}.Now() },
+		ActiveWindow: 15 * time.Minute,
+	}
+	detail, err := service.Get(t.Context(), "claude-code", rebuildClaudeSession)
+	require.NoError(t, err)
+	require.Len(t, detail.Session.Bindings, 1)
+	require.Equal(t, sessionapi.BindingSourceInferred, detail.Session.Bindings[0].Source)
+	require.Nil(t, detail.Session.Binding, "an inferred interval must not masquerade as the explicit binding")
+	require.NotNil(t, detail.Session.Bindings[0].Epoch)
+	require.Equal(t, epoch.String(), detail.Session.Bindings[0].Epoch.ID)
+
+	end, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_end_2_1_261.json"))
+	require.NoError(t, err)
+	_, err = handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
+		DBPath:         path,
+		Harness:        "claude-code",
+		Event:          "SessionEnd",
+		HostVersion:    "2.1.261",
+		Input:          bytes.NewReader(end),
+		Clock:          claimClock{},
+		Operations:     claimOperation("infer-end.end"),
+		ActorClaim:     tasks.ActorClaim(actor.ID.String()),
+		TimeoutProfile: timeouts.TestProfile(),
+	})
+	require.NoError(t, err)
+	require.Zero(t, countInferredBindings(t, db, rebuildClaudeSession),
+		"session end clears the inferred derivation in the same transaction that closes the explicit binding")
+
+	_, err = tasks.RebuildSessionState(t.Context(), tracker)
+	require.NoError(t, err)
+	require.Zero(t, countInferredBindings(t, db, rebuildClaudeSession),
+		"a later rebuild must not resurrect an inferred binding for an ended session")
+	detail, err = service.Get(t.Context(), "claude-code", rebuildClaudeSession)
+	require.NoError(t, err)
+	require.Empty(t, detail.Session.Bindings, "an ended session keeps no inferred interval")
 }
 
 func TestEnsureSessionStateDetectsCommittedOccurrence(t *testing.T) {
