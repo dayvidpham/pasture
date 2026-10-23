@@ -4,7 +4,7 @@ import "encoding/json"
 
 // PastureLocalAPIVersion is the frozen document-surface version for the local
 // session API. It changes only when a route or wire shape changes.
-const PastureLocalAPIVersion = "0.1.0"
+const PastureLocalAPIVersion = "0.2.0"
 
 // OpenAPIBytes returns the canonical OpenAPI 3.1 document. The generator and
 // the freshness test call this same function, so the committed artifact cannot
@@ -105,6 +105,19 @@ func openAPIDocument() map[string]any {
 						"403": errorResponse("Non-loopback Host or Origin"),
 						"503": errorResponse("The session cache is stale"),
 						"500": errorResponse("The session store could not be read"),
+					},
+				},
+			},
+			"/api/v1/ws": map[string]any{
+				"get": map[string]any{
+					"operationId": "sessionWebSocket",
+					"summary":     "Subscribe to bounded latest-frame session and epoch snapshots",
+					"description": "Upgrades to a WebSocket. The server sends a ready frame, then a snapshot frame for each subscribed topic. " +
+						"Snapshots carry revision and asOf at the frame level. A newer frame replaces an unread frame, so a slow client always sees the latest snapshot.",
+					"responses": map[string]any{
+						"101": map[string]any{"description": "Switching Protocols; subsequent frames are JSON text messages."},
+						"400": errorResponse("The request is not a valid WebSocket upgrade"),
+						"403": errorResponse("Non-loopback Host or Origin"),
 					},
 				},
 			},
@@ -291,6 +304,36 @@ func openAPIDocument() map[string]any {
 						"sessions":  map[string]any{"type": "array", "items": ref("SessionView")},
 					},
 					"revision", "asOf", "truncated", "epochs", "sessions",
+				),
+				"WebSocketClientMessage": objectSchema(
+					map[string]any{
+						"type":  map[string]any{"type": "string", "enum": []string{"subscribe", "unsubscribe", "ping"}},
+						"topic": map[string]any{"type": "string", "enum": []string{"sessions", "epochs"}},
+					},
+					"type",
+				),
+				"WebSocketReadyFrame": objectSchema(
+					map[string]any{
+						"type":   map[string]any{"type": "string", "enum": []string{"ready"}},
+						"topics": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					},
+					"type", "topics",
+				),
+				"WebSocketSnapshotFrame": objectSchema(
+					map[string]any{
+						"type":     map[string]any{"type": "string", "enum": []string{"sessions", "epochs"}},
+						"revision": map[string]any{"type": "integer", "format": "int64"},
+						"asOf":     map[string]any{"type": "string", "format": "date-time"},
+						"payload":  map[string]any{"type": "object"},
+					},
+					"type", "revision", "asOf", "payload",
+				),
+				"WebSocketErrorFrame": objectSchema(
+					map[string]any{
+						"type":  map[string]any{"type": "string", "enum": []string{"error"}},
+						"error": ref("ErrorBody"),
+					},
+					"type", "error",
 				),
 				"BindRequest": objectSchema(
 					map[string]any{

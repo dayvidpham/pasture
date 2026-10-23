@@ -334,13 +334,104 @@
         },
         "required": [],
         "type": "object"
+      },
+      "WebSocketClientMessage": {
+        "properties": {
+          "topic": {
+            "enum": [
+              "sessions",
+              "epochs"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "subscribe",
+              "unsubscribe",
+              "ping"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "WebSocketErrorFrame": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          },
+          "type": {
+            "enum": [
+              "error"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "error"
+        ],
+        "type": "object"
+      },
+      "WebSocketReadyFrame": {
+        "properties": {
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "ready"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "topics"
+        ],
+        "type": "object"
+      },
+      "WebSocketSnapshotFrame": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "sessions",
+              "epochs"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "revision",
+          "asOf",
+          "payload"
+        ],
+        "type": "object"
       }
     }
   },
   "info": {
     "description": "Loopback-only read API for active harness sessions mapped to epoch bindings. Transcripts are not served by this API.",
     "title": "Pasture Local Session API",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1057,6 +1148,38 @@
           }
         },
         "summary": "Unbind a session from its epoch"
+      }
+    },
+    "/api/v1/ws": {
+      "get": {
+        "description": "Upgrades to a WebSocket. The server sends a ready frame, then a snapshot frame for each subscribed topic. Snapshots carry revision and asOf at the frame level. A newer frame replaces an unread frame, so a slow client always sees the latest snapshot.",
+        "operationId": "sessionWebSocket",
+        "responses": {
+          "101": {
+            "description": "Switching Protocols; subsequent frames are JSON text messages."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is not a valid WebSocket upgrade"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          }
+        },
+        "summary": "Subscribe to bounded latest-frame session and epoch snapshots"
       }
     }
   }

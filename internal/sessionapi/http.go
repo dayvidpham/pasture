@@ -39,6 +39,7 @@ func NewHandler(service *Service, stores ...*tasks.SessionAPIStore) http.Handler
 	mux.HandleFunc("GET /api/v1/epochs", h.epochs)
 	mux.HandleFunc("GET /api/v1/epochs/", h.epochRoute)
 	mux.HandleFunc("GET /api/v1/inspect", h.inspect)
+	mux.HandleFunc("GET /api/v1/ws", h.ws)
 	mux.HandleFunc("GET /openapi.json", h.openapi)
 	return loopbackOnly(mux)
 }

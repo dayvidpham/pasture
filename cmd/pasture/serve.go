@@ -24,10 +24,10 @@ var serveCmd = &cobra.Command{
 	Short: "Serve the local session-to-epoch read API",
 	Long: `Serve the loopback-only session API from the local pasture database.
 
-The server exposes GET /api/v1/sessions and
-GET /api/v1/sessions/{harness}/{nativeSessionId}. It rebuilds the disposable
-session cache from the lifecycle journal when the cache is dirty or behind, and
-it never migrates the schema or accepts non-loopback hosts.`,
+The server exposes session and epoch reads, explicit bind/unbind, inspect, and
+the /api/v1/ws snapshot stream. It starts immediately from the existing cache;
+pass --backfill to rebuild historical session state from the lifecycle journal
+before serving. It never migrates the schema or accepts non-loopback hosts.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runServe(cmd)
