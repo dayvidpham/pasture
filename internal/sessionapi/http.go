@@ -313,11 +313,18 @@ func (h *handler) sessionTranscript(w http.ResponseWriter, r *http.Request) {
 		writeTranscriptError(w, err)
 		return
 	}
-	if export == nil || export.Content == nil || export.Size <= 0 {
+	if export == nil {
 		writeError(w, http.StatusInternalServerError, "malformed_transcript", "Peasant returned no readable transcript document; export the session directly with `peasant export sessions` and retry")
 		return
 	}
+	// Once the source returns an export, its file and private directory belong
+	// to this handler. Install cleanup before validating the export so a source
+	// that returns a nil Content or a non-positive Size cannot leak the file.
 	defer func() { _ = export.Close() }()
+	if export.Content == nil || export.Size <= 0 {
+		writeError(w, http.StatusInternalServerError, "malformed_transcript", "Peasant returned no readable transcript document; export the session directly with `peasant export sessions` and retry")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeContent(w, r, "", export.ModTime, export.Content)

@@ -353,8 +353,15 @@ func verifyIdentity(r io.Reader, harness, sessionID string) error {
 	if err := decoder.Decode(&identity); err != nil {
 		return fault(KindMalformed, err, "the exported transcript for session %q is not one complete JSON document: %v; re-run the Peasant export", sessionID, err)
 	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return fault(KindMalformed, err, "the exported transcript for session %q carries content after the durable document (%v); the exporter refuses to serve an envelope it cannot interpret", sessionID, err)
+	if token, err := decoder.Token(); err != io.EOF {
+		// A valid trailing token returns a nil error, so name the token and its
+		// offset rather than printing "<nil>". A malformed tail keeps its parse
+		// error instead.
+		detail := fmt.Sprintf("token %v at offset %d", token, decoder.InputOffset())
+		if err != nil {
+			detail = err.Error()
+		}
+		return fault(KindMalformed, err, "the exported transcript for session %q carries content after the durable document (%s); the exporter refuses to serve an envelope it cannot interpret", sessionID, detail)
 	}
 	switch {
 	case identity.ID == "" && identity.Harness == "":

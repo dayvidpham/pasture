@@ -331,6 +331,29 @@ func TestSourceClassifiesFailures(t *testing.T) {
 	}
 }
 
+func TestVerifyIdentityNamesTrailingContent(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name       string
+		payload    string
+		wantDetail string
+	}{
+		{name: "second object", payload: `{"id":"x","harness":"claude-code"}{"id":"y"}`, wantDetail: "token {"},
+		{name: "trailing scalar", payload: `{"id":"x","harness":"claude-code"} true`, wantDetail: "token true"},
+		{name: "malformed tail", payload: `{"id":"x","harness":"claude-code"} garbage`, wantDetail: "invalid character"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := verifyIdentity(strings.NewReader(tc.payload), "claude-code", "x")
+			require.Equal(t, KindMalformed, KindOf(err))
+			require.Contains(t, err.Error(), "carries content after the durable document")
+			require.Contains(t, err.Error(), tc.wantDetail)
+			require.NotContains(t, err.Error(), "<nil>", "a valid trailing token has a nil error and must not be printed")
+		})
+	}
+}
+
 func TestSourceNormalizesLegacyHarnesses(t *testing.T) {
 	t.Parallel()
 	binary := fakePeasantBinary(t)

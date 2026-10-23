@@ -23,11 +23,15 @@ type stubTranscriptSource struct {
 	payload []byte
 	err     error
 	closed  *bool
+	export  *TranscriptExport
 }
 
 func (s *stubTranscriptSource) ExportTranscript(context.Context, string, string) (*TranscriptExport, error) {
 	if s.err != nil {
 		return nil, s.err
+	}
+	if s.export != nil {
+		return s.export, nil
 	}
 	export := &TranscriptExport{
 		Content: bytes.NewReader(s.payload),
@@ -173,6 +177,42 @@ func TestSessionTranscriptHandlerClosesTheExport(t *testing.T) {
 	defer response.Body.Close()
 	require.Equal(t, http.StatusOK, response.StatusCode)
 	require.True(t, closed, "the handler must close the streamed export")
+}
+
+// TestSessionTranscriptHandlerClosesAnUnusableExport pins the cleanup order:
+// once ExportTranscript returns a non-nil export, the handler owns its file and
+// private directory even when the export is unusable and the request ends in an
+// error before any bytes are streamed.
+func TestSessionTranscriptHandlerClosesAnUnusableExport(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		export *TranscriptExport
+	}{
+		{name: "nil content", export: &TranscriptExport{Size: 10}},
+		{name: "zero size", export: &TranscriptExport{Content: bytes.NewReader([]byte("{}")), Size: 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			closed := false
+			tc.export.CloseFunc = func() error {
+				closed = true
+				return nil
+			}
+			server := newTranscriptServer(t, &stubTranscriptSource{export: tc.export})
+
+			response, err := http.Get(server.URL + "/api/v1/sessions/claude-code/" + validTranscriptSession + "/transcript")
+			require.NoError(t, err)
+			defer response.Body.Close()
+			require.Equal(t, http.StatusInternalServerError, response.StatusCode)
+
+			var envelope errorEnvelope
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&envelope))
+			require.Equal(t, "malformed_transcript", envelope.Error.Code)
+			require.True(t, closed, "the handler must close an export it refuses")
+		})
+	}
 }
 
 func TestSessionTranscriptHandlerRejectsAnInvalidSessionKey(t *testing.T) {

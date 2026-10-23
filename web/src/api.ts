@@ -4,7 +4,6 @@ export type SessionView = components['schemas']['SessionView']
 export type SessionBindingInterval = components['schemas']['SessionBindingInterval']
 export type EpochView = components['schemas']['EpochView']
 export type InspectPayload = components['schemas']['InspectPayload']
-export type SessionPage = components['schemas']['Page']
 export type EpochPage = components['schemas']['EpochPage']
 
 export type SessionsFrame = {
@@ -64,12 +63,6 @@ async function requestJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
 
 export function fetchInspect(signal?: AbortSignal): Promise<InspectPayload> {
   return requestJSON<InspectPayload>('/api/v1/inspect', signal)
-}
-
-export function fetchSessions(epoch?: string, signal?: AbortSignal): Promise<SessionPage> {
-  const params = new URLSearchParams({ limit: '100' })
-  if (epoch) params.set('epoch', epoch)
-  return requestJSON<SessionPage>(`/api/v1/sessions?${params.toString()}`, signal)
 }
 
 /**

@@ -128,13 +128,16 @@ describe('describeTranscriptError', () => {
     expect(failure.retry).toBe(true)
   })
 
-  it('maps 409 transcript_unsupported to the incompatible-store wording', () => {
+  it('maps 409 transcript_unsupported to every cause the exporter can report', () => {
     const failure = describeTranscriptError(
       new ApiError(409, 'transcript_unsupported', 'Peasant cannot serve this session'),
     )
 
     expect(failure.title).toBe('Peasant refused this transcript')
-    expect(failure.message).toContain('cannot read this session')
+    expect(failure.message).toContain('incompatible store')
+    expect(failure.message).toContain('native session id the shared contract rejects')
+    expect(failure.message).toContain('did not record a harness')
+    expect(failure.message).toContain('re-harvest the session')
     expect(failure.message).toContain('Install the Peasant version')
   })
 
