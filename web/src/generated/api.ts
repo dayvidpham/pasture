@@ -123,6 +123,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{harness}/{nativeSessionId}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the durable Peasant transcript for one session
+         * @description Runs `peasant export sessions --session <nativeSessionId>` beside the API in a private temporary directory and returns the durable SessionDetailPayload document unchanged. The route never returns a last-good transcript when Peasant refuses a newer incomplete attempt. The browser validates the body against the shared @peasant-labs/schema contract before rendering it.
+         */
+        get: operations["getSessionTranscript"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{harness}/{nativeSessionId}/unbind": {
         parameters: {
             query?: never;
@@ -272,6 +292,14 @@ export interface components {
             epoch?: components["schemas"]["EpochRef"];
             harness: string;
             nativeSessionId: string;
+        };
+        /** @description The durable Peasant SessionDetailPayload document, proxied unchanged. Pasture guarantees only the identity fields; every other field belongs to the shared @peasant-labs/schema session contract and is validated by the browser. */
+        TranscriptPayload: {
+            harness: string;
+            id: string;
+            turns: unknown[];
+        } & {
+            [key: string]: unknown;
         };
         UnbindRequest: {
             expectedBinding?: string;
@@ -760,6 +788,94 @@ export interface operations {
             };
             /** @description The session cache is stale or writes are unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getSessionTranscript: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Harness id */
+                harness: string;
+                /** @description Native session id */
+                nativeSessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptPayload"];
+                };
+            };
+            /** @description Invalid session key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Non-loopback Host or Origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Peasant has no transcript for that session */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Peasant refused an incomplete attempt, cannot express the session id, or returned a different identity */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Peasant failed, or returned a malformed or oversized document */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The peasant executable is absent or cannot be started */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The bounded Peasant export wait ended */
+            504: {
                 headers: {
                     [name: string]: unknown;
                 };

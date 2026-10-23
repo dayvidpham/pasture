@@ -17,19 +17,45 @@ import {
   RailShell,
   StatGrid,
   StatusDot,
+  TranscriptViewer,
 } from '@peasant-labs/fairtrade/ui'
 
 import {
   fetchInspect,
+  fetchTranscript,
   socketURL,
   subscribe,
   type EpochView,
   type SessionView,
   type WireFrame,
 } from './api'
+import {
+  adaptTranscriptPayload,
+  describeTranscriptError,
+  type TranscriptFailure,
+  type TranscriptViewModel,
+} from './transcript'
 
 type Connection = 'connecting' | 'live' | 'disconnected'
 type StateFilter = 'all' | 'active' | 'idle' | 'ended' | 'unknown'
+
+// Every non-idle state carries the session it belongs to, so a selection
+// change can never paint the previous session's transcript for a frame.
+type TranscriptState =
+  | { status: 'idle' }
+  | { status: 'loading'; key: string }
+  | { status: 'ready'; key: string; viewModel: TranscriptViewModel }
+  | { status: 'error'; key: string; failure: TranscriptFailure }
+
+// The console is a read-only observer: labelling, editing, contributing,
+// visibility changes, and export belong to producers with their own authority.
+const READ_ONLY_TRANSCRIPT_CAPABILITIES = {
+  canEdit: false,
+  canLabel: false,
+  canContribute: false,
+  canChangeVisibility: false,
+  canExport: false,
+} as const
 
 type SessionRow = {
   id: string
@@ -80,6 +106,10 @@ export default function App() {
   const [stateFilter, setStateFilter] = useState<StateFilter>('all')
   const [epochFilter, setEpochFilter] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [transcript, setTranscript] = useState<TranscriptState>({ status: 'idle' })
+  const [transcriptRetry, setTranscriptRetry] = useState(0)
+  const [transcriptLeftRail, setTranscriptLeftRail] = useState(false)
+  const [transcriptRightRail, setTranscriptRightRail] = useState(false)
   const socketRef = useRef<WebSocket | null>(null)
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -191,6 +221,37 @@ export default function App() {
     () => sessions.find((session) => sessionKey(session) === selectedId) ?? null,
     [sessions, selectedId],
   )
+
+  const selectedHarness = selectedSession?.harness
+  const selectedNativeId = selectedSession?.nativeSessionId
+  const transcriptKey =
+    selectedHarness && selectedNativeId ? `${selectedHarness}/${selectedNativeId}` : null
+
+  // Fetch once per selected session, not on every WebSocket snapshot: the
+  // stable identity strings are the dependencies, so live revision updates
+  // never restart the Peasant export.
+  useEffect(() => {
+    if (!selectedHarness || !selectedNativeId || !transcriptKey) {
+      setTranscript({ status: 'idle' })
+      return
+    }
+    const controller = new AbortController()
+    setTranscript({ status: 'loading', key: transcriptKey })
+    fetchTranscript(selectedHarness, selectedNativeId, controller.signal)
+      .then((value) => {
+        if (controller.signal.aborted) return
+        setTranscript({
+          status: 'ready',
+          key: transcriptKey,
+          viewModel: adaptTranscriptPayload(value),
+        })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setTranscript({ status: 'error', key: transcriptKey, failure: describeTranscriptError(error) })
+      })
+    return () => controller.abort()
+  }, [selectedHarness, selectedNativeId, transcriptKey, transcriptRetry])
 
   const activeCount = sessions.filter((session) => session.activity.state === 'active').length
   const unknownCount = sessions.filter((session) => session.activity.state === 'unknown').length
@@ -344,11 +405,47 @@ export default function App() {
             )}
           </RailSection>
 
-          <RailSection title="transcript" icon={Database} meta={null}>
-            <EmptyState
-              title="transcript join pending"
-              message="Pasture joins to Peasant on (harness, sessionId). The fairtrade TranscriptViewer renders Peasant's SessionDetailPayload once the local proxy lands."
-            />
+          <RailSection
+            title="transcript"
+            icon={Database}
+            meta={transcript.status === 'ready' && transcript.key === transcriptKey ? 'peasant' : null}
+          >
+            {!selectedSession || !transcriptKey ? (
+              <p className="rail-copy muted">
+                choose a session in the table to read its Peasant transcript.
+              </p>
+            ) : transcript.status === 'error' && transcript.key === transcriptKey ? (
+              <div className="transcript-state">
+                <EmptyState
+                  title={transcript.failure.title}
+                  message={transcript.failure.message}
+                  action={
+                    transcript.failure.retry ? (
+                      <button
+                        type="button"
+                        className="clear-filter"
+                        onClick={() => setTranscriptRetry((attempt) => attempt + 1)}
+                      >
+                        retry transcript
+                      </button>
+                    ) : undefined
+                  }
+                />
+              </div>
+            ) : transcript.status === 'ready' && transcript.key === transcriptKey ? (
+              <div className="transcript-host">
+                <TranscriptViewer
+                  viewModel={transcript.viewModel}
+                  capabilities={READ_ONLY_TRANSCRIPT_CAPABILITIES}
+                  leftRailOpen={transcriptLeftRail}
+                  onLeftRailOpenChange={setTranscriptLeftRail}
+                  rightRailOpen={transcriptRightRail}
+                  onRightRailOpenChange={setTranscriptRightRail}
+                />
+              </div>
+            ) : (
+              <p className="rail-copy muted">exporting the Peasant transcript for this session…</p>
+            )}
           </RailSection>
         </>
       }

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.2.0.json -o src/generated/api.ts"
+    "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.3.0.json -o src/generated/api.ts"
   },
   "dependencies": {
     "@peasant-labs/fairtrade": "0.0.31",

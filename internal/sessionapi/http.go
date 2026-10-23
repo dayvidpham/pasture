@@ -1,6 +1,7 @@
 package sessionapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -25,15 +27,29 @@ type errorEnvelope struct {
 
 // NewHandler returns the loopback-only HTTP handler for the session API. The
 // optional store enables the bind/unbind write routes; without it the read
-// routes still work.
+// routes still work. The transcript route always runs the Peasant CLI beside
+// the API; the browser never talks to Peasant directly.
 func NewHandler(service *Service, stores ...*tasks.SessionAPIStore) http.Handler {
-	h := &handler{service: service}
+	var store *tasks.SessionAPIStore
 	if len(stores) > 0 {
-		h.store = stores[0]
+		store = stores[0]
+	}
+	return loopbackOnly(newHandler(service, store, NewPeasantTranscriptSource(), transcriptExportTimeout()))
+}
+
+// newHandler builds the mux with explicit dependencies so tests can inject a
+// transcript source without mutating PATH or the process environment.
+func newHandler(service *Service, store *tasks.SessionAPIStore, transcript TranscriptSource, transcriptTimeout time.Duration) *handler {
+	h := &handler{
+		service:           service,
+		store:             store,
+		transcript:        transcript,
+		transcriptTimeout: transcriptTimeout,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/sessions", h.list)
 	mux.HandleFunc("GET /api/v1/sessions/{harness}/{nativeSessionId}", h.get)
+	mux.HandleFunc("GET /api/v1/sessions/{harness}/{nativeSessionId}/transcript", h.sessionTranscript)
 	mux.HandleFunc("POST /api/v1/sessions/{harness}/{nativeSessionId}/bind", h.bind)
 	mux.HandleFunc("POST /api/v1/sessions/{harness}/{nativeSessionId}/unbind", h.unbind)
 	mux.HandleFunc("GET /api/v1/epochs", h.epochs)
@@ -41,12 +57,22 @@ func NewHandler(service *Service, stores ...*tasks.SessionAPIStore) http.Handler
 	mux.HandleFunc("GET /api/v1/inspect", h.inspect)
 	mux.HandleFunc("GET /api/v1/ws", h.ws)
 	mux.HandleFunc("GET /openapi.json", h.openapi)
-	return loopbackOnly(mux)
+	h.mux = mux
+	return h
 }
 
 type handler struct {
-	service *Service
-	store   *tasks.SessionAPIStore
+	service           *Service
+	store             *tasks.SessionAPIStore
+	transcript        TranscriptSource
+	transcriptTimeout time.Duration
+	mux               *http.ServeMux
+}
+
+// ServeHTTP routes through the mux built in newHandler. NewHandler wraps the
+// result in loopbackOnly, so the Host/Origin guard stays the first check.
+func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.mux.ServeHTTP(w, r)
 }
 
 func (h *handler) list(w http.ResponseWriter, r *http.Request) {
@@ -254,6 +280,64 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+// sessionTranscript serves the durable Peasant transcript for one session. The
+// body is Peasant's SessionDetailPayload document unchanged; the browser
+// validates it against @peasant-labs/schema before rendering.
+func (h *handler) sessionTranscript(w http.ResponseWriter, r *http.Request) {
+	harness := r.PathValue("harness")
+	session := r.PathValue("nativeSessionId")
+	if !validSessionKey(harness) || !validSessionKey(session) {
+		writeError(w, http.StatusBadRequest, "invalid_session_key", "harness and nativeSessionId must be non-empty, at most 512 bytes, and contain no controls or slashes")
+		return
+	}
+	if h.transcript == nil {
+		writeError(w, http.StatusServiceUnavailable, "transcript_unavailable", "this serve process has no transcript source; restart `pasture serve` with Peasant installed, then retry")
+		return
+	}
+	timeout := h.transcriptTimeout
+	if timeout <= 0 {
+		timeout = transcriptExportTimeout()
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	payload, err := h.transcript.ExportTranscript(ctx, harness, session)
+	if err != nil {
+		writeTranscriptError(w, err)
+		return
+	}
+	if len(payload) == 0 {
+		writeError(w, http.StatusInternalServerError, "malformed_transcript", "Peasant returned an empty transcript document; export the session directly with `peasant export sessions` and retry")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(payload)
+}
+
+func writeTranscriptError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrTranscriptSourceUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "peasant_unavailable", err.Error())
+	case errors.Is(err, ErrTranscriptNotFound):
+		writeError(w, http.StatusNotFound, "transcript_not_found", err.Error())
+	case errors.Is(err, ErrTranscriptIncomplete):
+		writeError(w, http.StatusConflict, "transcript_incomplete", err.Error())
+	case errors.Is(err, ErrTranscriptUnsupported):
+		writeError(w, http.StatusConflict, "transcript_unsupported", err.Error())
+	case errors.Is(err, ErrTranscriptIdentityMismatch):
+		writeError(w, http.StatusConflict, "transcript_identity_mismatch", err.Error())
+	case errors.Is(err, ErrTranscriptTimedOut):
+		writeError(w, http.StatusGatewayTimeout, "transcript_timeout", err.Error())
+	case errors.Is(err, ErrTranscriptTooLarge):
+		writeError(w, http.StatusInternalServerError, "transcript_too_large", err.Error())
+	case errors.Is(err, ErrTranscriptMalformed):
+		writeError(w, http.StatusInternalServerError, "malformed_transcript", err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "peasant_export_failed", err.Error())
+	}
 }
 
 func validSessionKey(value string) bool {
