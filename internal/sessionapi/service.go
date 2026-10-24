@@ -21,11 +21,8 @@ const defaultActiveWindow = 15 * time.Minute
 // read open, and a failure simply leaves the fields empty.
 const projectLookupTimeout = 2 * time.Second
 
-// peasantDisabledMessage is the actionable disabled state /api/v1/inspect
-// reports. Disabled is the default and is distinct from unavailable. The
-// console toggle is the primary path; the startup flags remain the fallback for
-// a source that is not the conventional Peasant database.
-const peasantDisabledMessage = "Peasant project enrichment is off; turn it on from the web console, or restart pasture serve with --peasant-db/--peasant-url for a non-default source"
+// The authoritative disabled-state message lives in peasantproject so the
+// switch status and /api/v1/inspect cannot drift.
 
 // Peasant settings errors. The route maps these to its refusal statuses:
 // unavailable means this serve process has no configurable source, refused
@@ -364,14 +361,14 @@ func (s *Service) peasantIntegrationState() PeasantIntegration {
 			Enabled: false,
 			Source:  peasantproject.SourceDisabled,
 			Status:  PeasantIntegrationDisabled,
-			Message: peasantDisabledMessage,
+			Message: peasantproject.DisabledMessage,
 		}
 	}
 	status := s.ProjectSource.Status()
 	if !status.Enabled || status.Source == peasantproject.SourceDisabled {
 		message := status.Message
 		if message == "" {
-			message = peasantDisabledMessage
+			message = peasantproject.DisabledMessage
 		}
 		return PeasantIntegration{
 			Enabled: false,

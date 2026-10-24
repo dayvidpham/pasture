@@ -215,7 +215,10 @@ it reopens the configured Peasant source. With no `--peasant-db`/`--peasant-url`
 flag that source is the conventional Peasant SQLite database
 (`$XDG_DATA_HOME/peasant/peasant.db`, otherwise
 `~/.local/share/peasant/peasant.db`), opened lazily. Turning it off closes the
-source and the next session read omits project fields.
+source and the next session read omits project fields. Opening a WAL-mode
+Peasant database read-only may leave `peasant.db-shm` and `peasant.db-wal`
+beside the database; Pasture never writes to or migrates the main Peasant
+database.
 
 For a different source, start `pasture serve` with `--peasant-db <path>` or
 `--peasant-url <url>`; that starts enrichment enabled, and the console toggle

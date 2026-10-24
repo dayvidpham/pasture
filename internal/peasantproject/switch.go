@@ -10,10 +10,10 @@ import (
 // shutting down.
 var ErrSwitchClosed = errors.New("the Peasant project toggle is closed; restart pasture serve to change project enrichment")
 
-// disabledSwitchMessage is the integration message while the runtime switch is
-// off. It names the console toggle first and keeps the startup flags as the
-// fallback for a non-default source.
-const disabledSwitchMessage = "Peasant project enrichment is off; turn it on from the web console, or restart pasture serve with --peasant-db/--peasant-url for a non-default source"
+// DisabledMessage is the authoritative integration message while the runtime
+// switch is off. It names the console toggle first and keeps the startup flags
+// as the fallback for a non-default source.
+const DisabledMessage = "Peasant project enrichment is off; turn it on from the web console, or restart pasture serve with --peasant-db/--peasant-url for a non-default source"
 
 // Switch is the runtime on/off control for the opt-in Peasant project source.
 //
@@ -47,7 +47,7 @@ func (s *Switch) Status() Status {
 	s.mu.Lock()
 	if !s.on || s.source == nil {
 		s.mu.Unlock()
-		return Status{Enabled: false, Source: SourceDisabled, Message: disabledSwitchMessage}
+		return Status{Enabled: false, Source: SourceDisabled, Message: DisabledMessage}
 	}
 	source := s.source
 	s.mu.Unlock()

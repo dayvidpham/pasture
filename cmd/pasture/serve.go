@@ -72,15 +72,17 @@ source. With neither --peasant-db nor --peasant-url, it reads the conventional
 Peasant SQLite database ($XDG_DATA_HOME/peasant/peasant.db, else
 ~/.local/share/peasant/peasant.db). Nothing is opened while the toggle is off,
 and a missing or incompatible database returns an actionable error while
-enrichment stays off. Pass --peasant-db <path> to read Peasant's project
-mapping from a read-only SQLite handle, or --peasant-url <url> to ask the
-Peasant HTTP API; setting both is an error. Both flags start enrichment enabled,
-and the console toggle still turns that source off and on. The switch lasts for
-this serve process: restarting returns to the startup default (off without
-flags, on with an explicit --peasant-db/--peasant-url). With --peasant-db the
-reported label is the canonical remote label when the remote is recognizable,
-else the canonical cwd, else the project hash; with --peasant-url it is
-Peasant's resolved project label.`,
+enrichment stays off. Opening a WAL-mode Peasant database read-only may leave
+peasant.db-shm and peasant.db-wal beside the database; Pasture never writes to
+or migrates the main Peasant database. Pass --peasant-db <path> to read
+Peasant's project mapping from a read-only SQLite handle, or --peasant-url <url>
+to ask the Peasant HTTP API; setting both is an error. Both flags start
+enrichment enabled, and the console toggle still turns that source off and on.
+The switch lasts for this serve process: restarting returns to the startup default
+(off without flags, on with an explicit --peasant-db/--peasant-url). With
+--peasant-db the reported label is the canonical remote label when the remote is
+recognizable, else the canonical cwd, else the project hash; with --peasant-url
+it is Peasant's resolved project label.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runServe(cmd)

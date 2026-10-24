@@ -36,7 +36,10 @@ rail; it reopens the configured source. With no `--peasant-db`/`--peasant-url`
 flag that source is the conventional Peasant database
 (`$XDG_DATA_HOME/peasant/peasant.db`, otherwise
 `~/.local/share/peasant/peasant.db`), opened lazily. Turning it off closes that
-source and the next session read omits project fields. For a different source,
+source and the next session read omits project fields. Opening a WAL-mode
+Peasant database read-only may leave `peasant.db-shm` and `peasant.db-wal`
+beside the database; Pasture never writes to or migrates the main Peasant
+database. For a different source,
 start serve with `--peasant-db` or `--peasant-url`; that starts enabled, and the
 toggle can still turn it off and on. The switch lasts for this serve process:
 restarting returns to the startup default (off without flags, on with an
