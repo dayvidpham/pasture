@@ -1,4 +1,4 @@
-.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate web-install web-generate web-build web-test web-verify-generated web-verify-bundle check-operational-tracker
+.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate web-install web-generate web-build web-test web-verify-generated web-verify-bundle check-operational-tracker FORCE
 
 VERSION ?= devel
 
@@ -82,26 +82,32 @@ check-operational-tracker:
 
 build: $(BINS)
 
-bin/pastured:
+# The bin/ outputs are ignored files, so Make cannot derive their Go source
+# dependency graph. Force every `make build` to rebuild; otherwise a checkout
+# that already has bin/pasture silently keeps stale binaries, including an old
+# embedded web bundle.
+FORCE:
+
+bin/pastured: FORCE
 	@mkdir -p bin
 	CGO_ENABLED=0 go build \
 		-ldflags "-X main.version=$(VERSION)" \
 		-o bin/pastured ./cmd/pastured
 
-bin/pasture-release:
+bin/pasture-release: FORCE
 	@mkdir -p bin
 	CGO_ENABLED=0 go build \
 		-ldflags "-X main.version=$(VERSION)" \
 		-o bin/pasture-release ./cmd/pasture-release
 
-bin/pasture:
+bin/pasture: FORCE
 	@mkdir -p bin
 	CGO_ENABLED=0 go build \
 		-ldflags "-X main.version=$(VERSION)" \
 		-o bin/pasture ./cmd/pasture
 
 # Test-only binary; see BINS comment above for rationale.
-bin/pasture-migrate-crash:
+bin/pasture-migrate-crash: FORCE
 	@mkdir -p bin
 	CGO_ENABLED=0 go build \
 		-ldflags "-X main.version=$(VERSION)" \
