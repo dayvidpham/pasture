@@ -3,8 +3,10 @@ package peasantproject
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,8 +17,11 @@ import (
 
 const (
 	// apiLookupTimeout bounds one session-summaries request. The integration is
-	// optional; a slow Peasant must not hold a Pasture session read open.
-	apiLookupTimeout = 2 * time.Second
+	// optional; a slow Peasant must not hold a Pasture session read open. It
+	// sits below the session API's 2s enrichment bound so a timeout is
+	// attributable to the source (and therefore cacheable) rather than to the
+	// caller's own deadline.
+	apiLookupTimeout = 1500 * time.Millisecond
 	// maxAPIBodyBytes bounds the response body read. One page of summaries is a
 	// few kilobytes; this is a corruption/abuse backstop.
 	maxAPIBodyBytes = 1 << 20
@@ -111,8 +116,11 @@ func (s *apiSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, er
 	}
 	response, err := s.client.Do(request)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		s.status.markFailure(ctx, "the Peasant API is unreachable: "+err.Error())
-		return nil, fmt.Errorf("reaching the Peasant API: %w", err)
+		return nil, apiLookupError("reaching the Peasant API", lookupCtx, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
@@ -121,8 +129,11 @@ func (s *apiSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, er
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxAPIBodyBytes+1))
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		s.status.markFailure(ctx, "the Peasant session-summaries response could not be read: "+err.Error())
-		return nil, fmt.Errorf("reading the Peasant session-summaries response: %w", err)
+		return nil, apiLookupError("reading the Peasant session-summaries response", lookupCtx, err)
 	}
 	if len(body) > maxAPIBodyBytes {
 		s.status.markFailure(ctx, "the Peasant session-summaries response exceeded its byte bound")
@@ -152,6 +163,20 @@ func (s *apiSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, er
 	}
 	s.status.markOK()
 	return out, nil
+}
+
+// apiLookupError separates a source-owned timeout from a caller cancellation.
+// The caller checks its own context first, so reaching here with a timed-out
+// lookup context or a timed-out HTTP client means the source missed its own
+// budget while the caller was still waiting. Marking that with the cacheable
+// sentinel lets the cache absorb a hung Peasant for one TTL instead of
+// retrying it on every refresh tick.
+func apiLookupError(operation string, lookupCtx context.Context, err error) error {
+	var netErr net.Error
+	if lookupCtx.Err() != nil || (errors.As(err, &netErr) && netErr.Timeout()) {
+		return fmt.Errorf("%s: %w: %w", operation, errSourceLookupTimeout, err)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 // Close releases idle HTTP connections. It is safe to call more than once.

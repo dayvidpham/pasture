@@ -140,8 +140,21 @@ type cacheEntry struct {
 	expires time.Time
 }
 
+// errSourceLookupTimeout marks a failure at a source's own lookup bound while
+// the caller's context was still live. The cache treats it as cacheable: the
+// source was contacted and did not answer within its budget, which is a source
+// result rather than a caller cancellation.
+var errSourceLookupTimeout = errors.New("the Peasant source exceeded its lookup bound")
+
 type pendingLookup struct {
 	done chan struct{}
+	// cached reports whether the leader wrote its outcome to the cache before
+	// releasing waiters. err is the leader's result for the case it did not.
+	cached bool
+	err    error
+	// waiters counts callers currently blocked on this group. It is diagnostic
+	// state and never changes the lookup behavior.
+	waiters int
 }
 
 // CachedSource is the caching/coalescing wrapper. Its Close releases the
@@ -186,110 +199,131 @@ func newCachedWithLimit(inner Source, ttl time.Duration, now func() time.Time, l
 func (c *CachedSource) Status() Status { return c.inner.Status() }
 
 func (c *CachedSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, error) {
-	out := make(map[Key]Project, len(keys))
 	if len(keys) == 0 {
-		return out, nil
+		return make(map[Key]Project), nil
 	}
 
-	// Deduplicate the requested keys and serve everything still fresh from the
-	// cache. A cached error is replayed without another source call, which is
-	// what keeps an unavailable Peasant from being retried every refresh tick.
-	c.mu.Lock()
-	now := c.now()
-	missing := make([]Key, 0, len(keys))
-	seen := make(map[Key]struct{}, len(keys))
-	for _, key := range keys {
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		entry, ok := c.entries[key]
-		if ok && now.Before(entry.expires) {
-			if entry.err != nil {
-				c.mu.Unlock()
-				return nil, entry.err
-			}
-			if entry.project != nil {
-				out[key] = *entry.project
-			}
-			continue
-		}
-		missing = append(missing, key)
-	}
-	if len(missing) == 0 {
-		c.mu.Unlock()
-		return out, nil
-	}
+	for {
+		out := make(map[Key]Project, len(keys))
 
-	// One lookup at a time for the same missing set. A second caller waits for
-	// the leader and then reads the cache the leader populated.
-	group := cacheGroupKey(missing)
-	if pending, ok := c.pending[group]; ok {
-		c.mu.Unlock()
-		select {
-		case <-pending.done:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+		// Deduplicate the requested keys and serve everything still fresh from
+		// the cache. A cached error is replayed without another source call,
+		// which is what keeps an unavailable Peasant from being retried every
+		// refresh tick.
 		c.mu.Lock()
-		defer c.mu.Unlock()
 		now := c.now()
-		for _, key := range missing {
-			entry, ok := c.entries[key]
-			if !ok || !now.Before(entry.expires) {
+		missing := make([]Key, 0, len(keys))
+		seen := make(map[Key]struct{}, len(keys))
+		for _, key := range keys {
+			if _, ok := seen[key]; ok {
 				continue
 			}
-			if entry.err != nil {
-				return nil, entry.err
+			seen[key] = struct{}{}
+			entry, ok := c.entries[key]
+			if ok && now.Before(entry.expires) {
+				if entry.err != nil {
+					c.mu.Unlock()
+					return nil, entry.err
+				}
+				if entry.project != nil {
+					out[key] = *entry.project
+				}
+				continue
 			}
-			if entry.project != nil {
-				out[key] = *entry.project
+			missing = append(missing, key)
+		}
+		if len(missing) == 0 {
+			c.mu.Unlock()
+			return out, nil
+		}
+
+		// One lookup at a time for the same missing set. A second caller waits
+		// for the leader and then reads the outcome the leader published.
+		group := cacheGroupKey(missing)
+		if pending, ok := c.pending[group]; ok {
+			pending.waiters++
+			c.mu.Unlock()
+			select {
+			case <-pending.done:
+			case <-ctx.Done():
+				c.mu.Lock()
+				pending.waiters--
+				c.mu.Unlock()
+				return nil, ctx.Err()
+			}
+			if !pending.cached {
+				if pending.err != nil {
+					return nil, pending.err
+				}
+				// The leader returned without publishing a positive or
+				// negative entry (its caller was canceled after a successful
+				// source read). Try again instead of reporting a false absence.
+				continue
+			}
+			c.mu.Lock()
+			now := c.now()
+			for _, key := range missing {
+				entry, ok := c.entries[key]
+				if !ok || !now.Before(entry.expires) {
+					continue
+				}
+				if entry.err != nil {
+					c.mu.Unlock()
+					return nil, entry.err
+				}
+				if entry.project != nil {
+					out[key] = *entry.project
+				}
+			}
+			c.mu.Unlock()
+			return out, nil
+		}
+		pending := &pendingLookup{done: make(chan struct{})}
+		c.pending[group] = pending
+		c.mu.Unlock()
+
+		projects, err := c.inner.Lookup(ctx, missing)
+
+		// A caller cancellation is not evidence about the source, so neither
+		// its error nor any stale partial result is cached. A failure at the
+		// source's OWN bound (errSourceLookupTimeout) is evidence and is
+		// cached, so a hung Peasant is not retried on every refresh tick.
+		cacheable := ctx.Err() == nil &&
+			!errors.Is(err, context.Canceled) &&
+			(!errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errSourceLookupTimeout))
+
+		c.mu.Lock()
+		now = c.now()
+		pending.err = err
+		if cacheable {
+			c.pruneExpiredLocked(now)
+			for _, key := range missing {
+				entry := cacheEntry{err: err, expires: now.Add(c.ttl)}
+				if err == nil {
+					if project, ok := projects[key]; ok {
+						copied := project
+						entry.project = &copied
+					}
+				}
+				c.entries[key] = entry
+			}
+			c.evictToLimitLocked()
+			pending.cached = true
+		}
+		delete(c.pending, group)
+		close(pending.done)
+		c.mu.Unlock()
+
+		if err != nil {
+			return nil, err
+		}
+		for key := range seen {
+			if project, ok := projects[key]; ok {
+				out[key] = project
 			}
 		}
 		return out, nil
 	}
-	pending := &pendingLookup{done: make(chan struct{})}
-	c.pending[group] = pending
-	c.mu.Unlock()
-
-	projects, err := c.inner.Lookup(ctx, missing)
-
-	// A caller cancellation is not evidence about the source, so neither its
-	// error nor any stale partial result is cached. Pending waiters are still
-	// released below so a canceled leader can never strand them.
-	cacheable := ctx.Err() == nil &&
-		!errors.Is(err, context.Canceled) &&
-		!errors.Is(err, context.DeadlineExceeded)
-
-	c.mu.Lock()
-	now = c.now()
-	if cacheable {
-		c.pruneExpiredLocked(now)
-		for _, key := range missing {
-			entry := cacheEntry{err: err, expires: now.Add(c.ttl)}
-			if err == nil {
-				if project, ok := projects[key]; ok {
-					copied := project
-					entry.project = &copied
-				}
-			}
-			c.entries[key] = entry
-		}
-		c.evictToLimitLocked()
-	}
-	delete(c.pending, group)
-	close(pending.done)
-	c.mu.Unlock()
-
-	if err != nil {
-		return nil, err
-	}
-	for key := range seen {
-		if project, ok := projects[key]; ok {
-			out[key] = project
-		}
-	}
-	return out, nil
 }
 
 func (c *CachedSource) pruneExpiredLocked(now time.Time) {
@@ -304,6 +338,10 @@ func (c *CachedSource) evictToLimitLocked() {
 	if len(c.entries) <= c.limit {
 		return
 	}
+	// Snapshot the excess before deleting: the map shrinks as entries are
+	// removed, so re-reading len(entries) in the loop condition would stop
+	// after half the required evictions.
+	excess := len(c.entries) - c.limit
 	type keyExpiry struct {
 		key     Key
 		expires time.Time
@@ -315,7 +353,10 @@ func (c *CachedSource) evictToLimitLocked() {
 	sort.Slice(list, func(i, j int) bool {
 		return list[i].expires.Before(list[j].expires)
 	})
-	for i := 0; i < len(c.entries)-c.limit && i < len(list); i++ {
+	if excess > len(list) {
+		excess = len(list)
+	}
+	for i := 0; i < excess; i++ {
 		delete(c.entries, list[i].key)
 	}
 }
