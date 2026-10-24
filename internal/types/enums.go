@@ -8,6 +8,14 @@
 // only the CLI/release value types below.
 package types
 
+// ─── Environment variables ───────────────────────────────────────────────────
+
+// NamespaceEnv is the environment variable that supplies the default namespace
+// for the global --namespace flag and the scope of task list/ready/blocked.
+// It lives here, in a production-neutral leaf package, so the CLI and the test
+// helpers can share one spelling without the CLI linking the testing package.
+const NamespaceEnv = "PASTURE_NAMESPACE"
+
 // ─── OutputFormat ────────────────────────────────────────────────────────────
 
 // OutputFormat specifies the CLI output format for pasture commands.

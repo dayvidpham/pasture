@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dayvidpham/pasture/internal/types"
 )
 
 // SetEnv sets an environment variable for the duration of the test and
@@ -77,13 +79,12 @@ func restoreEnvVar(key, oldValue string, hadValue bool) {
 // DBPathEnv names the variable that overrides where pasture's unified store
 // lives; CaptureDirEnv names the variable that turns host-payload capture on
 // and points it at a directory; NamespaceEnv names the default namespace for
-// --namespace and the scope of task list/ready/blocked. All three are declared
-// here, rather than imported, because this package is a leaf that every test
-// binary links; the packages that own them (internal/tasks/paths.go for the
-// store, cmd/pasture's hook_environment.go for the capture directory, and
-// cmd/pasture/root.go for the namespace) pin these spellings equal in
-// cmd/pasture's sandbox guard, so the neutralized name is always the one the
-// product reads.
+// --namespace and the scope of task list/ready/blocked. DBPathEnv and
+// CaptureDirEnv are declared here, rather than imported, because their owners
+// (internal/tasks/paths.go for the store, cmd/pasture's hook_environment.go for
+// the capture directory) sit in packages this leaf cannot cheaply import.
+// NamespaceEnv aliases internal/types.NamespaceEnv instead, so the production
+// CLI can share one spelling without importing this test-only package.
 //
 // WHY THEY ARE NEUTRALIZED, AND WHY THE REST OF THE ENVIRONMENT IS NOT. HOME
 // and XDG_DATA_HOME point AT the sandbox; these three point AWAY from it, and the
@@ -105,8 +106,9 @@ const (
 	// (cmd/pasture's hookCaptureDirEnv, internal/handlers' captureDirectoryEnv).
 	CaptureDirEnv = "PASTURE_CAPTURE_DIR"
 	// NamespaceEnv is the default namespace for --namespace and the scope of
-	// task list/ready/blocked (cmd/pasture's root.go).
-	NamespaceEnv = "PASTURE_NAMESPACE"
+	// task list/ready/blocked. It aliases the production-neutral constant in
+	// internal/types so the CLI need not import this test-only package.
+	NamespaceEnv = types.NamespaceEnv
 )
 
 // SetHermeticEnv points HOME and XDG_DATA_HOME at a temporary directory tree

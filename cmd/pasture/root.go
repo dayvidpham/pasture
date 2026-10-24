@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
-	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/types"
 )
 
@@ -105,8 +104,8 @@ func init() {
 	// The default is the environment's namespace so task reads (list, ready,
 	// blocked) are scoped without repeating the flag. An explicit --namespace
 	// overwrites this value during flag parsing and always wins.
-	pf.StringVar(&flagNamespace, "namespace", os.Getenv(testutil.NamespaceEnv),
-		"Namespace URI for created tasks and scoped task reads (env: "+testutil.NamespaceEnv+"; empty derives new tasks from the git remote, then file:// of cwd)")
+	pf.StringVar(&flagNamespace, "namespace", os.Getenv(types.NamespaceEnv),
+		"Namespace URI for created tasks and scoped task reads (env: "+types.NamespaceEnv+"; empty derives new tasks from the git remote, then file:// of cwd)")
 
 	// Local to the root so no subcommand inherits it (see the RunE comment).
 	rootCmd.Flags().BoolVar(&flagRootUpgrade, "upgrade", false,
