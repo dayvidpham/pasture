@@ -1,4 +1,4 @@
-.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate web-install web-generate web-build web-test web-verify-generated check-operational-tracker
+.PHONY: build test test-pr test-recovery test-race test-race-correctness test-performance test-race-ci lint fmt clean release-local release-all generate web-install web-generate web-build web-test web-verify-generated web-verify-bundle check-operational-tracker
 
 VERSION ?= devel
 
@@ -53,6 +53,23 @@ web-verify-generated: web-install
 			echo "web/src/generated/api.ts is stale; run 'make web-generate' and commit the result."; \
 			exit 1; \
 		fi
+
+# Rebuild the production console and fail when the committed embedded bundle is
+# stale. This is the only build/release gate that needs Node: `make build`,
+# Nix, and the release jobs consume the committed internal/webui/assets tree
+# directly and never run pnpm. It installs frozen dependencies itself so it can
+# run standalone in CI.
+web-verify-bundle:
+	cd web && pnpm install --frozen-lockfile && pnpm build
+	@stale=$$(git status --porcelain -- internal/webui/assets); \
+	if [ -n "$$stale" ]; then \
+		echo "internal/webui/assets is stale: it does not match 'cd web && pnpm build'."; \
+		echo "Rebuild and commit the bundle before landing:"; \
+		echo "    cd web && pnpm install --frozen-lockfile && pnpm build"; \
+		echo "    git add internal/webui/assets"; \
+		echo "$$stale"; \
+		exit 1; \
+	fi
 
 # Unconditional read-only sweep; also runs through Codegen Drift's make generate
 # and the race suite's shipped-tree test. No environment bypass or baseline.

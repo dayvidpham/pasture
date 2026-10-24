@@ -106,7 +106,21 @@ jobs:
         run: make web-verify-generated
 
       - name: Typecheck and build
+        # The release-authority contract requires this exact build step. pnpm
+        # build writes internal/webui/assets, which the Go binary embeds.
         run: cd web && pnpm build
+
+      - name: Verify embedded web bundle freshness
+        run: |
+          stale=$(git status --porcelain -- internal/webui/assets)
+          if [ -n "$stale" ]; then
+            echo "internal/webui/assets is stale: it does not match 'cd web && pnpm build'."
+            echo "Rebuild and commit the bundle before landing:"
+            echo "    cd web && pnpm install --frozen-lockfile && pnpm build"
+            echo "    git add internal/webui/assets"
+            echo "$stale"
+            exit 1
+          fi
 
   recovery:
     name: Recovery correctness

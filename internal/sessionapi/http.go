@@ -555,6 +555,15 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
+// LoopbackOnly wraps next with the session API's Host/Origin guard. The serve
+// command applies it around the combined web-console and API handler so static
+// responses are protected by the same loopback-only origin as the API. NewHandler
+// already applies the same guard internally; wrapping the combined handler is a
+// second, outermost check for the UI and a harmless duplicate for the API.
+func LoopbackOnly(next http.Handler) http.Handler {
+	return loopbackOnly(next)
+}
+
 func loopbackOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !loopbackHost(r.Host) {
