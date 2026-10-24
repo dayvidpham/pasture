@@ -32,6 +32,10 @@ func TestProductionTimeoutSitesUseInjectedProfile(t *testing.T) {
 		"internal/acceptance/snapshot.go",
 		"internal/lifecycle/receipt/clock.go",
 		"internal/lifecycle/receipt/journal.go",
+		// The opt-in Peasant project source opens its own read-only SQLite
+		// handle and bounds its schema probe; its bounds are policy, not
+		// incidental literals.
+		"internal/peasantproject/db.go",
 	} {
 		path := filepath.Join(root, relative)
 		source, err := os.ReadFile(path)

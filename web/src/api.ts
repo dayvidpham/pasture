@@ -5,12 +5,19 @@ export type SessionBindingInterval = components['schemas']['SessionBindingInterv
 export type EpochView = components['schemas']['EpochView']
 export type InspectPayload = components['schemas']['InspectPayload']
 export type EpochPage = components['schemas']['EpochPage']
+export type PeasantIntegration = components['schemas']['PeasantIntegration']
 
 export type SessionsFrame = {
   type: 'sessions'
   revision: number
   asOf: string
-  payload: { items: SessionView[]; next?: string }
+  payload: {
+    items: SessionView[]
+    next?: string
+    // Present on frames from a build that reports integration health. Optional
+    // so a browser connected to an older frame shape degrades to "unknown".
+    peasantIntegration?: PeasantIntegration
+  }
 }
 
 export type EpochsFrame = {

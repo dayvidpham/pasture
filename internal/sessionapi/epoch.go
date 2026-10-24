@@ -66,11 +66,12 @@ func (s *Service) Inspect(ctx context.Context) (InspectPayload, error) {
 		return InspectPayload{}, err
 	}
 	return InspectPayload{
-		Revision:  epochs.Revision,
-		AsOf:      epochs.AsOf,
-		Truncated: sessions.Next != "",
-		Epochs:    epochs.Items,
-		Sessions:  sessions.Items,
+		Revision:           epochs.Revision,
+		AsOf:               epochs.AsOf,
+		Truncated:          sessions.Next != "",
+		Epochs:             epochs.Items,
+		Sessions:           sessions.Items,
+		PeasantIntegration: s.peasantIntegrationState(),
 	}, nil
 }
 

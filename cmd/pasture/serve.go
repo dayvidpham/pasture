@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
+	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -46,7 +48,15 @@ file is created and an existing older schema is migrated. serve never runs a
 separate "pasture migrate", and it refuses non-loopback hosts.
 
 The server starts from the existing session cache; pass --backfill to rebuild
-historical session state from the lifecycle journal before serving.`,
+historical session state from the lifecycle journal before serving.
+
+Peasant project enrichment is opt-in and disabled by default. Pass
+--peasant-db <path> to read Peasant's project mapping from a read-only SQLite
+handle, or --peasant-url <url> to ask the Peasant HTTP API; setting both is an
+error. With --peasant-db the reported label is the canonical remote label when
+the remote is recognizable, else the canonical cwd, else the project hash; with
+--peasant-url it is Peasant's resolved project label. When disabled, serve
+never opens a Peasant database and never contacts Peasant.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runServe(cmd)
@@ -57,6 +67,8 @@ func init() {
 	serveCmd.Flags().String("listen", "127.0.0.1:0", "Loopback TCP address to listen on")
 	serveCmd.Flags().Duration("active-window", 15*time.Minute, "Age after which an open session is idle")
 	serveCmd.Flags().Bool("backfill", false, "Rebuild historical session state before serving (can be slow on a large journal)")
+	serveCmd.Flags().String("peasant-db", "", "Opt-in: read project labels from the Peasant SQLite database at this path (read-only)")
+	serveCmd.Flags().String("peasant-url", "", "Opt-in: read project labels from the Peasant HTTP API at this base URL")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -64,8 +76,17 @@ func runServe(cmd *cobra.Command) error {
 	listen, _ := cmd.Flags().GetString("listen")
 	activeWindow, _ := cmd.Flags().GetDuration("active-window")
 	backfill, _ := cmd.Flags().GetBool("backfill")
+	peasantDB, _ := cmd.Flags().GetString("peasant-db")
+	peasantURL, _ := cmd.Flags().GetString("peasant-url")
 	if activeWindow <= 0 {
 		return fmt.Errorf("active window must be positive")
+	}
+	projectSource, closeProjectSource, err := newPeasantProjectSource(peasantDB, peasantURL)
+	if err != nil {
+		return err
+	}
+	if closeProjectSource != nil {
+		defer func() { _ = closeProjectSource() }()
 	}
 	if !listenIsLoopback(listen) {
 		return fmt.Errorf("serve refuses non-loopback listen address %q", listen)
@@ -115,6 +136,7 @@ func runServe(cmd *cobra.Command) error {
 
 	service := sessionapi.NewService(readDB)
 	service.ActiveWindow = activeWindow
+	service.ProjectSource = projectSource
 	if backfill {
 		service.Ensure = func(ctx context.Context) error {
 			_, _, err := tasks.EnsureSessionState(ctx, tracker)
@@ -159,6 +181,32 @@ func runServe(cmd *cobra.Command) error {
 		}
 		return nil
 	}
+}
+
+// newPeasantProjectSource constructs the operator's opt-in project source. An
+// empty pair means disabled: no source, no Peasant access. Both flags set is a
+// configuration error rather than an implicit precedence.
+func newPeasantProjectSource(dbPath, apiURL string) (peasantproject.Source, func() error, error) {
+	dbPath = strings.TrimSpace(dbPath)
+	apiURL = strings.TrimSpace(apiURL)
+	if dbPath != "" && apiURL != "" {
+		return nil, nil, fmt.Errorf("serve accepts only one Peasant project source: pass --peasant-db or --peasant-url, not both")
+	}
+	var raw peasantproject.Source
+	switch {
+	case dbPath != "":
+		raw = peasantproject.NewDBSource(dbPath)
+	case apiURL != "":
+		source, err := peasantproject.NewAPISource(apiURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		raw = source
+	default:
+		return nil, nil, nil
+	}
+	cached := peasantproject.NewCached(raw)
+	return cached, cached.Close, nil
 }
 
 func listenIsLoopback(listen string) bool {

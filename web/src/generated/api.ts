@@ -253,6 +253,7 @@ export interface components {
             /** Format: date-time */
             asOf: string;
             epochs: components["schemas"]["EpochView"][];
+            peasantIntegration: components["schemas"]["PeasantIntegration"];
             /** Format: int64 */
             revision: number;
             sessions: components["schemas"]["SessionView"][];
@@ -265,6 +266,22 @@ export interface components {
             next?: string;
             /** Format: int64 */
             revision: number;
+        };
+        PeasantIntegration: {
+            /** @description Whether the operator enabled Peasant project enrichment. Disabled is the default and is distinct from unavailable. */
+            enabled: boolean;
+            /** @description Actionable detail for disabled or unavailable; empty when the source is ok. */
+            message: string;
+            /**
+             * @description Which opt-in backend is configured: none when disabled, db for --peasant-db, api for --peasant-url.
+             * @enum {string}
+             */
+            source: "none" | "db" | "api";
+            /**
+             * @description disabled when the integration is off; ok after the configured source has answered a lookup successfully; unavailable when it has not been contacted yet or could not be opened, reached, or read.
+             * @enum {string}
+             */
+            status: "disabled" | "ok" | "unavailable";
         };
         SessionActivity: {
             /** Format: date-time */
@@ -305,6 +322,10 @@ export interface components {
             epoch?: components["schemas"]["EpochRef"];
             harness: string;
             nativeSessionId: string;
+            /** @description Peasant-owned project display label for the session. The label depends on the configured source: with --peasant-db it is the canonical remote label when the remote is recognizable, else the canonical cwd, else the project hash; with --peasant-url it is Peasant's resolved project label. Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never derives it. */
+            project?: string;
+            /** @description Peasant-owned opaque project hash for the session, preserved exactly. Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never recomputes it. */
+            projectHash?: string;
         };
         /** @description The durable Peasant SessionDetailPayload document, proxied unchanged. Pasture guarantees only the identity fields; every other field belongs to the shared @peasant-labs/schema session contract and is validated by the browser. */
         TranscriptPayload: {

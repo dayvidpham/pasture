@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -960,4 +962,177 @@ func TestHTTPBindUnbindErrorMapping(t *testing.T) {
 		require.Equal(t, http.StatusInternalServerError, status)
 		require.Equal(t, "storage_fault", code)
 	})
+}
+
+// fakePeasantSource is the injected project source for service tests. It
+// records each batch so tests can assert one lookup per page or detail.
+type fakePeasantSource struct {
+	mu       sync.Mutex
+	projects map[peasantproject.Key]peasantproject.Project
+	err      error
+	status   peasantproject.Status
+	calls    int
+	lastKeys []peasantproject.Key
+}
+
+func (f *fakePeasantSource) Lookup(_ context.Context, keys []peasantproject.Key) (map[peasantproject.Key]peasantproject.Project, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.lastKeys = append([]peasantproject.Key(nil), keys...)
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[peasantproject.Key]peasantproject.Project, len(keys))
+	for _, key := range keys {
+		if project, ok := f.projects[key]; ok {
+			out[key] = project
+		}
+	}
+	return out, nil
+}
+
+func (f *fakePeasantSource) Status() peasantproject.Status {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.status
+}
+
+func (f *fakePeasantSource) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func (f *fakePeasantSource) lastLookupKeys() []peasantproject.Key {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]peasantproject.Key(nil), f.lastKeys...)
+}
+
+func sessionViewByID(t *testing.T, items []sessionapi.SessionView, sessionID string) sessionapi.SessionView {
+	t.Helper()
+	for _, item := range items {
+		if item.NativeSessionID == sessionID {
+			return item
+		}
+	}
+	t.Fatalf("no session %q in the page", sessionID)
+	return sessionapi.SessionView{}
+}
+
+// TestProjectEnrichmentDisabledByDefault pins the opt-in default: with no
+// ProjectSource, every project field stays empty and inspect reports disabled
+// (not unavailable) with the actionable enablement message.
+func TestProjectEnrichmentDisabledByDefault(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	service := f.service()
+	ctx := context.Background()
+
+	page, err := service.List(ctx, sessionapi.ListOptions{Limit: 10})
+	require.NoError(t, err)
+	for _, item := range page.Items {
+		require.Empty(t, item.Project)
+		require.Empty(t, item.ProjectHash)
+	}
+	detail, err := service.Get(ctx, "claude-code", "active")
+	require.NoError(t, err)
+	require.Empty(t, detail.Session.Project)
+	require.Empty(t, detail.Session.ProjectHash)
+
+	inspect, err := service.Inspect(ctx)
+	require.NoError(t, err)
+	require.False(t, inspect.PeasantIntegration.Enabled)
+	require.Equal(t, peasantproject.SourceDisabled, inspect.PeasantIntegration.Source)
+	require.Equal(t, sessionapi.PeasantIntegrationDisabled, inspect.PeasantIntegration.Status)
+	require.Contains(t, inspect.PeasantIntegration.Message, "--peasant-db")
+	require.Contains(t, inspect.PeasantIntegration.Message, "--peasant-url")
+}
+
+// TestProjectEnrichmentListAndDetail pins the enriched path: one batch lookup
+// per page, one for a detail, and only the sessions Peasant mapped carry the
+// project fields.
+func TestProjectEnrichmentListAndDetail(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	hash := strings.Repeat("a", 64)
+	source := &fakePeasantSource{
+		projects: map[peasantproject.Key]peasantproject.Project{
+			{Harness: "claude-code", Session: "active"}: {Name: "org/repo", Hash: hash},
+		},
+		status: peasantproject.Status{Enabled: true, Source: peasantproject.SourceAPI, State: peasantproject.StateOK},
+	}
+	service := f.service()
+	service.ProjectSource = source
+	ctx := context.Background()
+
+	page, err := service.List(ctx, sessionapi.ListOptions{Limit: 10})
+	require.NoError(t, err)
+	require.Equal(t, 1, source.callCount(), "a page must enrich in one batch")
+	require.Len(t, source.lastLookupKeys(), len(page.Items))
+	active := sessionViewByID(t, page.Items, "active")
+	require.Equal(t, "org/repo", active.Project)
+	require.Equal(t, hash, active.ProjectHash)
+	idle := sessionViewByID(t, page.Items, "idle")
+	require.Empty(t, idle.Project)
+	require.Empty(t, idle.ProjectHash)
+
+	detail, err := service.Get(ctx, "claude-code", "active")
+	require.NoError(t, err)
+	require.Equal(t, 2, source.callCount(), "a detail must enrich in one lookup")
+	require.Equal(t, []peasantproject.Key{{Harness: "claude-code", Session: "active"}}, source.lastLookupKeys())
+	require.Equal(t, "org/repo", detail.Session.Project)
+	require.Equal(t, hash, detail.Session.ProjectHash)
+
+	detail, err = service.Get(ctx, "claude-code", "idle")
+	require.NoError(t, err)
+	require.Equal(t, 3, source.callCount())
+	require.Empty(t, detail.Session.Project)
+	require.Empty(t, detail.Session.ProjectHash)
+
+	inspect, err := service.Inspect(ctx)
+	require.NoError(t, err)
+	require.True(t, inspect.PeasantIntegration.Enabled)
+	require.Equal(t, peasantproject.SourceAPI, inspect.PeasantIntegration.Source)
+	require.Equal(t, sessionapi.PeasantIntegrationOK, inspect.PeasantIntegration.Status)
+	require.Empty(t, inspect.PeasantIntegration.Message)
+}
+
+// TestProjectEnrichmentUnavailableKeepsReads pins the failure rule: an
+// unavailable source leaves the project fields empty, the read still succeeds,
+// and inspect reports unavailable with the source's message.
+func TestProjectEnrichmentUnavailableKeepsReads(t *testing.T) {
+	t.Parallel()
+	f := seedSessions(t)
+	source := &fakePeasantSource{
+		err: errors.New("the Peasant database is unavailable"),
+		status: peasantproject.Status{
+			Enabled: true,
+			Source:  peasantproject.SourceDB,
+			State:   peasantproject.StateUnavailable,
+			Message: "the Peasant database is unavailable: no such file",
+		},
+	}
+	service := f.service()
+	service.ProjectSource = source
+	ctx := context.Background()
+
+	page, err := service.List(ctx, sessionapi.ListOptions{Limit: 10})
+	require.NoError(t, err, "enrichment failure must never fail the page")
+	require.NotEmpty(t, page.Items)
+	for _, item := range page.Items {
+		require.Empty(t, item.Project)
+		require.Empty(t, item.ProjectHash)
+	}
+	detail, err := service.Get(ctx, "claude-code", "active")
+	require.NoError(t, err)
+	require.Empty(t, detail.Session.Project)
+
+	inspect, err := service.Inspect(ctx)
+	require.NoError(t, err)
+	require.True(t, inspect.PeasantIntegration.Enabled)
+	require.Equal(t, peasantproject.SourceDB, inspect.PeasantIntegration.Source)
+	require.Equal(t, sessionapi.PeasantIntegrationUnavailable, inspect.PeasantIntegration.Status)
+	require.Contains(t, inspect.PeasantIntegration.Message, "no such file")
 }

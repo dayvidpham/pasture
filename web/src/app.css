@@ -240,6 +240,98 @@ body {
   word-break: break-all;
 }
 
+/* Peasant-owned project identity. The column clips a wide hash behind a title
+   instead of widening the table; unknown is text, never a hidden row. */
+.project-cell {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.project-cell.is-unknown {
+  color: var(--ink-3);
+}
+
+.project-detail {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: var(--bd);
+}
+
+.project-detail .eyebrow {
+  margin: 0;
+}
+
+/* The fairtrade Select is a full-width field by default; the toolbar needs a
+   compact, content-sized control that wraps with the existing groups. */
+.project-filter .is-field {
+  margin-bottom: 0;
+}
+
+.project-filter .select {
+  width: auto;
+  min-width: 13rem;
+  max-width: 22rem;
+}
+
+/* Peasant project integration is opt-in. The state is always visible so an
+   operator can tell disabled (a choice) from unavailable (a failed source). */
+.peasant-integration {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.peasant-integration-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.peasant-integration-title {
+  color: var(--ink-strong);
+  font: var(--fs-sm)/var(--lh-body) var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.peasant-integration-status {
+  flex: none;
+  color: var(--ink-3);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+  text-transform: lowercase;
+}
+
+.peasant-integration[data-status='ok'] .peasant-integration-status {
+  color: var(--success);
+}
+
+.peasant-integration[data-status='unavailable'] .peasant-integration-status {
+  color: var(--danger);
+}
+
+.peasant-integration-commands {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.peasant-integration-commands code {
+  display: block;
+  padding: var(--sp-1) var(--sp-2);
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: var(--bd);
+  font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
+}
+
 /* Binding provenance: the current source/confidence live in the detail list;
    the timeline below keeps every interval, including inferred ones, so a
    provisional epoch never looks authoritative. Bands are a vertical timeline:
