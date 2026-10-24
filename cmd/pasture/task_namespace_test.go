@@ -12,12 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The test process pins the namespace environment to empty so an operator's
-// exported PASTURE_NAMESPACE cannot change what these CLI invocations see.
-// Individual tests supply it per subprocess through runCLIEnv.
-func init() {
-	_ = os.Unsetenv("PASTURE_NAMESPACE")
-}
+// SetHermeticEnv in TestMain unsets PASTURE_NAMESPACE for the whole test
+// binary, so an operator's exported value cannot change what these CLI
+// invocations see. Individual tests supply it per subprocess through
+// runCLIEnv.
 
 // runCLIEnv executes the compiled binary with extra environment entries, which
 // take precedence over the inherited environment. It is the parallel-safe way

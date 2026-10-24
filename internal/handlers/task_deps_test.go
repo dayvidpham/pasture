@@ -125,6 +125,36 @@ func taskIDs(tasks []taskJSONShape) []string {
 	return out
 }
 
+func TestTaskReadiness_NamespaceMatchIsExact(t *testing.T) {
+	t.Parallel()
+	path := dbPath(t)
+
+	repo := createTaskInNamespace(t, path, "https://example/repo", "repo task")
+	repoExtra := createTaskInNamespace(t, path, "https://example/repo-extra", "repo-extra task")
+
+	ready := func(namespace string) []string {
+		t.Helper()
+		var out bytes.Buffer
+		code, err := handlers.TaskReady(&out, path, types.OutputJSON, "", namespace)
+		if err != nil {
+			t.Fatalf("ready(%q) failed: %v (code=%d)", namespace, err, code)
+		}
+		return taskIDs(decodeTaskList(t, out.String()))
+	}
+
+	if got := ready("https://example/repo"); len(got) != 1 || got[0] != repo {
+		t.Errorf("ready(https://example/repo) = %v, want exactly [%s]", got, repo)
+	}
+	if got := ready("https://example/repo-extra"); len(got) != 1 || got[0] != repoExtra {
+		t.Errorf("ready(https://example/repo-extra) = %v, want exactly [%s]", got, repoExtra)
+	}
+	// This is a string prefix of repo-extra but not a namespace: a prefix match
+	// would leak it, while equality on task.ID.Namespace keeps the result empty.
+	if got := ready("https://example/repo-"); len(got) != 0 {
+		t.Errorf("ready(https://example/repo-) = %v, want none", got)
+	}
+}
+
 func TestTaskDepAdd_RejectsCycle(t *testing.T) {
 	t.Parallel()
 	path := dbPath(t)

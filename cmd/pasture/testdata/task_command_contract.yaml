@@ -2,9 +2,9 @@ namespaces:
   - https://github.com/dayvidpham/pasture
   - https://github.com/dayvidpham/aura-plugins
 registration:
-  - {name: ready, path: [ready], flags: [label]}
-  - {name: blocked, path: [blocked], flags: [label]}
-  - {name: list, path: [list], flags: [namespace, status, priority, type, phase, label]}
+  - {name: ready, path: [ready], flags: [label, all-namespaces]}
+  - {name: blocked, path: [blocked], flags: [label, all-namespaces]}
+  - {name: list, path: [list], flags: [namespace, all-namespaces, status, priority, type, phase, label]}
   - {name: show, path: [show], flags: [format]}
   - {name: create, path: [create], flags: [namespace, description, type, priority, phase]}
   - {name: update, path: [update], flags: [title, description, notes, status, phase, priority]}

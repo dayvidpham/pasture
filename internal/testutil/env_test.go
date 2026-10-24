@@ -23,8 +23,10 @@ import (
 // that exports the operator's store therefore resolved the operator's store —
 // and, because the lifecycle hook derives its fault record from the store path
 // it would use, appended to the operator's live lifecycle-faults.jsonl.
+// PASTURE_NAMESPACE is the same shape for reads: an inherited value silently
+// scopes list/ready/blocked and names new tasks.
 //
-// WHAT IT VISITS: the two overrides testutil.SetHermeticEnv removes, and the
+// WHAT IT VISITS: the three overrides testutil.SetHermeticEnv removes, and the
 // two sandbox variables it sets. It does not visit the production resolver,
 // because this package stays a leaf; the consequence for the store path is
 // pinned by cmd/pasture's sandbox guard, which resolves the real
@@ -32,14 +34,16 @@ import (
 func TestSetHermeticEnvRemovesTheOverridesThatPointAtTheOperatorsState(t *testing.T) {
 	const operatorStore = "/home/operator/.local/share/pasture/pasture.db"
 	const operatorCapture = "/home/operator/.local/share/pasture-captures/live"
+	const operatorNamespace = "https://example.test/operator-repo"
 	t.Setenv(testutil.DBPathEnv, operatorStore)
 	t.Setenv(testutil.CaptureDirEnv, operatorCapture)
+	t.Setenv(testutil.NamespaceEnv, operatorNamespace)
 
 	cleanup, err := testutil.SetHermeticEnv("pasture-hermetic-self-test")
 	require.NoError(t, err)
 	require.NotNil(t, cleanup, "a successful hermetic setup must hand back its restore")
 
-	for _, override := range []string{testutil.DBPathEnv, testutil.CaptureDirEnv} {
+	for _, override := range []string{testutil.DBPathEnv, testutil.CaptureDirEnv, testutil.NamespaceEnv} {
 		_, present := os.LookupEnv(override)
 		assert.False(t, present,
 			"%s must not survive into a hermetic test process: it points away from the sandbox "+
@@ -63,6 +67,8 @@ func TestSetHermeticEnvRemovesTheOverridesThatPointAtTheOperatorsState(t *testin
 		"cleanup must restore PASTURE_DB_PATH to the value the process had before the sandbox")
 	assert.Equal(t, operatorCapture, os.Getenv(testutil.CaptureDirEnv),
 		"cleanup must restore PASTURE_CAPTURE_DIR to the value the process had before the sandbox")
+	assert.Equal(t, operatorNamespace, os.Getenv(testutil.NamespaceEnv),
+		"cleanup must restore PASTURE_NAMESPACE to the value the process had before the sandbox")
 }
 
 func assertInsideTempDir(t *testing.T, path, message string) {

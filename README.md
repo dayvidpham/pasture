@@ -163,8 +163,11 @@ pkg/
 ## CLI Surface (`pasture`)
 
 The local `pasture` CLI hosts the task workflow verbs — `task create / show / update / close`,
-`task list` (status/priority/type/phase/namespace plus one exact label filter),
-`task ready` and `task blocked` (optional exact `--label`), `task dep add` with
+`task list` scoped to the effective namespace (explicit `--namespace`, otherwise
+`PASTURE_NAMESPACE`; `--all-namespaces` opts out) with status/priority/type/phase
+plus one exact label filter,
+`task ready` and `task blocked` (same namespace scope and opt-out, optional exact
+`--label`), `task dep add` with
 `--kind` (`relation` is an alias), `task dep tree --kind` (`blocked_by` by
 default; `derived_from`, `supersedes`, `discovered_from`, or `all`),
 `task label add|remove|list`, `task comment add --author` and `task comments`,

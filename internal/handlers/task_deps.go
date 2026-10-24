@@ -27,11 +27,13 @@ func TaskReady(w io.Writer, dbPath string, format types.OutputFormat, label, nam
 	if err != nil {
 		return wrapTaskOpError("ready", err)
 	}
+	// Scope first: an out-of-scope task must not cost a label read or surface
+	// a label error for a candidate the caller will never see.
+	ts = filterReadinessNamespace(ts, namespace)
 	ts, err = filterReadinessLabels(tr, ts, label)
 	if err != nil {
 		return wrapTaskOpError("ready labels", err)
 	}
-	ts = filterReadinessNamespace(ts, namespace)
 	sortTasks(ts, true)
 	out, fErr := formatters.FormatTasks(ts, format)
 	if fErr != nil {
@@ -55,11 +57,13 @@ func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat, label, n
 	if err != nil {
 		return wrapTaskOpError("blocked", err)
 	}
+	// Scope first: an out-of-scope task must not cost a label read or surface
+	// a label error for a candidate the caller will never see.
+	ts = filterReadinessNamespace(ts, namespace)
 	ts, err = filterReadinessLabels(tr, ts, label)
 	if err != nil {
 		return wrapTaskOpError("blocked labels", err)
 	}
-	ts = filterReadinessNamespace(ts, namespace)
 	sortTasks(ts, true)
 	out, fErr := formatters.FormatTasks(ts, format)
 	if fErr != nil {
