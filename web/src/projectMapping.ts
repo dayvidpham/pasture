@@ -6,6 +6,7 @@ import {
   type ProjectView,
 } from './api'
 import type { PeasantIntegration } from './project'
+import { peasantDisabledRemedy, peasantUnavailableRemedy } from './project'
 import { epochLabel } from './timeline'
 
 /** The protocol roles offered by the project bind request. */
@@ -16,6 +17,21 @@ export const PROJECT_ROLES = [
   'supervisor',
   'worker',
 ] as const satisfies readonly ProjectRole[]
+
+/**
+ * UNSELECTABLE_PROJECT_ROLES is the compile-time parity check for
+ * PROJECT_ROLES: it must stay `never`. If the generated contract grows a role
+ * that PROJECT_ROLES does not offer, this becomes that role's union and the
+ * AssertNever constraint below fails the build, so a new role cannot be
+ * silently unselectable.
+ */
+export type UNSELECTABLE_PROJECT_ROLES = Exclude<
+  ProjectRole,
+  (typeof PROJECT_ROLES)[number]
+>
+
+type AssertNever<T extends never> = T
+type PROJECT_ROLES_ARE_EXHAUSTIVE = AssertNever<UNSELECTABLE_PROJECT_ROLES>
 
 /** The bind request defaults to worker when the caller does not pick a role. */
 export const DEFAULT_PROJECT_ROLE: ProjectRole = 'worker'
@@ -383,12 +399,9 @@ export function projectMappingNoProjectMessage(
   }
   switch (integration.status) {
     case 'disabled':
-      return 'Peasant project enrichment is disabled, so this session has no project hash; no project-level mapping can be shown or edited here. Restart pasture serve with --peasant-db or --peasant-url to enable it.'
-    case 'unavailable': {
-      const detail = integration.message?.trim()
-      const suffix = detail ? ` (${detail})` : ''
-      return `The configured Peasant project source is unavailable${suffix}, so this session has no project hash; no project-level mapping can be shown or edited here. Fix the source and refresh.`
-    }
+      return `${peasantDisabledRemedy()} This session has no project hash, so no project-level mapping can be shown or edited here.`
+    case 'unavailable':
+      return `${peasantUnavailableRemedy(integration)} This session has no project hash, so no project-level mapping can be shown or edited here.`
     case 'ok':
       return 'Peasant has not mapped this session to a project, so there is no project hash to look up a project-level mapping.'
     default:

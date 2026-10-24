@@ -97,6 +97,25 @@ export function integrationFromSessionsFrame(
 }
 
 /**
+ * peasantDisabledRemedy is the ONE disabled-integration remedy sentence. The
+ * session detail rail and the project mapping panel both build their state
+ * specific explanation around it, so the fix cannot drift between them.
+ */
+export function peasantDisabledRemedy(): string {
+  return 'Peasant project enrichment is disabled. Restart pasture serve with --peasant-db or --peasant-url to enable it.'
+}
+
+/**
+ * peasantUnavailableRemedy is the ONE unavailable-integration remedy sentence,
+ * carrying the backend's own detail when present.
+ */
+export function peasantUnavailableRemedy(integration: PeasantIntegration): string {
+  const detail = integration.message?.trim()
+  const suffix = detail ? ` (${detail})` : ''
+  return `The configured Peasant project source is unavailable${suffix}. Fix the source and refresh.`
+}
+
+/**
  * projectDetailMessage explains a missing project without blaming Peasant when
  * the integration is disabled or unavailable. A known project identity always
  * keeps the provenance note.
@@ -113,12 +132,9 @@ export function projectDetailMessage(
   }
   switch (integration.status) {
     case 'disabled':
-      return 'Peasant project enrichment is disabled, so no project is loaded for this session. Restart pasture serve with --peasant-db or --peasant-url to enable it.'
-    case 'unavailable': {
-      const detail = integration.message?.trim()
-      const suffix = detail ? ` (${detail})` : ''
-      return `The configured Peasant project source is unavailable${suffix}, so a project may be missing for this session. Check the Peasant source and refresh.`
-    }
+      return `${peasantDisabledRemedy()} No project is loaded for this session.`
+    case 'unavailable':
+      return `${peasantUnavailableRemedy(integration)} A project may be missing for this session.`
     case 'ok':
       return 'Peasant has not mapped this session to a project.'
     default:

@@ -75,7 +75,7 @@ type SessionAPIStore struct {
 
 // NewSessionAPIStore borrows the tracker's unified handle.
 func NewSessionAPIStore(tracker protocol.TaskTracker) (*SessionAPIStore, error) {
-	store, ok := tracker.(sessionTailStore)
+	store, ok := tracker.(unifiedStoreHandle)
 	if !ok || store.auditDBHandle() == nil {
 		return nil, sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}

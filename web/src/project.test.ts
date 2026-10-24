@@ -227,6 +227,7 @@ describe('project rendering', () => {
     )
     expect(disabled).toContain('enrichment is disabled')
     expect(disabled).toContain('--peasant-db')
+    expect(disabled).toContain('data-integration="disabled"')
     expect(disabled).not.toContain('Peasant has not mapped this session')
 
     const unavailable = render(
@@ -234,12 +235,14 @@ describe('project rendering', () => {
     )
     expect(unavailable).toContain('source is unavailable')
     expect(unavailable).toContain('database is locked')
+    expect(unavailable).toContain('data-integration="unavailable"')
     expect(unavailable).not.toContain('Peasant has not mapped this session')
 
     const unknownIntegration = render(
       createElement(ProjectDetail, { session: {}, integration: null }),
     )
     expect(unknownIntegration).toContain('Reading the Peasant project source')
+    expect(unknownIntegration).toContain('data-integration="unknown"')
     expect(unknownIntegration).not.toContain('Peasant has not mapped this session')
   })
 

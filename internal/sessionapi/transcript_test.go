@@ -49,7 +49,7 @@ func (s *stubTranscriptSource) ExportTranscript(context.Context, string, string)
 
 func newTranscriptServer(t *testing.T, source TranscriptSource) *httptest.Server {
 	t.Helper()
-	server := httptest.NewServer(newHandler(nil, nil, source))
+	server := httptest.NewServer(newHandlerWithProject(nil, nil, nil, source))
 	t.Cleanup(server.Close)
 	return server
 }

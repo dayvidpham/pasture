@@ -57,7 +57,7 @@ func (r *sessionRebuildRow) addTimestamp(ts int64) {
 
 // ReadSessionStateStatus reads the singleton cache marker without rebuilding.
 func ReadSessionStateStatus(ctx context.Context, tracker protocol.TaskTracker) (SessionStateStatus, error) {
-	store, ok := tracker.(sessionTailStore)
+	store, ok := tracker.(unifiedStoreHandle)
 	if !ok || store.auditDBHandle() == nil {
 		return SessionStateStatus{}, sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}
@@ -126,7 +126,7 @@ func EnsureSessionState(ctx context.Context, tracker protocol.TaskTracker) (Sess
 // occurrence plus the first/last timestamps of bindings and the first-claim-
 // wins claim.
 func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (SessionStateRebuildOutcome, error) {
-	store, ok := tracker.(sessionTailStore)
+	store, ok := tracker.(unifiedStoreHandle)
 	if !ok || store.auditDBHandle() == nil {
 		return SessionStateRebuildOutcome{}, sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}

@@ -32,6 +32,7 @@ import {
   projectRoleOptions,
   reduceProjectMapping,
   type ProjectMappingState,
+  type UNSELECTABLE_PROJECT_ROLES,
 } from './projectMapping'
 
 const PROJECT_HASH = 'a'.repeat(64)
@@ -201,6 +202,14 @@ describe('classifyProjectMappingError', () => {
       status: null,
       retry: true,
     })
+  })
+
+  it('classifies a 403 origin refusal as a non-retryable loopback fix', () => {
+    const forbidden = classifyProjectMappingError(
+      new ApiError(403, 'forbidden_origin', 'session API requests must use a loopback Origin'),
+    )
+    expect(forbidden).toMatchObject({ kind: 'invalid', status: 403, retry: false })
+    expect(forbidden.message).toContain('loopback')
   })
 })
 
@@ -390,6 +399,13 @@ describe('project mapping labels and options', () => {
     expect(projectRoleFromValue('not-a-role')).toBeNull()
   })
 
+  it('offers every generated project role', () => {
+    // Compile-time parity: a role added to the generated contract but omitted
+    // from PROJECT_ROLES makes this annotation `never` and fails typecheck.
+    const noUnselectableRoles: [UNSELECTABLE_PROJECT_ROLES] extends [never] ? true : never = true
+    expect(noUnselectableRoles).toBe(true)
+  })
+
   it('keys epoch options by id and falls back to the id for a missing title', () => {
     expect(epochOptions(epochs)).toEqual([
       { value: 'epoch/one', label: 'Epoch One' },
@@ -415,6 +431,16 @@ describe('project mapping labels and options', () => {
     expect(projectMappingNoProjectMessage(unavailableIntegration)).toContain('database is locked')
     expect(projectMappingNoProjectMessage(okIntegration)).toContain('has not mapped')
     expect(projectMappingNoProjectMessage(null)).toContain('Reading the Peasant project source')
+  })
+
+  it('explains an unrecognized Peasant integration state', () => {
+    const future = {
+      ...okIntegration,
+      status: 'future',
+    } as unknown as PeasantIntegration
+    const message = projectMappingNoProjectMessage(future)
+    expect(message).toContain('unrecognized Peasant integration state')
+    expect(message).toContain('future')
   })
 })
 
@@ -551,6 +577,49 @@ describe('ProjectMappingPanel render', () => {
     }
     const rebound = renderPanel(readyState(supervisorView))
     expect(rebound).toContain('value="supervisor" selected')
+  })
+
+  it('selects the current epoch, and the first option for a fresh mapping', () => {
+    const secondEpochView: ProjectView = {
+      ...boundView,
+      epoch: { id: 'epoch/two', title: '' },
+    }
+    expect(renderPanel(readyState(secondEpochView))).toContain(
+      'value="epoch/two" selected',
+    )
+    expect(renderPanel(readyState(null))).toContain('value="epoch/one" selected')
+    expect(
+      renderPanel(readyState({ ...boundView, epoch: { id: 'epoch/missing' } })),
+    ).toContain('value="epoch/one" selected')
+  })
+
+  it('keeps the session-override disclaimer in every panel state', () => {
+    for (const state of [
+      EMPTY_PROJECT_MAPPING,
+      loadingProjectMapping(PROJECT_HASH),
+      readyState(null),
+      readyState(boundView),
+    ]) {
+      const html = renderPanel(state)
+      expect(html).toContain('separate from')
+      expect(html).toContain('never overrides')
+    }
+  })
+
+  it('marks disabled and unavailable integration states', () => {
+    const disabled = renderPanel(EMPTY_PROJECT_MAPPING, {
+      integration: disabledIntegration,
+    })
+    expect(disabled).toContain('data-integration="disabled"')
+    expect(disabled).toContain('enrichment is disabled')
+    expect(disabled).toContain('--peasant-db')
+
+    const unavailable = renderPanel(EMPTY_PROJECT_MAPPING, {
+      integration: unavailableIntegration,
+    })
+    expect(unavailable).toContain('data-integration="unavailable"')
+    expect(unavailable).toContain('source is unavailable')
+    expect(unavailable).toContain('database is locked')
   })
 
   it('shows the active mapping, provenance, and interval history', () => {

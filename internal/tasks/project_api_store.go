@@ -88,7 +88,7 @@ type ProjectAPIStore struct {
 
 // NewProjectAPIStore borrows the tracker's unified handle.
 func NewProjectAPIStore(tracker protocol.TaskTracker) (*ProjectAPIStore, error) {
-	store, ok := tracker.(sessionTailStore)
+	store, ok := tracker.(unifiedStoreHandle)
 	if !ok || store.auditDBHandle() == nil {
 		return nil, projectStoreFault("construct project store", errors.New("the tracker has no unified database handle"))
 	}
@@ -207,8 +207,8 @@ func (s *ProjectAPIStore) Bind(ctx context.Context, projectHash string, req Proj
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var epochTitle string
-	err = tx.QueryRowContext(bounded, `SELECT COALESCE(title, '') FROM tasks WHERE id = ?`, epochID).Scan(&epochTitle)
+	var exists int
+	err = tx.QueryRowContext(bounded, `SELECT 1 FROM tasks WHERE id = ?`, epochID).Scan(&exists)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ProjectMapping{}, fmt.Errorf("%w: %s is not a task in the store; create the epoch or correct --epoch, then retry", ErrUnknownProjectEpoch, epochID)
 	}
@@ -217,14 +217,16 @@ func (s *ProjectAPIStore) Bind(ctx context.Context, projectHash string, req Proj
 	}
 
 	var openID, openEpoch, openRole string
-	var openBound int64
 	err = tx.QueryRowContext(bounded, `
-		SELECT binding_id, epoch_id, role, bound_at
+		SELECT binding_id, epoch_id, role
 		FROM pasture_project_epoch_binding
 		WHERE project_hash = ? AND unbound_at IS NULL`, normalized).
-		Scan(&openID, &openEpoch, &openRole, &openBound)
-	switch {
-	case err == nil:
+		Scan(&openID, &openEpoch, &openRole)
+	hasOpen := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ProjectMapping{}, projectStoreFault("read open project binding", err)
+	}
+	if hasOpen {
 		if expected != "" && expected != openID {
 			return ProjectMapping{}, fmt.Errorf("%w: expected %s, open is %s", ErrProjectBindingConflict, expected, openID)
 		}
@@ -238,16 +240,12 @@ func (s *ProjectAPIStore) Bind(ctx context.Context, projectHash string, req Proj
 			}
 			return mapping, nil
 		}
-	case errors.Is(err, sql.ErrNoRows):
-		if expected != "" {
-			return ProjectMapping{}, fmt.Errorf("%w: expected %s, but the project has no open mapping", ErrProjectBindingConflict, expected)
-		}
-	default:
-		return ProjectMapping{}, projectStoreFault("read open project binding", err)
+	} else if expected != "" {
+		return ProjectMapping{}, fmt.Errorf("%w: expected %s, but the project has no open mapping", ErrProjectBindingConflict, expected)
 	}
 
 	now := s.now()
-	if err == nil {
+	if hasOpen {
 		if _, execErr := tx.ExecContext(bounded, `
 			UPDATE pasture_project_epoch_binding
 			SET unbound_at = ?, unbound_reason = 'rebind'

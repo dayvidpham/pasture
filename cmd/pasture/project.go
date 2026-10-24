@@ -42,7 +42,7 @@ var projectListCmd = &cobra.Command{
 			DBPath: flagDBPath,
 			Output: cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishProjectCommand(code, err)
+		return finishSessionCommand(code, err)
 	},
 }
 
@@ -56,7 +56,7 @@ var projectShowCmd = &cobra.Command{
 			ProjectHash: args[0],
 			Output:      cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishProjectCommand(code, err)
+		return finishSessionCommand(code, err)
 	},
 }
 
@@ -76,7 +76,7 @@ var projectBindCmd = &cobra.Command{
 			ExpectedBinding: expected,
 			Output:          cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishProjectCommand(code, err)
+		return finishSessionCommand(code, err)
 	},
 }
 
@@ -92,7 +92,7 @@ var projectUnbindCmd = &cobra.Command{
 			ExpectedBinding: expected,
 			Output:          cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishProjectCommand(code, err)
+		return finishSessionCommand(code, err)
 	},
 }
 
@@ -104,10 +104,4 @@ func init() {
 
 	projectCmd.AddCommand(projectListCmd, projectShowCmd, projectBindCmd, projectUnbindCmd)
 	rootCmd.AddCommand(projectCmd)
-}
-
-// finishProjectCommand prints an actionable error report and exits with the
-// handler's category-mapped code.
-func finishProjectCommand(code int, err error) error {
-	return finishSessionCommand(code, err)
 }

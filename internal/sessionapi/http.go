@@ -27,40 +27,37 @@ type errorEnvelope struct {
 }
 
 // NewHandler returns the loopback-only HTTP handler for the session API. The
-// optional store enables the bind/unbind write routes; without it the read
-// routes still work. When the store is present, the project mapping routes reuse
-// its unified write handle. The transcript route always runs the Peasant CLI
-// beside the API; the browser never talks to Peasant directly.
+// optional store enables the bind/unbind and project mapping write routes;
+// without it the read routes still work. When the store is present, the project
+// mapping routes reuse its unified write handle. The transcript route always
+// runs the Peasant CLI beside the API; the browser never talks to Peasant
+// directly.
 func NewHandler(service *Service, stores ...*tasks.SessionAPIStore) http.Handler {
 	var store *tasks.SessionAPIStore
 	if len(stores) > 0 {
 		store = stores[0]
 	}
-	var projectStore *tasks.ProjectAPIStore
-	if store != nil {
-		projectStore, _ = tasks.NewProjectAPIStoreFromSessionAPIStore(store)
+	return loopbackOnly(newHandlerWithProject(service, store, projectStoreFromSessionStore(store), newPeasantTranscriptSource()))
+}
+
+// projectStoreFromSessionStore is the ONE derivation of the project mapping
+// store. The session and project stores share the serve process's unified write
+// handle; a nil or handle-less session store yields nil, and the project routes
+// then answer 503 without pretending an empty mapping is authoritative.
+func projectStoreFromSessionStore(store *tasks.SessionAPIStore) *tasks.ProjectAPIStore {
+	if store == nil {
+		return nil
 	}
-	return loopbackOnly(newHandlerWithProject(service, store, projectStore, newPeasantTranscriptSource()))
-}
-
-// NewHandlerWithProjectStore is the embedding seam for callers that already
-// hold a project store (tests, or a host that constructed the store itself).
-// Production serve uses NewHandler, which derives the project store from the
-// session API store so both share one writer.
-func NewHandlerWithProjectStore(service *Service, store *tasks.SessionAPIStore, projectStore *tasks.ProjectAPIStore) http.Handler {
-	return loopbackOnly(newHandlerWithProject(service, store, projectStore, newPeasantTranscriptSource()))
-}
-
-// newHandler builds the mux with explicit dependencies so tests can inject a
-// transcript source without mutating PATH or the process environment.
-func newHandler(service *Service, store *tasks.SessionAPIStore, transcript TranscriptSource) *handler {
-	var projectStore *tasks.ProjectAPIStore
-	if store != nil {
-		projectStore, _ = tasks.NewProjectAPIStoreFromSessionAPIStore(store)
+	projectStore, err := tasks.NewProjectAPIStoreFromSessionAPIStore(store)
+	if err != nil {
+		return nil
 	}
-	return newHandlerWithProject(service, store, projectStore, transcript)
+	return projectStore
 }
 
+// newHandlerWithProject builds the mux with explicit dependencies so tests can
+// inject a transcript source or a project store without mutating PATH or the
+// process environment.
 func newHandlerWithProject(service *Service, store *tasks.SessionAPIStore, projectStore *tasks.ProjectAPIStore, transcript TranscriptSource) *handler {
 	h := &handler{
 		service:      service,
@@ -95,8 +92,9 @@ type handler struct {
 	mux          *http.ServeMux
 }
 
-// ServeHTTP routes through the mux built in newHandler. NewHandler wraps the
-// result in loopbackOnly, so the Host/Origin guard stays the first check.
+// ServeHTTP routes through the mux built in newHandlerWithProject. NewHandler
+// wraps the result in loopbackOnly, so the Host/Origin guard stays the first
+// check.
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
 }

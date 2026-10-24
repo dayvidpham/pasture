@@ -52,7 +52,10 @@ type SessionStateWriter interface {
 	UpsertSessionState(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) error
 }
 
-type sessionTailStore interface {
+// unifiedStoreHandle is the borrowable unified-store write handle shared by the
+// session and project API stores. It intentionally names neither feature: both
+// stores read and write the same pasture.db file.
+type unifiedStoreHandle interface {
 	auditDBHandle() *sql.DB
 	lifecycleTimeoutProfile() timeouts.Profile
 }
@@ -87,7 +90,7 @@ func RecordLifecycleSessionTail(ctx context.Context, tracker protocol.TaskTracke
 	if session == "" {
 		return out, nil
 	}
-	store, ok := tracker.(sessionTailStore)
+	store, ok := tracker.(unifiedStoreHandle)
 	if !ok || store.auditDBHandle() == nil {
 		return out, sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}
@@ -157,7 +160,7 @@ func MarkSessionStateDirty(ctx context.Context, tracker protocol.TaskTracker) er
 	if ctx == nil {
 		return sessionClaimError("the context is invalid", "pass a live context")
 	}
-	store, ok := tracker.(sessionTailStore)
+	store, ok := tracker.(unifiedStoreHandle)
 	if !ok || store.auditDBHandle() == nil {
 		return sessionClaimError("the tracker has no unified database handle", "use tasks.OpenTaskTracker")
 	}

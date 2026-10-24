@@ -249,7 +249,7 @@ export function ProjectDetail({
 }) {
   const label = projectLabel(session)
   return (
-    <div className="project-detail">
+    <div className="project-detail" data-integration={integration?.status ?? 'unknown'}>
       <p className="eyebrow">peasant-owned project</p>
       <dl className="detail-list">
         <div><dt>project</dt><dd>{label}</dd></div>
@@ -432,7 +432,11 @@ export function ProjectMappingPanel({
   }
 
   return (
-    <div className="project-mapping" data-status={projectMappingStatusLabel(state)}>
+    <div
+      className="project-mapping"
+      data-status={projectMappingStatusLabel(state)}
+      data-integration={integration?.status ?? 'unknown'}
+    >
       <p className="eyebrow">project-level mapping</p>
       <p className="rail-copy muted">
         This maps the Peasant project to an epoch. It is separate from, and never

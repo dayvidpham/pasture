@@ -40,7 +40,6 @@ func (c *apiProjectClock) Now() time.Time {
 type projectAPIFixture struct {
 	server   *httptest.Server
 	db       *sql.DB
-	store    *tasks.ProjectAPIStore
 	epochOne string
 	epochTwo string
 }
@@ -59,10 +58,13 @@ func newProjectAPIFixture(t *testing.T) *projectAPIFixture {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
-	store := tasks.NewProjectAPIStoreWithDB(db, timeouts.TestProfile(), &apiProjectClock{at: time.Unix(1700000000, 0).UTC()})
-	server := httptest.NewServer(sessionapi.NewHandlerWithProjectStore(nil, nil, store))
+	// Compose through the production constructor: the project store is derived
+	// from the session store, which is also where the fixture's scripted clock
+	// is carried.
+	sessionStore := tasks.NewSessionAPIStoreWithDB(db, timeouts.TestProfile(), &apiProjectClock{at: time.Unix(1700000000, 0).UTC()})
+	server := httptest.NewServer(sessionapi.NewHandler(nil, sessionStore))
 	t.Cleanup(server.Close)
-	return &projectAPIFixture{server: server, db: db, store: store, epochOne: epochOne, epochTwo: epochTwo}
+	return &projectAPIFixture{server: server, db: db, epochOne: epochOne, epochTwo: epochTwo}
 }
 
 func createProjectEpoch(t *testing.T, tracker protocol.TaskTracker, title string) string {
@@ -118,6 +120,62 @@ func decodeProjectError(t *testing.T, response *http.Response) string {
 	return envelope.Error.Code
 }
 
+func TestProjectAPIProductionCompositionServesProjects(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "pasture.db")
+	tracker, err := tasks.OpenTaskTracker(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
+	epoch := createProjectEpoch(t, tracker, "Epoch one")
+
+	readDB, err := dbconn.OpenReadOnlyDB(path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, readDB.Close()) })
+
+	// This is the exact serve.go composition: the tracker owns the write
+	// handle, the session API store borrows it, and NewHandler derives the
+	// project store from that same session store.
+	service := sessionapi.NewService(readDB)
+	store, err := tasks.NewSessionAPIStore(tracker)
+	require.NoError(t, err)
+	server := httptest.NewServer(sessionapi.NewHandler(service, store))
+	t.Cleanup(server.Close)
+
+	page := decodeProjectPage(t, getProjectAPI(t, server.URL+"/api/v1/projects"))
+	require.NotNil(t, page.Items)
+	require.Empty(t, page.Items)
+
+	hash := projectAPIHash("d")
+	view := decodeProjectView(t, postProjectAPI(t, server.URL+"/api/v1/projects/"+hash+"/bind", `{"epochId":`+quoteJSON(epoch)+`}`))
+	require.Equal(t, hash, view.ProjectHash)
+	require.NotNil(t, view.Binding)
+	require.Equal(t, epoch, view.Epoch.ID)
+}
+
+func TestProjectAPIProjectRoutesReportStorageFaultAfterHandleClose(t *testing.T) {
+	t.Parallel()
+	fixture := newProjectAPIFixture(t)
+	hash := projectAPIHash("e")
+	base := fixture.server.URL + "/api/v1/projects/" + hash
+	bound := decodeProjectView(t, postProjectAPI(t, base+"/bind", `{"epochId":`+quoteJSON(fixture.epochOne)+`}`))
+	require.NotNil(t, bound.Binding)
+
+	require.NoError(t, fixture.db.Close())
+
+	for _, testCase := range []struct {
+		name     string
+		response *http.Response
+	}{
+		{name: "list", response: getProjectAPI(t, fixture.server.URL+"/api/v1/projects")},
+		{name: "detail", response: getProjectAPI(t, base)},
+		{name: "bind", response: postProjectAPI(t, base+"/bind", `{"epochId":`+quoteJSON(fixture.epochTwo)+`}`)},
+		{name: "unbind", response: postProjectAPI(t, base+"/unbind", `{}`)},
+	} {
+		require.Equal(t, http.StatusInternalServerError, testCase.response.StatusCode, "%s route", testCase.name)
+		require.Equal(t, "storage_fault", decodeProjectError(t, testCase.response), "%s route", testCase.name)
+	}
+}
+
 func TestProjectAPIListEmptyAndUnavailable(t *testing.T) {
 	t.Parallel()
 	fixture := newProjectAPIFixture(t)
@@ -133,6 +191,13 @@ func TestProjectAPIListEmptyAndUnavailable(t *testing.T) {
 	response := getProjectAPI(t, noStore.URL+"/api/v1/projects")
 	require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
 	require.Equal(t, "project_unavailable", decodeProjectError(t, response))
+
+	hash := projectAPIHash("f")
+	for _, suffix := range []string{"/bind", "/unbind"} {
+		write := postProjectAPI(t, noStore.URL+"/api/v1/projects/"+hash+suffix, `{}`)
+		require.Equal(t, http.StatusServiceUnavailable, write.StatusCode, "%s without a project store", suffix)
+		require.Equal(t, "project_unavailable", decodeProjectError(t, write), "%s without a project store", suffix)
+	}
 }
 
 func TestProjectAPIBindShowRebindUnbind(t *testing.T) {
@@ -174,6 +239,13 @@ func TestProjectAPIBindShowRebindUnbind(t *testing.T) {
 	stale := postProjectAPI(t, base+"/unbind", `{"expectedBinding":"stale-binding"}`)
 	require.Equal(t, http.StatusConflict, stale.StatusCode)
 	require.Equal(t, "binding_conflict", decodeProjectError(t, stale))
+
+	staleBind := postProjectAPI(t, base+"/bind", `{"epochId":`+quoteJSON(fixture.epochOne)+`,"expectedBinding":"stale-binding"}`)
+	require.Equal(t, http.StatusConflict, staleBind.StatusCode)
+	require.Equal(t, "binding_conflict", decodeProjectError(t, staleBind))
+	unchanged := decodeProjectView(t, getProjectAPI(t, base))
+	require.NotNil(t, unchanged.Binding)
+	require.Equal(t, rebound.Binding.BindingID, unchanged.Binding.BindingID, "a stale bind must not change the active mapping")
 
 	ended := decodeProjectView(t, postProjectAPI(t, base+"/unbind", `{"expectedBinding":`+quoteJSON(rebound.Binding.BindingID)+`}`))
 	require.Nil(t, ended.Binding, "unbind closes the active mapping")

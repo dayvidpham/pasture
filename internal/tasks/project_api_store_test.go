@@ -2,6 +2,7 @@ package tasks_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"sync"
@@ -220,6 +221,112 @@ func TestProjectAPIStoreBorrowsTheTrackerHandle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, mapping.Binding)
 	require.Equal(t, epoch, mapping.Binding.EpochID)
+}
+
+func TestNewProjectAPIStoreFromSessionAPIStoreRequiresHandle(t *testing.T) {
+	t.Parallel()
+	_, err := tasks.NewProjectAPIStoreFromSessionAPIStore(nil)
+	require.True(t, errors.Is(err, tasks.ErrProjectStoreFault), "nil session store must be a store fault: %v", err)
+	_, err = tasks.NewProjectAPIStoreFromSessionAPIStore(&tasks.SessionAPIStore{})
+	require.True(t, errors.Is(err, tasks.ErrProjectStoreFault), "a session store without a handle must be a store fault: %v", err)
+}
+
+// TestProjectAPIStoreLeavesSessionBindingsUntouched proves the project-level
+// relationship is separate: a real session binding is written first, then
+// project bind/rebind/unbind run against the same database and the session row
+// (and the session API revision) must stay byte-for-byte unchanged.
+func TestProjectAPIStoreLeavesSessionBindingsUntouched(t *testing.T) {
+	t.Parallel()
+	tracker, db, _ := claimStore(t)
+	epochOne := projectEpoch(t, tracker, "Epoch one")
+	epochTwo := projectEpoch(t, tracker, "Epoch two")
+	ctx := context.Background()
+
+	sessionStore := tasks.NewSessionAPIStoreWithDB(db, timeouts.TestProfile(), claimClock{})
+	seeded, err := sessionStore.Bind(ctx, "claude-code", "untouched-session", tasks.SessionBindRequest{EpochID: epochOne, Role: "worker"})
+	require.NoError(t, err)
+	require.True(t, seeded.Created)
+
+	type sessionBindingRow struct {
+		BindingID string
+		EpochID   string
+		BoundAt   int64
+		UnboundAt sql.NullInt64
+	}
+	readBinding := func() sessionBindingRow {
+		var row sessionBindingRow
+		require.NoError(t, db.QueryRow(`
+			SELECT binding_id, epoch_id, bound_at, unbound_at
+			FROM pasture_session_epoch_binding
+			WHERE harness = 'claude-code' AND session = 'untouched-session'`).
+			Scan(&row.BindingID, &row.EpochID, &row.BoundAt, &row.UnboundAt))
+		return row
+	}
+	readRevision := func() int64 {
+		var revision int64
+		require.NoError(t, db.QueryRow(`SELECT revision FROM pasture_session_api_state WHERE singleton_id = 0`).Scan(&revision))
+		return revision
+	}
+	before := readBinding()
+	revisionBefore := readRevision()
+
+	projectStore := tasks.NewProjectAPIStoreWithDB(db, timeouts.TestProfile(), newProjectClock())
+	hash := projectHash("b")
+	bound, err := projectStore.Bind(ctx, hash, tasks.ProjectBindRequest{EpochID: epochOne})
+	require.NoError(t, err)
+	rebound, err := projectStore.Bind(ctx, hash, tasks.ProjectBindRequest{EpochID: epochTwo})
+	require.NoError(t, err)
+	require.NotNil(t, rebound.Binding)
+	_, err = projectStore.Unbind(ctx, hash, rebound.Binding.BindingID)
+	require.NoError(t, err)
+	require.NotNil(t, bound.Binding)
+
+	require.Equal(t, before, readBinding(), "project bind/rebind/unbind must not touch the session binding row")
+	require.Equal(t, revisionBefore, readRevision(), "project writes must not bump the session API revision")
+}
+
+func TestProjectAPIStoreConcurrentBindsKeepOneOpenMapping(t *testing.T) {
+	t.Parallel()
+	tracker, db, _ := claimStore(t)
+	epochOne := projectEpoch(t, tracker, "Epoch one")
+	epochTwo := projectEpoch(t, tracker, "Epoch two")
+	store := tasks.NewProjectAPIStoreWithDB(db, timeouts.TestProfile(), newProjectClock())
+	hash := projectHash("c")
+
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, epoch := range []string{epochOne, epochTwo} {
+		wg.Add(1)
+		go func(epoch string) {
+			defer wg.Done()
+			_, err := store.Bind(context.Background(), hash, tasks.ProjectBindRequest{EpochID: epoch})
+			results <- err
+		}(epoch)
+	}
+	wg.Wait()
+	close(results)
+
+	// The shared DSN serializes writers (immediate transactions), so both binds
+	// may succeed one after the other; a bind that does fail must be a typed
+	// conflict or store fault, and the one-open index must never leave two open
+	// rows.
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+			continue
+		}
+		require.True(t,
+			errors.Is(err, tasks.ErrProjectBindingConflict) || errors.Is(err, tasks.ErrProjectStoreFault),
+			"a concurrent project bind must lose with a typed conflict or store fault, got: %v", err)
+	}
+	require.GreaterOrEqual(t, successes, 1, "at least one concurrent project bind must succeed")
+
+	var open int
+	require.NoError(t, db.QueryRow(`
+		SELECT COUNT(*) FROM pasture_project_epoch_binding
+		WHERE project_hash = ? AND unbound_at IS NULL`, hash).Scan(&open))
+	require.Equal(t, 1, open, "concurrent binds must leave exactly one open project mapping")
 }
 
 func TestProjectAPIStoreClassifiesStoreFaults(t *testing.T) {
