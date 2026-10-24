@@ -7,6 +7,7 @@ import {
   ApiError,
   bindProject,
   fetchProject,
+  setPeasantEnrichment,
   unbindProject,
   type EpochView,
   type ProjectBindingInterval,
@@ -507,6 +508,36 @@ describe('project mapping API client', () => {
     expect(JSON.parse(String(calls[2].init?.body))).toEqual({
       expectedBinding: 'binding-1',
     })
+  })
+
+  it('posts the runtime enrichment toggle and returns the updated state', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init })
+      return new Response(
+        JSON.stringify({
+          enabled: true,
+          source: 'db',
+          status: 'ok',
+          message: '',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }) as typeof fetch
+    try {
+      const updated = await setPeasantEnrichment(true)
+      expect(updated).toMatchObject({ enabled: true, source: 'db', status: 'ok' })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe('/api/v1/settings/peasant')
+    expect(calls[0].init).toMatchObject({
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json' },
+    })
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({ enabled: true })
   })
 
   it('turns a 409 envelope into an ApiError for the classifier', async () => {

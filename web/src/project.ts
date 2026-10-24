@@ -99,10 +99,12 @@ export function integrationFromSessionsFrame(
 /**
  * peasantDisabledRemedy is the ONE disabled-integration remedy sentence. The
  * session detail rail and the project mapping panel both build their state
- * specific explanation around it, so the fix cannot drift between them.
+ * specific explanation around it, so the fix cannot drift between them. The
+ * console toggle is the primary action; the startup flags remain the fallback
+ * for a source that is not the conventional Peasant database.
  */
 export function peasantDisabledRemedy(): string {
-  return 'Peasant project enrichment is disabled. Restart pasture serve with --peasant-db or --peasant-url to enable it.'
+  return 'Peasant project enrichment is disabled. Turn it on with the toggle in the Peasant projects rail; for a non-default source, restart pasture serve with --peasant-db or --peasant-url.'
 }
 
 /**
@@ -183,7 +185,7 @@ export function peasantIntegrationPresentation(
         status: 'disabled',
         title: 'Peasant project enrichment is off',
         message:
-          'Project names are not loaded, so every session shows an unknown project. Restart pasture serve with one of these flags to enable the opt-in source:',
+          'Project names are not loaded, so every session shows an unknown project. Turn on the toggle above to use the default Peasant database; for a different source, restart pasture serve with one of these flags:',
         commands: [
           'pasture serve --peasant-db <path>',
           'pasture serve --peasant-url <url>',

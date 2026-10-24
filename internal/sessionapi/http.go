@@ -78,6 +78,7 @@ func newHandlerWithProject(service *Service, store *tasks.SessionAPIStore, proje
 	mux.HandleFunc("GET /api/v1/epochs", h.epochs)
 	mux.HandleFunc("GET /api/v1/epochs/", h.epochRoute)
 	mux.HandleFunc("GET /api/v1/inspect", h.inspect)
+	mux.HandleFunc("POST /api/v1/settings/peasant", h.updatePeasantSettings)
 	mux.HandleFunc("GET /api/v1/ws", h.ws)
 	mux.HandleFunc("GET /openapi.json", h.openapi)
 	h.mux = mux
@@ -387,6 +388,33 @@ func (h *handler) inspect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, payload)
+}
+
+// updatePeasantSettings flips the runtime project-enrichment switch. The body is
+// one strict object with the boolean `enabled`; the response is the updated
+// integration state so the console can paint the switch and the rail from one
+// round trip.
+func (h *handler) updatePeasantSettings(w http.ResponseWriter, r *http.Request) {
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := decodeBody(w, r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", `request body must be one JSON object: {"enabled": true|false}`)
+		return
+	}
+	if request.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", "request body must contain `enabled` as a boolean")
+		return
+	}
+	if err := h.service.SetPeasantEnabled(r.Context(), *request.Enabled); err != nil {
+		if errors.Is(err, ErrPeasantSettingsUnavailable) {
+			writeError(w, http.StatusServiceUnavailable, "peasant_settings_unavailable", err.Error())
+			return
+		}
+		writeError(w, http.StatusConflict, "peasant_settings_refused", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, h.service.PeasantIntegration())
 }
 
 func validEpochID(value string) bool {

@@ -22,8 +22,19 @@ const defaultActiveWindow = 15 * time.Minute
 const projectLookupTimeout = 2 * time.Second
 
 // peasantDisabledMessage is the actionable disabled state /api/v1/inspect
-// reports. Disabled is the default and is distinct from unavailable.
-const peasantDisabledMessage = "Peasant project enrichment is disabled; pass --peasant-db or --peasant-url to `pasture serve` to enable it"
+// reports. Disabled is the default and is distinct from unavailable. The
+// console toggle is the primary path; the startup flags remain the fallback for
+// a source that is not the conventional Peasant database.
+const peasantDisabledMessage = "Peasant project enrichment is off; turn it on from the web console, or restart pasture serve with --peasant-db/--peasant-url for a non-default source"
+
+// Peasant settings errors. The route maps these to its refusal statuses:
+// unavailable means this serve process has no configurable source, refused
+// means the source exists but could not change state (for example a missing
+// default database).
+var (
+	ErrPeasantSettingsUnavailable = errors.New("this serve process has no configurable Peasant project source")
+	ErrPeasantSettingsRefused     = errors.New("Peasant project enrichment could not change state")
+)
 
 // Service reads the session cache. Ensure is supplied by the serve command and
 // runs the journal-aware rebuild when the cache is dirty or behind.
@@ -316,8 +327,37 @@ func (s *Service) enrichWithProjects(ctx context.Context, sessions []SessionView
 	}
 }
 
+// SetPeasantEnabled flips the runtime project-enrichment switch. It reports
+// ErrPeasantSettingsUnavailable when this process has no configurable source and
+// ErrPeasantSettingsRefused when the switch could not change state.
+func (s *Service) SetPeasantEnabled(ctx context.Context, enabled bool) error {
+	if s == nil || s.ProjectSource == nil {
+		return ErrPeasantSettingsUnavailable
+	}
+	changer, ok := s.ProjectSource.(interface {
+		SetEnabled(context.Context, bool) error
+	})
+	if !ok {
+		return ErrPeasantSettingsUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := changer.SetEnabled(ctx, enabled); err != nil {
+		return fmt.Errorf("%w: %v", ErrPeasantSettingsRefused, err)
+	}
+	return nil
+}
+
+// PeasantIntegration returns the current integration health for the settings
+// response and the console's inspect payload.
+func (s *Service) PeasantIntegration() PeasantIntegration {
+	return s.peasantIntegrationState()
+}
+
 // peasantIntegrationState reports the tri-state integration health for
-// /api/v1/inspect. A nil source is disabled and never reported as unavailable.
+// /api/v1/inspect. A nil source is disabled and never reported as unavailable;
+// a switch that is off is disabled even when it was configured at startup.
 func (s *Service) peasantIntegrationState() PeasantIntegration {
 	if s.ProjectSource == nil {
 		return PeasantIntegration{
@@ -328,12 +368,24 @@ func (s *Service) peasantIntegrationState() PeasantIntegration {
 		}
 	}
 	status := s.ProjectSource.Status()
+	if !status.Enabled || status.Source == peasantproject.SourceDisabled {
+		message := status.Message
+		if message == "" {
+			message = peasantDisabledMessage
+		}
+		return PeasantIntegration{
+			Enabled: false,
+			Source:  peasantproject.SourceDisabled,
+			Status:  PeasantIntegrationDisabled,
+			Message: message,
+		}
+	}
 	state := PeasantIntegrationUnavailable
 	if status.State == peasantproject.StateOK {
 		state = PeasantIntegrationOK
 	}
 	return PeasantIntegration{
-		Enabled: status.Enabled,
+		Enabled: true,
 		Source:  status.Source,
 		Status:  state,
 		Message: status.Message,

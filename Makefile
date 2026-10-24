@@ -26,7 +26,7 @@ generate:
 	go generate ./internal/target/claudecode/...
 	go generate ./internal/target/codex/...
 	go generate ./internal/lifecycle/metamodel/...
-	go run ./cmd/pasture-specgen -out internal/sessionapi/openapi/pasture-local-api-0.5.0.json
+	go run ./cmd/pasture-specgen -out internal/sessionapi/openapi/pasture-local-api-0.6.0.json
 	$(MAKE) check-operational-tracker
 
 web-install:
@@ -48,7 +48,7 @@ web-test: web-install
 # without failing this target.
 web-verify-generated: web-install
 	cd web && tmp=$$(mktemp) && trap 'rm -f "$$tmp"' EXIT && \
-		pnpm exec openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.5.0.json -o "$$tmp" >/dev/null && \
+		pnpm exec openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.6.0.json -o "$$tmp" >/dev/null && \
 		if ! cmp -s "$$tmp" src/generated/api.ts; then \
 			echo "web/src/generated/api.ts is stale; run 'make web-generate' and commit the result."; \
 			exit 1; \

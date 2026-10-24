@@ -4,7 +4,7 @@ import "encoding/json"
 
 // PastureLocalAPIVersion is the frozen document-surface version for the local
 // session API. It changes only when a route or wire shape changes.
-const PastureLocalAPIVersion = "0.5.0"
+const PastureLocalAPIVersion = "0.6.0"
 
 // OpenAPIBytes returns the canonical OpenAPI 3.1 document. The generator and
 // the freshness test call this same function, so the committed artifact cannot
@@ -109,6 +109,21 @@ func openAPIDocument() map[string]any {
 						"403": errorResponse("Non-loopback Host or Origin"),
 						"503": errorResponse("The session cache is stale"),
 						"500": errorResponse("The session store could not be read"),
+					},
+				},
+			},
+			"/api/v1/settings/peasant": map[string]any{
+				"post": map[string]any{
+					"operationId": "updatePeasantSettings",
+					"summary":     "Turn Peasant project enrichment on or off",
+					"description": "Runtime toggle for the opt-in Peasant project source. With the switch off, Pasture performs no Peasant access and session project fields stay empty. Turning it on opens the configured source, or the conventional Peasant SQLite database when serve was started without --peasant-db/--peasant-url.",
+					"requestBody": jsonBody(ref("PeasantSettingsRequest")),
+					"responses": map[string]any{
+						"200": jsonResponse(ref("PeasantIntegration")),
+						"400": errorResponse("Malformed body or a missing enabled boolean"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"409": errorResponse("The configured or default Peasant source could not be opened; enrichment stays off"),
+						"503": errorResponse("This serve process has no configurable Peasant source"),
 					},
 				},
 			},
@@ -463,6 +478,15 @@ func openAPIDocument() map[string]any {
 						},
 					},
 					"enabled", "source", "status", "message",
+				),
+				"PeasantSettingsRequest": objectSchema(
+					map[string]any{
+						"enabled": map[string]any{
+							"type":        "boolean",
+							"description": "Turn the runtime Peasant project-enrichment switch on (true) or off (false).",
+						},
+					},
+					"enabled",
 				),
 				"InspectPayload": objectSchema(
 					map[string]any{

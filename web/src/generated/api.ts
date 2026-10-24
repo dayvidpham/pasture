@@ -231,6 +231,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/peasant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn Peasant project enrichment on or off
+         * @description Runtime toggle for the opt-in Peasant project source. With the switch off, Pasture performs no Peasant access and session project fields stay empty. Turning it on opens the configured source, or the conventional Peasant SQLite database when serve was started without --peasant-db/--peasant-url.
+         */
+        post: operations["updatePeasantSettings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ws": {
         parameters: {
             query?: never;
@@ -353,6 +373,10 @@ export interface components {
              * @enum {string}
              */
             status: "disabled" | "ok" | "unavailable";
+        };
+        PeasantSettingsRequest: {
+            /** @description Turn the runtime Peasant project-enrichment switch on (true) or off (false). */
+            enabled: boolean;
         };
         ProjectBindRequest: {
             epochId: string;
@@ -1380,6 +1404,66 @@ export interface operations {
                 };
             };
             /** @description The session cache is stale or writes are unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    updatePeasantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PeasantSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PeasantIntegration"];
+                };
+            };
+            /** @description Malformed body or a missing enabled boolean */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Non-loopback Host or Origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The configured or default Peasant source could not be opened; enrichment stays off */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description This serve process has no configurable Peasant source */
             503: {
                 headers: {
                     [name: string]: unknown;

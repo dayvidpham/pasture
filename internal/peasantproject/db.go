@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,22 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/dbconn"
 )
+
+// DefaultDBPath is the conventional Peasant SQLite database location:
+// $XDG_DATA_HOME/peasant/peasant.db when XDG_DATA_HOME is set, otherwise
+// $HOME/.local/share/peasant/peasant.db. It does not check whether the file
+// exists and never creates it; the caller decides whether an absent default is
+// an error (runtime enablement) or simply unavailable integration state.
+func DefaultDBPath() string {
+	if dataDir := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); dataDir != "" {
+		return filepath.Join(dataDir, "peasant", "peasant.db")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "peasant", "peasant.db")
+}
 
 // dbSchemaTimeout bounds the constructor's probe and shape guard, and each
 // re-probe after a missing database. The source is optional integration state:

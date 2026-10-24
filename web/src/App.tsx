@@ -28,6 +28,7 @@ import {
   fetchInspect,
   fetchProject,
   fetchTranscript,
+  setPeasantEnrichment,
   socketURL,
   subscribe,
   unbindProject,
@@ -298,24 +299,55 @@ export function ProjectFilter({
 
 /**
  * PeasantIntegrationState renders the tri-state opt-in project integration from
- * /api/v1/inspect. Disabled is a configuration choice, unavailable is a failed
- * configured source, and ok is the quiet normal state.
+ * /api/v1/inspect and owns its runtime switch. Disabled is a configuration
+ * choice, unavailable is a failed configured source, and ok is the quiet normal
+ * state; the switch is offered in all three so an operator can turn enrichment
+ * on, off, or retry an unavailable source.
  */
 export function PeasantIntegrationState({
   integration,
+  onToggle,
+  busy = false,
+  error = null,
 }: {
   integration: PeasantIntegration | null
+  onToggle?: (enabled: boolean) => void
+  busy?: boolean
+  error?: string | null
 }) {
   if (!integration) {
     return <p className="rail-copy muted">reading the Peasant project source…</p>
   }
   const state = peasantIntegrationPresentation(integration)
+  const enabled = Boolean(integration.enabled)
   return (
     <div className="peasant-integration" data-status={state.status}>
       <div className="peasant-integration-head">
         <span className="peasant-integration-title">{state.title}</span>
         <span className="peasant-integration-status">{state.status}</span>
       </div>
+      <div className="peasant-integration-toggle">
+        <button
+          type="button"
+          role="switch"
+          className="peasant-switch"
+          aria-checked={enabled}
+          aria-label="Peasant project enrichment"
+          disabled={busy || !onToggle}
+          onClick={() => onToggle?.(!enabled)}
+        >
+          <span className="peasant-switch-track" aria-hidden="true">
+            <span className="peasant-switch-thumb" />
+          </span>
+          <span className="peasant-switch-label">{enabled ? 'on' : 'off'}</span>
+        </button>
+        {busy && <span className="rail-copy muted">updating…</span>}
+      </div>
+      {error && (
+        <p className="peasant-integration-error" role="alert">
+          {error}
+        </p>
+      )}
       {state.sourceLabel !== 'none' && (
         <p className="rail-copy muted">source: {state.sourceLabel}</p>
       )}
@@ -590,6 +622,8 @@ export default function App() {
   const [epochFilter, setEpochFilter] = useState<string | null>(null)
   const [projectFilter, setProjectFilter] = useState<string | null>(null)
   const [peasantIntegration, setPeasantIntegration] = useState<PeasantIntegration | null>(null)
+  const [peasantBusy, setPeasantBusy] = useState(false)
+  const [peasantError, setPeasantError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [transcript, setTranscript] = useState<TranscriptState>({ status: 'idle' })
   const [transcriptRetry, setTranscriptRetry] = useState(0)
@@ -621,6 +655,27 @@ export default function App() {
       if (!signal?.aborted) setLoading(false)
     }
   }, [])
+
+  const togglePeasant = useCallback(
+    async (enabled: boolean) => {
+      setPeasantBusy(true)
+      setPeasantError(null)
+      try {
+        const updated = await setPeasantEnrichment(enabled)
+        setPeasantIntegration(updated)
+        // Project fields live on the session views, so reload the inspect
+        // snapshot after the switch changes.
+        await load()
+      } catch (error) {
+        setPeasantError(
+          error instanceof Error ? error.message : 'the local API did not answer',
+        )
+      } finally {
+        setPeasantBusy(false)
+      }
+    },
+    [load],
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -941,7 +996,12 @@ export default function App() {
             icon={Folder}
             meta={peasantIntegration?.status ?? 'loading'}
           >
-            <PeasantIntegrationState integration={peasantIntegration} />
+            <PeasantIntegrationState
+              integration={peasantIntegration}
+              onToggle={togglePeasant}
+              busy={peasantBusy}
+              error={peasantError}
+            />
           </RailSection>
 
           <RailSection title="epochs" icon={Waypoints} meta={String(epochs.length)}>
