@@ -72,6 +72,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List projects with an active epoch mapping */
+        get: operations["listProjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectHash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one project's active mapping and interval history */
+        get: operations["getProject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectHash}/bind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Map a project to an epoch
+         * @description Closes any active mapping for the project and opens the requested one. Binding the already-active epoch and role is idempotent. The mapping is a project-level relationship and never writes or overrides a session binding.
+         */
+        post: operations["bindProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectHash}/unbind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Close a project's active epoch mapping */
+        post: operations["unbindProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions": {
         parameters: {
             query?: never;
@@ -282,6 +353,64 @@ export interface components {
              * @enum {string}
              */
             status: "disabled" | "ok" | "unavailable";
+        };
+        ProjectBindRequest: {
+            epochId: string;
+            /** @description Only change the mapping when this binding ID is still active. */
+            expectedBinding?: string;
+            /**
+             * @description Role recorded for the project in this epoch. Omit for worker.
+             * @default worker
+             * @enum {string}
+             */
+            role: "epoch" | "architect" | "reviewer" | "supervisor" | "worker";
+        };
+        ProjectBinding: {
+            bindingId: string;
+            /** Format: date-time */
+            boundAt: string;
+            confidence: components["schemas"]["Confidence"];
+            /**
+             * @description The role the operator recorded for the project in this epoch.
+             * @enum {string}
+             */
+            role: "epoch" | "architect" | "reviewer" | "supervisor" | "worker";
+            source: components["schemas"]["ProjectBindingSource"];
+        };
+        ProjectBindingInterval: {
+            bindingId: string;
+            /** Format: date-time */
+            boundAt: string;
+            confidence: components["schemas"]["Confidence"];
+            /** @enum {string} */
+            endReason?: "rebind" | "unbind";
+            epoch?: components["schemas"]["EpochRef"];
+            /** @enum {string} */
+            role: "epoch" | "architect" | "reviewer" | "supervisor" | "worker";
+            source: components["schemas"]["ProjectBindingSource"];
+            /** Format: date-time */
+            unboundAt?: string;
+        };
+        /**
+         * @description Project mapping provenance. A project mapping is an explicit operator relation; it is never inferred from a working directory or a session binding.
+         * @enum {string}
+         */
+        ProjectBindingSource: "project";
+        ProjectPage: {
+            /** @description Projects with an active mapping. A project whose mappings are all closed is omitted. */
+            items: components["schemas"]["ProjectView"][];
+        };
+        ProjectUnbindRequest: {
+            /** @description Only close the mapping when this binding ID is still active. */
+            expectedBinding?: string;
+        };
+        ProjectView: {
+            binding?: components["schemas"]["ProjectBinding"];
+            epoch?: components["schemas"]["EpochRef"];
+            /** @description Full mapping history ordered by boundAt ascending. Present on detail responses; omitted from list rows. */
+            intervals?: components["schemas"]["ProjectBindingInterval"][];
+            /** @description Peasant-owned project identity, preserved exactly. Pasture never derives or recomputes it. */
+            projectHash: string;
         };
         SessionActivity: {
             /** Format: date-time */
@@ -601,6 +730,274 @@ export interface operations {
                 };
             };
             /** @description The session cache is stale */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listProjects: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectPage"];
+                };
+            };
+            /** @description Non-loopback Host or Origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The project mapping store could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Project mapping routes are unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    getProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Peasant-owned project hash: exactly 64 lowercase hex characters */
+                projectHash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectView"];
+                };
+            };
+            /** @description Invalid project hash */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Non-loopback Host or Origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The project has no mapping history */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The project mapping store could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Project mapping routes are unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    bindProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Peasant-owned project hash: exactly 64 lowercase hex characters */
+                projectHash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectBindRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectView"];
+                };
+            };
+            /** @description Invalid project hash or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Non-loopback Host or Origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Unknown epoch */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Binding conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The project mapping store could not be written */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Project mapping writes are unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    unbindProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Peasant-owned project hash: exactly 64 lowercase hex characters */
+                projectHash: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectUnbindRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectView"];
+                };
+            };
+            /** @description Invalid project hash or body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Non-loopback Host or Origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description No open mapping or binding conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The project mapping store could not be written */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Project mapping writes are unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

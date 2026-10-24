@@ -314,6 +314,176 @@
         ],
         "type": "object"
       },
+      "ProjectBindRequest": {
+        "properties": {
+          "epochId": {
+            "type": "string"
+          },
+          "expectedBinding": {
+            "description": "Only change the mapping when this binding ID is still active.",
+            "type": "string"
+          },
+          "role": {
+            "default": "worker",
+            "description": "Role recorded for the project in this epoch. Omit for worker.",
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "epochId"
+        ],
+        "type": "object"
+      },
+      "ProjectBinding": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "role": {
+            "description": "The role the operator recorded for the project in this epoch.",
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProjectBindingSource"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "ProjectBindingInterval": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "endReason": {
+            "enum": [
+              "rebind",
+              "unbind"
+            ],
+            "type": "string"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "role": {
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProjectBindingSource"
+          },
+          "unboundAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "ProjectBindingSource": {
+        "description": "Project mapping provenance. A project mapping is an explicit operator relation; it is never inferred from a working directory or a session binding.",
+        "enum": [
+          "project"
+        ],
+        "type": "string"
+      },
+      "ProjectPage": {
+        "properties": {
+          "items": {
+            "description": "Projects with an active mapping. A project whose mappings are all closed is omitted.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProjectUnbindRequest": {
+        "properties": {
+          "expectedBinding": {
+            "description": "Only close the mapping when this binding ID is still active.",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ProjectView": {
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/ProjectBinding"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "intervals": {
+            "description": "Full mapping history ordered by boundAt ascending. Present on detail responses; omitted from list rows.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectBindingInterval"
+            },
+            "type": "array"
+          },
+          "projectHash": {
+            "description": "Peasant-owned project identity, preserved exactly. Pasture never derives or recomputes it.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectHash"
+        ],
+        "type": "object"
+      },
       "SessionActivity": {
         "properties": {
           "firstSeen": {
@@ -575,9 +745,9 @@
     }
   },
   "info": {
-    "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
+    "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. It also records explicit project-to-epoch mappings: a project hash is Peasant-owned, the mapped epoch is a Pasture task, and the relationship is independent of per-session bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
     "title": "Pasture Local Session API",
-    "version": "0.4.0"
+    "version": "0.5.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -880,6 +1050,331 @@
           }
         },
         "summary": "Snapshot epochs and sessions together"
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPage"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project mapping store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Project mapping routes are unavailable"
+          }
+        },
+        "summary": "List projects with an active epoch mapping"
+      }
+    },
+    "/api/v1/projects/{projectHash}": {
+      "get": {
+        "operationId": "getProject",
+        "parameters": [
+          {
+            "description": "Peasant-owned project hash: exactly 64 lowercase hex characters",
+            "in": "path",
+            "name": "projectHash",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid project hash"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project has no mapping history"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project mapping store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Project mapping routes are unavailable"
+          }
+        },
+        "summary": "Get one project's active mapping and interval history"
+      }
+    },
+    "/api/v1/projects/{projectHash}/bind": {
+      "post": {
+        "description": "Closes any active mapping for the project and opens the requested one. Binding the already-active epoch and role is idempotent. The mapping is a project-level relationship and never writes or overrides a session binding.",
+        "operationId": "bindProject",
+        "parameters": [
+          {
+            "description": "Peasant-owned project hash: exactly 64 lowercase hex characters",
+            "in": "path",
+            "name": "projectHash",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectBindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid project hash or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown epoch"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project mapping store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Project mapping writes are unavailable"
+          }
+        },
+        "summary": "Map a project to an epoch"
+      }
+    },
+    "/api/v1/projects/{projectHash}/unbind": {
+      "post": {
+        "operationId": "unbindProject",
+        "parameters": [
+          {
+            "description": "Peasant-owned project hash: exactly 64 lowercase hex characters",
+            "in": "path",
+            "name": "projectHash",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUnbindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid project hash or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "No open mapping or binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project mapping store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Project mapping writes are unavailable"
+          }
+        },
+        "summary": "Close a project's active epoch mapping"
       }
     },
     "/api/v1/sessions": {

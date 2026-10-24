@@ -6072,6 +6072,7 @@ var guardSweepForeign = map[string]string{
 	"migrate_v8_v9_cli_test.go":                  "audit schema v8 to v9 migration proof on the built binary, outside the lifecycle transport sweep",
 	"models_context_test.go":                     "model catalog command cancellation, outside the lifecycle transport sweep",
 	"models_test.go":                             "offline model allowances and registration, outside the lifecycle transport sweep",
+	"project_test.go":                            "project mapping CLI proof, outside the lifecycle transport sweep",
 	"queue_test.go":                              "not changed by this slice",
 	"serve_test.go":                              "session serve loopback and shutdown proof, outside the lifecycle transport sweep",
 	"session_test.go":                            "session CLI list/show proof, outside the lifecycle transport sweep",

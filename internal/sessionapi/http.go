@@ -28,23 +28,45 @@ type errorEnvelope struct {
 
 // NewHandler returns the loopback-only HTTP handler for the session API. The
 // optional store enables the bind/unbind write routes; without it the read
-// routes still work. The transcript route always runs the Peasant CLI beside
-// the API; the browser never talks to Peasant directly.
+// routes still work. When the store is present, the project mapping routes reuse
+// its unified write handle. The transcript route always runs the Peasant CLI
+// beside the API; the browser never talks to Peasant directly.
 func NewHandler(service *Service, stores ...*tasks.SessionAPIStore) http.Handler {
 	var store *tasks.SessionAPIStore
 	if len(stores) > 0 {
 		store = stores[0]
 	}
-	return loopbackOnly(newHandler(service, store, newPeasantTranscriptSource()))
+	var projectStore *tasks.ProjectAPIStore
+	if store != nil {
+		projectStore, _ = tasks.NewProjectAPIStoreFromSessionAPIStore(store)
+	}
+	return loopbackOnly(newHandlerWithProject(service, store, projectStore, newPeasantTranscriptSource()))
+}
+
+// NewHandlerWithProjectStore is the embedding seam for callers that already
+// hold a project store (tests, or a host that constructed the store itself).
+// Production serve uses NewHandler, which derives the project store from the
+// session API store so both share one writer.
+func NewHandlerWithProjectStore(service *Service, store *tasks.SessionAPIStore, projectStore *tasks.ProjectAPIStore) http.Handler {
+	return loopbackOnly(newHandlerWithProject(service, store, projectStore, newPeasantTranscriptSource()))
 }
 
 // newHandler builds the mux with explicit dependencies so tests can inject a
 // transcript source without mutating PATH or the process environment.
 func newHandler(service *Service, store *tasks.SessionAPIStore, transcript TranscriptSource) *handler {
+	var projectStore *tasks.ProjectAPIStore
+	if store != nil {
+		projectStore, _ = tasks.NewProjectAPIStoreFromSessionAPIStore(store)
+	}
+	return newHandlerWithProject(service, store, projectStore, transcript)
+}
+
+func newHandlerWithProject(service *Service, store *tasks.SessionAPIStore, projectStore *tasks.ProjectAPIStore, transcript TranscriptSource) *handler {
 	h := &handler{
-		service:    service,
-		store:      store,
-		transcript: transcript,
+		service:      service,
+		store:        store,
+		projectStore: projectStore,
+		transcript:   transcript,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/sessions", h.list)
@@ -52,6 +74,10 @@ func newHandler(service *Service, store *tasks.SessionAPIStore, transcript Trans
 	mux.HandleFunc("GET /api/v1/sessions/{harness}/{nativeSessionId}/transcript", h.sessionTranscript)
 	mux.HandleFunc("POST /api/v1/sessions/{harness}/{nativeSessionId}/bind", h.bind)
 	mux.HandleFunc("POST /api/v1/sessions/{harness}/{nativeSessionId}/unbind", h.unbind)
+	mux.HandleFunc("GET /api/v1/projects", h.projects)
+	mux.HandleFunc("GET /api/v1/projects/{projectHash}", h.project)
+	mux.HandleFunc("POST /api/v1/projects/{projectHash}/bind", h.bindProject)
+	mux.HandleFunc("POST /api/v1/projects/{projectHash}/unbind", h.unbindProject)
 	mux.HandleFunc("GET /api/v1/epochs", h.epochs)
 	mux.HandleFunc("GET /api/v1/epochs/", h.epochRoute)
 	mux.HandleFunc("GET /api/v1/inspect", h.inspect)
@@ -62,10 +88,11 @@ func newHandler(service *Service, store *tasks.SessionAPIStore, transcript Trans
 }
 
 type handler struct {
-	service    *Service
-	store      *tasks.SessionAPIStore
-	transcript TranscriptSource
-	mux        *http.ServeMux
+	service      *Service
+	store        *tasks.SessionAPIStore
+	projectStore *tasks.ProjectAPIStore
+	transcript   TranscriptSource
+	mux          *http.ServeMux
 }
 
 // ServeHTTP routes through the mux built in newHandler. NewHandler wraps the
@@ -145,6 +172,115 @@ func (h *handler) unbind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.detail(w, r, harness, session)
+}
+
+func (h *handler) projects(w http.ResponseWriter, r *http.Request) {
+	if h.projectStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "project_unavailable", "project mapping routes are unavailable in this serve process; restart `pasture serve` so the unified store is available")
+		return
+	}
+	mappings, err := h.projectStore.List(r.Context())
+	if err != nil {
+		writeProjectStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ProjectPageFromMappings(mappings))
+}
+
+func (h *handler) project(w http.ResponseWriter, r *http.Request) {
+	projectHash, ok := projectPathHash(w, r)
+	if !ok {
+		return
+	}
+	if h.projectStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "project_unavailable", "project mapping routes are unavailable in this serve process; restart `pasture serve` so the unified store is available")
+		return
+	}
+	mapping, err := h.projectStore.Get(r.Context(), projectHash)
+	if err != nil {
+		writeProjectStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ProjectViewFromMapping(mapping))
+}
+
+func (h *handler) bindProject(w http.ResponseWriter, r *http.Request) {
+	projectHash, ok := projectPathHash(w, r)
+	if !ok {
+		return
+	}
+	if h.projectStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "project_unavailable", "project mapping writes are unavailable in this serve process; restart `pasture serve` so the unified store is available")
+		return
+	}
+	var request tasks.ProjectBindRequest
+	if err := decodeBody(w, r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	mapping, err := h.projectStore.Bind(r.Context(), projectHash, request)
+	if err != nil {
+		writeProjectStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ProjectViewFromMapping(mapping))
+}
+
+func (h *handler) unbindProject(w http.ResponseWriter, r *http.Request) {
+	projectHash, ok := projectPathHash(w, r)
+	if !ok {
+		return
+	}
+	if h.projectStore == nil {
+		writeError(w, http.StatusServiceUnavailable, "project_unavailable", "project mapping writes are unavailable in this serve process; restart `pasture serve` so the unified store is available")
+		return
+	}
+	var request struct {
+		ExpectedBinding string `json:"expectedBinding,omitempty"`
+	}
+	if err := decodeBody(w, r, &request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	mapping, err := h.projectStore.Unbind(r.Context(), projectHash, request.ExpectedBinding)
+	if err != nil {
+		writeProjectStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, ProjectViewFromMapping(mapping))
+}
+
+// projectPathHash validates the project hash path segment. The hash is a
+// Peasant-owned identity; a malformed value is never trimmed or coerced.
+func projectPathHash(w http.ResponseWriter, r *http.Request) (string, bool) {
+	raw := r.PathValue("projectHash")
+	if _, err := schema.NewProjectHash(raw); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_project_hash", fmt.Sprintf("project hash %q is not a 64-character lowercase hex value; use the projectHash reported by Peasant", raw))
+		return "", false
+	}
+	return raw, true
+}
+
+// writeProjectStoreError maps the project mapping taxonomy onto the wire. A
+// request the caller can fix is 400; a domain outcome keeps 404/409; a store or
+// transaction failure is 500.
+func writeProjectStoreError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, tasks.ErrProjectRequest):
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
+	case errors.Is(err, tasks.ErrProjectNotFound):
+		writeError(w, http.StatusNotFound, "project_not_found", "no project mapping is recorded for that project hash")
+	case errors.Is(err, tasks.ErrUnknownProjectEpoch):
+		writeError(w, http.StatusNotFound, "unknown_epoch", err.Error())
+	case errors.Is(err, tasks.ErrProjectNoOpenBinding):
+		writeError(w, http.StatusConflict, "no_open_binding", "the project has no open mapping to unbind")
+	case errors.Is(err, tasks.ErrProjectBindingConflict):
+		writeError(w, http.StatusConflict, "binding_conflict", err.Error())
+	case errors.Is(err, tasks.ErrProjectStoreFault):
+		writeError(w, http.StatusInternalServerError, "storage_fault", err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "storage_fault", "the project mapping operation failed without a classified cause; inspect the serve log and retry")
+	}
 }
 
 func (h *handler) detail(w http.ResponseWriter, r *http.Request, harness, session string) {
