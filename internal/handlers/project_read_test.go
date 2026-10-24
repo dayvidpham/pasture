@@ -126,6 +126,31 @@ func TestProjectHandlersJSONListShowBindUnbind(t *testing.T) {
 	require.Len(t, view.Intervals, 2)
 }
 
+func TestProjectHandlersDatabasePathBranches(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	dir := t.TempDir()
+	code, err := handlers.ProjectList(ctx, handlers.ProjectListInput{DBPath: dir, Output: &bytes.Buffer{}}, types.OutputText)
+	require.Error(t, err)
+	require.Equal(t, 2, code)
+	require.Contains(t, err.Error(), "is a directory")
+
+	plain := filepath.Join(t.TempDir(), "plain-file")
+	require.NoError(t, os.WriteFile(plain, []byte("not a database"), 0o600))
+	code, err = handlers.ProjectList(ctx, handlers.ProjectListInput{DBPath: filepath.Join(plain, "nested.db"), Output: &bytes.Buffer{}}, types.OutputText)
+	require.Error(t, err)
+	require.Equal(t, 2, code)
+	require.Contains(t, err.Error(), "Couldn't inspect")
+
+	garbage := filepath.Join(t.TempDir(), "garbage.db")
+	require.NoError(t, os.WriteFile(garbage, []byte("this is not sqlite at all\n"), 0o600))
+	code, err = handlers.ProjectList(ctx, handlers.ProjectListInput{DBPath: garbage, Output: &bytes.Buffer{}}, types.OutputText)
+	require.Error(t, err)
+	require.Equal(t, 2, code)
+	require.Contains(t, err.Error(), "not a SQLite database")
+}
+
 func TestProjectHandlersActionableErrors(t *testing.T) {
 	t.Parallel()
 	dbPath, epochOne, _ := seedProjectHandlerStore(t)

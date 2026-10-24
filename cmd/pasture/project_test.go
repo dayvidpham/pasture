@@ -125,11 +125,35 @@ func TestCLI_ProjectErrors(t *testing.T) {
 	require.Equal(t, 3, out.exitCode, "a stale expected binding is a conflict\nstdout=%s\nstderr=%s", out.stdout, out.stderr)
 	require.Contains(t, out.stderr, "changed since")
 
+	unmapped := cliProjectHash("c")
+	out = runCLI(t, "--db", dbPath, "project", "show", unmapped)
+	require.Equal(t, 3, out.exitCode, "a valid but unmapped project is a workflow error\nstdout=%s\nstderr=%s", out.stdout, out.stderr)
+	require.Contains(t, out.stderr, "no mapping history")
+
 	missing := filepath.Join(t.TempDir(), "missing.db")
 	out = runCLI(t, "--db", missing, "project", "list")
 	require.Equal(t, 2, out.exitCode, "a missing store is a connection error\nstdout=%s\nstderr=%s", out.stdout, out.stderr)
 	_, statErr := os.Stat(missing)
 	require.True(t, os.IsNotExist(statErr), "project commands must not create a store")
+}
+
+func TestCLI_ProjectDatabasePathErrors(t *testing.T) {
+	dir := t.TempDir()
+	out := runCLI(t, "--db", dir, "project", "list")
+	require.Equal(t, 2, out.exitCode, "a directory --db is a connection error\nstdout=%s\nstderr=%s", out.stdout, out.stderr)
+	require.Contains(t, out.stderr, "is a directory")
+
+	plain := filepath.Join(t.TempDir(), "plain-file")
+	require.NoError(t, os.WriteFile(plain, []byte("not a database"), 0o600))
+	out = runCLI(t, "--db", filepath.Join(plain, "nested.db"), "project", "list")
+	require.Equal(t, 2, out.exitCode, "an unstattable --db path is a connection error\nstdout=%s\nstderr=%s", out.stdout, out.stderr)
+	require.Contains(t, out.stderr, "Couldn't inspect")
+
+	garbage := filepath.Join(t.TempDir(), "garbage.db")
+	require.NoError(t, os.WriteFile(garbage, []byte("this is not sqlite at all\n"), 0o600))
+	out = runCLI(t, "--db", garbage, "project", "list")
+	require.Equal(t, 2, out.exitCode, "a non-SQLite --db file is a connection error\nstdout=%s\nstderr=%s", out.stdout, out.stderr)
+	require.Contains(t, out.stderr, "not a SQLite database")
 }
 
 func TestCLI_ProjectHelpAndInventory(t *testing.T) {

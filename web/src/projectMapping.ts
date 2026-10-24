@@ -1,8 +1,10 @@
 import {
   ApiError,
   type EpochView,
+  type ProjectBindBody,
   type ProjectBindingInterval,
   type ProjectRole,
+  type ProjectUnbindBody,
   type ProjectView,
 } from './api'
 import type { PeasantIntegration } from './project'
@@ -348,6 +350,31 @@ export function projectMappingHistory(view: ProjectView | null): ProjectBindingI
 /** The active binding ID, used as the optimistic-concurrency token for writes. */
 export function expectedProjectBinding(view: ProjectView | null): string | undefined {
   return view?.binding?.bindingId
+}
+
+/**
+ * projectBindRequest builds the bind body, carrying the active binding as the
+ * optimistic-concurrency token. Omitting the token for an unmapped project is
+ * deliberate: there is no prior binding a concurrent writer could have changed.
+ */
+export function projectBindRequest(
+  view: ProjectView | null,
+  epochId: string,
+  role: ProjectRole,
+): ProjectBindBody {
+  const expectedBinding = expectedProjectBinding(view)
+  if (expectedBinding) return { epochId, role, expectedBinding }
+  return { epochId, role }
+}
+
+/**
+ * projectUnbindRequest builds the unbind body with the same concurrency token.
+ * A project with no active binding sends an empty body; the API answers 409.
+ */
+export function projectUnbindRequest(view: ProjectView | null): ProjectUnbindBody {
+  const expectedBinding = expectedProjectBinding(view)
+  if (expectedBinding) return { expectedBinding }
+  return {}
 }
 
 /** A glanceable status for the rail section meta. */

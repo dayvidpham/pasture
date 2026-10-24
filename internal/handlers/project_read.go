@@ -169,6 +169,9 @@ func openProjectStore(ctx context.Context, dbPath string) (*tasks.ProjectAPIStor
 	if err := requireExistingProjectStore(dbPath); err != nil {
 		return nil, nil, err
 	}
+	if err := ensureSQLiteStoreFile(dbPath); err != nil {
+		return nil, nil, projectOpenError(dbPath, err)
+	}
 	workCtx := nonNilContext(ctx)
 	tracker, err := tasks.OpenTaskTrackerContext(workCtx, dbPath)
 	if err != nil {
@@ -225,6 +228,36 @@ func requireExistingProjectStore(dbPath string) error {
 			Fix: fmt.Sprintf("Point --db or PASTURE_DB_PATH at the database file itself, for example:\n"+
 				"     %q", dbPath+"/pasture.db"),
 		}
+	}
+	return nil
+}
+
+// ensureSQLiteStoreFile refuses a non-empty file whose bytes are not a SQLite
+// database. The tracker's auto-on-open path can initialize an empty file, so an
+// empty file is left to it. A non-SQLite file cannot become a store; reporting
+// that here keeps the failure in the connection category instead of surfacing
+// as a storage fault from deep inside the migrator.
+func ensureSQLiteStoreFile(dbPath string) error {
+	info, err := os.Stat(dbPath)
+	if err != nil {
+		return err
+	}
+	if info.Size() == 0 {
+		return nil
+	}
+	file, err := os.Open(dbPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	const sqliteHeader = "SQLite format 3\x00"
+	header := make([]byte, len(sqliteHeader))
+	n, readErr := io.ReadFull(file, header)
+	if readErr != nil && !errors.Is(readErr, io.ErrUnexpectedEOF) && !errors.Is(readErr, io.EOF) {
+		return readErr
+	}
+	if n > 0 && string(header[:n]) != sqliteHeader {
+		return fmt.Errorf("%q is not a SQLite database: its first %d bytes are not the SQLite file header; point --db or PASTURE_DB_PATH at the pasture database file, or restore the damaged file", dbPath, n)
 	}
 	return nil
 }

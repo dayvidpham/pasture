@@ -64,15 +64,16 @@ import {
   DEFAULT_PROJECT_ROLE,
   EMPTY_PROJECT_MAPPING,
   epochOptions,
-  expectedProjectBinding,
   mappingIntervalEpochLabel,
   mappingSummary,
+  projectBindRequest,
   projectMappingForSelection,
   projectMappingHistory,
   projectMappingNoProjectMessage,
   projectMappingStatusLabel,
   projectRoleFromValue,
   projectRoleOptions,
+  projectUnbindRequest,
   reduceProjectMapping,
   type ProjectMappingState,
 } from './projectMapping'
@@ -791,11 +792,10 @@ export default function App() {
       if (!projectHash) return
       dispatchProjectMapping({ type: 'bind' })
       try {
-        const view = await bindProject(projectHash, {
-          epochId,
-          role,
-          expectedBinding: expectedProjectBinding(selectedMapping.view),
-        })
+        const view = await bindProject(
+          projectHash,
+          projectBindRequest(selectedMapping.view, epochId, role),
+        )
         dispatchProjectMapping({ type: 'bind-succeeded', projectHash, view })
       } catch (error) {
         dispatchProjectMapping({ type: 'action-failed', projectHash, error })
@@ -809,9 +809,10 @@ export default function App() {
     if (!projectHash) return
     dispatchProjectMapping({ type: 'unbind' })
     try {
-      const view = await unbindProject(projectHash, {
-        expectedBinding: expectedProjectBinding(selectedMapping.view),
-      })
+      const view = await unbindProject(
+        projectHash,
+        projectUnbindRequest(selectedMapping.view),
+      )
       dispatchProjectMapping({ type: 'unbind-succeeded', projectHash, view })
     } catch (error) {
       dispatchProjectMapping({ type: 'action-failed', projectHash, error })

@@ -28,8 +28,10 @@ import {
   projectMappingHistory,
   projectMappingNoProjectMessage,
   projectMappingStatusLabel,
+  projectBindRequest,
   projectRoleFromValue,
   projectRoleOptions,
+  projectUnbindRequest,
   reduceProjectMapping,
   type ProjectMappingState,
   type UNSELECTABLE_PROJECT_ROLES,
@@ -386,6 +388,26 @@ describe('project mapping labels and options', () => {
     expect(expectedProjectBinding(null)).toBeUndefined()
   })
 
+  it('builds bind and unbind bodies with the active concurrency token', () => {
+    expect(projectBindRequest(boundView, 'epoch/two', 'reviewer')).toEqual({
+      epochId: 'epoch/two',
+      role: 'reviewer',
+      expectedBinding: 'binding-1',
+    })
+    expect(projectBindRequest(unboundView, 'epoch/one', 'worker')).toEqual({
+      epochId: 'epoch/one',
+      role: 'worker',
+    })
+    expect(projectBindRequest(null, 'epoch/one', 'worker')).toEqual({
+      epochId: 'epoch/one',
+      role: 'worker',
+    })
+
+    expect(projectUnbindRequest(boundView)).toEqual({ expectedBinding: 'binding-1' })
+    expect(projectUnbindRequest(unboundView)).toEqual({})
+    expect(projectUnbindRequest(null)).toEqual({})
+  })
+
   it('offers the protocol roles and validates a select value', () => {
     expect(projectRoleOptions().map((option) => option.value)).toEqual([
       'epoch',
@@ -459,12 +481,11 @@ describe('project mapping API client', () => {
       const project = await fetchProject(PROJECT_HASH)
       expect(project.projectHash).toBe(PROJECT_HASH)
 
-      await bindProject(PROJECT_HASH, {
-        epochId: 'epoch/one',
-        role: 'worker',
-        expectedBinding: 'binding-1',
-      })
-      await unbindProject(PROJECT_HASH, { expectedBinding: 'binding-1' })
+      await bindProject(
+        PROJECT_HASH,
+        projectBindRequest(boundView, 'epoch/one', 'worker'),
+      )
+      await unbindProject(PROJECT_HASH, projectUnbindRequest(boundView))
     } finally {
       globalThis.fetch = originalFetch
     }
