@@ -34,6 +34,11 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 	require.NoError(t, serveCmd.Help())
 	help := out.String()
 	for _, want := range []string{
+		"GET  /                      the compiled web console",
+		"web console is embedded",
+		"no Node process",
+		"--web-dir",
+		"API remains at",
 		"/api/v1/sessions",
 		"/transcript",
 		"peasant",
@@ -59,11 +64,14 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 	} {
 		require.Contains(t, help, want)
 	}
-	require.Equal(t, "Serve the local session and epoch API", serveCmd.Short,
-		"the command writes as well as reads; the short line must not call it a read API")
+	require.Equal(t, "Serve the local session and epoch API and web console", serveCmd.Short,
+		"the short line must name both surfaces this command serves")
 	require.Contains(t, help, "session and epoch API")
 	require.NotContains(t, help, "read API")
 	require.NotContains(t, help, "never migrates the schema")
+	flag := serveCmd.Flags().Lookup("web-dir")
+	require.NotNil(t, flag)
+	require.Empty(t, flag.DefValue, "the embedded bundle is the production default")
 }
 
 func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
@@ -77,6 +85,7 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	cmd.Flags().Bool("backfill", false, "")
 	cmd.Flags().String("peasant-db", "", "")
 	cmd.Flags().String("peasant-url", "", "")
+	cmd.Flags().String("web-dir", "", "")
 	cmd.SetArgs(nil)
 	reader, writer := io.Pipe()
 	cmd.SetOut(writer)
@@ -105,6 +114,97 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	require.NoError(t, err)
 	defer response.Body.Close()
 	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	// The compiled console is embedded in the test binary through the same
+	// production package, so this proves the default serve path is UI+API.
+	ui, err := http.Get(base + "/")
+	require.NoError(t, err)
+	defer ui.Body.Close()
+	require.Equal(t, http.StatusOK, ui.StatusCode)
+	uiBody, err := io.ReadAll(ui.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(uiBody), `id="root"`, "the embedded app shell must be served at /")
+	require.Contains(t, ui.Header.Get("Content-Type"), "text/html")
+	require.Equal(t, "no-store", ui.Header.Get("Cache-Control"))
+
+	clientRoute, err := http.Get(base + "/sessions/example")
+	require.NoError(t, err)
+	defer clientRoute.Body.Close()
+	require.Equal(t, http.StatusOK, clientRoute.StatusCode)
+	clientBody, err := io.ReadAll(clientRoute.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(clientBody), `id="root"`, "client routes must fall back to the app shell")
+
+	cancel()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not shut down after context cancellation")
+	}
+}
+
+// TestServeWebDirOverride proves --web-dir replaces the embedded bundle with an
+// external build on disk while the API stays mounted on the same origin.
+func TestServeWebDirOverride(t *testing.T) {
+	previous := flagDBPath
+	flagDBPath = filepath.Join(t.TempDir(), "pasture.db")
+	t.Cleanup(func() { flagDBPath = previous })
+
+	webDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(webDir, "index.html"),
+		[]byte(`<!doctype html><html><body><div id="root">external build</div></body></html>`), 0o600))
+
+	cmd := &cobra.Command{}
+	cmd.Flags().String("listen", "127.0.0.1:0", "")
+	cmd.Flags().Duration("active-window", 15*time.Minute, "")
+	cmd.Flags().Bool("backfill", false, "")
+	cmd.Flags().String("peasant-db", "", "")
+	cmd.Flags().String("peasant-url", "", "")
+	cmd.Flags().String("web-dir", webDir, "")
+	require.NoError(t, cmd.Flags().Set("web-dir", webDir))
+	cmd.SetArgs(nil)
+	reader, writer := io.Pipe()
+	cmd.SetOut(writer)
+	ctx, cancel := context.WithCancel(context.Background())
+	cmd.SetContext(ctx)
+	t.Cleanup(cancel)
+
+	done := make(chan error, 1)
+	go func() { done <- runServe(cmd) }()
+	type readResult struct {
+		line string
+		err  error
+	}
+	lineCh := make(chan readResult, 1)
+	go func() {
+		line, err := bufio.NewReader(reader).ReadString('\n')
+		lineCh <- readResult{line: line, err: err}
+	}()
+
+	var line string
+	select {
+	case result := <-lineCh:
+		require.NoError(t, result.err)
+		line = result.line
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not print its bound address")
+	}
+	require.True(t, strings.HasPrefix(line, "pasture serve listening on http://127.0.0.1:"), line)
+	base := strings.TrimSpace(strings.TrimPrefix(line, "pasture serve listening on "))
+
+	ui, err := http.Get(base + "/")
+	require.NoError(t, err)
+	defer ui.Body.Close()
+	require.Equal(t, http.StatusOK, ui.StatusCode)
+	body, err := io.ReadAll(ui.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "external build")
+
+	api, err := http.Get(base + "/api/v1/sessions")
+	require.NoError(t, err)
+	defer api.Body.Close()
+	require.Equal(t, http.StatusOK, api.StatusCode)
 
 	cancel()
 	select {
@@ -172,6 +272,7 @@ func TestServeRejectsBothPeasantSources(t *testing.T) {
 	cmd.Flags().Bool("backfill", false, "")
 	cmd.Flags().String("peasant-db", "/tmp/peasant.db", "")
 	cmd.Flags().String("peasant-url", "http://127.0.0.1:8787", "")
+	cmd.Flags().String("web-dir", "", "")
 	require.NoError(t, cmd.Flags().Set("peasant-db", "/tmp/peasant.db"))
 	require.NoError(t, cmd.Flags().Set("peasant-url", "http://127.0.0.1:8787"))
 

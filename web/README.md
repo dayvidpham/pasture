@@ -6,16 +6,29 @@ loopback Pasture API.
 
 ## run
 
-Start the API on a fixed loopback port so Vite can proxy it:
+The production path is `pasture serve`: the console is compiled into
+`internal/webui/assets`, embedded in the `pasture` binary, and served at `/`
+from the same loopback origin as the API. No Node or Vite process is needed at
+runtime.
 
 ```bash
+cd web
+pnpm install --frozen-lockfile
+pnpm build                 # writes ../internal/webui/assets (committed)
+cd ..
+go build ./cmd/pasture
 pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
 ```
 
+Open `http://127.0.0.1:37373/`. The API remains at `/api/v1/*` and
+`/openapi.json`. `pnpm build` writes the committed embedded bundle; a plain
+`go build` and the release/Nix builds consume that committed tree and never run
+Node. `make web-verify-bundle` rebuilds it and fails if the committed bundle is
+stale.
+
 The transcript rail shells out to the local `peasant` CLI, so Peasant must be
-installed and on the `PATH` of the `pasture serve` process. The proxy runs
-`peasant export sessions` per selected session; the browser never talks to
-Peasant directly.
+installed and on the `PATH` of the `pasture serve` process. The browser never
+talks to Peasant directly.
 
 Historical bindings and activity are projected from the lifecycle journal. On a
 fresh store, pass `--backfill` once so older sessions appear in the inventory:
@@ -24,19 +37,27 @@ fresh store, pass `--backfill` once so older sessions appear in the inventory:
 pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373 --backfill
 ```
 
-Then, from `web/`:
+For UI development, run the API on a fixed loopback port and use the Vite dev
+server. `pnpm dev` is only for UI work: it proxies `/api` and `/openapi.json` to
+the API.
 
 ```bash
-pnpm install
-pnpm dev
+pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
+cd web && pnpm dev
 ```
 
-Open `http://127.0.0.1:5180`. Vite proxies `/api` and `/openapi.json` to
-`http://127.0.0.1:37373` by default. Override the target when the API is on a
+Open `http://127.0.0.1:5180`. Override the proxy target when the API is on a
 different port:
 
 ```bash
 PASTURE_API=http://127.0.0.1:46199 pnpm dev
+```
+
+To serve an already-built external bundle without rebuilding the Go binary, pass
+`--web-dir` to `pasture serve` (a development override):
+
+```bash
+pasture serve --web-dir /path/to/built/console --listen 127.0.0.1:37373
 ```
 
 The API is loopback-only. Do not bind `pasture serve` to a non-loopback address.
@@ -53,7 +74,8 @@ pnpm generate:api
 Commit the generated file with the contract change. `make web-verify-generated`
 regenerates the TypeScript to a temporary path and diffs it, so the Go JSON and
 the committed TypeScript cannot drift. `pnpm build` runs the TypeScript check
-and the production Vite build; `web/dist` is not committed.
+and the production Vite build, which writes `../internal/webui/assets`; `web/dist`
+is not used.
 
 `pnpm test` runs the Vitest boundary suite. It covers the shared-session-schema
 parse and `adaptTranscript` hand-off, plus the actionable copy for 404, 409,

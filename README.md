@@ -181,6 +181,31 @@ and `task assignment` — plus event/audit verbs:
 | `pasture task agents list\|show\|register` | Discover or inspect agents, or register one (registration is the only identity creator; comments need an explicit registered `--author`) |
 | `pasture migrate [--dry-run]` | Run pending audit-database schema migrations (top-level — NOT under `pasture task`) |
 
+## Web Console
+
+The local session-epoch console is a Vite/React app built from `web/` and
+embedded into the `pasture` binary. `pasture serve` serves it at `/` from the
+same loopback-only origin as the API, with no Node process at runtime:
+
+```bash
+pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
+# open http://127.0.0.1:37373/
+```
+
+The API remains at `/api/v1/*` and `/openapi.json`. To change the UI, rebuild
+the committed bundle before rebuilding Go:
+
+```bash
+cd web && pnpm install --frozen-lockfile && pnpm build   # writes internal/webui/assets
+cd .. && go build ./cmd/pasture
+make web-verify-bundle                                   # fails if the committed bundle is stale
+```
+
+`pnpm dev` (with the Vite proxy) is only for UI development. `pasture serve
+--web-dir <dir>` serves an external build instead of the embedded bundle.
+Plain `go build`, Nix, and the release jobs use the committed
+`internal/webui/assets` tree and never require Node.
+
 ## Key Conventions
 
 - **No CGo:** All dependencies pure Go (`CGO_ENABLED=0`). Use `modernc.org/sqlite`, not `mattn/go-sqlite3`.

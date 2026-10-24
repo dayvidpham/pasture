@@ -105,8 +105,11 @@ jobs:
         # committed OpenAPI artifact and the TypeScript consumers cannot drift.
         run: make web-verify-generated
 
-      - name: Typecheck and build
-        run: cd web && pnpm build
+      - name: Typecheck, build, and verify the embedded bundle
+        # pnpm build writes internal/webui/assets. The target reruns the build
+        # and fails if the committed bundle changed, so the embedded console in
+        # the Go binary cannot drift from the web sources.
+        run: make web-verify-bundle
 
   recovery:
     name: Recovery correctness

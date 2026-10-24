@@ -19,14 +19,17 @@ import (
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
+	"github.com/dayvidpham/pasture/internal/webui"
 )
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "Serve the local session and epoch API",
-	Long: `Serve the loopback-only session and epoch API from the local pasture database.
+	Short: "Serve the local session and epoch API and web console",
+	Long: `Serve the loopback-only session and epoch API and the compiled web console
+from the local pasture database.
 
 Routes:
+  GET  /                      the compiled web console
   GET  /api/v1/sessions
   GET  /api/v1/sessions/{harness}/{nativeSessionId}
   GET  /api/v1/sessions/{harness}/{nativeSessionId}/transcript
@@ -37,6 +40,11 @@ Routes:
   GET  /api/v1/inspect
   GET  /api/v1/ws
   GET  /openapi.json
+
+The web console is embedded in this binary and served at / from the same
+loopback origin as the API; it needs no Node process. The API remains at
+/api/v1/* and /openapi.json. Pass --web-dir <dir> to serve an external console
+build instead of the embedded bundle (a development override).
 
 The transcript route streams the durable transcript that "peasant export
 sessions" produces. It runs the peasant executable from this process's PATH;
@@ -69,6 +77,7 @@ func init() {
 	serveCmd.Flags().Bool("backfill", false, "Rebuild historical session state before serving (can be slow on a large journal)")
 	serveCmd.Flags().String("peasant-db", "", "Opt-in: read project labels from the Peasant SQLite database at this path (read-only)")
 	serveCmd.Flags().String("peasant-url", "", "Opt-in: read project labels from the Peasant HTTP API at this base URL")
+	serveCmd.Flags().String("web-dir", "", "Serve the built web console from this directory instead of the embedded bundle")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -78,6 +87,7 @@ func runServe(cmd *cobra.Command) error {
 	backfill, _ := cmd.Flags().GetBool("backfill")
 	peasantDB, _ := cmd.Flags().GetString("peasant-db")
 	peasantURL, _ := cmd.Flags().GetString("peasant-url")
+	webDir, _ := cmd.Flags().GetString("web-dir")
 	if activeWindow <= 0 {
 		return fmt.Errorf("active window must be positive")
 	}
@@ -147,7 +157,23 @@ func runServe(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	handler := sessionapi.NewHandler(service, store)
+	apiHandler := sessionapi.NewHandler(service, store)
+
+	var console http.Handler
+	if webDir != "" {
+		console, err = webui.NewFromDir(apiHandler, webDir)
+	} else {
+		console, err = webui.NewEmbedded(apiHandler)
+	}
+	if err != nil {
+		return err
+	}
+	// The combined handler is guarded once more at the outermost layer so the
+	// static console shares the API's loopback-only Host/Origin contract.
+	// NewHandler already guards the API inside; the duplicate check on API
+	// requests is intentional and keeps one guard responsible for every byte
+	// this server emits.
+	handler := sessionapi.LoopbackOnly(console)
 
 	listener, err := net.Listen("tcp", listen)
 	if err != nil {
