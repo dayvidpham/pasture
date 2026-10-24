@@ -11,9 +11,11 @@ import (
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
-// InterpreterDocumentVersion is the explicit format/content revision of the
-// interpreter document. A body change for the stable interpreter ID requires
-// a bump, enforced by the committed version ledger fixture.
+// InterpreterDocumentVersion is the explicit semantic revision of the
+// interpreter document. A generated source-inventory change is admitted at the
+// same version by CompatibleSourceInventoryUpdate; any semantic body change for
+// the stable interpreter ID requires a bump, enforced by the committed version
+// ledger fixture.
 const InterpreterDocumentVersion uint32 = 1
 
 // InterpreterDocumentID is the stable definition identity of the interpreter

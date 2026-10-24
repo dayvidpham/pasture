@@ -239,17 +239,23 @@ func resolveCommittedDefinition(reader DefinitionReader, ref model.DefinitionRef
 
 // The indexed lookup cannot distinguish first activation from a renamed
 // operation index. Before admitting an absent coordinate, inspect a bounded,
-// snapshot-pinned evidence inventory across ALL v2 definition/state coordinates,
-// not just the target. An unrelated damaged row can therefore refuse a fresh
+// snapshot-pinned evidence inventory across ALL v2 definition coordinates, not
+// just the target. An unrelated damaged row can therefore refuse a fresh
 // activation. At most eight MaxFactPageSize pages are inspected; exhaustion is
 // a refusal, not absence. This store-wide availability limit must be replaced
 // by an owner-provided coordinate index before hook-path integration.
 // Identical concurrent writers may already have published the correct operation;
 // their subsequent Apply remains the journal's atomic conflict/replay boundary.
+//
+// A same-coordinate row is allowed in one deliberate case: the committed body
+// and the incoming body differ only in their generated source inventory. The
+// source manifest describes the build, not the protocol shape, so a rebuilt
+// binary must not fail every hook until the document version is bumped. The
+// compatibility policy lives in definitions.CompatibleSourceInventoryUpdate.
 const definitionAbsenceProbePages = 8
 
 func rejectDisplacedDefinition(ctx context.Context, reader DefinitionReader, document definitions.Document) error {
-	query := provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitions.EvidenceKind, envelopeStateKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
+	query := provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitions.EvidenceKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
 	for range definitionAbsenceProbePages {
 		if err := ctx.Err(); err != nil {
 			return definitionError("rejectDisplacedDefinition", "Activation was canceled before absence could be verified.", err)
@@ -269,12 +275,33 @@ func rejectDisplacedDefinition(ctx context.Context, reader DefinitionReader, doc
 			if err := json.Unmarshal(row.Payload, &coordinate); err != nil {
 				return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition evidence row %d is unreadable; absence is not established.", row.JournalID), err)
 			}
+			if coordinate.Kind != document.Kind() || coordinate.ID != document.ID() || coordinate.Version != document.Version() || coordinate.Codec != document.Codec() {
+				continue
+			}
 			sum := sha256.Sum256(row.Payload)
 			content := document.Content()
-			matches := bytes.Equal(row.ContentDigest, content[:]) || sum == [32]byte(content) || coordinate.Content == content || (coordinate.Kind == document.Kind() && coordinate.ID == document.ID() && coordinate.Version == document.Version() && coordinate.Codec == document.Codec())
-			if matches && row.ProducingOperationID != definitionOperationID(document) {
-				return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition coordinate already has evidence at row %d under unexpected operation %q; the indexed absence is damaged journal truth, not first activation.", row.JournalID, row.ProducingOperationID), nil)
+			expectedOperation := definitionOperationID(document)
+			sameContent := bytes.Equal(row.ContentDigest, content[:]) || sum == [32]byte(content) || coordinate.Content == content
+			if sameContent {
+				if row.ProducingOperationID != expectedOperation {
+					return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition coordinate already has evidence at row %d under unexpected operation %q; the indexed absence is damaged journal truth, not first activation.", row.JournalID, row.ProducingOperationID), nil)
+				}
+				continue
 			}
+			if !bytes.Equal(row.ContentDigest, sum[:]) {
+				return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition evidence row %d has a content digest that does not match its payload; absence is not established.", row.JournalID), nil)
+			}
+			if row.ProducingOperationID == expectedOperation {
+				return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition evidence row %d has an operation identity that does not match its content; absence is not established.", row.JournalID), nil)
+			}
+			compatible, err := definitions.CompatibleSourceInventoryUpdate(row.Payload, document)
+			if err != nil {
+				return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition evidence row %d could not be checked for a source-inventory-only update; absence is not established.", row.JournalID), err)
+			}
+			if compatible {
+				continue
+			}
+			return definitionError("rejectDisplacedDefinition", fmt.Sprintf("Definition coordinate already has evidence at row %d under unexpected operation %q; the committed body differs by more than its generated source inventory, so a new definition version is required.", row.JournalID, row.ProducingOperationID), nil)
 		}
 		if page.Next == nil {
 			return nil
@@ -282,7 +309,7 @@ func rejectDisplacedDefinition(ctx context.Context, reader DefinitionReader, doc
 		query.Page.SnapshotMaxJournalID = page.SnapshotMaxJournalID
 		query.Page.AfterJournalID = page.Next.AfterJournalID
 	}
-	return definitionError("rejectDisplacedDefinition", fmt.Sprintf("The store-wide v2 definition/state inventory exceeded %d pages of %d rows (%d rows total) before absence could be established; no activation was appended. A coordinate-indexed owner lookup is required for larger inventories.", definitionAbsenceProbePages, provenance.MaxFactPageSize, definitionAbsenceProbePages*provenance.MaxFactPageSize), nil)
+	return definitionError("rejectDisplacedDefinition", fmt.Sprintf("The store-wide v2 definition inventory exceeded %d pages of %d rows (%d rows total) before absence could be established; no activation was appended. A coordinate-indexed owner lookup is required for larger inventories.", definitionAbsenceProbePages, provenance.MaxFactPageSize, definitionAbsenceProbePages*provenance.MaxFactPageSize), nil)
 }
 
 // ResolveDefinition first captures an enclosing evidence watermark. Exact-ID
