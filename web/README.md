@@ -32,13 +32,16 @@ talks to Peasant directly.
 
 Peasant project enrichment is off by default and no Peasant state is opened
 while it is off. Turn it on with the toggle in the console's "peasant projects"
-rail. With no `--peasant-db`/`--peasant-url` flag it lazily reads the
-conventional Peasant database (`$XDG_DATA_HOME/peasant/peasant.db`, otherwise
-`~/.local/share/peasant/peasant.db`). Turning it off closes that source and the
-next session read omits project fields. For a non-default source, start serve
-with `--peasant-db` or `--peasant-url`; that starts enabled, and the toggle can
-still turn it off and on. A missing or incompatible default database returns an
-actionable error and leaves enrichment off without affecting the session API.
+rail; it reopens the configured source. With no `--peasant-db`/`--peasant-url`
+flag that source is the conventional Peasant database
+(`$XDG_DATA_HOME/peasant/peasant.db`, otherwise
+`~/.local/share/peasant/peasant.db`), opened lazily. Turning it off closes that
+source and the next session read omits project fields. For a different source,
+start serve with `--peasant-db` or `--peasant-url`; that starts enabled, and the
+toggle can still turn it off and on. The switch lasts for this serve process:
+restarting returns to the startup default (off without flags, on with an
+explicit flag). A missing or incompatible source returns an actionable error
+and leaves enrichment off without affecting the session API.
 
 Historical bindings and activity are projected from the lifecycle journal. On a
 fresh store, pass `--backfill` once so older sessions appear in the inventory:

@@ -43,6 +43,7 @@ Routes:
   POST /api/v1/projects/{projectHash}/bind
   POST /api/v1/projects/{projectHash}/unbind
   GET  /api/v1/inspect
+  POST /api/v1/settings/peasant
   GET  /api/v1/ws
   GET  /openapi.json
 
@@ -66,17 +67,20 @@ The server starts from the existing session cache; pass --backfill to rebuild
 historical session state from the lifecycle journal before serving.
 
 Peasant project enrichment is opt-in and disabled by default; the web console
-can turn it on and off at runtime. With neither --peasant-db nor --peasant-url,
-turning it on reads the conventional Peasant SQLite database
-($XDG_DATA_HOME/peasant/peasant.db, else ~/.local/share/peasant/peasant.db);
-nothing is opened while the toggle is off, and a missing or incompatible
-database returns an actionable error while enrichment stays off. Pass
---peasant-db <path> to read Peasant's project mapping from a read-only SQLite
-handle, or --peasant-url <url> to ask the Peasant HTTP API; setting both is an
-error. Both flags start enrichment enabled, and the console toggle still turns
-that source off and on. With --peasant-db the reported label is the canonical
-remote label when the remote is recognizable, else the canonical cwd, else the
-project hash; with --peasant-url it is Peasant's resolved project label.`,
+can turn it on and off at runtime. Turning it on reopens the configured Peasant
+source. With neither --peasant-db nor --peasant-url, it reads the conventional
+Peasant SQLite database ($XDG_DATA_HOME/peasant/peasant.db, else
+~/.local/share/peasant/peasant.db). Nothing is opened while the toggle is off,
+and a missing or incompatible database returns an actionable error while
+enrichment stays off. Pass --peasant-db <path> to read Peasant's project
+mapping from a read-only SQLite handle, or --peasant-url <url> to ask the
+Peasant HTTP API; setting both is an error. Both flags start enrichment enabled,
+and the console toggle still turns that source off and on. The switch lasts for
+this serve process: restarting returns to the startup default (off without
+flags, on with an explicit --peasant-db/--peasant-url). With --peasant-db the
+reported label is the canonical remote label when the remote is recognizable,
+else the canonical cwd, else the project hash; with --peasant-url it is
+Peasant's resolved project label.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runServe(cmd)

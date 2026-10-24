@@ -56,6 +56,7 @@ type dbSource struct {
 	connectMu sync.Mutex
 	mu        sync.Mutex
 	db        *sql.DB
+	closed    bool
 
 	status statusHolder
 }
@@ -190,6 +191,10 @@ func (s *dbSource) Lookup(ctx context.Context, keys []Key) (map[Key]Project, err
 // under the caller's bounded context when the initial probe found no database.
 func (s *dbSource) handle(ctx context.Context) (*sql.DB, string) {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, "the Peasant project source is closed; turn enrichment off and on again to open a fresh source"
+	}
 	db := s.db
 	s.mu.Unlock()
 	if db != nil {
@@ -212,12 +217,18 @@ func (s *dbSource) handle(ctx context.Context) (*sql.DB, string) {
 
 // ensureConnected opens the Peasant database read-only and verifies its schema.
 // It returns an operator-facing problem and "" on success. The probe is
-// serialized so concurrent lookups do not open several handles.
+// serialized so concurrent lookups do not open several handles. A source that
+// has been closed is latched: it never opens or publishes another handle, and a
+// handle opened concurrently with Close is discarded instead of stored.
 func (s *dbSource) ensureConnected(ctx context.Context) string {
 	s.connectMu.Lock()
 	defer s.connectMu.Unlock()
 
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return "the Peasant project source is closed; turn enrichment off and on again to open a fresh source"
+	}
 	if s.db != nil {
 		s.mu.Unlock()
 		return ""
@@ -246,14 +257,25 @@ func (s *dbSource) ensureConnected(ctx context.Context) string {
 		return problem
 	}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		// Close won the race after the probe. Do not publish a handle on a
+		// closed source; the caller sees the closed error and no access leaks.
+		_ = db.Close()
+		return "the Peasant project source is closed; turn enrichment off and on again to open a fresh source"
+	}
 	s.db = db
 	s.mu.Unlock()
 	return ""
 }
 
-// Close releases the read-only handle. It is safe to call more than once.
+// Close releases the read-only handle and latches the source closed. It is safe
+// to call more than once; a later Lookup returns an error and never reopens the
+// database. The runtime switch discards the closed source and opens a fresh one
+// on the next enable.
 func (s *dbSource) Close() error {
 	s.mu.Lock()
+	s.closed = true
 	db := s.db
 	s.db = nil
 	s.mu.Unlock()

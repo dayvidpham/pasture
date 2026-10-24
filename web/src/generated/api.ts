@@ -359,12 +359,12 @@ export interface components {
             revision: number;
         };
         PeasantIntegration: {
-            /** @description Whether the operator enabled Peasant project enrichment. Disabled is the default and is distinct from unavailable. */
+            /** @description Whether the runtime enrichment switch is on. Off is the default and is distinct from unavailable; it does not mean no source was configured. */
             enabled: boolean;
             /** @description Actionable detail for disabled or unavailable; empty when the source is ok. */
             message: string;
             /**
-             * @description Which opt-in backend is configured: none when disabled, db for --peasant-db, api for --peasant-url.
+             * @description Which opt-in backend the switch opens when on: none while the switch is off; db for --peasant-db or the conventional Peasant database that the toggle opens when no flag was supplied; api for --peasant-url.
              * @enum {string}
              */
             source: "none" | "db" | "api";
@@ -1454,7 +1454,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorEnvelope"];
                 };
             };
-            /** @description The configured or default Peasant source could not be opened; enrichment stays off */
+            /** @description The runtime source or the default Peasant database opener could not be opened; enrichment stays off */
             409: {
                 headers: {
                     [name: string]: unknown;

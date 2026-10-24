@@ -301,8 +301,8 @@ export function ProjectFilter({
  * PeasantIntegrationState renders the tri-state opt-in project integration from
  * /api/v1/inspect and owns its runtime switch. Disabled is a configuration
  * choice, unavailable is a failed configured source, and ok is the quiet normal
- * state; the switch is offered in all three so an operator can turn enrichment
- * on, off, or retry an unavailable source.
+ * state. The switch is offered in all three; an unavailable source needs the
+ * operator to fix it, then toggle off and on to retry.
  */
 export function PeasantIntegrationState({
   integration,
@@ -332,6 +332,7 @@ export function PeasantIntegrationState({
           role="switch"
           className="peasant-switch"
           aria-checked={enabled}
+          aria-busy={busy}
           aria-label="Peasant project enrichment"
           disabled={busy || !onToggle}
           onClick={() => onToggle?.(!enabled)}
@@ -635,6 +636,10 @@ export default function App() {
   )
   const [projectMappingRetry, setProjectMappingRetry] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
+  // A ref, not the busy state: the WebSocket handler is installed once and a
+  // state capture would be stale. Frames must not repaint the pre-toggle
+  // integration while a settings request is in flight.
+  const peasantBusyRef = useRef(false)
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true)
@@ -658,6 +663,7 @@ export default function App() {
 
   const togglePeasant = useCallback(
     async (enabled: boolean) => {
+      peasantBusyRef.current = true
       setPeasantBusy(true)
       setPeasantError(null)
       try {
@@ -671,6 +677,7 @@ export default function App() {
           error instanceof Error ? error.message : 'the local API did not answer',
         )
       } finally {
+        peasantBusyRef.current = false
         setPeasantBusy(false)
       }
     },
@@ -712,7 +719,9 @@ export default function App() {
             setRevision(frame.revision)
             setAsOf(frame.asOf)
             setTruncated(Boolean(frame.payload.next))
-            setPeasantIntegration(integrationFromSessionsFrame(frame.payload))
+            if (!peasantBusyRef.current) {
+              setPeasantIntegration(integrationFromSessionsFrame(frame.payload))
+            }
             setLoading(false)
             break
           case 'epochs':

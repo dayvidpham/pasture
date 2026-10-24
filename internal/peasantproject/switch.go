@@ -3,13 +3,12 @@ package peasantproject
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 )
 
 // ErrSwitchClosed reports a settings change after the serve process began
 // shutting down.
-var ErrSwitchClosed = errors.New("the Peasant project toggle is closed")
+var ErrSwitchClosed = errors.New("the Peasant project toggle is closed; restart pasture serve to change project enrichment")
 
 // disabledSwitchMessage is the integration message while the runtime switch is
 // off. It names the console toggle first and keeps the startup flags as the
@@ -86,10 +85,11 @@ func (s *Switch) SetEnabled(ctx context.Context, enabled bool) error {
 		if source == nil {
 			return nil
 		}
+		// The switch is already off. A failure to close the old handle must not
+		// report a 409 for a state the operator successfully requested; the
+		// source is unreachable from here either way.
 		if closer, ok := source.(interface{ Close() error }); ok {
-			if err := closer.Close(); err != nil {
-				return fmt.Errorf("turning Peasant project enrichment off closed the source with an error: %w", err)
-			}
+			_ = closer.Close()
 		}
 		return nil
 	}

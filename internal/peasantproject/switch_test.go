@@ -16,6 +16,7 @@ type stubSource struct {
 	projects map[Key]Project
 	lookups  int
 	closed   int
+	closeErr error
 }
 
 func newStubSource() *stubSource {
@@ -50,7 +51,7 @@ func (s *stubSource) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed++
-	return nil
+	return s.closeErr
 }
 
 func (s *stubSource) counters() (lookups, closed int) {
@@ -166,6 +167,33 @@ func TestSwitchCloseIsIdempotentAndRefusesFurtherChanges(t *testing.T) {
 	require.Equal(t, 1, closed)
 	require.ErrorIs(t, sw.SetEnabled(context.Background(), true), ErrSwitchClosed)
 	require.False(t, sw.Status().Enabled)
+}
+
+func TestSwitchDisableSucceedsEvenWhenClosingTheSourceFails(t *testing.T) {
+	t.Parallel()
+
+	stub := newStubSource()
+	stub.closeErr = errors.New("handle close failed")
+	sw := NewSwitch(nil, stub)
+	t.Cleanup(func() { _ = sw.Close() })
+
+	require.NoError(t, sw.SetEnabled(context.Background(), false),
+		"the switch is off after the transition; a close failure is not a 409")
+	status := sw.Status()
+	require.False(t, status.Enabled)
+	require.Equal(t, SourceDisabled, status.Source)
+	_, closed := stub.counters()
+	require.Equal(t, 1, closed)
+}
+
+func TestSwitchClosedErrorNamesTheRestartRemedy(t *testing.T) {
+	t.Parallel()
+
+	sw := NewSwitch(nil, newStubSource())
+	require.NoError(t, sw.Close())
+	err := sw.SetEnabled(context.Background(), true)
+	require.ErrorIs(t, err, ErrSwitchClosed)
+	require.Contains(t, err.Error(), "restart pasture serve")
 }
 
 func TestSwitchSetEnabledWhileAlreadyOnIsANoOp(t *testing.T) {

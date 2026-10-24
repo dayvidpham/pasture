@@ -122,7 +122,7 @@ func openAPIDocument() map[string]any {
 						"200": jsonResponse(ref("PeasantIntegration")),
 						"400": errorResponse("Malformed body or a missing enabled boolean"),
 						"403": errorResponse("Non-loopback Host or Origin"),
-						"409": errorResponse("The configured or default Peasant source could not be opened; enrichment stays off"),
+						"409": errorResponse("The runtime source or the default Peasant database opener could not be opened; enrichment stays off"),
 						"503": errorResponse("This serve process has no configurable Peasant source"),
 					},
 				},
@@ -460,12 +460,12 @@ func openAPIDocument() map[string]any {
 					map[string]any{
 						"enabled": map[string]any{
 							"type":        "boolean",
-							"description": "Whether the operator enabled Peasant project enrichment. Disabled is the default and is distinct from unavailable.",
+							"description": "Whether the runtime enrichment switch is on. Off is the default and is distinct from unavailable; it does not mean no source was configured.",
 						},
 						"source": map[string]any{
 							"type":        "string",
 							"enum":        []string{"none", "db", "api"},
-							"description": "Which opt-in backend is configured: none when disabled, db for --peasant-db, api for --peasant-url.",
+							"description": "Which opt-in backend the switch opens when on: none while the switch is off; db for --peasant-db or the conventional Peasant database that the toggle opens when no flag was supplied; api for --peasant-url.",
 						},
 						"status": map[string]any{
 							"type":        "string",

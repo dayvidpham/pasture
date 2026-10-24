@@ -140,7 +140,8 @@ describe('peasantIntegrationPresentation', () => {
 
     expect(presentation.status).toBe('unavailable')
     expect(presentation.title).toContain('unavailable')
-    expect(presentation.message).toBe('database is locked')
+    expect(presentation.message).toContain('database is locked')
+    expect(presentation.message).toContain('Toggle enrichment off, then on to retry')
     expect(presentation.sourceLabel).toBe('Peasant SQLite database')
     expect(presentation.commands).toEqual([])
   })
@@ -346,6 +347,7 @@ describe('project rendering', () => {
     )
 
     expect(html).toContain('disabled=""')
+    expect(html).toContain('aria-busy="true"')
     expect(html).toContain('updating')
     expect(html).toContain('role="alert"')
     expect(html).toContain('the default Peasant database is missing')

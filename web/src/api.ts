@@ -104,7 +104,8 @@ export function setPeasantEnrichment(
   enabled: boolean,
   signal?: AbortSignal,
 ): Promise<PeasantIntegration> {
-  return sendJSON<PeasantIntegration>('/api/v1/settings/peasant', { enabled }, signal)
+  const body: PeasantSettingsBody = { enabled }
+  return sendJSON<PeasantIntegration>('/api/v1/settings/peasant', body, signal)
 }
 
 /**
