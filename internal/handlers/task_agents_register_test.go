@@ -75,9 +75,20 @@ func TestTaskAgentsRegister_AllKindsThenCommentAdd(t *testing.T) {
 	require.Equal(t, "machine_learning", ml.Kind)
 	require.Equal(t, "worker / "+string(model.Name), ml.Name)
 
+	epoch := register(handlers.TaskAgentRegisterInput{
+		DBPath:    path,
+		Namespace: "acme",
+		Kind:      handlers.AgentRegisterML,
+		Role:      "epoch",
+		Provider:  string(model.Provider),
+		Model:     string(model.Name),
+	})
+	require.Equal(t, "machine_learning", epoch.Kind)
+	require.Equal(t, "epoch / "+string(model.Name), epoch.Name)
+
 	// Every printed ID must be accepted as a comment author.
 	taskID := createTask(t, path, "authored work")
-	for _, author := range []string{human.AgentID, software.AgentID, ml.AgentID} {
+	for _, author := range []string{human.AgentID, software.AgentID, ml.AgentID, epoch.AgentID} {
 		var out bytes.Buffer
 		code, err := handlers.TaskCommentAdd(&out, handlers.TaskCommentAddInput{
 			DBPath:   path,

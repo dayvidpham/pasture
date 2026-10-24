@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/dayvidpham/bestiary v0.2.11
-	github.com/dayvidpham/provenance v0.10.2-0.20261016221412-022003a0a36b
+	github.com/dayvidpham/provenance v0.10.2-0.20261024024907-807fa8a8d53d
 	github.com/dbos-inc/dbos-transact-golang v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3

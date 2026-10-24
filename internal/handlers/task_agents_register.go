@@ -206,7 +206,7 @@ func registerMLAgent(ctx context.Context, w io.Writer, in TaskAgentRegisterInput
 	if roleText == "" {
 		return agentRegisterValidation(
 			"A role is required to register a machine-learning agent.",
-			"The --role flag was missing or empty. The role records what part the model plays (architect, supervisor, worker, or reviewer).",
+			"The --role flag was missing or empty. The role records what part the model plays (architect, supervisor, worker, reviewer, or epoch).",
 			"1. Pass the role with --role:\n"+
 				"     pasture task agents register ml --role worker --provider anthropic --model claude-opus-4-6\n"+
 				"2. Valid roles: "+listRoleWireValues(),
@@ -482,8 +482,8 @@ func agentRegisterStoreError(kind string, err error) (int, error) {
 
 // listRoleWireValues renders the valid Role wire values for help and errors.
 func listRoleWireValues() string {
-	values := make([]string, 0, 5)
-	for r := provenance.RoleHuman; r <= provenance.RoleReviewer; r++ {
+	values := make([]string, 0, 6)
+	for r := provenance.RoleHuman; r <= provenance.RoleEpoch; r++ {
 		values = append(values, r.String())
 	}
 	return strings.Join(values, ", ")
