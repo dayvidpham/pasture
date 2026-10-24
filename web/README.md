@@ -16,8 +16,8 @@ cd web
 pnpm install --frozen-lockfile
 pnpm build                 # writes ../internal/webui/assets (committed)
 cd ..
-go build ./cmd/pasture
-pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
+make build                 # or: go build -o bin/pasture ./cmd/pasture
+./bin/pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
 ```
 
 Open `http://127.0.0.1:37373/`. The API remains at `/api/v1/*` and
@@ -34,7 +34,7 @@ Historical bindings and activity are projected from the lifecycle journal. On a
 fresh store, pass `--backfill` once so older sessions appear in the inventory:
 
 ```bash
-pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373 --backfill
+./bin/pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373 --backfill
 ```
 
 For UI development, run the API on a fixed loopback port and use the Vite dev
@@ -42,7 +42,7 @@ server. `pnpm dev` is only for UI work: it proxies `/api` and `/openapi.json` to
 the API.
 
 ```bash
-pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
+./bin/pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
 cd web && pnpm dev
 ```
 
@@ -54,10 +54,12 @@ PASTURE_API=http://127.0.0.1:46199 pnpm dev
 ```
 
 To serve an already-built external bundle without rebuilding the Go binary, pass
-`--web-dir` to `pasture serve` (a development override):
+`--web-dir` to `serve` (a development override). The directory must be a trusted
+Vite build tree (it contains `index.html` at its root) and must not contain
+symlinks: a symlink could otherwise serve a file outside the directory.
 
 ```bash
-pasture serve --web-dir /path/to/built/console --listen 127.0.0.1:37373
+./bin/pasture serve --web-dir /path/to/built/console --listen 127.0.0.1:37373
 ```
 
 The API is loopback-only. Do not bind `pasture serve` to a non-loopback address.

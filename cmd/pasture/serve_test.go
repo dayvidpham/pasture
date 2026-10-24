@@ -48,6 +48,10 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 		"unbind",
 		"/api/v1/epochs",
 		"/api/v1/epochs/{id}/sessions",
+		"/api/v1/projects",
+		"/api/v1/projects/{projectHash}",
+		"/api/v1/projects/{projectHash}/bind",
+		"/api/v1/projects/{projectHash}/unbind",
 		"/api/v1/inspect",
 		"/api/v1/ws",
 		"/openapi.json",
@@ -135,6 +139,31 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(clientBody), `id="root"`, "client routes must fall back to the app shell")
 
+	// The outer LoopbackOnly wrapper must cover the static console as well as
+	// the API. Removing it from runServe would make these three requests
+	// succeed (the API has its own inner guard, the UI has none).
+	status := func(request *http.Request) int {
+		t.Helper()
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+		defer response.Body.Close()
+		return response.StatusCode
+	}
+	hostEvil, err := http.NewRequest(http.MethodGet, base+"/", nil)
+	require.NoError(t, err)
+	hostEvil.Host = "evil.example"
+	require.Equal(t, http.StatusForbidden, status(hostEvil), "non-loopback Host must be refused for the console")
+
+	originEvil, err := http.NewRequest(http.MethodGet, base+"/", nil)
+	require.NoError(t, err)
+	originEvil.Header.Set("Origin", "https://evil.example")
+	require.Equal(t, http.StatusForbidden, status(originEvil), "non-loopback Origin must be refused for the console")
+
+	apiHostEvil, err := http.NewRequest(http.MethodGet, base+"/api/v1/sessions", nil)
+	require.NoError(t, err)
+	apiHostEvil.Host = "evil.example"
+	require.Equal(t, http.StatusForbidden, status(apiHostEvil), "the deliberate outer guard must cover the API too")
+
 	cancel()
 	select {
 	case err := <-done:
@@ -213,6 +242,33 @@ func TestServeWebDirOverride(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("serve did not shut down after context cancellation")
 	}
+}
+
+// TestServeRejectsBadWebDirBeforeOpeningStore pins the early console check: a
+// --web-dir with no index.html must fail before the store is created/migrated.
+func TestServeRejectsBadWebDirBeforeOpeningStore(t *testing.T) {
+	previous := flagDBPath
+	flagDBPath = filepath.Join(t.TempDir(), "pasture.db")
+	t.Cleanup(func() { flagDBPath = previous })
+
+	webDir := t.TempDir()
+	cmd := &cobra.Command{}
+	cmd.Flags().String("listen", "127.0.0.1:0", "")
+	cmd.Flags().Duration("active-window", 15*time.Minute, "")
+	cmd.Flags().Bool("backfill", false, "")
+	cmd.Flags().String("peasant-db", "", "")
+	cmd.Flags().String("peasant-url", "", "")
+	cmd.Flags().String("web-dir", webDir, "")
+	require.NoError(t, cmd.Flags().Set("web-dir", webDir))
+
+	err := runServe(cmd)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no index.html")
+	require.Contains(t, err.Error(), "at its root")
+	require.Contains(t, err.Error(), "omit --web-dir")
+	require.NotContains(t, err.Error(), "rebuild pasture")
+	_, statErr := os.Stat(flagDBPath)
+	require.True(t, os.IsNotExist(statErr), "console validation must run before the store is opened")
 }
 
 // TestServePeasantProjectSource pins the opt-in source selection: empty flags

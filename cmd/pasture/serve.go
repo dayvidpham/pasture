@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -37,6 +38,10 @@ Routes:
   POST /api/v1/sessions/{harness}/{nativeSessionId}/unbind
   GET  /api/v1/epochs and /api/v1/epochs/{id}
   GET  /api/v1/epochs/{id}/sessions
+  GET  /api/v1/projects
+  GET  /api/v1/projects/{projectHash}
+  POST /api/v1/projects/{projectHash}/bind
+  POST /api/v1/projects/{projectHash}/unbind
   GET  /api/v1/inspect
   GET  /api/v1/ws
   GET  /openapi.json
@@ -44,7 +49,9 @@ Routes:
 The web console is embedded in this binary and served at / from the same
 loopback origin as the API; it needs no Node process. The API remains at
 /api/v1/* and /openapi.json. Pass --web-dir <dir> to serve an external console
-build instead of the embedded bundle (a development override).
+build instead of the embedded bundle (a development override). The directory
+must be a trusted Vite production build with index.html at its root; symlinks
+anywhere under it are refused.
 
 The transcript route streams the durable transcript that "peasant export
 sessions" produces. It runs the peasant executable from this process's PATH;
@@ -77,7 +84,7 @@ func init() {
 	serveCmd.Flags().Bool("backfill", false, "Rebuild historical session state before serving (can be slow on a large journal)")
 	serveCmd.Flags().String("peasant-db", "", "Opt-in: read project labels from the Peasant SQLite database at this path (read-only)")
 	serveCmd.Flags().String("peasant-url", "", "Opt-in: read project labels from the Peasant HTTP API at this base URL")
-	serveCmd.Flags().String("web-dir", "", "Serve the built web console from this directory instead of the embedded bundle")
+	serveCmd.Flags().String("web-dir", "", "Serve a trusted Vite production build from this directory (no symlinks) instead of the embedded bundle")
 	rootCmd.AddCommand(serveCmd)
 }
 
@@ -100,6 +107,18 @@ func runServe(cmd *cobra.Command) error {
 	}
 	if !listenIsLoopback(listen) {
 		return fmt.Errorf("serve refuses non-loopback listen address %q", listen)
+	}
+	// Resolve and validate the console before opening or migrating the store, so
+	// a bad --web-dir or an incomplete embedded bundle fails before any durable
+	// state is touched and before --backfill can run.
+	var assets fs.FS
+	if strings.TrimSpace(webDir) != "" {
+		assets, err = webui.AssetsFromDir(webDir)
+	} else {
+		assets, err = webui.Embedded()
+	}
+	if err != nil {
+		return err
 	}
 	dbPath := flagDBPath
 	if dbPath == "" {
@@ -158,13 +177,7 @@ func runServe(cmd *cobra.Command) error {
 		return err
 	}
 	apiHandler := sessionapi.NewHandler(service, store)
-
-	var console http.Handler
-	if webDir != "" {
-		console, err = webui.NewFromDir(apiHandler, webDir)
-	} else {
-		console, err = webui.NewEmbedded(apiHandler)
-	}
+	console, err := webui.New(apiHandler, assets)
 	if err != nil {
 		return err
 	}

@@ -55,10 +55,12 @@ web-verify-generated: web-install
 		fi
 
 # Rebuild the production console and fail when the committed embedded bundle is
-# stale. This is the only make target that needs Node: `make build`, Nix, and
-# the release jobs consume the committed internal/webui/assets tree directly.
-web-verify-bundle: web-install
-	cd web && pnpm build
+# stale. This is the only build/release gate that needs Node: `make build`,
+# Nix, and the release jobs consume the committed internal/webui/assets tree
+# directly and never run pnpm. It installs frozen dependencies itself so it can
+# run standalone in CI.
+web-verify-bundle:
+	cd web && pnpm install --frozen-lockfile && pnpm build
 	@stale=$$(git status --porcelain -- internal/webui/assets); \
 	if [ -n "$$stale" ]; then \
 		echo "internal/webui/assets is stale: it does not match 'cd web && pnpm build'."; \

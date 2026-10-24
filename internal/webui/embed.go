@@ -6,6 +6,7 @@ package webui
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 )
 
@@ -17,7 +18,15 @@ import (
 var embeddedAssets embed.FS
 
 // Embedded returns the embedded console tree rooted at the bundle directory
-// (the parent of index.html).
+// (the parent of index.html) after checking the shell and every local asset it
+// names. It fails closed rather than letting serve start with a blank console.
 func Embedded() (fs.FS, error) {
-	return fs.Sub(embeddedAssets, "assets")
+	assets, err := fs.Sub(embeddedAssets, "assets")
+	if err != nil {
+		return nil, fmt.Errorf("webui: open the embedded console bundle: %w — rebuild pasture after `cd web && pnpm install --frozen-lockfile && pnpm build`", err)
+	}
+	if err := validateBundle(assets, embeddedHints()); err != nil {
+		return nil, err
+	}
+	return assets, nil
 }

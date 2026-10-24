@@ -188,7 +188,8 @@ embedded into the `pasture` binary. `pasture serve` serves it at `/` from the
 same loopback-only origin as the API, with no Node process at runtime:
 
 ```bash
-pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
+make build                     # or: go build -o bin/pasture ./cmd/pasture
+./bin/pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373
 # open http://127.0.0.1:37373/
 ```
 
@@ -197,12 +198,12 @@ the committed bundle before rebuilding Go:
 
 ```bash
 cd web && pnpm install --frozen-lockfile && pnpm build   # writes internal/webui/assets
-cd .. && go build ./cmd/pasture
+cd .. && make build                                      # builds ./bin/pasture
 make web-verify-bundle                                   # fails if the committed bundle is stale
 ```
 
-`pnpm dev` (with the Vite proxy) is only for UI development. `pasture serve
---web-dir <dir>` serves an external build instead of the embedded bundle.
+`pnpm dev` (with the Vite proxy) is only for UI development. `./bin/pasture
+serve --web-dir <dir>` serves an external build instead of the embedded bundle.
 Plain `go build`, Nix, and the release jobs use the committed
 `internal/webui/assets` tree and never require Node.
 

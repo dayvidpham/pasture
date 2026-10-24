@@ -29,11 +29,12 @@ func testAPI() http.Handler {
 
 func testAssets() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":        {Data: []byte(`<!doctype html><html><body><div id="root"></div><script src="/assets/app-abc.js"></script></body></html>`)},
-		"assets/app-abc.js": {Data: []byte("console.log('ok')")},
-		"favicon.svg":       {Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)},
-		"docs/readme.txt":   {Data: []byte("docs")},
-		".secret":           {Data: []byte("hidden")},
+		"index.html":               {Data: []byte(`<!doctype html><html><body><div id="root"></div><script src="/assets/index-C-tgJrWs.js"></script></body></html>`)},
+		"assets/index-C-tgJrWs.js": {Data: []byte("console.log('ok')")},
+		"assets/plain.js":          {Data: []byte("console.log('plain')")},
+		"favicon.svg":              {Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"/>`)},
+		"docs/readme.txt":          {Data: []byte("docs")},
+		".secret":                  {Data: []byte("hidden")},
 	}
 }
 
@@ -66,7 +67,7 @@ func TestIndexAtRoot(t *testing.T) {
 func TestHashedAssetIsImmutable(t *testing.T) {
 	t.Parallel()
 
-	recorder := do(t, newTestHandler(t), http.MethodGet, "/assets/app-abc.js")
+	recorder := do(t, newTestHandler(t), http.MethodGet, "/assets/index-C-tgJrWs.js")
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, "console.log('ok')", recorder.Body.String())
 	require.Equal(t, immutableCache, recorder.Header().Get("Cache-Control"))
@@ -76,15 +77,30 @@ func TestHashedAssetIsImmutable(t *testing.T) {
 func TestNonHashedFileRevalidates(t *testing.T) {
 	t.Parallel()
 
-	recorder := do(t, newTestHandler(t), http.MethodGet, "/favicon.svg")
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Equal(t, noCache, recorder.Header().Get("Cache-Control"))
+	handler := newTestHandler(t)
+	for _, target := range []string{"/favicon.svg", "/assets/plain.js"} {
+		recorder := do(t, handler, http.MethodGet, target)
+		require.Equal(t, http.StatusOK, recorder.Code, target)
+		require.Equal(t, noCache, recorder.Header().Get("Cache-Control"), target)
+	}
+}
+
+func TestAntiFramingHeaders(t *testing.T) {
+	t.Parallel()
+
+	handler := newTestHandler(t)
+	for _, target := range []string{"/", "/assets/index-C-tgJrWs.js", "/sessions/abc"} {
+		recorder := do(t, handler, http.MethodGet, target)
+		require.Equal(t, http.StatusOK, recorder.Code, target)
+		require.Equal(t, "DENY", recorder.Header().Get("X-Frame-Options"), target)
+		require.Equal(t, "frame-ancestors 'none'", recorder.Header().Get("Content-Security-Policy"), target)
+	}
 }
 
 func TestAssetRangeRequest(t *testing.T) {
 	t.Parallel()
 
-	request := httptest.NewRequest(http.MethodGet, "/assets/app-abc.js", nil)
+	request := httptest.NewRequest(http.MethodGet, "/assets/index-C-tgJrWs.js", nil)
 	request.Header.Set("Range", "bytes=0-6")
 	recorder := httptest.NewRecorder()
 	newTestHandler(t).ServeHTTP(recorder, request)
@@ -208,6 +224,20 @@ func TestNewRejectsMissingDependencies(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestNewRejectsMissingReferencedAsset(t *testing.T) {
+	t.Parallel()
+
+	assets := fstest.MapFS{
+		"index.html":               {Data: []byte(`<script src="/assets/missing-C-tgJrWs.js"></script>`)},
+		"assets/other-D-tgJrWs.js": {Data: []byte("other")},
+	}
+	_, err := New(testAPI(), assets)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "references")
+	require.Contains(t, err.Error(), "/assets/missing-C-tgJrWs.js")
+	require.Contains(t, err.Error(), "rebuild the console")
+}
+
 func TestNewFromDir(t *testing.T) {
 	t.Parallel()
 
@@ -218,6 +248,43 @@ func TestNewFromDir(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "no index.html")
 		require.Contains(t, err.Error(), dir)
+		require.Contains(t, err.Error(), "at its root")
+		require.Contains(t, err.Error(), "internal/webui/assets")
+		require.Contains(t, err.Error(), "omit --web-dir")
+		require.NotContains(t, err.Error(), "rebuild pasture",
+			"a --web-dir operator should not be told to rebuild the binary")
+	})
+
+	t.Run("empty directory", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		_, err := NewFromDir(testAPI(), dir)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "no index.html")
+	})
+
+	t.Run("symlink escape is refused", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "index.html"),
+			[]byte(`<div id="root"></div>`), 0o600))
+		outside := filepath.Join(t.TempDir(), "outside-secret.txt")
+		require.NoError(t, os.WriteFile(outside, []byte("outside"), 0o600))
+		link := filepath.Join(dir, "leak.txt")
+		if err := os.Symlink(outside, link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+
+		assets, err := AssetsFromDir(dir)
+		require.Error(t, err)
+		require.Nil(t, assets)
+		require.Contains(t, err.Error(), "symlink")
+		require.Contains(t, err.Error(), link, "the error must name the offending link")
+		require.Contains(t, err.Error(), "trusted build directory")
+
+		_, err = NewFromDir(testAPI(), dir)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "symlink")
 	})
 
 	t.Run("valid build", func(t *testing.T) {
@@ -247,11 +314,15 @@ func TestEmbeddedBundleContainsIndex(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `id="root"`)
 
-	matches, err := fs.Glob(assets, "assets/*")
+	index, err := fs.ReadFile(assets, "index.html")
 	require.NoError(t, err)
-	require.NotEmpty(t, matches, "the committed bundle must contain hashed assets")
-	for _, match := range matches {
-		require.True(t, strings.HasPrefix(match, "assets/"))
+	refs := localAssetRefs(index)
+	require.NotEmpty(t, refs, "the committed shell must name its hashed assets")
+	for _, ref := range refs {
+		name := strings.TrimPrefix(ref, "/")
+		info, err := fs.Stat(assets, name)
+		require.NoError(t, err, "the committed bundle must contain the asset the shell references: %s", ref)
+		require.False(t, info.IsDir(), ref)
 	}
 }
 
