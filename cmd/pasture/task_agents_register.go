@@ -12,9 +12,10 @@ import (
 // `pasture task comment add --author`; that command never creates identities
 // implicitly. The created ID is printed so it can be copied into --author.
 //
-// The project namespace comes from the global --namespace flag and defaults
-// exactly like task creation (derived from the git remote, then the working
-// directory), so an author and its tasks share one namespace by default.
+// The project namespace comes from the global --namespace flag; when the flag
+// is omitted the environment's PASTURE_NAMESPACE supplies the default. With
+// neither source, it is derived exactly like task creation (the git remote, then
+// the working directory), so an author and its tasks share one namespace.
 func newTaskAgentsRegisterCmd() *cobra.Command {
 	registerCmd := &cobra.Command{
 		Use:   "register",
@@ -30,9 +31,9 @@ Subcommands:
   software  register a program (--name, --version, optional --source)
   ml        register a machine-learning model (--role, --provider, --model)
 
-The project namespace comes from the global --namespace flag. When omitted it
-is derived exactly like task creation (the git remote, then the working
-directory).`,
+The project namespace comes from --namespace, else PASTURE_NAMESPACE. With
+neither source, it is derived exactly like task creation (the git remote, then
+the working directory).`,
 	}
 
 	registerCmd.AddCommand(newTaskAgentsRegisterHumanCmd())

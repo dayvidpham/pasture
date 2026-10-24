@@ -2579,3 +2579,18 @@ bytes. The preceding digest identifies the prior recovery revision; neither
 revision participated in the historical captures above, and no capture payload,
 capture kit, fixture identity, activation state or acceptance record changes.
 No new live session, capture or host capability is claimed.
+
+### Namespace-scoped task recovery — 2026-10-24
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`7c3c1f5cb0d3e417077fd5bbaaf54587940e1a749c6e76019c8187a46d1492bb`.
+This later generated revision updates the embedded task-recovery prose: task
+ready/blocked/list now use the effective namespace (`--namespace`, otherwise
+`PASTURE_NAMESPACE`) and document `--all-namespaces` as the explicit opt-out.
+Lifecycle transport, activation, version guards, decision handling and the
+injection contract are unchanged; no runtime task query, file read or cached
+task state is added. The generated plugin and embedded hook asset still have
+identical bytes. The preceding digest identifies the prior recovery revision;
+neither revision participated in the historical captures above, and no capture
+payload, capture kit, fixture identity, activation state or acceptance record
+changes. No new live session, capture or host capability is claimed.

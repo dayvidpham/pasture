@@ -6077,6 +6077,7 @@ var guardSweepForeign = map[string]string{
 	"serve_test.go":                              "session serve loopback and shutdown proof, outside the lifecycle transport sweep",
 	"session_test.go":                            "session CLI list/show proof, outside the lifecycle transport sweep",
 	"task_residual_verbs_test.go":                "task agent registration and events/contexts CLI proof, outside the lifecycle transport sweep",
+	"task_namespace_test.go":                     "namespace-scoped task readiness CLI proof, outside the lifecycle transport sweep",
 	"task_well_known_test.go":                    "durable task-store built-in initialization and process-race CLI proof, outside the lifecycle transport sweep",
 	"task_workflow_test.go":                      "task workflow CLI proof, outside the lifecycle transport sweep",
 	"upgrade_cli_test.go":                        "upgrade command subprocess tests, outside the lifecycle transport sweep",

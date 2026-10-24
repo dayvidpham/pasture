@@ -103,17 +103,28 @@ func init() {
 		c := &cobra.Command{
 			Use:   name,
 			Short: "List " + name + " non-closed tasks",
-			Args:  cobra.NoArgs,
+			Long: "List " + name + " non-closed tasks.\n\n" +
+				"Results are scoped to the effective namespace: an explicit --namespace\n" +
+				"when supplied, otherwise PASTURE_NAMESPACE. Pass --all-namespaces to\n" +
+				"ignore both and read every namespace. When neither source is set, the\n" +
+				"result is unscoped.",
+			Args: cobra.NoArgs,
 		}
 		c.Flags().String("label", "", "Filter candidates by one exact label after readiness")
+		c.Flags().Bool("all-namespaces", false,
+			"Ignore --namespace and PASTURE_NAMESPACE; list tasks from every namespace")
 		c.RunE = func(cmd *cobra.Command, args []string) error {
 			label, _ := cmd.Flags().GetString("label")
+			namespace := effectiveNamespace()
+			if allNamespaces, _ := cmd.Flags().GetBool("all-namespaces"); allNamespaces {
+				namespace = ""
+			}
 			var code int
 			var err error
 			if cmd.Name() == "ready" {
-				code, err = handlers.TaskReady(cmd.OutOrStdout(), flagDBPath, resolveFormat(), label)
+				code, err = handlers.TaskReady(cmd.OutOrStdout(), flagDBPath, resolveFormat(), label, namespace)
 			} else {
-				code, err = handlers.TaskBlocked(cmd.OutOrStdout(), flagDBPath, resolveFormat(), label)
+				code, err = handlers.TaskBlocked(cmd.OutOrStdout(), flagDBPath, resolveFormat(), label, namespace)
 			}
 			return finishTaskCommand(code, err)
 		}

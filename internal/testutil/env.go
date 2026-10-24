@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/dayvidpham/pasture/internal/types"
 )
 
 // SetEnv sets an environment variable for the duration of the test and
@@ -76,15 +78,16 @@ func restoreEnvVar(key, oldValue string, hadValue bool) {
 
 // DBPathEnv names the variable that overrides where pasture's unified store
 // lives; CaptureDirEnv names the variable that turns host-payload capture on
-// and points it at a directory. Both are declared here, rather than imported,
-// because this package is a leaf that every test binary links; the packages
-// that own them (internal/tasks/paths.go for the store, cmd/pasture's
-// hook_environment.go for the capture directory) pin these two spellings equal
-// in cmd/pasture's sandbox guard, so the neutralized name is always the one the
-// product reads.
+// and points it at a directory; NamespaceEnv names the default namespace for
+// --namespace and the scope of task list/ready/blocked. DBPathEnv and
+// CaptureDirEnv are declared here, rather than imported, because their owners
+// (internal/tasks/paths.go for the store, cmd/pasture's hook_environment.go for
+// the capture directory) sit in packages this leaf cannot cheaply import.
+// NamespaceEnv aliases internal/types.NamespaceEnv instead, so the production
+// CLI can share one spelling without importing this test-only package.
 //
 // WHY THEY ARE NEUTRALIZED, AND WHY THE REST OF THE ENVIRONMENT IS NOT. HOME
-// and XDG_DATA_HOME point AT the sandbox; these two point AWAY from it, and the
+// and XDG_DATA_HOME point AT the sandbox; these three point AWAY from it, and the
 // store override outranks both of them. tasks.DefaultDBPath resolves
 // PASTURE_DB_PATH first and only then consults XDG_DATA_HOME and HOME, so a
 // developer or CI shell that exports PASTURE_DB_PATH defeats the redirect
@@ -92,18 +95,25 @@ func restoreEnvVar(key, oldValue string, hadValue bool) {
 // exported one, and because the lifecycle hook derives its fault record from
 // the store path it would use, the same variable decides where
 // lifecycle-faults.jsonl is appended. That is the route by which a test run
-// appended to the operator's live store and live fault record.
+// appended to the operator's live store and live fault record. An exported
+// PASTURE_NAMESPACE is milder but still changes what a test observes: it scopes
+// list/ready/blocked and names newly created tasks and authors, so a test that
+// omits --namespace silently reads or writes a different namespace.
 const (
 	// DBPathEnv is the store override (internal/tasks.DBPathEnv).
 	DBPathEnv = "PASTURE_DB_PATH"
 	// CaptureDirEnv is the payload-capture directory override
 	// (cmd/pasture's hookCaptureDirEnv, internal/handlers' captureDirectoryEnv).
 	CaptureDirEnv = "PASTURE_CAPTURE_DIR"
+	// NamespaceEnv is the default namespace for --namespace and the scope of
+	// task list/ready/blocked. It aliases the production-neutral constant in
+	// internal/types so the CLI need not import this test-only package.
+	NamespaceEnv = types.NamespaceEnv
 )
 
 // SetHermeticEnv points HOME and XDG_DATA_HOME at a temporary directory tree
-// for a package-level test run, and removes the two variables that would point
-// durable writes back outside it.
+// for a package-level test run, and removes the three variables that would
+// point durable writes or task-read scope back outside it.
 //
 // Before redirecting HOME it resolves and pins GOCACHE and GOPATH to their
 // effective values (via "go env"). This prevents subprocess go builds inside
@@ -113,24 +123,26 @@ const (
 // typically unset in the Nix dev shell, so os.Getenv("GOCACHE") is a no-op;
 // only the toolchain's own resolution gives the real paths.
 //
-// IT ALSO UNSETS PASTURE_DB_PATH AND PASTURE_CAPTURE_DIR, WHICH IS NOT
-// COSMETIC. tasks.DefaultDBPath reads PASTURE_DB_PATH BEFORE XDG_DATA_HOME and
-// HOME, so redirecting HOME alone leaves a test process that inherited the
-// operator's exported store path resolving that store — and the lifecycle fault
-// record beside it — for every test that does not name its own --db. The
-// capture override is the same shape one step milder: it copies host payloads
-// into a directory the operator chose. Both are restored by the returned
-// cleanup, so a caller that wants to exercise them can still set them after
-// this returns.
+// IT ALSO UNSETS PASTURE_DB_PATH, PASTURE_CAPTURE_DIR AND PASTURE_NAMESPACE,
+// WHICH IS NOT COSMETIC. tasks.DefaultDBPath reads PASTURE_DB_PATH BEFORE
+// XDG_DATA_HOME and HOME, so redirecting HOME alone leaves a test process that
+// inherited the operator's exported store path resolving that store — and the
+// lifecycle fault record beside it — for every test that does not name its own
+// --db. The capture override is the same shape one step milder: it copies host
+// payloads into a directory the operator chose. PASTURE_NAMESPACE scopes task
+// list/ready/blocked and names new tasks/authors, so an inherited value makes a
+// test read or write a namespace it never asked for. All are restored by the
+// returned cleanup, so a caller that wants to exercise them can still set them
+// after this returns.
 //
 // Sharing the content-addressed build and module caches does not weaken test
 // isolation: per-test SQLite databases remain isolated via --db flags and
-// t.TempDir(); only HOME, XDG_* dirs and those two overrides are touched for
+// t.TempDir(); only HOME, XDG_* dirs and those three overrides are touched for
 // hermeticity.
 //
-// The returned cleanup function restores all six variables (GOCACHE, GOPATH,
-// HOME, XDG_DATA_HOME, DBPathEnv, CaptureDirEnv) to their original state and
-// removes the temp dir.
+// The returned cleanup function restores all seven variables (GOCACHE, GOPATH,
+// HOME, XDG_DATA_HOME, DBPathEnv, CaptureDirEnv, NamespaceEnv) to their
+// original state and removes the temp dir.
 func SetHermeticEnv(prefix string) (func(), error) {
 	// Resolve effective GOCACHE and GOPATH BEFORE HOME changes.
 	// os.Getenv("GOCACHE") / os.Getenv("GOPATH") are unset in the Nix dev
@@ -184,6 +196,7 @@ func SetHermeticEnv(prefix string) (func(), error) {
 	oldXDG, hadXDG := os.LookupEnv("XDG_DATA_HOME")
 	oldDBPath, hadDBPath := os.LookupEnv(DBPathEnv)
 	oldCapture, hadCapture := os.LookupEnv(CaptureDirEnv)
+	oldNamespace, hadNamespace := os.LookupEnv(NamespaceEnv)
 	home := filepath.Join(dir, "home")
 	xdg := filepath.Join(dir, "xdg")
 
@@ -212,10 +225,11 @@ func SetHermeticEnv(prefix string) (func(), error) {
 		restoreEnvVar("HOME", oldHome, hadHome)
 		return nil, fmt.Errorf("testutil.SetHermeticEnv: set XDG_DATA_HOME=%q: %w", xdg, err)
 	}
-	// The two overrides point AWAY from the sandbox and outrank its paths, so
-	// they are removed rather than redirected: a test process must not inherit
-	// the operator's store or capture directory at all. See the doc comment.
-	for _, override := range []string{DBPathEnv, CaptureDirEnv} {
+	// The three overrides point AWAY from the sandbox and outrank its paths, or
+	// silently change which namespace a read sees, so they are removed rather
+	// than redirected: a test process must not inherit the operator's store,
+	// capture directory, or namespace at all. See the doc comment.
+	for _, override := range []string{DBPathEnv, CaptureDirEnv, NamespaceEnv} {
 		if err := os.Unsetenv(override); err != nil {
 			_ = os.RemoveAll(dir)
 			restoreEnvVar("GOCACHE", oldGOCACHE, hadGOCACHE)
@@ -223,8 +237,7 @@ func SetHermeticEnv(prefix string) (func(), error) {
 			restoreEnvVar("HOME", oldHome, hadHome)
 			restoreEnvVar("XDG_DATA_HOME", oldXDG, hadXDG)
 			return nil, fmt.Errorf("testutil.SetHermeticEnv: unset %s: %w"+
-				" — this override decides where the store and its lifecycle fault record are "+
-				"written, so a test run must not inherit the operator's value", override, err)
+				" — a test run must not inherit the operator's store, capture directory, or task namespace", override, err)
 		}
 	}
 
@@ -235,6 +248,7 @@ func SetHermeticEnv(prefix string) (func(), error) {
 		restoreEnvVar("GOPATH", oldGOPATH, hadGOPATH)
 		restoreEnvVar(DBPathEnv, oldDBPath, hadDBPath)
 		restoreEnvVar(CaptureDirEnv, oldCapture, hadCapture)
+		restoreEnvVar(NamespaceEnv, oldNamespace, hadNamespace)
 		_ = os.RemoveAll(dir)
 	}, nil
 }

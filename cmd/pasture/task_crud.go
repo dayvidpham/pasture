@@ -157,7 +157,12 @@ var taskCloseCmd = &cobra.Command{
 var taskListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tasks with optional filters",
-	Args:  cobra.NoArgs,
+	Long: `List tasks with optional filters.
+
+Results are scoped to the effective namespace: an explicit --namespace when
+supplied, otherwise PASTURE_NAMESPACE. Pass --all-namespaces to ignore both and
+list every namespace. When neither source is set, the list is unscoped.`,
+	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		in := handlers.TaskListInput{DBPath: flagDBPath}
 
@@ -200,9 +205,9 @@ var taskListCmd = &cobra.Command{
 		if cmd.Flags().Changed("label") {
 			in.Label, _ = cmd.Flags().GetString("label")
 		}
-		if flagNamespace != "" {
-			// Filter list results to the global --namespace when one was given.
-			in.Namespace = flagNamespace
+		allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
+		if !allNamespaces {
+			in.Namespace = effectiveNamespace()
 		}
 
 		code, err := handlers.TaskList(cmd.OutOrStdout(), in, resolveFormat())
@@ -241,7 +246,10 @@ func init() {
 	taskListCmd.Flags().String("type", "", "Filter by task type")
 	taskListCmd.Flags().String("phase", "", "Filter by phase")
 	taskListCmd.Flags().String("label", "", "Filter by label name")
-	// Namespace filtering is driven by the global --namespace flag (registered on rootCmd).
+	taskListCmd.Flags().Bool("all-namespaces", false,
+		"Ignore --namespace and PASTURE_NAMESPACE; list tasks from every namespace")
+	// Namespace filtering uses the effective namespace (explicit --namespace,
+	// otherwise PASTURE_NAMESPACE); --all-namespaces opts out of both sources.
 
 	taskCmd.AddCommand(taskCreateCmd)
 	taskCmd.AddCommand(taskShowCmd)

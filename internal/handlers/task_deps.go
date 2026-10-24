@@ -14,7 +14,9 @@ import (
 )
 
 // TaskReady prints non-closed tasks that have no non-closed stored blockers.
-func TaskReady(w io.Writer, dbPath string, format types.OutputFormat, label string) (int, error) {
+// When namespace is non-empty, only tasks whose ID.Namespace matches it are
+// printed; an empty namespace keeps the unscoped legacy behavior.
+func TaskReady(w io.Writer, dbPath string, format types.OutputFormat, label, namespace string) (int, error) {
 	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
@@ -25,6 +27,9 @@ func TaskReady(w io.Writer, dbPath string, format types.OutputFormat, label stri
 	if err != nil {
 		return wrapTaskOpError("ready", err)
 	}
+	// Scope first: an out-of-scope task must not cost a label read or surface
+	// a label error for a candidate the caller will never see.
+	ts = filterReadinessNamespace(ts, namespace)
 	ts, err = filterReadinessLabels(tr, ts, label)
 	if err != nil {
 		return wrapTaskOpError("ready labels", err)
@@ -39,7 +44,9 @@ func TaskReady(w io.Writer, dbPath string, format types.OutputFormat, label stri
 }
 
 // TaskBlocked prints non-closed tasks with at least one non-closed stored blocker.
-func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat, label string) (int, error) {
+// When namespace is non-empty, only tasks whose ID.Namespace matches it are
+// printed; an empty namespace keeps the unscoped legacy behavior.
+func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat, label, namespace string) (int, error) {
 	tr, err := tasks.OpenTaskTracker(dbPath)
 	if err != nil {
 		return pasterrors.ExitCode(err), err
@@ -50,6 +57,9 @@ func TaskBlocked(w io.Writer, dbPath string, format types.OutputFormat, label st
 	if err != nil {
 		return wrapTaskOpError("blocked", err)
 	}
+	// Scope first: an out-of-scope task must not cost a label read or surface
+	// a label error for a candidate the caller will never see.
+	ts = filterReadinessNamespace(ts, namespace)
 	ts, err = filterReadinessLabels(tr, ts, label)
 	if err != nil {
 		return wrapTaskOpError("blocked labels", err)
@@ -166,6 +176,22 @@ func filterReadinessLabels(tr provenance.Tracker, ts []provenance.Task, label st
 		}
 	}
 	return out, nil
+}
+
+// filterReadinessNamespace keeps only tasks whose ID namespace matches. An
+// empty namespace means no namespace source was configured, so the readiness
+// result stays unscoped.
+func filterReadinessNamespace(ts []provenance.Task, namespace string) []provenance.Task {
+	if namespace == "" {
+		return ts
+	}
+	out := make([]provenance.Task, 0, len(ts))
+	for _, task := range ts {
+		if task.ID.Namespace == namespace {
+			out = append(out, task)
+		}
+	}
+	return out
 }
 
 func sortTasks(ts []provenance.Task, priority bool) {
