@@ -210,8 +210,9 @@ const (
 	PeasantIntegrationUnavailable PeasantIntegrationStatus = "unavailable"
 )
 
-// PeasantIntegration reports whether project enrichment is configured and, when
-// it is, whether the source is currently answering.
+// PeasantIntegration reports the runtime Peasant project-enrichment switch and,
+// when it is on, whether the configured source is currently answering. Enabled
+// describes the switch itself, not merely whether a source was configured.
 type PeasantIntegration struct {
 	Enabled bool                     `json:"enabled"`
 	Source  string                   `json:"source"`

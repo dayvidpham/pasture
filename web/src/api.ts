@@ -13,6 +13,7 @@ export type ProjectRole = components['schemas']['ProjectBinding']['role']
 // shape; the OpenAPI artifact is the single source of truth.
 export type ProjectBindBody = components['schemas']['ProjectBindRequest']
 export type ProjectUnbindBody = components['schemas']['ProjectUnbindRequest']
+export type PeasantSettingsBody = components['schemas']['PeasantSettingsRequest']
 
 export type SessionsFrame = {
   type: 'sessions'
@@ -91,6 +92,20 @@ async function sendJSON<T>(path: string, body: unknown, signal?: AbortSignal): P
 
 export function fetchInspect(signal?: AbortSignal): Promise<InspectPayload> {
   return requestJSON<InspectPayload>('/api/v1/inspect', signal)
+}
+
+/**
+ * Turn the runtime Peasant project-enrichment switch on or off. The response is
+ * the updated integration state, so the console paints the switch from the
+ * server's answer instead of guessing. A 409 carries the source's actionable
+ * open failure; the switch stays off on the server.
+ */
+export function setPeasantEnrichment(
+  enabled: boolean,
+  signal?: AbortSignal,
+): Promise<PeasantIntegration> {
+  const body: PeasantSettingsBody = { enabled }
+  return sendJSON<PeasantIntegration>('/api/v1/settings/peasant', body, signal)
 }
 
 /**

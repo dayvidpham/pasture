@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import App, {
   PeasantIntegrationState,
@@ -121,12 +121,13 @@ describe('filterSessionsByProject', () => {
 })
 
 describe('peasantIntegrationPresentation', () => {
-  it('explains disabled with the exact opt-in commands', () => {
+  it('explains disabled with the toggle and the exact fallback commands', () => {
     const presentation = peasantIntegrationPresentation(disabledIntegration)
 
     expect(presentation.status).toBe('disabled')
     expect(presentation.title).toContain('off')
     expect(presentation.message).toContain('unknown project')
+    expect(presentation.message).toContain('toggle')
     expect(presentation.commands).toEqual([
       'pasture serve --peasant-db <path>',
       'pasture serve --peasant-url <url>',
@@ -139,7 +140,8 @@ describe('peasantIntegrationPresentation', () => {
 
     expect(presentation.status).toBe('unavailable')
     expect(presentation.title).toContain('unavailable')
-    expect(presentation.message).toBe('database is locked')
+    expect(presentation.message).toContain('database is locked')
+    expect(presentation.message).toContain('Toggle enrichment off, then on to retry')
     expect(presentation.sourceLabel).toBe('Peasant SQLite database')
     expect(presentation.commands).toEqual([])
   })
@@ -278,15 +280,77 @@ describe('project rendering', () => {
     expect(labelFor).toBe(selectId)
   })
 
-  it('renders the disabled integration state with exact commands', () => {
+  it('renders the disabled integration state with the runtime switch and fallback commands', () => {
     const html = render(
       createElement(PeasantIntegrationState, { integration: disabledIntegration }),
     )
 
     expect(html).toContain('data-status="disabled"')
     expect(html).toContain('Peasant project enrichment is off')
+    expect(html).toContain('role="switch"')
+    expect(html).toContain('aria-checked="false"')
+    expect(html).toContain('aria-label="Peasant project enrichment"')
     expect(html).toContain('pasture serve --peasant-db &lt;path&gt;')
     expect(html).toContain('pasture serve --peasant-url &lt;url&gt;')
+  })
+
+  it('renders the switch on for ok and unavailable sources', () => {
+    const ok = render(
+      createElement(PeasantIntegrationState, { integration: okIntegration }),
+    )
+    expect(ok).toContain('role="switch"')
+    expect(ok).toContain('aria-checked="true"')
+
+    const unavailable = render(
+      createElement(PeasantIntegrationState, { integration: unavailableIntegration }),
+    )
+    expect(unavailable).toContain('role="switch"')
+    expect(unavailable).toContain('aria-checked="true"')
+  })
+
+  it('wires the switch click to onToggle with the next state', () => {
+    const onToggle = vi.fn()
+    const element = PeasantIntegrationState({
+      integration: disabledIntegration,
+      onToggle,
+    }) as unknown as { props: { children?: unknown } }
+
+    const findSwitch = (node: unknown): { props: Record<string, unknown> } | null => {
+      if (!node || typeof node !== 'object') return null
+      const element = node as { props?: Record<string, unknown> }
+      if (element.props?.role === 'switch') {
+        return element as { props: Record<string, unknown> }
+      }
+      const children = element.props?.children
+      const list = Array.isArray(children) ? children : [children]
+      for (const child of list) {
+        const found = findSwitch(child)
+        if (found) return found
+      }
+      return null
+    }
+
+    const button = findSwitch(element)
+    expect(button).not.toBeNull()
+    ;(button!.props.onClick as () => void)()
+    expect(onToggle).toHaveBeenCalledWith(true)
+  })
+
+  it('disables the switch and announces errors while busy', () => {
+    const html = render(
+      createElement(PeasantIntegrationState, {
+        integration: okIntegration,
+        onToggle: () => {},
+        busy: true,
+        error: 'the default Peasant database is missing',
+      }),
+    )
+
+    expect(html).toContain('disabled=""')
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toContain('updating')
+    expect(html).toContain('role="alert"')
+    expect(html).toContain('the default Peasant database is missing')
   })
 
   it('renders the unavailable integration state with its source and message', () => {

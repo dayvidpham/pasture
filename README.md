@@ -207,6 +207,26 @@ serve --web-dir <dir>` serves an external build instead of the embedded bundle.
 Plain `go build`, Nix, and the release jobs use the committed
 `internal/webui/assets` tree and never require Node.
 
+### Peasant project enrichment
+
+Project names are off by default and Pasture opens no Peasant state while the
+toggle is off. Turn enrichment on from the console's "peasant projects" rail;
+it reopens the configured Peasant source. With no `--peasant-db`/`--peasant-url`
+flag that source is the conventional Peasant SQLite database
+(`$XDG_DATA_HOME/peasant/peasant.db`, otherwise
+`~/.local/share/peasant/peasant.db`), opened lazily. Turning it off closes the
+source and the next session read omits project fields. Opening a WAL-mode
+Peasant database read-only may leave `peasant.db-shm` and `peasant.db-wal`
+beside the database; Pasture never writes to or migrates the main Peasant
+database.
+
+For a different source, start `pasture serve` with `--peasant-db <path>` or
+`--peasant-url <url>`; that starts enrichment enabled, and the console toggle
+can still turn it off and on. The switch lasts for this serve process:
+restarting returns to the startup default (off without flags, on with an
+explicit flag). A missing or incompatible source makes the toggle report an
+actionable error and stay off without affecting the session API.
+
 ## Key Conventions
 
 - **No CGo:** All dependencies pure Go (`CGO_ENABLED=0`). Use `modernc.org/sqlite`, not `mattn/go-sqlite3`.

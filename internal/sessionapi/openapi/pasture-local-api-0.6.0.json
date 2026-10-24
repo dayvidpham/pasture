@@ -280,7 +280,7 @@
       "PeasantIntegration": {
         "properties": {
           "enabled": {
-            "description": "Whether the operator enabled Peasant project enrichment. Disabled is the default and is distinct from unavailable.",
+            "description": "Whether the runtime enrichment switch is on. Off is the default and is distinct from unavailable; it does not mean no source was configured.",
             "type": "boolean"
           },
           "message": {
@@ -288,7 +288,7 @@
             "type": "string"
           },
           "source": {
-            "description": "Which opt-in backend is configured: none when disabled, db for --peasant-db, api for --peasant-url.",
+            "description": "Which opt-in backend the switch opens when on: none while the switch is off; db for --peasant-db or the conventional Peasant database that the toggle opens when no flag was supplied; api for --peasant-url.",
             "enum": [
               "none",
               "db",
@@ -311,6 +311,18 @@
           "source",
           "status",
           "message"
+        ],
+        "type": "object"
+      },
+      "PeasantSettingsRequest": {
+        "properties": {
+          "enabled": {
+            "description": "Turn the runtime Peasant project-enrichment switch on (true) or off (false).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
@@ -747,7 +759,7 @@
   "info": {
     "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. It also records explicit project-to-epoch mappings: a project hash is Peasant-owned, the mapped epoch is a Pasture task, and the relationship is independent of per-session bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
     "title": "Pasture Local Session API",
-    "version": "0.5.0"
+    "version": "0.6.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -1900,6 +1912,75 @@
           }
         },
         "summary": "Unbind a session from its epoch"
+      }
+    },
+    "/api/v1/settings/peasant": {
+      "post": {
+        "description": "Runtime toggle for the opt-in Peasant project source. With the switch off, Pasture performs no Peasant access and session project fields stay empty. Turning it on opens the configured source, or the conventional Peasant SQLite database when serve was started without --peasant-db/--peasant-url.",
+        "operationId": "updatePeasantSettings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeasantSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeasantIntegration"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Malformed body or a missing enabled boolean"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The runtime source or the default Peasant database opener could not be opened; enrichment stays off"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "This serve process has no configurable Peasant source"
+          }
+        },
+        "summary": "Turn Peasant project enrichment on or off"
       }
     },
     "/api/v1/ws": {

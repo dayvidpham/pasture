@@ -314,6 +314,76 @@ body {
   color: var(--danger);
 }
 
+/* The runtime on/off control. It renders in disabled, unavailable, and ok so an
+   operator can turn enrichment on, off, or retry a failed source. */
+.peasant-integration-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.peasant-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+  text-transform: lowercase;
+}
+
+.peasant-switch:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.peasant-switch-track {
+  position: relative;
+  display: inline-block;
+  width: 2rem;
+  height: 1.1rem;
+  border: var(--bd);
+  border-radius: 999px;
+  background: var(--surface-2);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.peasant-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.1rem - 6px);
+  height: calc(1.1rem - 6px);
+  border-radius: 50%;
+  background: var(--ink-3);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.peasant-switch[aria-checked='true'] .peasant-switch-track {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.peasant-switch[aria-checked='true'] .peasant-switch-thumb {
+  transform: translateX(calc(2rem - 1.1rem));
+  background: var(--surface-2);
+}
+
+.peasant-switch:focus-visible {
+  outline: 2px solid var(--success);
+  outline-offset: 2px;
+}
+
+.peasant-integration-error {
+  margin: 0;
+  color: var(--danger);
+  font: var(--fs-sm)/var(--lh-body) var(--font-body);
+  overflow-wrap: anywhere;
+}
+
 .peasant-integration-commands {
   display: grid;
   gap: var(--sp-1);

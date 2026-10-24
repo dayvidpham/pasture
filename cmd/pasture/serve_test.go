@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"io"
 	"net/http"
 	"os"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	_ "modernc.org/sqlite"
+
+	"github.com/dayvidpham/pasture/internal/peasantproject"
 )
 
 // The serve help is the operator's route map. It must name the transcript
@@ -53,6 +57,7 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 		"/api/v1/projects/{projectHash}/bind",
 		"/api/v1/projects/{projectHash}/unbind",
 		"/api/v1/inspect",
+		"POST /api/v1/settings/peasant",
 		"/api/v1/ws",
 		"/openapi.json",
 		"auto-on-open",
@@ -63,8 +68,11 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 		"--peasant-db",
 		"--peasant-url",
 		"Peasant project enrichment is opt-in",
+		"can turn it on and off at runtime",
+		"switch lasts for",
+		"restarting returns to the startup default",
+		"Nothing is opened while the toggle is off",
 		"setting both is an",
-		"never opens a Peasant database",
 	} {
 		require.Contains(t, help, want)
 	}
@@ -271,48 +279,144 @@ func TestServeRejectsBadWebDirBeforeOpeningStore(t *testing.T) {
 	require.True(t, os.IsNotExist(statErr), "console validation must run before the store is opened")
 }
 
-// TestServePeasantProjectSource pins the opt-in source selection: empty flags
-// are disabled, both flags are a configuration error, and each single flag
-// builds the matching source without touching Peasant for the other.
+// TestServeDefaultPeasantSourceEnablesTheConfiguredDatabase is the success path
+// for the no-flag mode: the toggle lazily opens the conventional database under
+// XDG_DATA_HOME, resolves a seeded session, and disabling clears lookups.
+func TestServeDefaultPeasantSourceEnablesTheConfiguredDatabase(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	dir := filepath.Join(xdg, "peasant")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	path := filepath.Join(dir, "peasant.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	require.NoError(t, err)
+	_, err = db.Exec(`
+		CREATE TABLE projects (project_hash TEXT PRIMARY KEY, canonical_cwd TEXT, canonical_remote TEXT);
+		CREATE TABLE sessions (session_id TEXT PRIMARY KEY, model_harness TEXT NOT NULL, project_hash TEXT NOT NULL, started_at INTEGER)`)
+	require.NoError(t, err)
+	hash := strings.Repeat("a", 64)
+	_, err = db.Exec(`INSERT INTO projects VALUES (?, '/work/repo', 'github.com/org/repo')`, hash)
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO sessions VALUES ('default-session', 'claude-code', ?, 1)`, hash)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	projectSwitch, err := newPeasantProjectSource("", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = projectSwitch.Close() })
+	require.False(t, projectSwitch.Status().Enabled, "no flags starts off")
+
+	key := peasantproject.Key{Harness: "claude-code", Session: "default-session"}
+	projects, err := projectSwitch.Lookup(context.Background(), []peasantproject.Key{key})
+	require.NoError(t, err)
+	require.Empty(t, projects, "off performs no Peasant access")
+
+	require.NoError(t, projectSwitch.SetEnabled(context.Background(), true))
+	projects, err = projectSwitch.Lookup(context.Background(), []peasantproject.Key{key})
+	require.NoError(t, err)
+	require.Contains(t, projects, key)
+	require.Equal(t, hash, projects[key].Hash)
+	require.NotEmpty(t, projects[key].Name)
+
+	require.NoError(t, projectSwitch.SetEnabled(context.Background(), false))
+	projects, err = projectSwitch.Lookup(context.Background(), []peasantproject.Key{key})
+	require.NoError(t, err)
+	require.Empty(t, projects, "off clears lookups")
+}
+
+// TestServeDefaultPeasantSourceRefusesAnIncompatibleDatabase pins the actionable
+// failure: an existing default file whose shape is not Peasant's leaves the
+// switch off.
+func TestServeDefaultPeasantSourceRefusesAnIncompatibleDatabase(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+	dir := filepath.Join(xdg, "peasant")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+	path := filepath.Join(dir, "peasant.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	require.NoError(t, err)
+	_, err = db.Exec(`CREATE TABLE unrelated (id TEXT PRIMARY KEY)`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	projectSwitch, err := newPeasantProjectSource("", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = projectSwitch.Close() })
+
+	err = projectSwitch.SetEnabled(context.Background(), true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), path)
+	require.Contains(t, err.Error(), "not usable")
+	require.False(t, projectSwitch.Status().Enabled, "an incompatible default leaves enrichment off")
+}
+
+// the switch off with a lazy default-DB opener, one flag starts it enabled with
+// that source, and both flags are a configuration error.
 func TestServePeasantProjectSource(t *testing.T) {
 	t.Parallel()
 
-	source, closeSource, err := newPeasantProjectSource("", "")
+	switchOff, err := newPeasantProjectSource("", "")
 	require.NoError(t, err)
-	require.Nil(t, source, "the disabled default must not construct a source")
-	require.Nil(t, closeSource)
+	require.NotNil(t, switchOff)
+	t.Cleanup(func() { _ = switchOff.Close() })
+	off := switchOff.Status()
+	require.False(t, off.Enabled)
+	require.Equal(t, peasantproject.SourceDisabled, off.Source)
+	require.Empty(t, off.State)
+	require.Contains(t, off.Message, "turn it on from the web console")
 
-	_, _, err = newPeasantProjectSource("/tmp/peasant.db", "http://127.0.0.1:8787")
+	missingDB := filepath.Join(t.TempDir(), "missing-peasant.db")
+	explicitDB, err := newPeasantProjectSource(missingDB, "")
+	require.NoError(t, err)
+	require.NotNil(t, explicitDB)
+	t.Cleanup(func() { _ = explicitDB.Close() })
+	dbStatus := explicitDB.Status()
+	require.True(t, dbStatus.Enabled, "an explicit --peasant-db starts enabled, preserving previous behavior")
+	require.Equal(t, peasantproject.SourceDB, dbStatus.Source)
+	require.Equal(t, peasantproject.StateUnavailable, dbStatus.State)
+
+	explicitAPI, err := newPeasantProjectSource("", "http://127.0.0.1:8787")
+	require.NoError(t, err)
+	require.NotNil(t, explicitAPI)
+	t.Cleanup(func() { _ = explicitAPI.Close() })
+	apiStatus := explicitAPI.Status()
+	require.True(t, apiStatus.Enabled)
+	require.Equal(t, peasantproject.SourceAPI, apiStatus.Source)
+	require.Equal(t, peasantproject.StateUnavailable, apiStatus.State, "a configured API source is unavailable until its first lookup")
+	require.Contains(t, apiStatus.Message, "not been contacted")
+
+	_, err = newPeasantProjectSource("/tmp/peasant.db", "http://127.0.0.1:8787")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "--peasant-db")
 	require.Contains(t, err.Error(), "--peasant-url")
 	require.Contains(t, err.Error(), "not both")
 
-	missingDB := filepath.Join(t.TempDir(), "missing-peasant.db")
-	source, closeSource, err = newPeasantProjectSource(missingDB, "")
-	require.NoError(t, err, "a missing Peasant database is unavailable, not a startup failure")
-	require.NotNil(t, source)
-	status := source.Status()
-	require.True(t, status.Enabled)
-	require.Equal(t, "db", status.Source)
-	require.Equal(t, "unavailable", string(status.State))
-	require.NotNil(t, closeSource)
-	require.NoError(t, closeSource())
-	require.NoError(t, closeSource(), "closing the source twice is harmless")
-
-	source, closeSource, err = newPeasantProjectSource("", "http://127.0.0.1:8787")
-	require.NoError(t, err)
-	require.NotNil(t, source)
-	status = source.Status()
-	require.True(t, status.Enabled)
-	require.Equal(t, "api", status.Source)
-	require.Equal(t, "unavailable", string(status.State), "a configured API source is unavailable until its first lookup")
-	require.Contains(t, status.Message, "not been contacted")
-	require.NotNil(t, closeSource)
-	require.NoError(t, closeSource())
-
-	_, _, err = newPeasantProjectSource("", "not-a-url")
+	_, err = newPeasantProjectSource("", "not-a-url")
 	require.Error(t, err)
+}
+
+// TestServeDefaultPeasantSourceIsLazyAndActionable pins the no-flag path: no
+// Peasant access at start, and enabling without the conventional database
+// returns an actionable error while the switch stays off.
+func TestServeDefaultPeasantSourceIsLazyAndActionable(t *testing.T) {
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", xdg)
+
+	projectSwitch, err := newPeasantProjectSource("", "")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = projectSwitch.Close() })
+	require.False(t, projectSwitch.Status().Enabled)
+
+	projects, err := projectSwitch.Lookup(context.Background(), []peasantproject.Key{{Harness: "claude-code", Session: "session"}})
+	require.NoError(t, err)
+	require.Empty(t, projects, "lookup while off must not touch Peasant")
+
+	err = projectSwitch.SetEnabled(context.Background(), true)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), filepath.Join(xdg, "peasant", "peasant.db"))
+	require.Contains(t, err.Error(), "no Peasant database was found")
+	require.Contains(t, err.Error(), "--peasant-db")
+	require.False(t, projectSwitch.Status().Enabled, "a failed enable leaves enrichment off")
 }
 
 // TestServeRejectsBothPeasantSources proves the mutual-exclusion check runs

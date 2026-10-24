@@ -99,10 +99,12 @@ export function integrationFromSessionsFrame(
 /**
  * peasantDisabledRemedy is the ONE disabled-integration remedy sentence. The
  * session detail rail and the project mapping panel both build their state
- * specific explanation around it, so the fix cannot drift between them.
+ * specific explanation around it, so the fix cannot drift between them. The
+ * console toggle is the primary action; the startup flags remain the fallback
+ * for a source that is not the conventional Peasant database.
  */
 export function peasantDisabledRemedy(): string {
-  return 'Peasant project enrichment is disabled. Restart pasture serve with --peasant-db or --peasant-url to enable it.'
+  return 'Peasant project enrichment is disabled. Turn on the toggle in the Peasant projects rail to reopen the configured Peasant source; with no --peasant-db/--peasant-url flag, the conventional Peasant database is used. For a different source, restart pasture serve with one of those flags.'
 }
 
 /**
@@ -112,7 +114,7 @@ export function peasantDisabledRemedy(): string {
 export function peasantUnavailableRemedy(integration: PeasantIntegration): string {
   const detail = integration.message?.trim()
   const suffix = detail ? ` (${detail})` : ''
-  return `The configured Peasant project source is unavailable${suffix}. Fix the source and refresh.`
+  return `The configured Peasant project source is unavailable${suffix}. Toggle enrichment off, then on to retry; fix the source first.`
 }
 
 /**
@@ -183,7 +185,7 @@ export function peasantIntegrationPresentation(
         status: 'disabled',
         title: 'Peasant project enrichment is off',
         message:
-          'Project names are not loaded, so every session shows an unknown project. Restart pasture serve with one of these flags to enable the opt-in source:',
+          'Project names are not loaded, so every session shows an unknown project. Turn on the toggle above to reopen the configured Peasant source; with no --peasant-db/--peasant-url flag, the conventional Peasant database is used. For a different source, restart pasture serve with one of these flags:',
         commands: [
           'pasture serve --peasant-db <path>',
           'pasture serve --peasant-url <url>',
@@ -194,9 +196,7 @@ export function peasantIntegrationPresentation(
       return {
         status: 'unavailable',
         title: 'Peasant project source is unavailable',
-        message:
-          integration.message?.trim() ||
-          'The configured Peasant project source could not be read. Sessions still render with an unknown project; fix the source and refresh.',
+        message: `${integration.message?.trim() || 'The configured Peasant project source could not be read. Sessions still render with an unknown project; fix the source and refresh.'} Toggle enrichment off, then on to retry.`,
         commands: [],
         sourceLabel,
       }
