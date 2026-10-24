@@ -263,6 +263,16 @@ func TestNewFromDir(t *testing.T) {
 		require.Contains(t, err.Error(), "no index.html")
 	})
 
+	t.Run("path is a regular file", func(t *testing.T) {
+		t.Parallel()
+		file := filepath.Join(t.TempDir(), "console.tgz")
+		require.NoError(t, os.WriteFile(file, []byte("not a directory"), 0o600))
+		_, err := NewFromDir(testAPI(), file)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "is a file, not a build directory")
+		require.Contains(t, err.Error(), "directory that contains index.html")
+	})
+
 	t.Run("symlink escape is refused", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

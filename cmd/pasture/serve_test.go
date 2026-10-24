@@ -139,9 +139,9 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(clientBody), `id="root"`, "client routes must fall back to the app shell")
 
-	// The outer LoopbackOnly wrapper must cover the static console as well as
-	// the API. Removing it from runServe would make these three requests
-	// succeed (the API has its own inner guard, the UI has none).
+	// The first two requests prove the outer wrapper covers the console, which
+	// has no other guard; the third pins the API contract rather than
+	// distinguishing the wrapper.
 	status := func(request *http.Request) int {
 		t.Helper()
 		response, err := http.DefaultClient.Do(request)

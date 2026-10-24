@@ -95,6 +95,9 @@ func rejectSymlinks(dir string) error {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("webui: --web-dir %q is a symlink; point it at a trusted regular build directory", dir)
 	}
+	if !info.IsDir() {
+		return fmt.Errorf("webui: --web-dir %q is a file, not a build directory; point it at the directory that contains index.html", dir)
+	}
 	err = filepath.WalkDir(dir, func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
