@@ -155,7 +155,7 @@ func TestTaskReadiness_UsesAllBlockersBeforeLabelFilter(t *testing.T) {
 	check := func(blocked bool) {
 		t.Helper()
 		var out bytes.Buffer
-		code, err := handlers.TaskBlocked(&out, path, types.OutputJSON, "work")
+		code, err := handlers.TaskBlocked(&out, path, types.OutputJSON, "work", "")
 		require.NoError(t, err)
 		require.Zero(t, code)
 		got := decodeTaskList(t, out.String())
@@ -167,7 +167,7 @@ func TestTaskReadiness_UsesAllBlockersBeforeLabelFilter(t *testing.T) {
 		}
 
 		out.Reset()
-		code, err = handlers.TaskReady(&out, path, types.OutputJSON, "work")
+		code, err = handlers.TaskReady(&out, path, types.OutputJSON, "work", "")
 		require.NoError(t, err)
 		require.Zero(t, code)
 		got = decodeTaskList(t, out.String())

@@ -759,8 +759,8 @@ registered agents with `pasture task agents list`.
 |---|---|
 | `pasture task create` / `show` / `update` / `close` | Create, read, change, or close a task. |
 | `pasture task assignment` | Manage task assignments. |
-| `pasture task list` | List all statuses and namespaces, or intersect status, priority, type, phase, namespace, and one exact label filter. |
-| `pasture task ready` / `pasture task blocked` | List non-closed candidates, with an optional exact `--label` filter applied after readiness. |
+| `pasture task list` | List tasks scoped to the effective namespace by default (explicit `--namespace`, otherwise `PASTURE_NAMESPACE`), or intersect status, priority, type, phase, namespace, and one exact label filter; `--all-namespaces` opts out. |
+| `pasture task ready` / `pasture task blocked` | List non-closed candidates scoped to the effective namespace, with an optional exact `--label` filter applied after readiness; `--all-namespaces` opts out. |
 | `pasture task dep add` | Add a typed edge with `--target` and `--kind`, or use `--blocked-by TARGET` alone. `relation` is an alias of `dep`. |
 | `pasture task dep tree` | Follow outgoing task-to-task relations, including closed targets. `--kind` selects `blocked_by` (default), `derived_from`, `supersedes`, `discovered_from`, or `all`; a repeated node prints once and is never re-expanded. |
 | `pasture task label add` / `remove` / `list` | Change or read the sorted label set; changes print the post-state. |
@@ -780,10 +780,13 @@ or choose an identity for you. `task events` prints each event's ID, which
 `dep tree`, including its `--kind` selection.
 
 List order is created time then full ID. Ready/blocked order is numeric priority,
-created time, then full ID. Empty JSON collections are arrays. A single exact
-label is not a comma-separated filter. Only a non-closed stored `blocked_by`
-target blocks a candidate; label filters do not hide blockers. Separate reads
-do not promise a snapshot under concurrent writers.
+created time, then full ID. Empty JSON collections are arrays. Namespace scope
+for list/ready/blocked is an explicit `--namespace` when supplied, otherwise
+`PASTURE_NAMESPACE`; `--all-namespaces` ignores both, and with no source those
+reads are unscoped. A single exact label is not a comma-separated filter. Only a
+non-closed stored `blocked_by` target blocks a candidate; label filters do not
+hide blockers. Separate reads do not promise a snapshot under concurrent
+writers.
 
 ## Dependencies (Approved)
 

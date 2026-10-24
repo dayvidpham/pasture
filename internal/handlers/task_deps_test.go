@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,7 +25,7 @@ func TestTaskReady_ExcludesBlocked(t *testing.T) {
 	}
 
 	var readyOut bytes.Buffer
-	if _, err := handlers.TaskReady(&readyOut, path, types.OutputJSON, ""); err != nil {
+	if _, err := handlers.TaskReady(&readyOut, path, types.OutputJSON, "", ""); err != nil {
 		t.Fatalf("ready failed: %v", err)
 	}
 	ready := decodeTaskList(t, readyOut.String())
@@ -36,13 +37,92 @@ func TestTaskReady_ExcludesBlocked(t *testing.T) {
 	}
 
 	var blockedOut bytes.Buffer
-	if _, err := handlers.TaskBlocked(&blockedOut, path, types.OutputJSON, ""); err != nil {
+	if _, err := handlers.TaskBlocked(&blockedOut, path, types.OutputJSON, "", ""); err != nil {
 		t.Fatalf("blocked failed: %v", err)
 	}
 	blocked := decodeTaskList(t, blockedOut.String())
 	if !containsTask(blocked, parentId) {
 		t.Fatalf("expected parent %q in blocked list, got %+v", parentId, blocked)
 	}
+}
+
+// createTaskInNamespace creates a task whose ID carries the given namespace,
+// so readiness filtering can be exercised across namespaces.
+func createTaskInNamespace(t *testing.T, dbPath, namespace, title string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	code, err := handlers.TaskCreate(&buf, handlers.TaskCreateInput{
+		DBPath:    dbPath,
+		Namespace: namespace,
+		Title:     title,
+		Type:      provenance.TaskTypeTask,
+		Priority:  provenance.PriorityMedium,
+		Phase:     provenance.PhaseUnscoped,
+	}, types.OutputJSON)
+	if err != nil {
+		t.Fatalf("createTaskInNamespace(%q, %q) failed: %v (code=%d)", namespace, title, err, code)
+	}
+	return decodeTask(t, buf.String()).ID
+}
+
+func TestTaskReadiness_ScopesToNamespace(t *testing.T) {
+	t.Parallel()
+	path := dbPath(t)
+
+	alphaReady := createTaskInNamespace(t, path, "alpha", "alpha ready")
+	betaReady := createTaskInNamespace(t, path, "beta", "beta ready")
+	alphaBlocked := createTaskInNamespace(t, path, "alpha", "alpha blocked")
+	betaBlocker := createTaskInNamespace(t, path, "beta", "beta blocker")
+
+	// alphaBlocked is blocked by a task in another namespace: readiness is
+	// computed across the store, and only the result set is namespace-scoped.
+	mustAddEdge(t, path, alphaBlocked, betaBlocker, provenance.EdgeBlockedBy)
+
+	ready := func(namespace string) []string {
+		t.Helper()
+		var out bytes.Buffer
+		code, err := handlers.TaskReady(&out, path, types.OutputJSON, "", namespace)
+		if err != nil {
+			t.Fatalf("ready(%q) failed: %v (code=%d)", namespace, err, code)
+		}
+		return taskIDs(decodeTaskList(t, out.String()))
+	}
+	blocked := func(namespace string) []string {
+		t.Helper()
+		var out bytes.Buffer
+		code, err := handlers.TaskBlocked(&out, path, types.OutputJSON, "", namespace)
+		if err != nil {
+			t.Fatalf("blocked(%q) failed: %v (code=%d)", namespace, err, code)
+		}
+		return taskIDs(decodeTaskList(t, out.String()))
+	}
+
+	if got := ready("alpha"); len(got) != 1 || got[0] != alphaReady {
+		t.Errorf("ready(alpha) = %v, want [%s]", got, alphaReady)
+	}
+	if got := ready("beta"); len(got) != 2 || !slices.Contains(got, betaReady) || !slices.Contains(got, betaBlocker) {
+		t.Errorf("ready(beta) = %v, want the two beta tasks", got)
+	}
+	if got := ready(""); len(got) != 3 {
+		t.Errorf("ready(unscoped) = %v, want all three unblocked tasks", got)
+	}
+	if got := blocked("alpha"); len(got) != 1 || got[0] != alphaBlocked {
+		t.Errorf("blocked(alpha) = %v, want [%s]", got, alphaBlocked)
+	}
+	if got := blocked("beta"); len(got) != 0 {
+		t.Errorf("blocked(beta) = %v, want none", got)
+	}
+	if got := blocked(""); len(got) != 1 || got[0] != alphaBlocked {
+		t.Errorf("blocked(unscoped) = %v, want [%s]", got, alphaBlocked)
+	}
+}
+
+func taskIDs(tasks []taskJSONShape) []string {
+	out := make([]string, len(tasks))
+	for i, task := range tasks {
+		out[i] = task.ID
+	}
+	return out
 }
 
 func TestTaskDepAdd_RejectsCycle(t *testing.T) {
@@ -411,7 +491,7 @@ func TestTaskDepTree_TypedEdgesDoNotChangeReadiness(t *testing.T) {
 func readyTaskSet(t *testing.T, path string) map[string]bool {
 	t.Helper()
 	var out bytes.Buffer
-	if _, err := handlers.TaskReady(&out, path, types.OutputJSON, ""); err != nil {
+	if _, err := handlers.TaskReady(&out, path, types.OutputJSON, "", ""); err != nil {
 		t.Fatalf("ready failed: %v", err)
 	}
 	set := map[string]bool{}

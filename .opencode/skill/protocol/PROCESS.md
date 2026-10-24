@@ -6,15 +6,15 @@ For agent role definitions and detailed tool references, see `skills/`.
 
 ## Tracker setup and recipe bindings
 
-Use the supported `pasture task` CLI. Namespace precedence is explicit
-`--namespace`, then repository Git remote URL inference (or directory fallback).
-`PASTURE_NAMESPACE` below is a shell binding, NOT an environment variable the
-CLI reads automatically: set it to the intended repository URL and pass
-`--namespace "$PASTURE_NAMESPACE"` explicitly for create and list. The ready
-and blocked queries read the whole selected store: only an exact `--label`
-filter is supported, not namespace filtering. Inspect each returned full task
-URI before choosing repository work. Other task reads/writes address their
-full URI directly. Do not change directory merely to select a tracker.
+Use the supported `pasture task` CLI. `PASTURE_NAMESPACE` is read as the default
+for `--namespace` when the flag is omitted; an explicit `--namespace` always
+wins. `task list`, `task ready`, and `task blocked` are scoped to that effective
+namespace; pass `--all-namespaces` to ignore both sources and read every
+namespace. When neither source is set, those reads are unscoped. Creation still
+falls back to the git-remote-derived URL (or directory fallback) when neither
+source is set. Inspect each returned full task URI before choosing repository
+work. Other task reads/writes address their full URI directly. Do not change
+directory merely to select a tracker.
 Store precedence is `--db`, then `PASTURE_DB_PATH`, then
 `$XDG_DATA_HOME/pasture/pasture.db`, then
 `$HOME/.local/share/pasture/pasture.db`, with `.pasture/pasture.db` as fallback.

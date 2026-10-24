@@ -18,6 +18,6 @@ Flags:
 Global Flags:
       --db string          Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)
       --format string      Output format: text or json (default "text")
-      --namespace string   Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)
+      --namespace string   Namespace URI for created tasks and scoped task reads (env: PASTURE_NAMESPACE; empty derives new tasks from the git remote, then file:// of cwd)
 
 Use "pasture hook [command] --help" for more information about a command.

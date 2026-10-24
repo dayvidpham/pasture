@@ -101,12 +101,23 @@ func init() {
 		"Path to the unified pasture SQLite database (env: PASTURE_DB_PATH, default: ~/.local/share/pasture/pasture.db)")
 	pf.StringVar(&flagFormat, "format", "text",
 		"Output format: text or json")
-	pf.StringVar(&flagNamespace, "namespace", "",
-		"Namespace URI for created tasks (default: derived from git remote, then file:// of cwd)")
+	// The default is the environment's namespace so task reads (list, ready,
+	// blocked) are scoped without repeating the flag. An explicit --namespace
+	// overwrites this value during flag parsing and always wins.
+	pf.StringVar(&flagNamespace, "namespace", os.Getenv("PASTURE_NAMESPACE"),
+		"Namespace URI for created tasks and scoped task reads (env: PASTURE_NAMESPACE; empty derives new tasks from the git remote, then file:// of cwd)")
 
 	// Local to the root so no subcommand inherits it (see the RunE comment).
 	rootCmd.Flags().BoolVar(&flagRootUpgrade, "upgrade", false,
 		"Upgrade pasture to the latest release (same as `pasture upgrade`)")
+}
+
+// effectiveNamespace is the namespace task reads scope to: an explicit
+// --namespace when supplied, otherwise PASTURE_NAMESPACE (the flag default).
+// Empty means no namespace source exists, and callers keep their unscoped
+// behavior.
+func effectiveNamespace() string {
+	return flagNamespace
 }
 
 // resolveFormat returns the typed OutputFormat for the current command.
