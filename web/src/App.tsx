@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react'
 import {
   Activity,
   Clock3,
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import {
   Button,
+  Chip,
   ConnectionPill,
   DataTable,
   EmptyState,
@@ -23,11 +24,16 @@ import {
 } from '@peasant-labs/fairtrade/ui'
 
 import {
+  bindProject,
   fetchInspect,
+  fetchProject,
   fetchTranscript,
   socketURL,
   subscribe,
+  unbindProject,
   type EpochView,
+  type ProjectRole,
+  type ProjectView,
   type SessionBindingInterval,
   type SessionView,
   type WireFrame,
@@ -54,6 +60,23 @@ import {
   type ProjectIdentity,
   type ProjectOption,
 } from './project'
+import {
+  DEFAULT_PROJECT_ROLE,
+  EMPTY_PROJECT_MAPPING,
+  epochOptions,
+  mappingIntervalEpochLabel,
+  mappingSummary,
+  projectBindRequest,
+  projectMappingForSelection,
+  projectMappingHistory,
+  projectMappingNoProjectMessage,
+  projectMappingStatusLabel,
+  projectRoleFromValue,
+  projectRoleOptions,
+  projectUnbindRequest,
+  reduceProjectMapping,
+  type ProjectMappingState,
+} from './projectMapping'
 
 type Connection = 'connecting' | 'live' | 'disconnected'
 type StateFilter = 'all' | 'active' | 'idle' | 'ended' | 'unknown'
@@ -227,7 +250,7 @@ export function ProjectDetail({
 }) {
   const label = projectLabel(session)
   return (
-    <div className="project-detail">
+    <div className="project-detail" data-integration={integration?.status ?? 'unknown'}>
       <p className="eyebrow">peasant-owned project</p>
       <dl className="detail-list">
         <div><dt>project</dt><dd>{label}</dd></div>
@@ -308,6 +331,252 @@ export function PeasantIntegrationState({
   )
 }
 
+/**
+ * ProjectMappingHistory is the project's interval history. It is deliberately
+ * separate from BindingHistory: those intervals belong to the selected
+ * session's binding, while these belong to the Peasant project.
+ */
+export function ProjectMappingHistory({ view }: { view: ProjectView }) {
+  const intervals = projectMappingHistory(view)
+  if (intervals.length === 0) return null
+  return (
+    <div className="project-mapping-history">
+      <p className="eyebrow">mapping history</p>
+      <ol className="project-mapping-intervals" aria-label="project mapping history">
+        {intervals.map((interval) => (
+          <li
+            key={interval.bindingId}
+            className="project-mapping-interval"
+            data-open={interval.unboundAt ? 'false' : 'true'}
+            data-binding-id={interval.bindingId}
+          >
+            <div className="project-mapping-interval-head">
+              <span className="project-mapping-interval-epoch">
+                {mappingIntervalEpochLabel(interval)}
+              </span>
+              <StatusDot
+                label={interval.unboundAt ? 'closed' : 'open'}
+                color={interval.unboundAt ? 'var(--ink-4)' : 'var(--success)'}
+              />
+            </div>
+            <div className="project-mapping-chips">
+              <span className="project-mapping-role">{interval.role}</span>
+              <Chip size="sm" chrome>{interval.source}</Chip>
+              <Chip size="sm" tone="ok" chrome>{interval.confidence}</Chip>
+            </div>
+            <p className="project-mapping-range">
+              {formatTime(interval.boundAt)} →{' '}
+              {interval.unboundAt ? formatTime(interval.unboundAt) : 'open'}
+              {interval.endReason ? ` · ${interval.endReason}` : ''}
+            </p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  )
+}
+
+/**
+ * ProjectMappingPanel shows the project-level epoch mapping for the selected
+ * session's Peasant project. It is explicitly not the session's own epoch
+ * binding: the note stays visible in every state, and the session binding above
+ * remains the authoritative one. A missing project hash is explained from the
+ * Peasant integration state instead of offering a control that cannot work.
+ */
+export function ProjectMappingPanel({
+  state,
+  epochs,
+  integration,
+  onBind,
+  onUnbind,
+  onRefresh,
+}: {
+  state: ProjectMappingState
+  epochs: EpochView[]
+  integration: PeasantIntegration | null
+  onBind: (epochId: string, role: ProjectRole) => void
+  onUnbind: () => void
+  onRefresh: () => void
+}) {
+  const [chosenEpochId, setChosenEpochId] = useState('')
+  const [chosenRole, setChosenRole] = useState<ProjectRole | ''>('')
+
+  const epochChoices = epochOptions(epochs)
+  const currentEpochId = state.view?.epoch?.id ?? ''
+  const defaultEpochId =
+    currentEpochId && epochChoices.some((option) => option.value === currentEpochId)
+      ? currentEpochId
+      : (epochChoices[0]?.value ?? '')
+  // A live epoch-list change can remove the previously chosen epoch; fall back
+  // rather than offering a bind to an epoch that no longer exists.
+  const knownChosenEpochId =
+    chosenEpochId && epochChoices.some((option) => option.value === chosenEpochId)
+      ? chosenEpochId
+      : ''
+  const selectedEpochId = knownChosenEpochId || defaultEpochId
+  // A new binding starts at the API's worker default; rebinding starts at the
+  // role already recorded, so changing only the epoch cannot silently change it.
+  const selectedRole = chosenRole || state.view?.binding?.role || DEFAULT_PROJECT_ROLE
+  const busy = state.action === 'binding' || state.action === 'unbinding'
+  const canBind =
+    state.load === 'ready' && selectedEpochId !== '' && epochChoices.length > 0 && !busy
+  const canUnbind = state.load === 'ready' && Boolean(state.view?.binding) && !busy
+
+  const handleBind = () => {
+    if (!canBind) return
+    onBind(selectedEpochId, selectedRole)
+  }
+
+  const handleUnbind = () => {
+    if (!canUnbind) return
+    onUnbind()
+  }
+
+  return (
+    <div
+      className="project-mapping"
+      data-status={projectMappingStatusLabel(state)}
+      data-integration={integration?.status ?? 'unknown'}
+    >
+      <p className="eyebrow">project-level mapping</p>
+      <p className="rail-copy muted">
+        This maps the Peasant project to an epoch. It is separate from, and never
+        overrides, the session&apos;s own epoch binding above.
+      </p>
+
+      {state.load === 'no-project' && (
+        <p className="rail-copy muted">{projectMappingNoProjectMessage(integration)}</p>
+      )}
+
+      {state.load === 'loading' && (
+        <p className="rail-copy muted">reading the project-level mapping…</p>
+      )}
+
+      {state.load === 'error' && state.failure && (
+        <div className="project-mapping-error" role="alert">
+          <p className="rail-copy">{state.failure.message}</p>
+          {state.failure.retry && (
+            <button type="button" className="clear-filter" onClick={onRefresh}>
+              retry project mapping
+            </button>
+          )}
+        </div>
+      )}
+
+      {state.load === 'ready' && (
+        <>
+          {state.view?.binding ? (
+            <div className="project-mapping-current">
+              <p className="eyebrow">active project mapping</p>
+              <p className="project-mapping-epoch">{mappingSummary(state.view)}</p>
+              <dl className="detail-list">
+                <div><dt>role</dt><dd>{state.view.binding.role}</dd></div>
+                <div><dt>bound</dt><dd>{formatTime(state.view.binding.boundAt)}</dd></div>
+                <div>
+                  <dt>source</dt>
+                  <dd><Chip size="sm" chrome>{state.view.binding.source}</Chip></dd>
+                </div>
+                <div>
+                  <dt>confidence</dt>
+                  <dd><Chip size="sm" tone="ok" chrome>{state.view.binding.confidence}</Chip></dd>
+                </div>
+              </dl>
+            </div>
+          ) : (
+            <p className="rail-copy muted">
+              {epochChoices.length === 0
+                ? 'no active project mapping. Start an epoch before binding this project.'
+                : 'no active project mapping. Choose an epoch and role to bind this project.'}
+            </p>
+          )}
+
+          {state.action === 'binding' && (
+            <p className="rail-copy muted" role="status">binding the project mapping…</p>
+          )}
+
+          {state.action === 'unbinding' && (
+            <p className="rail-copy muted" role="status">removing the project mapping…</p>
+          )}
+
+          {state.action === 'success' && state.actionMessage && (
+            <p className="project-mapping-success" role="status">{state.actionMessage}</p>
+          )}
+
+          {state.action === 'error' && state.failure && (
+            <div className="project-mapping-error" role="alert">
+              <p className="rail-copy">{state.failure.message}</p>
+              {state.failure.retry && (
+                <button type="button" className="clear-filter" onClick={onRefresh}>
+                  refresh project mapping
+                </button>
+              )}
+            </div>
+          )}
+
+          {(epochChoices.length > 0 || state.view?.binding) && (
+            <div className="project-mapping-form">
+              {epochChoices.length > 0 && (
+                <>
+                  <Select
+                    label="epoch"
+                    options={epochChoices}
+                    value={selectedEpochId}
+                    onChange={(event) => setChosenEpochId(event.currentTarget.value)}
+                    disabled={busy}
+                  />
+                  <Select
+                    label="role"
+                    options={projectRoleOptions()}
+                    value={selectedRole}
+                    onChange={(event) => {
+                      const role = projectRoleFromValue(event.currentTarget.value)
+                      if (role) setChosenRole(role)
+                    }}
+                    disabled={busy}
+                  />
+                </>
+              )}
+              <div className="project-mapping-actions">
+                {epochChoices.length > 0 && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={state.action === 'binding'}
+                    disabled={!canBind}
+                    {...({ onClick: handleBind } as object)}
+                  >
+                    {state.view?.binding ? 'rebind project' : 'bind project'}
+                  </Button>
+                )}
+                {state.view?.binding && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    loading={state.action === 'unbinding'}
+                    disabled={!canUnbind}
+                    {...({ onClick: handleUnbind } as object)}
+                  >
+                    unbind
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {epochChoices.length === 0 && state.view?.binding && (
+            <p className="rail-copy muted">
+              no projected epochs are available to bind; the current project mapping can
+              still be unbound.
+            </p>
+          )}
+
+          {state.view && <ProjectMappingHistory view={state.view} />}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function App() {
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [epochs, setEpochs] = useState<EpochView[]>([])
@@ -326,6 +595,11 @@ export default function App() {
   const [transcriptRetry, setTranscriptRetry] = useState(0)
   const [transcriptLeftRail, setTranscriptLeftRail] = useState(false)
   const [transcriptRightRail, setTranscriptRightRail] = useState(false)
+  const [projectMapping, dispatchProjectMapping] = useReducer(
+    reduceProjectMapping,
+    EMPTY_PROJECT_MAPPING,
+  )
+  const [projectMappingRetry, setProjectMappingRetry] = useState(0)
   const socketRef = useRef<WebSocket | null>(null)
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -454,6 +728,11 @@ export default function App() {
     [sessions, selectedId],
   )
 
+  // The project mapping is keyed by the Peasant project hash, not by the
+  // selected session: two sessions in the same project share one mapping.
+  const selectedProjectHash = selectedSession?.projectHash ?? null
+  const selectedMapping = projectMappingForSelection(projectMapping, selectedProjectHash)
+
   const selectedHarness = selectedSession?.harness
   const selectedNativeId = selectedSession?.nativeSessionId
   const transcriptKey =
@@ -484,6 +763,65 @@ export default function App() {
       })
     return () => controller.abort()
   }, [selectedHarness, selectedNativeId, transcriptKey, transcriptRetry])
+
+  // Fetch the project-level mapping once per selected project hash. A 404 is
+  // classified by the reducer as "never mapped" and leaves the bind controls
+  // available; it is not surfaced as an error.
+  useEffect(() => {
+    if (!selectedProjectHash) {
+      dispatchProjectMapping({ type: 'load', projectHash: null })
+      return
+    }
+    const controller = new AbortController()
+    dispatchProjectMapping({ type: 'load', projectHash: selectedProjectHash })
+    fetchProject(selectedProjectHash, controller.signal)
+      .then((view) => {
+        if (controller.signal.aborted) return
+        dispatchProjectMapping({ type: 'loaded', projectHash: selectedProjectHash, view })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        dispatchProjectMapping({ type: 'load-failed', projectHash: selectedProjectHash, error })
+      })
+    return () => controller.abort()
+  }, [selectedProjectHash, projectMappingRetry])
+
+  const bindSelectedProject = useCallback(
+    async (epochId: string, role: ProjectRole) => {
+      const projectHash = selectedProjectHash
+      if (!projectHash) return
+      dispatchProjectMapping({ type: 'bind' })
+      try {
+        const view = await bindProject(
+          projectHash,
+          projectBindRequest(selectedMapping.view, epochId, role),
+        )
+        dispatchProjectMapping({ type: 'bind-succeeded', projectHash, view })
+      } catch (error) {
+        dispatchProjectMapping({ type: 'action-failed', projectHash, error })
+      }
+    },
+    [selectedProjectHash, selectedMapping.view],
+  )
+
+  const unbindSelectedProject = useCallback(async () => {
+    const projectHash = selectedProjectHash
+    if (!projectHash) return
+    dispatchProjectMapping({ type: 'unbind' })
+    try {
+      const view = await unbindProject(
+        projectHash,
+        projectUnbindRequest(selectedMapping.view),
+      )
+      dispatchProjectMapping({ type: 'unbind-succeeded', projectHash, view })
+    } catch (error) {
+      dispatchProjectMapping({ type: 'action-failed', projectHash, error })
+    }
+  }, [selectedProjectHash, selectedMapping.view])
+
+  const refreshProjectMapping = useCallback(() => {
+    setProjectMappingRetry((attempt) => attempt + 1)
+  }, [])
 
   const activeCount = sessions.filter((session) => session.activity.state === 'active').length
   const unknownCount = sessions.filter((session) => session.activity.state === 'unknown').length
@@ -665,6 +1003,26 @@ export default function App() {
               <p className="rail-copy muted">choose a session in the table to inspect its binding.</p>
             )}
           </RailSection>
+
+          {selectedSession && (
+            <RailSection
+              title="project mapping"
+              icon={Folder}
+              meta={projectMappingStatusLabel(selectedMapping)}
+            >
+              <ProjectMappingPanel
+                // Reset the local epoch/role form when the project changes, so
+                // one project's choices never leak into another project's bind.
+                key={selectedProjectHash ?? 'no-project'}
+                state={selectedMapping}
+                epochs={epochs}
+                integration={peasantIntegration}
+                onBind={bindSelectedProject}
+                onUnbind={unbindSelectedProject}
+                onRefresh={refreshProjectMapping}
+              />
+            </RailSection>
+          )}
 
           <RailSection
             title="transcript"

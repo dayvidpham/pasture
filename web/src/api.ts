@@ -6,6 +6,13 @@ export type EpochView = components['schemas']['EpochView']
 export type InspectPayload = components['schemas']['InspectPayload']
 export type EpochPage = components['schemas']['EpochPage']
 export type PeasantIntegration = components['schemas']['PeasantIntegration']
+export type ProjectView = components['schemas']['ProjectView']
+export type ProjectBindingInterval = components['schemas']['ProjectBindingInterval']
+export type ProjectRole = components['schemas']['ProjectBinding']['role']
+// Reuse the generated request contracts rather than hand-writing a second
+// shape; the OpenAPI artifact is the single source of truth.
+export type ProjectBindBody = components['schemas']['ProjectBindRequest']
+export type ProjectUnbindBody = components['schemas']['ProjectUnbindRequest']
 
 export type SessionsFrame = {
   type: 'sessions'
@@ -51,8 +58,7 @@ export class ApiError extends Error {
   }
 }
 
-async function requestJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, { signal, headers: { accept: 'application/json' } })
+async function readResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let code = 'http_error'
     let detail = `${response.status} ${response.statusText}`
@@ -66,6 +72,21 @@ async function requestJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
     throw new ApiError(response.status, code, detail)
   }
   return (await response.json()) as T
+}
+
+async function requestJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, { signal, headers: { accept: 'application/json' } })
+  return readResponse<T>(response)
+}
+
+async function sendJSON<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST',
+    signal,
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return readResponse<T>(response)
 }
 
 export function fetchInspect(signal?: AbortSignal): Promise<InspectPayload> {
@@ -84,6 +105,48 @@ export function fetchTranscript(
 ): Promise<unknown> {
   const path = `/api/v1/sessions/${encodeURIComponent(harness)}/${encodeURIComponent(nativeSessionId)}/transcript`
   return requestJSON<unknown>(path, signal)
+}
+
+/**
+ * Fetch one project's active mapping and interval history. A 404
+ * `project_not_found` is an ordinary "this project was never mapped" answer;
+ * callers classify it instead of treating it as a transport failure.
+ */
+export function fetchProject(projectHash: string, signal?: AbortSignal): Promise<ProjectView> {
+  return requestJSON<ProjectView>(
+    `/api/v1/projects/${encodeURIComponent(projectHash)}`,
+    signal,
+  )
+}
+
+/**
+ * Bind a project to an epoch. `expectedBinding` makes the write conditional on
+ * the mapping the caller last saw, so a concurrent rebind is refused with a
+ * 409 instead of silently overwriting it.
+ */
+export function bindProject(
+  projectHash: string,
+  body: ProjectBindBody,
+  signal?: AbortSignal,
+): Promise<ProjectView> {
+  return sendJSON<ProjectView>(
+    `/api/v1/projects/${encodeURIComponent(projectHash)}/bind`,
+    body,
+    signal,
+  )
+}
+
+/** Close a project's active mapping, keeping its interval history. */
+export function unbindProject(
+  projectHash: string,
+  body: ProjectUnbindBody = {},
+  signal?: AbortSignal,
+): Promise<ProjectView> {
+  return sendJSON<ProjectView>(
+    `/api/v1/projects/${encodeURIComponent(projectHash)}/unbind`,
+    body,
+    signal,
+  )
 }
 
 export function socketURL(): string {

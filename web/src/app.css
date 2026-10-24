@@ -516,3 +516,129 @@ body {
 .sessions-table .tbl-td {
   overflow: hidden;
 }
+
+/* Project-level epoch mapping. It lives beside the session detail and repeats
+   that it is not the session binding, so the two relations cannot be confused
+   at a glance. */
+.project-mapping {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.project-mapping > .rail-copy {
+  overflow-wrap: anywhere;
+}
+
+.project-mapping-current {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: var(--bd);
+  background: var(--surface);
+}
+
+.project-mapping-epoch {
+  margin: 0;
+  color: var(--ink-strong);
+  font: var(--fs-sm)/var(--lh-tight) var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.project-mapping-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.project-mapping-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.project-mapping-success {
+  margin: 0;
+  color: var(--success);
+  font: var(--fs-sm)/var(--lh-body) var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.project-mapping-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--danger);
+  background: var(--danger-soft);
+}
+
+.project-mapping-error .rail-copy {
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.project-mapping-history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.project-mapping-intervals {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-mapping-interval {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: var(--bd);
+}
+
+.project-mapping-interval[data-open='true'] {
+  border-color: var(--success);
+}
+
+.project-mapping-interval-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.project-mapping-interval-epoch {
+  color: var(--ink-strong);
+  font: var(--fs-sm)/var(--lh-body) var(--font-body);
+  overflow-wrap: anywhere;
+}
+
+.project-mapping-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.project-mapping-role {
+  padding: 0 var(--sp-1);
+  color: var(--ink-2);
+  border: var(--bd);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+}
+
+.project-mapping-range {
+  margin: 0;
+  color: var(--ink-3);
+  font: var(--fs-sm)/var(--lh-body) var(--font-mono);
+  overflow-wrap: anywhere;
+}

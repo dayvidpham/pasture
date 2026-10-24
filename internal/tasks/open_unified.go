@@ -620,6 +620,33 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 			ddl:  `CREATE UNIQUE INDEX IF NOT EXISTS pasture_session_epoch_binding_open ON pasture_session_epoch_binding (harness, session) WHERE unbound_at IS NULL`,
 		},
 		{
+			// A project-to-epoch mapping is a SEPARATE project-level
+			// relationship from the per-session binding above. It never writes
+			// or overrides a session binding, and the session read model never
+			// consults it. Peasant owns project_hash; Pasture owns epoch_id.
+			name: "pasture_project_epoch_binding",
+			ddl: `CREATE TABLE IF NOT EXISTS pasture_project_epoch_binding (
+				binding_id     TEXT PRIMARY KEY,
+				project_hash   TEXT NOT NULL,
+				epoch_id       TEXT NOT NULL,
+				role           TEXT NOT NULL,
+				bound_at       INTEGER NOT NULL,
+				unbound_at     INTEGER,
+				unbound_reason TEXT CHECK (unbound_reason IN ('rebind','unbind'))
+			)`,
+		},
+		{
+			// Exactly one active mapping per project. Closed intervals remain
+			// in the table, so the partial predicate is what enforces "zero or
+			// one active mapping" without discarding history.
+			name: "pasture_project_epoch_binding_open",
+			ddl:  `CREATE UNIQUE INDEX IF NOT EXISTS pasture_project_epoch_binding_open ON pasture_project_epoch_binding (project_hash) WHERE unbound_at IS NULL`,
+		},
+		{
+			name: "pasture_project_epoch_binding_history",
+			ddl:  `CREATE INDEX IF NOT EXISTS pasture_project_epoch_binding_history ON pasture_project_epoch_binding (project_hash, bound_at)`,
+		},
+		{
 			// The live session cache. The binding table owns the end; this table
 			// owns the activity fields the API reads.
 			name: "pasture_session_state",

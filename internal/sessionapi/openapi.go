@@ -4,7 +4,7 @@ import "encoding/json"
 
 // PastureLocalAPIVersion is the frozen document-surface version for the local
 // session API. It changes only when a route or wire shape changes.
-const PastureLocalAPIVersion = "0.4.0"
+const PastureLocalAPIVersion = "0.5.0"
 
 // OpenAPIBytes returns the canonical OpenAPI 3.1 document. The generator and
 // the freshness test call this same function, so the committed artifact cannot
@@ -21,6 +21,7 @@ func openAPIDocument() map[string]any {
 	ref := func(name string) map[string]any {
 		return map[string]any{"$ref": "#/components/schemas/" + name}
 	}
+	roleNames := []string{"epoch", "architect", "reviewer", "supervisor", "worker"}
 	jsonResponse := func(schema map[string]any) map[string]any {
 		return map[string]any{
 			"description": "Successful response",
@@ -43,7 +44,9 @@ func openAPIDocument() map[string]any {
 			"title":   "Pasture Local Session API",
 			"version": PastureLocalAPIVersion,
 			"description": "Loopback-only session and epoch API for active harness sessions mapped to " +
-				"epoch bindings. The transcript route proxies one durable Peasant " +
+				"epoch bindings. It also records explicit project-to-epoch mappings: a project hash " +
+				"is Peasant-owned, the mapped epoch is a Pasture task, and the relationship is " +
+				"independent of per-session bindings. The transcript route proxies one durable Peasant " +
 				"SessionDetailPayload; Pasture does not reshape transcript content.",
 		},
 		"paths": map[string]any{
@@ -106,6 +109,75 @@ func openAPIDocument() map[string]any {
 						"403": errorResponse("Non-loopback Host or Origin"),
 						"503": errorResponse("The session cache is stale"),
 						"500": errorResponse("The session store could not be read"),
+					},
+				},
+			},
+			"/api/v1/projects": map[string]any{
+				"get": map[string]any{
+					"operationId": "listProjects",
+					"summary":     "List projects with an active epoch mapping",
+					"responses": map[string]any{
+						"200": jsonResponse(ref("ProjectPage")),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"503": errorResponse("Project mapping routes are unavailable"),
+						"500": errorResponse("The project mapping store could not be read"),
+					},
+				},
+			},
+			"/api/v1/projects/{projectHash}": map[string]any{
+				"get": map[string]any{
+					"operationId": "getProject",
+					"summary":     "Get one project's active mapping and interval history",
+					"parameters": []any{
+						projectHashPathParameter(),
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(ref("ProjectView")),
+						"400": errorResponse("Invalid project hash"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"404": errorResponse("The project has no mapping history"),
+						"503": errorResponse("Project mapping routes are unavailable"),
+						"500": errorResponse("The project mapping store could not be read"),
+					},
+				},
+			},
+			"/api/v1/projects/{projectHash}/bind": map[string]any{
+				"post": map[string]any{
+					"operationId": "bindProject",
+					"summary":     "Map a project to an epoch",
+					"description": "Closes any active mapping for the project and opens the requested one. " +
+						"Binding the already-active epoch and role is idempotent. The mapping is a project-level " +
+						"relationship and never writes or overrides a session binding.",
+					"parameters": []any{
+						projectHashPathParameter(),
+					},
+					"requestBody": jsonBody(ref("ProjectBindRequest")),
+					"responses": map[string]any{
+						"200": jsonResponse(ref("ProjectView")),
+						"400": errorResponse("Invalid project hash or body"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"404": errorResponse("Unknown epoch"),
+						"409": errorResponse("Binding conflict"),
+						"503": errorResponse("Project mapping writes are unavailable"),
+						"500": errorResponse("The project mapping store could not be written"),
+					},
+				},
+			},
+			"/api/v1/projects/{projectHash}/unbind": map[string]any{
+				"post": map[string]any{
+					"operationId": "unbindProject",
+					"summary":     "Close a project's active epoch mapping",
+					"parameters": []any{
+						projectHashPathParameter(),
+					},
+					"requestBody": jsonBody(ref("ProjectUnbindRequest")),
+					"responses": map[string]any{
+						"200": jsonResponse(ref("ProjectView")),
+						"400": errorResponse("Invalid project hash or body"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"409": errorResponse("No open mapping or binding conflict"),
+						"503": errorResponse("Project mapping writes are unavailable"),
+						"500": errorResponse("The project mapping store could not be written"),
 					},
 				},
 			},
@@ -436,7 +508,7 @@ func openAPIDocument() map[string]any {
 				"BindRequest": objectSchema(
 					map[string]any{
 						"epochId":         map[string]any{"type": "string"},
-						"role":            map[string]any{"type": "string", "enum": []string{"epoch", "architect", "reviewer", "supervisor", "worker"}},
+						"role":            map[string]any{"type": "string", "enum": roleNames},
 						"expectedBinding": map[string]any{"type": "string"},
 					},
 					"epochId", "role",
@@ -444,6 +516,90 @@ func openAPIDocument() map[string]any {
 				"UnbindRequest": objectSchema(
 					map[string]any{
 						"expectedBinding": map[string]any{"type": "string"},
+					},
+				),
+				"ProjectBindingSource": map[string]any{
+					"type": "string",
+					"enum": []string{"project"},
+					"description": "Project mapping provenance. A project mapping is an explicit operator relation; " +
+						"it is never inferred from a working directory or a session binding.",
+				},
+				"ProjectBinding": objectSchema(
+					map[string]any{
+						"bindingId": map[string]any{"type": "string"},
+						"role": map[string]any{
+							"type":        "string",
+							"enum":        roleNames,
+							"description": "The role the operator recorded for the project in this epoch.",
+						},
+						"boundAt":    map[string]any{"type": "string", "format": "date-time"},
+						"source":     ref("ProjectBindingSource"),
+						"confidence": ref("Confidence"),
+					},
+					"bindingId", "role", "boundAt", "source", "confidence",
+				),
+				"ProjectBindingInterval": objectSchema(
+					map[string]any{
+						"bindingId":  map[string]any{"type": "string"},
+						"role":       map[string]any{"type": "string", "enum": roleNames},
+						"boundAt":    map[string]any{"type": "string", "format": "date-time"},
+						"unboundAt":  map[string]any{"type": "string", "format": "date-time"},
+						"endReason":  map[string]any{"type": "string", "enum": []string{"rebind", "unbind"}},
+						"source":     ref("ProjectBindingSource"),
+						"confidence": ref("Confidence"),
+						"epoch":      ref("EpochRef"),
+					},
+					"bindingId", "role", "boundAt", "source", "confidence",
+				),
+				"ProjectView": objectSchema(
+					map[string]any{
+						"projectHash": map[string]any{
+							"type":        "string",
+							"pattern":     "^[0-9a-f]{64}$",
+							"description": "Peasant-owned project identity, preserved exactly. Pasture never derives or recomputes it.",
+						},
+						"binding": ref("ProjectBinding"),
+						"epoch":   ref("EpochRef"),
+						"intervals": map[string]any{
+							"type":        "array",
+							"items":       ref("ProjectBindingInterval"),
+							"description": "Full mapping history ordered by boundAt ascending. Present on detail responses; omitted from list rows.",
+						},
+					},
+					"projectHash",
+				),
+				"ProjectPage": objectSchema(
+					map[string]any{
+						"items": map[string]any{
+							"type":        "array",
+							"items":       ref("ProjectView"),
+							"description": "Projects with an active mapping. A project whose mappings are all closed is omitted.",
+						},
+					},
+					"items",
+				),
+				"ProjectBindRequest": objectSchema(
+					map[string]any{
+						"epochId": map[string]any{"type": "string"},
+						"role": map[string]any{
+							"type":        "string",
+							"enum":        roleNames,
+							"default":     "worker",
+							"description": "Role recorded for the project in this epoch. Omit for worker.",
+						},
+						"expectedBinding": map[string]any{
+							"type":        "string",
+							"description": "Only change the mapping when this binding ID is still active.",
+						},
+					},
+					"epochId",
+				),
+				"ProjectUnbindRequest": objectSchema(
+					map[string]any{
+						"expectedBinding": map[string]any{
+							"type":        "string",
+							"description": "Only close the mapping when this binding ID is still active.",
+						},
 					},
 				),
 				"TranscriptPayload": map[string]any{
@@ -520,5 +676,22 @@ func pathParameter(name, description string) map[string]any {
 		"required":    true,
 		"description": description,
 		"schema":      map[string]any{"type": "string", "maxLength": 512},
+	}
+}
+
+// projectHashPathParameter documents the exact Peasant-owned project identity
+// the route accepts. The hash is never trimmed or coerced.
+func projectHashPathParameter() map[string]any {
+	return map[string]any{
+		"name":        "projectHash",
+		"in":          "path",
+		"required":    true,
+		"description": "Peasant-owned project hash: exactly 64 lowercase hex characters",
+		"schema": map[string]any{
+			"type":      "string",
+			"pattern":   "^[0-9a-f]{64}$",
+			"minLength": 64,
+			"maxLength": 64,
+		},
 	}
 }
