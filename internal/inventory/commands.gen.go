@@ -5,6 +5,7 @@ import "github.com/dayvidpham/pasture/internal/codegen/ir"
 
 func init() {
 	commandRows = []Row{
+		{Key{Harness: ir.HarnessClaudeCode, Kind: KindCommand, ID: "cmd-afk-implement"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindCommand, ID: "cmd-arch-handoff"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindCommand, ID: "cmd-arch-propose"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindCommand, ID: "cmd-arch-ratify"}},
@@ -29,6 +30,7 @@ func init() {
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindCommand, ID: "cmd-work-blocked"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindCommand, ID: "cmd-work-complete"}},
 		{Key{Harness: ir.HarnessClaudeCode, Kind: KindCommand, ID: "cmd-work-impl"}},
+		{Key{Harness: ir.HarnessOpenCode, Kind: KindCommand, ID: "cmd-afk-implement"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindCommand, ID: "cmd-arch-handoff"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindCommand, ID: "cmd-arch-propose"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindCommand, ID: "cmd-arch-ratify"}},
@@ -53,6 +55,7 @@ func init() {
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindCommand, ID: "cmd-work-blocked"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindCommand, ID: "cmd-work-complete"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindCommand, ID: "cmd-work-impl"}},
+		{Key{Harness: ir.HarnessCodex, Kind: KindCommand, ID: "cmd-afk-implement"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindCommand, ID: "cmd-arch-handoff"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindCommand, ID: "cmd-arch-propose"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindCommand, ID: "cmd-arch-ratify"}},

@@ -841,6 +841,17 @@ var CommandSpecs = map[string]CommandSpec{
 		Title:       "Pasture Status",
 		File:        "skills/status/SKILL.md",
 	},
+	"cmd-afk-implement": {
+		Id:          "cmd-afk-implement",
+		Name:        "pasture:afk-implement",
+		Description: "Run an unattended implementation session with small PRs and a clean review wave, never merging",
+		Title:       "AFK Implement",
+		RoleRef:     protocol.RoleSupervisor,
+		Phases: []protocol.PhaseId{
+			protocol.PhaseImplPlan, protocol.PhaseWorkerSlices, protocol.PhaseCodeReview,
+		},
+		File: "skills/afk-implement/SKILL.md",
+	},
 	"cmd-user-request": {
 		Id:            "cmd-user-request",
 		Name:          "pasture:user:request",

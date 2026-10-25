@@ -528,6 +528,14 @@
     <command id="cmd-status" name="pasture:status" description="Project status and monitoring via Pasture queries">
       <file>skills/status/SKILL.md</file>
     </command>
+    <command id="cmd-afk-implement" name="pasture:afk-implement" role-ref="supervisor" description="Run an unattended implementation session with small PRs and a clean review wave, never merging">
+      <phases>
+        <phase-ref ref="p8"></phase-ref>
+        <phase-ref ref="p9"></phase-ref>
+        <phase-ref ref="p10"></phase-ref>
+      </phases>
+      <file>skills/afk-implement/SKILL.md</file>
+    </command>
     <command id="cmd-swarm" name="pasture:swarm" description="Deprecated orchestration entry; use the supervisor and worker role workflow">
       <file>skills/swarm/SKILL.md</file>
     </command>
