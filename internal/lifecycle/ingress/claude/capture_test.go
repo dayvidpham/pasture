@@ -34,7 +34,7 @@ func authenticSessionStart(t *testing.T) (raw []byte, sidecar acceptance.Capture
 func TestAuthenticSessionStartCapturePreservesExactBytes(t *testing.T) {
 	t.Parallel()
 	raw, sidecar, sessionID := authenticSessionStart(t)
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	event := manifest.Events[0]
 	capture := claude.Parse(raw, event, manifest.Version, model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, capture.Disposition)
@@ -56,7 +56,7 @@ func TestAuthenticSessionStartCapturePreservesExactBytes(t *testing.T) {
 
 func TestCaptureClassifiesBeforeExtraction(t *testing.T) {
 	t.Parallel()
-	event := registration.ClaudeCode2_1_261().Events[0]
+	event := registration.ClaudeCode__2_1_261().Events[0]
 	tests := []struct {
 		name string
 		raw  []byte
@@ -84,7 +84,7 @@ func TestCaptureClassifiesBeforeExtraction(t *testing.T) {
 func TestCaptureDropsBindingsWhenLaterRequiredIdentityFails(t *testing.T) {
 	t.Parallel()
 	var event registration.Event
-	for _, candidate := range registration.ClaudeCode2_1_261().Events {
+	for _, candidate := range registration.ClaudeCode__2_1_261().Events {
 		if candidate.Kind == registration.EventPreToolUse {
 			event = candidate
 			break
@@ -114,7 +114,7 @@ func TestCaptureDropsBindingsWhenLaterRequiredIdentityFails(t *testing.T) {
 func TestAddedClaudeMembersStayOutsideBindings(t *testing.T) {
 	t.Parallel()
 	raw, _, _ := authenticSessionStart(t)
-	event := registration.ClaudeCode2_1_261().Events[0]
+	event := registration.ClaudeCode__2_1_261().Events[0]
 	control := claude.Parse(raw, event, "2.1.300", model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, control.Disposition)
 	var members map[string]json.RawMessage

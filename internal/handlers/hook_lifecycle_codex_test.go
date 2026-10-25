@@ -40,7 +40,7 @@ func TestHookLifecycleResponseRejectsUnsupportedCodexBeforeInputAndStorage(t *te
 			dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 			input := &readTrackingLifecycleInput{}
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessCodex, Event: event, HostVersion: registration.Codex0_153_0().Version,
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: event, HostVersion: registration.Codex__0_153_0().Version,
 				Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld.codex"},
 				TimeoutProfile: timeouts.TestProfile(),
 			})
@@ -135,7 +135,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			require.NoError(t, bootstrap.Close())
 
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_153_0().Version,
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex__0_153_0().Version,
 				Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.codex." + tc.name},
 				TimeoutProfile: timeouts.TestProfile(),
 			})
@@ -180,8 +180,8 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			require.NoError(t, err)
 			require.Len(t, records.Records(), 1, "the bounded read-back must return exactly the one committed occurrence")
 			record := records.Records()[0]
-			require.Equal(t, registration.Codex0_153_0().Contract, record.Occurrence.RuntimeContract, "read-back must preserve the Codex provider contract")
-			require.Equal(t, registration.Codex0_153_0().Version, record.Occurrence.Envelope.HostVersion)
+			require.Equal(t, registration.Codex__0_153_0().Contract, record.Occurrence.RuntimeContract, "read-back must preserve the Codex provider contract")
+			require.Equal(t, registration.Codex__0_153_0().Version, record.Occurrence.Envelope.HostVersion)
 			require.Equal(t, tc.kind, record.Occurrence.Kind)
 			require.Len(t, record.Interpreted(), 1)
 			interpreted := record.Interpreted()[0]

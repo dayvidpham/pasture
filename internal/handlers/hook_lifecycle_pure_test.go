@@ -71,7 +71,7 @@ func TestPrepareLifecycleDeliveryRefusesBeforeAnyStore(t *testing.T) {
 	valid := lifecycleAdmission{
 		Harness:     ir.HarnessClaudeCode,
 		Event:       "PreToolUse",
-		HostVersion: registration.ClaudeCode2_1_261().Version,
+		HostVersion: registration.ClaudeCode__2_1_261().Version,
 		Input:       bytes.NewReader(readPureFixture(t)),
 	}
 
@@ -92,7 +92,7 @@ func TestPrepareLifecycleDeliveryRefusesBeforeAnyStore(t *testing.T) {
 			admission: lifecycleAdmission{
 				Harness:           ir.HarnessClaudeCode,
 				Event:             "PreToolUse",
-				HostVersion:       registration.ClaudeCode2_1_261().Version,
+				HostVersion:       registration.ClaudeCode__2_1_261().Version,
 				HostVersionSource: model.HostVersionSource("not-a-declared-source"),
 				Input:             &admissionReader{},
 			},
@@ -104,7 +104,7 @@ func TestPrepareLifecycleDeliveryRefusesBeforeAnyStore(t *testing.T) {
 			admission: lifecycleAdmission{
 				Harness:     ir.HarnessClaudeCode,
 				Event:       "NotARegisteredEvent",
-				HostVersion: registration.ClaudeCode2_1_261().Version,
+				HostVersion: registration.ClaudeCode__2_1_261().Version,
 				Input:       &admissionReader{},
 			},
 			wantErr:    `declares no native event named "NotARegisteredEvent"`,
@@ -115,7 +115,7 @@ func TestPrepareLifecycleDeliveryRefusesBeforeAnyStore(t *testing.T) {
 			admission: lifecycleAdmission{
 				Harness:     ir.HarnessClaudeCode,
 				Event:       "Elicitation",
-				HostVersion: registration.ClaudeCode2_1_261().Version,
+				HostVersion: registration.ClaudeCode__2_1_261().Version,
 				Input:       &admissionReader{},
 			},
 			wantErr:    `event "Elicitation" is withheld`,
@@ -126,7 +126,7 @@ func TestPrepareLifecycleDeliveryRefusesBeforeAnyStore(t *testing.T) {
 			admission: lifecycleAdmission{
 				Harness:     ir.HarnessOpenCode,
 				Event:       "session.updated",
-				HostVersion: registration.OpenCode1_18_29().Version,
+				HostVersion: registration.OpenCode__1_18_29().Version,
 				Input:       &admissionReader{},
 			},
 			wantErr:    `event "session.updated" is withheld`,
@@ -137,7 +137,7 @@ func TestPrepareLifecycleDeliveryRefusesBeforeAnyStore(t *testing.T) {
 			admission: lifecycleAdmission{
 				Harness:     ir.HarnessClaudeCode,
 				Event:       "PreToolUse",
-				HostVersion: registration.ClaudeCode2_1_261().Version,
+				HostVersion: registration.ClaudeCode__2_1_261().Version,
 				Input:       &admissionReader{err: errors.New("stdin broke")},
 			},
 			wantErr:   "native payload could not be read",
@@ -148,7 +148,7 @@ func TestPrepareLifecycleDeliveryRefusesBeforeAnyStore(t *testing.T) {
 			admission: lifecycleAdmission{
 				Harness:     ir.HarnessClaudeCode,
 				Event:       "PreToolUse",
-				HostVersion: registration.ClaudeCode2_1_261().Version,
+				HostVersion: registration.ClaudeCode__2_1_261().Version,
 				Input:       bytes.NewReader(nil),
 			},
 			wantErr:   "standard input carried zero bytes",
@@ -159,7 +159,7 @@ func TestPrepareLifecycleDeliveryRefusesBeforeAnyStore(t *testing.T) {
 			admission: lifecycleAdmission{
 				Harness:     ir.HarnessClaudeCode,
 				Event:       "PreToolUse",
-				HostVersion: registration.ClaudeCode2_1_261().Version,
+				HostVersion: registration.ClaudeCode__2_1_261().Version,
 				Input:       bytes.NewReader(bytes.Repeat([]byte("x"), model.MaxNativePayloadBytes+1)),
 			},
 			wantErr:   "exceeds",
@@ -210,7 +210,7 @@ func TestRawDryRunPreviewRendersFromThePreparedDeliveryWithoutAStore(t *testing.
 	admission := lifecycleAdmission{
 		Harness:     ir.HarnessClaudeCode,
 		Event:       "PreToolUse",
-		HostVersion: registration.ClaudeCode2_1_261().Version,
+		HostVersion: registration.ClaudeCode__2_1_261().Version,
 		Input:       bytes.NewReader(readPureFixture(t)),
 	}
 	prepared, err := prepareLifecycleDelivery(admission)
@@ -257,7 +257,7 @@ func TestPreparedAdmissionFeedsGateAndEncoderWithoutAStore(t *testing.T) {
 	admission := lifecycleAdmission{
 		Harness:     ir.HarnessClaudeCode,
 		Event:       "PreToolUse",
-		HostVersion: registration.ClaudeCode2_1_261().Version,
+		HostVersion: registration.ClaudeCode__2_1_261().Version,
 		Input:       bytes.NewReader(readPureFixture(t)),
 	}
 	prepared, err := prepareLifecycleDelivery(admission)
@@ -324,7 +324,7 @@ func TestPrepareLifecycleDeliveryHonoursTheActivationOverride(t *testing.T) {
 	_, err = prepareLifecycleDelivery(lifecycleAdmission{
 		Harness:     ir.HarnessClaudeCode,
 		Event:       "PreToolUse",
-		HostVersion: registration.ClaudeCode2_1_261().Version,
+		HostVersion: registration.ClaudeCode__2_1_261().Version,
 		Activations: overridden,
 		Input:       reader,
 	})

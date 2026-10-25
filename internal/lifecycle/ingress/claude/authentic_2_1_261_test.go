@@ -21,7 +21,7 @@ import (
 )
 
 // authenticClaudeVersion is the recorded host version; the corpus was captured at it.
-var authenticClaudeVersion = registration.ClaudeCode2_1_261().Version
+var authenticClaudeVersion = registration.ClaudeCode__2_1_261().Version
 
 const authenticFileChangedVersion = "2.1.263"
 const authenticFileChangedSource = "cmd/pasture/hook_lifecycle.go:406 -> internal/handlers/capture_sink.go:DirectoryCaptureSink.Record (PASTURE_CAPTURE_DIR)"
@@ -232,7 +232,7 @@ func TestAuthenticClaude2_1_261FixtureInventoryAndPrivacy(t *testing.T) {
 
 func readAuthenticClaudeFixture(t *testing.T, fixture, expectedEvent string) []byte {
 	t.Helper()
-	return readAuthenticClaudeFixtureAt(t, fixture, expectedEvent, registration.ClaudeCode2_1_261().Version, "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)")
+	return readAuthenticClaudeFixtureAt(t, fixture, expectedEvent, registration.ClaudeCode__2_1_261().Version, "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)")
 }
 
 func readAuthenticClaudeFixtureAt(t *testing.T, fixture, expectedEvent, expectedVersion, expectedSource string) []byte {
@@ -342,7 +342,7 @@ func TestAuthenticClaudeFileChangedAdmissionRemainsNarrow(t *testing.T) {
 	t.Parallel()
 	raw := readAuthenticClaudeFixtureAt(t, "file_changed_2_1_263.json", "FileChanged", authenticFileChangedVersion, authenticFileChangedSource)
 	registered := requireRegistrationEvent(t, registration.EventFileChanged)
-	for _, event := range registration.ClaudeCode2_1_261().Events {
+	for _, event := range registration.ClaudeCode__2_1_261().Events {
 		if event.Kind == registration.EventFileChanged {
 			require.Contains(t, event.AllowedFields, registration.FieldFileEvent)
 		} else {

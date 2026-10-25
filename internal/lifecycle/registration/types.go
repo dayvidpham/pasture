@@ -70,10 +70,10 @@ func (m Manifest) Entries() []Event {
 // place that maps those back to the spelling a live delivery carries.
 func NativeName(contract ir.RuntimeContractID, kind model.ContractEventKind) (string, bool) {
 	for _, m := range []Manifest{
-		ClaudeCode2_1_261(),
-		Codex0_153_0(),
-		OpenCode1_18_29(),
-		OpenCode2_0_20(),
+		ClaudeCode__2_1_261(),
+		Codex__0_153_0(),
+		OpenCode__1_18_29(),
+		OpenCode__2_0_20(),
 	} {
 		if m.Contract != contract {
 			continue

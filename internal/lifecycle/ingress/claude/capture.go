@@ -29,7 +29,7 @@ type Capture struct {
 // exact name. Extra members remain raw evidence and never become bindings.
 func Parse(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
 	validation := ingress.Validate(raw)
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	envelope.Runtime.Contract = manifest.Contract
 	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}
 	result.Cause = model.JSONCaptureCause(validation.Body, validation.Disposition)

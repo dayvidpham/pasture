@@ -15,7 +15,7 @@ func TestCodexActivationEnablesClearedEvents(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.Codex0_153_0()
 	require.NoError(t, err)
-	require.Len(t, entries, len(registration.Codex0_153_0().Entries()), "the manifest must be exhaustive over the generated Codex catalog")
+	require.Len(t, entries, len(registration.Codex__0_153_0().Entries()), "the manifest must be exhaustive over the generated Codex catalog")
 
 	enabled := make([]model.ContractEventKind, 0, len(entries))
 	for _, entry := range entries {
@@ -33,7 +33,7 @@ func TestCodexActivationEnablesClearedEvents(t *testing.T) {
 		require.Equal(t, entry.Event, productionEvent, "the production proof must be bound to this exact event")
 	}
 	var registered []model.ContractEventKind
-	for _, event := range registration.Codex0_153_0().Entries() {
+	for _, event := range registration.Codex__0_153_0().Entries() {
 		registered = append(registered, event.Kind)
 	}
 	require.Equal(t, registered, enabled)
@@ -58,7 +58,7 @@ func TestCodexActivationRejectsCrossEventProofs(t *testing.T) {
 func TestCodexActivationTargetEventsAreDefensive(t *testing.T) {
 	t.Parallel()
 	targets := activation.Codex0_153_0TargetEvents()
-	require.Len(t, targets, len(registration.Codex0_153_0().Entries()))
+	require.Len(t, targets, len(registration.Codex__0_153_0().Entries()))
 	targets[0] = 0
 	require.Equal(t, registration.EventCodexSessionStart, activation.Codex0_153_0TargetEvents()[0], "the target table must be immune to caller mutation")
 }

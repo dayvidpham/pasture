@@ -23,7 +23,7 @@ import (
 // captureFileName is the file the capture sink writes for one Claude Code
 // Notification payload at the recorded host version:
 // <harness>_<snake_event>_<version with dots as underscores>.<n>.json.
-var captureFileName = "claude-code_notification_" + strings.ReplaceAll(registration.ClaudeCode2_1_261().Version, ".", "_") + ".1.json"
+var captureFileName = "claude-code_notification_" + strings.ReplaceAll(registration.ClaudeCode__2_1_261().Version, ".", "_") + ".1.json"
 
 // captureNoticePrefix is the load-bearing phrase of the one notice the hook
 // prints when it records a session. It is pinned here on the binary as it is
@@ -54,9 +54,9 @@ func TestCaptureDirectoryRefusalsLeaveTheHostOutcomeUnchanged(t *testing.T) {
 	run := func(captureDir string) lifecycleRun {
 		dbPath := filepath.Join(t.TempDir(), "pasture.db")
 		if captureDir == "" {
-			return runLifecycleHookIn(t, repoRoot, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload)
+			return runLifecycleHookIn(t, repoRoot, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode__2_1_261().Version, payload)
 		}
-		return runLifecycleHookIn(t, repoRoot, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode2_1_261().Version, payload, "PASTURE_CAPTURE_DIR="+captureDir)
+		return runLifecycleHookIn(t, repoRoot, binary, dbPath, "claude-code", "Notification", registration.ClaudeCode__2_1_261().Version, payload, "PASTURE_CAPTURE_DIR="+captureDir)
 	}
 	base := run("")
 	require.Equal(t, 0, base.ExitCode, base.Stderr)
@@ -136,7 +136,7 @@ func TestACaptureFailureNeverChangesTheHostOutcomeOnAnEnabledEvent(t *testing.T)
 	// standard output, so the durable state is what tells them apart: the
 	// event must be RECORDED, which a fault would not do.
 	listed := runLifecycleList(t, binary, failed.FaultDir+"/"+tasks.DefaultDBFilename.String(), "json")
-	assert.Contains(t, listed, `"registrationContract":"`+registration.ClaudeCode2_1_261().Contract.String()+`"`, "the event was recorded although the capture failed")
+	assert.Contains(t, listed, `"registrationContract":"`+registration.ClaudeCode__2_1_261().Contract.String()+`"`, "the event was recorded although the capture failed")
 	assert.Contains(t, listed, `"event":1`, "the recorded occurrence is the SessionStart kind")
 }
 

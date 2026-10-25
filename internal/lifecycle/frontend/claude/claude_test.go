@@ -60,9 +60,9 @@ func TestBindAuthenticParseRetainsNativeNameAndContractLayers(t *testing.T) {
 
 	raw, err := os.ReadFile("../../ingress/claude/testdata/fixtures/session_start_2_1_261.json")
 	require.NoError(t, err)
-	capture := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{})
+	capture := claudeingress.Parse(raw, registration.ClaudeCode__2_1_261().Events[0], registration.ClaudeCode__2_1_261().Version, model.OccurrenceEnvelopeRef{})
 	require.Equal(t, model.CaptureValid, capture.Disposition)
-	require.Equal(t, registration.ClaudeCode2_1_261().Contract, capture.Delivery.Contract)
+	require.Equal(t, registration.ClaudeCode__2_1_261().Contract, capture.Delivery.Contract)
 	require.NotEqual(t, capture.Delivery.Contract, runtime.ClaudeCode2_1_261Lifecycle().ID(), "capture-schema and semantic runtime contracts are distinct layers")
 
 	l1, identities, err := claude.Bind(capture.Delivery.Event, capture.Delivery.Bindings)
@@ -188,5 +188,5 @@ func TestBindReturnsWaistIdentityValuesWithoutReinterpretingThem(t *testing.T) {
 // native name.
 func TestEventMappingsCoverEveryRegisteredClaudeEvent(t *testing.T) {
 	t.Parallel()
-	testutil.AssertEventMappingsCoverRegistration(t, registration.ClaudeCode2_1_261(), runtime.ClaudeCode2_1_261Lifecycle(), claude.Bind)
+	testutil.AssertEventMappingsCoverRegistration(t, registration.ClaudeCode__2_1_261(), runtime.ClaudeCode2_1_261Lifecycle(), claude.Bind)
 }

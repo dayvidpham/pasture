@@ -4,12 +4,14 @@
 
 export const PASTURE_NATIVE_TOOLS = Object.freeze(["question", "skill", "task"]);
 export const PASTURE_RUNTIME_CONTRACT = "opencode/opencode@2.0.20";
-const METADATA = {"harness":"opencode","version":"2.0.20","contract":"opencode/opencode@2.0.20","events":[{"name":"session.created","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.prompt","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.context","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.compaction","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.generate","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.title","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.model.request","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.http.request","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.http.response","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.experimental.ws.handshake","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.experimental.ws.send","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.experimental.ws.receive","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.retry","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"tool.execute.before","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true},{"name":"id","kind":"tool-call","required":true}],"allowedFields":["id","sessionID"]},{"name":"tool.execute.after","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true},{"name":"id","kind":"tool-call","required":true}],"allowedFields":["id","sessionID"]},{"name":"permission.evaluate","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"shell.create.before","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[],"allowedFields":[]}]};
+export const METADATA = {"harness":"opencode","version":"2.0.20","contract":"opencode/opencode@2.0.20","events":[{"name":"session.created","semantic":"observation","surface":"opencode-catch-all-sse","blocking":"nonblocking","mutation":"none","order":"observation-stream","reconciliation":"none","failure":"observe-only","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.prompt","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.context","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.compaction","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.generate","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.title","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.model.request","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.http.request","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.http.response","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.experimental.ws.handshake","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.experimental.ws.send","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.experimental.ws.receive","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"session.retry","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"tool.execute.before","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true},{"name":"id","kind":"tool-call","required":true}],"allowedFields":["id","sessionID"]},{"name":"tool.execute.after","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true},{"name":"id","kind":"tool-call","required":true}],"allowedFields":["id","sessionID"]},{"name":"permission.evaluate","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[{"name":"sessionID","kind":"session","required":true}],"allowedFields":["sessionID"]},{"name":"shell.create.before","semantic":"gate-consultation","surface":"opencode-named-output","blocking":"blocking","mutation":"output-object","order":"sequential-load-order","reconciliation":"sequential-mutation","failure":"throw-fail-fast","stopLoop":"not-applicable","identities":[],"allowedFields":[]}]};
 type LifecycleResponse =
   | { decision: "proceed" }
   | { decision: "deny"; reason: string };
 
 const CHILD_WAIT_MS = 8000;
+const CONTEXT_HEARTBEAT_MS = 60000;
+const pastureContextSeen = new Map();
 const CONFIGURATION_ADVICE = "; verify PASTURE_BIN and the generated OpenCode 2.0.20 configuration";
 
 const TASK_RECOVERY_MARKER = "[pasture:task-recovery]";
@@ -131,7 +133,40 @@ function pastureReleaseShaped(value) {
   return typeof value === "string" && /^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(value.trim());
 }
 
-async function invokeLifecycle(command, event, value) {
+// session.context runs before every model dispatch, including every tool
+// continuation. A per-dispatch receipt is noise for the tracker; record the
+// first context and then at most one heartbeat per minute, or immediately
+// when the system/tool surface changes.
+function pastureContextDue(event) {
+  const sessionID = typeof event?.sessionID === "string" ? event.sessionID : "";
+  if (sessionID === "") return true;
+  const messages = Array.isArray(event?.messages) ? event.messages : [];
+  const last = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  const system = Array.isArray(event?.system) ? event.system : [];
+  const tools = event?.tools !== null && typeof event?.tools === "object" ? Object.keys(event.tools).length : 0;
+  const previous = pastureContextSeen.get(sessionID);
+  const now = Date.now();
+  if (previous !== undefined &&
+      previous.system === system.length &&
+      previous.tools === tools &&
+      now - previous.at < CONTEXT_HEARTBEAT_MS) {
+    return false;
+  }
+  pastureContextSeen.set(sessionID, {
+    at: now,
+    system: system.length,
+    tools,
+    messages: messages.length,
+    last: typeof last?.id === "string" ? last.id : "",
+  });
+  return true;
+}
+
+async function invokeLifecycle<K extends LifecycleEventName>(
+  event: (typeof LIFECYCLE_EVENTS)[K],
+  payload: LifecyclePayloadFor<K>,
+  extraArgs: readonly string[] = [],
+) {
   const binary = process.env.PASTURE_BIN ?? "pasture";
   // Carry the setup-observed host version unless this invocation already
   // names its own (the session.created observation does, from its bus data).
@@ -140,10 +175,12 @@ async function invokeLifecycle(command, event, value) {
   // version itself. A later host stays admissible: the binary admits its
   // recorded baseline and every later release, so forwarding the running
   // release never narrows it.
-  const effective = command.includes("--host-version") || pastureHostVersionArgs.length === 0 ? command : [...command, ...pastureHostVersionArgs];
+  const versionArgs = extraArgs.length > 0 ? extraArgs : pastureHostVersionArgs;
+  const effective = [...event.command, ...versionArgs];
   const child = Bun.spawn({
     cmd: [binary, ...effective],
-    stdin: new Blob([JSON.stringify(value)]),
+    env: process.env,
+    stdin: new Blob([JSON.stringify(payload)]),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -172,14 +209,14 @@ async function invokeLifecycle(command, event, value) {
     // Cancel pending reads as well: inherited pipes can remain open even after
     // the direct child exits. Always wait for the direct child to be reaped.
     await Promise.allSettled([stdoutReader.cancel(), stderrReader.cancel(), child.exited]);
-    throw new Error("pasture hook lifecycle for " + event + " " + (error instanceof Error ? error.message : String(error)) + CONFIGURATION_ADVICE);
+    throw new Error("pasture hook lifecycle for " + event.native + " " + (error instanceof Error ? error.message : String(error)) + CONFIGURATION_ADVICE);
   } finally {
     clearTimeout(timer);
     stdoutReader.releaseLock();
     stderrReader.releaseLock();
   }
   const [stdout, stderr, exitCode] = result;
-  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + CONFIGURATION_ADVICE);
+  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event.native + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + CONFIGURATION_ADVICE);
   // fd 2 is piped, not inherited. Preserve the child's diagnostic and the
   // existing terminal-newline policy without console.error decoration.
   // Bun.write(Bun.stderr, ...) stalled after a partial write in the generated
@@ -188,7 +225,7 @@ async function invokeLifecycle(command, event, value) {
   if (stderr.trim() !== "") {
     // A successful lifecycle decision must survive a host that has closed or
     // rejected its diagnostic stream. The child's stdout remains authoritative.
-    await forwardDiagnostic(stderr.endsWith("\n") ? stderr : stderr + "\n", event).catch(() => {});
+    await forwardDiagnostic(stderr.endsWith("\n") ? stderr : stderr + "\n", event.native).catch(() => {});
   }
   return stdout;
 }
@@ -241,10 +278,176 @@ function parseResponse(stdout: string, event: string): LifecycleResponse | undef
   throw new Error('pasture hook lifecycle response must be exactly {"decision":"proceed"} or {"decision":"deny","reason":<nonempty string>} for ' + event + CONFIGURATION_ADVICE);
 }
 
+// Generated lifecycle contract. The Go registration table is the source.
+export type SessionIdentityPayload = { sessionID: string };
+export type ToolIdentityPayload = { sessionID: string; id: string };
+export type SessionCreatedPayload = { type: "session.created"; data: { sessionID: string } };
+export type SessionCompactionPayload = {
+  sessionID: string;
+  kind: "compaction";
+  messageCount: number;
+  transcriptRoot: string;
+  systemRoot: string;
+  toolSetRoot: string;
+  toolCount: number;
+  agent?: string;
+  model?: string;
+};
+export type EmptyPayload = Record<string, never>;
+
+export const LIFECYCLE_EVENTS = Object.freeze({
+  sessionCreated: { kind: 93, native: "session.created", surface: "observation", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.created"] },
+  sessionPrompt: { kind: 94, native: "session.prompt", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.prompt"] },
+  sessionContext: { kind: 95, native: "session.context", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.context"] },
+  sessionCompaction: { kind: 96, native: "session.compaction", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.compaction"] },
+  sessionGenerate: { kind: 97, native: "session.generate", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.generate"] },
+  sessionTitle: { kind: 98, native: "session.title", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.title"] },
+  sessionModelRequest: { kind: 99, native: "session.model.request", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.model.request"] },
+  sessionHttpRequest: { kind: 100, native: "session.http.request", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.http.request"] },
+  sessionHttpResponse: { kind: 101, native: "session.http.response", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.http.response"] },
+  sessionExperimentalWsHandshake: { kind: 102, native: "session.experimental.ws.handshake", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.handshake"] },
+  sessionExperimentalWsSend: { kind: 103, native: "session.experimental.ws.send", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.send"] },
+  sessionExperimentalWsReceive: { kind: 104, native: "session.experimental.ws.receive", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.receive"] },
+  sessionRetry: { kind: 105, native: "session.retry", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "session.retry"] },
+  toolExecuteBefore: { kind: 106, native: "tool.execute.before", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before"] },
+  toolExecuteAfter: { kind: 107, native: "tool.execute.after", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.after"] },
+  permissionEvaluate: { kind: 108, native: "permission.evaluate", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "permission.evaluate"] },
+  shellCreateBefore: { kind: 109, native: "shell.create.before", surface: "hook", command: ["hook", "lifecycle", "--harness", "opencode", "--event", "shell.create.before"] },
+} as const);
+
+export type LifecycleEventName = keyof typeof LIFECYCLE_EVENTS;
+export type LifecycleEvent = (typeof LIFECYCLE_EVENTS)[LifecycleEventName];
+export type LifecyclePayloadFor<K extends LifecycleEventName> =
+  K extends "sessionCreated" ? SessionCreatedPayload :
+  K extends "sessionCompaction" ? SessionCompactionPayload :
+  K extends "toolExecuteBefore" ? ToolIdentityPayload :
+  K extends "toolExecuteAfter" ? ToolIdentityPayload :
+  K extends "shellCreateBefore" ? EmptyPayload :
+  SessionIdentityPayload;
+
+function pastureObject(value: unknown, path: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Pasture lifecycle payload for " + path + " must be an object; the host event was not forwarded");
+  }
+  return value as Record<string, unknown>;
+}
+
+function pastureIdentity(value: unknown, field: string, path: string): string {
+  const object = pastureObject(value, path);
+  const raw = object[field];
+  if (typeof raw !== "string" || raw.trim() === "" || raw.length > 512 || /[\u0000-\u001f\u007f]/.test(raw)) {
+    throw new Error("Pasture lifecycle payload for " + path + " has no usable " + field + " identity; the host event was not forwarded");
+  }
+  return raw;
+}
+
+function pastureDigest(value: string): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(value);
+  return "sha256:" + hasher.digest("hex");
+}
+
+function projectSessionCreated(value: unknown): SessionCreatedPayload {
+  const event = pastureObject(value, "session.created");
+  if (event.type !== "session.created") {
+    throw new Error("Pasture lifecycle payload for session.created has type " + JSON.stringify(event.type) + "; expected the native bus event type; the host event was not forwarded");
+  }
+  const data = pastureObject(event.data, "session.created.data");
+  return { type: "session.created", data: { sessionID: pastureIdentity(data, "sessionID", "session.created.data") } };
+}
+
+function projectSessionPrompt(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.prompt") };
+}
+
+function projectSessionContext(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.context") };
+}
+
+function projectSessionCompaction(value: unknown): SessionCompactionPayload {
+  const event = pastureObject(value, "session.compaction");
+  const sessionID = pastureIdentity(event, "sessionID", "session.compaction");
+  const messages = Array.isArray(event.messages) ? event.messages : [];
+  const system = Array.isArray(event.system) ? event.system : [];
+  const tools = event.tools !== null && typeof event.tools === "object" ? Object.keys(event.tools).sort() : [];
+  const payload: SessionCompactionPayload = {
+    sessionID,
+    kind: "compaction",
+    messageCount: messages.length,
+    transcriptRoot: pastureDigest(JSON.stringify(messages)),
+    systemRoot: pastureDigest(JSON.stringify(system)),
+    toolSetRoot: pastureDigest(JSON.stringify(tools)),
+    toolCount: tools.length,
+  };
+  if (typeof event.agent === "string") payload.agent = event.agent;
+  if (typeof event.model === "object" && event.model !== null && typeof (event.model as Record<string, unknown>).id === "string") {
+    payload.model = (event.model as Record<string, unknown>).id as string;
+  }
+  return payload;
+}
+
+function projectSessionGenerate(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.generate") };
+}
+
+function projectSessionTitle(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.title") };
+}
+
+function projectSessionModelRequest(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.model.request") };
+}
+
+function projectSessionHttpRequest(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.http.request") };
+}
+
+function projectSessionHttpResponse(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.http.response") };
+}
+
+function projectSessionExperimentalWsHandshake(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.experimental.ws.handshake") };
+}
+
+function projectSessionExperimentalWsSend(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.experimental.ws.send") };
+}
+
+function projectSessionExperimentalWsReceive(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.experimental.ws.receive") };
+}
+
+function projectSessionRetry(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "session.retry") };
+}
+
+function projectToolExecuteBefore(value: unknown): ToolIdentityPayload {
+  return {
+    sessionID: pastureIdentity(value, "sessionID", "tool.execute.before"),
+    id: pastureIdentity(value, "id", "tool.execute.before"),
+  };
+}
+
+function projectToolExecuteAfter(value: unknown): ToolIdentityPayload {
+  return {
+    sessionID: pastureIdentity(value, "sessionID", "tool.execute.after"),
+    id: pastureIdentity(value, "id", "tool.execute.after"),
+  };
+}
+
+function projectPermissionEvaluate(value: unknown): SessionIdentityPayload {
+  return { sessionID: pastureIdentity(value, "sessionID", "permission.evaluate") };
+}
+
+function projectShellCreateBefore(_value: unknown): EmptyPayload {
+  return {};
+}
+
 export async function sessionPrompt(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.prompt"], "session.prompt", hookEvent);
-    const response = parseResponse(stdout, "session.prompt");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionPrompt, projectSessionPrompt(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionPrompt.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -263,9 +466,10 @@ export async function sessionPrompt(hookEvent) {
 }
 
 export async function sessionContext(hookEvent) {
+  if (!pastureContextDue(hookEvent)) return;
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.context"], "session.context", hookEvent);
-    const response = parseResponse(stdout, "session.context");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionContext, projectSessionContext(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionContext.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -285,8 +489,8 @@ export async function sessionContext(hookEvent) {
 
 export async function sessionCompaction(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.compaction"], "session.compaction", hookEvent);
-    const response = parseResponse(stdout, "session.compaction");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionCompaction, projectSessionCompaction(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionCompaction.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -306,8 +510,8 @@ export async function sessionCompaction(hookEvent) {
 
 export async function sessionGenerate(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.generate"], "session.generate", hookEvent);
-    const response = parseResponse(stdout, "session.generate");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionGenerate, projectSessionGenerate(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionGenerate.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -327,8 +531,8 @@ export async function sessionGenerate(hookEvent) {
 
 export async function sessionTitle(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.title"], "session.title", hookEvent);
-    const response = parseResponse(stdout, "session.title");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionTitle, projectSessionTitle(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionTitle.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -348,8 +552,8 @@ export async function sessionTitle(hookEvent) {
 
 export async function sessionModelRequest(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.model.request"], "session.model.request", hookEvent);
-    const response = parseResponse(stdout, "session.model.request");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionModelRequest, projectSessionModelRequest(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionModelRequest.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -369,8 +573,8 @@ export async function sessionModelRequest(hookEvent) {
 
 export async function sessionHttpRequest(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.http.request"], "session.http.request", hookEvent);
-    const response = parseResponse(stdout, "session.http.request");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionHttpRequest, projectSessionHttpRequest(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionHttpRequest.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -390,8 +594,8 @@ export async function sessionHttpRequest(hookEvent) {
 
 export async function sessionHttpResponse(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.http.response"], "session.http.response", hookEvent);
-    const response = parseResponse(stdout, "session.http.response");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionHttpResponse, projectSessionHttpResponse(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionHttpResponse.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -411,8 +615,8 @@ export async function sessionHttpResponse(hookEvent) {
 
 export async function sessionExperimentalWsHandshake(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.handshake"], "session.experimental.ws.handshake", hookEvent);
-    const response = parseResponse(stdout, "session.experimental.ws.handshake");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionExperimentalWsHandshake, projectSessionExperimentalWsHandshake(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionExperimentalWsHandshake.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -432,8 +636,8 @@ export async function sessionExperimentalWsHandshake(hookEvent) {
 
 export async function sessionExperimentalWsSend(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.send"], "session.experimental.ws.send", hookEvent);
-    const response = parseResponse(stdout, "session.experimental.ws.send");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionExperimentalWsSend, projectSessionExperimentalWsSend(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionExperimentalWsSend.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -453,8 +657,8 @@ export async function sessionExperimentalWsSend(hookEvent) {
 
 export async function sessionExperimentalWsReceive(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.experimental.ws.receive"], "session.experimental.ws.receive", hookEvent);
-    const response = parseResponse(stdout, "session.experimental.ws.receive");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionExperimentalWsReceive, projectSessionExperimentalWsReceive(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionExperimentalWsReceive.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -474,8 +678,8 @@ export async function sessionExperimentalWsReceive(hookEvent) {
 
 export async function sessionRetry(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "session.retry"], "session.retry", hookEvent);
-    const response = parseResponse(stdout, "session.retry");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.sessionRetry, projectSessionRetry(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.sessionRetry.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -494,8 +698,8 @@ export async function sessionRetry(hookEvent) {
 }
 
 export async function toolExecuteBefore(hookEvent) {
-  const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.before"], "tool.execute.before", hookEvent);
-  const response = parseResponse(stdout, "tool.execute.before");
+  const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.toolExecuteBefore, projectToolExecuteBefore(hookEvent));
+  const response = parseResponse(stdout, LIFECYCLE_EVENTS.toolExecuteBefore.native);
   // A deny response is a future capable-binary path, not the enforceable
   // deny: every 2.0.20 row derives CapabilityNone, so the shipped binary
   // downgrades denials to proceed with the unenforced reason before this
@@ -514,8 +718,8 @@ export async function toolExecuteBefore(hookEvent) {
 
 export async function toolExecuteAfter(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "tool.execute.after"], "tool.execute.after", hookEvent);
-    const response = parseResponse(stdout, "tool.execute.after");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.toolExecuteAfter, projectToolExecuteAfter(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.toolExecuteAfter.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -535,8 +739,8 @@ export async function toolExecuteAfter(hookEvent) {
 
 export async function permissionEvaluate(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "permission.evaluate"], "permission.evaluate", hookEvent);
-    const response = parseResponse(stdout, "permission.evaluate");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.permissionEvaluate, projectPermissionEvaluate(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.permissionEvaluate.native);
     if (response?.decision === "deny") {
       // ENFORCED through the host's typed permission channel, on the path
       // where no saved or configured host rule already denied (that path
@@ -568,8 +772,8 @@ export async function permissionEvaluate(hookEvent) {
 
 export async function shellCreateBefore(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(["hook", "lifecycle", "--harness", "opencode", "--event", "shell.create.before"], "shell.create.before", hookEvent);
-    const response = parseResponse(stdout, "shell.create.before");
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.shellCreateBefore, projectShellCreateBefore(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.shellCreateBefore.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -589,7 +793,6 @@ export async function shellCreateBefore(hookEvent) {
 
 export async function sessionCreated(busEvent) {
   try {
-    const command = ["hook", "lifecycle", "--harness", "opencode", "--event", "session.created"];
     // The 2.0.20 bus event wraps its payload in data: version rides
     // beside sessionID there (packages/schema/src/session-event.ts for the
     // Created data shape and packages/schema/src/event.ts for the durable
@@ -597,14 +800,35 @@ export async function sessionCreated(busEvent) {
     // or change the original payload. A non-release bus version (a source
     // build reports "local") is not carried: the setup-observed version is
     // the fallback, and the probe resolves when neither is release-shaped.
+    const versionArgs: string[] = [];
     const busVersion = typeof busEvent?.data?.version === "string" ? busEvent.data.version.trim() : "";
-    if (pastureReleaseShaped(busVersion)) command.push("--host-version", busVersion);
-    await invokeLifecycle(command, "session.created", busEvent);
+    if (pastureReleaseShaped(busVersion)) versionArgs.push("--host-version", busVersion);
+    await invokeLifecycle(LIFECYCLE_EVENTS.sessionCreated, projectSessionCreated(busEvent), versionArgs);
   } catch (error) {
     // Observation is never a gate and cannot terminate the native event bus.
     console.error("Pasture lifecycle observation failed for session.created: " + error);
   }
 }
+
+const HANDLERS = Object.freeze({
+  sessionCreated: sessionCreated,
+  sessionPrompt: sessionPrompt,
+  sessionContext: sessionContext,
+  sessionCompaction: sessionCompaction,
+  sessionGenerate: sessionGenerate,
+  sessionTitle: sessionTitle,
+  sessionModelRequest: sessionModelRequest,
+  sessionHttpRequest: sessionHttpRequest,
+  sessionHttpResponse: sessionHttpResponse,
+  sessionExperimentalWsHandshake: sessionExperimentalWsHandshake,
+  sessionExperimentalWsSend: sessionExperimentalWsSend,
+  sessionExperimentalWsReceive: sessionExperimentalWsReceive,
+  sessionRetry: sessionRetry,
+  toolExecuteBefore: toolExecuteBefore,
+  toolExecuteAfter: toolExecuteAfter,
+  permissionEvaluate: permissionEvaluate,
+  shellCreateBefore: shellCreateBefore,
+} satisfies { [K in LifecycleEventName]: (event: any) => Promise<void> });
 
 
 export default {
@@ -622,26 +846,26 @@ export default {
     const observedVersion = typeof ctx?.app?.version === "string" ? ctx.app.version.trim() : "";
     pastureHostVersionArgs = pastureReleaseShaped(observedVersion) ? ["--host-version", observedVersion] : [];
     const registrations = [];
-    registrations.push(await ctx.session.hook("prompt", sessionPrompt));
+    registrations.push(await ctx.session.hook("prompt", HANDLERS.sessionPrompt));
     try {
-      registrations.push(await ctx.session.hook("context", withTaskRecovery(ctx, sessionContext)));
+      registrations.push(await ctx.session.hook("context", withTaskRecovery(ctx, HANDLERS.sessionContext)));
     } catch (error) {
       reportRecoveryFault(ctx, "session.context registration", error);
     }
-    registrations.push(await ctx.session.hook("compaction", sessionCompaction));
-    registrations.push(await ctx.session.hook("generate", sessionGenerate));
-    registrations.push(await ctx.session.hook("title", sessionTitle));
-    registrations.push(await ctx.session.hook("model.request", sessionModelRequest));
-    registrations.push(await ctx.session.hook("http.request", sessionHttpRequest));
-    registrations.push(await ctx.session.hook("http.response", sessionHttpResponse));
-    registrations.push(await ctx.session.hook("experimental.ws.handshake", sessionExperimentalWsHandshake));
-    registrations.push(await ctx.session.hook("experimental.ws.send", sessionExperimentalWsSend));
-    registrations.push(await ctx.session.hook("experimental.ws.receive", sessionExperimentalWsReceive));
-    registrations.push(await ctx.session.hook("retry", sessionRetry));
-    registrations.push(await ctx.tool.hook("execute.before", toolExecuteBefore));
-    registrations.push(await ctx.tool.hook("execute.after", toolExecuteAfter));
-    registrations.push(await ctx.permission.hook("evaluate", permissionEvaluate));
-    registrations.push(await ctx.shell.hook("create.before", shellCreateBefore));
+    registrations.push(await ctx.session.hook("compaction", HANDLERS.sessionCompaction));
+    registrations.push(await ctx.session.hook("generate", HANDLERS.sessionGenerate));
+    registrations.push(await ctx.session.hook("title", HANDLERS.sessionTitle));
+    registrations.push(await ctx.session.hook("model.request", HANDLERS.sessionModelRequest));
+    registrations.push(await ctx.session.hook("http.request", HANDLERS.sessionHttpRequest));
+    registrations.push(await ctx.session.hook("http.response", HANDLERS.sessionHttpResponse));
+    registrations.push(await ctx.session.hook("experimental.ws.handshake", HANDLERS.sessionExperimentalWsHandshake));
+    registrations.push(await ctx.session.hook("experimental.ws.send", HANDLERS.sessionExperimentalWsSend));
+    registrations.push(await ctx.session.hook("experimental.ws.receive", HANDLERS.sessionExperimentalWsReceive));
+    registrations.push(await ctx.session.hook("retry", HANDLERS.sessionRetry));
+    registrations.push(await ctx.tool.hook("execute.before", HANDLERS.toolExecuteBefore));
+    registrations.push(await ctx.tool.hook("execute.after", HANDLERS.toolExecuteAfter));
+    registrations.push(await ctx.permission.hook("evaluate", HANDLERS.permissionEvaluate));
+    registrations.push(await ctx.shell.hook("create.before", HANDLERS.shellCreateBefore));
     // Observation rows arrive on the connected server's public event
     // stream, not through a hook: filter the subscription to the bus events
     // the lifecycle needs and ignore the rest.
@@ -650,7 +874,7 @@ export default {
       try {
         for await (const busEvent of ctx.event.subscribe({ signal: controller.signal })) {
           if (busEvent !== null && typeof busEvent === "object" && busEvent.type === "session.created") {
-            await sessionCreated(busEvent);
+            await HANDLERS.sessionCreated(busEvent);
           }
         }
       } catch (error) {

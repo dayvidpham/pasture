@@ -76,7 +76,7 @@ func OpenCode1_18_29TargetEvents() []model.ContractEventKind {
 // OpenCode1_18_29 derives a fresh exhaustive activation manifest from the
 // generated host manifest and the proved static target declaration.
 func OpenCode1_18_29() ([]Entry, error) {
-	return deriveManifest("activation.OpenCode1_18_29", registration.OpenCode1_18_29().Entries(), openCodeTargetEventDeclarations[:])
+	return deriveManifest("activation.OpenCode1_18_29", registration.OpenCode__1_18_29().Entries(), openCodeTargetEventDeclarations[:])
 }
 
 // openCode2TargetEventDeclarations is the static typed target declaration for
@@ -125,5 +125,5 @@ func OpenCode2_0_20TargetEvents() []model.ContractEventKind {
 // OpenCode2_0_20 derives a fresh exhaustive activation manifest from the
 // generated 2.0.20 host manifest and the static target declaration.
 func OpenCode2_0_20() ([]Entry, error) {
-	return deriveManifest("activation.OpenCode2_0_20", registration.OpenCode2_0_20().Entries(), openCode2TargetEventDeclarations[:])
+	return deriveManifest("activation.OpenCode2_0_20", registration.OpenCode__2_0_20().Entries(), openCode2TargetEventDeclarations[:])
 }

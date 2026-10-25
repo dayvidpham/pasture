@@ -118,7 +118,7 @@ func TestAbandonedInvocationNeverLeavesAnOccurrenceWithoutItsBlob(t *testing.T) 
 		t.Fatal(err)
 	}
 	delivery := claudeingress.Parse(
-		raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
+		raw, registration.ClaudeCode__2_1_261().Events[0], registration.ClaudeCode__2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
 
 	// The blocked journal below gates the FIRST ApplyContext it sees. Complete

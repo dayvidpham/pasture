@@ -256,7 +256,7 @@ func gateInput(t *testing.T, dbPath, event string, raw []byte) HookLifecycleInpu
 		DBPath:      dbPath,
 		Harness:     ir.HarnessClaudeCode,
 		Event:       event,
-		HostVersion: registration.ClaudeCode2_1_261().Version,
+		HostVersion: registration.ClaudeCode__2_1_261().Version,
 		Input:       bytes.NewReader(raw),
 		Clock:       gateClock{},
 		Operations:  &gateOperations{},
@@ -853,7 +853,7 @@ func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
 	require.NoError(t, err)
 	gateEvent, err := ingress.EventByNativeName(dispatch.manifest, "PreToolUse")
 	require.NoError(t, err)
-	gateCapture := dispatch.parse(raw, gateEvent, registration.ClaudeCode2_1_261().Version)
+	gateCapture := dispatch.parse(raw, gateEvent, registration.ClaudeCode__2_1_261().Version)
 
 	_, _, err = deliveryCommit(t.Context(), service, dispatch, gateEvent, gateCapture.delivery, nil)
 
@@ -874,7 +874,7 @@ func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
 	observationRaw := gateFixture(t, gateClaudeSessionStartFixture)
 	observationEvent, err := ingress.EventByNativeName(dispatch.manifest, "SessionStart")
 	require.NoError(t, err)
-	observation := dispatch.parse(observationRaw, observationEvent, registration.ClaudeCode2_1_261().Version)
+	observation := dispatch.parse(observationRaw, observationEvent, registration.ClaudeCode__2_1_261().Version)
 
 	_, _, err = deliveryCommit(t.Context(), service, dispatch, observationEvent, observation.delivery, nil)
 
@@ -924,7 +924,7 @@ func TestBothCommittingSurfacesRunTheSameGate(t *testing.T) {
 			DBPath:         dbPath,
 			Harness:        ir.HarnessClaudeCode,
 			Event:          "PreToolUse",
-			HostVersion:    registration.ClaudeCode2_1_261().Version,
+			HostVersion:    registration.ClaudeCode__2_1_261().Version,
 			SchemaVersion:  RawSchemaClaudeCode2_1_261,
 			Input:          bytes.NewReader(raw),
 			Clock:          gateClock{},

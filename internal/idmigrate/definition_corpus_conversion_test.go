@@ -146,7 +146,7 @@ func defCorpusWarrant(t *testing.T, delivery receipt.Delivery) gate.Warrant {
 
 func defCorpusParseDelivery(t *testing.T, name, event string) receipt.Delivery {
 	t.Helper()
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	var selected registration.Event
 	for _, candidate := range manifest.Events {
 		if candidate.NativeName == event {

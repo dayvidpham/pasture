@@ -65,7 +65,7 @@ func TestNativePostCommitFailurePreservesBothOutcomeAndError(t *testing.T) {
 		DBPath:         dbPath,
 		Harness:        ir.HarnessClaudeCode,
 		Event:          "PreToolUse",
-		HostVersion:    registration.ClaudeCode2_1_261().Version,
+		HostVersion:    registration.ClaudeCode__2_1_261().Version,
 		Input:          bytes.NewReader(raw),
 		Clock:          fixedLifecycleClock{},
 		Operations:     fixedLifecycleOperations{id: "test.post-commit-error"},
@@ -102,8 +102,8 @@ func TestNativeUnenforcedDecisionAgreesWithDurableConsultation(t *testing.T) {
 		sessionMembers  []string
 		activations     func() ([]activation.Entry, error)
 	}{
-		{ir.HarnessCodex, codexMapping, registration.Codex0_153_0(), "codex/testdata/fixtures/pre_tool_use_0_153_0.json", `{"continue":true}`, []string{"session_id"}, activation.Codex0_153_0},
-		{ir.HarnessOpenCode, openCodeMapping, registration.OpenCode1_18_29(), "opencode/testdata/fixtures/tool_execute_before_1_18_29.json", `{"decision":"proceed"}`, []string{"input.sessionID"}, activation.OpenCode1_18_29},
+		{ir.HarnessCodex, codexMapping, registration.Codex__0_153_0(), "codex/testdata/fixtures/pre_tool_use_0_153_0.json", `{"continue":true}`, []string{"session_id"}, activation.Codex0_153_0},
+		{ir.HarnessOpenCode, openCodeMapping, registration.OpenCode__1_18_29(), "opencode/testdata/fixtures/tool_execute_before_1_18_29.json", `{"decision":"proceed"}`, []string{"input.sessionID"}, activation.OpenCode1_18_29},
 	} {
 		t.Run(string(route.harness), func(t *testing.T) {
 			require.Equal(t, runtime.CapabilityNone, route.mapping.Response())
@@ -214,7 +214,7 @@ func TestHookLifecycleResponseRejectsWithheldOpenCodeBeforeInputAndStorage(t *te
 	dbPath := filepath.Join(t.TempDir(), "unopened", tasks.DefaultDBFilename.String())
 	input := &readTrackingLifecycleInput{}
 	response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: "session.updated", HostVersion: registration.OpenCode1_18_29().Version,
+		DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: "session.updated", HostVersion: registration.OpenCode__1_18_29().Version,
 		Input: input, Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.withheld"},
 		TimeoutProfile: timeouts.TestProfile(),
 	})
@@ -270,7 +270,7 @@ func TestHookLifecycleResponseOpenCodeCommitsBeforeReturning(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, bootstrap.Close())
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: test.event, HostVersion: registration.OpenCode1_18_29().Version,
+				DBPath: dbPath, Harness: ir.HarnessOpenCode, Event: test.event, HostVersion: registration.OpenCode__1_18_29().Version,
 				Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test." + test.name},
 				TimeoutProfile: timeouts.TestProfile(),
 			})
@@ -323,7 +323,7 @@ func TestHookLifecycleResponsePersistenceFailureReturnsNoResponse(t *testing.T) 
 	directory := filepath.Join(t.TempDir(), "database-directory")
 	require.NoError(t, os.Mkdir(directory, 0o700))
 	response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: directory, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_29().Version,
+		DBPath: directory, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode__1_18_29().Version,
 		Input: bytes.NewReader(raw), Clock: fixedLifecycleClock{}, Operations: fixedLifecycleOperations{id: "test.failure"},
 		TimeoutProfile: timeouts.TestProfile(),
 	})

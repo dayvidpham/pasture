@@ -7,7 +7,7 @@ import (
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
-func OpenCode2_0_20() Manifest {
+func OpenCode__2_0_20() Manifest {
 	events := []Event{
 		{Kind: EventOpenCode2SessionCreated, NativeName: "session.created", AllowedFields: []model.NativeFieldID{FieldOpenCode2SessionID}, Identities: []Identity{{Field: FieldOpenCode2SessionID, Binding: model.BindingSession, Required: true}}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureObserveOnly, StopLoop: StopLoopNotApplicable},
 		{Kind: EventOpenCode2SessionPrompt, NativeName: "session.prompt", AllowedFields: []model.NativeFieldID{FieldOpenCode2SessionID}, Identities: []Identity{{Field: FieldOpenCode2SessionID, Binding: model.BindingSession, Required: true}}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureThrowFailFast, StopLoop: StopLoopNotApplicable},

@@ -29,7 +29,7 @@ import (
 // provider-specific identity paths.
 func ParseV2(raw []byte, event registration.Event, observedVersion string, envelope model.OccurrenceEnvelopeRef) Capture {
 	validation := ingress.Validate(raw)
-	manifest := registration.OpenCode2_0_20()
+	manifest := registration.OpenCode__2_0_20()
 	envelope.Runtime.Contract = manifest.Contract
 	envelope.HostVersion = observedVersion
 	result := Capture{Digest: validation.Digest, Disposition: validation.Disposition}

@@ -15,7 +15,7 @@ import (
 
 func TestDeriveManifestRefusesADecisionRowWithoutAClearance(t *testing.T) {
 	t.Parallel()
-	events := registration.ClaudeCode2_1_261().Entries()
+	events := registration.ClaudeCode__2_1_261().Entries()
 	const clearance = "internal/lifecycle/ingress/claude/testdata/CLEARANCE.md"
 
 	for _, reason := range []WithheldReason{
@@ -51,7 +51,7 @@ func TestDeriveManifestRefusesADecisionRowWithoutAClearance(t *testing.T) {
 
 func TestDeriveManifestDefaultsAnUnprovenTargetRowToMissingFixture(t *testing.T) {
 	t.Parallel()
-	events := registration.ClaudeCode2_1_261().Entries()
+	events := registration.ClaudeCode__2_1_261().Entries()
 	entries, err := deriveManifest("test", events, []targetEventDeclaration{{event: registration.EventSetup}})
 	require.NoError(t, err)
 	setup := entryFor(t, entries, registration.EventSetup)

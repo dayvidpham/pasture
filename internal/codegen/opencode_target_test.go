@@ -61,12 +61,18 @@ func runOpenCodeV2Mechanics(t *testing.T, helper, script string) string {
 	fake := "#!" + bun + "\n" + `
 import { closeSync } from "node:fs";
 if (!process.env.PASTURE_DB_PATH) throw new Error("scratch database path is required");
-const value = JSON.parse(await Bun.stdin.text());
-const mode = value.__mode ?? "observation-stall";
+JSON.parse(await Bun.stdin.text());
+const mode = process.env.PASTURE_TEST_MODE ?? "observation-stall";
 if (mode === "reply") {
-  process.stdout.write(value.__body);
-  process.stderr.write(value.__diagnostic ?? "");
-  process.exitCode = value.__exitCode ?? 0;
+  const body = process.env.PASTURE_TEST_BODY_FILE
+    ? await Bun.file(process.env.PASTURE_TEST_BODY_FILE).text()
+    : (process.env.PASTURE_TEST_BODY ?? "");
+  process.stdout.write(body);
+  const diagnostic = process.env.PASTURE_TEST_DIAGNOSTIC_FILE
+    ? await Bun.file(process.env.PASTURE_TEST_DIAGNOSTIC_FILE).text()
+    : (process.env.PASTURE_TEST_DIAGNOSTIC ?? "");
+  process.stderr.write(diagnostic);
+  process.exitCode = Number(process.env.PASTURE_TEST_EXIT_CODE ?? 0);
 } else {
   // Keep the actual process alive without using a sleep to order the proof.
   Bun.serve({ port: 0, fetch() { return new Response("held"); } });
@@ -80,6 +86,9 @@ if (mode === "reply") {
 	runner := filepath.Join(dir, "proof.ts")
 	preamble := fmt.Sprintf(`
 import assert from "node:assert/strict";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { %s } from %q;
 const gate = %s;
 const children = [];
@@ -119,11 +128,51 @@ async function bounded(promise, label) {
 }
 async function event(input) {
   const frozen = JSON.stringify(input);
+  const prior = {
+    mode: process.env.PASTURE_TEST_MODE,
+    body: process.env.PASTURE_TEST_BODY,
+    bodyFile: process.env.PASTURE_TEST_BODY_FILE,
+    diagnostic: process.env.PASTURE_TEST_DIAGNOSTIC,
+    diagnosticFile: process.env.PASTURE_TEST_DIAGNOSTIC_FILE,
+    exitCode: process.env.PASTURE_TEST_EXIT_CODE,
+  };
+  const set = (name, value) => {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = String(value);
+  };
+  const large = 32 * 1024;
+  const body = typeof input.__body === "string" ? input.__body : undefined;
+  const diagnostic = typeof input.__diagnostic === "string" ? input.__diagnostic : undefined;
+  let bodyFile;
+  let diagnosticFile;
+  if (body !== undefined && body.length > large) {
+    bodyFile = join(tmpdir(), "pasture-body-" + process.pid + "-" + Math.random().toString(16).slice(2));
+    writeFileSync(bodyFile, body);
+  }
+  if (diagnostic !== undefined && diagnostic.length > large) {
+    diagnosticFile = join(tmpdir(), "pasture-diagnostic-" + process.pid + "-" + Math.random().toString(16).slice(2));
+    writeFileSync(diagnosticFile, diagnostic);
+  }
+  set("PASTURE_TEST_MODE", input.__mode);
+  set("PASTURE_TEST_BODY", bodyFile === undefined ? body : undefined);
+  set("PASTURE_TEST_BODY_FILE", bodyFile);
+  set("PASTURE_TEST_DIAGNOSTIC", diagnosticFile === undefined ? diagnostic : undefined);
+  set("PASTURE_TEST_DIAGNOSTIC_FILE", diagnosticFile);
+  set("PASTURE_TEST_EXIT_CODE", input.__exitCode);
   let failure;
   try {
     await bounded(gate(input), "whole-child completion");
   } catch (error) {
     failure = error;
+  } finally {
+    set("PASTURE_TEST_MODE", prior.mode);
+    set("PASTURE_TEST_BODY", prior.body);
+    set("PASTURE_TEST_BODY_FILE", prior.bodyFile);
+    set("PASTURE_TEST_DIAGNOSTIC", prior.diagnostic);
+    set("PASTURE_TEST_DIAGNOSTIC_FILE", prior.diagnosticFile);
+    set("PASTURE_TEST_EXIT_CODE", prior.exitCode);
+    if (bodyFile !== undefined) unlinkSync(bodyFile);
+    if (diagnosticFile !== undefined) unlinkSync(diagnosticFile);
   }
   assert.equal(JSON.stringify(input), frozen, "host event identity on every outcome");
   return failure;
@@ -433,13 +482,13 @@ func TestOpenCodeV2SwallowingHelpersReportAndContinue(t *testing.T) {
 	}
 	fakeBinary := filepath.Join(dir, "fake-pasture")
 	fake := `#!/bin/sh
-payload=$(cat)
-case "$payload" in
-  *'"__mode":"malformed"'*) printf '%s' 'not-json' ;;
-  *'"__mode":"extra"'*) printf '%s' '{"decision":"proceed","extra":true}' ;;
-  *'"__mode":"wrong-decision"'*) printf '%s' '{"decision":"block"}' ;;
-  *'"__mode":"nonzero"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
-  *'"__mode":"deny"'*) printf '%s' '{"decision":"deny","reason":"role cannot write"}' ;;
+cat >/dev/null
+case "${PASTURE_TEST_MODE:-}" in
+  malformed) printf '%s' 'not-json' ;;
+  extra) printf '%s' '{"decision":"proceed","extra":true}' ;;
+  wrong-decision) printf '%s' '{"decision":"block"}' ;;
+  nonzero) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+  deny) printf '%s' '{"decision":"deny","reason":"role cannot write"}' ;;
   *) printf '%s' '{"decision":"proceed"}' ;;
 esac
 `
@@ -463,9 +512,11 @@ const frozen = (value) => {
 
 for (const helper of [sessionPrompt, sessionContext, toolExecuteAfter, shellCreateBefore]) {
   for (const mode of ["malformed", "extra", "wrong-decision", "nonzero", "deny"]) {
-    const hookEvent = { sessionID: "constructed", id: "call", __mode: mode };
+    const hookEvent = { sessionID: "constructed-" + mode, id: "call", __mode: mode };
     const check = frozen(hookEvent);
+    process.env.PASTURE_TEST_MODE = mode;
     await helper(hookEvent);
+    delete process.env.PASTURE_TEST_MODE;
     check();
   }
 }
@@ -473,9 +524,11 @@ for (const helper of [sessionPrompt, sessionContext, toolExecuteAfter, shellCrea
 // A non-denial leaves the permission evaluation exactly as the host set
 // it: effect stays allow and no message member appears.
 for (const mode of ["malformed", "extra", "wrong-decision", "nonzero"]) {
-  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: mode };
+  const evaluation = { sessionID: "constructed-" + mode, action: "edit", resources: ["file"], effect: "allow", __mode: mode };
   const check = frozen(evaluation);
+  process.env.PASTURE_TEST_MODE = mode;
   await permissionEvaluate(evaluation);
+  delete process.env.PASTURE_TEST_MODE;
   check();
   if (evaluation.effect !== "allow" || "message" in evaluation) {
     throw new Error(mode + " mutated the host evaluation");
@@ -486,8 +539,10 @@ for (const mode of ["malformed", "extra", "wrong-decision", "nonzero"]) {
 // becomes deny and message carries the durable reason verbatim. The fake
 // binary's reason is asserted exactly so a rewrite turns red.
 {
-  const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" };
+  const evaluation = { sessionID: "constructed-deny", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" };
+  process.env.PASTURE_TEST_MODE = "deny";
   await permissionEvaluate(evaluation);
+  delete process.env.PASTURE_TEST_MODE;
   if (evaluation.effect !== "deny") {
     throw new Error("a pasture denial left the host effect at " + JSON.stringify(evaluation.effect));
   }
@@ -497,7 +552,9 @@ for (const mode of ["malformed", "extra", "wrong-decision", "nonzero"]) {
 }
 
 // An observation failure is swallowed and logged like any other fault here.
+process.env.PASTURE_TEST_MODE = "nonzero";
 await sessionCreated({ type: "session.created", data: { sessionID: "constructed" }, __mode: "nonzero" });
+delete process.env.PASTURE_TEST_MODE;
 
 console.error = originalError;
 const gateFaults = logged.filter((line) => line.includes("gate consultation failed"));
@@ -553,11 +610,11 @@ func TestOpenCodePermissionEvaluateDenyMatrix(t *testing.T) {
 	}
 	fakeBinary := filepath.Join(dir, "fake-pasture")
 	fake := `#!/bin/sh
-payload=$(cat)
-case "$payload" in
-  *'"__mode":"deny"'*) printf '%s' '{"decision":"deny","reason":"role cannot write"}' ;;
-  *'"__mode":"empty"'*) printf '%s' '' ;;
-  *'"__mode":"nonzero"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+cat >/dev/null
+case "${PASTURE_TEST_MODE:-}" in
+  deny) printf '%s' '{"decision":"deny","reason":"role cannot write"}' ;;
+  empty) printf '%s' '' ;;
+  nonzero) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
   *) printf '%s' '{"decision":"proceed"}' ;;
 esac
 `
@@ -573,10 +630,21 @@ const logged = [];
 const originalError = console.error;
 console.error = (...values) => logged.push(values.join(" "));
 
+async function withMode(mode, run) {
+  const previous = process.env.PASTURE_TEST_MODE;
+  process.env.PASTURE_TEST_MODE = mode;
+  try {
+    return await run();
+  } finally {
+    if (previous === undefined) delete process.env.PASTURE_TEST_MODE;
+    else process.env.PASTURE_TEST_MODE = previous;
+  }
+}
+
 // A Denial assigns the typed channel members with the durable reason verbatim.
 {
   const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" };
-  await permissionEvaluate(evaluation);
+  await withMode("deny", () => permissionEvaluate(evaluation));
   assert.equal(evaluation.effect, "deny");
   assert.equal(evaluation.message, "role cannot write");
 }
@@ -585,7 +653,7 @@ console.error = (...values) => logged.push(values.join(" "));
 // incoming effect or message, decides.
 {
   const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "ask", message: "host draft", __mode: "deny" };
-  await permissionEvaluate(evaluation);
+  await withMode("deny", () => permissionEvaluate(evaluation));
   assert.equal(evaluation.effect, "deny");
   assert.equal(evaluation.message, "role cannot write");
 }
@@ -594,7 +662,7 @@ console.error = (...values) => logged.push(values.join(" "));
 {
   const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "proceed" };
   const before = JSON.stringify(evaluation);
-  await permissionEvaluate(evaluation);
+  await withMode("proceed", () => permissionEvaluate(evaluation));
   assert.equal(JSON.stringify(evaluation), before);
   assert.equal("message" in evaluation, false);
 }
@@ -603,7 +671,7 @@ console.error = (...values) => logged.push(values.join(" "));
 {
   const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "empty" };
   const before = JSON.stringify(evaluation);
-  await permissionEvaluate(evaluation);
+  await withMode("empty", () => permissionEvaluate(evaluation));
   assert.equal(JSON.stringify(evaluation), before);
   assert.equal("message" in evaluation, false);
 }
@@ -612,7 +680,7 @@ console.error = (...values) => logged.push(values.join(" "));
 {
   const evaluation = { sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "nonzero" };
   const before = JSON.stringify(evaluation);
-  await permissionEvaluate(evaluation);
+  await withMode("nonzero", () => permissionEvaluate(evaluation));
   assert.equal(JSON.stringify(evaluation), before);
   assert.equal("message" in evaluation, false);
 }
@@ -623,7 +691,7 @@ console.error = (...values) => logged.push(values.join(" "));
 // outside the try turns this arm into a rejection.
 {
   const evaluation = Object.freeze({ sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow", __mode: "deny" });
-  await permissionEvaluate(evaluation);
+  await withMode("deny", () => permissionEvaluate(evaluation));
   assert.equal(evaluation.effect, "allow");
   assert.equal("message" in evaluation, false);
 }
@@ -672,12 +740,12 @@ func TestOpenCodeGeneratedLifecycleCallbacks_RejectInvalidGateResponsesAndSwallo
 	}
 	fakeBinary := filepath.Join(dir, "fake-pasture")
 	fake := `#!/bin/sh
-payload=$(cat)
-case "$payload" in
-  *'"__mode":"malformed"'*) printf '%s' 'not-json' ;;
-  *'"__mode":"extra"'*) printf '%s' '{"decision":"proceed","extra":true}' ;;
-  *'"__mode":"wrong-decision"'*) printf '%s' '{"decision":"block"}' ;;
-  *'"__mode":"nonzero"'*) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
+cat >/dev/null
+case "${PASTURE_TEST_MODE:-}" in
+  malformed) printf '%s' 'not-json' ;;
+  extra) printf '%s' '{"decision":"proceed","extra":true}' ;;
+  wrong-decision) printf '%s' '{"decision":"block"}' ;;
+  nonzero) printf '%s' 'synthetic lifecycle diagnostic' >&2; exit 7 ;;
   *) printf '%s' '{"decision":"proceed"}' ;;
 esac
 `
@@ -699,10 +767,13 @@ for (const testCase of cases) {
   const hookEvent = { sessionID: "constructed", id: "call", __mode: testCase.mode };
   const before = JSON.stringify(hookEvent);
   let diagnostic = "";
+  process.env.PASTURE_TEST_MODE = testCase.mode;
   try {
     await toolExecuteBefore(hookEvent);
   } catch (error) {
     diagnostic = String(error);
+  } finally {
+    delete process.env.PASTURE_TEST_MODE;
   }
   if (!diagnostic.includes(testCase.diagnostic)) {
     throw new Error(testCase.mode + " did not reject actionably; got: " + diagnostic);
@@ -715,9 +786,11 @@ for (const testCase of cases) {
 const logged = [];
 const originalError = console.error;
 console.error = (...values) => logged.push(values.join(" "));
+process.env.PASTURE_TEST_MODE = "nonzero";
 try {
   await sessionCreated({ type: "session.created", data: { sessionID: "constructed" }, __mode: "nonzero" });
 } finally {
+  delete process.env.PASTURE_TEST_MODE;
   console.error = originalError;
 }
 if (logged.length !== 1 || !logged[0].includes("observation failed for session.created") ||
@@ -1153,5 +1226,128 @@ func TestOpenCodeTargetDescriptor_RuntimeContractIdentity(t *testing.T) {
 	}
 	if desc.RuntimeContract().Harness() != ir.HarnessOpenCode {
 		t.Errorf("descriptor harness = %v, want opencode", desc.RuntimeContract().Harness())
+	}
+}
+
+// TestOpenCodeLifecyclePayloadProjectionBounds proves the generated plugin
+// never forwards the assembled model context to the lifecycle ingress. The
+// host context event is deliberately larger than the 1 MiB native bound; the
+// projected payloads stay tiny, and repeated context dispatches are sampled.
+func TestOpenCodeLifecyclePayloadProjectionBounds(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Fatal("bun is required for the generated OpenCode payload projection proof; enter the flake dev shell")
+	}
+	dir := t.TempDir()
+	module, err := GenerateOpenCodeHooksModule()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	modulePath := filepath.Join(dir, "plugin.ts")
+	if err := os.WriteFile(modulePath, []byte(module), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	capturePath := filepath.Join(dir, "captured-payload.json")
+	countPath := filepath.Join(dir, "capture-count")
+	fakeBinary := filepath.Join(dir, "fake-pasture")
+	fake := `#!/bin/sh
+payload=$(cat)
+printf '%s' "$payload" > "$PASTURE_CAPTURE"
+printf x >> "$PASTURE_COUNT"
+printf '%s' '{"decision":"proceed"}'
+`
+	if err := os.WriteFile(fakeBinary, []byte(fake), 0o700); err != nil {
+		t.Fatalf("write projection fake PASTURE_BIN: %v", err)
+	}
+	runner := filepath.Join(dir, "projection-proof.ts")
+	script := fmt.Sprintf(`
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { sessionContext, sessionCompaction, sessionGenerate, sessionTitle, toolExecuteBefore, shellCreateBefore, sessionCreated } from %q;
+
+const capture = process.env.PASTURE_CAPTURE;
+const countPath = process.env.PASTURE_COUNT;
+const huge = "x".repeat(2 * 1024 * 1024);
+function payload() { return JSON.parse(readFileSync(capture, "utf8")); }
+function count() { try { return readFileSync(countPath, "utf8").length; } catch { return 0; } }
+
+const contextEvent = {
+  sessionID: "ses_context",
+  agent: "build",
+  model: { id: "deepseek-flash" },
+  system: [{ type: "text", text: huge }],
+  messages: [{ id: "msg_1", role: "user", content: huge }],
+  tools: { bash: { description: huge } },
+};
+await sessionContext(contextEvent);
+assert.deepEqual(payload(), { sessionID: "ses_context" });
+assert.ok(JSON.stringify(payload()).length < 1024, "context projection is tiny");
+const once = count();
+await sessionContext(contextEvent);
+assert.equal(count(), once, "repeated context dispatches are sampled");
+
+await sessionCompaction({
+  sessionID: "ses_compaction",
+  agent: "build",
+  model: { id: "deepseek-flash" },
+  system: [{ type: "text", text: huge }],
+  messages: [{ id: "msg_1", role: "user", content: huge }, { id: "msg_2", role: "assistant", content: "ok" }],
+  tools: { bash: { description: huge }, edit: {} },
+});
+const checkpoint = payload();
+assert.equal(checkpoint.sessionID, "ses_compaction");
+assert.equal(checkpoint.kind, "compaction");
+assert.equal(checkpoint.messageCount, 2);
+assert.equal(checkpoint.toolCount, 2);
+assert.equal(checkpoint.agent, "build");
+assert.equal(checkpoint.model, "deepseek-flash");
+assert.match(checkpoint.transcriptRoot, /^sha256:[0-9a-f]{64}$/);
+assert.match(checkpoint.systemRoot, /^sha256:[0-9a-f]{64}$/);
+assert.match(checkpoint.toolSetRoot, /^sha256:[0-9a-f]{64}$/);
+assert.equal("messages" in checkpoint, false, "compaction checkpoint retains no transcript");
+assert.equal("system" in checkpoint, false, "compaction checkpoint retains no system text");
+assert.equal("tools" in checkpoint, false, "compaction checkpoint retains no tool schemas");
+assert.ok(JSON.stringify(checkpoint).length < 4096, "compaction checkpoint is bounded");
+
+await sessionGenerate({ sessionID: "ses_generate", messages: [{ content: huge }], system: [{ text: huge }], tools: { bash: {} } });
+assert.deepEqual(payload(), { sessionID: "ses_generate" });
+
+await sessionTitle({ sessionID: "ses_title", messages: [{ content: huge }], system: [{ text: huge }] });
+assert.deepEqual(payload(), { sessionID: "ses_title" });
+
+await toolExecuteBefore({ sessionID: "ses_tool", id: "call_1", input: { content: huge } });
+assert.deepEqual(payload(), { id: "call_1", sessionID: "ses_tool" });
+
+await shellCreateBefore({ content: huge });
+assert.deepEqual(payload(), {});
+
+await sessionCreated({ type: "session.created", data: { sessionID: "ses_bus", version: "2.0.20", content: huge } });
+assert.deepEqual(payload(), { type: "session.created", data: { sessionID: "ses_bus" } });
+
+const beforeInvalid = count();
+await assert.rejects(() => toolExecuteBefore({ sessionID: "ses_tool" }), /no usable id identity/);
+assert.equal(count(), beforeInvalid, "a malformed identity never crosses the spawn boundary");
+
+console.log(JSON.stringify({ projected: true }));
+`, "file://"+modulePath)
+	if err := os.WriteFile(runner, []byte(script), 0o600); err != nil {
+		t.Fatalf("write Bun projection runner: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	proof := exec.CommandContext(ctx, bun, runner)
+	proof.Env = append(os.Environ(),
+		"PASTURE_BIN="+fakeBinary,
+		"PASTURE_CAPTURE="+capturePath,
+		"PASTURE_COUNT="+countPath,
+	)
+	var stdout, stderr bytes.Buffer
+	proof.Stdout = &stdout
+	proof.Stderr = &stderr
+	if err := proof.Run(); err != nil {
+		t.Fatalf("generated OpenCode payload projection proof failed: %v\nstdout: %s\nstderr: %s", err, stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != `{"projected":true}` {
+		t.Fatalf("projection proof output = %q, want the projection confirmation", stdout.String())
 	}
 }

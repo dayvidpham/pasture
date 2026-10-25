@@ -57,7 +57,7 @@ func codexFixtureMember(file, member string) string {
 // FAILS until the L3 frontend implementation lands.
 func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	tests := []struct {
 		name, file, nativeName string
 		kind                   model.ContractEventKind
@@ -130,7 +130,7 @@ func TestAuthenticCodexPayloadsProduceProviderCorrectVerifiedL2(t *testing.T) {
 // built-binary proofs hold that a withheld event is refused there.
 func TestEventMappingsCoverEveryRegisteredCodexEvent(t *testing.T) {
 	t.Parallel()
-	testutil.AssertEventMappingsCoverRegistration(t, registration.Codex0_153_0(), runtime.Codex0_153_0Lifecycle(), codex.Bind)
+	testutil.AssertEventMappingsCoverRegistration(t, registration.Codex__0_153_0(), runtime.Codex0_153_0Lifecycle(), codex.Bind)
 }
 
 func eventByKind(t *testing.T, manifest registration.Manifest, kind model.ContractEventKind) registration.Event {

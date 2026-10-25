@@ -12,7 +12,7 @@ import (
 )
 
 func TestOpenCodeCaptureNamesTheRefusalCause(t *testing.T) {
-	event, err := ingress.EventByNativeName(registration.OpenCode1_18_29(), "tool.execute.before")
+	event, err := ingress.EventByNativeName(registration.OpenCode__1_18_29(), "tool.execute.before")
 	require.NoError(t, err)
 	check := func(t *testing.T, raw string, disposition model.CaptureDisposition, cause model.CaptureCauseKind, field string, kind model.JSONKind) {
 		t.Helper()

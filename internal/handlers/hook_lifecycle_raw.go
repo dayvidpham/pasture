@@ -130,11 +130,11 @@ func rawSchemaVersionFor(harness ir.HarnessID) RawSchemaVersion {
 	var version string
 	switch harness {
 	case ir.HarnessClaudeCode:
-		version = registration.ClaudeCode2_1_261().Version
+		version = registration.ClaudeCode__2_1_261().Version
 	case ir.HarnessOpenCode:
-		version = registration.OpenCode1_18_29().Version
+		version = registration.OpenCode__1_18_29().Version
 	case ir.HarnessCodex:
-		version = registration.Codex0_153_0().Version
+		version = registration.Codex__0_153_0().Version
 	default:
 		return ""
 	}

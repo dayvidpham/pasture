@@ -77,5 +77,5 @@ func Codex0_153_0TargetEvents() []model.ContractEventKind {
 // derives only from the generated registration manifest, so Codex evidence can
 // never enable an OpenCode or Claude entry.
 func Codex0_153_0() ([]Entry, error) {
-	return deriveManifest("activation.Codex0_153_0", registration.Codex0_153_0().Entries(), codexTargetEventDeclarations[:])
+	return deriveManifest("activation.Codex0_153_0", registration.Codex__0_153_0().Entries(), codexTargetEventDeclarations[:])
 }

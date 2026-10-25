@@ -35,10 +35,10 @@ import (
 // file walks.
 func harnessManifests() []registration.Manifest {
 	return []registration.Manifest{
-		registration.ClaudeCode2_1_261(),
-		registration.Codex0_153_0(),
-		registration.OpenCode1_18_29(),
-		registration.OpenCode2_0_20(),
+		registration.ClaudeCode__2_1_261(),
+		registration.Codex__0_153_0(),
+		registration.OpenCode__1_18_29(),
+		registration.OpenCode__2_0_20(),
 	}
 }
 

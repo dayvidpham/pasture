@@ -32,15 +32,15 @@ type harnessParser struct {
 
 func harnessParsers() []harnessParser {
 	return []harnessParser{
-		{registration.ClaudeCode2_1_261(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.ClaudeCode__2_1_261(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := claude.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},
-		{registration.Codex0_153_0(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.Codex__0_153_0(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := codex.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},
-		{registration.OpenCode1_18_29(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
+		{registration.OpenCode__1_18_29(), func(raw []byte, event registration.Event, version string, envelope model.OccurrenceEnvelopeRef) (model.CaptureDisposition, []model.NativeBinding, []byte, digest.Digest) {
 			capture := opencode.Parse(raw, event, version, envelope)
 			return capture.Disposition, capture.Delivery.Bindings, capture.Delivery.Body, capture.Digest
 		}},

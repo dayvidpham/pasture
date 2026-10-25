@@ -17,7 +17,7 @@ import (
 
 func v2Event(t *testing.T, name string) registration.Event {
 	t.Helper()
-	for _, event := range registration.OpenCode2_0_20().Entries() {
+	for _, event := range registration.OpenCode__2_0_20().Entries() {
 		if event.NativeName == name {
 			return event
 		}
@@ -35,7 +35,7 @@ func TestParseV2SessionCreatedBindsDataSession(t *testing.T) {
 	require.Equal(t, []model.NativeBinding{
 		{Kind: model.BindingSession, NativeName: "sessionID", Value: "ses_constructed"},
 	}, capture.Delivery.Bindings)
-	require.Equal(t, registration.OpenCode2_0_20().Contract, capture.Delivery.Contract)
+	require.Equal(t, registration.OpenCode__2_0_20().Contract, capture.Delivery.Contract)
 }
 
 func TestParseV2ToolHooksBindSessionPlusCallID(t *testing.T) {

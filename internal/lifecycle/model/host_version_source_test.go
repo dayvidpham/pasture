@@ -18,7 +18,7 @@ func TestHostVersionSourceIsClosedButLegacyIsUnspecified(t *testing.T) {
 	require.Error(t, model.ValidateHostVersionSource("running-process-attested"))
 	for _, source := range []model.HostVersionSource{model.HostVersionCallerSupplied, model.HostVersionExecutableQuery} {
 		envelope := model.OccurrenceEnvelopeRef{
-			Runtime:     model.RuntimeContractDefinitionRef{Contract: registration.ClaudeCode2_1_261().Contract},
+			Runtime:     model.RuntimeContractDefinitionRef{Contract: registration.ClaudeCode__2_1_261().Contract},
 			HostVersion: "2.1.300", HostVersionSource: source,
 		}
 		raw, err := json.Marshal(envelope)
@@ -40,7 +40,7 @@ func TestUnspecifiedVersionSourcePreservesLegacyEnvelopeBytes(t *testing.T) {
 		Implementation model.EpochImplementationRef
 		Retention      model.RetentionPolicyDefinitionRef
 		Origin         origin.CaptureOrigin `json:"origin,omitempty"`
-	}{Runtime: model.RuntimeContractDefinitionRef{Contract: registration.ClaudeCode2_1_261().Contract}, HostVersion: "2.1.261"}
+	}{Runtime: model.RuntimeContractDefinitionRef{Contract: registration.ClaudeCode__2_1_261().Contract}, HostVersion: "2.1.261"}
 	before, err := json.Marshal(legacy)
 	require.NoError(t, err)
 	after, err := json.Marshal(model.OccurrenceEnvelopeRef{Runtime: legacy.Runtime, HostVersion: "2.1.261"})

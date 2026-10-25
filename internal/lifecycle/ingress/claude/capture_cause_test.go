@@ -16,7 +16,7 @@ import (
 func TestClaudeCaptureNamesTheRefusalCause(t *testing.T) {
 	fixture, err := os.ReadFile("testdata/fixtures/session_start_2_1_261.json")
 	require.NoError(t, err)
-	event, err := ingress.EventByNativeName(registration.ClaudeCode2_1_261(), "SessionStart")
+	event, err := ingress.EventByNativeName(registration.ClaudeCode__2_1_261(), "SessionStart")
 	require.NoError(t, err)
 	parse := func(raw []byte) claude.Capture {
 		return claude.Parse(raw, event, "2.1.261", model.OccurrenceEnvelopeRef{})

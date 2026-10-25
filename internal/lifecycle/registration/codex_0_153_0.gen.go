@@ -7,7 +7,7 @@ import (
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
-func Codex0_153_0() Manifest {
+func Codex__0_153_0() Manifest {
 	events := []Event{
 		{Kind: EventCodexSessionStart, NativeName: "SessionStart", AllowedFields: []model.NativeFieldID{FieldCodexSessionID}, Identities: []Identity{{Field: FieldCodexSessionID, Binding: model.BindingSession, Required: true}}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureStrictHook, StopLoop: StopLoopNotApplicable},
 		{Kind: EventCodexUserPromptSubmit, NativeName: "UserPromptSubmit", AllowedFields: []model.NativeFieldID{FieldCodexSessionID, FieldCodexTurnID}, Identities: []Identity{{Field: FieldCodexSessionID, Binding: model.BindingSession, Required: true}, {Field: FieldCodexTurnID, Binding: model.BindingTurn, Required: true}}, Blocking: Blocking, Mutation: MutationNone, Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable},

@@ -231,10 +231,10 @@ func TestGeneratedNamesFollowTheContractVersion(t *testing.T) {
 		payload      string
 		function     string
 	}{
-		{hostcontract.ClaudeCode2_1_261(), "internal/lifecycle/registration/claude_TOKEN.gen.go", "internal/lifecycle/ingress/claude/payload_TOKEN.gen.go", "func ClaudeCodeTOKEN() Manifest"},
-		{hostcontract.OpenCode1_18_29(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCodeTOKEN() Manifest"},
-		{hostcontract.OpenCode2_0_20(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCodeTOKEN() Manifest"},
-		{hostcontract.Codex0_153_0(), "internal/lifecycle/registration/codex_TOKEN.gen.go", "internal/lifecycle/ingress/codex/payload_TOKEN.gen.go", "func CodexTOKEN() Manifest"},
+		{hostcontract.ClaudeCode2_1_261(), "internal/lifecycle/registration/claude_TOKEN.gen.go", "internal/lifecycle/ingress/claude/payload_TOKEN.gen.go", "func ClaudeCode__TOKEN() Manifest"},
+		{hostcontract.OpenCode1_18_29(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCode__TOKEN() Manifest"},
+		{hostcontract.OpenCode2_0_20(), "internal/lifecycle/registration/opencode_TOKEN.gen.go", "internal/lifecycle/ingress/opencode/payload_TOKEN.gen.go", "func OpenCode__TOKEN() Manifest"},
+		{hostcontract.Codex0_153_0(), "internal/lifecycle/registration/codex_TOKEN.gen.go", "internal/lifecycle/ingress/codex/payload_TOKEN.gen.go", "func Codex__TOKEN() Manifest"},
 	} {
 		token := versionToken(tc.contract)
 		if token == "" || token != strings.ReplaceAll(tc.contract.Version, ".", "_") {

@@ -77,7 +77,7 @@ func TestReceiptSettlementCoversRealCommitReturnGapCancellationAndRollback(t *te
 			// document the commit will resolve. These commits carry
 			// definition evidence only — no occurrence or interpretation —
 			// so the row assertions below still count exactly the pair.
-			manifest := registration.ClaudeCode2_1_261()
+			manifest := registration.ClaudeCode__2_1_261()
 			var event registration.Event
 			for _, candidate := range manifest.Events {
 				if candidate.NativeName == "PreToolUse" {

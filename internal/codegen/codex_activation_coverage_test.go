@@ -33,7 +33,7 @@ func codexClearedFixtures(t *testing.T, root string) map[string]string {
 		require.NoError(t, err)
 		require.NoError(t, provenance.ValidateCommittedFixtureBytes(fixture, raw))
 		require.Equal(t, acceptance.HarnessCodexCLI, provenance.Harness)
-		require.Equal(t, registration.Codex0_153_0().Version, provenance.HarnessVersion)
+		require.Equal(t, registration.Codex__0_153_0().Version, provenance.HarnessVersion)
 		var payload struct {
 			Event string `json:"hook_event_name"`
 		}
@@ -51,7 +51,7 @@ func TestCodexClearedEventsHaveRunnerProofClosure(t *testing.T) {
 	fixtures := codexClearedFixtures(t, root)
 	states, err := codexActivationByKind()
 	require.NoError(t, err)
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	require.Len(t, fixtures, len(manifest.Entries()), "fixture and registered populations must agree by event")
 	for _, event := range manifest.Entries() {
 		t.Run(event.NativeName, func(t *testing.T) {
@@ -127,7 +127,7 @@ func TestCodexLifecycleManifestInventory(t *testing.T) {
 	files, err := (codexManifestEmitter{}).Emit(root, GenerateOptions{})
 	require.NoError(t, err)
 	want := []string{".codex/codex.toml", ".codex/hooks.json", ".codex/pasture-codex-activation.json"}
-	for _, event := range registration.Codex0_153_0().Entries() {
+	for _, event := range registration.Codex__0_153_0().Entries() {
 		want = append(want, ".codex/hooks/events/"+event.NativeName+".sh")
 	}
 	var got []string

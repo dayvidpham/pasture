@@ -144,7 +144,7 @@ func GenerateOpenCodeHooksModule() (string, error) {
 		}
 		surfaces[mapping.NativeName()] = mapping.Surface()
 	}
-	return generateOpenCodeHooksModule(registration.OpenCode2_0_20().Entries(), activationEntries, surfaces)
+	return generateOpenCodeHooksModule(registration.OpenCode__2_0_20().Entries(), activationEntries, surfaces)
 }
 
 // generateOpenCodeHooksModule consumes the validated activation result from the
@@ -273,6 +273,168 @@ func openCodeHelperName(nativeName string, names map[string]bool) (string, error
 	return helper, nil
 }
 
+func openCodeTypeName(helper string) string {
+	if helper == "" {
+		return ""
+	}
+	return strings.ToUpper(helper[:1]) + helper[1:]
+}
+
+func openCodeProjectorName(helper string) string {
+	return "project" + openCodeTypeName(helper)
+}
+
+func openCodeCommand(nativeName string) string {
+	return fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", %q]`, nativeName)
+}
+
+func openCodePayloadType(event registration.Event) string {
+	switch event.NativeName {
+	case "session.created":
+		return "SessionCreatedPayload"
+	case "session.compaction":
+		return "SessionCompactionPayload"
+	case "tool.execute.before", "tool.execute.after":
+		return "ToolIdentityPayload"
+	case "shell.create.before":
+		return "EmptyPayload"
+	default:
+		return "SessionIdentityPayload"
+	}
+}
+
+func openCodeProjectorBody(event registration.Event, helper string) string {
+	typeName := openCodePayloadType(event)
+	projector := openCodeProjectorName(helper)
+	switch event.NativeName {
+	case "session.created":
+		return fmt.Sprintf(`function %s(value: unknown): %s {
+  const event = pastureObject(value, "session.created");
+  if (event.type !== "session.created") {
+    throw new Error("Pasture lifecycle payload for session.created has type " + JSON.stringify(event.type) + "; expected the native bus event type; the host event was not forwarded");
+  }
+  const data = pastureObject(event.data, "session.created.data");
+  return { type: "session.created", data: { sessionID: pastureIdentity(data, "sessionID", "session.created.data") } };
+}
+`, projector, typeName)
+	case "session.compaction":
+		return fmt.Sprintf(`function %s(value: unknown): %s {
+  const event = pastureObject(value, "session.compaction");
+  const sessionID = pastureIdentity(event, "sessionID", "session.compaction");
+  const messages = Array.isArray(event.messages) ? event.messages : [];
+  const system = Array.isArray(event.system) ? event.system : [];
+  const tools = event.tools !== null && typeof event.tools === "object" ? Object.keys(event.tools).sort() : [];
+  const payload: %s = {
+    sessionID,
+    kind: "compaction",
+    messageCount: messages.length,
+    transcriptRoot: pastureDigest(JSON.stringify(messages)),
+    systemRoot: pastureDigest(JSON.stringify(system)),
+    toolSetRoot: pastureDigest(JSON.stringify(tools)),
+    toolCount: tools.length,
+  };
+  if (typeof event.agent === "string") payload.agent = event.agent;
+  if (typeof event.model === "object" && event.model !== null && typeof (event.model as Record<string, unknown>).id === "string") {
+    payload.model = (event.model as Record<string, unknown>).id as string;
+  }
+  return payload;
+}
+`, projector, typeName, typeName)
+	case "tool.execute.before", "tool.execute.after":
+		return fmt.Sprintf(`function %s(value: unknown): %s {
+  return {
+    sessionID: pastureIdentity(value, "sessionID", %q),
+    id: pastureIdentity(value, "id", %q),
+  };
+}
+`, projector, typeName, event.NativeName, event.NativeName)
+	case "shell.create.before":
+		return fmt.Sprintf(`function %s(_value: unknown): %s {
+  return {};
+}
+`, projector, typeName)
+	default:
+		return fmt.Sprintf(`function %s(value: unknown): %s {
+  return { sessionID: pastureIdentity(value, "sessionID", %q) };
+}
+`, projector, typeName, event.NativeName)
+	}
+}
+
+func renderOpenCodeContract(manifest []registration.Event, helperByKind map[model.ContractEventKind]string, surfaces map[string]runtime.HookSurface) string {
+	var b strings.Builder
+	b.WriteString(`// Generated lifecycle contract. The Go registration table is the source.
+export type SessionIdentityPayload = { sessionID: string };
+export type ToolIdentityPayload = { sessionID: string; id: string };
+export type SessionCreatedPayload = { type: "session.created"; data: { sessionID: string } };
+export type SessionCompactionPayload = {
+  sessionID: string;
+  kind: "compaction";
+  messageCount: number;
+  transcriptRoot: string;
+  systemRoot: string;
+  toolSetRoot: string;
+  toolCount: number;
+  agent?: string;
+  model?: string;
+};
+export type EmptyPayload = Record<string, never>;
+
+export const LIFECYCLE_EVENTS = Object.freeze({
+`)
+	for _, event := range manifest {
+		helper := helperByKind[event.Kind]
+		surface := "hook"
+		if surfaces[event.NativeName] == runtime.SurfaceOpenCodeCatchAllSSE {
+			surface = "observation"
+		}
+		fmt.Fprintf(&b, "  %s: { kind: %d, native: %q, surface: %q, command: %s },\n", helper, event.Kind, event.NativeName, surface, openCodeCommand(event.NativeName))
+	}
+	b.WriteString(`} as const);
+
+export type LifecycleEventName = keyof typeof LIFECYCLE_EVENTS;
+export type LifecycleEvent = (typeof LIFECYCLE_EVENTS)[LifecycleEventName];
+export type LifecyclePayloadFor<K extends LifecycleEventName> =
+`)
+	for _, event := range manifest {
+		switch event.NativeName {
+		case "session.created", "session.compaction", "tool.execute.before", "tool.execute.after", "shell.create.before":
+			fmt.Fprintf(&b, "  K extends %q ? %s :\n", helperByKind[event.Kind], openCodePayloadType(event))
+		}
+	}
+	b.WriteString("  SessionIdentityPayload;\n\n")
+
+	b.WriteString(`function pastureObject(value: unknown, path: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Pasture lifecycle payload for " + path + " must be an object; the host event was not forwarded");
+  }
+  return value as Record<string, unknown>;
+}
+
+function pastureIdentity(value: unknown, field: string, path: string): string {
+  const object = pastureObject(value, path);
+  const raw = object[field];
+  if (typeof raw !== "string" || raw.trim() === "" || raw.length > 512 || /[\u0000-\u001f\u007f]/.test(raw)) {
+    throw new Error("Pasture lifecycle payload for " + path + " has no usable " + field + " identity; the host event was not forwarded");
+  }
+  return raw;
+}
+
+function pastureDigest(value: string): string {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(value);
+  return "sha256:" + hasher.digest("hex");
+}
+
+`)
+	for _, event := range manifest {
+		helper := helperByKind[event.Kind]
+		b.WriteString(openCodeProjectorBody(event, helper))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func openCodeCallbacks(manifest []registration.Event, enabled map[model.ContractEventKind]bool, surfaces map[string]runtime.HookSurface) (string, string, error) {
 	var helpers, setup strings.Builder
 	seen := make(map[model.ContractEventKind]bool)
@@ -309,9 +471,7 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 	if len(seen) != len(enabled) {
 		return "", "", fmt.Errorf("codegen.openCodeCallbacks: activation contains an unregistered kind during emission; regenerate matching activation and registration tables")
 	}
-	commandFor := func(nativeName string) string {
-		return fmt.Sprintf(`["hook", "lifecycle", "--harness", "opencode", "--event", %q]`, nativeName)
-	}
+	contract := renderOpenCodeContract(manifest, helperByKind, surfaces)
 	for _, event := range manifest {
 		helper := helperByKind[event.Kind]
 		if _, isHook := hookByKind[event.Kind]; !isHook {
@@ -320,8 +480,8 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 		if event.NativeName == openCodeV2DenyHook {
 			fmt.Fprintf(&helpers, `export async function %s(hookEvent) {
   try {
-    const stdout = await invokeLifecycle(%s, %q, hookEvent);
-    const response = parseResponse(stdout, %q);
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.%s, %s(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.%s.native);
     if (response?.decision === "deny") {
       // ENFORCED through the host's typed permission channel, on the path
       // where no saved or configured host rule already denied (that path
@@ -351,13 +511,13 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
   }
 }
 
-`, helper, commandFor(event.NativeName), event.NativeName, event.NativeName, event.NativeName)
+`, helper, helper, openCodeProjectorName(helper), helper, event.NativeName)
 			continue
 		}
 		if event.NativeName == openCodeV2ThrowingHook {
 			fmt.Fprintf(&helpers, `export async function %s(hookEvent) {
-  const stdout = await invokeLifecycle(%s, %q, hookEvent);
-  const response = parseResponse(stdout, %q);
+  const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.%s, %s(hookEvent));
+  const response = parseResponse(stdout, LIFECYCLE_EVENTS.%s.native);
   // A deny response is a future capable-binary path, not the enforceable
   // deny: every 2.0.20 row derives CapabilityNone, so the shipped binary
   // downgrades denials to proceed with the unenforced reason before this
@@ -374,13 +534,17 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
   // mutation. Never write host-owned objects.
 }
 
-`, helper, commandFor(event.NativeName), event.NativeName, event.NativeName)
+`, helper, helper, openCodeProjectorName(helper), helper)
 			continue
 		}
+		contextGuard := ""
+		if event.NativeName == "session.context" {
+			contextGuard = "  if (!pastureContextDue(hookEvent)) return;\n"
+		}
 		fmt.Fprintf(&helpers, `export async function %s(hookEvent) {
-  try {
-    const stdout = await invokeLifecycle(%s, %q, hookEvent);
-    const response = parseResponse(stdout, %q);
+%s  try {
+    const stdout = await invokeLifecycle(LIFECYCLE_EVENTS.%s, %s(hookEvent));
+    const response = parseResponse(stdout, LIFECYCLE_EVENTS.%s.native);
     if (response?.decision === "deny") {
       // UNENFORCED on this hook: its failure channel is never, so a throw
       // would be a host-flow defect rather than a refusal, and the
@@ -398,11 +562,11 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
   }
 }
 
-`, helper, commandFor(event.NativeName), event.NativeName, event.NativeName, event.NativeName, event.NativeName)
+`, helper, contextGuard, helper, openCodeProjectorName(helper), helper, event.NativeName, event.NativeName)
 	}
 	for _, event := range observations {
 		helper := helperByKind[event.Kind]
-		versionSelection := ""
+		versionSelection := "    const versionArgs: string[] = [];\n"
 		if event.NativeName == "session.created" {
 			versionSelection = `    // The 2.0.20 bus event wraps its payload in data: version rides
     // beside sessionID there (packages/schema/src/session-event.ts for the
@@ -411,22 +575,28 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
     // or change the original payload. A non-release bus version (a source
     // build reports "local") is not carried: the setup-observed version is
     // the fallback, and the probe resolves when neither is release-shaped.
+    const versionArgs: string[] = [];
     const busVersion = typeof busEvent?.data?.version === "string" ? busEvent.data.version.trim() : "";
-    if (pastureReleaseShaped(busVersion)) command.push("--host-version", busVersion);
+    if (pastureReleaseShaped(busVersion)) versionArgs.push("--host-version", busVersion);
 `
 		}
 		fmt.Fprintf(&helpers, `export async function %s(busEvent) {
   try {
-    const command = %s;
-%s    await invokeLifecycle(command, %q, busEvent);
+%s    await invokeLifecycle(LIFECYCLE_EVENTS.%s, %s(busEvent), versionArgs);
   } catch (error) {
     // Observation is never a gate and cannot terminate the native event bus.
     console.error(%q + error);
   }
 }
 
-`, helper, commandFor(event.NativeName), versionSelection, event.NativeName, "Pasture lifecycle observation failed for "+event.NativeName+": ")
+`, helper, versionSelection, helper, openCodeProjectorName(helper), "Pasture lifecycle observation failed for "+event.NativeName+": ")
 	}
+	fmt.Fprintf(&helpers, "const HANDLERS = Object.freeze({\n")
+	for _, event := range manifest {
+		helper := helperByKind[event.Kind]
+		fmt.Fprintf(&helpers, "  %s: %s,\n", helper, helper)
+	}
+	fmt.Fprintf(&helpers, "} satisfies { [K in LifecycleEventName]: (event: any) => Promise<void> });\n\n")
 	fmt.Fprintf(&setup, `    // The v2 plugin context carries the running host's own release as
     // ctx.app.version (packages/plugin/src/app.ts: App.version, exposed on
     // the promise Context at packages/plugin/src/promise/plugin.ts). Capture
@@ -447,14 +617,14 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 		}
 		if event.NativeName == "session.context" {
 			fmt.Fprintf(&setup, `    try {
-      registrations.push(await ctx.session.hook("context", withTaskRecovery(ctx, %s)));
+      registrations.push(await ctx.session.hook("context", withTaskRecovery(ctx, HANDLERS.%s)));
     } catch (error) {
       reportRecoveryFault(ctx, "session.context registration", error);
     }
 `, helperByKind[event.Kind])
 			continue
 		}
-		fmt.Fprintf(&setup, "    registrations.push(await ctx.%s.hook(%q, %s));\n", hook[0], hook[1], helperByKind[event.Kind])
+		fmt.Fprintf(&setup, "    registrations.push(await ctx.%s.hook(%q, HANDLERS.%s));\n", hook[0], hook[1], helperByKind[event.Kind])
 	}
 	if len(observations) > 0 {
 		var guards strings.Builder
@@ -463,7 +633,7 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 			if i > 0 {
 				keyword = "else if"
 			}
-			fmt.Fprintf(&guards, "          %s (busEvent !== null && typeof busEvent === \"object\" && busEvent.type === %q) {\n            await %s(busEvent);\n          }\n", keyword, event.NativeName, helperByKind[event.Kind])
+			fmt.Fprintf(&guards, "          %s (busEvent !== null && typeof busEvent === \"object\" && busEvent.type === %q) {\n            await HANDLERS.%s(busEvent);\n          }\n", keyword, event.NativeName, helperByKind[event.Kind])
 		}
 		fmt.Fprintf(&setup, `    // Observation rows arrive on the connected server's public event
     // stream, not through a hook: filter the subscription to the bus events
@@ -489,16 +659,16 @@ func openCodeCallbacks(manifest []registration.Event, enabled map[model.Contract
 	fmt.Fprintf(&setup, `      for (const registration of registrations) await registration.dispose();
     };
 `)
-	return helpers.String(), setup.String(), nil
+	return contract + helpers.String(), setup.String(), nil
 }
 
 func openCodeEventByKind(kind model.ContractEventKind) (registration.Event, error) {
-	for _, event := range registration.OpenCode2_0_20().Entries() {
+	for _, event := range registration.OpenCode__2_0_20().Entries() {
 		if event.Kind == kind {
 			return event, nil
 		}
 	}
-	return registration.Event{}, fmt.Errorf("codegen.openCodeEventByKind: generated OpenCode %s manifest lacks event kind %d; regenerate the host contract before activation", registration.OpenCode2_0_20().Version, kind)
+	return registration.Event{}, fmt.Errorf("codegen.openCodeEventByKind: generated OpenCode %s manifest lacks event kind %d; regenerate the host contract before activation", registration.OpenCode__2_0_20().Version, kind)
 }
 
 func openCodeActivationEntries() ([]activation.Entry, error) {
@@ -506,7 +676,7 @@ func openCodeActivationEntries() ([]activation.Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	manifest := registration.OpenCode2_0_20().Entries()
+	manifest := registration.OpenCode__2_0_20().Entries()
 	if len(entries) != len(manifest) {
 		return nil, fmt.Errorf("activation has %d entries but generated OpenCode manifest has %d; activation must exhaustively classify every generated event", len(entries), len(manifest))
 	}

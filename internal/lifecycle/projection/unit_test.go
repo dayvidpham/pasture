@@ -152,7 +152,7 @@ func evidenceRow(jid int64, op string, kind provenance.EvidenceKind, payload str
 
 func occurrence(t *testing.T, jid int64) model.OccurrenceRecord {
 	t.Helper()
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode__2_1_261().Contract.String())
 	if err != nil {
 		t.Fatalf("construct runtime contract: %v", err)
 	}

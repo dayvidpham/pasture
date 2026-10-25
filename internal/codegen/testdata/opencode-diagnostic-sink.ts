@@ -27,7 +27,7 @@ Bun.spawn = () => ({
 const installSink = sink => Object.defineProperty(process, "stderr", {value: sink, configurable: true});
 try {
   await plugin.setup(ctx);
-  const payload = { permission: "tool", action: "task" };
+  const payload = { permission: "tool", action: "task", sessionID: "constructed" };
   for (const mode of ["destroyed", "epipe"]) {
     const sink = new Writable({ write(_chunk, _encoding, callback) {
       callback(mode === "epipe" ? Object.assign(new Error("simulated EPIPE"), {code: "EPIPE"}) : undefined);

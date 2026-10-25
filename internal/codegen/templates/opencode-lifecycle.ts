@@ -4,12 +4,14 @@
 
 export const PASTURE_NATIVE_TOOLS = Object.freeze([/* PASTURE_NATIVE_TOOLS */]);
 export const PASTURE_RUNTIME_CONTRACT = "__PASTURE_CONTRACT_LITERAL__";
-const METADATA = /* PASTURE_METADATA */ {};
+export const METADATA = /* PASTURE_METADATA */ {};
 type LifecycleResponse =
   | { decision: "proceed" }
   | { decision: "deny"; reason: string };
 
 const CHILD_WAIT_MS = 8000;
+const CONTEXT_HEARTBEAT_MS = 60000;
+const pastureContextSeen = new Map();
 const CONFIGURATION_ADVICE = "; verify PASTURE_BIN and the generated OpenCode __PASTURE_HOST_VERSION__ configuration";
 
 const TASK_RECOVERY_MARKER = "[pasture:task-recovery]";
@@ -131,7 +133,40 @@ function pastureReleaseShaped(value) {
   return typeof value === "string" && /^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(value.trim());
 }
 
-async function invokeLifecycle(command, event, value) {
+// session.context runs before every model dispatch, including every tool
+// continuation. A per-dispatch receipt is noise for the tracker; record the
+// first context and then at most one heartbeat per minute, or immediately
+// when the system/tool surface changes.
+function pastureContextDue(event) {
+  const sessionID = typeof event?.sessionID === "string" ? event.sessionID : "";
+  if (sessionID === "") return true;
+  const messages = Array.isArray(event?.messages) ? event.messages : [];
+  const last = messages.length > 0 ? messages[messages.length - 1] : undefined;
+  const system = Array.isArray(event?.system) ? event.system : [];
+  const tools = event?.tools !== null && typeof event?.tools === "object" ? Object.keys(event.tools).length : 0;
+  const previous = pastureContextSeen.get(sessionID);
+  const now = Date.now();
+  if (previous !== undefined &&
+      previous.system === system.length &&
+      previous.tools === tools &&
+      now - previous.at < CONTEXT_HEARTBEAT_MS) {
+    return false;
+  }
+  pastureContextSeen.set(sessionID, {
+    at: now,
+    system: system.length,
+    tools,
+    messages: messages.length,
+    last: typeof last?.id === "string" ? last.id : "",
+  });
+  return true;
+}
+
+async function invokeLifecycle<K extends LifecycleEventName>(
+  event: (typeof LIFECYCLE_EVENTS)[K],
+  payload: LifecyclePayloadFor<K>,
+  extraArgs: readonly string[] = [],
+) {
   const binary = process.env.__PASTURE_BINARY_ENV__ ?? "pasture";
   // Carry the setup-observed host version unless this invocation already
   // names its own (the session.created observation does, from its bus data).
@@ -140,10 +175,12 @@ async function invokeLifecycle(command, event, value) {
   // version itself. A later host stays admissible: the binary admits its
   // recorded baseline and every later release, so forwarding the running
   // release never narrows it.
-  const effective = command.includes("--host-version") || pastureHostVersionArgs.length === 0 ? command : [...command, ...pastureHostVersionArgs];
+  const versionArgs = extraArgs.length > 0 ? extraArgs : pastureHostVersionArgs;
+  const effective = [...event.command, ...versionArgs];
   const child = Bun.spawn({
     cmd: [binary, ...effective],
-    stdin: new Blob([JSON.stringify(value)]),
+    env: process.env,
+    stdin: new Blob([JSON.stringify(payload)]),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -172,14 +209,14 @@ async function invokeLifecycle(command, event, value) {
     // Cancel pending reads as well: inherited pipes can remain open even after
     // the direct child exits. Always wait for the direct child to be reaped.
     await Promise.allSettled([stdoutReader.cancel(), stderrReader.cancel(), child.exited]);
-    throw new Error("pasture hook lifecycle for " + event + " " + (error instanceof Error ? error.message : String(error)) + CONFIGURATION_ADVICE);
+    throw new Error("pasture hook lifecycle for " + event.native + " " + (error instanceof Error ? error.message : String(error)) + CONFIGURATION_ADVICE);
   } finally {
     clearTimeout(timer);
     stdoutReader.releaseLock();
     stderrReader.releaseLock();
   }
   const [stdout, stderr, exitCode] = result;
-  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + CONFIGURATION_ADVICE);
+  if (exitCode !== 0) throw new Error("pasture hook lifecycle for " + event.native + " exited " + exitCode + ": " + (stderr.trim() || "no diagnostic was returned") + CONFIGURATION_ADVICE);
   // fd 2 is piped, not inherited. Preserve the child's diagnostic and the
   // existing terminal-newline policy without console.error decoration.
   // Bun.write(Bun.stderr, ...) stalled after a partial write in the generated
@@ -188,7 +225,7 @@ async function invokeLifecycle(command, event, value) {
   if (stderr.trim() !== "") {
     // A successful lifecycle decision must survive a host that has closed or
     // rejected its diagnostic stream. The child's stdout remains authoritative.
-    await forwardDiagnostic(stderr.endsWith("\n") ? stderr : stderr + "\n", event).catch(() => {});
+    await forwardDiagnostic(stderr.endsWith("\n") ? stderr : stderr + "\n", event.native).catch(() => {});
   }
   return stdout;
 }

@@ -30,9 +30,9 @@ import (
 // read from the generated manifests so a moved host version moves every
 // --schema-version in these tests with it.
 var (
-	claudeRawSchema   = registration.ClaudeCode2_1_261().Contract.String()
-	codexRawSchema    = registration.Codex0_153_0().Contract.String()
-	openCodeRawSchema = registration.OpenCode1_18_29().Contract.String()
+	claudeRawSchema   = registration.ClaudeCode__2_1_261().Contract.String()
+	codexRawSchema    = registration.Codex__0_153_0().Contract.String()
+	openCodeRawSchema = registration.OpenCode__1_18_29().Contract.String()
 )
 
 // build raw CLI exec-binary tests (SLICE-2 L2). These import the production
@@ -163,12 +163,12 @@ func TestRawContinuationParityWithNativePerEvent(t *testing.T) {
 		},
 		{
 			name: "codex session start observation", harness: "codex", event: "SessionStart",
-			hostVersion: registration.Codex0_153_0().Version, schema: codexRawSchema,
+			hostVersion: registration.Codex__0_153_0().Version, schema: codexRawSchema,
 			fixture: "session_start_0_153_0.json", pkg: "codex", want: `{}`,
 		},
 		{
 			name: "codex pre-tool-use gate", harness: "codex", event: "PreToolUse",
-			hostVersion: registration.Codex0_153_0().Version, schema: codexRawSchema,
+			hostVersion: registration.Codex__0_153_0().Version, schema: codexRawSchema,
 			fixture: "pre_tool_use_0_153_0.json", pkg: "codex", want: `{"continue":true}`,
 		},
 	} {
@@ -361,7 +361,7 @@ func TestRawWithheldEventIsNotAdmitted(t *testing.T) {
 
 	command := exec.Command(binary, databaseFlagName.Argument(), dbPath,
 		"hook", "lifecycle", "raw",
-		"--harness", "opencode", "--event", "session.updated", "--host-version", registration.OpenCode1_18_29().Version,
+		"--harness", "opencode", "--event", "session.updated", "--host-version", registration.OpenCode__1_18_29().Version,
 		"--schema-version", openCodeRawSchema)
 	command.Stdin = strings.NewReader(`{"event":{"type":"session.updated"}}`)
 	var stdout, stderr bytes.Buffer

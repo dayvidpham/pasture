@@ -208,7 +208,7 @@ type lifecycleDispatch struct {
 var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 	ir.HarnessClaudeCode: {
 		name:        "Claude",
-		manifest:    registration.ClaudeCode2_1_261(),
+		manifest:    registration.ClaudeCode__2_1_261(),
 		activations: activation.ClaudeCode2_1_261,
 		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := claudeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
@@ -226,7 +226,7 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 	},
 	ir.HarnessOpenCode: {
 		name:        "OpenCode",
-		manifest:    registration.OpenCode1_18_29(),
+		manifest:    registration.OpenCode__1_18_29(),
 		activations: activation.OpenCode1_18_29,
 		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := opencodeingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
@@ -247,7 +247,7 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 	},
 	ir.HarnessCodex: {
 		name:        "Codex",
-		manifest:    registration.Codex0_153_0(),
+		manifest:    registration.Codex__0_153_0(),
 		activations: activation.Codex0_153_0,
 		parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 			capture := codexingress.Parse(raw, event, version, model.OccurrenceEnvelopeRef{})
@@ -283,7 +283,7 @@ var frontendRegistry = map[ir.HarnessID]lifecycleDispatch{
 // encoder change.
 var openCodeV2Dispatch = lifecycleDispatch{
 	name:        "OpenCode",
-	manifest:    registration.OpenCode2_0_20(),
+	manifest:    registration.OpenCode__2_0_20(),
 	activations: activation.OpenCode2_0_20,
 	parse: func(raw []byte, event registration.Event, version string) lifecycleCapture {
 		capture := opencodeingress.ParseV2(raw, event, version, model.OccurrenceEnvelopeRef{})

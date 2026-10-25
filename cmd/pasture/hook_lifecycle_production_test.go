@@ -63,30 +63,27 @@ func TestInstalledOpenCodePluginObservesUpdatesWithoutReinstall(t *testing.T) {
 	require.NoError(t, os.WriteFile(installed, module, 0o600)) // exactly one install
 	installedHash := sha256.Sum256(module)
 	fixtureDir := filepath.Join("..", "..", "internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures")
-	sessionRaw, err := os.ReadFile(filepath.Join(fixtureDir, "session_created_1_18_29.json"))
+	sessionRaw, err := os.ReadFile(filepath.Join(fixtureDir, "opencode_session_created_2_0_21.1.json"))
 	require.NoError(t, err)
-	toolRaw, err := os.ReadFile(filepath.Join(fixtureDir, "tool_execute_before_1_18_29.json"))
+	toolRaw, err := os.ReadFile(filepath.Join(fixtureDir, "opencode_tool_execute_before_2_0_20.1.json"))
 	require.NoError(t, err)
 
-	for _, variant := range []string{"accepted", "new creation version", "absent", "empty", "whitespace", "number", "null", "object", "array", "bool", "missing session", "unusable session", "missing call"} {
+	for _, variant := range []string{"accepted", "new creation version", "absent", "empty", "whitespace", "number", "null", "object", "array", "bool"} {
 		t.Run(variant, func(t *testing.T) {
 			var session, tool map[string]any
 			require.NoError(t, json.Unmarshal(sessionRaw, &session))
 			require.NoError(t, json.Unmarshal(toolRaw, &tool))
-			properties := session["event"].(map[string]any)["properties"].(map[string]any)
-			creationVersion := "1.18.29"
+			data := session["data"].(map[string]any)
+			creationVersion := "2.0.21"
 			creationSource := model.HostVersionCallerSupplied
 			creationValid, toolValid := true, true
-			// The bus event carries the v2 data envelope the generated
-			// helper reads the occurrence-local flag from, alongside the v1
-			// nested shape the 1.18.29 row under test parses. Variants
-			// mutate data.version; the nested fixture shape stays
-			// byte-identical except where the variant removes an identity.
-			data := map[string]any{"version": creationVersion}
-			session["data"] = data
+			// Variants mutate the v2 data.version the generated helper reads
+			// for the occurrence-local flag. Identity fields stay valid; the
+			// generated projector rejects malformed identities before spawn,
+			// which is covered by the projector proof.
 			switch variant {
 			case "new creation version":
-				data["version"], creationVersion = "1.22.0+runtime", "1.22.0+runtime"
+				data["version"], creationVersion = "2.0.21+runtime", "2.0.21+runtime"
 			case "absent":
 				delete(data, "version")
 			case "empty":
@@ -98,35 +95,39 @@ func TestInstalledOpenCodePluginObservesUpdatesWithoutReinstall(t *testing.T) {
 			case "null":
 				data["version"] = nil
 			case "object":
-				data["version"] = map[string]any{"version": "1.18.29"}
+				data["version"] = map[string]any{"version": "2.0.21"}
 			case "array":
-				data["version"] = []any{"1.18.29"}
+				data["version"] = []any{"2.0.21"}
 			case "bool":
 				data["version"] = true
-			case "missing session":
-				delete(properties, "sessionID")
-				creationValid = false
-			case "unusable session":
-				properties["sessionID"] = " "
-				creationValid = false
-			case "missing call":
-				delete(tool["input"].(map[string]any), "callID")
-				toolValid = false
 			}
 			if value, ok := data["version"].(string); !ok || strings.TrimSpace(value) == "" {
 				creationSource = model.HostVersionExecutableQuery
 			}
-			sessionBytes, err := json.Marshal(session)
+			sessionHostBytes, err := json.Marshal(session)
 			require.NoError(t, err)
-			toolBytes, err := json.Marshal(tool)
+			toolHostBytes, err := json.Marshal(tool)
 			require.NoError(t, err)
-			// The bus event always carries the v2 data envelope beside the
-			// v1 nested shape, so every route uses a newly serialized
-			// payload; the nested fixture content stays byte-identical
-			// except where the variant removes an identity.
-			if variant != "missing call" {
-				toolBytes = toolRaw
-			}
+			sessionID, ok := data["sessionID"].(string)
+			require.True(t, ok)
+			sessionBytes, err := json.Marshal(struct {
+				Type string `json:"type"`
+				Data struct {
+					SessionID string `json:"sessionID"`
+				} `json:"data"`
+			}{Type: "session.created", Data: struct {
+				SessionID string `json:"sessionID"`
+			}{SessionID: sessionID}})
+			require.NoError(t, err)
+			toolSessionID, ok := tool["sessionID"].(string)
+			require.True(t, ok)
+			toolCallID, ok := tool["id"].(string)
+			require.True(t, ok)
+			toolBytes, err := json.Marshal(struct {
+				SessionID string `json:"sessionID"`
+				ID        string `json:"id"`
+			}{SessionID: toolSessionID, ID: toolCallID})
+			require.NoError(t, err)
 			scratch := t.TempDir()
 			path := filepath.Join(scratch, "bin")
 			require.NoError(t, os.Mkdir(path, 0o700))
@@ -134,7 +135,7 @@ func TestInstalledOpenCodePluginObservesUpdatesWithoutReinstall(t *testing.T) {
 			marker := filepath.Join(scratch, "queries")
 			// The executable's path stays fixed. Each query appends, so exact counts
 			// detect a cached value, a second query, or an unexpected metadata query.
-			banners := []string{"1.19.0", "1.20.0+updated"}
+			banners := []string{"2.0.20", "2.0.21"}
 			var scripts []string
 			dbPath := filepath.Join(scratch, tasks.DefaultDBFilename.String())
 			initializeLifecycleTestDatabase(t, dbPath)
@@ -197,7 +198,7 @@ try {
   }
   console.log(JSON.stringify(await Promise.all(calls)));
 } finally { Bun.spawn = spawn; }
-`, installed, installed, sessionBytes, toolBytes, jsonScripts, executable)
+`, installed, installed, sessionHostBytes, toolHostBytes, jsonScripts, executable)
 			require.NoError(t, os.WriteFile(runner, []byte(code), 0o600))
 			command := exec.Command(bun, runner)
 			command.Env = discoveryChildEnv(map[string]*string{"PATH": &path, "PASTURE_BIN": &binary,
@@ -261,8 +262,8 @@ func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, upda
 	require.Len(t, occurrences, 4, "both updates must append distinct occurrences in the same scratch store")
 	sort.Slice(occurrences, func(i, j int) bool { return occurrences[i].JournalID < occurrences[j].JournalID })
 	occurrences = occurrences[updateIndex*2 : updateIndex*2+2]
-	require.Equal(t, registration.EventOpenCodeSessionCreated, decodeOccurrencePayload(t, occurrences[0].Payload).Event)
-	require.Equal(t, registration.EventOpenCodeToolExecuteBefore, decodeOccurrencePayload(t, occurrences[1].Payload).Event)
+	require.Equal(t, registration.EventOpenCode2SessionCreated, decodeOccurrencePayload(t, occurrences[0].Payload).Event)
+	require.Equal(t, registration.EventOpenCode2ToolExecuteBefore, decodeOccurrencePayload(t, occurrences[1].Payload).Event)
 	interpreted := queryLifecycleEvidence(t, tracker.Journal(), interpretedEvidenceKind)
 	consultations := queryLifecycleEvidence(t, tracker.Journal(), consultationEvidenceKind)
 	wantInterpreted, wantConsultations := 0, 0
@@ -288,16 +289,16 @@ func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, upda
 		payload := decodeOccurrencePayload(t, row.Payload)
 		raw, version, source, valid := toolRaw, toolVersion, model.HostVersionExecutableQuery, toolValid
 		semantic := runtime.SemanticGateConsultation
-		identities := []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "ses_f8e723e13ffeUWnfE2vlRBO1xN"}, {Kind: uint8(runtime.IdentityToolCall), Value: "call_4zMdLgUBV12aE7yHvuYQolSx"}}
-		if payload.Event == registration.EventOpenCodeSessionCreated {
+		identities := []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "ses_f08eb1a39ffee3oHEXffLySG2p"}, {Kind: uint8(runtime.IdentityToolCall), Value: "call_00_ol6zvpbgwup5or2tz4gkvvmq"}}
+		if payload.Event == registration.EventOpenCode2SessionCreated {
 			raw, version, source, valid = sessionRaw, creationVersion, creationSource, creationValid
 			semantic = runtime.SemanticObservation
-			identities = identities[:1]
+			identities = []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "ses_f05d440a7ffenr7XNt4C4Haot0"}}
 		} else {
-			require.Equal(t, registration.EventOpenCodeToolExecuteBefore, payload.Event)
+			require.Equal(t, registration.EventOpenCode2ToolExecuteBefore, payload.Event)
 		}
-		require.Equal(t, registration.OpenCode1_18_29().Contract.String(), payload.Contract)
-		require.Equal(t, registration.OpenCode1_18_29().Contract, payload.Envelope.Runtime.Contract)
+		require.Equal(t, registration.OpenCode__2_0_20().Contract.String(), payload.Contract)
+		require.Equal(t, registration.OpenCode__2_0_20().Contract, payload.Envelope.Runtime.Contract)
 		require.Equal(t, version, payload.Envelope.HostVersion)
 		require.Equal(t, source, payload.Envelope.HostVersionSource)
 		require.Equal(t, digest.FromBytes(raw).String(), payload.Body)
@@ -312,7 +313,7 @@ func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, upda
 			matches++
 			assertSharedOperation(t, row, irRow)
 			value := decodeInterpretedPayload(t, irRow.Payload)
-			require.Equal(t, runtime.OpenCode1_18_29().ID().String(), value.Contract)
+			require.Equal(t, runtime.OpenCode2_0_20().ID().String(), value.Contract)
 			require.Equal(t, uint8(semantic), value.Semantic)
 			require.Equal(t, identities, value.Identities)
 			require.Empty(t, value.UnresolvedFacts)
@@ -321,8 +322,8 @@ func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, upda
 			require.Equal(t, model.CaptureValid, payload.Capture)
 			require.Equal(t, 1, matches)
 			bindings := []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "sessionID", Value: identities[0].Value}}
-			if payload.Event == registration.EventOpenCodeToolExecuteBefore {
-				bindings = append(bindings, lifecycleBindingPayload{Kind: model.BindingToolCall, NativeName: "callID", Value: identities[1].Value})
+			if payload.Event == registration.EventOpenCode2ToolExecuteBefore {
+				bindings = append(bindings, lifecycleBindingPayload{Kind: model.BindingToolCall, NativeName: "id", Value: identities[1].Value})
 			}
 			require.Equal(t, bindings, payload.Bindings)
 		} else {
@@ -340,7 +341,7 @@ func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, upda
 			require.Len(t, record.Interpreted(), matches)
 		}
 		require.Equal(t, 1, projected)
-		if valid && payload.Event == registration.EventOpenCodeToolExecuteBefore {
+		if valid && payload.Event == registration.EventOpenCode2ToolExecuteBefore {
 			require.Equal(t, row.ProducingOperationID, consultations[updateIndex].ProducingOperationID)
 			require.Equal(t, row.ProducingOperationJournalID, consultations[updateIndex].ProducingOperationJournalID)
 			assertUnboundProceedConsultation(t, consultations[updateIndex].Payload)
@@ -387,10 +388,10 @@ func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, upda
 	require.Len(t, public.Items, 4)
 	for _, item := range public.Items {
 		raw, valid := toolRaw, toolValid
-		if item.Event == registration.EventOpenCodeSessionCreated {
+		if item.Event == registration.EventOpenCode2SessionCreated {
 			raw, valid = sessionRaw, creationValid
 		} else {
-			require.Equal(t, registration.EventOpenCodeToolExecuteBefore, item.Event)
+			require.Equal(t, registration.EventOpenCode2ToolExecuteBefore, item.Event)
 		}
 		require.Equal(t, digest.FromBytes(raw).String(), item.Digest)
 		if valid {
@@ -485,9 +486,9 @@ func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
 	semantics := make(map[model.ContractEventKind]runtime.EventSemantic, 2)
 	identities := make(map[model.ContractEventKind]map[runtime.NativeIdentityKind]string, 2)
 	for _, record := range page.Records() {
-		require.Equal(t, registration.OpenCode1_18_29().Contract, record.Occurrence.RuntimeContract)
+		require.Equal(t, registration.OpenCode__1_18_29().Contract, record.Occurrence.RuntimeContract)
 		if record.Occurrence.Kind == registration.EventOpenCodeSessionCreated {
-			require.Equal(t, registration.OpenCode1_18_29().Version, record.Occurrence.Envelope.HostVersion)
+			require.Equal(t, registration.OpenCode__1_18_29().Version, record.Occurrence.Envelope.HostVersion)
 			require.Equal(t, model.HostVersionCallerSupplied, record.Occurrence.Envelope.HostVersionSource)
 		} else {
 			require.Equal(t, "1.19.0", record.Occurrence.Envelope.HostVersion)
@@ -727,7 +728,7 @@ console.log("opencode 2.0.21 production drive passed");
 	byKind := make(map[model.ContractEventKind]int, len(openCode2EnabledFixtures))
 	for _, record := range page.Records() {
 		byKind[record.Occurrence.Kind]++
-		require.Equal(t, registration.OpenCode2_0_20().Contract, record.Occurrence.RuntimeContract)
+		require.Equal(t, registration.OpenCode__2_0_20().Contract, record.Occurrence.RuntimeContract)
 		require.Equal(t, wantVersion[record.Occurrence.Kind], record.Occurrence.Envelope.HostVersion)
 		require.Equal(t, model.HostVersionCallerSupplied, record.Occurrence.Envelope.HostVersionSource)
 		require.Len(t, record.Interpreted(), 1)
@@ -745,7 +746,7 @@ console.log("opencode 2.0.21 production drive passed");
 // registration manifest and the runtime contract so a moved host version
 // moves every expectation in this file with it.
 var (
-	occurrenceLifecycleContract  = registration.ClaudeCode2_1_261().Contract.String()
+	occurrenceLifecycleContract  = registration.ClaudeCode__2_1_261().Contract.String()
 	interpretedLifecycleContract = runtime.ClaudeCode2_1_261().ID().String()
 	consultationEvidenceKind     = receipt.CurrentConsultationEvidenceKind()
 )
@@ -1451,7 +1452,7 @@ func TestWithheldOpenCodeEventIsNotAdmittedByBuiltCLI(t *testing.T) {
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, dbPath)
 
-	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "opencode", "--event", "session.updated", "--host-version", registration.OpenCode1_18_29().Version)
+	command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "opencode", "--event", "session.updated", "--host-version", registration.OpenCode__1_18_29().Version)
 	command.Stdin = bytes.NewBufferString(`{"event":{"type":"session.updated"}}`)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -2522,7 +2523,7 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 			raw := readCodexProductionFixture(t, tc.fixture, tc.event, tc.captureProof)
 
 			response, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex0_153_0().Version,
+				DBPath: dbPath, Harness: ir.HarnessCodex, Event: tc.event, HostVersion: registration.Codex__0_153_0().Version,
 				Input: bytes.NewReader(raw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 				TimeoutProfile: timeouts.TestProfile(),
 				Activations:    activations,
@@ -2557,7 +2558,7 @@ func TestEnabledCodexHandlersToDurableReadBack(t *testing.T) {
 			require.NoError(t, tracker.Close())
 
 			// Bounded provider-correct public read-back.
-			identities, semantic := readBackGate(t, dbPath, registration.Codex0_153_0().Contract, runtime.Codex0_153_0().ID(), tc.kind)
+			identities, semantic := readBackGate(t, dbPath, registration.Codex__0_153_0().Contract, runtime.Codex0_153_0().ID(), tc.kind)
 			require.Equal(t, tc.semantic, semantic)
 			require.Equal(t, tc.identities, identities, "read-back identities must be the provider-correct Codex correlation set")
 		})
@@ -2580,13 +2581,13 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	codexDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, codexDB)
 	codexResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: registration.Codex0_153_0().Version,
+		DBPath: codexDB, Harness: ir.HarnessCodex, Event: "PreToolUse", HostVersion: registration.Codex__0_153_0().Version,
 		Input: bytes.NewReader(codexRaw), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		TimeoutProfile: timeouts.TestProfile(),
 		Activations:    codexActivations,
 	})
 	require.NoError(t, err)
-	codexIdentities, codexSemantic := readBackGate(t, codexDB, registration.Codex0_153_0().Contract, runtime.Codex0_153_0().ID(), registration.EventCodexPreToolUse)
+	codexIdentities, codexSemantic := readBackGate(t, codexDB, registration.Codex__0_153_0().Contract, runtime.Codex0_153_0().ID(), registration.EventCodexPreToolUse)
 	codexNative, err := nativeresponse.CodexContinuation(codexResponse)
 	require.NoError(t, err)
 
@@ -2595,12 +2596,12 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 	openCodeDB := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	initializeLifecycleTestDatabase(t, openCodeDB)
 	openCodeResponse, err := handlers.HookLifecycleResponse(context.Background(), handlers.HookLifecycleInput{
-		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode1_18_29().Version,
+		DBPath: openCodeDB, Harness: ir.HarnessOpenCode, Event: "tool.execute.before", HostVersion: registration.OpenCode__1_18_29().Version,
 		Input: bytes.NewReader(openCodeWire), Clock: lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
 		TimeoutProfile: timeouts.TestProfile(),
 	})
 	require.NoError(t, err)
-	openCodeIdentities, openCodeSemantic := readBackGate(t, openCodeDB, registration.OpenCode1_18_29().Contract, runtime.OpenCode1_18_29().ID(), registration.EventOpenCodeToolExecuteBefore)
+	openCodeIdentities, openCodeSemantic := readBackGate(t, openCodeDB, registration.OpenCode__1_18_29().Contract, runtime.OpenCode1_18_29().ID(), registration.EventOpenCodeToolExecuteBefore)
 	openCodeNative, err := nativeresponse.CanonicalProceed(openCodeResponse)
 	require.NoError(t, err)
 
@@ -2618,7 +2619,7 @@ func TestCodexAndOpenCodeGateDifferentialPreservesProviderFacts(t *testing.T) {
 
 	// DISTINCT: provider-specific facts stay separate; no whole-payload identity.
 	require.NotEqual(t, runtime.Codex0_153_0().ID(), runtime.OpenCode1_18_29().ID(), "interpreted runtime contracts remain provider-correct")
-	require.NotEqual(t, registration.Codex0_153_0().Contract, registration.OpenCode1_18_29().Contract, "registration contracts remain provider-correct")
+	require.NotEqual(t, registration.Codex__0_153_0().Contract, registration.OpenCode__1_18_29().Contract, "registration contracts remain provider-correct")
 	require.Equal(t, []byte(`{"continue":true}`), codexNative)
 	require.Equal(t, []byte(`{"decision":"proceed"}`), openCodeNative)
 	require.NotEqual(t, codexNative, openCodeNative, "provider-specific native continuation shapes remain distinct")
@@ -2662,13 +2663,13 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	require.NotContains(t, string(openCodeManifest), "codex", "the OpenCode manifest carries no Codex activation entry")
 
 	// Codex now emits its own committed activation audit report, unconditionally,
-	// derived from registration.Codex0_153_0() + activation.Codex0_153_0().
+	// derived from registration.Codex__0_153_0() + activation.Codex0_153_0().
 	codexReportPath := filepath.Join(root, ".codex", "pasture-codex-activation.json")
 	codexReport, err := os.ReadFile(codexReportPath)
 	require.NoError(t, err, "the Codex activation audit report must be a committed artifact at %s", codexReportPath)
 
 	// Content equality against a freshly derived report — no golden literals for
-	// content, so catalog drift in registration.Codex0_153_0() or
+	// content, so catalog drift in registration.Codex__0_153_0() or
 	// activation.Codex0_153_0() is caught here rather than silently accepted.
 	wantReport := deriveCodexActivationReport(t)
 	require.Equal(t, string(wantReport), string(codexReport), "the committed Codex activation report must equal the report freshly derived from the pinned Codex registration + activation catalogs")
@@ -2684,7 +2685,7 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(codexReport, &parsed))
 	require.Equal(t, "codex", parsed.Harness, "the Codex audit report is the Codex-only artifact")
-	require.Len(t, parsed.Events, len(registration.Codex0_153_0().Entries()), "the Codex activation report is exhaustive over every generated Codex event")
+	require.Len(t, parsed.Events, len(registration.Codex__0_153_0().Entries()), "the Codex activation report is exhaustive over every generated Codex event")
 	states, err := activation.Codex0_153_0()
 	require.NoError(t, err)
 	byKind := make(map[model.ContractEventKind]activation.Entry, len(states))
@@ -2695,7 +2696,7 @@ func TestCodexActivationLeavesClaudeAndOpenCodeArtifactsIsolated(t *testing.T) {
 		byKind[state.Event] = state
 	}
 	var expectedEnabled []string
-	for index, event := range registration.Codex0_153_0().Entries() {
+	for index, event := range registration.Codex__0_153_0().Entries() {
 		require.Equal(t, event.NativeName, parsed.Events[index].Event, "report order follows registration")
 		state, declared := byKind[event.Kind]
 		require.True(t, declared)
@@ -2817,7 +2818,7 @@ func readCodexProductionFixture(t *testing.T, fixture, expectedEvent string, cap
 	var sidecar acceptance.CaptureProvenance
 	require.NoError(t, json.Unmarshal(provenanceBytes, &sidecar))
 	require.Equal(t, acceptance.HarnessCodexCLI, sidecar.Harness)
-	require.Equal(t, registration.Codex0_153_0().Version, sidecar.HarnessVersion, "the Codex fixture was captured at the recorded host version")
+	require.Equal(t, registration.Codex__0_153_0().Version, sidecar.HarnessVersion, "the Codex fixture was captured at the recorded host version")
 	require.Equal(t, acceptance.OriginAuthenticCapture, sidecar.Origin)
 	require.Equal(t, expectedEvent, sidecar.Event)
 	require.NoError(t, sidecar.ValidateFixture(root, fixture), "the committed Codex fixture bytes must match the cleared digest its sidecar records")

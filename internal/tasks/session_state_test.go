@@ -19,7 +19,7 @@ import (
 func tailInput(bindings []model.NativeBinding, occurrence model.OccurrenceID) tasks.SessionTailInput {
 	return tasks.SessionTailInput{
 		Harness:      ir.HarnessClaudeCode,
-		Contract:     registration.ClaudeCode2_1_261().Contract,
+		Contract:     registration.ClaudeCode__2_1_261().Contract,
 		EventKind:    registration.EventSessionStart,
 		Bindings:     bindings,
 		OccurrenceID: occurrence,

@@ -4,6 +4,11 @@ const marker = "[pasture:task-recovery]";
 const logs: string[] = [];
 console.error = (...args) => logs.push(args.join(" "));
 const calls: any[] = [];
+// The generated plugin samples session.context heartbeats; advance the clock
+// so each composition stage still tests a lifecycle consultation.
+let clock = 0;
+const originalNow = Date.now;
+Date.now = () => (clock += 61_000);
 Bun.spawn = ((options) => {
   const record = { argv: options.cmd, payload: undefined };
   calls.push(record);
@@ -43,8 +48,7 @@ for (const stage of ["first", "repeat", "continuation"]) {
   verify(event);
   assert.equal(calls.length, n + 1, stage + " retains lifecycle consultation");
   assert.ok(calls.at(-1).argv.includes("session.context"));
-  if (stage === "first") assert.deepEqual(calls.at(-1).payload.system, [before, after], "consult pristine host system before injection");
-  else assert.equal(calls.at(-1).payload.system.filter(p => p.text.startsWith(marker)).length, 1, "later consultation sees at most the prior single owned part");
+  assert.deepEqual(calls.at(-1).payload, { sessionID: "constructed" }, "consult only the session identity, never the assembled context");
   assert.deepEqual(event.system.filter(p => !p.text.startsWith(marker)), [before, after]);
 }
 const compacted = { ...event, system: [after] };
@@ -90,4 +94,5 @@ assert.ok(logs[1].includes("registration") && logs[1].includes("/constructed/fau
 await faulty.hooks["session.prompt"]({ sessionID: "constructed" });
 await cleanup();
 assert.equal(faulty.disposed.length, 15);
+Date.now = originalNow;
 console.log("recovery composition assertions passed");
