@@ -77,7 +77,7 @@ func TestReceiveGateRefusalLeavesStoreEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode__2_1_261().Events[0], registration.ClaudeCode__2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 
 	t.Run("zero warrant", func(t *testing.T) {
 		_, err := service.Receive(ctx, gate.Warrant{}, delivery)

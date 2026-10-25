@@ -217,11 +217,11 @@ func registeredBlockingModes(t *testing.T, harness ir.HarnessID) map[string]regi
 	var manifest registration.Manifest
 	switch harness {
 	case ir.HarnessClaudeCode:
-		manifest = registration.ClaudeCode2_1_261()
+		manifest = registration.ClaudeCode__2_1_261()
 	case ir.HarnessCodex:
-		manifest = registration.Codex0_153_0()
+		manifest = registration.Codex__0_153_0()
 	case ir.HarnessOpenCode:
-		manifest = registration.OpenCode2_0_20()
+		manifest = registration.OpenCode__2_0_20()
 	default:
 		t.Fatalf("harness %q has no registration manifest in this test", harness)
 	}
@@ -397,7 +397,7 @@ func codexEventRunnerNames(t *testing.T, dir string) map[string]struct{} {
 func openCodeV2RegisteredSurface(t *testing.T) map[string]struct{} {
 	t.Helper()
 	registered := make(map[string]struct{})
-	for _, event := range registration.OpenCode2_0_20().Entries() {
+	for _, event := range registration.OpenCode__2_0_20().Entries() {
 		registered[event.NativeName] = struct{}{}
 	}
 	require.NotEmpty(t, registered, "the 2.0.20 manifest declares no event, so the completeness check covers nothing")
@@ -437,11 +437,11 @@ const openCodePluginExport = "export default {"
 
 // openCodeHookRegistration captures one location-scoped hook registration:
 // the plugin domain, the hook name, and the helper it invokes.
-var openCodeHookRegistration = regexp.MustCompile(`registrations\.push\(await ctx\.([A-Za-z0-9_]+)\.hook\("([^"]+)", (?:withTaskRecovery\(ctx, )?([A-Za-z0-9_]+)\)`)
+var openCodeHookRegistration = regexp.MustCompile(`registrations\.push\(await ctx\.([A-Za-z0-9_]+)\.hook\("([^"]+)", (?:withTaskRecovery\(ctx, )?(?:HANDLERS\.)?([A-Za-z0-9_]+)\)`)
 
 // openCodeBusGuard captures one bus-event filter of the event subscription:
 // the bus type it selects and the helper it calls.
-var openCodeBusGuard = regexp.MustCompile(`busEvent\.type === "([^"]+)"\) \{\s*await ([A-Za-z0-9_]+)\(busEvent\);\s*\}`)
+var openCodeBusGuard = regexp.MustCompile(`busEvent\.type === "([^"]+)"\) \{\s*await (?:HANDLERS\.)?([A-Za-z0-9_]+)\(busEvent\);\s*\}`)
 
 // openCodeWiredLifecycleEvents returns the events the generated OpenCode plugin
 // actually REGISTERS with the host.
@@ -490,7 +490,7 @@ func openCodeRegisteredEvents(t *testing.T, path, source string) map[string]stru
 	setup := openCodePluginSetupBody(t, path, source)
 	if strings.Contains(setup, "withTaskRecovery(ctx,") {
 		require.Equal(t, 1, strings.Count(setup, "withTaskRecovery(ctx,"), "only context composes recovery")
-		require.Contains(t, setup, `ctx.session.hook("context", withTaskRecovery(ctx, sessionContext))`)
+		require.Contains(t, setup, `ctx.session.hook("context", withTaskRecovery(ctx, HANDLERS.sessionContext))`)
 		require.Equal(t, 1, strings.Count(source, "await lifecycleCallback(hookEvent);"), "recovery composition must call the original lifecycle handler once")
 	}
 	registered := make(map[string]struct{})
@@ -531,10 +531,11 @@ func openCodeRequireHelperEmission(t *testing.T, path, source, helper, event str
 	end := matchBrace(source, open)
 	require.Greater(t, end, open, "%s: malformed helper %s", path, helper)
 	body := source[open+1 : end]
-	flags := lifecycleEventFlag.FindAllStringSubmatch(body, -1)
-	require.Len(t, flags, 1, "%s: helper %s must emit exactly one lifecycle command", path, helper)
-	require.Equal(t, event, flags[0][1], "%s: registered key reaches the wrong native command", path)
-	require.Equal(t, 1, strings.Count(body, "await invokeLifecycle("), "%s: helper %s must invoke once", path, helper)
+	require.Equal(t, 1, strings.Count(body, "await invokeLifecycle(LIFECYCLE_EVENTS."+helper+","), "%s: helper %s must invoke its typed event descriptor once", path, helper)
+	descriptor := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(helper) + `: \{ kind: \d+, native: "([^"]+)"`)
+	matches := descriptor.FindAllStringSubmatch(source, -1)
+	require.Len(t, matches, 1, "%s: helper %s must have exactly one generated event descriptor", path, helper)
+	require.Equal(t, event, matches[0][1], "%s: registered key reaches the wrong native command", path, helper)
 }
 
 // openCodePluginSetupBody returns the text between the braces of the setup
@@ -770,9 +771,9 @@ func derivedEnabledEvents(t *testing.T) map[string]map[string]struct{} {
 		entries  func() ([]activation.Entry, error)
 		manifest registration.Manifest
 	}{
-		{"claude-code", activation.ClaudeCode2_1_261, registration.ClaudeCode2_1_261()},
-		{"codex", activation.Codex0_153_0, registration.Codex0_153_0()},
-		{"opencode", activation.OpenCode2_0_20, registration.OpenCode2_0_20()},
+		{"claude-code", activation.ClaudeCode2_1_261, registration.ClaudeCode__2_1_261()},
+		{"codex", activation.Codex0_153_0, registration.Codex__0_153_0()},
+		{"opencode", activation.OpenCode2_0_20, registration.OpenCode__2_0_20()},
 	}
 
 	derived := make(map[string]map[string]struct{}, len(sources))
@@ -804,7 +805,7 @@ func derivedEnabledEvents(t *testing.T) map[string]map[string]struct{} {
 func openCode2ExpectedRows(t *testing.T) map[string][2]string {
 	t.Helper()
 	names := make(map[model.ContractEventKind]string)
-	for _, event := range registration.OpenCode2_0_20().Entries() {
+	for _, event := range registration.OpenCode__2_0_20().Entries() {
 		names[event.Kind] = event.NativeName
 	}
 	entries, err := activation.OpenCode2_0_20()

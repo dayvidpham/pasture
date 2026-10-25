@@ -32,7 +32,7 @@ import (
 
 // claudeVersion is the pinned contract version the Claude fixtures were
 // captured at.
-var claudeVersion = registration.ClaudeCode2_1_261().Version
+var claudeVersion = registration.ClaudeCode__2_1_261().Version
 
 // shortSocketPath returns a socket path inside a short private directory.
 //

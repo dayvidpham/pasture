@@ -104,18 +104,18 @@ func RuntimeSpecificationForContract(id ir.RuntimeContractID) (RuntimeSpecificat
 	transport := "stdin-json-hooks"
 	switch id {
 	case pastureruntime.ClaudeCode2_1_261().ID():
-		contract, manifest = pastureruntime.ClaudeCode2_1_261(), registration.ClaudeCode2_1_261()
+		contract, manifest = pastureruntime.ClaudeCode2_1_261(), registration.ClaudeCode__2_1_261()
 		lifecycle, err = lifecycleDescriptors(pastureruntime.ClaudeCode2_1_261Lifecycle())
 	case pastureruntime.OpenCode1_18_29().ID():
-		contract, manifest = pastureruntime.OpenCode1_18_29(), registration.OpenCode1_18_29()
+		contract, manifest = pastureruntime.OpenCode1_18_29(), registration.OpenCode__1_18_29()
 		lifecycle, err = lifecycleDescriptors(pastureruntime.OpenCode1_18_29Lifecycle())
 		transport = "plugin-events"
 	case pastureruntime.OpenCode2_0_20().ID():
-		contract, manifest = pastureruntime.OpenCode2_0_20(), registration.OpenCode2_0_20()
+		contract, manifest = pastureruntime.OpenCode2_0_20(), registration.OpenCode__2_0_20()
 		lifecycle, err = lifecycleDescriptors(pastureruntime.OpenCode2_0_20Lifecycle())
 		transport = "plugin-events"
 	case pastureruntime.Codex0_153_0().ID():
-		contract, manifest = pastureruntime.Codex0_153_0(), registration.Codex0_153_0()
+		contract, manifest = pastureruntime.Codex0_153_0(), registration.Codex__0_153_0()
 		lifecycle, err = lifecycleDescriptors(pastureruntime.Codex0_153_0Lifecycle())
 	default:
 		return RuntimeSpecification{}, failure("RuntimeSpecificationForContract", fmt.Sprintf("Runtime contract %q is not registered in this binary.", id), nil)

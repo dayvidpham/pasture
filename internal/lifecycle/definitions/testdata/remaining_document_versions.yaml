@@ -1,7 +1,9 @@
-# Released-body version ledger for the remaining owner documents. On content
-# changes, add a new version entry and retain historical entries; do not
-# replace a released version's digest. A changed source dependency changes the
-# epoch/interpreter body, which requires a document version bump here.
+# Released-body version ledger for the remaining owner documents. On semantic
+# content changes, add a new version entry and retain historical entries; do
+# not replace a released version's digest. A changed source dependency changes
+# the epoch/interpreter body, but a source-inventory-only change is admitted at
+# the same version by definitions.CompatibleSourceInventoryUpdate. Any other
+# body change requires a document version bump here.
 # DEFS-SLICE-3 note: the schema and interpreter entries below were refreshed
 # pre-release (no immutable corpus published yet) to cover the reviewed
 # occurrence.v2/interpreted.v3 wire. Per PROPOSAL-18 an initial unreleased

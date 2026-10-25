@@ -320,9 +320,9 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 	// the prepared interpretation names the runtime profile compiled for it.
 	tracker, service := receiptServiceForBackendTest(t)
 	delivery := receipt.Delivery{
-		Contract: registration.ClaudeCode2_1_261().Contract,
+		Contract: registration.ClaudeCode__2_1_261().Contract,
 		Event:    model.ContractEventKind(runtime.ClaudeEventElicitation),
-		Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: registration.ClaudeCode2_1_261().Contract}},
+		Envelope: model.OccurrenceEnvelopeRef{Runtime: model.RuntimeContractDefinitionRef{Contract: registration.ClaudeCode__2_1_261().Contract}},
 		Capture:  model.CaptureValid,
 		Body:     []byte(`{"hook_event_name":"Elicitation"}`),
 	}

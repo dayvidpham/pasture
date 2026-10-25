@@ -17,7 +17,7 @@ import (
 // catalogue. It is the v2 analogue of the v1 manifest-version pin.
 func TestV2CatalogIsSourceDerived(t *testing.T) {
 	t.Parallel()
-	manifest := registration.OpenCode2_0_20()
+	manifest := registration.OpenCode__2_0_20()
 	require.Equal(t, runtime.OpenCode2_0_20().Versions().Min().String(), manifest.Version, "the registration manifest and the runtime contract record one host version")
 	source := hostcontract.OpenCode2_0_20().Events
 	require.NotEmpty(t, source, "the OpenCode v2 host contract declares at least one event")
@@ -35,7 +35,7 @@ func TestV2CatalogIsSourceDerived(t *testing.T) {
 // identity without updating this policy.
 func TestV2CatalogIdentitiesAreSourceDeclared(t *testing.T) {
 	t.Parallel()
-	manifest := registration.OpenCode2_0_20()
+	manifest := registration.OpenCode__2_0_20()
 	for _, event := range manifest.Events {
 		bindings := map[model.NativeBindingKind]int{}
 		for _, identity := range event.Identities {

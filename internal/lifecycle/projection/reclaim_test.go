@@ -134,7 +134,7 @@ func commitOccurrenceWithBindings(t *testing.T, tracker protocol.TaskTracker, re
 	require.True(t, ok)
 	identity, err := resolver.ResolveLifecycleIdentity(ctx)
 	require.NoError(t, err)
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode__2_1_261().Contract.String())
 	require.NoError(t, err)
 	payload, err := json.Marshal(struct {
 		Contract string                      `json:"contract"`

@@ -108,7 +108,7 @@ func TestEnvelopeSetupDoesNotConsumeTheOccurrenceFailureBudget(t *testing.T) {
 	}
 	journal := &setupContextJournal{Journal: service.Appender.Journal}
 	service.Appender.Journal = journal
-	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode2_1_261().Contract)
+	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode__2_1_261().Contract)
 	if len(journal.deadlines) == 0 {
 		t.Fatal("fixture did not exercise real definition activation")
 	}
@@ -242,7 +242,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	// complete envelopes ensure their owner refs before the blob write, so
 	// pre-activate every envelope document while the writer is still free.
 	// These commits carry definition evidence only and leave no occurrence.
-	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode2_1_261().Contract)
+	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode__2_1_261().Contract)
 	held, release := make(chan struct{}), make(chan struct{})
 	lockErr := make(chan error, 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -292,7 +292,7 @@ func TestSliceStartHonestFailureUnderInjectedDelay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode__2_1_261().Events[0], registration.ClaudeCode__2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	_, err = service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
 		releaseLock()
@@ -357,7 +357,7 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 		tracker.Close()
 		t.Fatal(err)
 	}
-	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode2_1_261().Contract)
+	preactivateEnvelopeDocuments(t, service, registration.ClaudeCode__2_1_261().Contract)
 	realStore, ok := service.Blobs.(receipt.SQLiteBlobStore)
 	if !ok {
 		tracker.Close()
@@ -370,7 +370,7 @@ func TestBlobFirstFailureLeavesReclaimableOrphanWithoutReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode__2_1_261().Events[0], registration.ClaudeCode__2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	ref := digest.FromBytes(delivery.Body)
 	_, receiveErr := service.Receive(context.Background(), deliveryWarrant(t, delivery), delivery)
 	if probe := <-probeErr; probe == nil {
@@ -481,7 +481,7 @@ func TestBudgetWorkerProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode__2_1_261().Events[0], registration.ClaudeCode__2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	warrant := deliveryWarrant(t, delivery)
 	for i := 0; i < count; i++ {
 		if _, err := service.Receive(context.Background(), warrant, delivery); err != nil {

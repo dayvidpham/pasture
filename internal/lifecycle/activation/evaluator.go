@@ -60,17 +60,17 @@ func (e Evaluator) Admission() runtime.VersionConstraint { return e.admission }
 
 // ClaudeCodeEvaluator evaluates against the pinned Claude Code contract.
 func ClaudeCodeEvaluator() Evaluator {
-	return newEvaluator(acceptance.HarnessClaudeCode, runtime.ClaudeCode2_1_261Lifecycle(), registration.ClaudeCode2_1_261(), claudeTargetEventDeclarations[:])
+	return newEvaluator(acceptance.HarnessClaudeCode, runtime.ClaudeCode2_1_261Lifecycle(), registration.ClaudeCode__2_1_261(), claudeTargetEventDeclarations[:])
 }
 
 // CodexEvaluator evaluates against the pinned Codex contract.
 func CodexEvaluator() Evaluator {
-	return newEvaluator(acceptance.HarnessCodexCLI, runtime.Codex0_153_0Lifecycle(), registration.Codex0_153_0(), codexTargetEventDeclarations[:])
+	return newEvaluator(acceptance.HarnessCodexCLI, runtime.Codex0_153_0Lifecycle(), registration.Codex__0_153_0(), codexTargetEventDeclarations[:])
 }
 
 // OpenCodeEvaluator evaluates against the pinned OpenCode contract.
 func OpenCodeEvaluator() Evaluator {
-	return newEvaluator(acceptance.HarnessOpenCode, runtime.OpenCode1_18_29Lifecycle(), registration.OpenCode1_18_29(), openCodeTargetEventDeclarations[:])
+	return newEvaluator(acceptance.HarnessOpenCode, runtime.OpenCode1_18_29Lifecycle(), registration.OpenCode__1_18_29(), openCodeTargetEventDeclarations[:])
 }
 
 // EvaluatorFor selects the evaluator of one harness. The set is closed: a

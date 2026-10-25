@@ -39,7 +39,7 @@ func TestRawSchemaVersionConstantsPinToGeneratedRegistrations(t *testing.T) {
 	// The 2.0.20 wire identity is selected by observed host version, not by
 	// the harness default above: pin it to the generated 2.0.20 registration
 	// it decodes.
-	contract, err := ir.NewRuntimeContractID(registration.OpenCode2_0_20().Harness, registration.OpenCode2_0_20().Version)
+	contract, err := ir.NewRuntimeContractID(registration.OpenCode__2_0_20().Harness, registration.OpenCode__2_0_20().Version)
 	require.NoError(t, err)
 	require.Equal(t, string(RawSchemaOpenCode2_0_20), contract.String(),
 		"the OpenCode 2.0.20 wire identity must equal the contract derived from the generated 2.0.20 registration")
@@ -74,7 +74,7 @@ func TestRawPreviewShowsTheUnevaluatedDefaultAndTheCommitRunsTheGate(t *testing.
 		DBPath:         previewDB,
 		Harness:        ir.HarnessClaudeCode,
 		Event:          "PreToolUse",
-		HostVersion:    registration.ClaudeCode2_1_261().Version,
+		HostVersion:    registration.ClaudeCode__2_1_261().Version,
 		SchemaVersion:  RawSchemaClaudeCode2_1_261,
 		DryRun:         true,
 		Input:          bytes.NewReader(raw),

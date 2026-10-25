@@ -83,9 +83,9 @@ var overClaimsBlocking = map[ir.HarnessID][]string{
 
 func manifests() map[ir.HarnessID]registration.Manifest {
 	return map[ir.HarnessID]registration.Manifest{
-		ir.HarnessClaudeCode: registration.ClaudeCode2_1_261(),
-		ir.HarnessCodex:      registration.Codex0_153_0(),
-		ir.HarnessOpenCode:   registration.OpenCode1_18_29(),
+		ir.HarnessClaudeCode: registration.ClaudeCode__2_1_261(),
+		ir.HarnessCodex:      registration.Codex__0_153_0(),
+		ir.HarnessOpenCode:   registration.OpenCode__1_18_29(),
 	}
 }
 
@@ -261,7 +261,7 @@ func deriveCodexDivergenceCounts(t *testing.T) codexDivergenceCounts {
 	t.Helper()
 
 	runtimeRows := codexRuntimeMappings(t)
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	counts := codexDivergenceCounts{registered: len(manifest.Entries())}
 	for _, event := range manifest.Entries() {
 		runtimeRow, declared := pastureruntime.LookupLifecycleFailure(ir.HarnessCodex, event.NativeName)

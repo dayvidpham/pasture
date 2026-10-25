@@ -79,5 +79,5 @@ func ClaudeCode2_1_261Matcher(event model.ContractEventKind) string {
 // manifest is derived only from the generated registration manifest and the
 // static typed target declaration table; it performs no filesystem access.
 func ClaudeCode2_1_261() ([]Entry, error) {
-	return deriveManifest("activation.ClaudeCode2_1_261", registration.ClaudeCode2_1_261().Entries(), claudeTargetEventDeclarations[:])
+	return deriveManifest("activation.ClaudeCode2_1_261", registration.ClaudeCode__2_1_261().Entries(), claudeTargetEventDeclarations[:])
 }

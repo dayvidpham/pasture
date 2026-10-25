@@ -180,7 +180,7 @@ func TestOpenCodeV2ActivationIsExhaustiveInRegistrationOrder(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)
-	manifest := registration.OpenCode2_0_20().Entries()
+	manifest := registration.OpenCode__2_0_20().Entries()
 	require.Len(t, manifest, 17)
 	require.Len(t, entries, len(manifest))
 	seen := make(map[model.ContractEventKind]struct{}, len(entries))
@@ -215,7 +215,7 @@ func TestOpenCodeV2PerRowCapabilityDerivesFromEvidence(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)
-	manifest := registration.OpenCode2_0_20().Entries()
+	manifest := registration.OpenCode__2_0_20().Entries()
 	byKind := make(map[model.ContractEventKind]string, len(manifest))
 	for _, event := range manifest {
 		byKind[event.Kind] = event.NativeName
@@ -291,7 +291,7 @@ var openCode2CaptureVersion = map[string]string{
 // capture-time stem and a version no older than the 2.0.20 contract floor.
 func TestOpenCodeV2ExpectedFixtureNamesFollowTheCaptureRule(t *testing.T) {
 	t.Parallel()
-	manifest := registration.OpenCode2_0_20().Entries()
+	manifest := registration.OpenCode__2_0_20().Entries()
 	require.Len(t, manifest, 17)
 	entries, err := activation.OpenCode2_0_20()
 	require.NoError(t, err)

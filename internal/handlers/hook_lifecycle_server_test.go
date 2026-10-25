@@ -82,7 +82,7 @@ func gateServeInput(t *testing.T, raw []byte, event string) HookLifecycleServeIn
 	return HookLifecycleServeInput{
 		Harness:     ir.HarnessClaudeCode,
 		Event:       event,
-		HostVersion: registration.ClaudeCode2_1_261().Version,
+		HostVersion: registration.ClaudeCode__2_1_261().Version,
 		Payload:     raw,
 	}
 }
@@ -170,7 +170,7 @@ func TestAServedWithheldEventStagedNothing(t *testing.T) {
 	_, err := server.Serve(context.Background(), HookLifecycleServeInput{
 		Harness:     ir.HarnessClaudeCode,
 		Event:       "anEventNoRegistrationDeclares",
-		HostVersion: registration.ClaudeCode2_1_261().Version,
+		HostVersion: registration.ClaudeCode__2_1_261().Version,
 		Payload:     []byte(`{}`),
 	})
 	require.Error(t, err)

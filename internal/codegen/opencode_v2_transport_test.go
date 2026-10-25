@@ -103,7 +103,7 @@ func TestOpenCodeTargetManifestPublishesExhaustiveProofGatedActivation(t *testin
 	// no proof. An enabled row without proofs would claim evidence that does
 	// not exist.
 	names := make(map[model.ContractEventKind]string)
-	for _, event := range registration.OpenCode2_0_20().Entries() {
+	for _, event := range registration.OpenCode__2_0_20().Entries() {
 		names[event.Kind] = event.NativeName
 	}
 	derived, err := activation.OpenCode2_0_20()
@@ -409,7 +409,7 @@ func TestOpenCodeHooksModule_FaultRecordPromiseIsTrue(t *testing.T) {
 // Constructed rows below test generator mechanics, not authentic host payloads
 // or activation evidence. The public generator still evaluates the real corpus.
 func TestOpenCodeV2SetupRegistersTheWholeSurface(t *testing.T) {
-	manifest := registration.OpenCode2_0_20().Entries()
+	manifest := registration.OpenCode__2_0_20().Entries()
 	entries, err := openCodeActivationEntries()
 	if err != nil {
 		t.Fatal(err)
@@ -474,21 +474,20 @@ assert.equal(subscribed.length, 1, "one bus subscription carries the observation
 const byEvent = (name) => calls.find((call) => call.argv[5] === name);
 await waitForCalls(1);
 assert.equal(byEvent("session.created").argv.slice(6).join(" "), "--host-version 2.0.20", "the bus version rides the occurrence-local flag");
-assert.deepEqual(byEvent("session.created").payload, { type: "session.created", data: { sessionID: "constructed", version: "2.0.20" } });
+assert.deepEqual(byEvent("session.created").payload, { type: "session.created", data: { sessionID: "constructed" } });
 assert.equal(calls.length, 1, "only the session.created bus event spawns");
 await hooks["tool.execute.before"]({ tool: "task", sessionID: "constructed", agent: "agent", messageID: "message", id: "call", input: { path: "unchanged" } });
-assert.deepEqual(byEvent("tool.execute.before").payload, { tool: "task", sessionID: "constructed", agent: "agent", messageID: "message", id: "call", input: { path: "unchanged" } });
-// A gate payload is forwarded verbatim: the v2 transport performs no
-// args-only projection and no input/output shape validation.
+assert.deepEqual(byEvent("tool.execute.before").payload, { id: "call", sessionID: "constructed" });
+// The transport forwards only the contract-allowed identity fields.
 await hooks["session.prompt"]({ sessionID: "constructed", messageID: "m", prompt: { text: "hello" }, delivery: "steer" });
-assert.deepEqual(byEvent("session.prompt").payload, { sessionID: "constructed", messageID: "m", prompt: { text: "hello" }, delivery: "steer" });
+assert.deepEqual(byEvent("session.prompt").payload, { sessionID: "constructed" });
 // A proceed leaves the host evaluation untouched: the permission mutation
 // fires on a Denial only, and the deny matrix is pinned by the dedicated
 // permission-deny proof. The frozen object below would throw on assignment,
 // so reaching these assertions also proves the proceed path assigns nothing.
 const evaluation = Object.freeze({ sessionID: "constructed", action: "edit", resources: ["file"], effect: "allow" });
 await hooks["permission.evaluate"](evaluation);
-assert.deepEqual(byEvent("permission.evaluate").payload, evaluation);
+assert.deepEqual(byEvent("permission.evaluate").payload, { sessionID: "constructed" });
 assert.equal(evaluation.effect, "allow", "the gate consultation must not mutate the host evaluation");
 assert.equal("message" in evaluation, false, "the gate consultation must not add a host message");
 `)
@@ -501,7 +500,7 @@ assert.equal("message" in evaluation, false, "the gate consultation must not add
 // the admission authority, and its fail-open continuation answers an
 // unadmitted row with the host's continue bytes.
 func TestOpenCodeV2WithheldRowsStayRegistered(t *testing.T) {
-	manifest := registration.OpenCode2_0_20().Entries()
+	manifest := registration.OpenCode__2_0_20().Entries()
 	withheld, err := openCodeActivationEntries()
 	if err != nil {
 		t.Fatal(err)
@@ -553,15 +552,16 @@ func TestOpenCodeCreationVersionIsOccurrenceLocal(t *testing.T) {
   { type: "session.created", data: { sessionID: "constructed", version: false } },
   { type: "session.created", data: { sessionID: "constructed", version: {} } },
   { type: "session.created", data: { sessionID: "constructed", version: [] } },
-  { type: "session.created", sessionID: "constructed", version: "2.0.20" },
+  { type: "session.created", data: { sessionID: "constructed" }, version: "2.0.20" },
 ]`, `
 const base = ["hook", "lifecycle", "--harness", "opencode", "--event"];
 await waitForCalls(14);
 const releaseShaped = (version) => typeof version === "string" && /^v?\d+\.\d+\.\d+(?:[-+].*)?$/.test(version.trim());
+const versions = ["2.0.20", " local ", "local", "unknown", "2.1.0+build", undefined, "", " \t\n", null, 42, false, {}, [], undefined];
 const created = calls.filter((call) => call.argv[5] === "session.created");
 assert.equal(created.length, 14, "every bus script entry spawns; only the last carries a flat decoy version the helper must ignore");
-for (const call of created) {
-  const version = call.payload.data?.version;
+for (const [index, call] of created.entries()) {
+  const version = versions[index];
   // A release-shaped bus version rides occurrence-local; anything else
   // (blank, non-string, or a non-release self-report such as "local")
   // falls back to the setup-observed host version, so no invocation
@@ -570,18 +570,19 @@ for (const call of created) {
   if (releaseShaped(version)) expected.push("--host-version", version.trim());
   else expected.push("--host-version", "2.0.20");
   assert.deepEqual(call.argv, expected, "creation occurrence selects original release-shaped metadata first, then the setup-observed host version");
+  assert.deepEqual(call.payload, { type: "session.created", data: { sessionID: "constructed" } }, "only the bus identity reaches the lifecycle payload; the flat decoy is not an identity");
 }
 const decoy = created[created.length - 1];
-assert.equal(decoy.payload.version, "2.0.20", "the flat decoy version rides top-level");
 assert.deepEqual(decoy.argv, [...base, "session.created", "--host-version", "2.0.20"], "a top-level version beside data must not become a flag; the setup-observed version rides instead");
 const hookEvent = Object.freeze({ tool: "task", sessionID: "constructed", agent: "agent", messageID: "m", id: "call", input: Object.freeze({ path: "unchanged" }) });
 const before = JSON.stringify(hookEvent);
 await hooks["tool.execute.before"](hookEvent);
 assert.deepEqual(calls.at(-1).argv, [...base, "tool.execute.before", "--host-version", "2.0.20"], "hook callbacks carry the setup-observed host version instead of depending on the version probe");
-assert.deepEqual(calls.at(-1).payload, hookEvent);
+assert.deepEqual(calls.at(-1).payload, { id: "call", sessionID: "constructed" });
 assert.equal(JSON.stringify(hookEvent), before, "the hook event is forwarded without mutation");
 await hooks["session.context"](Object.freeze({ sessionID: "constructed" }));
 assert.deepEqual(calls.at(-1).argv, [...base, "session.context", "--host-version", "2.0.20"], "session hooks carry the setup-observed host version too");
+assert.deepEqual(calls.at(-1).payload, { sessionID: "constructed" });
 `)
 }
 
@@ -667,7 +668,7 @@ Bun.spawn = options => {
   return {stdout: new Blob(['{"decision":"proceed"}']).stream(), stderr: new Blob([]).stream(), exited: Promise.resolve(0), exitCode: 0, kill() {throw new Error("unexpected kill");}};
 };
 try {
-  const payload = { tool: "task", sessionID: "constructed" };
+  const payload = { tool: "task", sessionID: "constructed", id: "call" };
   let cleanup = await plugin.setup(baseCtx(undefined));
   await hooks["tool.execute.before"](payload);
   assert.equal(calls.at(-1).argv.includes("--host-version"), false, "a setup with no app must not invent a version flag");
@@ -809,7 +810,7 @@ func TestOpenCodeGeneratorRejectsUnsupportedSurface(t *testing.T) {
 func TestOpenCodeRegisteredSurfaceEmissionMechanics(t *testing.T) {
 	// This is not an activation evaluator: all rows here are constructed enabled
 	// inputs so emission covers native spellings that remain withheld in product.
-	manifest := registration.OpenCode2_0_20().Entries()
+	manifest := registration.OpenCode__2_0_20().Entries()
 	var entries []activation.Entry
 	surfaces := map[string]runtime.HookSurface{}
 	contract := runtime.OpenCode2_0_20Lifecycle()
@@ -860,7 +861,19 @@ for (const name of immutable) {
   const before = JSON.stringify(hookEvent);
   await hooks[name](hookEvent);
   assert.equal(calls.at(-1).argv[5], name);
-  assert.deepEqual(calls.at(-1).payload, hookEvent);
+  const payload = calls.at(-1).payload;
+  if (name === "session.compaction") {
+    assert.equal(payload.sessionID, "constructed");
+    assert.equal(payload.kind, "compaction");
+    assert.equal(payload.messageCount, 0);
+    assert.match(payload.transcriptRoot, /^sha256:[0-9a-f]{64}$/);
+  } else if (name.startsWith("tool.")) {
+    assert.deepEqual(payload, { id: "constructed", sessionID: "constructed" });
+  } else if (name === "shell.create.before") {
+    assert.deepEqual(payload, {});
+  } else {
+    assert.deepEqual(payload, { sessionID: "constructed" });
+  }
   assert.equal(JSON.stringify(hookEvent), before, "a non-enforcing consultation never mutates its host event");
 }
 assert.equal(calls.length, immutable.length);

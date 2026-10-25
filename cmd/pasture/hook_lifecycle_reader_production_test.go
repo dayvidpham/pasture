@@ -184,7 +184,7 @@ func readerHarnessCases(t *testing.T) []readerHarnessCase {
 	require.NoError(t, err)
 	codex, err := runtime.Codex0_153_0Lifecycle().Mapping(runtime.CodexEventPreToolUse)
 	require.NoError(t, err)
-	openCode, err := runtime.OpenCode1_18_29Lifecycle().Mapping(runtime.OpenCodeEventToolExecuteBefore)
+	openCode, err := runtime.OpenCode2_0_20Lifecycle().Mapping(runtime.OpenCode2EventToolExecuteBefore)
 	require.NoError(t, err)
 	return []readerHarnessCase{
 		{
@@ -199,7 +199,7 @@ func readerHarnessCases(t *testing.T) []readerHarnessCase {
 		},
 		{
 			label: "OpenCode", harness: ir.HarnessOpenCode, native: "tool.execute.before",
-			fixture: filepath.Join("internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures", "tool_execute_before_1_18_29.json"),
+			fixture: filepath.Join("internal", "lifecycle", "ingress", "opencode", "testdata", "fixtures", "opencode_tool_execute_before_2_0_20.1.json"),
 			mapping: openCode, run: runReaderOpenCode,
 		},
 	}
@@ -294,7 +294,7 @@ func runReaderOpenCode(t *testing.T, binary, dbPath string, raw []byte, failClos
 
 	path := t.TempDir()
 	stub := filepath.Join(path, "opencode")
-	require.NoError(t, os.WriteFile(stub, []byte("#!/bin/sh\nprintf '1.19.0\\n'\n"), 0o700))
+	require.NoError(t, os.WriteFile(stub, []byte("#!/bin/sh\nprintf '2.0.20\\n'\n"), 0o700))
 	env := map[string]*string{
 		"PASTURE_BIN": &binary, "PASTURE_DB_PATH": &dbPath, "PATH": &path,
 		"PASTURE_CAPTURE_DIR": nil, "PASTURE_ACTOR_ID": nil, "PASTURE_HOOK_FAIL_CLOSED": nil,

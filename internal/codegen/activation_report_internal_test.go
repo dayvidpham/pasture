@@ -81,7 +81,7 @@ func TestFailureEvidenceColumnFollowsTheDeclaredBlockingModeAndTheCitation(t *te
 
 func TestPostCompactReportUsesRuntimeEvidenceEvenWhenCatalogueObserves(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	var event registration.Event
 	for _, candidate := range manifest.Events {
 		if candidate.NativeName == "PostCompact" {
@@ -119,7 +119,7 @@ func TestPostCompactReportUsesRuntimeEvidenceEvenWhenCatalogueObserves(t *testin
 // refusals for an entry that does not belong to its event.
 func TestActivationSupportEntryForIsTheOneRowBuilder(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	var sessionStart, setup, preToolUse registration.Event
 	for _, event := range manifest.Events {
 		switch event.NativeName {
@@ -173,7 +173,7 @@ func TestActivationSupportEntryForIsTheOneRowBuilder(t *testing.T) {
 // case turns this red, quoting the arm's rendered reason text.
 func TestActivationSupportEntryForRendersEachNewWithholdingArm(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	var setup registration.Event
 	for _, event := range manifest.Events {
 		if event.NativeName == "Setup" {

@@ -7,7 +7,7 @@ import (
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
-func OpenCode1_18_29() Manifest {
+func OpenCode__1_18_29() Manifest {
 	events := []Event{
 		{Kind: EventOpenCodeCommandExecuted, NativeName: "command.executed", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureObserveOnly, StopLoop: StopLoopNotApplicable},
 		{Kind: EventOpenCodeFileEdited, NativeName: "file.edited", AllowedFields: []model.NativeFieldID{}, Identities: []Identity{}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureObserveOnly, StopLoop: StopLoopNotApplicable},

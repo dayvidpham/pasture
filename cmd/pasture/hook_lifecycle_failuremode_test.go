@@ -1362,7 +1362,7 @@ func captureSessionIDOf(t *testing.T, raw []byte, harness ir.HarnessID) string {
 	member := "session_id"
 	switch harness {
 	case ir.HarnessOpenCode:
-		member = "input.sessionID"
+		member = "sessionID"
 	}
 	for _, part := range strings.Split(member, ".") {
 		object, isObject := payload.(map[string]any)
@@ -2313,7 +2313,7 @@ func TestEveryDeclaredRowDiffersFromItsEffectiveModeOnlyByTheEvidenceRule(t *tes
 			"change can reach this line — the counter is unconditional and the lookup check above "+
 			"ends the test first — so it guards a later exemption, filter or early continue added "+
 			"inside this loop, which would silently shrink the population every assertion above sees")
-	registered := len(registration.ClaudeCode2_1_261().Entries()) + len(registration.Codex0_153_0().Entries()) + len(registration.OpenCode1_18_29().Entries())
+	registered := len(registration.ClaudeCode__2_1_261().Entries()) + len(registration.Codex__0_153_0().Entries()) + len(registration.OpenCode__1_18_29().Entries())
 	require.GreaterOrEqual(t, checked, registered,
 		"the three pinned profiles declare %d rows between them, one per registered event; a catalog that returned fewer would pass every assertion above while walking a fraction of the population, which is the defect this size assertion replaces", registered)
 }
@@ -3580,7 +3580,7 @@ func TestTheOpenCodeBeltSurfacesTheDiagnosticItSendsTheOperatorTo(t *testing.T) 
 			script := fmt.Sprintf(`
 import { toolExecuteBefore } from %q;
 const output = { args: { path: "a" } };
-await toolExecuteBefore({ tool: "read", sessionID: "s", callID: "c" }, output);
+await toolExecuteBefore({ tool: "read", sessionID: "s", id: "c" }, output);
 console.log("HOST-CONTINUED");
 `, module)
 			require.NoError(t, os.WriteFile(runner, []byte(script), 0o600),
@@ -4832,7 +4832,7 @@ func (b panickingCommitBarrier) AfterCommit(context.Context, handlers.CommitBoun
 func TestAPanicAfterTheCommitDoesNotClaimTheDeliveryWasNotRecorded(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, tasks.DefaultDBFilename.String())
-	initializePostCommitTestDatabase(t, dbPath, registration.OpenCode1_18_29().Contract)
+	initializePostCommitTestDatabase(t, dbPath, registration.OpenCode__1_18_29().Contract)
 
 	cmd := lifecycleTestCommand(t, "opencode", "tool.execute.before", "1.18.29", dbPath)
 	cmd.SetIn(bytes.NewReader(openCodeToolExecuteBeforeWire(t)))

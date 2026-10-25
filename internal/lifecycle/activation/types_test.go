@@ -19,7 +19,7 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 	t.Parallel()
 	entries, err := activation.ClaudeCode2_1_261()
 	require.NoError(t, err)
-	require.Len(t, entries, len(registration.ClaudeCode2_1_261().Entries()), "one activation entry per registered Claude event")
+	require.Len(t, entries, len(registration.ClaudeCode__2_1_261().Entries()), "one activation entry per registered Claude event")
 	targets := make(map[model.ContractEventKind]struct{})
 	for _, event := range activation.ClaudeCode2_1_261TargetEvents() {
 		targets[event] = struct{}{}

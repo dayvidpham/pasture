@@ -101,7 +101,7 @@ func TestCodexManifestIsDeterministic(t *testing.T) {
 func codexLifecycleEventNamesForTest() []string {
 	enabled := make(map[string]struct{})
 	for _, kind := range activation.Codex0_153_0TargetEvents() {
-		for _, event := range registration.Codex0_153_0().Events {
+		for _, event := range registration.Codex__0_153_0().Events {
 			if event.Kind == kind {
 				enabled[event.NativeName] = struct{}{}
 			}
@@ -291,7 +291,7 @@ func TestCodexHostVersionLabelTracksContract(t *testing.T) {
 // ones, so the branches are reachable without a build tag or a test-only export.
 func TestCodexEnabledEventNamesFailsClosed(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	states, err := activation.Codex0_153_0()
 	if err != nil {
 		t.Fatalf("activation.Codex0_153_0: %v", err)
@@ -389,7 +389,7 @@ func TestCodexEnabledEventNamesInjectionMatchesProduction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("activation.Codex0_153_0: %v", err)
 	}
-	injected, err := codexEnabledEventNamesFrom(registration.Codex0_153_0(), states, runtime.CodexLifecycleEvents())
+	injected, err := codexEnabledEventNamesFrom(registration.Codex__0_153_0(), states, runtime.CodexLifecycleEvents())
 	if err != nil {
 		t.Fatalf("codexEnabledEventNamesFrom with the pinned sources: %v", err)
 	}

@@ -96,7 +96,7 @@ func enabledClaudeTargets(t *testing.T) []model.ContractEventKind {
 // generated Claude manifest.
 func nativeNameOf(t *testing.T, kind model.ContractEventKind) string {
 	t.Helper()
-	for _, entry := range registration.ClaudeCode2_1_261().Entries() {
+	for _, entry := range registration.ClaudeCode__2_1_261().Entries() {
 		if entry.Kind == kind {
 			return entry.NativeName
 		}
@@ -258,11 +258,11 @@ func TestNonAuthenticTargetBreadthThroughProductionWaist(t *testing.T) {
 			require.Equal(t, row.nativeName, registered.NativeName)
 
 			input := append([]byte(nil), row.payload...)
-			capture := Parse(input, registered, registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{})
+			capture := Parse(input, registered, registration.ClaudeCode__2_1_261().Version, model.OccurrenceEnvelopeRef{})
 			input[0] = ' '
 			require.Equal(t, model.CaptureValid, capture.Disposition)
 			require.Equal(t, model.CaptureValid, capture.Delivery.Capture)
-			require.Equal(t, registration.ClaudeCode2_1_261().Contract, capture.Delivery.Contract)
+			require.Equal(t, registration.ClaudeCode__2_1_261().Contract, capture.Delivery.Contract)
 			require.Equal(t, row.event, capture.Delivery.Event)
 			require.Equal(t, row.payload, capture.Delivery.Body, "delivery retains defensive exact bytes")
 			require.Equal(t, row.bindings, capture.Delivery.Bindings, "native binding order/name/kind/value")
@@ -294,7 +294,7 @@ func TestNonAuthenticTargetBreadthThroughProductionWaist(t *testing.T) {
 
 func requireRegistrationEvent(t *testing.T, kind model.ContractEventKind) registration.Event {
 	t.Helper()
-	for _, event := range registration.ClaudeCode2_1_261().Entries() {
+	for _, event := range registration.ClaudeCode__2_1_261().Entries() {
 		if event.Kind == kind {
 			return event
 		}
@@ -316,7 +316,7 @@ func TestIndependentCatalogueCoversGeneratedManifest(t *testing.T) {
 	raw, err := os.ReadFile("testdata/corpora/claude_2_1_261_catalogue.yaml")
 	require.NoError(t, err)
 	require.NoError(t, yaml.Unmarshal(raw, &catalogue))
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	require.Len(t, catalogue.Events, len(manifest.Events))
 	for i, expected := range catalogue.Events {
 		require.Equal(t, expected.Name, manifest.Events[i].NativeName, "independent catalogue order %d", i)
@@ -342,7 +342,7 @@ func TestIndependentCatalogueCoversGeneratedManifest(t *testing.T) {
 func TestClaudeCatalogueMatchesRuntimeMappingForAllOrdinals(t *testing.T) {
 	t.Parallel()
 
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	runtimeContract := runtime.ClaudeCode2_1_261Lifecycle()
 	// Two roots record the host version: the runtime contract id and the host
 	// contract the manifest is generated from. They are one version or nothing

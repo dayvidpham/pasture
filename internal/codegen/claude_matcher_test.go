@@ -29,7 +29,7 @@ func TestClaudeMatcherReportIsSourceDerivedAndOptional(t *testing.T) {
 		if err := json.Unmarshal([]byte(file.Content), &report); err != nil {
 			t.Fatal(err)
 		}
-		if len(report.Events) != len(registration.ClaudeCode2_1_261().Entries()) {
+		if len(report.Events) != len(registration.ClaudeCode__2_1_261().Entries()) {
 			t.Fatal("report population differs from registration")
 		}
 		matched := 0
@@ -66,7 +66,7 @@ func TestClaudeMatcherReportIsSourceDerivedAndOptional(t *testing.T) {
 
 func TestClaudeLifecycleMatchersFollowTargetDeclarations(t *testing.T) {
 	t.Parallel()
-	events := registration.ClaudeCode2_1_261().Entries()
+	events := registration.ClaudeCode__2_1_261().Entries()
 	if len(events) == 0 {
 		t.Fatal("Claude registration is empty; matcher coverage would check no event")
 	}
@@ -139,7 +139,7 @@ func TestClaudeFileChangedTransportRequiresProofsAndPreservesMatcher(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	negative, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, registration.ClaudeCode2_1_261(), unproven)
+	negative, err := emitClaudeHooks(t.TempDir(), GenerateOptions{}, registration.ClaudeCode__2_1_261(), unproven)
 	if err != nil {
 		t.Fatal(err)
 	}

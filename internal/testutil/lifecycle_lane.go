@@ -26,7 +26,7 @@ func ActivateLaneTestDefinitions(t *testing.T, service receipt.Service) {
 	service.Appender.Deadline = 30 * time.Second
 	_, err := receipt.EnsureActiveMetamodel(ctx, service)
 	require.NoError(t, err, "initialize the lane fixture's metamodel")
-	contract := registration.ClaudeCode2_1_261().Contract
+	contract := registration.ClaudeCode__2_1_261().Contract
 	_, err = receipt.EnsureOccurrenceEnvelope(ctx, service, contract, model.OccurrenceEnvelopeRef{})
 	require.NoError(t, err, "initialize the lane fixture's occurrence owners")
 	runtimeContract, err := definitions.RuntimeContractForDelivery(contract)

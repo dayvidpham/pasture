@@ -115,8 +115,8 @@ func sortedUniqueStrings(values []string) []string {
 }
 
 func claudeNativeFields(event string) []string {
-	manifest := registration.ClaudeCode2_1_261()
-	fieldNames := registration.ClaudeCode2_1_261NativeFieldNames()
+	manifest := registration.ClaudeCode__2_1_261()
+	fieldNames := registration.ClaudeCode__2_1_261NativeFieldNames()
 	for _, candidate := range manifest.Events {
 		if candidate.NativeName != event {
 			continue
@@ -160,7 +160,7 @@ func claudeLifecycleHookGroup(event registration.Event) claudeHookGroup {
 }
 
 func (claudeHooksEmitter) Emit(root string, opts GenerateOptions) ([]GeneratedFile, error) {
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		return nil, fmt.Errorf("codegen.claudeHooksEmitter.Emit: build activation manifest: %w", err)

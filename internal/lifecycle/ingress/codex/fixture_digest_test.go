@@ -65,7 +65,7 @@ func TestClearedFixtureBytesMatchTheirSidecars(t *testing.T) {
 			require.NoError(t, json.Unmarshal(sidecarBytes, &sidecar))
 			require.Equal(t, acceptance.OriginAuthenticCapture, sidecar.Origin)
 			require.Equal(t, acceptance.HarnessCodexCLI, sidecar.Harness)
-			require.Equal(t, registration.Codex0_153_0().Version, sidecar.HarnessVersion)
+			require.Equal(t, registration.Codex__0_153_0().Version, sidecar.HarnessVersion)
 			require.Equal(t, event, sidecar.Event)
 			require.Equal(t, "sha256:"+sum(raw), sidecar.RawFileDigest, "the sidecar digest is the digest of the committed bytes")
 			rules, err := acceptance.ParseRedaction(sidecar.Redaction)

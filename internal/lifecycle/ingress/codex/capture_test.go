@@ -37,7 +37,7 @@ func clearedCodexBodies(t *testing.T) map[string][]byte {
 		require.NoError(t, err)
 		require.NoError(t, sidecar.ValidateCommittedFixtureBytes(fixture, raw))
 		require.Equal(t, acceptance.HarnessCodexCLI, sidecar.Harness)
-		require.Equal(t, registration.Codex0_153_0().Version, sidecar.HarnessVersion)
+		require.Equal(t, registration.Codex__0_153_0().Version, sidecar.HarnessVersion)
 		require.NotContains(t, bodies, sidecar.Event)
 		bodies[sidecar.Event] = raw
 	}
@@ -71,7 +71,7 @@ func capturedCodexBindings(t *testing.T, raw []byte) []model.NativeBinding {
 
 func TestProductionIngressPreservesExactBytesAndCodexIdentities(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	bodies := clearedCodexBodies(t)
 	require.Len(t, bodies, len(manifest.Entries()))
 	for _, event := range manifest.Entries() {
@@ -97,7 +97,7 @@ func TestProductionIngressPreservesExactBytesAndCodexIdentities(t *testing.T) {
 
 func TestCodexCatalogIdentitiesMatchClearedCaptures(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	require.Equal(t, runtime.Codex0_153_0().Versions().Min().String(), manifest.Version)
 	source := hostcontract.Codex0_153_0()
 	require.Len(t, manifest.Events, len(source.Events))
@@ -124,7 +124,7 @@ func TestCodexCatalogIdentitiesMatchClearedCaptures(t *testing.T) {
 func TestCodexParserRejectsMissingAndMalformedRequiredIdentities(t *testing.T) {
 	t.Parallel()
 	bodies := clearedCodexBodies(t)
-	for _, event := range registration.Codex0_153_0().Entries() {
+	for _, event := range registration.Codex__0_153_0().Entries() {
 		t.Run(event.NativeName, func(t *testing.T) {
 			raw := bodies[event.NativeName]
 			for _, binding := range capturedCodexBindings(t, raw) {
@@ -166,14 +166,14 @@ func TestCodexParserRejectsMissingAndMalformedRequiredIdentities(t *testing.T) {
 
 func TestCodexParserUsesPinnedEventAndRequiresMatchingPayloadEvent(t *testing.T) {
 	t.Parallel()
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	event, err := ingress.EventByNativeName(manifest, "SessionStart")
 	require.NoError(t, err)
 	raw := clearedCodexBodies(t)[event.NativeName]
 	for name, selected := range map[string]registration.Event{
 		"unknown":    {Kind: event.Kind, NativeName: "NotRegistered"},
 		"wrong-kind": {Kind: registration.EventCodexStop, NativeName: event.NativeName},
-		"foreign":    registration.OpenCode1_18_29().Entries()[0],
+		"foreign":    registration.OpenCode__1_18_29().Entries()[0],
 	} {
 		t.Run(name, func(t *testing.T) {
 			capture := codex.Parse(raw, selected, manifest.Version, model.OccurrenceEnvelopeRef{})

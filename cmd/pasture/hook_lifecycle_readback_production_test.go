@@ -116,7 +116,7 @@ func seedRawOriginOccurrence(t *testing.T, dbPath string) {
 
 	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
 	require.NoError(t, err)
-	delivery := claudeingress.Parse(raw, registration.ClaudeCode2_1_261().Events[0], registration.ClaudeCode2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
+	delivery := claudeingress.Parse(raw, registration.ClaudeCode__2_1_261().Events[0], registration.ClaudeCode__2_1_261().Version, model.OccurrenceEnvelopeRef{}).Delivery
 	delivery.Origin = acceptance.OriginRaw
 	delivery.Envelope.Origin = acceptance.OriginRaw
 

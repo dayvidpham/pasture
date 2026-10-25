@@ -7,7 +7,7 @@ import (
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
-func ClaudeCode2_1_261() Manifest {
+func ClaudeCode__2_1_261() Manifest {
 	events := []Event{
 		{Kind: EventSessionStart, NativeName: "SessionStart", AllowedFields: []model.NativeFieldID{FieldSessionID, FieldTranscriptPath, FieldCWD, FieldPermissionMode, FieldHookEventName, FieldEffort, FieldAgentID, FieldAgentType, FieldPromptID, FieldScratchpadDir, FieldSource, FieldModel, FieldSessionTitle}, Identities: []Identity{{Field: FieldSessionID, Binding: model.BindingSession, Required: true}}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
 		{Kind: EventSetup, NativeName: "Setup", AllowedFields: []model.NativeFieldID{FieldSessionID, FieldTranscriptPath, FieldCWD, FieldPermissionMode, FieldHookEventName, FieldEffort, FieldAgentID, FieldAgentType, FieldPromptID, FieldScratchpadDir, FieldTrigger}, Identities: []Identity{{Field: FieldSessionID, Binding: model.BindingSession, Required: true}}, Blocking: NonBlocking, Mutation: MutationNone, Failure: pastureruntime.FailureReportAndContinue, StopLoop: StopLoopNotApplicable},
@@ -50,7 +50,7 @@ func ClaudeCode2_1_261() Manifest {
 	return Manifest{Harness: ir.HarnessClaudeCode, Version: "2.1.261", Contract: contract, Events: events}
 }
 
-func ClaudeCode2_1_261NativeFieldNames() map[model.NativeFieldID]string {
+func ClaudeCode__2_1_261NativeFieldNames() map[model.NativeFieldID]string {
 	return map[model.NativeFieldID]string{
 		FieldSessionID:           "session_id",
 		FieldScratchpadDir:       "scratchpad_dir",

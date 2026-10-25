@@ -387,3 +387,130 @@ func TestAbsentDefinitionRejectsDifferentContentUnderSameCoordinate(t *testing.T
 	require.Equal(t, before, evidenceCount(t, r))
 	require.NoError(t, tracker.Journal().VerifyIntegrity())
 }
+
+// rewriteFirstSourceHash changes one generated source hash while leaving every
+// semantic field untouched. The result is a valid same-coordinate body whose
+// only difference is its source inventory.
+func rewriteFirstSourceHash(t *testing.T, body []byte) []byte {
+	t.Helper()
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(body, &wire))
+	spec, ok := wire["specification"].(map[string]any)
+	require.True(t, ok)
+	sources, ok := spec["sources"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, sources)
+	first, ok := sources[0].(map[string]any)
+	require.True(t, ok)
+	hash, ok := first["sha256"].(string)
+	require.True(t, ok)
+	require.Len(t, hash, sha256.Size*2)
+	replacement := "0"
+	if hash[0] == '0' {
+		replacement = "1"
+	}
+	first["sha256"] = replacement + hash[1:]
+	raw, err := json.Marshal(wire)
+	require.NoError(t, err)
+	normalized, err := definitions.NormalizePayload(definitions.EvidenceKind, raw)
+	require.NoError(t, err)
+	return normalized
+}
+
+// commitSyntheticDefinition writes a definition evidence row through the real
+// journal, without going through the owner activation writer. It simulates a
+// definition row committed by an earlier build.
+func commitSyntheticDefinition(t *testing.T, tracker provenance.Tracker, service receipt.Service, operation string, body []byte) model.DefinitionJournalID {
+	t.Helper()
+	id, err := service.Identity.ResolveLifecycleIdentity(context.Background())
+	require.NoError(t, err)
+	sum := sha256.Sum256(body)
+	applied, err := tracker.Journal().Apply(provenance.OperationInput{
+		OperationID:        provenance.OperationID(operation),
+		ActorID:            id.Actor,
+		AuthorityJournalID: &id.Authority,
+		CommandDigest:      []byte(operation),
+		RecordedAt:         clock{}.Now().UnixNano(),
+		Effects: []provenance.Effect{{
+			Sort:          provenance.EffectEvidence,
+			EvidenceKind:  definitions.EvidenceKind,
+			ResultSlot:    "definition",
+			Payload:       body,
+			ContentDigest: sum[:],
+		}},
+	})
+	require.NoError(t, err)
+	require.Len(t, applied.ResultSlots, 1)
+	return model.DefinitionJournalID(applied.ResultSlots[0].ProducedJournalID)
+}
+
+func TestSourceInventoryOnlyDefinitionUpdateIsAccepted(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		construct func() (definitions.Document, error)
+	}{
+		{name: "epoch-implementation", construct: definitions.NewEpochImplementation},
+		{name: "interpreter", construct: definitions.NewInterpreter},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, tracker, service := activatedStore(t)
+			document, err := tc.construct()
+			require.NoError(t, err)
+			oldBody := rewriteFirstSourceHash(t, document.Body())
+			oldDocument, err := definitions.Decode(oldBody)
+			require.NoError(t, err)
+			require.Equal(t, document.Kind(), oldDocument.Kind())
+			require.Equal(t, document.ID(), oldDocument.ID())
+			require.Equal(t, document.Version(), oldDocument.Version())
+			require.NotEqual(t, document.Content(), oldDocument.Content())
+			oldRow := commitSyntheticDefinition(t, tracker, service, "synthetic-old-"+tc.name, oldBody)
+
+			ref, err := receipt.EnsureActiveDefinition(context.Background(), service, document)
+			require.NoError(t, err)
+			require.Equal(t, document.Content(), ref.Content)
+			require.NotEqual(t, oldRow, ref.Definition)
+
+			reader, err := receipt.NewDefinitionReader(tracker.Journal())
+			require.NoError(t, err)
+			snapshot, _, err := receipt.ResolveDefinition(reader, ref)
+			require.NoError(t, err)
+			require.Equal(t, document.Body(), snapshot.Body())
+			require.Equal(t, 3, evidenceCount(t, reader), "old definition plus new definition and state")
+			require.NoError(t, tracker.Journal().VerifyIntegrity())
+		})
+	}
+}
+
+func TestEpochSemanticDefinitionUpdateStillRequiresVersion(t *testing.T) {
+	t.Parallel()
+	_, tracker, service := activatedStore(t)
+	document, err := definitions.NewEpochImplementation()
+	require.NoError(t, err)
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(document.Body(), &wire))
+	spec, ok := wire["specification"].(map[string]any)
+	require.True(t, ok)
+	spec["cohort"] = "2"
+	raw, err := json.Marshal(wire)
+	require.NoError(t, err)
+	body, err := definitions.NormalizePayload(definitions.EvidenceKind, raw)
+	require.NoError(t, err)
+	other, err := definitions.Decode(body)
+	require.NoError(t, err)
+	require.Equal(t, document.Version(), other.Version())
+	require.NotEqual(t, document.Content(), other.Content())
+	commitSyntheticDefinition(t, tracker, service, "synthetic-epoch-semantic", body)
+
+	reader, err := receipt.NewDefinitionReader(tracker.Journal())
+	require.NoError(t, err)
+	before := evidenceCount(t, reader)
+	_, err = receipt.EnsureActiveDefinition(context.Background(), service, document)
+	require.Error(t, err)
+	var refused *pasterrors.StructuredError
+	require.ErrorAs(t, err, &refused)
+	require.Contains(t, refused.Why, "differs by more than its generated source inventory")
+	require.Equal(t, before, evidenceCount(t, reader))
+	require.NoError(t, tracker.Journal().VerifyIntegrity())
+}

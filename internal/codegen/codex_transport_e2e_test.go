@@ -55,7 +55,7 @@ func TestCodexGeneratedRunnerDrivesBuiltCLI(t *testing.T) {
 	require.NoError(t, err)
 	var config codexHooksConfig
 	require.NoError(t, json.Unmarshal(wire, &config))
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	require.Len(t, config.Hooks, len(manifest.Entries()))
 	// Copy the embedded production runners once into a realistic global layout.
 	// Only the executable observed at the version boundary changes thereafter.
@@ -230,7 +230,7 @@ func TestCodexGeneratedRunnerIsTransparentConduit(t *testing.T) {
 	shell, err := exec.LookPath("sh")
 	require.NoError(t, err)
 	fixtures := codexClearedFixtures(t, root)
-	for _, event := range registration.Codex0_153_0().Entries() {
+	for _, event := range registration.Codex__0_153_0().Entries() {
 		t.Run(event.NativeName, func(t *testing.T) {
 			dir := t.TempDir()
 			stdinCapture := filepath.Join(dir, "stdin")

@@ -27,9 +27,9 @@ import (
 
 func manifests() []registration.Manifest {
 	return []registration.Manifest{
-		registration.ClaudeCode2_1_261(),
-		registration.Codex0_153_0(),
-		registration.OpenCode1_18_29(),
+		registration.ClaudeCode__2_1_261(),
+		registration.Codex__0_153_0(),
+		registration.OpenCode__1_18_29(),
 	}
 }
 
@@ -80,7 +80,7 @@ func TestEveryRegisteredEventCarriesAnActionClass(t *testing.T) {
 // committed capture sitting re-derives, all on never-denied actions so a
 // misclassified provisional row can only proceed.
 func TestEveryV2EventCarriesAnActionClass(t *testing.T) {
-	manifest := registration.OpenCode2_0_20()
+	manifest := registration.OpenCode__2_0_20()
 	var unclassified []string
 	for _, event := range manifest.Entries() {
 		class, ok := gateauthority.ClassForEvent(manifest.Harness, event.NativeName)

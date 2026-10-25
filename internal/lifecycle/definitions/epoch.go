@@ -14,8 +14,10 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-// EpochDocumentVersion is the explicit format/content revision of the epoch
-// implementation document. It is tracked independently of the DBOS recovery
+// EpochDocumentVersion is the explicit semantic revision of the epoch
+// implementation document. A generated source-inventory change is admitted at
+// the same version by CompatibleSourceInventoryUpdate; any semantic change
+// requires a new version. It is tracked independently of the DBOS recovery
 // cohort the document carries: ordinary manifest changes never bump the cohort,
 // and a cohort bump never silently rides a manifest change.
 const EpochDocumentVersion uint32 = 1

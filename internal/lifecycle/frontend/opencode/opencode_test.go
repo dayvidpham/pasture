@@ -26,7 +26,7 @@ func TestAuthenticCallbacksProduceProviderCorrectVerifiedL2(t *testing.T) {
 		{"session created", "session_created_1_18_29.json", registration.EventOpenCodeSessionCreated, runtime.SemanticObservation, []runtime.NativeIdentityKind{runtime.IdentitySession}},
 		{"tool execute before", "tool_execute_before_1_18_29.json", registration.EventOpenCodeToolExecuteBefore, runtime.SemanticGateConsultation, []runtime.NativeIdentityKind{runtime.IdentitySession, runtime.IdentityToolCall}},
 	}
-	manifest := registration.OpenCode1_18_29()
+	manifest := registration.OpenCode__1_18_29()
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -69,7 +69,7 @@ func identityKinds(values []waist.SemanticIdentity) []runtime.NativeIdentityKind
 // the activation table before any payload is read (internal/handlers).
 func TestEventMappingsCoverEveryRegisteredOpenCodeEvent(t *testing.T) {
 	t.Parallel()
-	testutil.AssertEventMappingsCoverRegistration(t, registration.OpenCode1_18_29(), runtime.OpenCode1_18_29Lifecycle(), opencode.Bind)
+	testutil.AssertEventMappingsCoverRegistration(t, registration.OpenCode__1_18_29(), runtime.OpenCode1_18_29Lifecycle(), opencode.Bind)
 }
 
 // TestV2EventMappingsCoverEveryRegisteredEvent holds the OpenCode 2.0.20
@@ -78,7 +78,7 @@ func TestEventMappingsCoverEveryRegisteredOpenCodeEvent(t *testing.T) {
 // the activation table before any payload is read (internal/handlers).
 func TestV2EventMappingsCoverEveryRegisteredEvent(t *testing.T) {
 	t.Parallel()
-	testutil.AssertEventMappingsCoverRegistration(t, registration.OpenCode2_0_20(), runtime.OpenCode2_0_20Lifecycle(), opencode.BindV2)
+	testutil.AssertEventMappingsCoverRegistration(t, registration.OpenCode__2_0_20(), runtime.OpenCode2_0_20Lifecycle(), opencode.BindV2)
 }
 
 // TestBindV2ProducesVerifiedL2 drives constructed 2.0.20 bindings through the

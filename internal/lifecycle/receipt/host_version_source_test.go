@@ -32,7 +32,7 @@ func TestReceiptVersionSourceRoundTripsAndLegacyRemainsUnspecified(t *testing.T)
 			require.NoError(t, err)
 			service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, gateTestClock{}, &gateTestOperations{}, timeouts.TestProfile())
 			require.NoError(t, err)
-			event, err := ingress.EventByNativeName(registration.ClaudeCode2_1_261(), "SessionStart")
+			event, err := ingress.EventByNativeName(registration.ClaudeCode__2_1_261(), "SessionStart")
 			require.NoError(t, err)
 			raw, err := os.ReadFile("../ingress/claude/testdata/fixtures/session_start_2_1_261.json")
 			require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestReceiptRejectsUnknownVersionSourceBeforeAnyWrite(t *testing.T) {
 	defer tracker.Close()
 	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, gateTestClock{}, &gateTestOperations{}, timeouts.TestProfile())
 	require.NoError(t, err)
-	event, err := ingress.EventByNativeName(registration.ClaudeCode2_1_261(), "SessionStart")
+	event, err := ingress.EventByNativeName(registration.ClaudeCode__2_1_261(), "SessionStart")
 	require.NoError(t, err)
 	delivery := claude.Parse([]byte(`{"hook_event_name":"SessionStart","session_id":"session"}`), event, "2.1.300", model.OccurrenceEnvelopeRef{}).Delivery
 	delivery.Envelope.HostVersionSource = "running-process-attested"

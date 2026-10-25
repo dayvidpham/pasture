@@ -71,7 +71,7 @@ func TestClearedCodexStopAndPostToolUseAreAdmittedByBuiltCLI(t *testing.T) {
 			dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 			initializeLifecycleTestDatabase(t, dbPath)
 			raw := readCodexProductionFixture(t, tc.fixture, tc.event, tc.proof)
-			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "codex", "--event", tc.event, "--host-version", registration.Codex0_153_0().Version)
+			command := exec.Command(binary, databaseFlagName.Argument(), dbPath, "hook", "lifecycle", "--harness", "codex", "--event", tc.event, "--host-version", registration.Codex__0_153_0().Version)
 			command.Env = append(os.Environ(), "PASTURE_DB_PATH="+dbPath, "PASTURE_CAPTURE_DIR=", "PASTURE_ACTOR_ID=")
 			command.Stdin = bytes.NewReader(raw)
 			var stdout, stderr bytes.Buffer
@@ -148,7 +148,7 @@ func initializePostCommitTestDatabase(t *testing.T, dbPath string, contract ir.R
 func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
 	t.Setenv("PASTURE_DB_PATH", dbPath)
-	initializePostCommitTestDatabase(t, dbPath, registration.Codex0_153_0().Contract)
+	initializePostCommitTestDatabase(t, dbPath, registration.Codex__0_153_0().Contract)
 	raw := readCodexProductionFixture(t, "pre_tool_use_0_153_0.json", "PreToolUse", activation.CaptureProofCodexPreToolUse)
 
 	failing := &erroringWriter{}
@@ -156,7 +156,7 @@ func TestLifecycleCommandReportsStdoutWriteFailureAfterDurableCommit(t *testing.
 	rootCmd.SetArgs([]string{
 		databaseFlagName.Argument(), dbPath, "hook", "lifecycle",
 		"--harness", "codex", "--event", "PreToolUse",
-		"--host-version", registration.Codex0_153_0().Version,
+		"--host-version", registration.Codex__0_153_0().Version,
 	})
 	rootCmd.SetIn(bytes.NewReader(raw))
 	rootCmd.SetOut(failing)

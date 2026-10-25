@@ -28,7 +28,7 @@ func TestAuthenticPayloadsPreserveBytesProvenanceAndIdentities(t *testing.T) {
 		{"session created", "session_created_1_18_29.json", registration.EventOpenCodeSessionCreated, 1},
 		{"tool execute before", "tool_execute_before_1_18_29.json", registration.EventOpenCodeToolExecuteBefore, 2},
 	}
-	manifest := registration.OpenCode1_18_29()
+	manifest := registration.OpenCode__1_18_29()
 	for _, test := range tests {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
@@ -58,7 +58,7 @@ func TestAuthenticPayloadsPreserveBytesProvenanceAndIdentities(t *testing.T) {
 
 func TestCatalogIsSourceDerivedAndAuthenticProofIsSelected(t *testing.T) {
 	t.Parallel()
-	manifest := registration.OpenCode1_18_29()
+	manifest := registration.OpenCode__1_18_29()
 	// Two roots record the host version: the runtime contract id and the host
 	// contract the manifest is generated from. They are one version.
 	require.Equal(t, runtime.OpenCode1_18_29().Versions().Min().String(), manifest.Version, "the registration manifest and the runtime contract record one host version")

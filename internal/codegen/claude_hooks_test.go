@@ -19,7 +19,7 @@ import (
 
 func TestClaudeHooksFailClosedOnActivationMismatch(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestClaudeHooksFailClosedOnActivationMismatch(t *testing.T) {
 
 func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 	if err := json.Unmarshal([]byte(support), &report); err != nil {
 		t.Fatal(err)
 	}
-	if want := len(registration.ClaudeCode2_1_261().Entries()); len(report.Events) != want {
+	if want := len(registration.ClaudeCode__2_1_261().Entries()); len(report.Events) != want {
 		t.Fatalf("support entries=%d, want %d (one per registered Claude event)", len(report.Events), want)
 	}
 	expected := []struct{ event, state, reason string }{
@@ -127,7 +127,7 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 			t.Errorf("numeric reason leaked: %+v", entry)
 		}
 	}
-	if want := len(registration.ClaudeCode2_1_261().Entries()); len(seen) != want {
+	if want := len(registration.ClaudeCode__2_1_261().Entries()); len(seen) != want {
 		t.Fatalf("unique support events=%d, want %d", len(seen), want)
 	}
 	manifestEntries := manifest.Entries()
@@ -222,7 +222,7 @@ func TestClaudeHooksStableProofNamesAndIndependentPreToolUse(t *testing.T) {
 
 func TestClaudeHooksAbsentSessionStartDoesNotPanic(t *testing.T) {
 	t.Parallel()
-	manifest := registration.ClaudeCode2_1_261()
+	manifest := registration.ClaudeCode__2_1_261()
 	states, err := activation.ClaudeCode2_1_261()
 	if err != nil {
 		t.Fatal(err)
@@ -342,7 +342,7 @@ func TestClaudeLifecycleTransportAllowsAuthenticFieldShapes(t *testing.T) {
 	//
 	// The three metadata-control payloads and all provenance sidecars are
 	// excluded by the positive filename grammar, independently of their bytes.
-	registered := registration.ClaudeCode2_1_261()
+	registered := registration.ClaudeCode__2_1_261()
 	registeredNames := make(map[model.ContractEventKind]string, len(registered.Events))
 	registeredByName := make(map[string]struct{}, len(registered.Events))
 	for _, event := range registered.Entries() {
@@ -421,8 +421,8 @@ func TestClaudeLifecycleTransportAllowsAuthenticFieldShapes(t *testing.T) {
 
 func TestClaudeLifecycleTransportFieldsMatchGeneratedRegistration(t *testing.T) {
 	t.Parallel()
-	fieldNames := registration.ClaudeCode2_1_261NativeFieldNames()
-	for _, event := range registration.ClaudeCode2_1_261().Entries() {
+	fieldNames := registration.ClaudeCode__2_1_261NativeFieldNames()
+	for _, event := range registration.ClaudeCode__2_1_261().Entries() {
 		expected := make([]string, 0, len(event.AllowedFields))
 		for _, field := range event.AllowedFields {
 			name, present := fieldNames[field]

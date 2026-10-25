@@ -2594,3 +2594,19 @@ identical bytes. The preceding digest identifies the prior recovery revision;
 neither revision participated in the historical captures above, and no capture
 payload, capture kit, fixture identity, activation state or acceptance record
 changes. No new live session, capture or host capability is claimed.
+
+### Typed lifecycle transport — 2026-10-24
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`3373d6d824da5d2b054a2eda9ba9854e85ba1dbfaa6d7be2258f9a193df38fc0`.
+This later generated revision replaces the string-dispatched projection with a
+generated event table, typed payload projectors, and an explicit handler
+registry. Each lifecycle command now carries only the fields its generated
+contract declares, so the assembled OpenCode context no longer crosses the
+1 MiB ingress bound. The session.created observation retains its occurrence
+local host-version flag and the session.context recovery composition remains
+unchanged. The generated plugin and embedded hook asset have identical bytes.
+The preceding digest identifies the prior recovery revision; neither revision
+participated in the historical captures above, and no capture payload, capture
+kit, fixture identity, activation state or acceptance record changes. No new
+live session, capture or host capability is claimed.

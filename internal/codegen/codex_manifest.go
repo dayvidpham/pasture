@@ -262,7 +262,7 @@ func codexEnabledEventNames() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("codegen.codexEnabledEventNames: build activation manifest: %w", err)
 	}
-	return codexEnabledEventNamesFrom(registration.Codex0_153_0(), states, runtime.CodexLifecycleEvents())
+	return codexEnabledEventNamesFrom(registration.Codex__0_153_0(), states, runtime.CodexLifecycleEvents())
 }
 
 // codexEnabledEventNamesFrom is the injectable body of codexEnabledEventNames.
@@ -318,7 +318,7 @@ func codexEnabledEventNamesFrom(manifest registration.Manifest, states []activat
 // dispositions are the audit payload, not a side effect of enablement.
 //
 // The report derives solely from the pinned Codex registration manifest
-// (registration.Codex0_153_0()) and activation catalog
+// (registration.Codex__0_153_0()) and activation catalog
 // (activation.Codex0_153_0()) — no filesystem access and no live Codex — reusing
 // the shared activationSupportReport shape so the Claude and Codex audit reports
 // can never diverge. The exhaustiveness checks reject any disagreement between
@@ -334,7 +334,7 @@ func RenderCodexActivationReport() (string, error) {
 }
 
 func renderCodexActivationReport() (string, error) {
-	manifest := registration.Codex0_153_0()
+	manifest := registration.Codex__0_153_0()
 	states, err := activation.Codex0_153_0()
 	if err != nil {
 		return "", fmt.Errorf("codegen.renderCodexActivationReport: build activation manifest: %w", err)

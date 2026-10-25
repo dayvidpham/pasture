@@ -107,7 +107,7 @@ func seedProjectionOccurrence(t *testing.T, path string) string {
 	task, err := tr.As(actor, authority).Create("projection-e2e", "occurrence subject", "the task the lifecycle occurrence names", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
 	require.NoError(t, err)
 
-	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode2_1_261().Contract.String())
+	contract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, registration.ClaudeCode__2_1_261().Contract.String())
 	require.NoError(t, err)
 	body := []byte("body")
 	ref := "sha256:" + fmt.Sprintf("%x", sha256.Sum256(body))
