@@ -119,6 +119,27 @@ func TestBudgetFromProfileStaysInsideTheProfileTiers(t *testing.T) {
 	}
 }
 
+func TestProductionHoldTargetStaysAtTheCapWhenTheBusyTierGrows(t *testing.T) {
+	profile := timeouts.ProductionProfile()
+	uncapped := profile.SQLiteBusy() * 4 / 5
+	if uncapped <= maxDerivedHoldTarget {
+		t.Fatalf("4/5 of production SQLiteBusy (%s) is %s, which does not exceed the %s cap; this test no longer proves the cap holds the lane hold down", profile.SQLiteBusy(), uncapped, maxDerivedHoldTarget)
+	}
+	budget, err := BudgetFromProfile(profile)
+	if err != nil {
+		t.Fatalf("BudgetFromProfile(production) = %v", err)
+	}
+	if budget.HoldTarget != maxDerivedHoldTarget {
+		t.Fatalf("production HoldTarget = %s, want the %s cap; do not raise maxDerivedHoldTarget with the busy tier", budget.HoldTarget, maxDerivedHoldTarget)
+	}
+	if budget.FlushInterval != 25*time.Millisecond {
+		t.Fatalf("production FlushInterval = %s, want 25ms; the busy-tier change must not move the idle flush", budget.FlushInterval)
+	}
+	if want := int(maxDerivedHoldTarget / assumedPerRecordCommitCost); budget.BatchRecords != want {
+		t.Fatalf("production BatchRecords = %d, want %d derived from the capped hold; the busy-tier change must not change BatchRecords", budget.BatchRecords, want)
+	}
+}
+
 func TestBudgetFromProfileRefusesAnInvalidProfile(t *testing.T) {
 	if _, err := BudgetFromProfile(timeouts.Profile{}); err == nil {
 		t.Fatal("BudgetFromProfile accepted the zero profile")

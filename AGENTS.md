@@ -127,7 +127,7 @@ Both subsystems open the same file: the Provenance tables (`tasks`, `edges`,
 `pasture_well_known_agents`, `pasture_agent_categories`, `audit_schema_meta`)
 co-exist in one file. PROPOSAL-2 §7.1 / D11 binds writers to SQLite WAL mode.
 The `busy_timeout` that goes with it is taken from the shared timeout profile
-(`internal/timeouts`) and is **500 ms** in the production profile; it is never a
+(`internal/timeouts`) and is **1.5 s** in the production profile; it is never a
 literal in a DSN. The cross-subsystem race test in
 `internal/tasks/tracker_race_test.go` (BLOCKER B3) exercises this path.
 
@@ -150,8 +150,8 @@ inverts the rest:
 
 | Tier | Field | Production | Bounds |
 |---|---|---|---|
-| innermost | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
-| caller window | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
+| innermost | `SQLiteBusy` | **1.5 s** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
+| caller window | `Ingress` | **2 s** | one lifecycle receipt append, including its lock retries |
 | caller window | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
 | host window | `HookInvocation` | **5 s** | when the lifecycle hook requests cancellation; an entered receipt commit waits for settlement |
 | outermost | `WorkflowResult` | **30 s** | how long a caller waits for a whole workflow to report a result |
@@ -246,7 +246,7 @@ validated by `internal/timeouts`:
 | Variable | Tier | Default | Meaning |
 |---|---|---|---|
 | `PASTURE_HOOK_INVOCATION_TIMEOUT` | `HookInvocation` | 5 s | how long ONE whole lifecycle hook invocation may run before it reports a fault |
-| `PASTURE_INGRESS_TIMEOUT` | `Ingress` | 1 s | one lifecycle receipt append, including its lock retries |
+| `PASTURE_INGRESS_TIMEOUT` | `Ingress` | 2 s | one lifecycle receipt append, including its lock retries |
 | `PASTURE_START_SLICE_TIMEOUT` | `StartSlice` | 2 s | how long a slice sub-workflow waits for its `start_slice` signal |
 
 Each accepts a Go duration (`750ms`, `3s`). An unset or empty variable keeps the
@@ -381,9 +381,11 @@ Rules that must hold for any change to the lane:
   Every grouping site asks the splitter; no site re-derives a bound. The lane is
   the only writer for hook records, and it is what makes the property true — not
   a connection or pool limit.
-- **The hold bound protects the other writers.** `HoldTarget` (400 ms, derived
-  as 4/5 of the SQLite busy tier and capped) bounds one lane turn, so the DBOS
-  engine's own writes and every CLI writer keep their measured wait.
+- **The hold bound protects the other writers.** `HoldTarget` stays 400 ms.
+  The derivation is four fifths of the SQLite busy tier, capped at 400 ms, so
+  the 1.5 s production busy tier does not raise the lane hold. That bound
+  keeps one lane turn from starving the DBOS engine's own writes and every
+  CLI writer past their measured wait.
   `writelane.BudgetFromProfile` derives every bound from the validated timeout
   profile and refuses a profile that cannot contain the hold.
 - **`proceed` means committed, and nothing is acknowledged early.** The lane's

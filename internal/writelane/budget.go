@@ -42,11 +42,11 @@ import (
 const assumedPerRecordCommitCost = 20 * time.Millisecond
 
 // maxDerivedHoldTarget is the ceiling BudgetFromProfile places on the lane's
-// hold target, whatever the busy tier is. The production SQLite busy tier is
-// 500 ms and the derivation takes four fifths of it (400 ms); this constant
-// keeps a profile with a LARGER busy tier from letting the lane hold the
-// writer longer than the 400 ms the design sized against the other writers'
-// wait. See PROPOSAL-19 section 3 (Bounds, splitter, backpressure, oversize).
+// hold target, whatever the busy tier is. Four fifths of the production
+// SQLite busy tier (1.5s) would be 1.2s; this constant keeps that larger busy
+// tier from letting the lane hold the writer longer than the 400ms the design
+// sized against the other writers' wait. See PROPOSAL-19 section 3 (Bounds,
+// splitter, backpressure, oversize).
 const maxDerivedHoldTarget = 400 * time.Millisecond
 
 // ingressPayloadFloor is the floor Validate places on BatchBytes: the one item

@@ -158,7 +158,7 @@ carrying a second set of durations.
 
 | Bound | Production value | Derivation |
 |---|---|---|
-| `HoldTarget` | 400 ms | 4/5 of the SQLite busy tier (500 ms), capped at 400 ms |
+| `HoldTarget` | 400 ms | 4/5 of the 1.5 s SQLite busy tier would be 1.2 s; capped at 400 ms |
 | `BatchRecords` | 20 | `HoldTarget / assumedPerRecordCommitCost` |
 | `BatchBytes` | 8 MiB | 8 × the 1 MiB ingress payload cap |
 | `QueueRecords` | 256 | staging depth; deeper than one turn |

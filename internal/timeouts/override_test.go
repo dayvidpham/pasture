@@ -57,12 +57,12 @@ func TestOverrideAppliesEachExposedTier(t *testing.T) {
 		},
 		{
 			name: "ingress window lowered",
-			o:    Override{Ingress: 800 * time.Millisecond},
+			o:    Override{Ingress: 1800 * time.Millisecond},
 			want: func(p Profile) time.Duration { return p.Ingress() },
 		},
 		{
 			name: "start-slice window lowered",
-			o:    Override{StartSlice: 1500 * time.Millisecond},
+			o:    Override{StartSlice: 1750 * time.Millisecond},
 			want: func(p Profile) time.Duration { return p.StartSlice() },
 		},
 	}
@@ -130,6 +130,21 @@ func TestOverrideRefusesAnUnusableCombination(t *testing.T) {
 		{
 			name:    "an ingress below the SQLite lock wait that sits inside it",
 			o:       Override{Ingress: 400 * time.Millisecond},
+			wantErr: "timeout profile is inverted",
+		},
+		{
+			name:    "an ingress equal to the SQLite lock wait",
+			o:       Override{Ingress: 1500 * time.Millisecond},
+			wantErr: "timeout profile is inverted",
+		},
+		{
+			name:    "a start-slice window equal to the SQLite lock wait",
+			o:       Override{StartSlice: 1500 * time.Millisecond},
+			wantErr: "timeout profile is inverted",
+		},
+		{
+			name:    "a start-slice window below the SQLite lock wait",
+			o:       Override{StartSlice: 400 * time.Millisecond},
 			wantErr: "timeout profile is inverted",
 		},
 		{
