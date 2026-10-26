@@ -349,6 +349,13 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 	tracker.storeClock = cfg.clock
 	tracker.diagnostics = cfg.diagnostics
 	tracker.afterGenesisCommit = cfg.afterGenesisCommit
+	// Repair the hot-path definition projection when the journal has newer
+	// activation evidence than the projection watermark. This is best-effort:
+	// the journal-backed bridge remains the fallback if the projection cannot
+	// be rebuilt, and the next activation can repopulate it.
+	if err := rebuildLifecycleActiveEntities(ctx, tracker); err != nil {
+		fmt.Fprintf(tracker.diagnostics, "lifecycle active-entity projection rebuild failed: %v\n", err)
+	}
 	// Durable CLI and daemon callers receive the same complete registry. The
 	// daemon separately recovers these IDs into its startup cache.
 	cache := NewWellKnownAgentCache()
@@ -738,6 +745,34 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 				genesis_authority_journal_id INTEGER NOT NULL
 			)`,
 		},
+		{
+			// The hot-path read model for lifecycle definitions. The journal
+			// remains the source of truth; this table stores only the journal
+			// coordinates of an activation whose compiled body is already in
+			// the binary. content_digest is the key because the binary asks for
+			// exactly the body it was compiled with.
+			name: "lifecycle_active_entity",
+			ddl: `CREATE TABLE IF NOT EXISTS lifecycle_active_entity (
+				entity_kind           INTEGER NOT NULL,
+				content_digest        BLOB    NOT NULL,
+				definition_journal_id INTEGER NOT NULL,
+				state_journal_id      INTEGER NOT NULL,
+				operation_id          TEXT    NOT NULL,
+				generation            INTEGER NOT NULL,
+				PRIMARY KEY (entity_kind, content_digest)
+			) STRICT, WITHOUT ROWID`,
+		},
+		{
+			name: "lifecycle_active_projection",
+			ddl: `CREATE TABLE IF NOT EXISTS lifecycle_active_projection (
+				singleton          INTEGER PRIMARY KEY CHECK (singleton = 1),
+				applied_journal_id INTEGER NOT NULL
+			) STRICT`,
+		},
+		{
+			name: "lifecycle_active_projection_singleton",
+			ddl:  `INSERT OR IGNORE INTO lifecycle_active_projection (singleton, applied_journal_id) VALUES (1, 0)`,
+		},
 	}
 
 	for _, s := range statements {
@@ -759,7 +794,60 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 			}
 		}
 	}
+	// Both indexes are load-bearing and deliberately retained. The evidence
+	// index keeps the projection freshness check from scanning every lifecycle
+	// evidence row on each open; the operations index keeps the journal append
+	// and fold path from scanning journal_operations by journal_id. An isolated
+	// A/B measured 390 ms per hook with both versus ~600 ms without them, so
+	// removing either as "append write amplification" is counterproductive.
+	for _, index := range []struct {
+		name  string
+		table string
+		ddl   string
+	}{
+		{
+			name:  "idx_journal_evidence_lifecycle_kind_journal",
+			table: "journal_evidence",
+			ddl:   `CREATE INDEX IF NOT EXISTS idx_journal_evidence_lifecycle_kind_journal ON journal_evidence (evidence_kind, journal_id)`,
+		},
+		{
+			name:  "idx_journal_operations_journal_id",
+			table: "journal_operations",
+			ddl:   `CREATE INDEX IF NOT EXISTS idx_journal_operations_journal_id ON journal_operations (journal_id)`,
+		},
+	} {
+		present, err := sqliteTableExistsContext(ctx, db, index.table)
+		if err != nil {
+			return err
+		}
+		if !present {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, index.ddl); err != nil {
+			return &pasterrors.StructuredError{
+				Category: pasterrors.CategoryStorage,
+				What:     fmt.Sprintf("Pasture couldn't create the %q index in the database.", index.name),
+				Why:      "Tried to create a lifecycle read index but the database refused.",
+				Where:    "Setting up the pasture-side tables (internal/tasks/open_unified.go in tasks.ensurePastureTables).",
+				Impact:   "Lifecycle definition reads and journal folding will fall back to slower journal scans.",
+				Fix:      "Confirm the database is writable, then run 'pasture migrate' and retry.",
+				Cause:    err,
+			}
+		}
+	}
 	return nil
+}
+
+func sqliteTableExistsContext(ctx context.Context, db *sql.DB, table string) (bool, error) {
+	var name string
+	err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check sqlite table %q: %w", table, err)
+	}
+	return true, nil
 }
 
 // ─── decodeAuditEvent: shared row-scan helper for Timeline + future queries ──

@@ -28,7 +28,9 @@ func TestContextPoolSettingsAndReplacement(t *testing.T) {
 		require.NoError(t, conn.QueryRowContext(t.Context(), "PRAGMA synchronous").Scan(&sync))
 		require.NoError(t, conn.QueryRowContext(t.Context(), "PRAGMA foreign_keys").Scan(&fk))
 		require.NoError(t, conn.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&journal))
-		require.Equal(t, 500, busy)
+		wantBusy := int(timeouts.ProductionProfile().SQLiteBusy().Milliseconds())
+		require.Equal(t, 1500, wantBusy, "production SQLite busy tier must be 1.5s; a stale 500ms pragma must not pass")
+		require.Equal(t, wantBusy, busy)
 		require.Equal(t, 1, sync)
 		require.Equal(t, 1, fk)
 		require.Equal(t, "wal", journal)
@@ -53,8 +55,14 @@ func TestContextFirstConnectionLockedRollbackJournal(t *testing.T) {
 	db, err := OpenSharedDBContextWithProfile(ctx, path, timeouts.ProductionProfile())
 	require.Nil(t, db)
 	require.True(t, errors.Is(err, context.DeadlineExceeded), "%v", err)
+	// The caller deadline above is 25ms. This ceiling is the fixed 500ms
+	// lock-acquisition bound plus the scheduling allowance. It must stay
+	// strictly below the production busy tier so a missed cancellation that
+	// waits out that 1.5s tier cannot pass.
 	const schedulerTolerance = 100 * time.Millisecond
-	require.Less(t, time.Since(start), 500*time.Millisecond+schedulerTolerance)
+	ceiling := 500*time.Millisecond + schedulerTolerance
+	require.Less(t, ceiling, timeouts.ProductionProfile().SQLiteBusy())
+	require.Less(t, time.Since(start), ceiling)
 }
 
 func TestContextConnectRejectsCancelledAndNil(t *testing.T) {

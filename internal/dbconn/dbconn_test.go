@@ -3,21 +3,41 @@ package dbconn
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
+func busyTimeoutLiteral(profile timeouts.Profile) string {
+	return "busy_timeout(" + strconv.FormatInt(profile.SQLiteBusy().Milliseconds(), 10) + ")"
+}
+
 func TestDSNUsesInjectedProfileBusyTimeout(t *testing.T) {
 	t.Parallel()
-	if got := SharedDSNWithProfile("db", timeouts.TestProfile()); !strings.Contains(got, "busy_timeout(500)") {
-		t.Fatalf("test DSN=%q, want injected 500ms", got)
+	testProfile := timeouts.TestProfile()
+	if got := SharedDSNWithProfile("db", testProfile); !strings.Contains(got, busyTimeoutLiteral(testProfile)) {
+		t.Fatalf("test DSN=%q, want injected %s", got, busyTimeoutLiteral(testProfile))
 	}
-	if got := SharedDSNWithProfile("db", timeouts.ProductionProfile()); !strings.Contains(got, "busy_timeout(500)") {
-		t.Fatalf("production DSN=%q, want injected 500ms", got)
+	production := timeouts.ProductionProfile()
+	if production.SQLiteBusy() != 1500*time.Millisecond {
+		t.Fatalf("production SQLite busy timeout = %s, want 1.5s; the shared DSN must not keep the retired 500ms literal", production.SQLiteBusy())
+	}
+	got := SharedDSNWithProfile("db", production)
+	want := busyTimeoutLiteral(production)
+	if !strings.Contains(got, want) {
+		t.Fatalf("production DSN=%q, want injected %s from ProductionProfile", got, want)
+	}
+	if strings.Contains(got, "busy_timeout(500)") {
+		t.Fatalf("production DSN=%q still carries the retired 500ms busy_timeout", got)
+	}
+	readonly := ReadOnlyDSNWithProfile("db", production)
+	if !strings.Contains(readonly, want) {
+		t.Fatalf("production read-only DSN=%q, want injected %s from ProductionProfile", readonly, want)
 	}
 }
 

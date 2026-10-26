@@ -640,13 +640,14 @@ const backpressureStartSliceDeadline = 10 * time.Second
 // silently inherits a deadline that hides a real delay.
 func newBackpressureEngine(t *testing.T, k int) *engine.Engine {
 	t.Helper()
+	base := timeouts.ProductionProfile()
 	profile, err := timeouts.New(
 		timeouts.Test,
-		500*time.Millisecond, // SQLite lock wait, unchanged
-		time.Second,          // ingress, the production window; only the start-signal deadline moves
+		base.SQLiteBusy(),
+		base.Ingress(),
 		backpressureStartSliceDeadline,
 		backpressureStartSliceDeadline+time.Second, // hook-invocation deadline, kept above the start-slice deadline
-		30*time.Second, // workflow-result wait, the outermost tier
+		base.WorkflowResult(),
 	)
 	if err != nil {
 		t.Fatalf("build the timeout profile for the backpressure test: %v", err)

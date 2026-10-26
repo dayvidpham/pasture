@@ -127,7 +127,7 @@ Both subsystems open the same file: the Provenance tables (`tasks`, `edges`,
 `pasture_well_known_agents`, `pasture_agent_categories`, `audit_schema_meta`)
 co-exist in one file. PROPOSAL-2 §7.1 / D11 binds writers to SQLite WAL mode.
 The `busy_timeout` that goes with it is taken from the shared timeout profile
-(`internal/timeouts`) and is **500 ms** in the production profile; it is never a
+(`internal/timeouts`) and is **1.5 s** in the production profile; it is never a
 literal in a DSN. The cross-subsystem race test in
 `internal/tasks/tracker_race_test.go` (BLOCKER B3) exercises this path.
 
@@ -150,8 +150,8 @@ inverts the rest:
 
 | Tier | Field | Production | Bounds |
 |---|---|---|---|
-| innermost | `SQLiteBusy` | **500 ms** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
-| caller window | `Ingress` | **1 s** | one lifecycle receipt append, including its lock retries |
+| innermost | `SQLiteBusy` | **1.5 s** | one SQLite lock wait inside the driver, set as the DSN `busy_timeout` |
+| caller window | `Ingress` | **2 s** | one lifecycle receipt append, including its lock retries |
 | caller window | `StartSlice` | **2 s** | how long a slice sub-workflow waits for its `start_slice` signal |
 | host window | `HookInvocation` | **5 s** | when the lifecycle hook requests cancellation; an entered receipt commit waits for settlement |
 | outermost | `WorkflowResult` | **30 s** | how long a caller waits for a whole workflow to report a result |
@@ -246,7 +246,7 @@ validated by `internal/timeouts`:
 | Variable | Tier | Default | Meaning |
 |---|---|---|---|
 | `PASTURE_HOOK_INVOCATION_TIMEOUT` | `HookInvocation` | 5 s | how long ONE whole lifecycle hook invocation may run before it reports a fault |
-| `PASTURE_INGRESS_TIMEOUT` | `Ingress` | 1 s | one lifecycle receipt append, including its lock retries |
+| `PASTURE_INGRESS_TIMEOUT` | `Ingress` | 2 s | one lifecycle receipt append, including its lock retries |
 | `PASTURE_START_SLICE_TIMEOUT` | `StartSlice` | 2 s | how long a slice sub-workflow waits for its `start_slice` signal |
 
 Each accepts a Go duration (`750ms`, `3s`). An unset or empty variable keeps the
@@ -381,11 +381,17 @@ Rules that must hold for any change to the lane:
   Every grouping site asks the splitter; no site re-derives a bound. The lane is
   the only writer for hook records, and it is what makes the property true — not
   a connection or pool limit.
-- **The hold bound protects the other writers.** `HoldTarget` (400 ms, derived
-  as 4/5 of the SQLite busy tier and capped) bounds one lane turn, so the DBOS
-  engine's own writes and every CLI writer keep their measured wait.
-  `writelane.BudgetFromProfile` derives every bound from the validated timeout
-  profile and refuses a profile that cannot contain the hold.
+- **The hold bound protects the other writers.** Production `HoldTarget` is
+  1 s: four fifths of the 1.5 s SQLite busy tier is 1.2 s, capped at 1 s. 1 s
+  stays below the busy tier and below the 2 s ingress and start-slice windows.
+  Exceeding the hold is reported as `HoldExceeded`; the lane still commits
+  every admitted record and never drops one to meet the bound.
+  `writelane.BudgetFromProfile` takes the hold from the validated timeout
+  profile and refuses a flush that is not strictly below it. The record caps
+  are fixed: 256 per turn (Provenance's batch cap) and 1024 queued. The byte
+  caps stay 64 MiB per turn and 256 MiB queued. Production idle flush is
+  50 ms, inside the 250 ms acceptance target and longer than the previous
+  25 ms start; shorter profiles keep the scaled fallback.
 - **`proceed` means committed, and nothing is acknowledged early.** The lane's
   `Submit` returns only after the record's `Settle` ran and reported its result,
   which is only after the flush's one transaction committed or failed.
@@ -795,7 +801,7 @@ writers.
 | `github.com/spf13/cobra` | (see `go.mod`) | CLI framework |
 | `github.com/spf13/viper` | (see `go.mod`) | Configuration loading (TOML/YAML/env) |
 | `github.com/dbos-inc/dbos-transact-golang` | v1.2.0 | Durable-execution substrate (DBOS Transact, SQLite backend) |
-| `github.com/dayvidpham/provenance` | v0.10.2-0.20261016221412-022003a0a36b | Task, edge and receipt store; exact injected model membership with additive provider/model reconciliation; context-aware borrowed activation and software registration; verified-as-of ledger open and sanctioned-write advance; atomic bounded `BatchJournal` commits; guarded exact-replay proof reuse restricted to the current transaction state, with structural/trigger checks and full integrity fallback on uncertainty. Identity, authority, reducer and new-write integrity checks remain mandatory. Internal SQL timing instrumentation is build-tagged and explicitly opt-in. Built on the same DBOS version. |
+| `github.com/dayvidpham/provenance` | v0.10.2-0.20261026142913-847c8f54f93a | Task, edge and receipt store; exact injected model membership with additive provider/model reconciliation; context-aware borrowed activation and software registration; verified-as-of ledger open and sanctioned-write advance; sanctioned writes verify only their appended journal delta against subtype, actor-placement and authority invariants, while open, migration, audit and any ledger mismatch retain full integrity fallback; atomic bounded `BatchJournal` commits; guarded exact-replay proof reuse restricted to the current transaction state, with structural/trigger checks and full integrity fallback on uncertainty. Identity, authority, reducer and new-write integrity checks remain mandatory. Internal SQL timing instrumentation is build-tagged and explicitly opt-in. Built on the same DBOS version. |
 | `modernc.org/sqlite` | v1.54.0 | Pure-Go SQLite (audit trail, local state, DBOS system DB) |
 | `modernc.org/libc` | v1.75.6 | Indirect, but pinned on purpose: v1.74.3 is retracted upstream, and module resolution selects it unless this floor is held |
 | `golang.org/x/term` | (see `go.mod`) | Cross-platform terminal/isatty detection (sync-versions non-TTY guard) |

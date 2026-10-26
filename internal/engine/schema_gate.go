@@ -71,7 +71,7 @@ import (
 // KNOWN LIMIT — A LIVE MIGRATOR THAT COMMITS NOTHING FOR THE FIRST WINDOW LOOKS
 // STABLE. The runtime's migrations are small and back to back, so a live
 // process that neither commits nor holds the lock for the first SQLiteBusy
-// window after the gate's first look (500 ms in production) has stalled, not
+// window after the gate's first look (1.5s in production) has stalled, not
 // paused. If that happens the gate refuses with the older-build sentence,
 // exactly as every read of the file did before the wait existed. A stall that
 // comes AFTER the gate saw progress is not refused that way: the gate waits to

@@ -477,6 +477,7 @@ var identityCountTables = []string{
 	"journal", "journal_operations", "governed_allocation_operations",
 	"actor_namespace_claims", "fixed_actor_manifest_entries",
 	"pasture_well_known_agents", "pasture_agent_categories",
+	"lifecycle_active_entity",
 	"audit_events", "context_edges", "lifecycle_payload_blobs",
 	"journal_activity_creations", "journal_authority_assignment_episodes",
 	"journal_authority_assignment_transitions", "journal_decisions", "journal_evidence",

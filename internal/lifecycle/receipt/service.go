@@ -49,6 +49,14 @@ type Service struct {
 	Identity   IdentityResolver
 	Clock      Clock
 	Operations OperationIDSource
+	// Direct is the primary-key evidence reader for known journal rows. It is
+	// optional so hand-built test services keep the journal-backed fallback;
+	// production wiring supplies the unified SQLite handle.
+	Direct DirectEvidenceReader
+	// Active is the materialized active-entity projection. It is optional for
+	// the same reason: a miss falls back to the journal-backed bridge and is
+	// repaired by the next activation or startup rebuild.
+	Active ActiveEntityStore
 	// Settlement is supplied by the host-facing invocation. A standalone
 	// synchronous receipt caller may omit it because it makes no concurrent
 	// timeout-to-host decision. Outcome is encoded before entering the fence.

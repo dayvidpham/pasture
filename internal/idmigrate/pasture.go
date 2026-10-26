@@ -58,6 +58,7 @@ var pastureIdentityArrayColumns = []struct{ table, column string }{
 // identity-looking pasture column be classified on purpose.
 var pasturePreservedColumns = []struct{ table, column, reason string }{
 	{"pasture_governed_allocation_audit", "operation_id", "opaque operation handle; equality-only projection key"},
+	{"lifecycle_active_entity", "operation_id", "opaque activation operation handle; equality-only projection key, never parsed or resolved"},
 	{"pasture_governed_allocation_audit", "child_assignment_id", "opaque assignment handles as a canonical JSON array; equality-only"},
 	{"session_entries", "entry_id", "opaque audit session-entry key"},
 	{"session_entries", "parent_entry_id", "opaque audit session-entry key"},

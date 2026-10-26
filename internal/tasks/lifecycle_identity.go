@@ -147,5 +147,38 @@ func NewLifecycleReceiptServiceWithProfile(tracker protocol.TaskTracker, clock r
 	if !ok || store.auditDBHandle() == nil {
 		return receipt.Service{}, &pasterrors.StructuredError{Category: pasterrors.CategoryValidation, What: "The supplied tracker cannot host lifecycle receipts.", Why: "Receipt storage needs the unified SQLite blob handle, Provenance journal, and read-only persisted identity resolver.", Where: "Wiring lifecycle ingress (internal/tasks/lifecycle_identity.go in tasks.NewLifecycleReceiptService).", Impact: "No delivery can be recorded through this service.", Fix: "Use the tracker returned by tasks.OpenTaskTracker."}
 	}
-	return receipt.Service{Window: profile.WorkflowResult(), Blobs: receipt.SQLiteBlobStore{DB: store.auditDBHandle()}, Appender: receipt.JournalAppender{Journal: store.Journal(), Deadline: profile.Ingress(), Clock: clock}, Identity: store, Clock: clock, Operations: operations}, nil
+	return receipt.Service{
+		Window:     profile.WorkflowResult(),
+		Blobs:      receipt.SQLiteBlobStore{DB: store.auditDBHandle()},
+		Appender:   receipt.JournalAppender{Journal: store.Journal(), Deadline: profile.Ingress(), Clock: clock},
+		Identity:   store,
+		Clock:      clock,
+		Operations: operations,
+		Direct:     receipt.SQLiteEvidenceReader{DB: store.auditDBHandle()},
+		Active:     receipt.SQLiteActiveEntityStore{DB: store.auditDBHandle()},
+	}, nil
+}
+
+// rebuildLifecycleActiveEntities repairs the hot-path projection when
+// definition/state evidence is newer than the recorded watermark. It is a
+// startup best-effort: a failure is diagnostic only because the journal-backed
+// bridge remains the fallback and the next activation can repopulate the row.
+func rebuildLifecycleActiveEntities(ctx context.Context, tracker protocol.TaskTracker) error {
+	store, ok := tracker.(lifecycleReceiptStore)
+	if !ok || store.auditDBHandle() == nil {
+		return fmt.Errorf("rebuild lifecycle active entities: tracker has no unified database handle")
+	}
+	active := receipt.SQLiteActiveEntityStore{DB: store.auditDBHandle()}
+	needs, err := active.NeedsRebuild(ctx)
+	if err != nil {
+		return err
+	}
+	if !needs {
+		return nil
+	}
+	reader, err := receipt.NewDefinitionReader(store.Journal())
+	if err != nil {
+		return err
+	}
+	return receipt.RebuildActiveEntities(ctx, reader, active)
 }

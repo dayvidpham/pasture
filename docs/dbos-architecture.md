@@ -223,7 +223,7 @@ local HTTP surface, is available but not enabled by default.)
 - **Concurrency:** WAL multi-writer; pasture opens the shared handle with DSN-param
   `journal_mode=WAL`, `busy_timeout=<profile>`, `synchronous=NORMAL`, `_txlock=immediate`,
   `foreign_keys=ON` (DBOS skips PRAGMA setup on a caller-supplied handle). The busy
-  timeout is the innermost tier of `internal/timeouts` — 500 ms in production — and is
+  timeout is the innermost tier of `internal/timeouts` — 1.5 s in production — and is
   never a literal in the DSN.
 
 ## 7. Exactly-once model (per tier)

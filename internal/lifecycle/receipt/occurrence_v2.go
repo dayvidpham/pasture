@@ -45,7 +45,7 @@ func EnsureOccurrenceEnvelope(ctx context.Context, service Service, contract ir.
 	if service.Appender.Journal == nil {
 		return model.OccurrenceEnvelopeRef{}, envelopeError(where, "The lifecycle receipt service cannot ensure definition references.", "Envelope refs are journaled owner facts, so the provenance journal is required to ensure them.", "No occurrence was committed.", "Construct the service through tasks.NewLifecycleReceiptService.", nil)
 	}
-	reader, err := NewDefinitionReader(service.Appender.Journal)
+	reader, err := service.definitionReader()
 	if err != nil {
 		return model.OccurrenceEnvelopeRef{}, err
 	}

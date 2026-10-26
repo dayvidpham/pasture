@@ -69,7 +69,7 @@ func TestColdRegistrationWaitingCallerCounterexample(t *testing.T) {
 	// A full race suite schedules many SQLite workers at once. Allow delayed
 	// timer/worker scheduling after the one SQL busy wait, not a second wait.
 	// The 30 ms allowance expired under CI load; keep this tolerance below the
-	// 500 ms production busy tier, and the total bound below two busy tiers.
+	// production busy tier (1.5s), and the total bound below two busy tiers.
 	// Context identity is independently checked at registration entry above;
 	// the real holder stays locked until cancellation completes, and the error
 	// must still preserve context.Canceled. No production budget changes here.
