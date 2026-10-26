@@ -208,7 +208,7 @@ func TestAuditWriterLongHolderRetries(t *testing.T) {
 	go func() { defer close(done); id, err = s.RecordEventReturningId(ctx, writerEvent()) }()
 	select {
 	case failedAt := <-failed:
-		// The 100ms cleanup reserve is inside the 500ms tier. Removing it
+		// The 100ms cleanup reserve is inside the 1.5s tier. Removing it
 		// would exceed this separately named 75ms scheduler allowance.
 		ceiling := s.busyTier - min(100*time.Millisecond, s.busyTier/5) + writerSchedulingTolerance
 		if failedAt.Sub(start) > ceiling {
@@ -620,8 +620,9 @@ func TestAuditWriterConnectorSetupHonorsCurrentAcquisitionDeadline(t *testing.T)
 	}
 	defer db.Close()
 	var busy int64
-	if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busy); err != nil || busy != 500 {
-		t.Fatalf("new configured connector busy timeout=%d error=%v, want standing 500ms", busy, err)
+	wantBusy := timeouts.ProductionProfile().SQLiteBusy().Milliseconds()
+	if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busy); err != nil || busy != wantBusy {
+		t.Fatalf("new configured connector busy timeout=%d error=%v, want standing %s (%d)", busy, err, timeouts.ProductionProfile().SQLiteBusy(), wantBusy)
 	}
 	if err := db.QueryRow("PRAGMA journal_mode").Scan(&journal); err != nil || journal != "wal" {
 		t.Fatalf("new configured connector journal=%q error=%v, want WAL after holder release", journal, err)
