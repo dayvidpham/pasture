@@ -51,6 +51,29 @@ func NewDefinitionReader(journal provenance.Journal) (DefinitionReader, error) {
 	return journalDefinitionReader{journal}, nil
 }
 
+// directDefinitionReader adds the primary-key evidence door to a journal
+// definition reader. The hot metacommand path uses it to fetch the exact
+// activation rows it already names instead of going through the generic
+// evidence-page matcher.
+type directDefinitionReader struct {
+	DefinitionReader
+	DirectEvidenceReader
+}
+
+// definitionReader returns the reader the service should use. Production
+// wiring supplies both the journal and the direct SQLite door; a test service
+// without Direct keeps the journal-only behavior.
+func (s Service) definitionReader() (DefinitionReader, error) {
+	reader, err := NewDefinitionReader(s.Appender.Journal)
+	if err != nil {
+		return nil, err
+	}
+	if s.Direct == nil {
+		return reader, nil
+	}
+	return directDefinitionReader{DefinitionReader: reader, DirectEvidenceReader: s.Direct}, nil
+}
+
 // NewTransactionDefinitionReader uses the dependency's owner verifier on exactly
 // the caller's transaction. It neither acquires another connection nor owns tx.
 func NewTransactionDefinitionReader(ctx context.Context, tx *sql.Tx) (DefinitionReader, error) {
@@ -136,7 +159,7 @@ func definitionSlots(result provenance.CommittedResult) (provenance.JournalID, p
 }
 
 func EnsureActiveDefinition(ctx context.Context, s Service, document definitions.Document) (model.DefinitionRef, error) {
-	reader, err := NewDefinitionReader(s.Appender.Journal)
+	reader, err := s.definitionReader()
 	if err != nil {
 		return model.DefinitionRef{}, err
 	}
@@ -156,6 +179,20 @@ func ensureActiveDefinitionAt(ctx context.Context, s Service, document definitio
 	ref, result, _, err := ensureCommittedDefinition(ctx, s, document, reader)
 	if err != nil {
 		return model.DefinitionRef{}, empty, noState, err
+	}
+	// The active projection is a read model, never a gate on correctness. A
+	// failed write is repaired on the next activation or startup rebuild; the
+	// journal-backed resolution below remains the authoritative path.
+	if s.Active != nil {
+		if _, stateID, slotErr := definitionSlots(result); slotErr == nil {
+			_ = s.Active.Put(ctx, ActiveEntity{
+				Kind:       document.Kind(),
+				Content:    document.Content(),
+				Definition: ref.Definition,
+				State:      model.DefinitionStateID(stateID),
+				Operation:  definitionOperationID(document),
+			})
+		}
 	}
 	return resolveCommittedDefinition(reader, ref, document, result, watermark)
 }

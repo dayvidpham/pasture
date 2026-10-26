@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
@@ -32,7 +33,7 @@ func BridgeActiveMetamodel(ctx context.Context, reader DefinitionReader) (model.
 	if err := ctx.Err(); err != nil {
 		return model.LifecycleMetamodelRef{}, model.DefinitionSnapshot{}, model.DefinitionStateRecord{}, bridgeError("BridgeActiveMetamodel", "Metamodel bridging was canceled before resolution.", err)
 	}
-	return bridgeMetamodelProducerAt(reader, metamodel.Active(), 0)
+	return bridgeMetamodelProducerAt(ctx, reader, metamodel.Active(), 0)
 }
 
 // BridgeMetamodelProducer resolves one legacy metamodel activation — addressed
@@ -56,14 +57,14 @@ func BridgeActiveMetamodel(ctx context.Context, reader DefinitionReader) (model.
 // bytes, so they resolve through the persisted normalized evidence, the
 // manifest-bound state payload, and the operation recipe alone.
 func BridgeMetamodelProducer(reader DefinitionReader, manifest model.LifecycleMetamodelManifest) (model.LifecycleMetamodelRef, model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
-	return bridgeMetamodelProducerAt(reader, manifest, 0)
+	return bridgeMetamodelProducerAt(context.Background(), reader, manifest, 0)
 }
 
 // bridgeMetamodelProducerAt shares the batch watermark across the bridge and
 // the definition resolutions: one enclosing snapshot for the whole envelope.
 // A zero watermark captures a fresh one; a positive watermark is never
 // widened.
-func bridgeMetamodelProducerAt(reader DefinitionReader, manifest model.LifecycleMetamodelManifest, watermark provenance.JournalID) (model.LifecycleMetamodelRef, model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
+func bridgeMetamodelProducerAt(ctx context.Context, reader DefinitionReader, manifest model.LifecycleMetamodelManifest, watermark provenance.JournalID) (model.LifecycleMetamodelRef, model.DefinitionSnapshot, model.DefinitionStateRecord, error) {
 	var empty model.DefinitionSnapshot
 	var noState model.DefinitionStateRecord
 	if reader == nil || !manifest.IsValid() {
@@ -82,27 +83,33 @@ func bridgeMetamodelProducerAt(reader DefinitionReader, manifest model.Lifecycle
 		return model.LifecycleMetamodelRef{}, empty, noState, err
 	}
 	// The enclosing evidence watermark pins one snapshot for the snapshot and
-	// state reads below. A batch shares its already captured watermark; a
-	// zero watermark captures a fresh one over the legacy definition kinds.
+	// state reads below. A batch shares its already captured watermark. A
+	// direct reader already knows the activation state ID from the committed
+	// result slots, so it uses that exact bound instead of scanning the
+	// definition kinds for a fresh watermark. The journal-only fallback keeps
+	// the old capture for compatibility.
 	if watermark == 0 {
-		watermarkPage, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitionKind, definitionStateKind}, Page: provenance.FactPageRequest{Limit: 1}})
-		if err != nil {
-			return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("bridgeMetamodelProducerAt", "Enclosing evidence snapshot could not be captured.", err)
+		if _, direct := reader.(DirectEvidenceReader); direct {
+			watermark = provenance.JournalID(stateID)
+		} else {
+			watermarkPage, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitionKind, definitionStateKind}, Page: provenance.FactPageRequest{Limit: 1}})
+			if err != nil {
+				return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("bridgeMetamodelProducerAt", "Enclosing evidence snapshot could not be captured.", err)
+			}
+			watermark = watermarkPage.SnapshotMaxJournalID
 		}
-		watermark = watermarkPage.SnapshotMaxJournalID
 	}
 	id := provenance.JournalID(snapshotID)
 	if watermark < provenance.JournalID(stateID) {
 		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Activation lies beyond the enclosing snapshot watermark.", nil)
 	}
-	page, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{definitionKind}, Page: provenance.FactPageRequest{Limit: 1, SnapshotMaxJournalID: id, AfterJournalID: id - 1}})
+	row, err := readExactEvidence(ctx, reader, definitionKind, id, watermark)
 	if err != nil {
 		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Exact metamodel snapshot row could not be read.", err)
 	}
-	if len(page.Rows) != 1 || page.Rows[0].JournalID != id {
+	if row.JournalID != id {
 		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Metamodel snapshot row is missing or has the wrong evidence kind.", nil)
 	}
-	row := page.Rows[0]
 	if row.ProducingOperationID != operation {
 		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Metamodel snapshot producing operation does not match the producer coordinate recipe.", nil)
 	}
@@ -135,14 +142,10 @@ func bridgeMetamodelProducerAt(reader DefinitionReader, manifest model.Lifecycle
 			return model.LifecycleMetamodelRef{}, empty, noState, err
 		}
 	}
-	states, err := reader.QueryEvidence(provenance.EvidenceQuery{Filter: provenance.FactFilter{OperationIDs: []provenance.OperationID{operation}}, Kinds: []provenance.EvidenceKind{definitionStateKind}, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize, SnapshotMaxJournalID: watermark}})
+	stateRow, err := readEvidenceByOperation(ctx, reader, definitionStateKind, operation, watermark)
 	if err != nil {
-		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Activation state evidence could not be read under the enclosing watermark.", err)
+		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Activation state evidence could not be read.", err)
 	}
-	if len(states.Rows) != 1 || states.Next != nil {
-		return model.LifecycleMetamodelRef{}, empty, noState, bridgeError("BridgeMetamodelProducer", "Activation operation must produce exactly one state evidence row.", nil)
-	}
-	stateRow := states.Rows[0]
 	if err := validateBridgeState(manifest, stateRow, stateID, operation, row.ProducingOperationJournalID); err != nil {
 		return model.LifecycleMetamodelRef{}, empty, noState, err
 	}
@@ -236,6 +239,71 @@ func validateBridgeState(manifest model.LifecycleMetamodelManifest, stateRow pro
 		return bridgeError("validateBridgeState", "Activation state operation linkage is damaged.", nil)
 	}
 	return nil
+}
+
+// readExactEvidence reads one known evidence row. The direct primary-key door
+// is the hot path; the journal-backed page remains the fallback for hand-built
+// services and transaction-bound readers.
+func readExactEvidence(ctx context.Context, reader DefinitionReader, kind provenance.EvidenceKind, id provenance.JournalID, watermark provenance.JournalID) (provenance.EvidenceRow, error) {
+	if direct, ok := reader.(DirectEvidenceReader); ok {
+		row, found, err := direct.EvidenceAt(ctx, kind, id)
+		if err != nil {
+			return provenance.EvidenceRow{}, err
+		}
+		if !found {
+			return provenance.EvidenceRow{}, fmt.Errorf("evidence row %d of kind %q is absent", id, kind)
+		}
+		if row.JournalID != id || row.EvidenceKind != kind {
+			return provenance.EvidenceRow{}, fmt.Errorf("evidence row %d does not match kind %q", id, kind)
+		}
+		return row, nil
+	}
+	page, err := reader.QueryEvidence(provenance.EvidenceQuery{Kinds: []provenance.EvidenceKind{kind}, Page: provenance.FactPageRequest{Limit: 1, SnapshotMaxJournalID: id, AfterJournalID: id - 1}})
+	if err != nil {
+		return provenance.EvidenceRow{}, err
+	}
+	if len(page.Rows) != 1 || page.Rows[0].JournalID != id {
+		return provenance.EvidenceRow{}, fmt.Errorf("evidence row %d of kind %q is absent", id, kind)
+	}
+	if watermark > 0 && provenance.JournalID(id) > watermark {
+		return provenance.EvidenceRow{}, fmt.Errorf("evidence row %d lies beyond watermark %d", id, watermark)
+	}
+	return page.Rows[0], nil
+}
+
+// readEvidenceByOperation reads the state row produced by one activation
+// operation. The direct door looks up the operation's journal anchor and then
+// its evidence row; the journal-backed fallback keeps the original filtered
+// page semantics.
+func readEvidenceByOperation(ctx context.Context, reader DefinitionReader, kind provenance.EvidenceKind, operation provenance.OperationID, watermark provenance.JournalID) (provenance.EvidenceRow, error) {
+	if direct, ok := reader.(DirectEvidenceReader); ok {
+		row, found, err := direct.EvidenceByOperation(ctx, kind, operation)
+		if err != nil {
+			return provenance.EvidenceRow{}, err
+		}
+		if !found {
+			return provenance.EvidenceRow{}, fmt.Errorf("evidence of kind %q for operation %q is absent", kind, operation)
+		}
+		if row.EvidenceKind != kind || row.ProducingOperationID != operation {
+			return provenance.EvidenceRow{}, fmt.Errorf("evidence for operation %q does not match kind %q", operation, kind)
+		}
+		if watermark > 0 && row.JournalID > watermark {
+			return provenance.EvidenceRow{}, fmt.Errorf("evidence for operation %q lies beyond watermark %d", operation, watermark)
+		}
+		return row, nil
+	}
+	states, err := reader.QueryEvidence(provenance.EvidenceQuery{
+		Filter: provenance.FactFilter{OperationIDs: []provenance.OperationID{operation}},
+		Kinds:  []provenance.EvidenceKind{kind},
+		Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize, SnapshotMaxJournalID: watermark},
+	})
+	if err != nil {
+		return provenance.EvidenceRow{}, err
+	}
+	if len(states.Rows) != 1 || states.Next != nil {
+		return provenance.EvidenceRow{}, fmt.Errorf("operation %q did not produce exactly one state evidence row", operation)
+	}
+	return states.Rows[0], nil
 }
 
 func bridgeError(step, why string, cause error) error {
