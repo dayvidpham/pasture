@@ -78,14 +78,38 @@ func TestNewRejectsAWorkflowResultWaitBelowTheInnerWindows(t *testing.T) {
 	}
 }
 
-// TestProductionIngressWaitIsUnchangedAtOneSecond pins the production receipt
-// append budget independently of any test harness override. Tests that are not
-// about latency may run under TestProfile; this keeps the product's own value
-// asserted where it is defined.
-func TestProductionIngressWaitIsUnchangedAtOneSecond(t *testing.T) {
+// TestProductionProfileKeepsTheApprovedCallerWindows pins the production
+// receipt budget and the SQLite lock wait inside it. Ordering is part of the
+// contract, not a side effect of the numbers: the busy wait must stay strictly
+// below both 2s caller windows, and the hook deadline must stay at 5s above
+// them. The 500ms remainder of ingress is the append work that remains after
+// one lock wait. Tests that are not about latency may run under TestProfile;
+// this keeps the product's own values asserted where they are defined.
+func TestProductionProfileKeepsTheApprovedCallerWindows(t *testing.T) {
 	t.Parallel()
-	if got := ProductionProfile().Ingress(); got != time.Second {
-		t.Fatalf("production ingress wait = %s, want 1s", got)
+	profile := ProductionProfile()
+	if got := profile.SQLiteBusy(); got != 1500*time.Millisecond {
+		t.Fatalf("production SQLite busy timeout = %s, want 1.5s", got)
+	}
+	if got := profile.Ingress(); got != 2*time.Second {
+		t.Fatalf("production ingress wait = %s, want 2s", got)
+	}
+	if got := profile.StartSlice(); got != 2*time.Second {
+		t.Fatalf("production start_slice wait = %s, want 2s", got)
+	}
+	if got := profile.HookInvocation(); got != 5*time.Second {
+		t.Fatalf("production hook-invocation deadline = %s, want 5s", got)
+	}
+	if profile.SQLiteBusy() >= profile.Ingress() || profile.SQLiteBusy() >= profile.StartSlice() {
+		t.Fatalf("production ordering inverted: SQLite busy %s is not strictly below ingress %s and start_slice %s",
+			profile.SQLiteBusy(), profile.Ingress(), profile.StartSlice())
+	}
+	if profile.HookInvocation() <= profile.Ingress() || profile.HookInvocation() <= profile.StartSlice() {
+		t.Fatalf("production hook-invocation deadline %s is not strictly above ingress %s and start_slice %s",
+			profile.HookInvocation(), profile.Ingress(), profile.StartSlice())
+	}
+	if remain := profile.Ingress() - profile.SQLiteBusy(); remain != 500*time.Millisecond {
+		t.Fatalf("production ingress leaves %s after one SQLite lock wait, want 500ms for the append itself", remain)
 	}
 }
 

@@ -25,29 +25,26 @@ import (
 	"github.com/dayvidpham/provenance"
 )
 
-// assumedPerRecordCommitCost is the per-record commit cost the batch-record
-// count is derived from.
-//
-// IT IS A CONSERVATIVE DESIGN CONSTANT, NOT A MEASUREMENT OF THIS TREE. Rule 1
-// of the sibling repository's design-performance skill forbids presenting a
-// guess as a measurement, so this is named for what it is. Phase 2 kept it as
-// the splitter's per-record allowance rather than replacing it: a lane turn is
-// now ONE ApplyBatchContext transaction, so what the count must still bound is
-// the turn's hold on the writer. The pinned Provenance v0.9.0 release records a
-// batched per-record fold cost of 11.64 ms (its own sandbox, serial p50), so 20
-// records per turn is about 233 ms, inside HoldTarget (400 ms); the phase-2
-// measurement in docs/audits/lifecycle-write-lane.md is the check that the
-// bound is not the bottleneck. The constant stays at 20 ms so the derived count
-// errors SMALL.
-const assumedPerRecordCommitCost = 20 * time.Millisecond
-
 // maxDerivedHoldTarget is the ceiling BudgetFromProfile places on the lane's
-// hold target, whatever the busy tier is. The production SQLite busy tier is
-// 500 ms and the derivation takes four fifths of it (400 ms); this constant
-// keeps a profile with a LARGER busy tier from letting the lane hold the
-// writer longer than the 400 ms the design sized against the other writers'
-// wait. See PROPOSAL-19 section 3 (Bounds, splitter, backpressure, oversize).
-const maxDerivedHoldTarget = 400 * time.Millisecond
+// hold target, whatever the busy tier is. The production profile is SQLiteBusy
+// 1.5s; four fifths of that is 1.2s, and this constant caps the hold at 1s.
+// 1s remains below the busy tier the other writers wait on, and below the 2s
+// ingress and start-slice windows. A turn that outruns the cap is reported as
+// HoldExceeded; the lane still commits every admitted record.
+const maxDerivedHoldTarget = time.Second
+
+// derivedQueueRecords is the number of admitted-but-uncommitted records the
+// lane may stage. It is a fixed staging depth, deeper than one turn, not a
+// time derivation.
+const derivedQueueRecords = 1024
+
+// productionFlushInterval is the production profile's idle fallback. It is
+// 50ms: a lone record must not add 500ms to the hook path, 50ms stays inside
+// the 250ms acceptance target, and it still batches longer than the previous
+// 25ms start. It is strictly below the 1s hold. Non-production profiles do
+// not use it. DeadlineTestProfile's hold is 20ms, so a fixed 50ms flush would
+// fail Validate there, and TestProfile keeps its scaled 25ms fallback.
+const productionFlushInterval = 50 * time.Millisecond
 
 // ingressPayloadFloor is the floor Validate places on BatchBytes: the one item
 // a hook may send is bounded by the ingress payload cap, and a batch byte
@@ -56,6 +53,18 @@ const maxDerivedHoldTarget = 400 * time.Millisecond
 // record larger than the whole batch budget ALONE regardless, so this floor is
 // a sanity bound on the knob, not a correctness condition.
 const ingressPayloadFloor int64 = 1 << 20
+
+// derivedBatchBytes is one lane turn's staged-payload bound.
+//
+// It is 64 MiB, sixty-four times the 1 MiB ingress payload cap, unchanged
+// from the byte-budget raise. It is not sized from the record count: the
+// record cap is Provenance's batch cap (256), and 256 maximum-size records
+// are 256 MiB, which is above this bound. A turn of maximum-size records is
+// therefore split by bytes before the count cap. The byte term still keeps
+// one turn from staging an unbounded aggregate. QueueBytes stays four times
+// this value (256 MiB). HoldTarget, BatchRecords, FlushInterval, and
+// QueueRecords are not derived from this constant.
+const derivedBatchBytes int64 = 64 << 20
 
 // WriteLaneBudget is every bound the lane enforces, in one value. It is
 // constructor-validated: the daemon resolves it once from the timeout profile
@@ -74,9 +83,12 @@ type WriteLaneBudget struct {
 	// QueueBytes bounds the staged payload bytes across the whole queue, the
 	// byte half of the same brake.
 	QueueBytes int64
-	// BatchRecords bounds ONE lane turn's record count. The turn is what holds
-	// the store writer, so this count times the per-record commit cost must
-	// stay inside HoldTarget.
+	// BatchRecords bounds ONE lane turn's record count. One turn is one
+	// Provenance batch, so the production value is Provenance's batch cap and
+	// Validate refuses anything above it. The count is not a per-record time
+	// budget: a full turn is not claimed to finish inside HoldTarget.
+	// HoldExceeded reports a turn that outran the hold; the lane still commits
+	// every admitted record and never drops one.
 	BatchRecords int
 	// BatchBytes bounds ONE lane turn's staged payload bytes on the same terms.
 	BatchBytes int64
@@ -85,9 +97,11 @@ type WriteLaneBudget struct {
 	// stay well below the hook-invocation tier, because every record in the
 	// batch is still waiting for its acknowledgement.
 	FlushInterval time.Duration
-	// HoldTarget bounds how long ONE lane turn may hold the SQLite writer, so
-	// the engine's own writes and every CLI writer keep their measured wait.
-	// It is derived below the other writers' busy tier.
+	// HoldTarget is the observed bound on how long ONE lane turn may hold the
+	// SQLite writer, so the engine's own writes and every CLI writer keep
+	// their measured wait. It is derived below the other writers' busy tier.
+	// Exceeding it increments HoldExceeded. It is not enforced by dropping an
+	// admitted record.
 	HoldTarget time.Duration
 }
 
@@ -143,22 +157,32 @@ func (b WriteLaneBudget) Validate() error {
 // The derivation, and why each term is what it is:
 //
 //   - HoldTarget is four fifths of the profile's SQLite busy tier, capped by
-//     maxDerivedHoldTarget. The busy tier is the window every OTHER writer
+//     maxDerivedHoldTarget (1s). The busy tier is the window every OTHER writer
 //     waits for the lock, so a lane turn that stays inside four fifths of it
 //     leaves scheduling headroom instead of becoming the holder that starves
-//     them.
-//   - BatchRecords is HoldTarget divided by assumedPerRecordCommitCost, floored
-//     at one, so the turn's record count is sized against the hold bound rather
-//     than picked.
-//   - BatchBytes is 8 MiB: eight times the 1 MiB ingress payload cap, so a
-//     queue of concurrent maximum-size payloads cannot itself become the
-//     memory bound (the design's stated start).
-//   - QueueRecords/QueueBytes are the staging bounds: 256 records and four
-//     times BatchBytes, so the queue is deeper than one turn but still bounded.
-//   - FlushInterval is 25 ms, the design's stated start, and never more than a
-//     quarter of HoldTarget. It is the ONLY wait a lone record can add to the
-//     hook path, so it is bounded hard: it stays well below the hook-invocation
-//     tier, and it is below a hold bound that is itself below the busy tier.
+//     them. Four fifths of the production 1.5s busy tier is 1.2s, so the cap
+//     holds production at 1s. 1s remains below that busy tier and below the 2s
+//     ingress and start-slice windows. A turn that outruns HoldTarget is
+//     reported as HoldExceeded; the lane still commits every admitted record
+//     and never drops one to meet the bound.
+//   - BatchRecords is provenance.MaxBatchRecords (256), a fixed cap. It is not
+//     derived from a per-record commit cost, and a full turn is not claimed to
+//     finish inside HoldTarget. The real bounds on one turn are this cap, the
+//     queue count, and the byte caps.
+//   - BatchBytes is derivedBatchBytes (64 MiB). QueueBytes is four times that
+//     (256 MiB). A turn of maximum-size records is split by the byte cap before
+//     the record cap, because 256 such records are 256 MiB.
+//   - QueueRecords is derivedQueueRecords (1024): a fixed staging depth, deeper
+//     than one turn, still bounded.
+//   - FlushInterval on the production profile is productionFlushInterval
+//     (50ms), strictly below the 1s hold. It is the ONLY wait a lone record
+//     can add to the hook path, so it stays inside the 250ms acceptance
+//     target and still batches longer than the previous 25ms start.
+//     Non-production profiles keep the scaled fallback — 25ms, never more
+//     than a quarter of HoldTarget, never below 1ms — so TestProfile stays at
+//     25ms and DeadlineTestProfile at 5ms. A fixed 50ms flush would not be
+//     strictly below DeadlineTestProfile's 20ms hold, and Validate would
+//     refuse that budget.
 func BudgetFromProfile(profile timeouts.Profile) (WriteLaneBudget, error) {
 	if err := profile.Validate(); err != nil {
 		return WriteLaneBudget{}, fmt.Errorf("derive the write lane budget: the timeout profile is invalid, so no lane bound can be derived from it: %w", err)
@@ -167,23 +191,26 @@ func BudgetFromProfile(profile timeouts.Profile) (WriteLaneBudget, error) {
 	if hold > maxDerivedHoldTarget {
 		hold = maxDerivedHoldTarget
 	}
+	// Production idle fallback is 50ms. TestProfile keeps the scaled 25ms
+	// start (its hold is 400ms). DeadlineTestProfile's hold is 20ms, so the
+	// scaled fallback is hold/4 (5ms); a fixed 50ms flush would invert
+	// FlushInterval and HoldTarget there.
 	flush := 25 * time.Millisecond
-	if quarter := hold / 4; quarter < flush {
-		flush = quarter
+	if profile.Kind() == timeouts.Production {
+		flush = productionFlushInterval
+	} else {
+		if quarter := hold / 4; quarter < flush {
+			flush = quarter
+		}
+		if flush < time.Millisecond {
+			flush = time.Millisecond
+		}
 	}
-	if flush < time.Millisecond {
-		flush = time.Millisecond
-	}
-	batchRecords := int(hold / assumedPerRecordCommitCost)
-	if batchRecords < 1 {
-		batchRecords = 1
-	}
-	batchBytes := int64(8 << 20)
 	budget := WriteLaneBudget{
-		QueueRecords:  256,
-		QueueBytes:    batchBytes * 4,
-		BatchRecords:  batchRecords,
-		BatchBytes:    batchBytes,
+		QueueRecords:  derivedQueueRecords,
+		QueueBytes:    derivedBatchBytes * 4,
+		BatchRecords:  provenance.MaxBatchRecords,
+		BatchBytes:    derivedBatchBytes,
 		FlushInterval: flush,
 		HoldTarget:    hold,
 	}

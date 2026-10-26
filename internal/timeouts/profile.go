@@ -8,9 +8,9 @@
 // siblings: neither is inside the other:
 //
 //	Tier           Field           Production   Bounds
-//	innermost      SQLiteBusy      500ms        one SQLite lock wait, set as the
+//	innermost      SQLiteBusy      1.5s         one SQLite lock wait, set as the
 //	                                            DSN busy_timeout
-//	caller window  Ingress         1s           one lifecycle receipt append,
+//	caller window  Ingress         2s           one lifecycle receipt append,
 //	                                            including its lock retries
 //	caller window  StartSlice      2s           how long a slice sub-workflow
 //	                                            waits for its start_slice signal
@@ -133,11 +133,14 @@ func New(kind Kind, sqliteBusy, ingress, startSlice, hookInvocation, workflowRes
 	return Profile{kind: kind, sqliteBusy: sqliteBusy, ingress: ingress, startSlice: startSlice, hookInvocation: hookInvocation, workflowResult: workflowResult}, nil
 }
 
-// ProductionProfile allocates half of ingress to each SQLite lock wait. This
-// preserves useful WAL contention absorption while leaving strict headroom
-// below the one- and two-second caller windows.
+// ProductionProfile gives each SQLite lock wait 1.5s inside the 2s caller
+// windows. That leaves 500ms of the ingress budget for the append itself
+// after one lock wait, and it stays strictly below both caller windows and
+// the 5s hook invocation. It is a bounded wait, not a throughput knob:
+// raising the busy tier further requires raising ingress and start_slice
+// first, or the constructor refuses the profile as inverted.
 func ProductionProfile() Profile {
-	return must(New(Production, 500*time.Millisecond, time.Second, 2*time.Second, 5*time.Second, 30*time.Second))
+	return must(New(Production, 1500*time.Millisecond, 2*time.Second, 2*time.Second, 5*time.Second, 30*time.Second))
 }
 
 // TestProfile favors deterministic integration runs: its two-second ingress

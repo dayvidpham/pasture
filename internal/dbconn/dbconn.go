@@ -75,7 +75,7 @@ func encodeDSNPath(path string) string {
 //
 //   - journal_mode(WAL)      multi-reader / single-writer without reader stalls
 //   - busy_timeout(N)        auto-retry a locked write for the caller's SQLite
-//     lock budget. N is profile.SQLiteBusy() in milliseconds, 500 ms in the
+//     lock budget. N is profile.SQLiteBusy() in milliseconds, 1.5s in the
 //     production profile. A caller that creates more overlap than production
 //     passes a wider profile instead of changing this default.
 //   - synchronous(NORMAL)    durable under WAL without an fsync per commit

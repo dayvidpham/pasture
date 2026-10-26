@@ -39,7 +39,7 @@ func (s Service) prepareEnvelopes(ctx context.Context, delivery Delivery, observ
 	if s.Appender.Journal == nil {
 		return empty, nil, envelopeError(where, "The lifecycle receipt service cannot ensure definition references.", "Envelope refs are journaled owner facts, so the provenance journal is required to ensure them.", "No occurrence was committed.", "Construct the service through tasks.NewLifecycleReceiptService.", nil)
 	}
-	reader, err := NewDefinitionReader(s.Appender.Journal)
+	reader, err := s.definitionReader()
 	if err != nil {
 		return empty, nil, err
 	}
@@ -75,6 +75,17 @@ func (s Service) prepareEnvelopes(ctx context.Context, delivery Delivery, observ
 				}
 			}
 		}
+		operation := definitionOperationID(document)
+		if s.Active != nil {
+			entity, ok, lookupErr := s.Active.Lookup(ctx, document.Kind(), document.Content())
+			if lookupErr == nil && ok && entity.Operation == operation {
+				ref := model.DefinitionRef{Definition: entity.Definition, Kind: document.Kind(), Content: document.Content()}
+				if shared != nil {
+					shared.Set(key, ref)
+				}
+				return ref, nil
+			}
+		}
 		ref, result, fresh, err := ensureCommittedDefinition(ctx, s, document, reader)
 		if err != nil {
 			return model.DefinitionRef{}, err
@@ -82,6 +93,20 @@ func (s Service) prepareEnvelopes(ctx context.Context, delivery Delivery, observ
 		if fresh {
 			if _, _, _, err := resolveCommittedDefinition(reader, ref, document, result, 0); err != nil {
 				return model.DefinitionRef{}, err
+			}
+		}
+		// A projection write failure must not turn an already-committed
+		// definition into a hook failure. The next read falls back and the
+		// startup rebuild can repair the row.
+		if s.Active != nil {
+			if _, stateID, slotErr := definitionSlots(result); slotErr == nil {
+				_ = s.Active.Put(ctx, ActiveEntity{
+					Kind:       document.Kind(),
+					Content:    document.Content(),
+					Definition: ref.Definition,
+					State:      model.DefinitionStateID(stateID),
+					Operation:  operation,
+				})
 			}
 		}
 		if shared != nil {
@@ -151,7 +176,7 @@ func (s Service) prepareEnvelopes(ctx context.Context, delivery Delivery, observ
 	if delivery.Capture != model.CaptureValid {
 		return empty, nil, preparedRefusal(where, "A non-valid capture supplied prepared interpretation.", "Only a valid capture carries a verified prepared interpretation; malformed and unsupported captures commit record-only occurrences without fabricated semantic records.", "Omit prepared effects for non-valid captures.", nil)
 	}
-	final, err := finalizePreparedBatch(ctx, reader, runtimeContract, interpreterRef, delivery, complete, extra, shared)
+	final, err := finalizePreparedBatch(ctx, reader, s.Active, runtimeContract, interpreterRef, delivery, complete, extra, shared)
 	if err != nil {
 		return empty, nil, err
 	}
@@ -163,7 +188,7 @@ func (s Service) prepareEnvelopes(ctx context.Context, delivery Delivery, observ
 // resolutions share the turn scope like every other owner document; admission
 // is proved by pure checks over resolved evidence — shared-ref equality,
 // producer contract and manifest agreement, and structural completeness.
-func finalizePreparedBatch(ctx context.Context, reader DefinitionReader, runtimeContract ir.RuntimeContractID, interpreterRef model.DefinitionRef, delivery Delivery, complete model.OccurrenceEnvelopeRef, extra []provenance.Effect, shared *writelane.TurnScope) ([]provenance.Effect, error) {
+func finalizePreparedBatch(ctx context.Context, reader DefinitionReader, active ActiveEntityStore, runtimeContract ir.RuntimeContractID, interpreterRef model.DefinitionRef, delivery Delivery, complete model.OccurrenceEnvelopeRef, extra []provenance.Effect, shared *writelane.TurnScope) ([]provenance.Effect, error) {
 	const where = "Finalizing prepared lifecycle effects (internal/lifecycle/receipt/envelope_batch.go in receipt.Service.finalizePreparedBatch)."
 	preparedEffect := extra[0]
 	prepared, err := DecodeInterpretedV2(model.InterpretationID(1), model.OccurrenceID(1), preparedEffect.Payload)
@@ -182,7 +207,7 @@ func finalizePreparedBatch(ctx context.Context, reader DefinitionReader, runtime
 	// every other owner document. DeliveryCommit ensures the activation
 	// before Receive on the valid-capture path; a store without it fails
 	// closed here rather than finalizing against an unjournaled vocabulary.
-	metamodelRef, err := turnSharedBridge(ctx, reader, shared)
+	metamodelRef, err := turnSharedBridge(ctx, reader, active, shared)
 	if err != nil {
 		return nil, err
 	}
@@ -262,7 +287,7 @@ func turnDocumentKey(document definitions.Document) string {
 // turnSharedBridge resolves the active metamodel producer through the
 // normalized bridge, sharing the turn scope like every other owner document.
 // A failure is never shared: every record retries the bridge independently.
-func turnSharedBridge(ctx context.Context, reader DefinitionReader, shared *writelane.TurnScope) (model.LifecycleMetamodelRef, error) {
+func turnSharedBridge(ctx context.Context, reader DefinitionReader, activeStore ActiveEntityStore, shared *writelane.TurnScope) (model.LifecycleMetamodelRef, error) {
 	active := metamodel.Active()
 	key := "lifecycle-metamodel-bridge:" + hex.EncodeToString(active.Content[:])
 	if shared != nil {
@@ -272,9 +297,39 @@ func turnSharedBridge(ctx context.Context, reader DefinitionReader, shared *writ
 			}
 		}
 	}
-	ref, _, _, err := BridgeActiveMetamodel(ctx, reader)
+	if activeStore != nil {
+		normalized, err := producerAgreementMemo()
+		if err == nil {
+			digest := sha256.Sum256(normalized)
+			content := model.ContentIdentity(digest)
+			entity, ok, lookupErr := activeStore.Lookup(ctx, model.DefinitionMetamodel, content)
+			if lookupErr == nil && ok && entity.Operation == metamodelOperationID(active) {
+				ref := model.LifecycleMetamodelRef{Definition: model.DefinitionRef{
+					Definition: entity.Definition,
+					Kind:       model.DefinitionMetamodel,
+					Content:    content,
+				}}
+				if shared != nil {
+					shared.Set(key, ref)
+				}
+				return ref, nil
+			}
+		}
+	}
+	ref, _, state, err := BridgeActiveMetamodel(ctx, reader)
 	if err != nil {
 		return model.LifecycleMetamodelRef{}, err
+	}
+	// The bridge is the authoritative cold/rebuild path. A failed projection
+	// write is retried on the next hook or repaired by the startup rebuild.
+	if activeStore != nil {
+		_ = activeStore.Put(ctx, ActiveEntity{
+			Kind:       model.DefinitionMetamodel,
+			Content:    ref.Definition.Content,
+			Definition: ref.Definition.Definition,
+			State:      state.LatestState,
+			Operation:  metamodelOperationID(active),
+		})
 	}
 	if shared != nil {
 		shared.Set(key, ref)
