@@ -2,7 +2,8 @@
 
 Both phases are release gates. Operator approval on 2026-10-16 separates
 measurement from concurrent race-suite load; it did not relax a band or remove
-a workload at that sitting. Production remains 20 records / 25 ms.
+a workload at that sitting. Production remains 256 records / 50 ms idle flush.
+The derivation is in `docs/audits/lifecycle-write-lane.md`.
 
 On 2026-10-18 the operator lowered the synthetic sustained-throughput floor
 from 80/s to 50/s. The same harness measured 52.8-92.6/s on shared 4-vCPU CI

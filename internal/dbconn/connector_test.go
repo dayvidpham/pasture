@@ -55,9 +55,10 @@ func TestContextFirstConnectionLockedRollbackJournal(t *testing.T) {
 	db, err := OpenSharedDBContextWithProfile(ctx, path, timeouts.ProductionProfile())
 	require.Nil(t, db)
 	require.True(t, errors.Is(err, context.DeadlineExceeded), "%v", err)
-	// This ceiling is the 25ms caller plus scheduling allowance, not the
-	// production busy tier. It must stay strictly below that tier so a missed
-	// cancellation that waits out SQLiteBusy cannot pass.
+	// The caller deadline above is 25ms. This ceiling is the fixed 500ms
+	// lock-acquisition bound plus the scheduling allowance. It must stay
+	// strictly below the production busy tier so a missed cancellation that
+	// waits out that 1.5s tier cannot pass.
 	const schedulerTolerance = 100 * time.Millisecond
 	ceiling := 500*time.Millisecond + schedulerTolerance
 	require.Less(t, ceiling, timeouts.ProductionProfile().SQLiteBusy())
