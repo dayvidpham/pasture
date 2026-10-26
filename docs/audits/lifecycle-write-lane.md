@@ -160,9 +160,9 @@ carrying a second set of durations.
 |---|---|---|
 | `HoldTarget` | 400 ms | 4/5 of the 1.5 s SQLite busy tier would be 1.2 s; capped at 400 ms |
 | `BatchRecords` | 20 | `HoldTarget / assumedPerRecordCommitCost` |
-| `BatchBytes` | 8 MiB | 8 × the 1 MiB ingress payload cap |
+| `BatchBytes` | 64 MiB | 64 × the 1 MiB ingress payload cap, above a count-legal turn of maximum-size records (20 × 1 MiB). The previous 8 MiB start split that turn after eight records. |
 | `QueueRecords` | 256 | staging depth; deeper than one turn |
-| `QueueBytes` | 32 MiB | 4 × `BatchBytes` |
+| `QueueBytes` | 256 MiB | 4 × `BatchBytes` (was 32 MiB when `BatchBytes` was 8 MiB) |
 | `FlushInterval` | 25 ms | the design's stated start, capped at `HoldTarget/4` |
 
 `assumedPerRecordCommitCost` (20 ms) is **DERIVED, NOT MEASURED**, and phase 2
