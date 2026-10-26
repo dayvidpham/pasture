@@ -390,7 +390,8 @@ Rules that must hold for any change to the lane:
   profile and refuses a flush that is not strictly below it. The record caps
   are fixed: 256 per turn (Provenance's batch cap) and 1024 queued. The byte
   caps stay 64 MiB per turn and 256 MiB queued. Production idle flush is
-  500 ms; shorter profiles keep the scaled fallback.
+  50 ms, inside the 250 ms acceptance target and longer than the previous
+  25 ms start; shorter profiles keep the scaled fallback.
 - **`proceed` means committed, and nothing is acknowledged early.** The lane's
   `Submit` returns only after the record's `Settle` ran and reported its result,
   which is only after the flush's one transaction committed or failed.

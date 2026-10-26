@@ -136,19 +136,20 @@ func TestBudgetFromProfileStaysInsideTheProfileTiers(t *testing.T) {
 			}
 			switch profile.Kind() {
 			case timeouts.Production:
-				if budget.HoldTarget != time.Second || budget.FlushInterval != 500*time.Millisecond {
-					t.Fatalf("production hold/flush = %s/%s, want 1s/500ms", budget.HoldTarget, budget.FlushInterval)
+				if budget.HoldTarget != time.Second || budget.FlushInterval != 50*time.Millisecond {
+					t.Fatalf("production hold/flush = %s/%s, want 1s/50ms", budget.HoldTarget, budget.FlushInterval)
 				}
 			case timeouts.Test:
-				// 500ms busy derives a 400ms hold. The production 500ms flush
-				// would not be strictly below that hold, so the scaled 25ms
-				// fallback must remain.
+				// 500ms busy derives a 400ms hold. The production 50ms flush
+				// would fit under that hold, but the scaled 25ms fallback
+				// must remain.
 				if budget.HoldTarget != 400*time.Millisecond || budget.FlushInterval != 25*time.Millisecond {
 					t.Fatalf("TestProfile hold/flush = %s/%s, want 400ms/25ms", budget.HoldTarget, budget.FlushInterval)
 				}
 			case timeouts.DeadlineTest:
 				// 25ms busy derives a 20ms hold, and the scaled fallback is
-				// hold/4 (5ms), not the production 500ms flush.
+				// hold/4 (5ms). The production 50ms flush would not be
+				// strictly below that hold.
 				if budget.HoldTarget != 20*time.Millisecond || budget.FlushInterval != 5*time.Millisecond {
 					t.Fatalf("DeadlineTestProfile hold/flush = %s/%s, want 20ms/5ms", budget.HoldTarget, budget.FlushInterval)
 				}
@@ -179,8 +180,8 @@ func TestProductionHoldTargetStaysAtTheCapWhenTheBusyTierGrows(t *testing.T) {
 	if budget.HoldTarget != maxDerivedHoldTarget {
 		t.Fatalf("production HoldTarget = %s, want the cap %s", budget.HoldTarget, maxDerivedHoldTarget)
 	}
-	if budget.FlushInterval != 500*time.Millisecond {
-		t.Fatalf("production FlushInterval = %s, want 500ms", budget.FlushInterval)
+	if budget.FlushInterval != 50*time.Millisecond {
+		t.Fatalf("production FlushInterval = %s, want 50ms", budget.FlushInterval)
 	}
 	if budget.BatchRecords != 256 {
 		t.Fatalf("production BatchRecords = %d, want 256", budget.BatchRecords)

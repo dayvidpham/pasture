@@ -39,10 +39,12 @@ const maxDerivedHoldTarget = time.Second
 const derivedQueueRecords = 1024
 
 // productionFlushInterval is the production profile's idle fallback. It is
-// 500ms, strictly below the 1s hold cap. Non-production profiles do not use
-// it: their holds are shorter than 500ms, and Validate requires FlushInterval
-// to be strictly below HoldTarget.
-const productionFlushInterval = 500 * time.Millisecond
+// 50ms: a lone record must not add 500ms to the hook path, 50ms stays inside
+// the 250ms acceptance target, and it still batches longer than the previous
+// 25ms start. It is strictly below the 1s hold. Non-production profiles do
+// not use it. DeadlineTestProfile's hold is 20ms, so a fixed 50ms flush would
+// fail Validate there, and TestProfile keeps its scaled 25ms fallback.
+const productionFlushInterval = 50 * time.Millisecond
 
 // ingressPayloadFloor is the floor Validate places on BatchBytes: the one item
 // a hook may send is bounded by the ingress payload cap, and a batch byte
@@ -173,11 +175,14 @@ func (b WriteLaneBudget) Validate() error {
 //   - QueueRecords is derivedQueueRecords (1024): a fixed staging depth, deeper
 //     than one turn, still bounded.
 //   - FlushInterval on the production profile is productionFlushInterval
-//     (500ms), strictly below the 1s hold. It is the ONLY wait a lone record
-//     can add to the hook path. Non-production profiles keep the scaled
-//     fallback — 25ms, never more than a quarter of HoldTarget, never below
-//     1ms — because a fixed 500ms flush would not be strictly below those
-//     shorter holds, and Validate would refuse the budget.
+//     (50ms), strictly below the 1s hold. It is the ONLY wait a lone record
+//     can add to the hook path, so it stays inside the 250ms acceptance
+//     target and still batches longer than the previous 25ms start.
+//     Non-production profiles keep the scaled fallback — 25ms, never more
+//     than a quarter of HoldTarget, never below 1ms — so TestProfile stays at
+//     25ms and DeadlineTestProfile at 5ms. A fixed 50ms flush would not be
+//     strictly below DeadlineTestProfile's 20ms hold, and Validate would
+//     refuse that budget.
 func BudgetFromProfile(profile timeouts.Profile) (WriteLaneBudget, error) {
 	if err := profile.Validate(); err != nil {
 		return WriteLaneBudget{}, fmt.Errorf("derive the write lane budget: the timeout profile is invalid, so no lane bound can be derived from it: %w", err)
@@ -186,10 +191,10 @@ func BudgetFromProfile(profile timeouts.Profile) (WriteLaneBudget, error) {
 	if hold > maxDerivedHoldTarget {
 		hold = maxDerivedHoldTarget
 	}
-	// Production is the only profile whose hold (1s) can contain a 500ms idle
-	// fallback. TestProfile's hold is 400ms and DeadlineTestProfile's is 20ms;
-	// applying the production flush there would invert FlushInterval and
-	// HoldTarget. Those profiles keep the scaled fallback.
+	// Production idle fallback is 50ms. TestProfile keeps the scaled 25ms
+	// start (its hold is 400ms). DeadlineTestProfile's hold is 20ms, so the
+	// scaled fallback is hold/4 (5ms); a fixed 50ms flush would invert
+	// FlushInterval and HoldTarget there.
 	flush := 25 * time.Millisecond
 	if profile.Kind() == timeouts.Production {
 		flush = productionFlushInterval

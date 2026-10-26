@@ -163,16 +163,17 @@ existing tier hierarchy instead of carrying a second set of durations.
 | `BatchBytes` | 64 MiB | unchanged. 64 × the 1 MiB ingress payload cap. A count-legal turn of maximum-size records is 256 MiB, so the byte cap splits that turn before the count cap. |
 | `QueueRecords` | 1024 | fixed staging depth; deeper than one turn |
 | `QueueBytes` | 256 MiB | unchanged. 4 × `BatchBytes` |
-| `FlushInterval` | 500 ms | production idle fallback, strictly below the 1 s hold. Non-production profiles keep the scaled fallback: 25 ms, capped at `HoldTarget/4`, floored at 1 ms. |
+| `FlushInterval` | 50 ms | production idle fallback. A lone record must not add 500 ms to the hook path; 50 ms stays inside the 250 ms acceptance target and still batches longer than the previous 25 ms start. Strictly below the 1 s hold. Non-production profiles keep the scaled fallback: 25 ms, capped at `HoldTarget/4`, floored at 1 ms. |
 
 There is no per-record commit-cost constant. A 256-record turn is not claimed
 to finish inside the 1 s hold. The phase-2 measurement above was taken under
 the old 20-record / 25 ms budget; it does not measure a 256-record turn.
 
 A burst that neither fills 256 records nor drains the queue commits on the
-500 ms idle fallback. That wait is the cost of the approved flush: a partial
-turn is not dropped, and it is not split early to protect the old 250 ms
-acceptance probe.
+50 ms idle fallback. That wait is what a lone record can add to the hook path.
+It stays inside the 250 ms acceptance target. A partial turn is not dropped.
+`HoldTarget` remains 1 s and is observed via `HoldExceeded`, not enforced by
+dropping records.
 
 `HoldTarget` is observed via `HoldExceeded` and is not enforced by dropping
 records. A turn that outruns it is still committed in full. It is what keeps
