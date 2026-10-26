@@ -794,10 +794,12 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 			}
 		}
 	}
-	// The active projection's freshness check and the direct evidence reader
-	// both look up known lifecycle rows. These indexes are additive read
-	// optimizations on the Provenance tables; a bare test database without the
-	// lifecycle tables still opens normally.
+	// Both indexes are load-bearing and deliberately retained. The evidence
+	// index keeps the projection freshness check from scanning every lifecycle
+	// evidence row on each open; the operations index keeps the journal append
+	// and fold path from scanning journal_operations by journal_id. An isolated
+	// A/B measured 390 ms per hook with both versus ~600 ms without them, so
+	// removing either as "append write amplification" is counterproductive.
 	for _, index := range []struct {
 		name  string
 		table string
@@ -827,7 +829,7 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 				What:     fmt.Sprintf("Pasture couldn't create the %q index in the database.", index.name),
 				Why:      "Tried to create a lifecycle read index but the database refused.",
 				Where:    "Setting up the pasture-side tables (internal/tasks/open_unified.go in tasks.ensurePastureTables).",
-				Impact:   "Lifecycle definition reads will fall back to slower journal scans.",
+				Impact:   "Lifecycle definition reads and journal folding will fall back to slower journal scans.",
 				Fix:      "Confirm the database is writable, then run 'pasture migrate' and retry.",
 				Cause:    err,
 			}
