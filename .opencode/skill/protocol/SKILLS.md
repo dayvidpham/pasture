@@ -12,6 +12,7 @@ See [AGENTS.md](AGENTS.md) for role definitions and phase ownership.
 |---------|-------|-------------|
 | `/pasture:epoch` | 1-12 | Master orchestrator for the full 12-phase workflow. Delegates to role-specific skills per phase. |
 | `/pasture:status` | any | Project status and monitoring via Pasture queries. |
+| `/pasture:afk-implement` | 8-10 | Unattended supervisor run: small progressive iterations, open PRs, a clean review wave, and no merges. Stops with a morning handoff. |
 
 ---
 

@@ -9,6 +9,7 @@
 package codegen
 
 var SkillBodySpecs = map[string]SkillBody{
+	"afk-implement":             afkImplementBody,
 	"architect":                 architectBody,
 	"architect-handoff":         architectHandoffBody,
 	"architect-propose-plan":    architectProposePlanBody,
