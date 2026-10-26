@@ -152,36 +152,37 @@ store; it is not claimed as a measurement of this tree.
 
 ## Lane budget derivation (DERIVED)
 
-`writelane.BudgetFromProfile` derives every lane bound from the validated
-timeout profile, so the lane joins the existing tier hierarchy instead of
-carrying a second set of durations.
+`writelane.BudgetFromProfile` takes the hold from the validated timeout profile
+and uses fixed caps for the record and byte bounds, so the lane joins the
+existing tier hierarchy instead of carrying a second set of durations.
 
 | Bound | Production value | Derivation |
 |---|---|---|
-| `HoldTarget` | 400 ms | 4/5 of the 1.5 s SQLite busy tier would be 1.2 s; capped at 400 ms |
-| `BatchRecords` | 20 | `HoldTarget / assumedPerRecordCommitCost` |
-| `BatchBytes` | 64 MiB | 64 × the 1 MiB ingress payload cap, above a count-legal turn of maximum-size records (20 × 1 MiB). The previous 8 MiB start split that turn after eight records. |
-| `QueueRecords` | 256 | staging depth; deeper than one turn |
-| `QueueBytes` | 256 MiB | 4 × `BatchBytes` (was 32 MiB when `BatchBytes` was 8 MiB) |
-| `FlushInterval` | 25 ms | the design's stated start, capped at `HoldTarget/4` |
+| `HoldTarget` | 1 s | 4/5 of the 1.5 s SQLite busy tier is 1.2 s; capped at 1 s. 1 s stays below the busy tier and below the 2 s ingress and start-slice windows. |
+| `BatchRecords` | 256 | Provenance `MaxBatchRecords` cap. No per-record-time derivation. |
+| `BatchBytes` | 64 MiB | unchanged. 64 × the 1 MiB ingress payload cap. A count-legal turn of maximum-size records is 256 MiB, so the byte cap splits that turn before the count cap. |
+| `QueueRecords` | 1024 | fixed staging depth; deeper than one turn |
+| `QueueBytes` | 256 MiB | unchanged. 4 × `BatchBytes` |
+| `FlushInterval` | 500 ms | production idle fallback, strictly below the 1 s hold. Non-production profiles keep the scaled fallback: 25 ms, capped at `HoldTarget/4`, floored at 1 ms. |
 
-`assumedPerRecordCommitCost` (20 ms) is **DERIVED, NOT MEASURED**, and phase 2
-keeps it as the splitter's conservative per-record allowance rather than
-replacing it. A lane turn is now ONE transaction, so the per-record cost is no
-longer the turn's cost; what the count must still bound is the turn's hold on
-the writer. The pinned Provenance v0.9.0 release records a batched per-record
-fold cost of 11.64 ms (serial p50, its own sandbox), so 20 records per turn is
-~233 ms, inside `HoldTarget` (400 ms). The phase-2 measurement above is the
-check that the bound is not the bottleneck: the batched lane did not saturate at
-C = 18, 36 or 54.
+There is no per-record commit-cost constant. A 256-record turn is not claimed
+to finish inside the 1 s hold. The phase-2 measurement above was taken under
+the old 20-record / 25 ms budget; it does not measure a 256-record turn.
 
-`HoldTarget` is the one bound with an external consequence: it is what keeps
+A burst that neither fills 256 records nor drains the queue commits on the
+500 ms idle fallback. That wait is the cost of the approved flush: a partial
+turn is not dropped, and it is not split early to protect the old 250 ms
+acceptance probe.
+
+`HoldTarget` is observed via `HoldExceeded` and is not enforced by dropping
+records. A turn that outruns it is still committed in full. It is what keeps
 the lane from starving the engine's and the CLI's own writers past their busy
-window. It is validated at construction (`WriteLaneBudget.Validate`) and
-`BudgetFromProfile` refuses a profile whose busy tier cannot contain it.
-`Validate` also refuses a `BatchRecords` above Provenance's `MaxBatchRecords`
-(256), because one turn is one `ApplyBatchContext` call and a larger turn would
-be refused by the journal.
+window, as an observed signal rather than a drop. It is validated at
+construction (`WriteLaneBudget.Validate`): `FlushInterval` must stay strictly
+below it. `Validate` also refuses a `BatchRecords` above Provenance's
+`MaxBatchRecords` (256), because one turn is one `ApplyBatchContext` call and a
+larger turn would be refused by the journal. The real bounds on one turn are
+that cap, the 1024 queue records, and the 64 MiB / 256 MiB byte caps.
 
 ## What is NOT measured here
 

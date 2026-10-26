@@ -1,6 +1,7 @@
 package writelane
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -112,8 +113,14 @@ func TestBudgetFromProfileStaysInsideTheProfileTiers(t *testing.T) {
 			if budget.QueueBytes != budget.BatchBytes*4 {
 				t.Fatalf("QueueBytes = %d, want 4 x BatchBytes (%d)", budget.QueueBytes, budget.BatchBytes*4)
 			}
-			if budget.QueueRecords != 256 {
-				t.Fatalf("QueueRecords = %d, want 256; the byte-budget change must not move the record staging bound", budget.QueueRecords)
+			if budget.QueueRecords != 1024 {
+				t.Fatalf("QueueRecords = %d, want 1024", budget.QueueRecords)
+			}
+			if budget.BatchRecords != 256 {
+				t.Fatalf("BatchRecords = %d, want 256", budget.BatchRecords)
+			}
+			if budget.BatchRecords != provenance.MaxBatchRecords {
+				t.Fatalf("BatchRecords = %d, want provenance.MaxBatchRecords (%d)", budget.BatchRecords, provenance.MaxBatchRecords)
 			}
 			if budget.HoldTarget > profile.SQLiteBusy() {
 				t.Fatalf("HoldTarget %s exceeds the SQLite busy tier %s; the lane would hold the writer past the window the other writers wait", budget.HoldTarget, profile.SQLiteBusy())
@@ -127,12 +134,23 @@ func TestBudgetFromProfileStaysInsideTheProfileTiers(t *testing.T) {
 			if budget.FlushInterval >= profile.HookInvocation() {
 				t.Fatalf("FlushInterval %s is not below the hook-invocation tier %s", budget.FlushInterval, profile.HookInvocation())
 			}
-			if budget.BatchRecords < 1 {
-				t.Fatalf("BatchRecords is %d; a batch must admit at least one record", budget.BatchRecords)
-			}
-			if profile.Kind() == timeouts.Production {
-				if budget.HoldTarget != 400*time.Millisecond || budget.BatchRecords != 20 || budget.FlushInterval != 25*time.Millisecond {
-					t.Fatalf("production time knobs moved with the byte budget: HoldTarget=%s BatchRecords=%d FlushInterval=%s; want 400ms, 20, 25ms", budget.HoldTarget, budget.BatchRecords, budget.FlushInterval)
+			switch profile.Kind() {
+			case timeouts.Production:
+				if budget.HoldTarget != time.Second || budget.FlushInterval != 500*time.Millisecond {
+					t.Fatalf("production hold/flush = %s/%s, want 1s/500ms", budget.HoldTarget, budget.FlushInterval)
+				}
+			case timeouts.Test:
+				// 500ms busy derives a 400ms hold. The production 500ms flush
+				// would not be strictly below that hold, so the scaled 25ms
+				// fallback must remain.
+				if budget.HoldTarget != 400*time.Millisecond || budget.FlushInterval != 25*time.Millisecond {
+					t.Fatalf("TestProfile hold/flush = %s/%s, want 400ms/25ms", budget.HoldTarget, budget.FlushInterval)
+				}
+			case timeouts.DeadlineTest:
+				// 25ms busy derives a 20ms hold, and the scaled fallback is
+				// hold/4 (5ms), not the production 500ms flush.
+				if budget.HoldTarget != 20*time.Millisecond || budget.FlushInterval != 5*time.Millisecond {
+					t.Fatalf("DeadlineTestProfile hold/flush = %s/%s, want 20ms/5ms", budget.HoldTarget, budget.FlushInterval)
 				}
 			}
 		})
@@ -140,8 +158,14 @@ func TestBudgetFromProfileStaysInsideTheProfileTiers(t *testing.T) {
 }
 
 func TestProductionHoldTargetStaysAtTheCapWhenTheBusyTierGrows(t *testing.T) {
+	if maxDerivedHoldTarget != time.Second {
+		t.Fatalf("maxDerivedHoldTarget = %s, want 1s", maxDerivedHoldTarget)
+	}
 	profile := timeouts.ProductionProfile()
 	uncapped := profile.SQLiteBusy() * 4 / 5
+	if uncapped != 1200*time.Millisecond {
+		t.Fatalf("4/5 of production SQLiteBusy (%s) is %s, want 1.2s", profile.SQLiteBusy(), uncapped)
+	}
 	if uncapped <= maxDerivedHoldTarget {
 		t.Fatalf("4/5 of production SQLiteBusy (%s) is %s, which does not exceed the %s cap; this test no longer proves the cap holds the lane hold down", profile.SQLiteBusy(), uncapped, maxDerivedHoldTarget)
 	}
@@ -149,14 +173,83 @@ func TestProductionHoldTargetStaysAtTheCapWhenTheBusyTierGrows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BudgetFromProfile(production) = %v", err)
 	}
+	if budget.HoldTarget != time.Second {
+		t.Fatalf("production HoldTarget = %s, want 1s; do not raise maxDerivedHoldTarget past 1s with the busy tier", budget.HoldTarget)
+	}
 	if budget.HoldTarget != maxDerivedHoldTarget {
-		t.Fatalf("production HoldTarget = %s, want the %s cap; do not raise maxDerivedHoldTarget with the busy tier", budget.HoldTarget, maxDerivedHoldTarget)
+		t.Fatalf("production HoldTarget = %s, want the cap %s", budget.HoldTarget, maxDerivedHoldTarget)
 	}
-	if budget.FlushInterval != 25*time.Millisecond {
-		t.Fatalf("production FlushInterval = %s, want 25ms; the busy-tier change must not move the idle flush", budget.FlushInterval)
+	if budget.FlushInterval != 500*time.Millisecond {
+		t.Fatalf("production FlushInterval = %s, want 500ms", budget.FlushInterval)
 	}
-	if want := int(maxDerivedHoldTarget / assumedPerRecordCommitCost); budget.BatchRecords != want {
-		t.Fatalf("production BatchRecords = %d, want %d derived from the capped hold; the busy-tier change must not change BatchRecords", budget.BatchRecords, want)
+	if budget.BatchRecords != 256 {
+		t.Fatalf("production BatchRecords = %d, want 256", budget.BatchRecords)
+	}
+	if budget.BatchRecords != provenance.MaxBatchRecords {
+		t.Fatalf("production BatchRecords = %d, want provenance.MaxBatchRecords (%d)", budget.BatchRecords, provenance.MaxBatchRecords)
+	}
+	if budget.QueueRecords != 1024 {
+		t.Fatalf("production QueueRecords = %d, want 1024", budget.QueueRecords)
+	}
+}
+
+func TestBatchRecordsAtTheProvenanceCapValidatesAndOneAboveIsRefused(t *testing.T) {
+	if provenance.MaxBatchRecords != 256 {
+		t.Fatalf("provenance.MaxBatchRecords = %d, want 256; the production batch cap is that constant", provenance.MaxBatchRecords)
+	}
+	budget, err := BudgetFromProfile(timeouts.ProductionProfile())
+	if err != nil {
+		t.Fatalf("BudgetFromProfile(production) = %v", err)
+	}
+	if budget.BatchRecords != provenance.MaxBatchRecords {
+		t.Fatalf("production BatchRecords = %d, want provenance.MaxBatchRecords (%d)", budget.BatchRecords, provenance.MaxBatchRecords)
+	}
+	if err := budget.Validate(); err != nil {
+		t.Fatalf("Validate refused BatchRecords == provenance.MaxBatchRecords (%d): %v", provenance.MaxBatchRecords, err)
+	}
+
+	// QueueRecords must be at least the batch, or Validate fails on the queue
+	// relationship before it can name the Provenance cap.
+	over := budget
+	over.QueueRecords = provenance.MaxBatchRecords + 1
+	over.BatchRecords = provenance.MaxBatchRecords + 1
+	err = over.Validate()
+	if err == nil {
+		t.Fatal("Validate accepted a batch one above the Provenance cap")
+	}
+	if !strings.Contains(err.Error(), "Provenance batch cap") {
+		t.Fatalf("Validate error does not name the Provenance cap: %v", err)
+	}
+
+	if ExceedsWriteBatch(budget, provenance.MaxBatchRecords-1, 0, 1) {
+		t.Fatal("the splitter refused the record that fills a Provenance-cap turn")
+	}
+	if !ExceedsWriteBatch(budget, provenance.MaxBatchRecords, 0, 1) {
+		t.Fatal("the splitter admitted a record past the Provenance cap into the same turn")
+	}
+
+	lane := &Lane{budget: budget, apply: testApply, ctx: context.Background()}
+	batch := make([]*item, provenance.MaxBatchRecords)
+	for i := range batch {
+		batch[i] = &item{
+			bytes:  1,
+			record: commitFunc(func(context.Context) error { return nil }),
+			result: make(chan error, 1),
+		}
+	}
+	lane.commitBatch(batch)
+	if got := lane.Stats().Records; got != int64(provenance.MaxBatchRecords) {
+		t.Fatalf("committed records = %d, want %d; a cap-sized turn must commit every admitted record", got, provenance.MaxBatchRecords)
+	}
+	for i, it := range batch {
+		select {
+		case commitErr := <-it.result:
+			if commitErr != nil {
+				t.Fatalf("record %d failed: %v", i, commitErr)
+			}
+		default:
+			t.Fatalf("record %d was not answered; the lane dropped an admitted record", i)
+		}
 	}
 }
 

@@ -381,13 +381,16 @@ Rules that must hold for any change to the lane:
   Every grouping site asks the splitter; no site re-derives a bound. The lane is
   the only writer for hook records, and it is what makes the property true — not
   a connection or pool limit.
-- **The hold bound protects the other writers.** `HoldTarget` stays 400 ms.
-  The derivation is four fifths of the SQLite busy tier, capped at 400 ms, so
-  the 1.5 s production busy tier does not raise the lane hold. That bound
-  keeps one lane turn from starving the DBOS engine's own writes and every
-  CLI writer past their measured wait.
-  `writelane.BudgetFromProfile` derives every bound from the validated timeout
-  profile and refuses a profile that cannot contain the hold.
+- **The hold bound protects the other writers.** Production `HoldTarget` is
+  1 s: four fifths of the 1.5 s SQLite busy tier is 1.2 s, capped at 1 s. 1 s
+  stays below the busy tier and below the 2 s ingress and start-slice windows.
+  Exceeding the hold is reported as `HoldExceeded`; the lane still commits
+  every admitted record and never drops one to meet the bound.
+  `writelane.BudgetFromProfile` takes the hold from the validated timeout
+  profile and refuses a flush that is not strictly below it. The record caps
+  are fixed: 256 per turn (Provenance's batch cap) and 1024 queued. The byte
+  caps stay 64 MiB per turn and 256 MiB queued. Production idle flush is
+  500 ms; shorter profiles keep the scaled fallback.
 - **`proceed` means committed, and nothing is acknowledged early.** The lane's
   `Submit` returns only after the record's `Settle` ran and reported its result,
   which is only after the flush's one transaction committed or failed.
