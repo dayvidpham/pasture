@@ -9,10 +9,9 @@
 # occurrence.v2/interpreted.v3 wire. Per PROPOSAL-18 an initial unreleased
 # document keeps version 1 with this broader content; after release any
 # further body change must bump the version and retain this entry.
-# The epoch entry was likewise refreshed before its first release for the
-# reviewed audit-logger wiring in internal/engine/engine.go. This document was
-# introduced after the last published v0.0.20 tag, which has no epoch owner;
-# its initial unreleased version remains 1 under the same rule above.
+# The epoch document version 1 shipped in pasture v0.0.21. That digest is
+# immutable. Version 2 is the current source-inventory refresh after
+# internal/engine/schema_gate.go changed the generated source manifest.
 versions:
   - id: pasture.lifecycle.occurrence-schema
     version: 1
@@ -23,6 +22,9 @@ versions:
   - id: pasture.epoch.implementation
     version: 1
     sha256: 561e352f00c75913a55bb896fee4dfe347f6fe5b902cef6dfa979634a91c82fe
+  - id: pasture.epoch.implementation
+    version: 2
+    sha256: febeef30a3d3254c2caf23165589ec308681799b3b4bf0df41011f039441ac98
   - id: pasture.lifecycle.interpreter
     version: 1
     sha256: 7a3e0bcd5d5d8cfdfd4eef93483dd5ba0e8a3ead7a130060dd146c7f84d06f13
