@@ -100,6 +100,21 @@ func TestBudgetFromProfileStaysInsideTheProfileTiers(t *testing.T) {
 			if err := budget.Validate(); err != nil {
 				t.Fatalf("BudgetFromProfile produced a budget Validate refuses: %v", err)
 			}
+			// BatchBytes is a fixed derivation, not a profile knob. The literals
+			// pin the raised budget: 64 MiB is above a count-legal turn of
+			// 1 MiB records, and QueueBytes stays four times that (256 MiB).
+			if budget.BatchBytes != 64<<20 {
+				t.Fatalf("BatchBytes = %d, want 64 MiB (%d)", budget.BatchBytes, int64(64<<20))
+			}
+			if budget.QueueBytes != 256<<20 {
+				t.Fatalf("QueueBytes = %d, want 256 MiB (%d)", budget.QueueBytes, int64(256<<20))
+			}
+			if budget.QueueBytes != budget.BatchBytes*4 {
+				t.Fatalf("QueueBytes = %d, want 4 x BatchBytes (%d)", budget.QueueBytes, budget.BatchBytes*4)
+			}
+			if budget.QueueRecords != 256 {
+				t.Fatalf("QueueRecords = %d, want 256; the byte-budget change must not move the record staging bound", budget.QueueRecords)
+			}
 			if budget.HoldTarget > profile.SQLiteBusy() {
 				t.Fatalf("HoldTarget %s exceeds the SQLite busy tier %s; the lane would hold the writer past the window the other writers wait", budget.HoldTarget, profile.SQLiteBusy())
 			}
@@ -114,6 +129,11 @@ func TestBudgetFromProfileStaysInsideTheProfileTiers(t *testing.T) {
 			}
 			if budget.BatchRecords < 1 {
 				t.Fatalf("BatchRecords is %d; a batch must admit at least one record", budget.BatchRecords)
+			}
+			if profile.Kind() == timeouts.Production {
+				if budget.HoldTarget != 400*time.Millisecond || budget.BatchRecords != 20 || budget.FlushInterval != 25*time.Millisecond {
+					t.Fatalf("production time knobs moved with the byte budget: HoldTarget=%s BatchRecords=%d FlushInterval=%s; want 400ms, 20, 25ms", budget.HoldTarget, budget.BatchRecords, budget.FlushInterval)
+				}
 			}
 		})
 	}

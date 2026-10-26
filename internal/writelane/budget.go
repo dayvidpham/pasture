@@ -57,6 +57,19 @@ const maxDerivedHoldTarget = 400 * time.Millisecond
 // a sanity bound on the knob, not a correctness condition.
 const ingressPayloadFloor int64 = 1 << 20
 
+// derivedBatchBytes is one lane turn's staged-payload bound.
+//
+// It is 64 MiB, sixty-four times the 1 MiB ingress payload cap. The previous
+// 8 MiB start split a turn of maximum-size records after eight of them. The
+// hold-derived BatchRecords count is at most 20 (HoldTarget is capped at
+// 400 ms and each record is allowed 20 ms), so twenty maximum-size records
+// are 20 MiB. 64 MiB sits above that, so a count-legal turn of admissible
+// records is split by the hold-derived count, not by bytes. The byte term
+// still keeps one turn from staging an unbounded aggregate. QueueBytes stays
+// four times this value (256 MiB). HoldTarget, BatchRecords, FlushInterval,
+// and QueueRecords are not derived from this constant.
+const derivedBatchBytes int64 = 64 << 20
+
 // WriteLaneBudget is every bound the lane enforces, in one value. It is
 // constructor-validated: the daemon resolves it once from the timeout profile
 // (BudgetFromProfile) and an operator may override named knobs, but the value
@@ -150,11 +163,12 @@ func (b WriteLaneBudget) Validate() error {
 //   - BatchRecords is HoldTarget divided by assumedPerRecordCommitCost, floored
 //     at one, so the turn's record count is sized against the hold bound rather
 //     than picked.
-//   - BatchBytes is 8 MiB: eight times the 1 MiB ingress payload cap, so a
-//     queue of concurrent maximum-size payloads cannot itself become the
-//     memory bound (the design's stated start).
+//   - BatchBytes is derivedBatchBytes (64 MiB): sixty-four times the 1 MiB
+//     ingress payload cap, above a count-legal turn of maximum-size records,
+//     so the byte term does not split that turn before the hold-derived count.
 //   - QueueRecords/QueueBytes are the staging bounds: 256 records and four
-//     times BatchBytes, so the queue is deeper than one turn but still bounded.
+//     times BatchBytes (256 MiB), so the queue is deeper than one turn but
+//     still bounded.
 //   - FlushInterval is 25 ms, the design's stated start, and never more than a
 //     quarter of HoldTarget. It is the ONLY wait a lone record can add to the
 //     hook path, so it is bounded hard: it stays well below the hook-invocation
@@ -178,12 +192,11 @@ func BudgetFromProfile(profile timeouts.Profile) (WriteLaneBudget, error) {
 	if batchRecords < 1 {
 		batchRecords = 1
 	}
-	batchBytes := int64(8 << 20)
 	budget := WriteLaneBudget{
 		QueueRecords:  256,
-		QueueBytes:    batchBytes * 4,
+		QueueBytes:    derivedBatchBytes * 4,
 		BatchRecords:  batchRecords,
-		BatchBytes:    batchBytes,
+		BatchBytes:    derivedBatchBytes,
 		FlushInterval: flush,
 		HoldTarget:    hold,
 	}
