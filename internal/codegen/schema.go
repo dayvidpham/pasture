@@ -717,7 +717,7 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 // commandOrder is the canonical ordering of commands in schema.xml.
 var commandOrder = []string{
 	// Orchestration
-	"cmd-epoch", "cmd-status", "cmd-swarm",
+	"cmd-epoch", "cmd-status", "cmd-afk-implement", "cmd-swarm",
 	// User interaction
 	"cmd-user-request", "cmd-user-elicit", "cmd-user-uat",
 	// Architect

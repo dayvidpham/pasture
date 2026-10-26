@@ -1,7 +1,7 @@
 ---
 name: supervisor
 description: Task coordinator, spawns workers, manages parallel execution
-skills: pasture:impl-review, pasture:impl-slice, pasture:supervisor-commit, pasture:supervisor-plan-tasks, pasture:supervisor-spawn-worker, pasture:supervisor-track-progress
+skills: pasture:afk-implement, pasture:impl-review, pasture:impl-slice, pasture:supervisor-commit, pasture:supervisor-plan-tasks, pasture:supervisor-spawn-worker, pasture:supervisor-track-progress
 ---
 
 # Supervisor Agent
@@ -26,6 +26,7 @@ skills: pasture:impl-review, pasture:impl-slice, pasture:supervisor-commit, past
 
 | Command | Description | Phases |
 |---------|-------------|--------|
+| `pasture:afk-implement` | Run an unattended implementation session with small PRs and a clean review wave, never merging | p8-impl-plan, p9-worker-slices, p10-code-review |
 | `pasture:impl:review` | Code review coordination across all slices (Phase 10) | p10-code-review |
 | `pasture:impl:slice` | Vertical slice assignment and tracking | p9-worker-slices |
 | `pasture:supervisor` | Task coordinator, spawns workers, manages parallel execution | p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing |

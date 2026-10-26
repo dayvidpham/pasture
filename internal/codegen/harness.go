@@ -397,6 +397,7 @@ var commandSkillDirs = map[string]string{
 	"cmd-rev-code":      "reviewer-review-code",
 	"cmd-rev-plan":      "reviewer-review-plan",
 	"cmd-rev-vote":      "reviewer-vote",
+	"cmd-afk-implement": "afk-implement",
 	"cmd-status":        "status",
 	"cmd-sup-commit":    "supervisor-commit",
 	"cmd-sup-track":     "supervisor-track-progress",

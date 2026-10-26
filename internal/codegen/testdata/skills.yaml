@@ -66,6 +66,12 @@ role_cases:
       - "### Handoffs"
 
 sub_skill_cases:
+  - command_id: "cmd-afk-implement"
+    must_contain:
+      - "pasture:afk-implement"
+      - "never merging"
+      - "Review Wave"
+
   - command_id: "cmd-sup-plan"
     must_contain:
       - "pasture:supervisor:plan-tasks"
