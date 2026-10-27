@@ -21,7 +21,7 @@ import (
 // step refuses a populated store that does not carry the slash identity marker,
 // so a legacy store's plain migration stops here; the cutover transaction applies
 // the remaining step atomically with the marker and the receipt.
-const cutoverTarget = audit.MaxKnownSchemaVersion - 1
+const cutoverTarget = audit.IdentityFormatSchemaVersion - 1
 
 // migratePopulatedToCutoverTarget migrates a store whose identities populate the
 // Provenance tables through the deferred ceiling, the way the cutover's catch-up
@@ -140,12 +140,8 @@ func TestTheDeferredCeilingNoOpsAStoreAlreadyPastTheTarget(t *testing.T) {
 	requireRecordedVersion(t, db, audit.MaxKnownSchemaVersion)
 }
 
-// TestTheDeferredWorkIsVersionOnly pins that the work deferred past the cutover
-// target is version-only TODAY: applying the deferred ceiling to a store at the
-// target changes only the recorded schema version, never another table's schema
-// or content. A future real migration step landing in (target, MaxKnown] would
-// change something else and turn this pin red, so a real step cannot be silently
-// stamped as the deferred work instead of being applied.
+// The identity-floor step itself changes only the version. Later migrations
+// have their own real work and must run after this historical step.
 func TestTheDeferredWorkIsVersionOnly(t *testing.T) {
 	t.Parallel()
 	db, _ := populatedStoreAtCeiling(t, cutoverTarget)
@@ -153,8 +149,8 @@ func TestTheDeferredWorkIsVersionOnly(t *testing.T) {
 	schemaBefore := schemaDigest(t, db)
 	contentBefore := tableDigests(t, db)
 
-	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.MaxKnownSchemaVersion))
-	requireRecordedVersion(t, db, audit.MaxKnownSchemaVersion)
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.IdentityFormatSchemaVersion))
+	requireRecordedVersion(t, db, audit.IdentityFormatSchemaVersion)
 
 	require.Equal(t, schemaBefore, schemaDigest(t, db), "the deferred ceiling must add no schema object")
 	contentAfter := tableDigests(t, db)

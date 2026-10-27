@@ -495,8 +495,8 @@ func TestPlanMigrationsListsTheV8ToV9Step(t *testing.T) {
 	// offers must be a real step, and the last one must reach the constant.
 	steps := migrationSteps()
 	last := steps[len(steps)-1]
-	if last.fromVersion != 9 || last.toVersion != 10 {
-		t.Errorf("last registry step is v%d->v%d, want v9->v10", last.fromVersion, last.toVersion)
+	if last.fromVersion != 10 || last.toVersion != 11 {
+		t.Errorf("last registry step is v%d->v%d, want v10->v11", last.fromVersion, last.toVersion)
 	}
 	if MaxKnownSchemaVersion != last.toVersion {
 		t.Errorf("MaxKnownSchemaVersion=%d but the last step reaches %d", MaxKnownSchemaVersion, last.toVersion)

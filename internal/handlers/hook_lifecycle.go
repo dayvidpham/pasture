@@ -601,6 +601,8 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		Contract:     capture.delivery.Contract,
 		EventKind:    event.Kind,
 		Bindings:     capture.delivery.Bindings,
+		NativeBody:   capture.delivery.Body,
+		Capture:      capture.delivery.Capture,
 		OccurrenceID: committedReceipt.OccurrenceID,
 		RecordedAt:   committedReceipt.RecordedAt,
 		ActorClaim:   in.ActorClaim,

@@ -189,6 +189,15 @@ func renderCodexHooksConfigWithRunner(eventNames []string, runner func(string) s
 				StatusMessage: "Consulting Pasture lifecycle state",
 			}},
 		}}
+		if name == "SessionStart" {
+			// Resume is an exact second subscription, not regex or match-all.
+			// It uses the identical runner and transport. Native acceptance is
+			// tracked separately from this generated delivery contract.
+			resume := "resume"
+			group := config.Hooks[name][0]
+			group.Matcher = &resume
+			config.Hooks[name] = append(config.Hooks[name], group)
+		}
 	}
 	wire, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {

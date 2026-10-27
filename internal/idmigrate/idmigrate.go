@@ -304,7 +304,7 @@ func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now fun
 	// floor, so the fence evidence commits together. Written once.
 	if err := writeReceipt(ctx, tx, Receipt{
 		MarkerFormat:  string(provenance.IDFormatSlash),
-		FloorVersion:  audit.MaxKnownSchemaVersion,
+		FloorVersion:  audit.IdentityFormatSchemaVersion,
 		ArchivePath:   opts.Archive.Path,
 		ArchiveSHA256: opts.Archive.SHA256,
 		CutoverAt:     now().UTC().UnixNano(),
@@ -312,7 +312,7 @@ func runConversion(ctx context.Context, tx *sql.Tx, opts ConvertOptions, now fun
 		return err
 	}
 	report.ReceiptWritten = true
-	report.FloorVersion = audit.MaxKnownSchemaVersion
+	report.FloorVersion = audit.IdentityFormatSchemaVersion
 
 	// P3k: the deferred ceiling step(s), applied by name, LAST.
 	if err := audit.RaiseIDFormatCeilingInTx(tx, opts.StorePath, now().UTC().UnixNano()); err != nil {

@@ -36,15 +36,17 @@ type Identity struct {
 }
 
 type Event struct {
-	Kind       model.ContractEventKind
-	Symbol     string
-	Name       string
-	Fields     []model.NativeFieldID
-	Identities []Identity
-	Blocking   BlockingMode
-	Mutation   MutationMode
-	Failure    pastureruntime.FailureMode
-	StopLoop   StopLoopPolicy
+	Kind                  model.ContractEventKind
+	Symbol                string
+	Name                  string
+	Fields                []model.NativeFieldID
+	Identities            []Identity
+	Blocking              BlockingMode
+	Mutation              MutationMode
+	Failure               pastureruntime.FailureMode
+	StopLoop              StopLoopPolicy
+	SessionTransition     model.SessionTransition
+	TransitionSourceField string
 }
 
 type Contract struct {

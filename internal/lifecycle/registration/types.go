@@ -35,14 +35,16 @@ type Identity struct {
 // Event is generated target-neutral registration data. Host-specific source
 // code is inaccessible to this package by Go's internal-package rule.
 type Event struct {
-	Kind          model.ContractEventKind    `json:"Kind"`
-	NativeName    string                     `json:"NativeName"`
-	AllowedFields []model.NativeFieldID      `json:"AllowedFields"`
-	Identities    []Identity                 `json:"Identities"`
-	Blocking      BlockingMode               `json:"Blocking"`
-	Mutation      MutationMode               `json:"Mutation"`
-	Failure       pastureruntime.FailureMode `json:"Failure"`
-	StopLoop      StopLoopPolicy             `json:"StopLoop"`
+	Kind                  model.ContractEventKind    `json:"Kind"`
+	NativeName            string                     `json:"NativeName"`
+	AllowedFields         []model.NativeFieldID      `json:"AllowedFields"`
+	Identities            []Identity                 `json:"Identities"`
+	Blocking              BlockingMode               `json:"Blocking"`
+	Mutation              MutationMode               `json:"Mutation"`
+	Failure               pastureruntime.FailureMode `json:"Failure"`
+	StopLoop              StopLoopPolicy             `json:"StopLoop"`
+	SessionTransition     model.SessionTransition    `json:"SessionTransition"`
+	TransitionSourceField string                     `json:"TransitionSourceField,omitempty"`
 }
 
 func (e Event) Fields() []model.NativeFieldID { return slices.Clone(e.AllowedFields) }

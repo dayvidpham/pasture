@@ -9,6 +9,11 @@ import (
 	"github.com/dayvidpham/provenance"
 )
 
+// IdentityFormatSchemaVersion is the stable schema floor established by the
+// slash-identity cutover. Later migrations do not change cutover receipt meaning
+// or the last version an unconverted populated store can reach.
+const IdentityFormatSchemaVersion = 10
+
 // migrateV9toV10Step raises the audit schema ceiling to version 10.
 //
 // WHY THE FLOOR, IN PLAIN WORDS. Version 10 is the ceiling at which a store's
@@ -82,7 +87,7 @@ func raiseIdentityCeiling(tx *sql.Tx, now int64, location string) error {
 	if inspection.Populated && inspection.Format != provenance.IDFormatSlash {
 		return identityFormatCeilingRefusal(location)
 	}
-	return writeVersion(tx, MaxKnownSchemaVersion, now)
+	return writeVersion(tx, IdentityFormatSchemaVersion, now)
 }
 
 // identityFormatCeilingRefusal is returned when a caller asks to raise the

@@ -23,5 +23,6 @@ func FieldAllocationOrder() []string {
 		"FieldFileEvent",
 		"FieldCodexAgentID",
 		"FieldOpenCode2SessionID", "FieldOpenCode2CallID",
+		"FieldCodexSource",
 	}
 }

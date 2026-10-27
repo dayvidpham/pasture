@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/tasks"
@@ -62,11 +63,11 @@ func TestMigrateIDsLegacyFixtureEndToEnd(t *testing.T) {
 	defer db.Close()
 	var version int
 	require.NoError(t, db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version))
-	require.Equal(t, 10, version)
+	require.Equal(t, audit.MaxKnownSchemaVersion, version)
 	var markerRows, receiptRows, agents, converted int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM provenance_id_format WHERE singleton=1`).Scan(&markerRows))
 	require.Equal(t, 1, markerRows)
-	require.NoError(t, db.QueryRow(`SELECT count(*) FROM pasture_id_cutover WHERE singleton_id=0 AND floor_version=10`).Scan(&receiptRows))
+	require.NoError(t, db.QueryRow(`SELECT count(*) FROM pasture_id_cutover WHERE singleton_id=0 AND floor_version=?`, audit.IdentityFormatSchemaVersion).Scan(&receiptRows))
 	require.Equal(t, 1, receiptRows)
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM agents_software WHERE name LIKE 'pasture/legacy-role/%'`).Scan(&agents))
 	require.Equal(t, 7, agents)

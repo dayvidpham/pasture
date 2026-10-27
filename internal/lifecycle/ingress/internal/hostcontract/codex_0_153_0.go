@@ -16,6 +16,7 @@ const (
 	fCodexTurnID
 	fCodexToolUseID
 	fCodexAgentID
+	fCodexSource
 )
 
 var codexFields = []Field{
@@ -23,6 +24,7 @@ var codexFields = []Field{
 	{fCodexTurnID, "FieldCodexTurnID", "turn_id"},
 	{fCodexToolUseID, "FieldCodexToolUseID", "tool_use_id"},
 	{fCodexAgentID, "FieldCodexAgentID", "agent_id"},
+	{fCodexSource, "FieldCodexSource", "source"},
 }
 
 // codexReaderRefusalCost explains a failure to build the source catalogue.
@@ -268,6 +270,16 @@ func codex0_153_0Over(rows []codexRuntimeRow) Contract {
 			continue
 		}
 		event.Fields = []model.NativeFieldID{fCodexSessionID}
+		switch event.Name {
+		case "UserPromptSubmit":
+			event.SessionTransition = model.SessionTransitionPrompt
+		case "SessionEnd":
+			event.SessionTransition = model.SessionTransitionEnd
+		case "SessionStart":
+			event.SessionTransition = model.SessionTransitionResume
+			event.TransitionSourceField = "source"
+			event.Fields = append(event.Fields, fCodexSource)
+		}
 		event.Identities = []Identity{{Field: fCodexSessionID, Binding: model.BindingSession, Required: true}}
 		if event.Name != "SessionStart" && event.Name != "SessionEnd" {
 			event.Fields = append(event.Fields, fCodexTurnID)

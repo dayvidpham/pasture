@@ -84,6 +84,9 @@ func stepDescription(fromVersion, toVersion int) string {
 		return "require the slash task-identity format before opening the database; " +
 			"a populated store must be converted first with 'pasture migrate ids', and " +
 			"an older pasture binary will then refuse this database for every command until it is upgraded"
+	case fromVersion == 10 && toVersion == 11:
+		return "add independent session prompt, end and resume watermarks and invalidate the session read cache once; " +
+			"an older pasture binary will then refuse this database for every command until it is upgraded"
 	default:
 		// Forward-compatible default: workers who add a new step will see
 		// this generic text and know to add a tailored description here.

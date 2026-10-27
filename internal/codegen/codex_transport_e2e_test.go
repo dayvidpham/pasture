@@ -15,12 +15,61 @@ import (
 	digest "github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
 	"github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
+
+// Constructed delivery through the shipped runner/CLI. This does not prove a
+// native Codex matcher or substitute for a cleared same-ID resume capture.
+func TestCodexResumeGeneratedRunnerConstructedDelivery(t *testing.T) {
+	t.Parallel()
+	root := testModuleRoot(t)
+	shell, err := exec.LookPath("sh")
+	require.NoError(t, err)
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "pasture")
+	buildCodexProofCLI(t, root, binary)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "codex"), []byte("#!"+shell+"\nprintf 'codex-cli 0.153.0\\n'\n"), 0o700))
+	dbPath := filepath.Join(dir, "pasture.db")
+	env := append(codexProofEnvironment(binary, dbPath), "PATH="+dir+":"+os.Getenv("PATH"), "PASTURE_WRITE_LANE=direct")
+	bootstrap := exec.Command(binary, "--db", dbPath, "--namespace", "file://constructed-resume", "task", "create", "initialize scratch store")
+	bootstrap.Env = env
+	out, err := bootstrap.CombinedOutput()
+	require.NoError(t, err, "bootstrap: %s", out)
+	raw := []byte(`{"hook_event_name":"SessionStart","session_id":"constructed-resume-session","source":"resume"}`)
+	wire, err := os.ReadFile(filepath.Join(root, ".codex/hooks.json"))
+	require.NoError(t, err)
+	var config codexHooksConfig
+	require.NoError(t, json.Unmarshal(wire, &config))
+	groups := config.Hooks["SessionStart"]
+	require.Len(t, groups, 2)
+	require.Equal(t, "resume", *groups[1].Matcher)
+	command := exec.Command(shell, "-c", groups[1].Hooks[0].Command)
+	command.Dir = root
+	command.Env = env
+	command.Stdin = bytes.NewReader(raw)
+	out, err = command.CombinedOutput()
+	require.NoError(t, err, "runner: %s", out)
+	readback := exec.Command(binary, "--db", dbPath, "hook", "lifecycle", "list", "--format", "json")
+	readback.Env = env
+	out, err = readback.CombinedOutput()
+	require.NoError(t, err, "readback: %s", out)
+	var page struct {
+		Items []struct {
+			PayloadDigest string                  `json:"payloadDigest"`
+			Event         model.ContractEventKind `json:"event"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(out, &page))
+	require.Len(t, page.Items, 1)
+	require.Equal(t, digest.FromBytes(raw).String(), page.Items[0].PayloadDigest)
+	got := ingress.ExtractSessionTransition(registration.Codex__0_153_0().Contract, page.Items[0].Event, raw, model.CaptureValid, []model.NativeBinding{{Kind: model.BindingSession, Value: "constructed-resume-session"}})
+	require.Equal(t, model.SessionTransitionResume, got)
+}
 
 func buildCodexProofCLI(t *testing.T, root, binary string) {
 	t.Helper()
@@ -99,7 +148,7 @@ func TestCodexGeneratedRunnerDrivesBuiltCLI(t *testing.T) {
 				t.Logf("installed executable observation: %s", version)
 				groups, found := config.Hooks[event.NativeName]
 				require.True(t, found, "cleared event has no generated transport")
-				require.Len(t, groups, 1)
+				require.Len(t, groups, expectedCodexHookGroups(event.NativeName))
 				require.Len(t, groups[0].Hooks, 1)
 				require.Equal(t, "sh .codex/hooks/events/"+event.NativeName+".sh", groups[0].Hooks[0].Command)
 				raw, err := os.ReadFile(fixtures[event.NativeName])

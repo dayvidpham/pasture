@@ -336,6 +336,8 @@ func (r *servedLifecycleRecord) Settle(ctx context.Context, outcome provenance.B
 		Contract:     r.contract,
 		EventKind:    r.eventKind,
 		Bindings:     r.delivery.Bindings,
+		NativeBody:   r.delivery.Body,
+		Capture:      r.delivery.Capture,
 		OccurrenceID: r.occurrence,
 		RecordedAt:   time.Unix(0, r.pending.Operation().RecordedAt).UTC(),
 		ActorClaim:   r.claim,

@@ -43,7 +43,7 @@ func RetiredPopulatedStoreWithClaim(t *testing.T) (string, *sql.DB) {
 	if _, err := db.Exec(`DROP TABLE IF EXISTS pasture_id_cutover`); err != nil {
 		t.Fatalf("strip cutover receipt: %v", err)
 	}
-	if _, err := db.Exec(`DELETE FROM audit_schema_meta WHERE version >= ?`, audit.MaxKnownSchemaVersion); err != nil {
+	if _, err := db.Exec(`DELETE FROM audit_schema_meta WHERE version >= ?`, audit.IdentityFormatSchemaVersion); err != nil {
 		t.Fatalf("strip deferred ceiling: %v", err)
 	}
 	minBody := make([]byte, 16)

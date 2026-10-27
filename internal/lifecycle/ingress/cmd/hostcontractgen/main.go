@@ -214,7 +214,7 @@ func renderProviderManifest(c hostcontract.Contract, funcName, harnessExpr strin
 		for _, id := range e.Identities {
 			fmt.Fprintf(&b, "{Field:%s,Binding:%s,Required:%t},", fieldSymbols[uint16(id.Field)], binding(id.Binding), id.Required)
 		}
-		fmt.Fprintf(&b, "}, Blocking:%s, Mutation:%s, Failure:%s, StopLoop:%s},\n", blocking(e.Blocking), mutation(e.Mutation), failureIdent(e.Failure), stop(e.StopLoop))
+		fmt.Fprintf(&b, "}, Blocking:%s, Mutation:%s, Failure:%s, StopLoop:%s, SessionTransition:model.SessionTransition(%d), TransitionSourceField:%q},\n", blocking(e.Blocking), mutation(e.Mutation), failureIdent(e.Failure), stop(e.StopLoop), e.SessionTransition, e.TransitionSourceField)
 	}
 	fmt.Fprintf(&b, "\t}\n\tcontract, err := ir.NewRuntimeContractID(%s, %q)\n\tif err != nil { panic(err) }\n\treturn Manifest{Harness:%s, Version:%q, Contract:contract, Events:events}\n}\n", harnessExpr, c.Version, harnessExpr, c.Version)
 	return b.Bytes()
@@ -252,7 +252,7 @@ func renderManifest(c hostcontract.Contract) []byte {
 		for _, id := range e.Identities {
 			fmt.Fprintf(&b, "{Field:%s,Binding:%s,Required:%t},", fieldSymbols[uint16(id.Field)], binding(id.Binding), id.Required)
 		}
-		fmt.Fprintf(&b, "}, Blocking:%s, Mutation:%s, Failure:%s, StopLoop:%s},\n", blocking(e.Blocking), mutation(e.Mutation), failureIdent(e.Failure), stop(e.StopLoop))
+		fmt.Fprintf(&b, "}, Blocking:%s, Mutation:%s, Failure:%s, StopLoop:%s, SessionTransition:model.SessionTransition(%d), TransitionSourceField:%q},\n", blocking(e.Blocking), mutation(e.Mutation), failureIdent(e.Failure), stop(e.StopLoop), e.SessionTransition, e.TransitionSourceField)
 	}
 	fmt.Fprintf(&b, "\t}\n\tcontract, err := ir.NewRuntimeContractID(ir.HarnessClaudeCode, %q)\n\tif err != nil { panic(err) }\n\treturn Manifest{Harness:ir.HarnessClaudeCode, Version:%q, Contract:contract, Events:events}\n}\n", c.Version, c.Version)
 	fmt.Fprintf(&b, "\nfunc ClaudeCode__%sNativeFieldNames() map[model.NativeFieldID]string {\n\treturn map[model.NativeFieldID]string{\n", versionToken(c))
