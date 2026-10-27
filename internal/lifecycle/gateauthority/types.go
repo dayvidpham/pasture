@@ -260,13 +260,17 @@ type Episode struct {
 
 // SessionClaim is what a harness session is bound to. Bound false means the
 // session was never claimed, which is not an error: the gate proceeds and
-// records that the session was unbound. Known reports whether the harness
-// session id itself was recognised.
+// records that the session was unbound. Known reports whether the claimed actor
+// is recognized; the reserved attribution-only identity never requires an
+// ownership query to establish that fact.
 type SessionClaim struct {
 	Bound   bool
 	Actor   provenance.ActorID
 	Session string
 	Known   bool
+	// AttributionOnly identifies the exact reserved generic LLM actor. This
+	// descriptive claim conveys no ownership or assignment-policy enrollment.
+	AttributionOnly bool
 }
 
 // ActorAuthority is every started episode one actor holds at the snapshot
