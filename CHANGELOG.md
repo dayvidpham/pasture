@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.0.23] - 2026-10-27
+
+### Fixed
+- fix(nix): refresh the vendor hash for v0.0.23
+
 ## [0.0.22] - 2026-10-27
 
 ### Added
