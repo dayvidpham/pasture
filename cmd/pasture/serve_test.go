@@ -20,6 +20,15 @@ import (
 	"github.com/dayvidpham/pasture/internal/peasantproject"
 )
 
+// The main-only race job runs this package under heavy instrumentation and CI
+// CPU contention. These waits bound a real startup or shutdown, not a latency
+// requirement, so keep them generous enough that a slow runner cannot turn a
+// healthy serve process into a false failure.
+const (
+	serveStartupBudget  = 60 * time.Second
+	serveShutdownBudget = 30 * time.Second
+)
+
 // The serve help is the operator's route map. It must name the transcript
 // proxy, the peasant dependency that rail has, and the ordinary auto-on-open
 // migration path; the old text claimed serve never migrated the schema, which
@@ -116,7 +125,7 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	var line string
 	select {
 	case line = <-lineCh:
-	case <-time.After(10 * time.Second):
+	case <-time.After(serveStartupBudget):
 		t.Fatal("serve did not print its bound address")
 	}
 	require.True(t, strings.HasPrefix(line, "pasture serve listening on http://127.0.0.1:"), line)
@@ -176,7 +185,7 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	select {
 	case err := <-done:
 		require.NoError(t, err)
-	case <-time.After(10 * time.Second):
+	case <-time.After(serveShutdownBudget):
 		t.Fatal("serve did not shut down after context cancellation")
 	}
 }
@@ -224,7 +233,7 @@ func TestServeWebDirOverride(t *testing.T) {
 	case result := <-lineCh:
 		require.NoError(t, result.err)
 		line = result.line
-	case <-time.After(10 * time.Second):
+	case <-time.After(serveStartupBudget):
 		t.Fatal("serve did not print its bound address")
 	}
 	require.True(t, strings.HasPrefix(line, "pasture serve listening on http://127.0.0.1:"), line)
@@ -247,7 +256,7 @@ func TestServeWebDirOverride(t *testing.T) {
 	select {
 	case err := <-done:
 		require.NoError(t, err)
-	case <-time.After(10 * time.Second):
+	case <-time.After(serveShutdownBudget):
 		t.Fatal("serve did not shut down after context cancellation")
 	}
 }
