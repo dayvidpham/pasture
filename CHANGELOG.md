@@ -1,5 +1,118 @@
 # Changelog
 
+## [0.0.22] - 2026-10-27
+
+### Added
+- feat(writelane): raise lane capacity and hold budget
+- feat(writelane): raise lane BatchBytes to 64 MiB
+- feat(skills): add afk-implement generated skill
+- feat(web): add runtime Peasant enrichment toggle
+- feat(serve): embed the compiled web console in the pasture binary
+- feat(cli): scope task readiness to the active namespace
+- feat(web): add project epoch mapping controls
+- feat(session-api): add explicit project-epoch mappings
+- feat(web): show Peasant project integration
+- feat(session-api): add opt-in Peasant project enrichment
+- feat(web): add historical session timeline
+- feat(session-api): proxy Peasant transcripts and render them
+- feat(session-api): infer bindings from claim ownership
+- feat(session-api): expose historical binding intervals
+- feat(session-cli): add session list and show
+- feat(session-api): add the fairtrade session-epoch web shell
+- feat(session-api): stream session and epoch snapshots over WebSocket
+- feat(session-api): make serve startup independent of backfill
+- feat(session-api): add epoch read endpoints and inspect
+- feat(session-api): bind and unbind sessions with typed conflicts
+- feat(session-api): generate and serve the OpenAPI contract
+- feat(session-api): serve loopback session list and detail
+- feat(session-api): rebuild session state from journal and bindings
+- feat(session-api): add transactional session-state tail
+- feat(install): create the daemon config and user service
+
+### Fixed
+- fix(lifecycle): bump epoch document after source refresh
+- fix(writelane): lower idle flush to 50ms
+- fix(timeouts): raise production busy wait to 1.5s and ingress to 2s
+- fix(lifecycle): make active definition lookup O(1)
+- fix(lifecycle): admit source-inventory-only definition updates
+- fix(serve): harden Peasant toggle close and off-state guidance
+- fix(make): force build targets to rebuild stale binaries
+- fix(ci): preserve the release-authority web build step
+- fix(webui): polish --web-dir validation and guard-test wording
+- fix(webui): harden the embedded console review findings
+- fix(cli): move NamespaceEnv to a production-neutral package
+- fix(cli): address namespace readiness review findings
+- fix(idmigrate): classify project binding identities
+- fix(session-api): polish project mapping error paths
+- fix(session-api): close project mapping review gaps
+- fix(session-api): bound project cache and cover cancellation
+- fix(session-api): harden opt-in project enrichment
+- fix(web): polish timeline end and provenance edges
+- fix(web): close historical timeline review gaps
+- fix(session-api): classify bind failures and align serve surface
+- fix(session-api): close transcript cleanup and release-gate gaps
+- fix(session-cli): pin cache errors and correct serve help
+- fix(session-api): close read-contract and diagnostic gaps
+- fix(session-api): close transcript proxy review gaps
+- fix(session-cli): close session CLI review gaps
+- fix(session-api): unify inferred binding reads and confidence
+- fix(idmigrate): classify session binding identity columns
+- fix(session-api): keep occurrence fact reads raw and bounded
+- fix(session-api): give serve a bounded rebuild budget
+- fix(install): harden config and service handling
+
+### Changed
+- refactor(opencode): generate typed lifecycle handlers and commands
+- perf(session-api): rebuild session cache from occurrence facts
+
+### Documentation
+- docs: align current lane budget prose
+- docs: record the provenance delta pin
+- docs(serve): document Peasant WAL sidecars and share the disabled message
+- docs: record the namespace recovery plugin digest
+- docs(session-api): describe the write surface and share fault wording
+
+### Other
+- chore(web): align package version before release
+- Merge pull request #245 from dayvidpham/pasture-perf-landing
+- chore(lifecycle): regenerate epoch sources for schema gate
+- merge: integrate origin/main before performance landing
+- merge: incremental journal delta and lane performance
+- test(audit): derive busy timeout from the profile
+- chore: pin provenance journal delta verification
+- Merge branch 'pasture-active-entity--feat--hot-path' into pasture-perf-integration
+- test(lifecycle): retain measured active indexes
+- Merge pull request #244 from dayvidpham/pasture-243--feat--afk-implement-skill
+- Merge pull request #242 from dayvidpham/pasture-01a16e6b--fix--epoch-source-compat
+- Merge pull request #241 from dayvidpham/pasture-240--feat--peasant-enrichment-toggle
+- Merge pull request #239 from dayvidpham/pasture-238--fix--make-build-force
+- Merge pull request #237 from dayvidpham/pasture-230--feat--embedded-web-ui
+- chore(nix): refresh the Go module vendor hash
+- Merge pull request #236 from dayvidpham/pasture-230--feat--namespace-readiness
+- Merge pull request #235 from dayvidpham/pasture-230--feat--project-mapping-web
+- Merge pull request #233 from dayvidpham/pasture-230--feat--project-web
+- Merge pull request #232 from dayvidpham/pasture-230--feat--phase1-epoch-api
+- merge: pin final wording and unbind refusal
+- test(session-api): pin write-surface wording and unbind refusal
+- merge: correct API description and shared fault wording
+- merge: classify bind failures and align serve surface
+- merge: close transcript cleanup and release-gate gaps
+- merge: close CLI and serve review gaps
+- merge: close read-contract and diagnostic gaps
+- merge: close transcript and web review gaps
+- merge: close session CLI review gaps
+- merge: surface inferred bindings with confidence
+- merge: classify session binding identities
+- merge: session CLI commands
+- merge: transcript proxy and fairtrade viewer
+- test(session-cli): classify the session CLI test in the guard sweep
+- Merge pull request #231 from dayvidpham/pasture-230--feat--session-epoch-api
+- Merge pull request #229 from dayvidpham/pasture-01a15046--ci--nonrace-pr
+- ci: run the non-race suite on pull requests
+- Merge pull request #228 from dayvidpham/pasture-01a15046--test--hybrid-fake-store
+- Merge pull request #227 from dayvidpham/pasture-installer--feat--config-and-service
+- test(lifecycle): prove admission and preview without a store
+
 ## [0.0.21] - 2026-10-18
 
 Release-preparation candidate, **not published**. The separately owned version

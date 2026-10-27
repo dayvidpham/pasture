@@ -1,15 +1,4 @@
 {
-  "name": "@dayvidpham/pasture-web",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "test": "vitest run",
-    "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.6.0.json -o src/generated/api.ts"
-  },
   "dependencies": {
     "@peasant-labs/fairtrade": "0.0.31",
     "@peasant-labs/schema": "0.31.0",
@@ -26,5 +15,16 @@
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
-  }
+  },
+  "name": "@dayvidpham/pasture-web",
+  "private": true,
+  "scripts": {
+    "build": "tsc --noEmit \u0026\u0026 vite build",
+    "dev": "vite",
+    "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.6.0.json -o src/generated/api.ts",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "type": "module",
+  "version": "0.0.22"
 }
