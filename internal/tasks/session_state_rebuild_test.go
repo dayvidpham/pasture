@@ -114,7 +114,7 @@ func TestEnsureSessionStateRebuildsOnlyWhenNeeded(t *testing.T) {
 	rebuild, rebuilt, err = tasks.EnsureSessionState(t.Context(), tracker)
 	require.NoError(t, err)
 	require.True(t, rebuilt)
-	require.Equal(t, int64(2), rebuild.Revision)
+	require.Equal(t, int64(3), rebuild.Revision, "dirty publication and successful rebuild each advance the generation")
 
 	var dirty int64
 	require.NoError(t, db.QueryRow(`SELECT dirty FROM pasture_session_api_state WHERE singleton_id = 0`).Scan(&dirty))
@@ -198,7 +198,7 @@ func TestRebuildSessionStateRepairsASessionEndBinding(t *testing.T) {
 		Event:          "SessionEnd",
 		HostVersion:    "2.1.261",
 		Input:          bytes.NewReader(end),
-		Clock:          claimClock{},
+		Clock:          &liveFoldClock{at:1700000002},
 		Operations:     claimOperation("repair.end"),
 		ActorClaim:     tasks.ActorClaim(actor.ID.String()),
 		TimeoutProfile: timeouts.TestProfile(),

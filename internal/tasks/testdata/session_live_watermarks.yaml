@@ -1,0 +1,55 @@
+# Constructed fold sequences, not authentic harness captures.
+- name: delayed-prompt-after-newer-tool
+  tails: [{event: UserPromptSubmit, jid: 10, at: 100}, {event: PostToolUse, jid: 30, at: 300}, {event: UserPromptSubmit, jid: 20, at: 200}]
+  broad: 30
+  prompt: 20
+  prompt_at: 200
+  revision: 3
+- name: stale-prompt-inert
+  tails: [{event: UserPromptSubmit, jid: 20, at: 200}, {event: UserPromptSubmit, jid: 10, at: 100}]
+  broad: 20
+  prompt: 20
+  prompt_at: 200
+  revision: 1
+- name: duplicate-inert
+  tails: [{event: UserPromptSubmit, jid: 20, at: 200}, {event: UserPromptSubmit, jid: 20, at: 200}]
+  broad: 20
+  prompt: 20
+  prompt_at: 200
+  revision: 1
+- name: never-bound-end-survives-background
+  tails: [{event: SessionEnd, jid: 10, at: 100}, {event: PostToolUse, jid: 20, at: 200}]
+  broad: 20
+  end: 10
+  end_at: 100
+  revision: 2
+- name: end-after-resume-arrives-late
+  tails: [{event: SessionEnd, jid: 10, at: 100}, {event: SessionStart, source: resume, jid: 30, at: 300}, {event: SessionEnd, jid: 20, at: 999}]
+  broad: 30
+  end: 20
+  end_at: 999
+  resume: 30
+  resume_at: 300
+  revision: 3
+- name: end-resume-journal-order-not-clock
+  tails: [{event: UserPromptSubmit, jid: 5, at: 500}, {event: SessionEnd, jid: 10, at: 400}, {event: SessionStart, source: resume, jid: 20, at: 300}, {event: SessionEnd, jid: 30, at: 200}, {event: SessionStart, source: resume, jid: 40, at: 100}]
+  broad: 40
+  prompt: 5
+  prompt_at: 500
+  end: 30
+  end_at: 200
+  resume: 40
+  resume_at: 100
+  revision: 5
+- name: startup-is-not-resume
+  tails: [{event: SessionEnd, jid: 10, at: 100}, {event: SessionStart, source: startup, jid: 20, at: 200}]
+  broad: 20
+  end: 10
+  end_at: 100
+  revision: 2
+- name: invalid-capture-cannot-resume
+  tails: [{event: SessionEnd, jid: 10, at: 100}, {event: SessionStart, source: resume, jid: 20, at: 200, invalid: true}]
+  broad: 20
+  end: 10
+  end_at: 100
+  revision: 2
