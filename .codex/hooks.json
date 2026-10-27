@@ -100,6 +100,17 @@
             "statusMessage": "Consulting Pasture lifecycle state"
           }
         ]
+      },
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh .codex/hooks/events/SessionStart.sh",
+            "timeout": 600,
+            "statusMessage": "Consulting Pasture lifecycle state"
+          }
+        ]
       }
     ],
     "Stop": [

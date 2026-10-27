@@ -65,6 +65,10 @@ func OpenCode2_0_20() Contract {
 			StopLoop: StopLoopNotApplicable,
 		}
 		switch runtimeEvent {
+		case pastureruntime.OpenCode2EventSessionPrompt:
+			event.SessionTransition = model.SessionTransitionPrompt
+		}
+		switch runtimeEvent {
 		case pastureruntime.OpenCode2EventSessionCreated,
 			pastureruntime.OpenCode2EventSessionPrompt,
 			pastureruntime.OpenCode2EventSessionContext,

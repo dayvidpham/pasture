@@ -13,3 +13,15 @@ versions:
   - contract: codex/codex@0.153.0
     version: 1
     sha256: 5803b0414d06422ca48123a820a78306fcab3dd7247868e81750f02e744b65ff
+  - contract: claude-code/claude-code@2.1.261
+    version: 2
+    sha256: a063218508543fa1fd2426c8fb7c3d8779db84f58e9b5f352743ac2d9ed51789
+  - contract: opencode/opencode@1.18.29
+    version: 2
+    sha256: dd45d2bebb3a73b208fe13a61f2b54b78808ceff5dceaecf0c04e4cacfd3b22c
+  - contract: opencode/opencode@2.0.20
+    version: 2
+    sha256: dd858159c1204190db0e07cc4ee4a35e464014eb362e86d71507a833e0d1e95a
+  - contract: codex/codex@0.153.0
+    version: 2
+    sha256: c54f70e7cec2d33a1a815d447c1d1058a76fc8af3799bb63e63deeb1e2764b61

@@ -665,6 +665,12 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 				last_event      TEXT NOT NULL,
 				last_journal_id INTEGER NOT NULL,
 				updated_at      INTEGER NOT NULL,
+				last_prompt_at INTEGER NOT NULL DEFAULT 0,
+				last_prompt_journal_id INTEGER NOT NULL DEFAULT 0,
+				host_end_at INTEGER NOT NULL DEFAULT 0,
+				host_end_journal_id INTEGER NOT NULL DEFAULT 0,
+				last_resume_at INTEGER NOT NULL DEFAULT 0,
+				last_resume_journal_id INTEGER NOT NULL DEFAULT 0,
 				PRIMARY KEY (harness, session)
 			)`,
 		},
@@ -723,12 +729,13 @@ func ensurePastureTablesContext(ctx context.Context, db *sql.DB) error {
 				singleton_id          INTEGER PRIMARY KEY CHECK (singleton_id = 0),
 				revision              INTEGER NOT NULL,
 				dirty                 INTEGER NOT NULL CHECK (dirty IN (0,1)),
-				completed_through_jid INTEGER NOT NULL
+				completed_through_jid INTEGER NOT NULL,
+				cache_version INTEGER NOT NULL DEFAULT 0
 			)`,
 		},
 		{
 			name: "pasture_session_api_state_singleton",
-			ddl:  `INSERT OR IGNORE INTO pasture_session_api_state (singleton_id, revision, dirty, completed_through_jid) VALUES (0, 0, 0, 0)`,
+			ddl:  fmt.Sprintf(`INSERT OR IGNORE INTO pasture_session_api_state (singleton_id, revision, dirty, completed_through_jid, cache_version) VALUES (0, 0, 0, 0, %d)`, audit.SessionCacheVersion),
 		},
 		{
 			// pasture_system_identity persists the resolved committing actor and

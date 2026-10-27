@@ -62,7 +62,7 @@ func RunCatchUp(ctx context.Context, opts CatchUpOptions) (CatchUpResult, error)
 	}
 
 	beforeVersion := RecordedSchemaVersionPath(opts.StorePath)
-	trailOptions := []audit.SqliteAuditTrailOption{audit.WithDeferredCeiling(audit.MaxKnownSchemaVersion - 1)}
+	trailOptions := []audit.SqliteAuditTrailOption{audit.WithDeferredCeiling(audit.IdentityFormatSchemaVersion - 1)}
 	if !opts.TimeoutProfile.IsZero() {
 		trailOptions = append(trailOptions, audit.WithTimeoutProfile(opts.TimeoutProfile))
 	}

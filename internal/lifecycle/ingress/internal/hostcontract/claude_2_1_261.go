@@ -90,7 +90,17 @@ func nativeEvent(kind model.ContractEventKind, symbol, name string, fields []mod
 	all := append([]model.NativeFieldID(nil), commonFields...)
 	all = append(all, fields...)
 	ids := append([]Identity{{Field: fSessionID, Binding: model.BindingSession, Required: true}}, identities...)
-	return Event{Kind: kind, Symbol: symbol, Name: name, Fields: all, Identities: ids, Blocking: blocking, Mutation: mutation, Failure: failure, StopLoop: stop}
+	event := Event{Kind: kind, Symbol: symbol, Name: name, Fields: all, Identities: ids, Blocking: blocking, Mutation: mutation, Failure: failure, StopLoop: stop}
+	switch name {
+	case "UserPromptSubmit":
+		event.SessionTransition = model.SessionTransitionPrompt
+	case "SessionEnd":
+		event.SessionTransition = model.SessionTransitionEnd
+	case "SessionStart":
+		event.SessionTransition = model.SessionTransitionResume
+		event.TransitionSourceField = "source"
+	}
+	return event
 }
 
 // ClaudeCode2_1_261 is the Claude Code host contract at the recorded version

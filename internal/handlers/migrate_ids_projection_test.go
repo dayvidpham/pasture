@@ -45,7 +45,7 @@ func buildRetiredStoreWithStaleProjection(t *testing.T) string {
 	db, err := dbconn.OpenSharedDB(path)
 	require.NoError(t, err)
 	ctx := context.Background()
-	require.NoError(t, audit.MigrateContextToCeiling(ctx, db, audit.MaxKnownSchemaVersion-1))
+	require.NoError(t, audit.MigrateContextToCeiling(ctx, db, audit.IdentityFormatSchemaVersion-1))
 	for _, table := range []string{"provenance_id_format", "pasture_id_cutover"} {
 		_, err := db.Exec("DROP TABLE IF EXISTS " + table)
 		require.NoError(t, err)

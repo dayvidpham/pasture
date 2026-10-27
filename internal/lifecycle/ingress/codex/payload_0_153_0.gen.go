@@ -11,4 +11,5 @@ var fieldNames0_153_0 = map[model.NativeFieldID]string{
 	registration.FieldCodexTurnID:    "turn_id",
 	registration.FieldCodexToolUseID: "tool_use_id",
 	registration.FieldCodexAgentID:   "agent_id",
+	registration.FieldCodexSource:    "source",
 }

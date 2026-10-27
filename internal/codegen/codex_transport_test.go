@@ -107,7 +107,7 @@ func TestCodexHooksJSONUsesPlainCommandStrings(t *testing.T) {
 	}
 	for _, event := range codexLifecycleEventNamesForTest() {
 		groups := config.Hooks[event]
-		if len(groups) != 1 || len(groups[0].Hooks) != 1 {
+		if len(groups) != expectedCodexHookGroups(event) || len(groups[0].Hooks) != 1 {
 			t.Fatalf("event %s has %+v, want exactly one command hook", event, groups)
 		}
 		command := groups[0].Hooks[0].Command

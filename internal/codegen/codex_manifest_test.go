@@ -142,7 +142,7 @@ func TestCodexHooksConfigCoversActivatedEvents(t *testing.T) {
 	}
 	for _, event := range activated {
 		groups, ok := config.Hooks[event]
-		if !ok || len(groups) != 1 || len(groups[0].Hooks) != 1 {
+		if !ok || len(groups) != expectedCodexHookGroups(event) || len(groups[0].Hooks) != 1 {
 			t.Fatalf("event %s config = %+v, want one command hook", event, groups)
 		}
 		command := groups[0].Hooks[0].Command
@@ -187,8 +187,8 @@ func TestCodexHooksMatchersMatchAuthenticCapture(t *testing.T) {
 	requireMatcher := func(event, want string) {
 		t.Helper()
 		groups := config.Hooks[event]
-		if len(groups) != 1 {
-			t.Fatalf("event %s has %d groups, want 1", event, len(groups))
+		if len(groups) != expectedCodexHookGroups(event) {
+			t.Fatalf("event %s has %d groups, want %d", event, len(groups), expectedCodexHookGroups(event))
 		}
 		if groups[0].Matcher == nil {
 			t.Fatalf("event %s matcher is omitted, want the authentic value %q", event, want)
@@ -255,8 +255,44 @@ func TestCodexCommittedHooksMatchersMatchAuthenticCapture(t *testing.T) {
 	}
 	for event, want := range codexAuthenticMatchers {
 		groups := config.Hooks[event]
-		if len(groups) != 1 || groups[0].Matcher == nil || *groups[0].Matcher != want {
+		if len(groups) != expectedCodexHookGroups(event) || groups[0].Matcher == nil || *groups[0].Matcher != want {
 			t.Errorf("committed .codex/hooks.json event %s matcher = %+v, want authentic value %q; run make generate", event, groups, want)
+		}
+	}
+}
+
+func expectedCodexHookGroups(event string) int {
+	if event == "SessionStart" {
+		return 2
+	}
+	return 1
+}
+
+// This is a generated configuration contract, not native matcher acceptance.
+func TestCodexStartupAndResumeUseTheSameRunner(t *testing.T) {
+	t.Parallel()
+	project, err := renderCodexHooksConfig(codexLifecycleEventNamesForTest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	global, err := EmitCodexGlobalHooksConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wire := range []string{project, global.Content} {
+		var config codexHooksConfig
+		if err := json.Unmarshal([]byte(wire), &config); err != nil {
+			t.Fatal(err)
+		}
+		groups := config.Hooks["SessionStart"]
+		if len(groups) != 2 {
+			t.Fatalf("SessionStart groups = %d", len(groups))
+		}
+		if groups[0].Matcher == nil || *groups[0].Matcher != "startup" || groups[1].Matcher == nil || *groups[1].Matcher != "resume" {
+			t.Fatalf("expected two exact startup/resume subscriptions: %+v", groups)
+		}
+		if len(groups[0].Hooks) != 1 || len(groups[1].Hooks) != 1 || groups[0].Hooks[0] != groups[1].Hooks[0] {
+			t.Fatal("startup/resume do not share exactly one identical runner command")
 		}
 	}
 }

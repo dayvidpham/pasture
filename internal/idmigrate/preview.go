@@ -153,7 +153,7 @@ func preview(ctx context.Context, db *sql.DB, storePath string) (Preview, error)
 	if out.Preserved, err = preservedColumnsPresent(ctx, db); err != nil {
 		return Preview{}, err
 	}
-	if target := audit.MaxKnownSchemaVersion - 1; out.RecordedVersion < target {
+	if target := audit.IdentityFormatSchemaVersion - 1; out.RecordedVersion < target {
 		out.PendingCatchUpSteps = target - out.RecordedVersion
 	}
 	if out.EpochIDLowerBound, err = countLegacyEpochIDs(ctx, db, out.RecordedVersion); err != nil {

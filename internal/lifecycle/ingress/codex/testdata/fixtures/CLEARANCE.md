@@ -16,6 +16,20 @@ used. Each section below states which batch a paragraph belongs to.
 
 ## Harness and pinned version
 
+### Later generated subscription change (2026-10-27; not capture acceptance)
+
+The candidate committed `.codex/hooks.json` now hashes to
+`d8699ab044136b23bcd3d0d0f9b4e211ccc7d0f13ff7c6876d08cb8c2cc83f6b`.
+It differs from the capture-kit and previously shipped digests below because
+SessionStart now has a second exact `resume` matcher group beside the unchanged
+`startup` group. Both groups use the unchanged production event runner. This
+maintenance note changes no fixture, historical digest, or user acceptance.
+Neither sitting below proves the new resume subscription: genuine same-ID
+end/resume delivery through this candidate configuration and the pinned native
+binary, on direct and supported served paths, still requires capture and explicit
+clearance. Constructed runner tests and static matcher-source evidence are not
+that acceptance.
+
 Codex 0.153.0. Admission is a floor: this version and every later release; the
 contract records 0.153.0.
 

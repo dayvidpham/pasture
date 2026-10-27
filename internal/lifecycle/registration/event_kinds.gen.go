@@ -177,4 +177,5 @@ const (
 	FieldCodexAgentID
 	FieldOpenCode2SessionID
 	FieldOpenCode2CallID
+	FieldCodexSource
 )

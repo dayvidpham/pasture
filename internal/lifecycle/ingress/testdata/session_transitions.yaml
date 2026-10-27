@@ -1,0 +1,25 @@
+# Constructed algorithm cases, not authentic host captures.
+- {name: claude-resume, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"resume"}', session: s, want: 3}
+- {name: codex-resume, harness: codex, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"resume"}', session: s, want: 3}
+- {name: startup, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"startup"}', session: s, want: 0}
+- {name: compact, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"compact"}', session: s, want: 0}
+- {name: clear, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"clear"}', session: s, want: 0}
+- {name: fork, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"fork"}', session: s, want: 0}
+- {name: unknown-source, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"other"}', session: s, want: 0}
+- {name: missing-source, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s"}', session: s, want: 0}
+- {name: padded-source, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"resume "}', session: s, want: 0}
+- {name: wrong-source-kind, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":true}', session: s, want: 0}
+- {name: sessionless, event: SessionStart, body: '{"hook_event_name":"SessionStart","source":"resume"}', want: 0}
+- {name: different-session, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"other","source":"resume"}', session: s, want: 0}
+- {name: invalid-capture, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"resume"}', session: s, invalid: true, want: 0}
+- {name: malformed, event: SessionStart, body: '{', session: s, want: 0}
+- {name: duplicate-source, event: SessionStart, body: '{"hook_event_name":"SessionStart","session_id":"s","source":"startup","source":"resume"}', session: s, want: 0}
+- {name: wrong-event, event: SessionStart, body: '{"hook_event_name":"SessionEnd","session_id":"s","source":"resume"}', session: s, want: 0}
+- {name: claude-prompt, event: UserPromptSubmit, body: '{"hook_event_name":"UserPromptSubmit","session_id":"s","source":"resume"}', session: s, want: 1}
+- {name: codex-prompt, harness: codex, event: UserPromptSubmit, body: '{"hook_event_name":"UserPromptSubmit","session_id":"s"}', session: s, want: 1}
+- {name: opencode-prompt, harness: opencode, event: session.prompt, body: '{"sessionID":"s"}', session: s, want: 1}
+- {name: opencode-background, harness: opencode, event: session.context, body: '{"sessionID":"s","source":"resume"}', session: s, want: 0}
+- {name: claude-end, event: SessionEnd, body: '{"hook_event_name":"SessionEnd","session_id":"s"}', session: s, want: 2}
+- {name: codex-end, harness: codex, event: SessionEnd, body: '{"hook_event_name":"SessionEnd","session_id":"s"}', session: s, want: 2}
+- {name: background, event: PostToolUse, body: '{"hook_event_name":"PostToolUse","session_id":"s","source":"resume"}', session: s, want: 0}
+- {name: model-switch, event: PostModelSwitch, body: '{"hook_event_name":"PostModelSwitch","session_id":"s","source":"resume"}', session: s, want: 0}

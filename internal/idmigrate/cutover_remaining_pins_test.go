@@ -74,7 +74,7 @@ func markerlessStoreOnTheProductionHandle(t *testing.T) (string, *sql.DB) {
 	db, err := dbconn.OpenSharedDB(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.MaxKnownSchemaVersion-1))
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.IdentityFormatSchemaVersion-1))
 	return path, db
 }
 
@@ -96,7 +96,7 @@ func lifecycleBearingStore(t *testing.T) (string, *sql.DB) {
 	ctx := context.Background()
 	// The audit schema the conversion reads and raises, stopped at the cutover
 	// target the way the deferred catch-up leaves it.
-	require.NoError(t, audit.MigrateContextToCeiling(ctx, db, audit.MaxKnownSchemaVersion-1))
+	require.NoError(t, audit.MigrateContextToCeiling(ctx, db, audit.IdentityFormatSchemaVersion-1))
 	// Drop the fence evidence the seed open wrote: the conversion only ever runs
 	// on an unmarked store.
 	for _, table := range []string{"provenance_id_format", "pasture_id_cutover"} {
@@ -289,7 +289,7 @@ func TestConversionInTransactionInjectionsRollBackARealReplay(t *testing.T) {
 			require.NoError(t, stateErr)
 			require.False(t, state.MarkerPresent, "the marker must roll back")
 			require.False(t, state.ReceiptPresent, "the receipt must roll back")
-			require.Equal(t, audit.MaxKnownSchemaVersion-1, state.RecordedVersion, "the deferred ceiling must roll back")
+			require.Equal(t, audit.IdentityFormatSchemaVersion-1, state.RecordedVersion, "the deferred ceiling must roll back")
 
 			var occurrences, bindings, converted, retired int
 			require.NoError(t, db.QueryRow(`SELECT count(*) FROM lifecycle_occurrences`).Scan(&occurrences))
@@ -360,7 +360,7 @@ func TestBelowTargetRefusalNamesTheAppliedCatchUpAndWritesNothing(t *testing.T) 
 	require.NoError(t, stateErr)
 	require.Equal(t, OutcomeRefuseUnbackedMark, state.Outcome)
 	require.False(t, state.ReceiptPresent, "the refusal writes no receipt")
-	require.Equal(t, audit.MaxKnownSchemaVersion-1, state.RecordedVersion, "the refusal raises no floor")
+	require.Equal(t, audit.IdentityFormatSchemaVersion-1, state.RecordedVersion, "the refusal raises no floor")
 }
 
 // TestNoArchiveScopedRefusalBranchIsPinned pins the no-archive branch of the

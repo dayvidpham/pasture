@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -20,10 +21,14 @@ import (
 // handler and the daemon lane. It carries exactly the committed receipt facts
 // plus the verified event bindings.
 type SessionTailInput struct {
-	Harness      ir.HarnessID
-	Contract     ir.RuntimeContractID
-	EventKind    model.ContractEventKind
-	Bindings     []model.NativeBinding
+	Harness   ir.HarnessID
+	Contract  ir.RuntimeContractID
+	EventKind model.ContractEventKind
+	Bindings  []model.NativeBinding
+	// NativeBody and Capture are supplied by the admitted parser on direct and
+	// served paths. Legacy replay without a retained body cannot prove resume.
+	NativeBody   []byte
+	Capture      model.CaptureDisposition
 	OccurrenceID model.OccurrenceID
 	RecordedAt   time.Time
 	ActorClaim   ActorClaim
@@ -119,7 +124,7 @@ func RecordLifecycleSessionTail(ctx context.Context, tracker protocol.TaskTracke
 		return out, sessionClaimError("the store refused the session-state savepoint: "+err.Error(), "release other store writers or repair the database, then retry the delivery")
 	}
 	stateErr := writer.UpsertSessionState(bounded, tx, in, session)
-	if stateErr == nil && isSessionEnd(in.Harness, in.Contract, in.EventKind) {
+	if stateErr == nil && sessionTailTransition(in) == model.SessionTransitionEnd {
 		stateErr = closeSessionBindingTx(bounded, tx, in.Harness, session, in.RecordedAt.UnixNano())
 	}
 	if stateErr != nil {
@@ -151,6 +156,18 @@ func RecordLifecycleSessionTail(ctx context.Context, tracker protocol.TaskTracke
 		return out, sessionClaimError("the store refused to commit the session-tail transaction: "+err.Error(), "release other store writers or repair the database, then retry the delivery")
 	}
 	return out, nil
+}
+
+func sessionTailTransition(in SessionTailInput) model.SessionTransition {
+	if in.NativeBody != nil {
+		return ingress.ExtractSessionTransition(in.Contract, in.EventKind, in.NativeBody, in.Capture, in.Bindings)
+	}
+	// Old occurrence rows already record their admitted event coordinate. Their
+	// end meaning remains readable without a body; resume never gets guessed.
+	if isSessionEnd(in.Harness, in.Contract, in.EventKind) {
+		return model.SessionTransitionEnd
+	}
+	return model.SessionTransitionNone
 }
 
 // MarkSessionStateDirty marks the session cache behind. The raw lifecycle

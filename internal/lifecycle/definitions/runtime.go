@@ -14,7 +14,7 @@ import (
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 )
 
-const RuntimeDocumentVersion uint32 = 1
+const RuntimeDocumentVersion uint32 = 2
 
 type runtimeDocument struct {
 	Kind          model.DefinitionKind  `json:"kind"`
@@ -175,10 +175,17 @@ func decodeRuntime(payload []byte) (Document, error) {
 	// by today's generator. Add a new arm rather than replacing this decoder.
 	switch wire.Version {
 	case 1:
+		if err := validateRuntimeV1Shape(payload); err != nil {
+			return Document{}, err
+		}
+	case 2:
+		if err := validateRuntimeV2Transitions(wire.Specification); err != nil {
+			return Document{}, err
+		}
 	default:
 		return Document{}, failure("decodeRuntime", "The runtime document version has no supported historical codec.", nil)
 	}
-	if wire.Kind != model.DefinitionRuntimeContract || wire.Version != 1 || wire.Codec != model.DefinitionCanonicalJSON || !wire.Specification.Contract.IsValid() || wire.ID != runtimeID(wire.Specification.Contract) || wire.Specification.Harness != wire.Specification.Contract.Harness() || wire.Specification.Registration.Harness != wire.Specification.Harness || wire.Specification.Registration.Version != wire.Specification.Minimum || len(wire.Specification.Operations) != len(ir.AllOperationKinds()) || len(wire.Specification.Lifecycle) == 0 {
+	if wire.Kind != model.DefinitionRuntimeContract || wire.Codec != model.DefinitionCanonicalJSON || !wire.Specification.Contract.IsValid() || wire.ID != runtimeID(wire.Specification.Contract) || wire.Specification.Harness != wire.Specification.Contract.Harness() || wire.Specification.Registration.Harness != wire.Specification.Harness || wire.Specification.Registration.Version != wire.Specification.Minimum || len(wire.Specification.Operations) != len(ir.AllOperationKinds()) || len(wire.Specification.Lifecycle) == 0 {
 		return Document{}, failure("decodeRuntime", "Runtime document kind, owner identity, codec, version or full catalog is invalid.", fmt.Errorf("kind=%d version=%d codec=%d id=%q want=%q contract=%q valid=%t harness=%q registration=%q operations=%d expected=%d lifecycle=%d", wire.Kind, wire.Version, wire.Codec, wire.ID, runtimeID(wire.Specification.Contract), wire.Specification.Contract, wire.Specification.Contract.IsValid(), wire.Specification.Harness, wire.Specification.Registration.Contract, len(wire.Specification.Operations), len(ir.AllOperationKinds()), len(wire.Specification.Lifecycle)))
 	}
 	if err := validateRuntimeSpecification(wire.Specification); err != nil {

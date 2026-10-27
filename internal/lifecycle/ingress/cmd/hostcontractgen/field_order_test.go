@@ -41,7 +41,8 @@ func TestFieldAllocationPreservesExistingIDs(t *testing.T) {
 	require.Equal(t, len(baseline)+2, ids["FieldCodexAgentID"])
 	require.Equal(t, len(baseline)+3, ids["FieldOpenCode2SessionID"])
 	require.Equal(t, len(baseline)+4, ids["FieldOpenCode2CallID"])
-	require.Len(t, ids, len(baseline)+4)
+	require.Equal(t, len(baseline)+5, ids["FieldCodexSource"])
+	require.Len(t, ids, len(baseline)+5)
 }
 
 func renderedFieldIDs(t *testing.T, source []byte) map[string]int {

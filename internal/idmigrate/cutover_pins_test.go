@@ -40,7 +40,7 @@ func markerlessStore(t *testing.T) (string, *sql.DB) {
 	path := filepath.Join(t.TempDir(), "pasture.db")
 	db, err := dbconn.OpenDefaultDB(path)
 	require.NoError(t, err)
-	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.MaxKnownSchemaVersion-1))
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.IdentityFormatSchemaVersion-1))
 	t.Cleanup(func() { _ = db.Close() })
 	return path, db
 }
@@ -121,15 +121,15 @@ func TestRefuseUnbackedMarkClassRows(t *testing.T) {
 		want        Outcome
 	}{
 		{"marker only, below floor", true, false, "", 0, 9, OutcomeRefuseUnbackedMark},
-		{"receipt without marker", false, true, string(provenance.IDFormatSlash), audit.MaxKnownSchemaVersion, audit.MaxKnownSchemaVersion, OutcomeRefuseUnbackedMark},
-		{"marker-mismatched receipt", true, true, "some-other-format", audit.MaxKnownSchemaVersion, audit.MaxKnownSchemaVersion, OutcomeRefuseUnbackedMark},
-		{"version below the receipt floor", true, true, string(provenance.IDFormatSlash), audit.MaxKnownSchemaVersion, audit.MaxKnownSchemaVersion - 1, OutcomeRefuseUnbackedMark},
-		{"complete triple", true, true, string(provenance.IDFormatSlash), audit.MaxKnownSchemaVersion, audit.MaxKnownSchemaVersion, OutcomeNormal},
+		{"receipt without marker", false, true, string(provenance.IDFormatSlash), audit.IdentityFormatSchemaVersion, audit.MaxKnownSchemaVersion, OutcomeRefuseUnbackedMark},
+		{"marker-mismatched receipt", true, true, "some-other-format", audit.IdentityFormatSchemaVersion, audit.MaxKnownSchemaVersion, OutcomeRefuseUnbackedMark},
+		{"version below the receipt floor", true, true, string(provenance.IDFormatSlash), audit.IdentityFormatSchemaVersion, audit.IdentityFormatSchemaVersion - 1, OutcomeRefuseUnbackedMark},
+		{"complete triple", true, true, string(provenance.IDFormatSlash), audit.IdentityFormatSchemaVersion, audit.MaxKnownSchemaVersion, OutcomeNormal},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path, db := markerlessStore(t)
-			if tc.version != audit.MaxKnownSchemaVersion-1 {
+			if tc.version != audit.IdentityFormatSchemaVersion-1 {
 				_, err := db.Exec(`INSERT INTO audit_schema_meta(version, applied_at) VALUES(?, ?)`, tc.version, time.Now().UTC().UnixNano())
 				require.NoError(t, err)
 			}
@@ -304,7 +304,7 @@ func TestP2ToP3BoundaryResumesToCompletion(t *testing.T) {
 	// P1 archive, then P2 catch-up with the deferred ceiling.
 	archive, err := ArchiveStore(context.Background(), path, t.TempDir(), time.Now())
 	require.NoError(t, err)
-	trail, err := audit.NewSqliteAuditTrailWithOptions(path, audit.WithDeferredCeiling(audit.MaxKnownSchemaVersion-1))
+	trail, err := audit.NewSqliteAuditTrailWithOptions(path, audit.WithDeferredCeiling(audit.IdentityFormatSchemaVersion-1))
 	require.NoError(t, err)
 	require.NoError(t, trail.Close())
 
@@ -314,7 +314,7 @@ func TestP2ToP3BoundaryResumesToCompletion(t *testing.T) {
 	defer resumed.Close()
 	state, err := EvaluateCutoverOnHandle(context.Background(), resumed, path, true)
 	require.NoError(t, err)
-	require.Equal(t, audit.MaxKnownSchemaVersion-1, state.RecordedVersion)
+	require.Equal(t, audit.IdentityFormatSchemaVersion-1, state.RecordedVersion)
 	require.False(t, state.MarkerPresent)
 	require.True(t, state.Populated, "the v2->v3 backfill populates the store during the catch-up")
 	require.Equal(t, OutcomeRefusePopulated, state.Outcome, "a normal open refuses the resumed state")
@@ -393,7 +393,7 @@ func TestConversionInTransactionInjectionsRollBackTheWholeTransaction(t *testing
 			require.NoError(t, stateErr)
 			require.False(t, state.MarkerPresent, "the marker must roll back")
 			require.False(t, state.ReceiptPresent, "the receipt must roll back")
-			require.Equal(t, audit.MaxKnownSchemaVersion-1, state.RecordedVersion, "the deferred ceiling must roll back")
+			require.Equal(t, audit.IdentityFormatSchemaVersion-1, state.RecordedVersion, "the deferred ceiling must roll back")
 		})
 	}
 }
@@ -428,7 +428,7 @@ func TestBelowTargetPreBeginDigestEquality(t *testing.T) {
 	db, err := dbconn.OpenSharedDB(path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.MaxKnownSchemaVersion-2))
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), db, audit.IdentityFormatSchemaVersion-2))
 	require.NoError(t, checkpointWAL(db))
 	before := fileDigest(t, path)
 
@@ -477,7 +477,7 @@ func TestConvertSucceedsOnAWALModeStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pasture.db")
 	seed, err := dbconn.OpenDefaultDB(path)
 	require.NoError(t, err)
-	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), seed, audit.MaxKnownSchemaVersion-1))
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), seed, audit.IdentityFormatSchemaVersion-1))
 	require.NoError(t, seed.Close())
 
 	wal, err := dbconn.OpenSharedDB(path)
