@@ -1,0 +1,29 @@
+# Constructed input validation scenarios, not native captures.
+boundaries:
+  - {name: empty-supplied, value: '', repeat: 1, valid: false}
+  - {name: ascii-512, value: x, repeat: 512, valid: true}
+  - {name: ascii-513, value: x, repeat: 513, valid: false}
+  - {name: multibyte-512, value: é, repeat: 256, valid: true}
+  - {name: multibyte-514, value: é, repeat: 257, valid: false}
+  - {name: multibyte-513, value: é, repeat: 256, suffix: x, valid: false}
+  - {name: invalid-utf8, bytes: [255], valid: false}
+  - {name: truncated-utf8, bytes: [195], valid: false}
+  - {name: nul, value: "x\0y", repeat: 1, valid: false}
+  - {name: newline, value: "x\ny", repeat: 1, valid: false}
+  - {name: tab, value: "x\ty", repeat: 1, valid: false}
+  - {name: delete-control, bytes: [120, 127, 121], valid: false}
+  - {name: unicode-control, value: "x\u0085y", repeat: 1, valid: false}
+  - {name: leading-padding, value: ' x', repeat: 1, valid: false}
+  - {name: trailing-padding, value: 'x ', repeat: 1, valid: false}
+  - {name: unicode-padding, value: "\u00a0x", repeat: 1, valid: false}
+  - {name: internal-space-is-not-padding, value: 'native agent', repeat: 1, valid: true}
+roles:
+  - {name: native-build-no-protocol-inference, native: build, want_native: observed, want_protocol: unavailable}
+  - {name: unknown-native-preserved, native: custom-future-agent, want_native: observed, want_protocol: unavailable}
+  - {name: distinct-vocabularies, native: build, environment: worker, registry: worker, want_native: observed, want_protocol: observed, source: environment, value: worker}
+  - {name: invalid-protocol-name, native: build, environment: build, want_native: observed, want_protocol: invalid, source: environment, reason: rejected-input}
+  - {name: protocol-conflict, environment: worker, registry: architect, want_native: unavailable, want_protocol: conflict, source: none, reason: valid-disagreement}
+  - {name: invalid-plus-valid-role, environment: build, registry: worker, want_native: unavailable, want_protocol: invalid, source: environment, reason: rejected-input}
+  - {name: registry-only-role, registry: reviewer, want_native: unavailable, want_protocol: observed, source: actor-registry, value: reviewer}
+kinds: [primary, compaction, title, generate, selection, child]
+members: [model.id, model, to_model]

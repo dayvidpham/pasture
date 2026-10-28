@@ -23,6 +23,8 @@ import (
 type FixtureName string
 
 const (
+	ExecutionNormalization  FixtureName = "execution_normalization"
+	ExecutionValidation     FixtureName = "execution_validation"
 	DefinitionCodec         FixtureName = "definition_codec"
 	DefinitionKinds         FixtureName = "definition_kinds"
 	DefinitionCorruption    FixtureName = "definition_corruption"
