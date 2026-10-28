@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -42,6 +43,13 @@ type sessionRebuildRow struct {
 	lastPromptAt, lastPromptJournalID int64
 	hostEndAt, hostEndJournalID       int64
 	lastResumeAt, lastResumeJournalID int64
+	executions                        []sessionExecutionRow
+}
+
+type sessionExecutionRow struct {
+	journalID, observedAt      int64
+	kind, agent, turn, request string
+	encoded                    []byte
 }
 
 func (r *sessionRebuildRow) addTimestamp(ts int64) {
@@ -181,6 +189,11 @@ func sessionReplayRow(rows map[sessionKey]*sessionRebuildRow, harness, session s
 
 func scanSessionReplay(ctx context.Context, store lifecycleReceiptStore, after provenance.JournalID) (map[sessionKey]*sessionRebuildRow, provenance.JournalID, bool, error) {
 	rows := make(map[sessionKey]*sessionRebuildRow)
+	// Retained execution bytes are bounded independently of journal length.
+	// A scan that exceeds this budget refuses publication rather than losing
+	// observations or holding the live writer while it reads more pages.
+	const executionBudget = provenance.MaxFactPageSize * model.MaxNativePayloadBytes
+	executionBytes := 0
 	request := provenance.FactPageRequest{Limit: provenance.MaxFactPageSize, AfterJournalID: after}
 	var watermark provenance.JournalID
 	found := false
@@ -207,6 +220,17 @@ func scanSessionReplay(ctx context.Context, store lifecycleReceiptStore, after p
 			}
 			row := sessionReplayRow(rows, string(fact.Contract.Harness()), session)
 			jid := int64(fact.JournalID)
+			if fact.Execution != nil {
+				encoded, err := json.Marshal(fact.Execution)
+				if err != nil {
+					return nil, 0, false, fmt.Errorf("encode execution metadata for occurrence %d: %w", jid, err)
+				}
+				executionBytes += len(encoded)
+				if executionBytes > executionBudget {
+					return nil, 0, false, fmt.Errorf("session execution replay exceeds its %d-byte memory budget; previous cache is preserved; reduce the journal or use a larger-capacity reader", executionBudget)
+				}
+				row.executions = append(row.executions, sessionExecutionRow{journalID: jid, observedAt: fact.ReceivedAt, kind: string(fact.Execution.Kind), agent: fact.Execution.AgentID, turn: fact.Execution.TurnID, request: fact.Execution.RequestID, encoded: encoded})
+			}
 			if row.firstSeen == 0 || fact.ReceivedAt < row.firstSeen {
 				row.firstSeen = fact.ReceivedAt
 			}
@@ -368,6 +392,23 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 		return SessionStateRebuildOutcome{}, err
 	}
 	if full {
+		// Even a full rebuild must not silently rewrite an existing observation
+		// under the same journal identity.
+		for _, row := range rows {
+			for _, observation := range row.executions {
+				var exists, matches bool
+				err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pasture_session_execution WHERE journal_id=?), EXISTS(SELECT 1 FROM pasture_session_execution WHERE journal_id=? AND harness=? AND session_id=? AND kind=? AND agent_id=? AND turn_id=? AND request_id=? AND observed_at=? AND execution_json=?)`, observation.journalID, observation.journalID, row.harness, row.session, observation.kind, observation.agent, observation.turn, observation.request, observation.observedAt, observation.encoded).Scan(&exists, &matches)
+				if err != nil {
+					return SessionStateRebuildOutcome{}, err
+				}
+				if exists && !matches {
+					return SessionStateRebuildOutcome{}, fmt.Errorf("execution cache occurrence %d conflicts with journal evidence; inspect the cache and journal before retrying", observation.journalID)
+				}
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM pasture_session_execution`); err != nil {
+			return SessionStateRebuildOutcome{}, err
+		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM pasture_session_state`); err != nil {
 			return SessionStateRebuildOutcome{}, err
 		}
@@ -375,6 +416,19 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 	for _, row := range rows {
 		if err := upsertReplayedSessionRow(ctx, tx, row); err != nil {
 			return SessionStateRebuildOutcome{}, err
+		}
+		for _, observation := range row.executions {
+			result, err := tx.ExecContext(ctx, `INSERT INTO pasture_session_execution(journal_id,harness,session_id,kind,agent_id,turn_id,request_id,observed_at,execution_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(journal_id) DO UPDATE SET journal_id=excluded.journal_id WHERE harness=excluded.harness AND session_id=excluded.session_id AND kind=excluded.kind AND agent_id=excluded.agent_id AND turn_id=excluded.turn_id AND request_id=excluded.request_id AND observed_at=excluded.observed_at AND execution_json=excluded.execution_json`, observation.journalID, row.harness, row.session, observation.kind, observation.agent, observation.turn, observation.request, observation.observedAt, observation.encoded)
+			if err != nil {
+				return SessionStateRebuildOutcome{}, err
+			}
+			count, err := result.RowsAffected()
+			if err != nil {
+				return SessionStateRebuildOutcome{}, err
+			}
+			if count != 1 {
+				return SessionStateRebuildOutcome{}, fmt.Errorf("execution cache occurrence %d conflicts with journal evidence; inspect the cache and journal before retrying", observation.journalID)
+			}
 		}
 	}
 	ended, err := readUnsupersededSessionEnds(ctx, tx)

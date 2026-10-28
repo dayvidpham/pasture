@@ -43,7 +43,7 @@ func TestSessionWatermarkMigrationInvalidatesOnce(t *testing.T) {
 	if err := db.QueryRow(`SELECT revision,dirty,completed_through_jid,cache_version FROM pasture_session_api_state`).Scan(&revision, &dirty, &cursor, &version); err != nil {
 		t.Fatal(err)
 	}
-	if revision != 8 || dirty != 1 || cursor != 0 || version != SessionCacheVersion {
+	if revision != 9 || dirty != 1 || cursor != 0 || version != SessionCacheVersion {
 		t.Fatalf("migration state = %d/%d/%d/%d", revision, dirty, cursor, version)
 	}
 	var prompt, promptID, end, endID, resume, resumeID int64
@@ -101,7 +101,7 @@ func TestSessionWatermarkConcurrentUpgrade(t *testing.T) {
 	if err := db.QueryRow(`SELECT revision,cache_version FROM pasture_session_api_state`).Scan(&revision, &version); err != nil {
 		t.Fatal(err)
 	}
-	if revision != 8 || version != SessionCacheVersion {
+	if revision != 9 || version != SessionCacheVersion {
 		t.Fatalf("concurrent upgrade invalidated more than once: revision=%d version=%d", revision, version)
 	}
 }

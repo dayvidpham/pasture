@@ -8,7 +8,7 @@ import (
 // SessionCacheVersion identifies the disposable prompt/end/resume cache layout.
 // Fresh stores use the same version as upgraded stores; opening a current store
 // must not invalidate a successfully rebuilt cache again.
-const SessionCacheVersion = 1
+const SessionCacheVersion = 2
 
 func migrateV10toV11Step(tx *sql.Tx, now int64) error {
 	for _, table := range []string{"pasture_session_state", "pasture_session_api_state"} {
@@ -38,7 +38,7 @@ func migrateV10toV11Step(tx *sql.Tx, now int64) error {
 			}
 		}
 		if table == "pasture_session_api_state" {
-			if _, err := tx.Exec(`UPDATE pasture_session_api_state SET cache_version=?, dirty=1, completed_through_jid=0, revision=revision+1 WHERE singleton_id=0 AND cache_version < ?`, SessionCacheVersion, SessionCacheVersion); err != nil {
+			if _, err := tx.Exec(`UPDATE pasture_session_api_state SET cache_version=1, dirty=1, completed_through_jid=0, revision=revision+1 WHERE singleton_id=0 AND cache_version < 1`); err != nil {
 				return sessionCacheMigrationError(table, err)
 			}
 		}
