@@ -79,7 +79,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			semantic:     runtime.SemanticObservation,
 			wantResponse: false,
 			wantNative:   []byte(`{}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3"},
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3", "pasture.lifecycle.interpreted.v3"},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession: "session_id",
 			},
@@ -93,7 +93,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			wantResponse: true,
 			wantNative:   []byte(`{"continue":true}`),
 			wantEvidence: []provenance.EvidenceKind{
-				"pasture.lifecycle.occurrence.v2",
+				"pasture.lifecycle.occurrence.v3",
 				"pasture.lifecycle.interpreted.v3",
 				receipt.CurrentConsultationEvidenceKind(),
 			},
@@ -107,7 +107,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			name: "Stop gate", fixture: "stop_0_153_0.json", event: "Stop",
 			kind: registration.EventCodexStop, semantic: runtime.SemanticGateConsultation,
 			wantResponse: true, wantNative: []byte(`{"continue":true}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3", receipt.CurrentConsultationEvidenceKind()},
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3", "pasture.lifecycle.interpreted.v3", receipt.CurrentConsultationEvidenceKind()},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession: "session_id", runtime.IdentityTurn: "turn_id",
 			},
@@ -116,7 +116,7 @@ func TestHookLifecycleResponseCodexCommitsBeforeReturningAndEncodesNativeBytes(t
 			name: "PostToolUse gate", fixture: "post_tool_use_0_153_0.json", event: "PostToolUse",
 			kind: registration.EventCodexPostToolUse, semantic: runtime.SemanticGateConsultation,
 			wantResponse: true, wantNative: []byte(`{"continue":true}`),
-			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2", "pasture.lifecycle.interpreted.v3", receipt.CurrentConsultationEvidenceKind()},
+			wantEvidence: []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3", "pasture.lifecycle.interpreted.v3", receipt.CurrentConsultationEvidenceKind()},
 			wantIdentities: map[runtime.NativeIdentityKind]string{
 				runtime.IdentitySession: "session_id", runtime.IdentityTurn: "turn_id", runtime.IdentityToolCall: "tool_use_id",
 			},

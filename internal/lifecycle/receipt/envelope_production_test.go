@@ -45,7 +45,7 @@ import (
 )
 
 const (
-	envelopeOccurrenceV2   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")
+	envelopeOccurrenceV2   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
 	envelopeOccurrenceV1   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 	envelopeInterpretedV3  = provenance.EvidenceKind("pasture.lifecycle.interpreted.v3")
 	envelopeInterpretedV2  = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")

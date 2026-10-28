@@ -13,6 +13,7 @@ import (
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	claudefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/claude"
 	codexfrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/codex"
 	opencodefrontend "github.com/dayvidpham/pasture/internal/lifecycle/frontend/opencode"
@@ -43,6 +44,7 @@ import (
 const hookLifecycleWhere = "Receiving a native lifecycle event (internal/handlers/hook_lifecycle.go in handlers.HookLifecycle)."
 
 type HookLifecycleInput struct {
+	Execution execution.Invocation
 	// Settlement is shared with the command's timeout choice. Native callers
 	// that omit it get a fresh fence, never a post-Apply committed flag.
 	Settlement  *receipt.CommitSettlement
@@ -513,6 +515,9 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		return backend.HostResponse{}, err
 	}
 	dispatch, event, capture := prepared.dispatch, prepared.event, prepared.capture
+	if capture.delivery.ExecutionInputs != nil {
+		capture.delivery.ExecutionInputs.Environment = in.Execution.Declaration()
+	}
 	tracker, err := open(ctx, in.DBPath)
 	if err != nil {
 		return backend.HostResponse{}, err
@@ -521,6 +526,9 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 		return backend.HostResponse{}, lifecycleError(pasterrors.CategoryStorage, "The lifecycle store opener returned no store.", "A receipt cannot be appended without the unified tracker.", "Nothing was recorded.", "Use tasks.OpenTaskTracker.", nil)
 	}
 	defer tracker.Close()
+	if capture.delivery.ExecutionInputs != nil {
+		capture.delivery.ExecutionInputs.ActorRegistry = tasks.ExecutionActorDeclaration(ctx, tracker, in.Harness, capture.delivery.Bindings, in.ActorClaim, in.ImplicitClaim)
+	}
 	service, err := lifecycleReceiptServiceFor(tracker, in.Clock, in.Operations, in.TimeoutProfile)
 	if err != nil {
 		return backend.HostResponse{}, err

@@ -285,7 +285,7 @@ func readSessionOccurrencePage(ctx context.Context, db *sql.DB, request provenan
 		_ = tx.Rollback()
 		return projection.OccurrenceFactPage{}, err
 	}
-	page, readErr := projection.ReadOccurrenceFactPage(ctx, reader, request)
+	page, readErr := projection.ReadOccurrenceFactPage(ctx, reader, tx, request)
 	closeErr := tx.Rollback()
 	if readErr != nil {
 		return projection.OccurrenceFactPage{}, readErr
@@ -380,7 +380,7 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 	if err != nil {
 		return SessionStateRebuildOutcome{}, err
 	}
-	post, err := projection.ReadOccurrenceFactPage(ctx, reader, provenance.FactPageRequest{Limit: 1, AfterJournalID: watermark})
+	post, err := projection.ReadOccurrenceFactPage(ctx, reader, tx, provenance.FactPageRequest{Limit: 1, AfterJournalID: watermark})
 	if err != nil {
 		return SessionStateRebuildOutcome{}, err
 	}

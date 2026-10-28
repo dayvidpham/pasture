@@ -24,6 +24,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/lanewire"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -74,7 +75,7 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) error {
 		// nothing was committed.
 		return s.refuse(conn, hostexit.FaultStageNotRecorded, fmt.Errorf("%w; nothing was read past the frame, so nothing was committed for this event", err))
 	}
-	if request.Harness != "" || request.Event != "" || request.HostVersion != "" || request.HostVersionSource != "" || request.ActorClaim != "" || request.ImplicitClaim || len(payload) != 0 {
+	if request.Harness != "" || request.Event != "" || request.HostVersion != "" || request.HostVersionSource != "" || request.ActorClaim != "" || request.ImplicitClaim || request.Execution != (execution.Invocation{}) || len(payload) != 0 {
 		return s.refuse(conn, hostexit.FaultStageNotRecorded, fmt.Errorf("lifecycle lane expected a version-only probe before receipt work; reconnect with a compatible client"))
 	}
 	if err := lanewire.WriteMessage(conn, lanewire.Response{Version: lanewire.ProtocolVersion, Kind: lanewire.KindReady}, nil); err != nil {
@@ -97,6 +98,7 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) error {
 		Payload:           payload,
 		ActorClaim:        tasks.ActorClaim(request.ActorClaim),
 		ImplicitClaim:     request.ImplicitClaim,
+		Execution:         request.Execution,
 	})
 	if serveErr != nil {
 		return s.refuse(conn, handlers.LifecycleFaultStageForError(serveErr), serveErr)

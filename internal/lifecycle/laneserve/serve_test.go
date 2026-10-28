@@ -4,6 +4,8 @@ package laneserve
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/laneclient"
 	"github.com/dayvidpham/pasture/internal/lifecycle/lanewire"
@@ -92,6 +95,59 @@ func TestServeConnCarriesImplicitClaimSource(t *testing.T) {
 	in := <-handler.input
 	require.True(t, in.ImplicitClaim)
 	require.Equal(t, tasks.ActorClaim("actor"), in.ActorClaim)
+}
+
+func TestServeConnCarriesExecutionDeclaration(t *testing.T) {
+	handler := &fakeHandler{input: make(chan handlers.HookLifecycleServeInput, 1), served: handlers.HookLifecycleServed{Outcome: hostexit.Outcome{Exit: hostexit.ExitContinue}}}
+	client, stop := serveOverSocket(t, handler)
+	defer stop()
+	provider, model := "route", "model"
+	declaration := execution.BoundedInvocation(&provider, &model, nil)
+	_, err := client.Consult(t.Context(), lanewire.Request{Harness: string(ir.HarnessClaudeCode), Execution: declaration}, []byte(`{}`))
+	require.NoError(t, err)
+	require.Equal(t, declaration, (<-handler.input).Execution)
+}
+
+func TestServedExecutionReceiptRebuildsCache(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+	tracker, err := tasks.OpenTaskTracker(dbPath)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, tracker.Close()) })
+	_, err = tracker.Create("file://served-execution", "bootstrap", "initialize journal", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	host, err := tasks.NewLifecycleLaneHost(tracker, tasks.LaneClock{}, tasks.LaneOperationIDs{}, timeouts.TestProfile())
+	require.NoError(t, err)
+	service, err := tasks.NewLifecycleReceiptServiceWithProfile(tracker, host.Clock(), host.Operations(), host.Profile())
+	require.NoError(t, err)
+	testutil.ActivateLaneTestDefinitions(t, service)
+	budget, err := writelane.BudgetFromProfile(host.Profile())
+	require.NoError(t, err)
+	lane, err := writelane.New(budget, service.Appender.AppendBatch)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lane.Close(context.Background())) })
+	server, err := handlers.NewHookLifecycleServer(handlers.HookLifecycleServerConfig{Tracker: tracker, Lane: lane, Clock: host.Clock(), Operations: host.Operations(), Profile: host.Profile(), Readers: host.NewGateReaderFactory()})
+	require.NoError(t, err)
+	client, stop := serveOverSocket(t, server)
+	defer stop()
+	raw, err := os.ReadFile(filepath.Join("..", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
+	require.NoError(t, err)
+	provider, model := "route", "claude-fable-5-1"
+	response, err := client.Consult(t.Context(), lanewire.Request{Harness: string(ir.HarnessClaudeCode), Event: "SessionStart", HostVersion: claudeVersion, Execution: execution.BoundedInvocation(&provider, &model, nil)}, raw)
+	require.NoError(t, err)
+	require.Equal(t, lanewire.KindCommitted, response.Kind)
+	_, err = tasks.RebuildSessionState(t.Context(), tracker)
+	require.NoError(t, err)
+	db, err := sql.Open("sqlite", dbPath)
+	require.NoError(t, err)
+	defer db.Close()
+	var data []byte
+	require.NoError(t, db.QueryRow(`SELECT execution_json FROM pasture_session_execution WHERE journal_id=?`, response.OccurrenceID).Scan(&data))
+	var metadata execution.Metadata
+	require.NoError(t, json.Unmarshal(data, &metadata))
+	require.Equal(t, model, metadata.Model.Value)
+	require.Equal(t, execution.Host, metadata.Model.Source)
+	require.Equal(t, provider, metadata.Provider.Value)
+	require.Equal(t, execution.Environment, metadata.Provider.Source)
 }
 
 // serveOverSocket starts one Server on a private socket and returns a client

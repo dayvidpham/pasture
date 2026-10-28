@@ -23,7 +23,7 @@ const occurrenceKindV3 = provenance.EvidenceKind("pasture.lifecycle.occurrence.v
 
 // CurrentOccurrenceEvidenceKind identifies newly committed occurrences.
 // Readers admit the historical kind alongside it.
-func CurrentOccurrenceEvidenceKind() provenance.EvidenceKind { return occurrenceKindV2 }
+func CurrentOccurrenceEvidenceKind() provenance.EvidenceKind { return occurrenceKindV3 }
 
 // EnsureOccurrenceEnvelope resolves the complete four-reference occurrence
 // envelope for one delivery contract: the contract's own runtime document
@@ -170,7 +170,7 @@ func buildActiveDocuments(contract ir.RuntimeContractID) (definitions.ActiveDocu
 	if err != nil {
 		return definitions.ActiveDocuments{}, ir.RuntimeContractID{}, envelopeError(where, "The shared schema document is unreadable.", "The schema owner body failed its typed codec.", "No occurrence was committed.", "Regenerate the schema document and retry the delivery.", err)
 	}
-	if !slices.Contains(specification.OccurrenceKinds, string(occurrenceKindV2)) || !slices.Contains(specification.InterpretedKinds, string(interpretedKindV3)) {
+	if !slices.Contains(specification.OccurrenceKinds, string(occurrenceKindV3)) || !slices.Contains(specification.InterpretedKinds, string(interpretedKindV3)) {
 		return definitions.ActiveDocuments{}, ir.RuntimeContractID{}, envelopeError(where, "The shared schema does not support the complete envelopes.", "The schema descriptor must name the occurrence.v2 and interpreted.v3 wire this codec emits; pairing against an older schema would admit refs the readers cannot validate.", "No occurrence was committed.", "Regenerate the dual-envelope schema document before admitting complete envelopes.", nil)
 	}
 	return documents, runtimeContract, nil

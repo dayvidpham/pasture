@@ -63,7 +63,7 @@ func TestHookLifecycleRetainsVersionSourceOnValidAndRefusedCapture(t *testing.T)
 				tracker, err = tasks.OpenTaskTracker(database)
 				require.NoError(t, err)
 				defer tracker.Close()
-				evidence := queryOneEvidence(t, tracker, "pasture.lifecycle.occurrence.v2")
+				evidence := queryOneEvidence(t, tracker, "pasture.lifecycle.occurrence.v3")
 				var payload struct {
 					Envelope model.OccurrenceEnvelopeRef `json:"envelope"`
 					Capture  model.CaptureDisposition    `json:"capture"`

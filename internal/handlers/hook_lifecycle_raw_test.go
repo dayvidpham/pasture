@@ -212,7 +212,7 @@ func TestRawHostVersionSourcePreviewCommitAndLegacy(t *testing.T) {
 			defer tracker.Close()
 			page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
 				Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-				Kinds:  []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"},
+				Kinds:  []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3"},
 				Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
 			})
 			require.NoError(t, err)

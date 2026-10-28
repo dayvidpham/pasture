@@ -340,13 +340,13 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 		t.Fatalf("Receive() rejected production effects: %v", err)
 	}
 	// The prepared pair finalizes on commit: the occurrence carries the
-	// complete envelope as occurrence.v2, the interpretation as
+	// complete envelope as occurrence.v3, the interpretation as
 	// interpreted.v3, and the consultation re-emitted against the final v3
 	// bytes, all in canonical interpreted-then-consultation order.
 	page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
 		Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
 		Kinds: []provenance.EvidenceKind{
-			"pasture.lifecycle.occurrence.v2",
+			"pasture.lifecycle.occurrence.v3",
 			"pasture.lifecycle.interpreted.v3",
 			"pasture.lifecycle.consultation.v2",
 		},
@@ -356,7 +356,7 @@ func TestConsultationEffectsAreAcceptedByReceiptServiceInOrder(t *testing.T) {
 		t.Fatalf("query committed effects: %v", err)
 	}
 	if len(page.Rows) != 3 {
-		t.Fatalf("committed rows = %d, want occurrence.v2 + interpreted.v3 + consultation", len(page.Rows))
+		t.Fatalf("committed rows = %d, want occurrence.v3 + interpreted.v3 + consultation", len(page.Rows))
 	}
 	operation := page.Rows[0].ProducingOperationID
 	for _, row := range page.Rows[1:] {

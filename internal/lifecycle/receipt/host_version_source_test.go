@@ -12,6 +12,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -106,7 +107,7 @@ func versionSourceEvidence(t *testing.T, journal provenance.Journal) provenance.
 	t.Helper()
 	page, err := journal.Facts().QueryEvidence(provenance.EvidenceQuery{
 		Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-		Kinds:  []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"},
+		Kinds:  []provenance.EvidenceKind{receipt.CurrentOccurrenceEvidenceKind()},
 		Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
 	})
 	require.NoError(t, err)

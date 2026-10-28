@@ -81,13 +81,6 @@ func readOccurrenceRows(reader DefinitionResolver) ([]occurrenceRow, provenance.
 	return readOccurrenceRowsWithValidation(context.Background(), reader, true)
 }
 
-// readOccurrenceFactsRows reads the same journal truth without the semantic
-// envelope checks. The projection rebuild owns those checks; the session cache
-// is a separate disposable read model that must not pay for them.
-func readOccurrenceFactsRows(ctx context.Context, reader DefinitionResolver) ([]occurrenceRow, provenance.JournalID, error) {
-	return readOccurrenceRowsWithValidation(ctx, reader, false)
-}
-
 func readOccurrenceRowsWithValidation(ctx context.Context, reader DefinitionResolver, validate bool) ([]occurrenceRow, provenance.JournalID, error) {
 	query := provenance.EvidenceQuery{Kinds: occurrenceEvidenceKinds, Page: provenance.FactPageRequest{Limit: provenance.MaxFactPageSize}}
 	var rows []occurrenceRow
@@ -222,8 +215,11 @@ func rebuildOccurrences(ctx context.Context, journal provenance.Journal, db *sql
 	// projection, and its blob is younger than the writer window relative to
 	// it, so it cannot be selected however slow the rebuild is.
 	snapshotInstant := reclaim.Clock.Now()
-	rows, _, err := readOccurrenceRows(journalResolver{Journal: journal})
+	rows, watermark, err := readOccurrenceRows(journalResolver{Journal: journal})
 	if err != nil {
+		return ReclaimOutcome{}, err
+	}
+	if err := RefuseUnknownOccurrenceKinds(ctx, db, 0, watermark); err != nil {
 		return ReclaimOutcome{}, err
 	}
 
@@ -304,6 +300,9 @@ func RebuildOccurrencesInTx(ctx context.Context, tx *sql.Tx, reader DefinitionRe
 	if err != nil {
 		return err
 	}
+	if err := RefuseUnknownOccurrenceKinds(ctx, tx, 0, watermark); err != nil {
+		return err
+	}
 	if err := verifyTransactionSemanticEvidence(reader, rows, watermark); err != nil {
 		return err
 	}
@@ -345,8 +344,11 @@ func CompareOccurrencesToEvidence(ctx context.Context, tx *sql.Tx, reader Defini
 	if ctx == nil || tx == nil || reader == nil {
 		return projectionError("The lifecycle projection comparison is incompletely wired.", "The caller's transaction and its evidence reader are required.", "No comparison was performed.", "Pass the active transaction and its bound reader.", nil)
 	}
-	evidenceRows, _, err := readOccurrenceRows(reader)
+	evidenceRows, watermark, err := readOccurrenceRows(reader)
 	if err != nil {
+		return err
+	}
+	if err := RefuseUnknownOccurrenceKinds(ctx, tx, 0, watermark); err != nil {
 		return err
 	}
 	expected := make(map[provenance.JournalID]expectedOccurrence, len(evidenceRows))
@@ -473,37 +475,4 @@ type OccurrenceFact struct {
 	Execution         *execution.Metadata
 	SessionTransition model.SessionTransition
 	Version           provenance.EvidenceKind
-}
-
-// ReadOccurrenceFacts reads committed occurrence evidence in journal order.
-// The semantic envelope checks remain the projection rebuild's job; this entry
-// is only for consumers that derive a non-projection view from the same facts.
-func ReadOccurrenceFacts(ctx context.Context, journal provenance.Journal) ([]OccurrenceFact, error) {
-	if journal == nil {
-		return nil, projectionError("The lifecycle occurrence facts cannot be read.", "A Provenance journal is required.", "No occurrence facts were read.", "Open the unified store and retry.", nil)
-	}
-	rows, _, err := readOccurrenceFactsRows(ctx, journalResolver{Journal: journal})
-	if err != nil {
-		return nil, err
-	}
-	facts := make([]OccurrenceFact, 0, len(rows))
-	for _, row := range rows {
-		contract, err := parseOccurrenceContract(row.payload.Contract)
-		if err != nil {
-			return nil, projectionError("A lifecycle occurrence journal row carries an invalid contract.", fmt.Sprintf("Evidence row %d does not name a runtime contract.", row.journalID), "No occurrence facts were returned.", "Repair the malformed journal row before rebuilding.", err)
-		}
-		facts = append(facts, OccurrenceFact{
-			JournalID:         row.journalID,
-			Contract:          contract,
-			Event:             row.payload.Event,
-			ReceivedAt:        row.recordedAt,
-			Bindings:          append([]model.NativeBinding(nil), row.payload.Bindings...),
-			Capture:           row.payload.Capture,
-			PayloadDigest:     row.payload.Body,
-			Execution:         row.payload.Execution,
-			Version:           row.kind,
-			SessionTransition: storedTransition(row.payload.SessionTransition),
-		})
-	}
-	return facts, nil
 }

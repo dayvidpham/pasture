@@ -95,7 +95,7 @@ import (
 )
 
 const (
-	defCorpusOccurrenceV2   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")
+	defCorpusOccurrenceV2   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
 	defCorpusInterpretedV3  = provenance.EvidenceKind("pasture.lifecycle.interpreted.v3")
 	defCorpusInterpretedV2  = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
 	defCorpusConsultationV2 = provenance.EvidenceKind("pasture.lifecycle.consultation.v2")

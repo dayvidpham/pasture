@@ -210,7 +210,7 @@ func gateService(t *testing.T, dbPath string) (receipt.Service, func()) {
 // kind a subject happened to remember to read.
 func gateEvidenceKinds() []provenance.EvidenceKind {
 	return []provenance.EvidenceKind{
-		"pasture.lifecycle.occurrence.v2",
+		"pasture.lifecycle.occurrence.v3",
 		"pasture.lifecycle.interpreted.v3",
 		receipt.CurrentConsultationEvidenceKind(),
 	}
@@ -880,7 +880,7 @@ func TestCommitRefusesAGateWithoutAnEvaluatedDecision(t *testing.T) {
 
 	require.NoError(t, err, "an observation commits without an evaluated decision")
 	require.NotEmpty(t, gateQueryEvidence(t, dbPath, gateEvidenceKinds()))
-	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), 1)
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3"}), 1)
 	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.interpreted.v3"}), 1)
 }
 

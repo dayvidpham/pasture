@@ -2,10 +2,12 @@ package projection
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"slices"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/provenance"
 )
 
@@ -30,20 +32,18 @@ type OccurrenceFactPage struct {
 // and then query after the cursor AT THAT WATERMARK. Using the cursor itself as
 // the snapshot would hide every newly committed occurrence.
 //
-// EvidencePageReader may be pooled or bound to the caller's SQL transaction.
-// The latter makes this same function the current post-scan publication fence.
-// Use a context-bound read-only transaction reader when pool acquisition and
-// each underlying query must obey ctx; the compatibility pooled API has no
-// context parameter of its own.
-func ReadOccurrenceFactPage(ctx context.Context, reader EvidencePageReader, request provenance.FactPageRequest) (OccurrenceFactPage, error) {
+// The reader MUST be bound to tx: the kind guard and evidence query must see
+// the same store and transaction snapshot. Production constructs it with
+// provenance.NewTransactionEvidenceReader(ctx, tx).
+func ReadOccurrenceFactPage(ctx context.Context, reader EvidencePageReader, tx *sql.Tx, request provenance.FactPageRequest) (OccurrenceFactPage, error) {
 	if ctx == nil {
 		return OccurrenceFactPage{}, fmt.Errorf("read lifecycle occurrence page: context is absent; supply the caller's live replay context before reading evidence")
 	}
 	if err := ctx.Err(); err != nil {
 		return OccurrenceFactPage{}, err
 	}
-	if reader == nil || request.Limit < 1 || request.Limit > provenance.MaxFactPageSize {
-		return OccurrenceFactPage{}, fmt.Errorf("read lifecycle occurrence page: reader or page limit is invalid; supply a live reader and a limit between 1 and %d", provenance.MaxFactPageSize)
+	if reader == nil || tx == nil || request.Limit < 1 || request.Limit > provenance.MaxFactPageSize {
+		return OccurrenceFactPage{}, fmt.Errorf("read lifecycle occurrence page: transaction, bound reader or page limit is invalid; supply a live transaction, its evidence reader and a limit between 1 and %d", provenance.MaxFactPageSize)
 	}
 	query := provenance.EvidenceQuery{Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}}, Kinds: OccurrenceEvidenceKinds(), Page: request}
 	if request.SnapshotMaxJournalID == 0 && request.AfterJournalID != 0 {
@@ -62,6 +62,9 @@ func ReadOccurrenceFactPage(ctx context.Context, reader EvidencePageReader, requ
 	if err != nil {
 		return OccurrenceFactPage{}, err
 	}
+	if err := RefuseUnknownOccurrenceKinds(ctx, tx, request.AfterJournalID, page.SnapshotMaxJournalID); err != nil {
+		return OccurrenceFactPage{}, err
+	}
 	result := OccurrenceFactPage{SnapshotMaxJournalID: page.SnapshotMaxJournalID, Next: page.Next, Facts: make([]OccurrenceFact, 0, len(page.Rows))}
 	for _, evidence := range page.Rows {
 		if err := ctx.Err(); err != nil {
@@ -74,6 +77,15 @@ func ReadOccurrenceFactPage(ctx context.Context, reader EvidencePageReader, requ
 		contract, err := parseOccurrenceContract(payload.Contract)
 		if err != nil {
 			return OccurrenceFactPage{}, err
+		}
+		if evidence.EvidenceKind == occurrenceEvidenceKindV3 {
+			owner, ok := reader.(receipt.DefinitionReader)
+			if !ok {
+				return OccurrenceFactPage{}, fmt.Errorf("read lifecycle occurrence %d: definition owner resolution is unavailable; use a journal or transaction reader with committed-result lookup", evidence.JournalID)
+			}
+			if err := receipt.ValidateStoredOccurrenceEnvelope(owner, evidence.EvidenceKind, contract, payload.Envelope, page.SnapshotMaxJournalID); err != nil {
+				return OccurrenceFactPage{}, fmt.Errorf("read lifecycle occurrence %d: owner envelope validation failed: %w; restore verified journal evidence", evidence.JournalID, err)
+			}
 		}
 		result.Facts = append(result.Facts, OccurrenceFact{JournalID: evidence.JournalID, Contract: contract, Event: payload.Event, ReceivedAt: evidence.RecordedAt.UnixNano(), Bindings: append([]model.NativeBinding(nil), payload.Bindings...), Capture: payload.Capture, PayloadDigest: payload.Body, Execution: payload.Execution, Version: evidence.EvidenceKind, SessionTransition: storedTransition(payload.SessionTransition)})
 	}

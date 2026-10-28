@@ -64,6 +64,10 @@ var pasturePreservedColumns = []struct{ table, column, reason string }{
 	{"session_entries", "parent_entry_id", "opaque audit session-entry key"},
 	{"session_entries", "session_id", "opaque audit session key"},
 	{"session_entries", "tool_call_id", "opaque vendor tool-call handle"},
+	{"pasture_session_execution", "session_id", "opaque native session identifier; equality-only projection key"},
+	{"pasture_session_execution", "agent_id", "opaque native agent identifier; equality-only projection key"},
+	{"pasture_session_execution", "turn_id", "opaque native turn identifier; equality-only projection key"},
+	{"pasture_session_execution", "request_id", "opaque native request identifier; equality-only projection key"},
 	// The explicit bind mints a bare UUID and the inference rebuild derives a
 	// deterministic "inferred-<sha256>" handle; neither carries a namespace and
 	// neither is ever parsed or resolved. Rewriting one would rename a binding

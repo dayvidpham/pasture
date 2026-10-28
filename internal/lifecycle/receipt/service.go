@@ -14,6 +14,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
@@ -87,7 +88,9 @@ type occurrencePayload struct {
 	// occurrence.v1 records is tolerant: records committed without the member
 	// decode with the empty origin, and the reader defaults that to the native
 	// sentinel (see Delivery.Origin).
-	Origin origin.CaptureOrigin `json:"origin,omitempty"`
+	Origin            origin.CaptureOrigin `json:"origin,omitempty"`
+	Execution         *execution.Metadata  `json:"execution,omitempty"`
+	SessionTransition string               `json:"sessionTransition,omitempty"`
 }
 
 // Receive is the sole durable lifecycle write for a host delivery. It is a
@@ -191,6 +194,27 @@ func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, deliv
 	if err := validateLifecycleExtras(extra); err != nil {
 		return PendingReceipt{}, err
 	}
+	var attribution *execution.Metadata
+	hasSession := false
+	for _, binding := range delivery.Bindings {
+		if binding.Kind == model.BindingSession && binding.Value != "" {
+			hasSession = true
+		}
+	}
+	if delivery.Capture == model.CaptureValid && hasSession && delivery.ExecutionInputs != nil {
+		metadata, err := execution.Normalize(*delivery.ExecutionInputs)
+		if err != nil {
+			return PendingReceipt{}, fmt.Errorf("normalize lifecycle execution metadata before receipt admission: %w; correct the delivery's structural coordinates and retry", err)
+		}
+		if err := execution.ValidateMetadata(metadata); err != nil {
+			return PendingReceipt{}, err
+		}
+		attribution = &metadata
+	}
+	transition := ""
+	if ingress.ExtractSessionTransition(delivery.Contract, delivery.Event, delivery.Body, delivery.Capture, delivery.Bindings) == model.SessionTransitionResume {
+		transition = "resume"
+	}
 	if s.Settlement != nil && delivery.Capture == model.CaptureValid {
 		if _, known := s.Outcome.Exit.Code(); !known {
 			return PendingReceipt{}, fmt.Errorf("receive lifecycle delivery: validated event has no candidate Outcome for settlement; no receipt was written; encode its complete response before Receive")
@@ -236,7 +260,7 @@ func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, deliv
 		return PendingReceipt{}, structured(pasterrors.CategoryStorage, "A fresh lifecycle operation identity could not be created.", "Every host delivery must have a distinct operation identity, including byte-identical deliveries.", "Preparing a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Restore the injected operation identity source and retry the delivery.", err)
 	}
 	receivedAt := s.Clock.Now().UTC()
-	payload, err := json.Marshal(occurrencePayload{Contract: delivery.Contract, Event: delivery.Event, Envelope: complete, Bindings: append([]model.NativeBinding(nil), delivery.Bindings...), Capture: delivery.Capture, Body: ref.String(), Origin: delivery.Origin})
+	payload, err := json.Marshal(occurrencePayload{Contract: delivery.Contract, Event: delivery.Event, Envelope: complete, Bindings: append([]model.NativeBinding(nil), delivery.Bindings...), Capture: delivery.Capture, Body: ref.String(), Origin: delivery.Origin, Execution: attribution, SessionTransition: transition})
 	if err != nil {
 		return PendingReceipt{}, structured(pasterrors.CategoryStorage, "The lifecycle occurrence envelope could not be encoded.", "The validated typed delivery failed JSON encoding, which indicates an internal contract defect.", "Preparing a lifecycle delivery (internal/lifecycle/receipt/service.go in receipt.Service.PrepareReceipt).", "The payload blob may remain as a reclaimable orphan; no occurrence was committed.", "Report the incompatible delivery shape and retry only after correcting it.", err)
 	}
@@ -244,7 +268,7 @@ func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, deliv
 	payloadDigest := sha256.Sum256(payload)
 	authority := identity.Authority
 	effects := make([]provenance.Effect, 0, 1+len(final))
-	effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: occurrenceKindV2, ContentDigest: payloadDigest[:], Payload: payload})
+	effects = append(effects, provenance.Effect{Sort: provenance.EffectEvidence, ResultSlot: receiptSlot, EvidenceKind: occurrenceKindV3, ContentDigest: payloadDigest[:], Payload: payload})
 	effects = append(effects, final...)
 	input := provenance.OperationInput{
 		OperationID:        provenance.OperationID(operation),

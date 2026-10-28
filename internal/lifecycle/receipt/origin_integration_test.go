@@ -11,6 +11,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	claudeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/claude"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -68,7 +69,7 @@ func TestRawOriginOccurrenceReadsBackThroughProductionStore(t *testing.T) {
 
 	page, err := tracker.Journal().Facts().QueryEvidence(provenance.EvidenceQuery{
 		Filter: provenance.FactFilter{TaskScope: provenance.FactTaskScope{Kind: provenance.FactTaskAny}},
-		Kinds:  []provenance.EvidenceKind{provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")},
+		Kinds:  []provenance.EvidenceKind{receipt.CurrentOccurrenceEvidenceKind()},
 		Page:   provenance.FactPageRequest{Limit: provenance.MaxFactPageSize},
 	})
 	if err != nil {

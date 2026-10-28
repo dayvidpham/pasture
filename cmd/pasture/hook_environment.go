@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -75,6 +76,7 @@ const (
 // mapper refuses an unset policy. A caller therefore cannot skip the parser and
 // silently inherit fail-open behaviour it never chose.
 type HookEnvironment struct {
+	Execution execution.Invocation
 	// FaultPolicy says what an evaluation fault does to the host. It defaults
 	// to fail-open, so a broken hook does not stop the user working.
 	FaultPolicy hostexit.FaultPolicy
@@ -132,6 +134,14 @@ func HookEnvironmentFromOS(lookup func(string) (string, bool)) (HookEnvironment,
 	}
 
 	parsed := HookEnvironment{FaultPolicy: hostexit.FaultFailOpen, WriteLane: WriteLaneAuto, ActorClaim: provadapter.DefaultLLMActorID().String(), ImplicitClaim: true}
+	readExecution := func(name string) *string {
+		value, present := lookup(name)
+		if !present {
+			return nil
+		}
+		return &value
+	}
+	parsed.Execution = execution.BoundedInvocation(readExecution("PASTURE_EXECUTION_PROVIDER"), readExecution("PASTURE_EXECUTION_MODEL"), readExecution("PASTURE_EXECUTION_ROLE"))
 
 	if raw, present := lookup(hookWriteLaneEnv); present && raw != "" {
 		switch WriteLaneMode(raw) {

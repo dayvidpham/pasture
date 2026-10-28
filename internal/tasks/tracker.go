@@ -56,6 +56,7 @@ import (
 // backed by the same SQLite file, and exposes a *sql.DB handle for the 6
 // pasture-only methods that operate on context_edges and pasture_agent_categories.
 type trackerImpl struct {
+	executionAgents  sync.Map // immutable ML declarations, keyed by actor identity
 	prov             provenance.Tracker
 	trail            audit.Trail
 	auditDB          *sql.DB // owned here, borrowed by Provenance; may alias a test trail's pool

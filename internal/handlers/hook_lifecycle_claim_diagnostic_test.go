@@ -147,7 +147,7 @@ func TestSessionClaimMismatchReachesStandardErrorWithoutFailingTheHook(t *testin
 	require.Contains(t, diagnostics.String(), `"stored-actor"`)
 	require.Contains(t, diagnostics.String(), session)
 	require.Contains(t, diagnostics.String(), tasks.SessionClaimAlreadyClaimed.String())
-	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), 1,
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3"}), 1,
 		"the invocation commits exactly one occurrence; the claim write adds no journal row")
 }
 
@@ -204,7 +204,7 @@ func TestSessionClaimLostRaceReachesStandardErrorNamingTheWinner(t *testing.T) {
 	require.Contains(t, diagnostics.String(), `"winner-actor"`)
 	require.Contains(t, diagnostics.String(), session)
 	require.Contains(t, diagnostics.String(), tasks.SessionClaimLostRace.String())
-	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), 1,
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3"}), 1,
 		"the invocation commits exactly one occurrence; the race trigger adds no journal row")
 }
 
@@ -238,7 +238,7 @@ func TestSessionClaimNoDiagnosticForWroteOrSameActor(t *testing.T) {
 	_, err = hookLifecycle(t.Context(), second, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
 	require.NoError(t, err)
 	require.Empty(t, secondDiagnostics.String(), "the same actor is not a mismatch")
-	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), 2, "both silent invocations must actually commit")
+	require.Len(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3"}), 2, "both silent invocations must actually commit")
 	check, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
 	defer check.Close()
@@ -261,6 +261,6 @@ func prepareClaimDiagnosticOwners(t *testing.T, dbPath string) {
 	testutil.ActivateLaneTestDefinitions(t, service)
 	require.Equal(t, deadline, service.Appender.Deadline, "setup must not widen the measured receipt budget")
 	require.NoError(t, tracker.Close())
-	require.Empty(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v2"}), "setup must not manufacture a receipt")
+	require.Empty(t, gateQueryEvidence(t, dbPath, []provenance.EvidenceKind{"pasture.lifecycle.occurrence.v3"}), "setup must not manufacture a receipt")
 
 }

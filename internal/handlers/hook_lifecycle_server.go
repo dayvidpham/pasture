@@ -12,6 +12,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/lifecycle/backend"
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -123,6 +124,7 @@ func NewHookLifecycleServer(cfg HookLifecycleServerConfig) (*HookLifecycleServer
 // host's payload bytes verbatim. Everything else the served path needs it
 // re-derives from the store, so a hook cannot hand it a verdict.
 type HookLifecycleServeInput struct {
+	Execution         execution.Invocation
 	Harness           ir.HarnessID
 	Event             string
 	HostVersion       string
@@ -179,6 +181,10 @@ func (s *HookLifecycleServer) Serve(ctx context.Context, in HookLifecycleServeIn
 		return HookLifecycleServed{}, err
 	}
 	dispatch, event, capture := prepared.dispatch, prepared.event, prepared.capture
+	if capture.delivery.ExecutionInputs != nil {
+		capture.delivery.ExecutionInputs.Environment = in.Execution.Declaration()
+		capture.delivery.ExecutionInputs.ActorRegistry = tasks.ExecutionActorDeclaration(ctx, s.tracker, in.Harness, capture.delivery.Bindings, in.ActorClaim, in.ImplicitClaim)
+	}
 
 	service, err := lifecycleReceiptServiceFor(s.tracker, s.clock, s.operations, s.profile)
 	if err != nil {

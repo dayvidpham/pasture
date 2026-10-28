@@ -116,7 +116,7 @@ func TestConsultReportsRecordUnknownWhenTheAnswerNeverComes(t *testing.T) {
 }
 
 func TestConsultFallsBackOnAProtocolMismatch(t *testing.T) {
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{1, 2, 3} {
 		t.Run(fmt.Sprintf("version-%d", version), func(t *testing.T) {
 			socketPath := filepath.Join(t.TempDir(), "lane.sock")
 			listener, done := serveOnce(t, socketPath, func(conn net.Conn) {

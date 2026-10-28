@@ -247,6 +247,9 @@ func (r Reader) occurrences(ctx context.Context, query model.OccurrenceQuery) (m
 		}
 		snapshot = watermark.SnapshotMaxJournalID
 	}
+	if err := RefuseUnknownOccurrenceKinds(ctx, r.DB, 0, snapshot); err != nil {
+		return model.OccurrencePage{}, 0, err
+	}
 	statement := `SELECT journal_id,contract,event_kind,received_at,actor_id,capture_disposition,payload_digest,envelope_json FROM lifecycle_occurrences WHERE journal_id>? AND journal_id<=?`
 	args := []any{after, snapshot}
 	if len(normalized.Contracts) > 0 {

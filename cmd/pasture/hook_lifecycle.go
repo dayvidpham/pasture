@@ -473,6 +473,7 @@ func lifecycleOutcomeWithCompletion(
 			Barrier:       barrier,
 			ActorClaim:    tasks.ActorClaim(env.ActorClaim),
 			ImplicitClaim: env.ImplicitClaim,
+			Execution:     env.Execution,
 			Settlement:    settlement,
 			// The operator's resolved profile reaches the receipt path here, so a
 			// tuned Ingress window is the appender's deadline and not only a

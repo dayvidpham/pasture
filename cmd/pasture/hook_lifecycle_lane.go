@@ -135,6 +135,7 @@ func lifecycleLaneAttempt(
 		HostVersionSource: string(coords.HostVersionSource),
 		ActorClaim:        env.ActorClaim,
 		ImplicitClaim:     env.ImplicitClaim,
+		Execution:         env.Execution,
 	}, raw)
 
 	switch {

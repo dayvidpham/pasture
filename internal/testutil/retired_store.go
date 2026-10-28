@@ -45,6 +45,9 @@ func RetiredPopulatedStoreWithClaim(t *testing.T) (string, *sql.DB) {
 	if _, err := db.Exec(`DROP TABLE pasture_default_llm_initialization`); err != nil {
 		t.Fatalf("strip later initialization marker: %v", err)
 	}
+	if _, err := db.Exec(`DROP TABLE pasture_session_execution`); err != nil {
+		t.Fatalf("strip later execution cache: %v", err)
+	}
 	if _, err := db.Exec(`DELETE FROM audit_schema_meta WHERE version >= ?`, audit.IdentityFormatSchemaVersion); err != nil {
 		t.Fatalf("strip deferred ceiling: %v", err)
 	}
