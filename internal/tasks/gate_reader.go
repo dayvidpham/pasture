@@ -35,6 +35,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gateauthority"
+	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
@@ -325,6 +326,18 @@ func (r *gateReader) Snapshot(ctx context.Context) (gateauthority.Snapshot, erro
 	actor, err := provenance.ParseActorID(claimed)
 	if err != nil {
 		return nil, &GateClaimMalformedError{Harness: r.harness, Session: r.session, Cause: err}
+	}
+	// A generic execution identity is descriptive, never an authority source.
+	// Do not even assert the ownership capability: adversarial assignments to
+	// this actor must not enroll it or make its ordinary claim read fail.
+	if provadapter.IsDefaultLLMActor(actor) {
+		return &gateSnapshotValue{
+			claim: gateauthority.SessionClaim{
+				Bound: true, Known: true, Actor: actor, Session: r.session, AttributionOnly: true,
+			},
+			authority: gateauthority.ActorAuthority{Actor: actor},
+			harness:   r.harness, session: r.session, actor: actor,
+		}, nil
 	}
 	// TWO STORES, TWO SNAPSHOTS, ONE DECISION. The claim read above saw
 	// pasture_session_claim as of its own instant, and the ownership read below

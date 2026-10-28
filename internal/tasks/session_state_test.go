@@ -65,13 +65,13 @@ func TestRecordLifecycleSessionTailWritesClaimStateAndRevision(t *testing.T) {
 	require.NoError(t, db.QueryRow(
 		`SELECT revision, completed_through_jid FROM pasture_session_api_state WHERE singleton_id = 0`).Scan(&revision, &completed))
 	require.Equal(t, int64(1), revision)
-	require.Equal(t, int64(42), completed)
+	require.Zero(t, completed, "a hot tail does not certify a completed journal scan")
 }
 
 type failingSessionStateWriter struct{}
 
-func (failingSessionStateWriter) UpsertSessionState(context.Context, *sql.Tx, tasks.SessionTailInput, string) error {
-	return errors.New("injected state failure")
+func (failingSessionStateWriter) UpsertSessionState(context.Context, *sql.Tx, tasks.SessionTailInput, string) (bool, error) {
+	return false, errors.New("injected state failure")
 }
 
 func TestRecordLifecycleSessionTailPreservesClaimWhenStateFails(t *testing.T) {
@@ -99,7 +99,7 @@ func TestRecordLifecycleSessionTailPreservesClaimWhenStateFails(t *testing.T) {
 	var revision, completed, dirty int64
 	require.NoError(t, db.QueryRow(
 		`SELECT revision, completed_through_jid, dirty FROM pasture_session_api_state WHERE singleton_id = 0`).Scan(&revision, &completed, &dirty))
-	require.Equal(t, int64(0), revision, "a failed state write must not bump the revision")
+	require.Equal(t, int64(1), revision, "the preserved claim and dirty marker must fence concurrent cache publication")
 	require.Equal(t, int64(0), completed, "a failed state write must not advance the watermark")
 	require.Equal(t, int64(1), dirty, "the cache must be marked dirty for the next rebuild")
 }

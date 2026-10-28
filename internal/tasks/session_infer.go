@@ -41,6 +41,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/provenance"
 )
 
@@ -122,6 +123,13 @@ func planSessionInference(ctx context.Context, store lifecycleReceiptStore) ([]s
 	if len(claims) == 0 {
 		return nil, nil
 	}
+	// Exclude attribution-only identities before inspecting ownership capability
+	// or collecting any ownership facts, even when assignments contradict that
+	// identity's purpose. Explicit bindings remain a separate user operation.
+	actors := sessionClaimActors(claims)
+	if len(actors) == 0 {
+		return nil, nil
+	}
 	epochs, err := readSessionEpochProjectionIDs(ctx, store.auditDBHandle())
 	if err != nil {
 		return nil, err
@@ -138,7 +146,6 @@ func planSessionInference(ctx context.Context, store lifecycleReceiptStore) ([]s
 	// One read per distinct actor keeps the cost proportional to the number of
 	// actors, never to the number of sessions. The ordered slice keeps the read
 	// order deterministic for tests and for an operator reading a store trace.
-	actors := sessionClaimActors(claims)
 	epochByActor := make(map[provenance.ActorID]string, len(actors))
 	for _, actor := range actors {
 		// No material or evidence kinds are requested: inference asks only
@@ -211,14 +218,14 @@ func unambiguousOwnedEpoch(tasks []provenance.OwnedTaskRow, epochs map[string]st
 	return candidate, len(seen) == 1
 }
 
-// sessionClaimActors returns every distinct parseable actor in the claims, in a
-// deterministic order.
+// sessionClaimActors returns every distinct parseable authority-eligible actor
+// in deterministic order. Generic LLM attribution never supplies inferred intent.
 func sessionClaimActors(claims []sessionClaimRow) []provenance.ActorID {
 	seen := make(map[provenance.ActorID]struct{}, len(claims))
 	actors := make([]provenance.ActorID, 0, len(claims))
 	for _, claim := range claims {
 		actor, err := provenance.ParseActorID(claim.actor)
-		if err != nil {
+		if err != nil || provadapter.IsDefaultLLMActor(actor) {
 			continue
 		}
 		if _, ok := seen[actor]; ok {

@@ -454,7 +454,7 @@ func TestInputHasOnlyPolicyFacts(t *testing.T) {
 	for typ, names := range map[reflect.Type][]string{
 		reflect.TypeOf(gateauthority.ActorAuthority{}): {"Actor", "Episodes"},
 		reflect.TypeOf(gateauthority.Episode{}):        {"Assignment", "Task", "Role", "Phase"},
-		reflect.TypeOf(gateauthority.SessionClaim{}):   {"Bound", "Actor", "Session", "Known"},
+		reflect.TypeOf(gateauthority.SessionClaim{}):   {"Bound", "Actor", "Session", "Known", "AttributionOnly"},
 	} {
 		if typ.NumField() != len(names) {
 			t.Fatalf("%s adds facts beyond the policy boundary", typ)
