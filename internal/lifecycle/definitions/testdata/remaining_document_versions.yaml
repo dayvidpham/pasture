@@ -28,3 +28,6 @@ versions:
   - id: pasture.lifecycle.interpreter
     version: 1
     sha256: 7a3e0bcd5d5d8cfdfd4eef93483dd5ba0e8a3ead7a130060dd146c7f84d06f13
+  - id: pasture.lifecycle.interpreter
+    version: 2
+    sha256: 97e8f062962e0077666b876cc6590e60ba3b179b56650d2aed4e5dee12ed84fd

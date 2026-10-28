@@ -74,6 +74,20 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) error {
 		// nothing was committed.
 		return s.refuse(conn, hostexit.FaultStageNotRecorded, fmt.Errorf("%w; nothing was read past the frame, so nothing was committed for this event", err))
 	}
+	if request.Harness != "" || request.Event != "" || request.HostVersion != "" || request.HostVersionSource != "" || request.ActorClaim != "" || request.ImplicitClaim || len(payload) != 0 {
+		return s.refuse(conn, hostexit.FaultStageNotRecorded, fmt.Errorf("lifecycle lane expected a version-only probe before receipt work; reconnect with a compatible client"))
+	}
+	if err := lanewire.WriteMessage(conn, lanewire.Response{Version: lanewire.ProtocolVersion, Kind: lanewire.KindReady}, nil); err != nil {
+		return fmt.Errorf("write lifecycle lane version acknowledgment: %w", err)
+	}
+	request = lanewire.Request{}
+	payload, err = lanewire.ReadMessage(conn, &request)
+	if err != nil {
+		return fmt.Errorf("read lifecycle lane receipt request after version probe: %w", err)
+	}
+	if err := lanewire.CheckVersion(request.Version); err != nil {
+		return s.refuse(conn, hostexit.FaultStageNotRecorded, err)
+	}
 
 	served, serveErr := s.handler.Serve(requestCtx, handlers.HookLifecycleServeInput{
 		Harness:           ir.HarnessID(request.Harness),
@@ -82,6 +96,7 @@ func (s *Server) ServeConn(ctx context.Context, conn net.Conn) error {
 		HostVersionSource: model.HostVersionSource(request.HostVersionSource),
 		Payload:           payload,
 		ActorClaim:        tasks.ActorClaim(request.ActorClaim),
+		ImplicitClaim:     request.ImplicitClaim,
 	})
 	if serveErr != nil {
 		return s.refuse(conn, handlers.LifecycleFaultStageForError(serveErr), serveErr)

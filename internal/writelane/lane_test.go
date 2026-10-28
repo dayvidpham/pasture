@@ -196,6 +196,9 @@ func TestIntervalFallbackCommitsAPartialBatch(t *testing.T) {
 	if elapsed := time.Since(started); elapsed < budget.FlushInterval/2 {
 		t.Fatalf("the partial batch flushed after %s, before the %s interval that is supposed to bound it", elapsed, budget.FlushInterval)
 	}
+	if err := lane.Close(context.Background()); err != nil {
+		t.Fatalf("join completed turns before reading batch statistics: %v", err)
+	}
 	if stats := lane.Stats(); stats.Records != 2 || stats.Batches != 2 {
 		t.Fatalf("stats = %+v, want each oversized-for-the-batch record committed in its own batch", stats)
 	}

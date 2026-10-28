@@ -132,6 +132,9 @@ func Decide(in Input) (Result, error) {
 	if !in.Claim.Bound {
 		return decision(backend.DecisionProceed, backend.ReasonUnboundSession)
 	}
+	if in.Claim.AttributionOnly {
+		return decision(backend.DecisionProceed, backend.ReasonAttributionOnlySession)
+	}
 
 	// Rule 4: a bound session naming an unknown actor is a denial.
 	if !in.Claim.Known {

@@ -84,6 +84,7 @@ func TestDurableOpenPreservesRegistrationWorkflowFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "pasture.db")
 	fixture, db := openFreshTracker(t, path)
 	_, err := db.Exec(`CREATE TRIGGER block_builtin_mint BEFORE INSERT ON agents_software
+		WHEN NEW.name LIKE 'pasture/automaton/%'
 		BEGIN SELECT RAISE(ABORT, 'built-in mint blocked by fixture'); END`)
 	require.NoError(t, err)
 	require.NoError(t, fixture.Close())

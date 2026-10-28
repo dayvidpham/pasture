@@ -128,8 +128,9 @@ type HookLifecycleServeInput struct {
 	HostVersion       string
 	HostVersionSource model.HostVersionSource
 	// Payload is the host's stdin bytes exactly as the hook read them.
-	Payload    []byte
-	ActorClaim tasks.ActorClaim
+	Payload       []byte
+	ActorClaim    tasks.ActorClaim
+	ImplicitClaim bool
 }
 
 // HookLifecycleServed is one committed answer: the encoded Outcome the host
@@ -247,7 +248,7 @@ func (s *HookLifecycleServer) Serve(ctx context.Context, in HookLifecycleServeIn
 	occurrence = record.occurrence
 	claim = record.claimOutcome
 
-	if line := sessionClaimMismatchDiagnostic(in.Harness, in.ActorClaim, capture.delivery.Bindings, claim); line != "" && s.diagnostics != nil {
+	if line := sessionClaimMismatchDiagnosticForSource(in.Harness, in.ActorClaim, in.ImplicitClaim, capture.delivery.Bindings, claim); line != "" && s.diagnostics != nil {
 		fmt.Fprintln(s.diagnostics, line)
 	}
 	return HookLifecycleServed{Outcome: preparedCommit.outcome, OccurrenceID: strconv.FormatInt(int64(occurrence.JournalID()), 10), ClaimState: claim.State.String()}, nil

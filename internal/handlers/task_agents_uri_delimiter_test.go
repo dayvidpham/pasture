@@ -44,7 +44,7 @@ func TestTaskAgentsHandlersNameTheExactFileWhenThePathCarriesURIDelimiters(t *te
 	require.Equal(t, 0, code)
 	require.Contains(t, listOut.String(), "pasture/automaton/check-constraints",
 		"the list must read the agent registry from the exact file")
-	require.Equal(t, tasks.WellKnownAgentCount, strings.Count(strings.TrimSpace(listOut.String()), "\n")+1,
+	require.Equal(t, tasks.WellKnownAgentCount+1, strings.Count(strings.TrimSpace(listOut.String()), "\n")+1,
 		"the list must read EVERY registered agent from the exact file, not only the one named above")
 
 	var showOut bytes.Buffer

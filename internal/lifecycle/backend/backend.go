@@ -18,20 +18,21 @@ type DecisionReason = waist.DecisionReason
 type Decision = waist.Decision
 
 const (
-	DecisionKindUnset        = waist.DecisionKindUnset
-	DecisionProceed          = waist.DecisionProceed
-	DecisionDeny             = waist.DecisionDeny
-	DecisionRequireHuman     = waist.DecisionRequireHuman
-	ReasonUnset              = waist.ReasonUnset
-	ReasonLegal              = waist.ReasonLegal
-	ReasonUnboundSession     = waist.ReasonUnboundSession
-	ReasonStopLoopGuard      = waist.ReasonStopLoopGuard
-	ReasonUnknownActor       = waist.ReasonUnknownActor
-	ReasonNoActiveAssignment = waist.ReasonNoActiveAssignment
-	ReasonRoleForbidsAction  = waist.ReasonRoleForbidsAction
-	ReasonPhaseForbidsAction = waist.ReasonPhaseForbidsAction
-	ReasonUnenforcedDeny     = waist.ReasonUnenforcedDeny
-	ReasonEvaluationFault    = waist.ReasonEvaluationFault
+	DecisionKindUnset            = waist.DecisionKindUnset
+	DecisionProceed              = waist.DecisionProceed
+	DecisionDeny                 = waist.DecisionDeny
+	DecisionRequireHuman         = waist.DecisionRequireHuman
+	ReasonUnset                  = waist.ReasonUnset
+	ReasonLegal                  = waist.ReasonLegal
+	ReasonUnboundSession         = waist.ReasonUnboundSession
+	ReasonStopLoopGuard          = waist.ReasonStopLoopGuard
+	ReasonUnknownActor           = waist.ReasonUnknownActor
+	ReasonNoActiveAssignment     = waist.ReasonNoActiveAssignment
+	ReasonRoleForbidsAction      = waist.ReasonRoleForbidsAction
+	ReasonPhaseForbidsAction     = waist.ReasonPhaseForbidsAction
+	ReasonUnenforcedDeny         = waist.ReasonUnenforcedDeny
+	ReasonEvaluationFault        = waist.ReasonEvaluationFault
+	ReasonAttributionOnlySession = waist.ReasonAttributionOnlySession
 )
 
 func NewDecision(kind DecisionKind, reason DecisionReason) (Decision, error) {

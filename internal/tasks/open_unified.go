@@ -85,16 +85,25 @@ func OpenTaskTrackerContext(ctx context.Context, dbPath string) (protocol.TaskTr
 	return openTaskTrackerWithOptions(ctx, dbPath, productionOpenDefaults())
 }
 
+// OpenLifecycleTaskTrackerContext refuses uninitialized default identities
+// rather than registering an actor from a lifecycle hook.
+func OpenLifecycleTaskTrackerContext(ctx context.Context, dbPath string) (protocol.TaskTracker, error) {
+	cfg := productionOpenDefaults()
+	cfg.lifecycleReadOnlyInitialization = true
+	return openTaskTrackerWithOptions(ctx, dbPath, cfg)
+}
+
 type openTaskTrackerOptions struct {
-	modelRegistry      provenance.ModelRegistry
-	skipMigrations     bool
-	maxOpenConns       int
-	afterGenesisCommit func(provenance.JournalID) error
-	timeouts           timeouts.Profile
-	clock              receipt.Clock
-	diagnostics        io.Writer
-	beforeActivation   func(context.Context, *sql.DB) error
-	activationObserver func(string)
+	lifecycleReadOnlyInitialization bool
+	modelRegistry                   provenance.ModelRegistry
+	skipMigrations                  bool
+	maxOpenConns                    int
+	afterGenesisCommit              func(provenance.JournalID) error
+	timeouts                        timeouts.Profile
+	clock                           receipt.Clock
+	diagnostics                     io.Writer
+	beforeActivation                func(context.Context, *sql.DB) error
+	activationObserver              func(string)
 }
 
 // WithModelRegistry admits the same exact identities used by the caller's validation.
@@ -337,6 +346,12 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 		_ = trail.Close()
 		return nil, err
 	}
+	if err := ensureDefaultLLMActor(ctx, auditDB, prov, cfg.lifecycleReadOnlyInitialization); err != nil {
+		_ = prov.Close()
+		_ = auditDB.Close()
+		_ = trail.Close()
+		return nil, err
+	}
 
 	tracker, err := newTrackerImplContext(ctx, prov, trail, auditDB, true)
 	if err != nil {
@@ -375,6 +390,10 @@ func openTaskTrackerWithOptions(ctx context.Context, dbPath string, cfg openTask
 			Fix:      "1. Inspect the underlying cause and the identified built-in name mapping; back up the database before repairing a corrupt mapping.\n2. Restore writable, compatible storage with free space if a storage operation failed.\n3. Then retry the same CLI command; no daemon is required.",
 			Cause:    err,
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		_ = tracker.Close()
+		return nil, wrapOpenError(dbPath, "opening context", err)
 	}
 	return tracker, nil
 }

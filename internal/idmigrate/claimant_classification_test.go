@@ -72,7 +72,7 @@ func readClaimRow(t *testing.T, db *sql.DB) claimRow {
 	t.Helper()
 	var row claimRow
 	require.NoError(t, db.QueryRow(
-		`SELECT namespace, claimant_id, range_min, range_max, codec FROM actor_namespace_claims WHERE namespace='pasture-system'`).
+		`SELECT namespace, claimant_id, range_min, range_max, codec FROM actor_namespace_claims WHERE namespace='fixture-opaque'`).
 		Scan(&row.namespace, &row.claimantID, &row.rangeMin, &row.rangeMax, &row.codec))
 	return row
 }

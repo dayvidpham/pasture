@@ -70,13 +70,28 @@ type fakeHandler struct {
 	served handlers.HookLifecycleServed
 	err    error
 	block  <-chan struct{}
+	input  chan handlers.HookLifecycleServeInput
 }
 
-func (f *fakeHandler) Serve(ctx context.Context, _ handlers.HookLifecycleServeInput) (handlers.HookLifecycleServed, error) {
+func (f *fakeHandler) Serve(ctx context.Context, in handlers.HookLifecycleServeInput) (handlers.HookLifecycleServed, error) {
+	if f.input != nil {
+		f.input <- in
+	}
 	if f.block != nil {
 		<-f.block
 	}
 	return f.served, f.err
+}
+
+func TestServeConnCarriesImplicitClaimSource(t *testing.T) {
+	handler := &fakeHandler{input: make(chan handlers.HookLifecycleServeInput, 1), served: handlers.HookLifecycleServed{Outcome: hostexit.Outcome{Exit: hostexit.ExitContinue}}}
+	client, stop := serveOverSocket(t, handler)
+	defer stop()
+	_, err := client.Consult(t.Context(), lanewire.Request{Harness: string(ir.HarnessClaudeCode), ActorClaim: "actor", ImplicitClaim: true}, []byte(`{}`))
+	require.NoError(t, err)
+	in := <-handler.input
+	require.True(t, in.ImplicitClaim)
+	require.Equal(t, tasks.ActorClaim("actor"), in.ActorClaim)
 }
 
 // serveOverSocket starts one Server on a private socket and returns a client

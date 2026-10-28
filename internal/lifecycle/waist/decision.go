@@ -46,9 +46,10 @@ const (
 	ReasonPhaseForbidsAction
 	ReasonUnenforcedDeny
 	ReasonEvaluationFault
+	ReasonAttributionOnlySession
 )
 
-func (r DecisionReason) IsValid() bool { return r >= ReasonLegal && r <= ReasonEvaluationFault }
+func (r DecisionReason) IsValid() bool { return r >= ReasonLegal && r <= ReasonAttributionOnlySession }
 
 func (r DecisionReason) String() string {
 	switch r {
@@ -70,6 +71,8 @@ func (r DecisionReason) String() string {
 		return "unenforced-deny"
 	case ReasonEvaluationFault:
 		return "evaluation-fault"
+	case ReasonAttributionOnlySession:
+		return "attribution-only-session"
 	default:
 		return ""
 	}
@@ -95,6 +98,8 @@ func (r DecisionReason) Message() string {
 		return "The host continues because this event has no evidenced refusal channel; the policy denial is record-only."
 	case ReasonEvaluationFault:
 		return "Pasture could not evaluate this event; this is not a policy denial. Read the lifecycle fault diagnostic and repair the failed evaluation before retrying."
+	case ReasonAttributionOnlySession:
+		return "This session has an attribution-only actor; the host continues without an assignment decision."
 	default:
 		return ""
 	}
@@ -118,7 +123,7 @@ func NewDecision(kind DecisionKind, reason DecisionReason) (Decision, error) {
 func (d Decision) IsValid() bool {
 	switch d.kind {
 	case DecisionProceed:
-		return d.reason == ReasonLegal || d.reason == ReasonUnboundSession || d.reason == ReasonStopLoopGuard || d.reason == ReasonUnenforcedDeny
+		return d.reason == ReasonLegal || d.reason == ReasonUnboundSession || d.reason == ReasonStopLoopGuard || d.reason == ReasonUnenforcedDeny || d.reason == ReasonAttributionOnlySession
 	case DecisionDeny, DecisionRequireHuman:
 		return d.reason == ReasonUnknownActor || d.reason == ReasonNoActiveAssignment || d.reason == ReasonRoleForbidsAction || d.reason == ReasonPhaseForbidsAction
 	default:
@@ -160,7 +165,7 @@ func (d *Decision) UnmarshalJSON(raw []byte) error {
 		}
 	}
 	var reason DecisionReason
-	for candidate := ReasonLegal; candidate <= ReasonEvaluationFault; candidate++ {
+	for candidate := ReasonLegal; candidate <= ReasonAttributionOnlySession; candidate++ {
 		if candidate.String() == wire.Reason {
 			reason = candidate
 		}

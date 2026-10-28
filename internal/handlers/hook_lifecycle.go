@@ -31,6 +31,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 	"github.com/dayvidpham/pasture/internal/lifecycle/waist"
+	"github.com/dayvidpham/pasture/internal/provadapter"
 	pastureruntime "github.com/dayvidpham/pasture/internal/runtime"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -56,7 +57,8 @@ type HookLifecycleInput struct {
 	Clock             receipt.Clock
 	Operations        receipt.OperationIDSource
 	// ActorClaim binds a session, not the receipt author. Zero means no claim.
-	ActorClaim tasks.ActorClaim
+	ActorClaim    tasks.ActorClaim
+	ImplicitClaim bool
 	// Diagnostics is the best-effort standard-error sink for an ancillary
 	// condition that must NOT change the host outcome. Production wires the
 	// command's standard error; a nil sink discards the line, exactly as every
@@ -139,14 +141,14 @@ func HookLifecycle(ctx context.Context, in HookLifecycleInput) error {
 // HookLifecycleResponse records the lifecycle receipt before returning an
 // optional response to the native host.
 //
-// IT WIRES THE REAL DEPENDENCIES, AND THE PIN IS BY NAME. tasks.OpenTaskTrackerContext
+// IT WIRES THE REAL DEPENDENCIES, AND THE PIN IS BY NAME. tasks.OpenLifecycleTaskTrackerContext
 // is the store the receipt and the gate read share, and tasks.NewGateReader is
 // the only reader this build has; an in-process proof injects its own pair one
 // layer down, at hookLifecycle, so the production pairing is stated here where
 // a reader can see it and is checked by an AST scan rather than by a value a
 // table can compare.
 func HookLifecycleResponse(ctx context.Context, in HookLifecycleInput) (backend.HostResponse, error) {
-	return hookLifecycle(ctx, in, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
+	return hookLifecycle(ctx, in, tasks.OpenLifecycleTaskTrackerContext, tasks.NewGateReader)
 }
 
 type lifecycleCapture struct {
@@ -612,11 +614,18 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 	if err != nil {
 		return backend.HostResponse{}, fmt.Errorf("%w: %w", ErrLifecycleCommittedWithoutContinuation, err)
 	}
-	if line := sessionClaimMismatchDiagnostic(in.Harness, in.ActorClaim, capture.delivery.Bindings, tail.Claim); line != "" && in.Diagnostics != nil {
+	if line := sessionClaimMismatchDiagnosticForSource(in.Harness, in.ActorClaim, in.ImplicitClaim, capture.delivery.Bindings, tail.Claim); line != "" && in.Diagnostics != nil {
 		fmt.Fprintln(in.Diagnostics, line)
 	}
 	response = committed
 	return response, nil
+}
+
+func sessionClaimMismatchDiagnosticForSource(harness ir.HarnessID, actorClaim tasks.ActorClaim, implicit bool, bindings []model.NativeBinding, outcome tasks.SessionClaimOutcome) string {
+	if implicit && string(actorClaim) == provadapter.DefaultLLMActorID().String() {
+		return ""
+	}
+	return sessionClaimMismatchDiagnostic(harness, actorClaim, bindings, outcome)
 }
 
 // sessionClaimMismatchDiagnostic renders the ONE best-effort diagnostic line for

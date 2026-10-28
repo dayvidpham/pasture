@@ -114,12 +114,12 @@ func TestSystemIdentity_ActivatesExactDefaultActor(t *testing.T) {
 	if err := db.QueryRow(`SELECT COUNT(*) FROM fixed_actor_manifest_entries`).Scan(&manifestCount); err != nil {
 		t.Fatalf("count fixed manifest entries: %v", err)
 	}
-	if manifestCount != 1 {
-		t.Fatalf("fixed manifest entries = %d, want only ordinal zero", manifestCount)
+	if manifestCount != 2 {
+		t.Fatalf("fixed manifest entries = %d, want system and generic LLM actors", manifestCount)
 	}
 	var actorID, namespace, name, metadata string
 	var kind int
-	if err := db.QueryRow(`SELECT actor_id, namespace, kind_id, name, metadata FROM fixed_actor_manifest_entries`).
+	if err := db.QueryRow(`SELECT actor_id, namespace, kind_id, name, metadata FROM fixed_actor_manifest_entries WHERE actor_id = ?`, provadapter.PastureSystemDefaultActorID().String()).
 		Scan(&actorID, &namespace, &kind, &name, &metadata); err != nil {
 		t.Fatalf("read fixed manifest entry: %v", err)
 	}

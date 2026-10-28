@@ -54,6 +54,8 @@ func TestExistingSlashStoreAtIdentityFloorAppliesSessionMigration(t *testing.T) 
 	}
 	_, err := db.Exec(`ALTER TABLE pasture_session_api_state DROP COLUMN cache_version`)
 	require.NoError(t, err)
+	_, err = db.Exec(`DROP TABLE pasture_default_llm_initialization`)
+	require.NoError(t, err)
 	_, err = db.Exec(`DELETE FROM audit_schema_meta WHERE version > ?`, audit.IdentityFormatSchemaVersion)
 	require.NoError(t, err)
 	reopened, err := tasks.OpenTaskTracker(path)
