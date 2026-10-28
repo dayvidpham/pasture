@@ -136,10 +136,9 @@ func TestSessionListRejectsInvalidInputBeforeOpeningTheStore(t *testing.T) {
 	}
 }
 
-// A concurrent writer can mark the cache dirty after the command's refresh and
-// before the projection read. A trigger that re-marks the marker on every update
-// reproduces that window deterministically: the refresh still succeeds, and the
-// read observes dirty=1.
+// A trigger that changes the marker whenever replay acquires its publication
+// lock deterministically prevents certification. The command must exhaust its
+// bounded retry effort honestly, without outputting an uncertified cache.
 func TestSessionListReportsAStaleCacheAsStorageExit(t *testing.T) {
 	t.Parallel()
 
@@ -163,7 +162,8 @@ func TestSessionListReportsAStaleCacheAsStorageExit(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 5, code, "a stale cache is a storage error")
 	require.Equal(t, pasterrors.ExitCode(err), code)
-	require.Contains(t, err.Error(), "marked stale")
+	require.Contains(t, err.Error(), "session state cache is stale")
+	require.Contains(t, err.Error(), "previous certified cache is preserved")
 	require.Empty(t, out.String())
 }
 

@@ -54,7 +54,9 @@ type SessionTailOutcome struct {
 // SQL implementation; tests inject a failing writer to prove that the claim
 // survives and the dirty marker is set.
 type SessionStateWriter interface {
-	UpsertSessionState(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) error
+	// The result is true only when this delivery changes cached facts. An old
+	// or duplicate delivery must not mutate bindings or advance the revision.
+	UpsertSessionState(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) (bool, error)
 }
 
 // unifiedStoreHandle is the borrowable unified-store write handle shared by the
@@ -67,7 +69,7 @@ type unifiedStoreHandle interface {
 
 type sqlSessionStateWriter struct{}
 
-func (sqlSessionStateWriter) UpsertSessionState(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) error {
+func (sqlSessionStateWriter) UpsertSessionState(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) (bool, error) {
 	return upsertSessionStateTx(ctx, tx, in, session)
 }
 
@@ -123,9 +125,13 @@ func RecordLifecycleSessionTail(ctx context.Context, tracker protocol.TaskTracke
 	if _, err := tx.ExecContext(bounded, `SAVEPOINT session_state`); err != nil {
 		return out, sessionClaimError("the store refused the session-state savepoint: "+err.Error(), "release other store writers or repair the database, then retry the delivery")
 	}
-	stateErr := writer.UpsertSessionState(bounded, tx, in, session)
-	if stateErr == nil && sessionTailTransition(in) == model.SessionTransitionEnd {
-		stateErr = closeSessionBindingTx(bounded, tx, in.Harness, session, in.RecordedAt.UnixNano())
+	changed, stateErr := writer.UpsertSessionState(bounded, tx, in, session)
+	if stateErr == nil && changed && sessionTailTransition(in) == model.SessionTransitionEnd {
+		var unsuperseded bool
+		stateErr = tx.QueryRowContext(bounded, `SELECT host_end_journal_id = ? AND host_end_journal_id > last_resume_journal_id FROM pasture_session_state WHERE harness=? AND session=?`, in.OccurrenceID.JournalID(), string(in.Harness), session).Scan(&unsuperseded)
+		if stateErr == nil && unsuperseded {
+			stateErr = closeSessionBindingTx(bounded, tx, in.Harness, session, in.RecordedAt.UnixNano())
+		}
 	}
 	if stateErr != nil {
 		// The savepoint is still open when UpsertSessionState fails. Roll it
@@ -134,8 +140,12 @@ func RecordLifecycleSessionTail(ctx context.Context, tracker protocol.TaskTracke
 		if _, err := tx.ExecContext(bounded, `ROLLBACK TO SAVEPOINT session_state`); err != nil {
 			return out, sessionClaimError("the store refused to roll back the failed session-state write: "+err.Error(), "repair the database before retrying the delivery")
 		}
-		_, _ = tx.ExecContext(bounded, `RELEASE SAVEPOINT session_state`)
-		_, _ = tx.ExecContext(bounded, `UPDATE pasture_session_api_state SET dirty = 1 WHERE singleton_id = 0`)
+		if _, err := tx.ExecContext(bounded, `RELEASE SAVEPOINT session_state`); err != nil {
+			return out, sessionClaimError("the store refused to release the failed session-state savepoint: "+err.Error(), "repair the database before retrying the delivery")
+		}
+		if _, err := tx.ExecContext(bounded, `UPDATE pasture_session_api_state SET dirty = 1, revision = revision + 1 WHERE singleton_id = 0`); err != nil {
+			return out, sessionClaimError("the store refused to mark the failed session-state cache dirty: "+err.Error(), "repair the database before rebuilding the cache from the committed journal")
+		}
 		out.State.Dirty = true
 		if in.Diagnostics != nil {
 			fmt.Fprintf(in.Diagnostics, "pasture: session state cache write failed for harness %q session %q: %v; the receipt remains committed and the cache is marked dirty for the next rebuild\n", string(in.Harness), session, stateErr)
@@ -144,12 +154,14 @@ func RecordLifecycleSessionTail(ctx context.Context, tracker protocol.TaskTracke
 		if _, err := tx.ExecContext(bounded, `RELEASE SAVEPOINT session_state`); err != nil {
 			return out, sessionClaimError("the store refused to release the session-state savepoint: "+err.Error(), "repair the database before retrying the delivery")
 		}
-		if _, err := tx.ExecContext(bounded,
-			`UPDATE pasture_session_api_state SET revision = revision + 1, completed_through_jid = max(completed_through_jid, ?) WHERE singleton_id = 0`,
-			in.OccurrenceID.JournalID()); err != nil {
-			return out, sessionClaimError("the store refused the session API revision update: "+err.Error(), "repair the database before retrying the delivery")
+		if changed || out.Claim.State == SessionClaimWrote {
+			if _, err := tx.ExecContext(bounded, `UPDATE pasture_session_api_state SET revision = revision + 1 WHERE singleton_id = 0`); err != nil {
+				return out, sessionClaimError("the store refused the session API revision update: "+err.Error(), "repair the database before retrying the delivery")
+			}
 		}
-		out.State.Written = true
+		// Only a completed journal scan certifies completed_through_jid. A hot
+		// tail can settle beyond an earlier committed receipt with no tail yet.
+		out.State.Written = changed
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -183,7 +195,7 @@ func MarkSessionStateDirty(ctx context.Context, tracker protocol.TaskTracker) er
 	}
 	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().Ingress())
 	defer cancel()
-	if _, err := store.auditDBHandle().ExecContext(bounded, `UPDATE pasture_session_api_state SET dirty = 1 WHERE singleton_id = 0`); err != nil {
+	if _, err := store.auditDBHandle().ExecContext(bounded, `UPDATE pasture_session_api_state SET dirty = 1, revision = revision + 1 WHERE singleton_id = 0`); err != nil {
 		return sessionClaimError("the store refused the session-state dirty marker: "+err.Error(), "repair the database before retrying")
 	}
 	return nil
@@ -222,27 +234,51 @@ func claimSessionTx(ctx context.Context, tx *sql.Tx, harness ir.HarnessID, sessi
 // upsertSessionStateTx writes the activity cache. first_seen is preserved on
 // update; last_seen/last_event follow the highest journal id so an out-of-order
 // delivery cannot rewind the cache.
-func upsertSessionStateTx(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) error {
+func upsertSessionStateTx(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) (bool, error) {
 	nativeName, ok := registration.NativeName(in.Contract, in.EventKind)
 	if !ok {
 		nativeName = fmt.Sprintf("event-%d", in.EventKind)
 	}
 	recordedAt := in.RecordedAt.UnixNano()
 	journalID := int64(in.OccurrenceID.JournalID())
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO pasture_session_state
-			(harness, session, first_seen, last_seen, last_event, last_journal_id, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(harness, session) DO UPDATE SET
-			last_seen = CASE WHEN excluded.last_journal_id >= pasture_session_state.last_journal_id THEN excluded.last_seen ELSE pasture_session_state.last_seen END,
-			last_event = CASE WHEN excluded.last_journal_id >= pasture_session_state.last_journal_id THEN excluded.last_event ELSE pasture_session_state.last_event END,
-			last_journal_id = max(pasture_session_state.last_journal_id, excluded.last_journal_id),
-			updated_at = max(pasture_session_state.updated_at, excluded.updated_at)`,
-		string(in.Harness), session, recordedAt, recordedAt, nativeName, journalID, recordedAt)
-	if err != nil {
-		return sessionClaimError("the store refused the session-state write: "+err.Error(), "repair the database before retrying the delivery")
+	var promptAt, promptID, endAt, endID, resumeAt, resumeID int64
+	switch sessionTailTransition(in) {
+	case model.SessionTransitionPrompt:
+		promptAt, promptID = recordedAt, journalID
+	case model.SessionTransitionEnd:
+		endAt, endID = recordedAt, journalID
+	case model.SessionTransitionResume:
+		resumeAt, resumeID = recordedAt, journalID
 	}
-	return nil
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO pasture_session_state
+			(harness, session, first_seen, last_seen, last_event, last_journal_id, updated_at,
+			 last_prompt_at,last_prompt_journal_id,host_end_at,host_end_journal_id,last_resume_at,last_resume_journal_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(harness, session) DO UPDATE SET
+			last_seen = CASE WHEN excluded.last_journal_id > pasture_session_state.last_journal_id THEN excluded.last_seen ELSE pasture_session_state.last_seen END,
+			last_event = CASE WHEN excluded.last_journal_id > pasture_session_state.last_journal_id THEN excluded.last_event ELSE pasture_session_state.last_event END,
+			last_journal_id = max(pasture_session_state.last_journal_id, excluded.last_journal_id),
+			last_prompt_at = CASE WHEN excluded.last_prompt_journal_id > pasture_session_state.last_prompt_journal_id THEN excluded.last_prompt_at ELSE pasture_session_state.last_prompt_at END,
+			last_prompt_journal_id = max(pasture_session_state.last_prompt_journal_id,excluded.last_prompt_journal_id),
+			host_end_at = CASE WHEN excluded.host_end_journal_id > pasture_session_state.host_end_journal_id THEN excluded.host_end_at ELSE pasture_session_state.host_end_at END,
+			host_end_journal_id = max(pasture_session_state.host_end_journal_id,excluded.host_end_journal_id),
+			last_resume_at = CASE WHEN excluded.last_resume_journal_id > pasture_session_state.last_resume_journal_id THEN excluded.last_resume_at ELSE pasture_session_state.last_resume_at END,
+			last_resume_journal_id = max(pasture_session_state.last_resume_journal_id,excluded.last_resume_journal_id),
+			updated_at = max(pasture_session_state.updated_at, excluded.updated_at)
+		WHERE excluded.last_journal_id > pasture_session_state.last_journal_id
+		   OR excluded.last_prompt_journal_id > pasture_session_state.last_prompt_journal_id
+		   OR excluded.host_end_journal_id > pasture_session_state.host_end_journal_id
+		   OR excluded.last_resume_journal_id > pasture_session_state.last_resume_journal_id`,
+		string(in.Harness), session, recordedAt, recordedAt, nativeName, journalID, recordedAt, promptAt, promptID, endAt, endID, resumeAt, resumeID)
+	if err != nil {
+		return false, sessionClaimError("the store refused the session-state write: "+err.Error(), "repair the database before retrying the delivery")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return false, sessionClaimError("the store did not report the session-state change: "+err.Error(), "repair the database before rebuilding the cache")
+	}
+	return affected > 0, nil
 }
 
 // isSessionEnd names the one host lifecycle event that ends an open binding.
@@ -260,7 +296,7 @@ func closeSessionBindingTx(ctx context.Context, tx *sql.Tx, harness ir.HarnessID
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE pasture_session_epoch_binding
 		SET unbound_at = ?, unbound_reason = 'session_end'
-		WHERE harness = ? AND session = ? AND unbound_at IS NULL`, at, string(harness), session); err != nil {
+		WHERE harness = ? AND session = ? AND unbound_at IS NULL AND bound_at <= ?`, at, string(harness), session, at); err != nil {
 		return sessionClaimError("the store refused to close the session binding: "+err.Error(), "repair the database before retrying the delivery")
 	}
 	// An inferred binding never outlives the session it was derived for. The

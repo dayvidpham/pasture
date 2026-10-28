@@ -459,11 +459,13 @@ func compareBindingRows(ctx context.Context, tx *sql.Tx, expected map[provenance
 // projection rows; the session cache is a separate rebuildable read model and
 // must not pay for another read model's replay.
 type OccurrenceFact struct {
-	JournalID  provenance.JournalID
-	Contract   ir.RuntimeContractID
-	Event      model.ContractEventKind
-	ReceivedAt int64
-	Bindings   []model.NativeBinding
+	JournalID     provenance.JournalID
+	Contract      ir.RuntimeContractID
+	Event         model.ContractEventKind
+	ReceivedAt    int64
+	Bindings      []model.NativeBinding
+	Capture       model.CaptureDisposition
+	PayloadDigest string
 }
 
 // ReadOccurrenceFacts reads committed occurrence evidence in journal order.
@@ -484,11 +486,13 @@ func ReadOccurrenceFacts(ctx context.Context, journal provenance.Journal) ([]Occ
 			return nil, projectionError("A lifecycle occurrence journal row carries an invalid contract.", fmt.Sprintf("Evidence row %d does not name a runtime contract.", row.journalID), "No occurrence facts were returned.", "Repair the malformed journal row before rebuilding.", err)
 		}
 		facts = append(facts, OccurrenceFact{
-			JournalID:  row.journalID,
-			Contract:   contract,
-			Event:      row.payload.Event,
-			ReceivedAt: row.recordedAt,
-			Bindings:   append([]model.NativeBinding(nil), row.payload.Bindings...),
+			JournalID:     row.journalID,
+			Contract:      contract,
+			Event:         row.payload.Event,
+			ReceivedAt:    row.recordedAt,
+			Bindings:      append([]model.NativeBinding(nil), row.payload.Bindings...),
+			Capture:       row.payload.Capture,
+			PayloadDigest: row.payload.Body,
 		})
 	}
 	return facts, nil
