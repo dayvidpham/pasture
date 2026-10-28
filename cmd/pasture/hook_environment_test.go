@@ -216,6 +216,9 @@ func TestHookEnvironmentTreatsSetButEmptyAsUnset(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+			if test.want.ActorClaim == "" {
+				test.want.ActorClaim = "pasture-system/00000000-0000-0000-0000-000000000001"
+			}
 			assert.Equal(t, test.want, got)
 		})
 	}

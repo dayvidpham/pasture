@@ -25,6 +25,25 @@ func policyInput(episodes ...gateauthority.Episode) gatepolicy.Input {
 	}
 }
 
+func TestAttributionOnlyContinuationKeepsEarlierGuards(t *testing.T) {
+	t.Parallel()
+	in := policyInput()
+	in.Claim.AttributionOnly = true
+	assertDecision(t, in, backend.DecisionProceed, backend.ReasonAttributionOnlySession)
+	in.Capability = runtime.CapabilityNone
+	assertDecision(t, in, backend.DecisionProceed, backend.ReasonAttributionOnlySession)
+	in.Semantic = runtime.SemanticObservation
+	assertDecision(t, in, backend.DecisionProceed, backend.ReasonLegal)
+	in.Semantic = runtime.SemanticGateConsultation
+	in.StopLoop = runtime.StopLoopConsultWhenInactive
+	assertDecision(t, in, backend.DecisionProceed, backend.ReasonStopLoopGuard)
+	in.StopLoop = runtime.StopLoopNotApplicable
+	in.Capability = 0
+	if _, err := gatepolicy.Decide(in); err == nil {
+		t.Fatal("invalid runtime must remain a fault, not an attribution continuation")
+	}
+}
+
 func episode(role gateauthority.AssignmentRole, phase gateauthority.TaskPhase) gateauthority.Episode {
 	return gateauthority.Episode{Role: role, Phase: phase}
 }

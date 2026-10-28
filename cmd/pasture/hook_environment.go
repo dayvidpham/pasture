@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
+	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
@@ -81,8 +82,8 @@ type HookEnvironment struct {
 	// capture is off. This parser only reads the value; the capture sink owns
 	// the rules about which directories are acceptable.
 	CaptureDir string
-	// ActorClaim is the actor identifier a host session claims, or "" when the
-	// session makes no claim.
+	// ActorClaim is the explicitly supplied actor, or the generic attribution-only
+	// actor when the environment does not supply one.
 	ActorClaim string
 	// BudgetOverride carries the operator's requested substitutions for the
 	// hook-invocation deadline and the caller windows beneath it. The zero
@@ -129,7 +130,7 @@ func HookEnvironmentFromOS(lookup func(string) (string, bool)) (HookEnvironment,
 				"without one; pass os.LookupEnv, or use hookEnvironment() which supplies it")
 	}
 
-	parsed := HookEnvironment{FaultPolicy: hostexit.FaultFailOpen, WriteLane: WriteLaneAuto}
+	parsed := HookEnvironment{FaultPolicy: hostexit.FaultFailOpen, WriteLane: WriteLaneAuto, ActorClaim: provadapter.DefaultLLMActorID().String()}
 
 	if raw, present := lookup(hookWriteLaneEnv); present && raw != "" {
 		switch WriteLaneMode(raw) {
@@ -207,7 +208,7 @@ func HookEnvironmentFromOS(lookup func(string) (string, bool)) (HookEnvironment,
 					"actor identifier; this happened in HookEnvironmentFromOS "+
 					"(cmd/pasture/hook_environment.go) while the hook was starting, before any host payload "+
 					"was read; an inexact identifier would attribute this session to the wrong actor or to "+
-					"none; set %s to the exact actor identifier, or unset it to make no claim",
+					"none; set %s to the exact actor identifier, or unset it to use the generic LLM actor",
 				hookActorIDEnv, raw, hookActorIDEnv)
 		}
 		parsed.ActorClaim = raw
