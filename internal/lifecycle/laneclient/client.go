@@ -107,6 +107,19 @@ func (c *Client) Consult(ctx context.Context, request lanewire.Request, payload 
 		_ = conn.SetDeadline(deadline)
 	}
 
+	// A version-only frame cannot reach an old daemon's storage path: old
+	// servers check the version before dispatch. Negotiate on this connection
+	// before sending any receipt work.
+	if err := lanewire.WriteMessage(conn, lanewire.Request{Version: lanewire.ProtocolVersion}, nil); err != nil {
+		return lanewire.Response{}, fmt.Errorf("%w: lane version probe failed before receipt work was sent: %v", ErrUnavailable, err)
+	}
+	var ready lanewire.Response
+	if _, err := lanewire.ReadMessage(conn, &ready); err != nil {
+		return lanewire.Response{}, fmt.Errorf("%w: lane version probe received no answer before receipt work was sent: %v", ErrUnavailable, err)
+	}
+	if err := lanewire.CheckVersion(ready.Version); err != nil || ready.Kind != lanewire.KindReady {
+		return lanewire.Response{}, fmt.Errorf("%w: lane did not acknowledge the compatible version before receipt work was sent", ErrUnavailable)
+	}
 	if err := lanewire.WriteMessage(conn, request, payload); err != nil {
 		return lanewire.Response{}, fmt.Errorf("%w: the request could not be written to the lane at %s (%v); whether the daemon received it is unknown, so no direct write follows", ErrRecordUnknown, c.socketPath, err)
 	}
@@ -118,7 +131,7 @@ func (c *Client) Consult(ctx context.Context, request lanewire.Request, payload 
 	if err := lanewire.CheckVersion(response.Version); err != nil {
 		// A version mismatch is caught BEFORE any semantic reading of the
 		// response: a field this build does not know could mean anything.
-		return lanewire.Response{}, fmt.Errorf("%w: %w; the hook falls back to the direct write path, which cannot double-write because this answer carries no committed occurrence", ErrUnavailable, err)
+		return lanewire.Response{}, fmt.Errorf("%w: incompatible answer after receipt work was sent: %v; no direct write follows", ErrRecordUnknown, err)
 	}
 	switch response.Kind {
 	case lanewire.KindCommitted, lanewire.KindRefused:

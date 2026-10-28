@@ -13,7 +13,7 @@ import (
 // schema document. It is not the host version, the release number, or any store
 // version. A body change for the stable schema ID requires a bump, enforced by
 // the committed version ledger fixture.
-const SchemaDocumentVersion uint32 = 1
+const SchemaDocumentVersion uint32 = 2
 
 // SchemaDocumentID is the stable definition identity of the lifecycle schema
 // document. It does not change across versions.
@@ -37,9 +37,8 @@ type schemaDocument struct {
 // codecs enforce. Host payload field catalogs remain runtime-contract data;
 // this is not a host JSON schema and not the interpretation vocabulary.
 type SchemaSpecification struct {
-	// OccurrenceKinds are the durable occurrence evidence kinds the receipt
-	// writer emits. v1 is read-only legacy without refs; v2 carries the
-	// complete four-reference envelope and is the only kind new writes emit.
+	// OccurrenceKinds are the durable occurrence evidence kinds the reader
+	// understands. v1 is legacy; v2 and v3 carry the complete envelope.
 	OccurrenceKinds []string `json:"occurrence_kinds"`
 	// InterpretedKinds are the durable interpreted evidence kinds. v1 is
 	// read-only legacy without a metamodel coordinate; v2 carries one; v3
@@ -108,7 +107,7 @@ type ByteBounds struct {
 // rotting.
 func SchemaSpecificationForBinary() (SchemaSpecification, error) {
 	return SchemaSpecification{
-		OccurrenceKinds:      []string{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.occurrence.v2"},
+		OccurrenceKinds:      []string{"pasture.lifecycle.occurrence.v1", "pasture.lifecycle.occurrence.v2", "pasture.lifecycle.occurrence.v3"},
 		InterpretedKinds:     []string{"pasture.lifecycle.interpreted.v1", "pasture.lifecycle.interpreted.v2", "pasture.lifecycle.interpreted.v3"},
 		DefinitionKinds:      []string{"pasture.lifecycle.definition.v1", "pasture.lifecycle.definition.v2"},
 		DefinitionStateKinds: []string{"pasture.lifecycle.definition-state.v1", "pasture.lifecycle.definition-state.v2"},
@@ -200,11 +199,11 @@ func decodeSchema(payload []byte) (Document, error) {
 	// Version 1 is a historical codec arm, independent of the version emitted
 	// by today's generator. Add a new arm rather than replacing this decoder.
 	switch wire.Version {
-	case 1:
+	case 1, 2:
 	default:
 		return Document{}, failure("decodeSchema", "The schema document version has no supported historical codec.", nil)
 	}
-	if wire.Kind != model.DefinitionLifecycleSchema || wire.Version != 1 || wire.Codec != model.DefinitionCanonicalJSON || wire.ID != SchemaDocumentID {
+	if wire.Kind != model.DefinitionLifecycleSchema || wire.Codec != model.DefinitionCanonicalJSON || wire.ID != SchemaDocumentID {
 		return Document{}, failure("decodeSchema", "Schema document kind, owner identity, codec or version is invalid.", fmt.Errorf("kind=%d version=%d codec=%d id=%q", wire.Kind, wire.Version, wire.Codec, wire.ID))
 	}
 	if err := validateSchemaSpecification(wire.Specification); err != nil {

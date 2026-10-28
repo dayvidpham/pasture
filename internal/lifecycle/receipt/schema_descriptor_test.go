@@ -24,7 +24,7 @@ func TestSchemaDescriptorMatchesReceiptWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(spec.OccurrenceKinds) != 2 || spec.OccurrenceKinds[0] != string(receiptKind) || spec.OccurrenceKinds[1] != string(occurrenceKindV2) {
+	if !slices.Equal(spec.OccurrenceKinds, []string{string(receiptKind), string(occurrenceKindV2), string(occurrenceKindV3)}) {
 		t.Fatalf("descriptor occurrence kinds %q do not match the receipt writer", spec.OccurrenceKinds)
 	}
 	if !slices.Equal(spec.InterpretedKinds, []string{string(interpretedKind), string(interpretedKindV2), string(interpretedKindV3)}) {

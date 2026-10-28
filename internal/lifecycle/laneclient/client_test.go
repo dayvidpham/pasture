@@ -31,9 +31,23 @@ func serveOnce(t *testing.T, socketPath string, handle func(conn net.Conn)) (net
 	return listener, done
 }
 
+func acceptProbe(t *testing.T, conn net.Conn) {
+	t.Helper()
+	var probe lanewire.Request
+	body, err := lanewire.ReadMessage(conn, &probe)
+	if err != nil || probe.Version != lanewire.ProtocolVersion || probe.Harness != "" || len(body) != 0 {
+		t.Errorf("invalid version probe: %+v, %v", probe, err)
+		return
+	}
+	if err := lanewire.WriteMessage(conn, lanewire.Response{Version: lanewire.ProtocolVersion, Kind: lanewire.KindReady}, nil); err != nil {
+		t.Errorf("write probe answer: %v", err)
+	}
+}
+
 func TestConsultReturnsACommittedAnswer(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "lane.sock")
 	listener, done := serveOnce(t, socketPath, func(conn net.Conn) {
+		acceptProbe(t, conn)
 		var request lanewire.Request
 		body, err := lanewire.ReadMessage(conn, &request)
 		if err != nil {
@@ -79,6 +93,7 @@ func TestConsultReportsUnavailableWhenTheSocketIsAbsent(t *testing.T) {
 func TestConsultReportsRecordUnknownWhenTheAnswerNeverComes(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "lane.sock")
 	listener, done := serveOnce(t, socketPath, func(conn net.Conn) {
+		acceptProbe(t, conn)
 		// Read the request and close without answering: the daemon may have
 		// committed it, so the hook must not claim not-recorded.
 		var request lanewire.Request
@@ -103,8 +118,11 @@ func TestConsultFallsBackOnAProtocolMismatch(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "lane.sock")
 	listener, done := serveOnce(t, socketPath, func(conn net.Conn) {
 		var request lanewire.Request
-		_, _ = lanewire.ReadMessage(conn, &request)
-		_ = lanewire.WriteMessage(conn, lanewire.Response{Version: lanewire.ProtocolVersion + 1, Kind: lanewire.KindCommitted}, nil)
+		body, err := lanewire.ReadMessage(conn, &request)
+		if err != nil || request.Harness != "" || len(body) != 0 {
+			t.Errorf("old daemon received receipt work during probe: %+v body=%q err=%v", request, body, err)
+		}
+		_ = lanewire.WriteMessage(conn, lanewire.Response{Version: 1, Kind: lanewire.KindRefused}, nil)
 	})
 	defer listener.Close()
 
@@ -116,9 +134,31 @@ func TestConsultFallsBackOnAProtocolMismatch(t *testing.T) {
 	<-done
 }
 
+func TestConsultNeverFallsBackAfterReceiptOnVersionMismatch(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "lane.sock")
+	listener, done := serveOnce(t, socketPath, func(conn net.Conn) {
+		acceptProbe(t, conn)
+		var request lanewire.Request
+		body, err := lanewire.ReadMessage(conn, &request)
+		if err != nil || string(body) != "payload" {
+			t.Errorf("receipt request: body=%q err=%v", body, err)
+			return
+		}
+		_ = lanewire.WriteMessage(conn, lanewire.Response{Version: 1, Kind: lanewire.KindCommitted}, nil)
+	})
+	defer listener.Close()
+	client := New(socketPath, time.Second)
+	_, err := client.Consult(context.Background(), lanewire.Request{Harness: "opencode"}, []byte("payload"))
+	if !errors.Is(err, ErrRecordUnknown) || errors.Is(err, ErrUnavailable) {
+		t.Fatalf("post-send mismatch = %v, want record-unknown only", err)
+	}
+	<-done
+}
+
 func TestConsultRefusesAnUnknownAnswerKind(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "lane.sock")
 	listener, done := serveOnce(t, socketPath, func(conn net.Conn) {
+		acceptProbe(t, conn)
 		var request lanewire.Request
 		_, _ = lanewire.ReadMessage(conn, &request)
 		_ = lanewire.WriteMessage(conn, lanewire.Response{Version: lanewire.ProtocolVersion, Kind: "maybe"}, nil)
@@ -136,6 +176,7 @@ func TestConsultRefusesAnUnknownAnswerKind(t *testing.T) {
 func TestConsultReturnsARefusedAnswer(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "lane.sock")
 	listener, done := serveOnce(t, socketPath, func(conn net.Conn) {
+		acceptProbe(t, conn)
 		var request lanewire.Request
 		_, _ = lanewire.ReadMessage(conn, &request)
 		_ = lanewire.WriteMessage(conn, lanewire.Response{

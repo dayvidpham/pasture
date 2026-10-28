@@ -22,7 +22,7 @@ import (
 // It is carried in BOTH directions and checked by BOTH ends: an old hook
 // against a new daemon and a new hook against an old daemon must each fall back
 // to the direct write path rather than misinterpret a frame.
-const ProtocolVersion = 1
+const ProtocolVersion = 2
 
 // Response kinds. Exactly one is set on every well-formed response.
 const (
@@ -32,6 +32,8 @@ const (
 	// KindRefused means nothing, or nothing further, was committed: the refusal
 	// carries the stage that says which.
 	KindRefused = "refused"
+	// KindReady acknowledges a version probe without admitting receipt work.
+	KindReady = "ready"
 )
 
 // MaxHeaderBytes bounds the JSON header. A header larger than this is refused

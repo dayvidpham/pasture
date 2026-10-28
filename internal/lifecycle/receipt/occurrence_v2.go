@@ -19,6 +19,7 @@ import (
 // records decode unchanged and are never proof of completeness. Nothing but
 // the common receipt boundary emits v2.
 const occurrenceKindV2 = provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")
+const occurrenceKindV3 = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
 
 // CurrentOccurrenceEvidenceKind identifies newly committed occurrences.
 // Readers admit the historical kind alongside it.
@@ -229,7 +230,7 @@ func resolveOccurrenceRefs(reader DefinitionReader, contract ir.RuntimeContractI
 func ValidateStoredOccurrenceEnvelope(reader DefinitionReader, kind provenance.EvidenceKind, contract ir.RuntimeContractID, envelope model.OccurrenceEnvelopeRef, watermark provenance.JournalID) error {
 	const where = "Validating stored occurrence evidence (internal/lifecycle/receipt/occurrence_v2.go in receipt.validateStoredOccurrenceEnvelope)."
 	switch kind {
-	case occurrenceKindV2:
+	case occurrenceKindV2, occurrenceKindV3:
 		return resolveOccurrenceRefs(reader, contract, envelope, watermark)
 	case receiptKind:
 		refs := []model.DefinitionRef{envelope.Runtime.Definition, envelope.Schema.Definition, envelope.Implementation.Definition, envelope.Retention.Definition}

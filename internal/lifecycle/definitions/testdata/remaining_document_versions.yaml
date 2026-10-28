@@ -16,6 +16,9 @@ versions:
   - id: pasture.lifecycle.occurrence-schema
     version: 1
     sha256: 4545eabebf51405118b476beb8757847ad4001025783df05b31865d2dd12252b
+  - id: pasture.lifecycle.occurrence-schema
+    version: 2
+    sha256: 8a0a834ade7c34d5d740ed149accf5a194781b9707534abe3b385cb1715637ab
   - id: pasture.lifecycle.retention.store-all
     version: 1
     sha256: a32a0f49aa541ba3650b359f1acfdfe9035699fd5cc3464d2da9eea49dbe4f19

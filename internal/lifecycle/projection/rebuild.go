@@ -9,6 +9,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/provenance"
@@ -16,20 +17,23 @@ import (
 
 const occurrenceEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 const occurrenceEvidenceKindV2 = provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")
+const occurrenceEvidenceKindV3 = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
 
 // occurrenceEvidenceKinds is the closed set of occurrence evidence kinds the
 // replay admits. v1 is read-only legacy (all-zero envelopes pass through;
-// any nonzero ref must validate); v2 carries the complete four-reference
-// envelope and is the only kind new writes emit.
-var occurrenceEvidenceKinds = []provenance.EvidenceKind{occurrenceEvidenceKind, occurrenceEvidenceKindV2}
+// any nonzero ref must validate); v2 and v3 carry the complete four-reference
+// envelope. The writer still emits v2 until the v3 path is coordinated.
+var occurrenceEvidenceKinds = []provenance.EvidenceKind{occurrenceEvidenceKind, occurrenceEvidenceKindV2, occurrenceEvidenceKindV3}
 
 type occurrencePayload struct {
-	Contract string                      `json:"contract"`
-	Event    model.ContractEventKind     `json:"event"`
-	Envelope model.OccurrenceEnvelopeRef `json:"envelope"`
-	Bindings []model.NativeBinding       `json:"bindings"`
-	Capture  model.CaptureDisposition    `json:"capture"`
-	Body     string                      `json:"body_digest"`
+	Contract          string                      `json:"contract"`
+	Event             model.ContractEventKind     `json:"event"`
+	Envelope          model.OccurrenceEnvelopeRef `json:"envelope"`
+	Bindings          []model.NativeBinding       `json:"bindings"`
+	Capture           model.CaptureDisposition    `json:"capture"`
+	Body              string                      `json:"body_digest"`
+	Execution         *execution.Metadata         `json:"execution,omitempty"`
+	SessionTransition string                      `json:"sessionTransition,omitempty"`
 }
 
 // EvidencePageReader is the narrow evidence surface the non-reclaiming replay
@@ -101,7 +105,7 @@ func readOccurrenceRowsWithValidation(ctx context.Context, reader DefinitionReso
 		}
 		for _, evidence := range page.Rows {
 			var payload occurrencePayload
-			if err := json.Unmarshal(evidence.Payload, &payload); err != nil {
+			if err := decodeOccurrence(evidence.EvidenceKind, evidence.Payload, evidence.ContentDigest, &payload); err != nil {
 				return nil, 0, projectionError("A lifecycle occurrence journal row could not be decoded.", fmt.Sprintf("Evidence row %d does not contain the canonical occurrence envelope.", evidence.JournalID), "No projection rows were changed.", "Repair or restore the malformed journal row before rebuilding.", err)
 			}
 			contract, err := parseOccurrenceContract(payload.Contract)
@@ -459,13 +463,16 @@ func compareBindingRows(ctx context.Context, tx *sql.Tx, expected map[provenance
 // projection rows; the session cache is a separate rebuildable read model and
 // must not pay for another read model's replay.
 type OccurrenceFact struct {
-	JournalID     provenance.JournalID
-	Contract      ir.RuntimeContractID
-	Event         model.ContractEventKind
-	ReceivedAt    int64
-	Bindings      []model.NativeBinding
-	Capture       model.CaptureDisposition
-	PayloadDigest string
+	JournalID         provenance.JournalID
+	Contract          ir.RuntimeContractID
+	Event             model.ContractEventKind
+	ReceivedAt        int64
+	Bindings          []model.NativeBinding
+	Capture           model.CaptureDisposition
+	PayloadDigest     string
+	Execution         *execution.Metadata
+	SessionTransition model.SessionTransition
+	Version           provenance.EvidenceKind
 }
 
 // ReadOccurrenceFacts reads committed occurrence evidence in journal order.
@@ -486,13 +493,16 @@ func ReadOccurrenceFacts(ctx context.Context, journal provenance.Journal) ([]Occ
 			return nil, projectionError("A lifecycle occurrence journal row carries an invalid contract.", fmt.Sprintf("Evidence row %d does not name a runtime contract.", row.journalID), "No occurrence facts were returned.", "Repair the malformed journal row before rebuilding.", err)
 		}
 		facts = append(facts, OccurrenceFact{
-			JournalID:     row.journalID,
-			Contract:      contract,
-			Event:         row.payload.Event,
-			ReceivedAt:    row.recordedAt,
-			Bindings:      append([]model.NativeBinding(nil), row.payload.Bindings...),
-			Capture:       row.payload.Capture,
-			PayloadDigest: row.payload.Body,
+			JournalID:         row.journalID,
+			Contract:          contract,
+			Event:             row.payload.Event,
+			ReceivedAt:        row.recordedAt,
+			Bindings:          append([]model.NativeBinding(nil), row.payload.Bindings...),
+			Capture:           row.payload.Capture,
+			PayloadDigest:     row.payload.Body,
+			Execution:         row.payload.Execution,
+			Version:           row.kind,
+			SessionTransition: storedTransition(row.payload.SessionTransition),
 		})
 	}
 	return facts, nil

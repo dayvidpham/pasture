@@ -298,6 +298,9 @@ func replaySessionTransition(ctx context.Context, store lifecycleReceiptStore, f
 	if event.SessionTransition != model.SessionTransitionResume {
 		return event.SessionTransition, nil
 	}
+	if fact.Version == "pasture.lifecycle.occurrence.v3" {
+		return fact.SessionTransition, nil
+	}
 	ref, err := digest.Parse(fact.PayloadDigest)
 	if err != nil || ref.Algorithm() != digest.SHA256 {
 		return model.SessionTransitionNone, fmt.Errorf("legacy occurrence %d has an invalid payload digest; restore its original payload evidence", fact.JournalID)

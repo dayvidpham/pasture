@@ -2,7 +2,6 @@ package projection
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 
@@ -69,14 +68,14 @@ func ReadOccurrenceFactPage(ctx context.Context, reader EvidencePageReader, requ
 			return OccurrenceFactPage{}, err
 		}
 		var payload occurrencePayload
-		if err := json.Unmarshal(evidence.Payload, &payload); err != nil {
+		if err := decodeOccurrence(evidence.EvidenceKind, evidence.Payload, evidence.ContentDigest, &payload); err != nil {
 			return OccurrenceFactPage{}, fmt.Errorf("decode lifecycle occurrence %d during bounded session replay: %w; restore the damaged journal row before retrying", evidence.JournalID, err)
 		}
 		contract, err := parseOccurrenceContract(payload.Contract)
 		if err != nil {
 			return OccurrenceFactPage{}, err
 		}
-		result.Facts = append(result.Facts, OccurrenceFact{JournalID: evidence.JournalID, Contract: contract, Event: payload.Event, ReceivedAt: evidence.RecordedAt.UnixNano(), Bindings: append([]model.NativeBinding(nil), payload.Bindings...), Capture: payload.Capture, PayloadDigest: payload.Body})
+		result.Facts = append(result.Facts, OccurrenceFact{JournalID: evidence.JournalID, Contract: contract, Event: payload.Event, ReceivedAt: evidence.RecordedAt.UnixNano(), Bindings: append([]model.NativeBinding(nil), payload.Bindings...), Capture: payload.Capture, PayloadDigest: payload.Body, Execution: payload.Execution, Version: evidence.EvidenceKind, SessionTransition: storedTransition(payload.SessionTransition)})
 	}
 	return result, nil
 }
