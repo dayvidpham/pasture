@@ -10,6 +10,7 @@ import (
 	"github.com/dayvidpham/provenance"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -55,7 +56,7 @@ func TestAuditOnlyLegacyStoreIsCutOverOnFirstOpen(t *testing.T) {
 
 	var version int
 	require.NoError(t, db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version))
-	require.Equal(t, 10, version, "the cutover raises the ceiling")
+	require.Equal(t, audit.MaxKnownSchemaVersion, version, "auto-open migrates to the current layout")
 
 	var markerRows int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM provenance_id_format WHERE singleton=1 AND format=?`,
@@ -64,7 +65,7 @@ func TestAuditOnlyLegacyStoreIsCutOverOnFirstOpen(t *testing.T) {
 
 	var receiptRows int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM pasture_id_cutover WHERE singleton_id=0 AND marker_format=? AND floor_version=?`,
-		string(provenance.IDFormatSlash), 10).Scan(&receiptRows))
+		string(provenance.IDFormatSlash), audit.IdentityFormatSchemaVersion).Scan(&receiptRows))
 	require.Equal(t, 1, receiptRows, "the cutover receipt must be written")
 
 	var agents int
@@ -90,7 +91,7 @@ func TestAuditOnlyLegacyStoreIsCutOverOnFirstOpen(t *testing.T) {
 
 	var versionAfter int
 	require.NoError(t, db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&versionAfter))
-	require.Equal(t, 10, versionAfter, "the second open is a no-op")
+	require.Equal(t, audit.MaxKnownSchemaVersion, versionAfter, "the second open is a no-op")
 	var agentsAfter int
 	require.NoError(t, db.QueryRow(`SELECT count(*) FROM agents_software WHERE name LIKE 'pasture/legacy-role/%'`).Scan(&agentsAfter))
 	require.Equal(t, 7, agentsAfter, "the second open must not duplicate agents")
