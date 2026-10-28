@@ -1,0 +1,173 @@
+# Constructed pure normalization scenarios, not authenticated host captures.
+- name: absent
+  models: [null, null, null]
+  providers: [null, null, null]
+  want_model: {status: unavailable, source: none, reason: no-evidence}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: matched-completion
+  models: [M, M, null]
+  providers: [null, P, null]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: observed, source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}
+- name: invalid-host-lone-declaration
+  permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  models: [' bad', M, null]
+  want_model: {status: invalid, source: host, field: model.id, reason: rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_MODEL, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: invalid-host-complete-declaration
+  models: [' bad', M, null]
+  providers: [null, P, null]
+  want_model: {status: invalid, source: host, field: model.id, reason: rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_MODEL, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}]}
+- name: malformed-model-is-not-malformed-provider
+  models: [' bad', M, null]
+  providers: [P, Q, null]
+  want_model: {status: invalid, source: host, field: model.id, reason: rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_MODEL, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: host, field: model.providerID, value: P}, {source: environment, field: PASTURE_EXECUTION_PROVIDER, value: Q}]}
+- name: different-complete-pairs-no-anchor
+  models: [M, N, null]
+  providers: [P, Q, null]
+  want_model: {status: conflict, source: none, reason: valid-disagreement, candidates: [{source: host, field: model.id, value: M}, {source: environment, field: PASTURE_EXECUTION_MODEL, value: N}]}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: host, field: model.providerID, value: P}, {source: environment, field: PASTURE_EXECUTION_PROVIDER, value: Q}]}
+- name: rejected-host-two-disagreeing-pairs
+  permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  models: [' bad', M, N]
+  providers: [null, P, Q]
+  want_model: {status: conflict, source: none, reason: valid-disagreement-with-rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_MODEL, value: M}, {source: actor-registry, field: model, value: N}]}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}, {source: actor-registry, field: provider, value: Q}]}
+- name: same-model-different-declared-providers
+  permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  models: [null, M, M]
+  providers: [null, P, Q]
+  want_model: {status: observed, source: environment, field: PASTURE_EXECUTION_MODEL, value: M}
+  want_provider: {status: conflict, source: none, reason: valid-disagreement, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}, {source: actor-registry, field: provider, value: Q}]}
+- name: declarations-disagree-no-host
+  models: [null, M, N]
+  providers: [null, P, Q]
+  want_model: {status: conflict, source: none, reason: valid-disagreement, candidates: [{source: environment, field: PASTURE_EXECUTION_MODEL, value: M}, {source: actor-registry, field: model, value: N}]}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}, {source: actor-registry, field: provider, value: Q}]}
+- name: host-provider-only
+  providers: [P, null, null]
+  want_model: {status: unavailable, source: none, reason: no-evidence}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: host, field: model.providerID, value: P}]}
+- name: declaration-provider-only
+  models: [M, null, null]
+  providers: [null, P, null]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}]}
+- name: mismatched-declaration-does-not-complete
+  models: [M, N, null]
+  providers: [null, Q, null]
+  want_model: {status: conflict, source: none, reason: valid-disagreement, candidates: [{source: host, field: model.id, value: M}, {source: environment, field: PASTURE_EXECUTION_MODEL, value: N}]}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: Q}]}
+- name: host-and-environment-provider-conflict
+  models: [M, M, null]
+  providers: [P, Q, null]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: conflict, source: none, reason: valid-disagreement, candidates: [{source: host, field: model.providerID, value: P}, {source: environment, field: PASTURE_EXECUTION_PROVIDER, value: Q}]}
+- name: unpaired-registry-does-not-compete
+  models: [M, M, null]
+  providers: [null, P, Q]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: observed, source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}
+- name: invalid-host-provider
+  models: [M, M, null]
+  providers: [' bad', P, null]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: invalid, source: host, field: model.providerID, reason: rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}]}
+- name: invalid-lower-provider-no-valid-fallback
+  models: [M, M, null]
+  providers: [P, ' bad', null]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: invalid, source: environment, field: PASTURE_EXECUTION_PROVIDER, reason: rejected-input, candidates: [{source: host, field: model.providerID, value: P}]}
+- name: provider-conflict-before-rejection
+  models: [M, M, M]
+  providers: [' bad', P, Q]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: conflict, source: none, reason: valid-disagreement-with-rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}, {source: actor-registry, field: provider, value: Q}]}
+- name: both-host-fields-malformed
+  models: [' bad', M, null]
+  providers: [' bad', P, null]
+  want_model: {status: invalid, source: host, field: model.id, reason: rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_MODEL, value: M}]}
+  want_provider: {status: invalid, source: host, field: model.providerID, reason: rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}]}
+- name: no-anchor-unpaired-disagreement-and-rejection
+  providers: [P, Q, ' bad']
+  want_model: {status: unavailable, source: none, reason: no-evidence}
+  want_provider: {status: invalid, source: actor-registry, field: provider, reason: rejected-input, candidates: [{source: host, field: model.providerID, value: P}, {source: environment, field: PASTURE_EXECUTION_PROVIDER, value: Q}]}
+- name: invalid-lower-model-no-fallback
+  models: [M, ' bad', null]
+  want_model: {status: invalid, source: environment, field: PASTURE_EXECUTION_MODEL, reason: rejected-input, candidates: [{source: host, field: model.id, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: model-conflict-before-rejected-registry
+  models: [M, N, ' bad']
+  want_model: {status: conflict, source: none, reason: valid-disagreement-with-rejected-input, candidates: [{source: host, field: model.id, value: M}, {source: environment, field: PASTURE_EXECUTION_MODEL, value: N}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: all-agree
+  permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  models: [M, M, M]
+  providers: [P, P, P]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: observed, source: host, field: model.providerID, value: P}
+- name: declarations-agree
+  permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  models: [null, M, M]
+  providers: [null, P, P]
+  want_model: {status: observed, source: environment, field: PASTURE_EXECUTION_MODEL, value: M}
+  want_provider: {status: observed, source: environment, field: PASTURE_EXECUTION_PROVIDER, value: P}
+- name: registry-only
+  permutations: [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]
+  models: [null, null, M]
+  providers: [null, null, P]
+  want_model: {status: observed, source: actor-registry, field: model, value: M}
+  want_provider: {status: observed, source: actor-registry, field: provider, value: P}
+- name: all-malformed
+  models: [' bad', ' bad', ' bad']
+  want_model: {status: invalid, source: host, field: model.id, reason: rejected-input}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: all-candidates-preserved-source-order-not-value-order
+  models: [Z, A, B]
+  providers: [Z, A, B]
+  want_model: {status: conflict, source: none, reason: valid-disagreement, candidates: [{source: host, field: model.id, value: Z}, {source: environment, field: PASTURE_EXECUTION_MODEL, value: A}, {source: actor-registry, field: model, value: B}]}
+  want_provider: {status: unavailable, source: none, reason: unpaired-provider, candidates: [{source: host, field: model.providerID, value: Z}, {source: environment, field: PASTURE_EXECUTION_PROVIDER, value: A}, {source: actor-registry, field: provider, value: B}]}
+- name: registry-invalid-host-valid
+  models: [M, null, ' bad']
+  want_model: {status: invalid, source: actor-registry, field: model, reason: rejected-input, candidates: [{source: host, field: model.id, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: environment-invalid-registry-valid
+  models: [null, ' bad', M]
+  want_model: {status: invalid, source: environment, field: PASTURE_EXECUTION_MODEL, reason: rejected-input, candidates: [{source: actor-registry, field: model, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: registry-invalid-environment-valid
+  models: [null, M, ' bad']
+  want_model: {status: invalid, source: actor-registry, field: model, reason: rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_MODEL, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: host-invalid-registry-valid
+  models: [' bad', null, M]
+  want_model: {status: invalid, source: host, field: model.id, reason: rejected-input, candidates: [{source: actor-registry, field: model, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: environment-rejected-two-valid
+  models: [M, ' bad', N]
+  want_model: {status: conflict, source: none, reason: valid-disagreement-with-rejected-input, candidates: [{source: host, field: model.id, value: M}, {source: actor-registry, field: model, value: N}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: highest-invalid-not-highest-valid
+  models: [M, ' bad', ' bad']
+  want_model: {status: invalid, source: environment, field: PASTURE_EXECUTION_MODEL, reason: rejected-input, candidates: [{source: host, field: model.id, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: highest-invalid-host-before-registry
+  models: [' bad', M, ' bad']
+  want_model: {status: invalid, source: host, field: model.id, reason: rejected-input, candidates: [{source: environment, field: PASTURE_EXECUTION_MODEL, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: highest-invalid-host-before-environment
+  models: [' bad', ' bad', M]
+  want_model: {status: invalid, source: host, field: model.id, reason: rejected-input, candidates: [{source: actor-registry, field: model, value: M}]}
+  want_provider: {status: unavailable, source: none, reason: no-evidence}
+- name: host-registry-equal-model-provider-conflict
+  models: [M, null, M]
+  providers: [P, null, Q]
+  want_model: {status: observed, source: host, field: model.id, value: M}
+  want_provider: {status: conflict, source: none, reason: valid-disagreement, candidates: [{source: host, field: model.providerID, value: P}, {source: actor-registry, field: provider, value: Q}]}
+- name: uncatalogued-host-route-is-not-model-publisher
+  models: [deepseek-v4.1-flash, null, null]
+  providers: [opencode-go, null, null]
+  want_model: {status: observed, source: host, field: model.id, value: deepseek-v4.1-flash}
+  want_provider: {status: observed, source: host, field: model.providerID, value: opencode-go}
