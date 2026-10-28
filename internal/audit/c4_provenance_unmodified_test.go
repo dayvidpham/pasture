@@ -118,7 +118,16 @@ func TestC4_ProvenanceLibraryUnmodified(t *testing.T) {
 	var unrelated []string
 	for _, commit := range allCommits {
 		if looksLikePastureCommit(commit) {
-			pastureRelated = append(pastureRelated, commit)
+			sha := strings.Fields(commit)[0]
+			paths, err := runGit(t, provSrc, "diff-tree", "--root", "-m", "--no-commit-id", "--name-only", "-r", "-z", sha)
+			if err != nil {
+				t.Fatalf("C4: cannot inspect paths of provenance commit %s: %v\n%s", sha, err, paths)
+			}
+			if c4NonProductionPaths(paths) {
+				unrelated = append(unrelated, commit)
+			} else {
+				pastureRelated = append(pastureRelated, commit)
+			}
 		} else {
 			unrelated = append(unrelated, commit)
 		}
@@ -161,6 +170,30 @@ func TestC4_ProvenanceLibraryUnmodified(t *testing.T) {
 		epochAfter.Format(time.RFC3339),
 		formatCommitList(pastureRelated),
 	)
+}
+
+// c4NonProductionPaths refuses to classify an empty or unknown path set as safe.
+func c4NonProductionPaths(paths string) bool {
+	if paths == "" {
+		return false
+	}
+	for _, path := range strings.Split(strings.TrimSuffix(paths, "\x00"), "\x00") {
+		if !strings.HasPrefix(path, ".github/") && !strings.HasPrefix(path, "testdata/") &&
+			!strings.HasSuffix(path, "_test.go") && !strings.HasSuffix(strings.ToLower(path), ".md") {
+			return false
+		}
+	}
+	return true
+}
+
+func TestC4NonProductionPaths(t *testing.T) {
+	t.Parallel()
+	if !c4NonProductionPaths(".github/consumer-oracle/run.sh\x00.github/workflows/ci.yml\x00TESTING.md\x00") {
+		t.Fatal("CI and documentation changes should not be treated as production changes")
+	}
+	if c4NonProductionPaths(".github/workflows/ci.yml\x00tracker.go\x00") {
+		t.Fatal("a commit containing production changes must remain eligible")
+	}
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
