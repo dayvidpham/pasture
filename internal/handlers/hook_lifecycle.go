@@ -139,14 +139,14 @@ func HookLifecycle(ctx context.Context, in HookLifecycleInput) error {
 // HookLifecycleResponse records the lifecycle receipt before returning an
 // optional response to the native host.
 //
-// IT WIRES THE REAL DEPENDENCIES, AND THE PIN IS BY NAME. tasks.OpenTaskTrackerContext
+// IT WIRES THE REAL DEPENDENCIES, AND THE PIN IS BY NAME. tasks.OpenLifecycleTaskTrackerContext
 // is the store the receipt and the gate read share, and tasks.NewGateReader is
 // the only reader this build has; an in-process proof injects its own pair one
 // layer down, at hookLifecycle, so the production pairing is stated here where
 // a reader can see it and is checked by an AST scan rather than by a value a
 // table can compare.
 func HookLifecycleResponse(ctx context.Context, in HookLifecycleInput) (backend.HostResponse, error) {
-	return hookLifecycle(ctx, in, tasks.OpenTaskTrackerContext, tasks.NewGateReader)
+	return hookLifecycle(ctx, in, tasks.OpenLifecycleTaskTrackerContext, tasks.NewGateReader)
 }
 
 type lifecycleCapture struct {

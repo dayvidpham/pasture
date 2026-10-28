@@ -375,7 +375,7 @@ func TestTheLifecycleEntryPointsWireTheGateReader(t *testing.T) {
 			case "hookLifecycle":
 				coreCallers++
 				require.Len(t, call.Args, 4, "%s calls the core with the wrong shape", name)
-				require.Equal(t, "tasks.OpenTaskTrackerContext", gateSourceOf(call.Args[2]),
+				require.Equal(t, "tasks.OpenLifecycleTaskTrackerContext", gateSourceOf(call.Args[2]),
 					"the core must open the unified store itself, so the receipt and the gate read share one file")
 				require.Equal(t, "tasks.NewGateReader", gateSourceOf(call.Args[3]),
 					"PRODUCTION MUST SUPPLY THE REAL READER. A caller that passes anything else evaluates the gate "+
