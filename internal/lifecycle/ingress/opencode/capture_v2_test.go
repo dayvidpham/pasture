@@ -1,14 +1,30 @@
 package opencode_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	opencodeingress "github.com/dayvidpham/pasture/internal/lifecycle/ingress/opencode"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
+
+func TestCapturedContextCarriesExecutionInputs(t *testing.T) {
+	t.Parallel()
+	body, err := os.ReadFile("testdata/fixtures/opencode_session_context_2_0_20.1.json")
+	require.NoError(t, err)
+	capture := opencodeingress.ParseV2(body, v2Event(t, "session.context"), "2.0.20", model.OccurrenceEnvelopeRef{})
+	require.Equal(t, model.CaptureValid, capture.Disposition)
+	require.NotNil(t, capture.Delivery.ExecutionInputs)
+	metadata, err := execution.Normalize(*capture.Delivery.ExecutionInputs)
+	require.NoError(t, err)
+	require.Equal(t, execution.Primary, metadata.Kind)
+	require.Equal(t, "deepseek-v4.1-flash", metadata.Model.Value)
+	require.Equal(t, "opencode-go", metadata.Provider.Value)
+}
 
 // Constructed payloads below exercise the 2.0.20 admission shapes, not
 // authentic host captures. They mirror the hook inputs the 2.0.20 plugin

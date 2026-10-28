@@ -8,6 +8,7 @@ import (
 
 	digest "github.com/opencontainers/go-digest"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/ingress"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
@@ -39,6 +40,11 @@ func Parse(raw []byte, event registration.Event, observedVersion string, envelop
 		result.Disposition, result.Delivery.Bindings, result.Cause = validateMembers(validation.Members, event)
 	}
 	result.Delivery.Capture = result.Disposition
+	if result.Disposition == model.CaptureValid {
+		if in, ok := execution.Native("claude-code", event.NativeName, validation.Body); ok {
+			result.Delivery.ExecutionInputs = &in
+		}
+	}
 	return result
 }
 

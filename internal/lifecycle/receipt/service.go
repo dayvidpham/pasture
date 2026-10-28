@@ -11,6 +11,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/acceptance/origin"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/gate"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
@@ -25,6 +26,9 @@ type Delivery struct {
 	Bindings []model.NativeBinding
 	Capture  model.CaptureDisposition
 	Body     []byte
+	// ExecutionInputs are ephemeral native observations. They are never written
+	// directly: the receipt constructor must normalize them before persistence.
+	ExecutionInputs *execution.Inputs
 	// Origin records the capture provenance origin of the delivery (M4 raw
 	// ingestion carrier). It is provenance-only: the gate never observes it and
 	// validation never discriminates on it. The empty value means the native
