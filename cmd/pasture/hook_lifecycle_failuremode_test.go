@@ -6027,6 +6027,7 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 // gives what neither had: a file cannot leave the sweep without being written
 // down as foreign, and a new file cannot arrive without being classified at all.
 var guardSweepOwned = []string{
+	"hook_default_llm_fault_test.go",
 	"hook_environment_test.go",
 	"hook_lifecycle_additive_test.go",
 	"hook_lifecycle_budget_test.go",

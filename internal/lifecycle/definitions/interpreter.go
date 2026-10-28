@@ -16,7 +16,7 @@ import (
 // same version by CompatibleSourceInventoryUpdate; any semantic body change for
 // the stable interpreter ID requires a bump, enforced by the committed version
 // ledger fixture.
-const InterpreterDocumentVersion uint32 = 1
+const InterpreterDocumentVersion uint32 = 2
 
 // InterpreterDocumentID is the stable definition identity of the interpreter
 // document. It does not change across versions and never selects whatever
@@ -184,11 +184,11 @@ func decodeInterpreter(payload []byte) (Document, error) {
 	// Version 1 is a historical codec arm, independent of the version emitted
 	// by today's generator. Add a new arm rather than replacing this decoder.
 	switch wire.Version {
-	case 1:
+	case 1, 2:
 	default:
 		return Document{}, failure("decodeInterpreter", "The interpreter document version has no supported historical codec.", nil)
 	}
-	if wire.Kind != model.DefinitionInterpreter || wire.Version != 1 || wire.Codec != model.DefinitionCanonicalJSON || wire.ID != InterpreterDocumentID {
+	if wire.Kind != model.DefinitionInterpreter || wire.Codec != model.DefinitionCanonicalJSON || wire.ID != InterpreterDocumentID {
 		return Document{}, failure("decodeInterpreter", "Interpreter document kind, owner identity, codec or version is invalid.", fmt.Errorf("kind=%d version=%d codec=%d id=%q", wire.Kind, wire.Version, wire.Codec, wire.ID))
 	}
 	if err := validateInterpreterSpecification(wire.Specification); err != nil {

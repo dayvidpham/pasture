@@ -248,7 +248,7 @@ func TestCLI_Migrate_DryRun_NamesTheExactFileForALeadingSlashRun(t *testing.T) {
 }
 
 // TestCLI_AnyCommand_UpgradesAVersionEightFileOnOpen is the auto-on-open half.
-// An operator who never runs `pasture migrate` must still land on version 10
+// An operator who never runs `pasture migrate` must still reach the latest version
 // the first time any command opens the store: the open detects the non-NORMAL
 // store, archives it, runs the deferred audit catch-up and the identity
 // conversion, and raises the ceiling.
@@ -270,7 +270,7 @@ func TestCLI_AnyCommand_UpgradesAVersionEightFileOnOpen(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version) FROM audit_schema_meta`).Scan(&version); err != nil {
 		t.Fatalf("read the recorded version: %v", err)
 	}
-	if version != 10 {
-		t.Errorf("recorded version=%d after an ordinary command opened the store, want 10", version)
+	if version != audit.MaxKnownSchemaVersion {
+		t.Errorf("recorded version=%d after an ordinary command opened the store, want %d", version, audit.MaxKnownSchemaVersion)
 	}
 }

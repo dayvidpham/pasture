@@ -49,7 +49,7 @@ func TestTaskAgents_AllKindsAndUnknownAuthor(t *testing.T) {
 		PastureRole   string
 	}
 	require.NoError(t, json.Unmarshal(out.Bytes(), &entries))
-	require.Len(t, entries, tasks.WellKnownAgentCount+3)
+	require.Len(t, entries, tasks.WellKnownAgentCount+4)
 
 	byID := make(map[string]string)
 	for _, e := range entries {

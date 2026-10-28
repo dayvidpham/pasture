@@ -141,10 +141,11 @@ func TestDecisionFactoriesKeepPolicyAndFaultArmsDisjoint(t *testing.T) {
 	t.Parallel()
 
 	proceedReasons := map[backend.DecisionReason]bool{
-		backend.ReasonLegal:          true,
-		backend.ReasonUnboundSession: true,
-		backend.ReasonStopLoopGuard:  true,
-		backend.ReasonUnenforcedDeny: true,
+		backend.ReasonLegal:                  true,
+		backend.ReasonUnboundSession:         true,
+		backend.ReasonStopLoopGuard:          true,
+		backend.ReasonUnenforcedDeny:         true,
+		backend.ReasonAttributionOnlySession: true,
 	}
 	denyReasons := map[backend.DecisionReason]bool{
 		backend.ReasonUnknownActor:       true,
@@ -154,7 +155,7 @@ func TestDecisionFactoriesKeepPolicyAndFaultArmsDisjoint(t *testing.T) {
 	}
 
 	for kind := backend.DecisionKindUnset; kind <= backend.DecisionRequireHuman+1; kind++ {
-		for reason := backend.ReasonUnset; reason <= backend.ReasonEvaluationFault+1; reason++ {
+		for reason := backend.ReasonUnset; reason <= backend.ReasonAttributionOnlySession+1; reason++ {
 			isContinuation := kind == backend.DecisionProceed && proceedReasons[reason]
 			isRefusal := (kind == backend.DecisionDeny || kind == backend.DecisionRequireHuman) && denyReasons[reason]
 			want := isContinuation || isRefusal
@@ -245,6 +246,7 @@ func TestDecisionRecordRejectsMalformedOrUnevaluatedValues(t *testing.T) {
 		"phase-forbids-action",
 		"unenforced-deny",
 		"evaluation-fault",
+		"attribution-only-session",
 	}
 	for i, want := range reasons {
 		if got := backend.DecisionReason(i).String(); got != want {

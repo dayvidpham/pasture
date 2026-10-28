@@ -344,7 +344,12 @@ func assertInstalledOpenCodeOccurrence(t *testing.T, binary, dbPath string, upda
 		if valid && payload.Event == registration.EventOpenCode2ToolExecuteBefore {
 			require.Equal(t, row.ProducingOperationID, consultations[updateIndex].ProducingOperationID)
 			require.Equal(t, row.ProducingOperationJournalID, consultations[updateIndex].ProducingOperationJournalID)
-			assertUnboundProceedConsultation(t, consultations[updateIndex].Payload)
+			if updateIndex == 0 {
+				assertUnboundProceedConsultation(t, consultations[updateIndex].Payload)
+			} else {
+				members := decodeJSONObject(t, consultations[updateIndex].Payload)
+				require.JSONEq(t, `{"decision":"proceed","reason":"attribution-only-session"}`, string(members["decision"]))
+			}
 		}
 	}
 	faultPath := filepath.Join(filepath.Dir(dbPath), lifecycleFaultRecordFile)
@@ -529,8 +534,8 @@ func TestEnabledOpenCodeHandlersToDurableReadBack(t *testing.T) {
 	require.NotZero(t, gateInterpreted.JournalID)
 	require.Equal(t, gateInterpreted.ProducingOperationJournalID, consultation.ProducingOperationJournalID)
 	require.Less(t, gateInterpreted.JournalID, consultation.JournalID, "one durable gate operation must order interpreted before consultation evidence")
-	require.Contains(t, string(consultation.Payload), `"decision":{"decision":"proceed","reason":"unbound-session"}`,
-		"a transport gate with no session-start claim records the unbound-session reason")
+	require.Contains(t, string(consultation.Payload), `"decision":{"decision":"proceed","reason":"attribution-only-session"}`,
+		"the observed session creation claims the generic actor before the gate")
 
 	// Claude is deliberately non-live regression evidence here. Compare only the
 	// shared gate semantic, blocking mode, and canonical Proceed decision.

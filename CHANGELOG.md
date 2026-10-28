@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.0.24] - 2026-10-28
+
+### Other
+- Update the published Provenance dependency to make its optional context-aware fixed software-agent registration capability available. This dependency update does not activate a default actor or session attribution.
+
 ## [0.0.23] - 2026-10-27
 
 ### Fixed

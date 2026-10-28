@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,9 +13,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/handlers"
 	"github.com/dayvidpham/pasture/internal/lifecycle/hostexit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/laneserve"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/provadapter"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -36,6 +41,10 @@ func laneTestSocketPath(t *testing.T) string {
 // socket and returns its path, so the hook's client path is exercised against
 // the production server, lane and store rather than a stub.
 func startHookTestWriteLane(t *testing.T, dbPath string) string {
+	return startHookTestWriteLaneWithDiagnostics(t, dbPath, nil)
+}
+
+func startHookTestWriteLaneWithDiagnostics(t *testing.T, dbPath string, diagnostics io.Writer) string {
 	t.Helper()
 	tracker, err := tasks.OpenTaskTracker(dbPath)
 	require.NoError(t, err)
@@ -52,7 +61,7 @@ func startHookTestWriteLane(t *testing.T, dbPath string) string {
 
 	server, err := handlers.NewHookLifecycleServer(handlers.HookLifecycleServerConfig{
 		Tracker: host.Tracker(), Lane: lane, Clock: host.Clock(), Operations: host.Operations(),
-		Profile: host.Profile(), Readers: host.NewGateReaderFactory(),
+		Profile: host.Profile(), Readers: host.NewGateReaderFactory(), Diagnostics: diagnostics,
 	})
 	require.NoError(t, err)
 	connServer, err := laneserve.NewServer(server, timeouts.TestProfile().WorkflowResult())
@@ -72,6 +81,46 @@ func startHookTestWriteLane(t *testing.T, dbPath string) string {
 		require.NoError(t, lane.Close(context.Background()))
 	})
 	return socketPath
+}
+
+func TestBuiltHookExistingClaimImplicitAndExplicitGeneric(t *testing.T) {
+	binary := lifecycleBinary(t)
+	raw := claudeFixture(t, "session_start_2_1_261.json")
+	session := captureSessionIDOf(t, raw, ir.HarnessClaudeCode)
+	for _, route := range []string{"direct", "served"} {
+		t.Run(route, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "pasture.db")
+			initializeWarmLaneTestDatabase(t, path)
+			owner := seedReaderClaim(t, path, ir.HarnessClaudeCode, session)
+			var diagnostics strings.Builder
+			env := []string{"PASTURE_WRITE_LANE=direct", "PASTURE_CAPTURE_DIR="}
+			if route == "served" {
+				socket := startHookTestWriteLaneWithDiagnostics(t, path, &diagnostics)
+				env = []string{"PASTURE_WRITE_LANE=auto", "PASTURE_WRITE_LANE_SOCKET=" + socket, "PASTURE_CAPTURE_DIR="}
+			}
+			implicit := runLifecycleHook(t, binary, path, "SessionStart", raw, append(env, "PASTURE_ACTOR_ID=")...)
+			require.Zero(t, implicit.ExitCode, implicit.Stderr)
+			require.Empty(t, implicit.Stdout)
+			require.Empty(t, implicit.Stderr)
+			require.Empty(t, diagnostics.String())
+			explicit := runLifecycleHook(t, binary, path, "SessionStart", raw, append(env, "PASTURE_ACTOR_ID="+provadapter.DefaultLLMActorID().String())...)
+			require.Zero(t, explicit.ExitCode, explicit.Stderr)
+			require.Equal(t, implicit.Stdout, explicit.Stdout)
+			warning := explicit.Stderr
+			if route == "served" {
+				warning = diagnostics.String()
+				require.Empty(t, explicit.Stderr)
+			}
+			require.Contains(t, warning, owner.String())
+			require.Contains(t, warning, provadapter.DefaultLLMActorID().String())
+			tracker, err := tasks.OpenTaskTracker(path)
+			require.NoError(t, err)
+			defer tracker.Close()
+			claim, err := tasks.RecordLifecycleSessionClaim(t.Context(), tracker, ir.HarnessClaudeCode, registration.EventSessionStart, []model.NativeBinding{{Kind: model.BindingSession, Value: session}}, tasks.ActorClaim(provadapter.DefaultLLMActorID().String()), lifecycleCLIClock{})
+			require.NoError(t, err)
+			require.Equal(t, owner.String(), claim.StoredActor)
+		})
+	}
 }
 
 func initializeWarmLaneTestDatabase(t *testing.T, dbPath string) {

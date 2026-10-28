@@ -20,6 +20,16 @@ func envMap(values map[string]string) func(string) (string, bool) {
 	}
 }
 
+func TestHookEnvironmentDistinguishesExplicitGenericClaim(t *testing.T) {
+	const generic = "pasture-system/00000000-0000-0000-0000-000000000001"
+	for _, value := range []string{"", generic} {
+		env, err := HookEnvironmentFromOS(envMap(map[string]string{hookActorIDEnv: value}))
+		require.NoError(t, err)
+		require.Equal(t, generic, env.ActorClaim)
+		require.Equal(t, value == "", env.ImplicitClaim)
+	}
+}
+
 // TestHookEnvironmentTreatsSetButEmptyAsUnset is the parser table. The
 // load-bearing case is set-but-empty: a shell that exports an unset variable
 // produces an empty string, so reading "" as an opt-in would make an ordinary
@@ -216,6 +226,10 @@ func TestHookEnvironmentTreatsSetButEmptyAsUnset(t *testing.T) {
 			}
 
 			require.NoError(t, err)
+			if test.want.ActorClaim == "" {
+				test.want.ActorClaim = "pasture-system/00000000-0000-0000-0000-000000000001"
+				test.want.ImplicitClaim = true
+			}
 			assert.Equal(t, test.want, got)
 		})
 	}

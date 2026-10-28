@@ -3,6 +3,7 @@ package laneclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"path/filepath"
 	"testing"
@@ -115,23 +116,27 @@ func TestConsultReportsRecordUnknownWhenTheAnswerNeverComes(t *testing.T) {
 }
 
 func TestConsultFallsBackOnAProtocolMismatch(t *testing.T) {
-	socketPath := filepath.Join(t.TempDir(), "lane.sock")
-	listener, done := serveOnce(t, socketPath, func(conn net.Conn) {
-		var request lanewire.Request
-		body, err := lanewire.ReadMessage(conn, &request)
-		if err != nil || request.Harness != "" || len(body) != 0 {
-			t.Errorf("old daemon received receipt work during probe: %+v body=%q err=%v", request, body, err)
-		}
-		_ = lanewire.WriteMessage(conn, lanewire.Response{Version: 1, Kind: lanewire.KindRefused}, nil)
-	})
-	defer listener.Close()
+	for _, version := range []int{1, 2} {
+		t.Run(fmt.Sprintf("version-%d", version), func(t *testing.T) {
+			socketPath := filepath.Join(t.TempDir(), "lane.sock")
+			listener, done := serveOnce(t, socketPath, func(conn net.Conn) {
+				var request lanewire.Request
+				body, err := lanewire.ReadMessage(conn, &request)
+				if err != nil || request.Harness != "" || len(body) != 0 {
+					t.Errorf("old daemon received receipt work during probe: %+v body=%q err=%v", request, body, err)
+				}
+				_ = lanewire.WriteMessage(conn, lanewire.Response{Version: version, Kind: lanewire.KindRefused}, nil)
+			})
+			defer listener.Close()
 
-	client := New(socketPath, time.Second)
-	_, err := client.Consult(context.Background(), lanewire.Request{Harness: "opencode"}, []byte("payload"))
-	if !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("a protocol mismatch returned %v, want ErrUnavailable so the hook writes directly", err)
+			client := New(socketPath, time.Second)
+			_, err := client.Consult(context.Background(), lanewire.Request{Harness: "opencode"}, []byte("payload"))
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("a protocol mismatch returned %v, want ErrUnavailable so the hook writes directly", err)
+			}
+			<-done
+		})
 	}
-	<-done
 }
 
 func TestConsultNeverFallsBackAfterReceiptOnVersionMismatch(t *testing.T) {

@@ -470,9 +470,10 @@ func lifecycleOutcomeWithCompletion(
 			HostVersionSource: coords.HostVersionSource,
 			Input:             input,
 			Clock:             lifecycleCLIClock{}, Operations: lifecycleCLIOperations{},
-			Barrier:    barrier,
-			ActorClaim: tasks.ActorClaim(env.ActorClaim),
-			Settlement: settlement,
+			Barrier:       barrier,
+			ActorClaim:    tasks.ActorClaim(env.ActorClaim),
+			ImplicitClaim: env.ImplicitClaim,
+			Settlement:    settlement,
 			// The operator's resolved profile reaches the receipt path here, so a
 			// tuned Ingress window is the appender's deadline and not only a
 			// number validated beside the hook deadline.
