@@ -2,6 +2,7 @@
 # {{ .Role.Name }} Agent
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture {{ .Version }} artifact {{ .ArtifactFormat }} -->
 **Role:** `{{ .Role.Id }}` | **Phases owned:** {{- $ownedPhases := .OwnedPhases }}{{- range $i, $p := $ownedPhases }} {{ index $.PhaseSlug $p }}{{- if not (last $i (len $ownedPhases)) }},{{- end }}{{- end }}
 
 ## Protocol Context (generated from schema.xml)

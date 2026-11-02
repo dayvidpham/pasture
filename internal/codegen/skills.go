@@ -48,6 +48,14 @@ var DefaultOptions = GenerateOptions{Diff: true, Write: true}
 // struct for the single-pass pipeline. All fields are exported so
 // text/template can access them.
 type skillContext struct {
+	// Version is the declared Pasture release stamped into the fence so an
+	// installed skill names the release whose generator produced it.
+	Version string
+
+	// ArtifactFormat is the artifact bundle format version the skills publish
+	// under; the bundle identity itself is a content hash and cannot be embedded.
+	ArtifactFormat string
+
 	// Header fields (from role context and spec lookups)
 	Role                 RoleSpec
 	Commands             []CommandSpec
@@ -84,6 +92,12 @@ type skillContext struct {
 // is CommandTitle (CommandSpec.Title, the curated on-disk H1) so the
 // hand-authored title is preserved verbatim.
 type skillSubContext struct {
+	// Version is the declared Pasture release stamped into the fence.
+	Version string
+
+	// ArtifactFormat is the artifact bundle format version the skills publish under.
+	ArtifactFormat string
+
 	SubSkillName       string
 	CommandTitle       string
 	CommandName        string
@@ -423,7 +437,7 @@ func unifiedDiff(fromFile, toFile, oldContent, newContent string) string {
 // including both the header and body content inside BEGIN/END markers.
 // This is the single-pass replacement for the former renderHeader + renderBody
 // two-pass pipeline.
-func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string) (string, error) {
+func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string, version string) (string, error) {
 	if tmplName == "" {
 		tmplName = TemplateSkill
 	}
@@ -453,6 +467,8 @@ func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string) (st
 	fbw := figuresByWorkflow(figures)
 
 	ctx := skillContext{
+		Version:              version,
+		ArtifactFormat:       GeneratedArtifactFormat,
 		Role:                 roleSpec,
 		Commands:             commands,
 		Constraints:          constraints,
@@ -512,7 +528,7 @@ func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string) (st
 // SKILL.md file, including both figures and body content inside BEGIN/END
 // markers. This is the single-pass replacement for the former
 // renderSubSkillHeader + renderBody two-pass pipeline.
-func renderSubSkill(commandId, figuresDir string, tmplName string) (string, error) {
+func renderSubSkill(commandId, figuresDir string, tmplName string, version string) (string, error) {
 	if tmplName == "" {
 		tmplName = TemplateSubSkill
 	}
@@ -549,6 +565,8 @@ func renderSubSkill(commandId, figuresDir string, tmplName string) (string, erro
 	}
 
 	ctx := skillSubContext{
+		Version:            version,
+		ArtifactFormat:     GeneratedArtifactFormat,
 		SubSkillName:       skillDirKey,
 		CommandTitle:       cmdSpec.Title,
 		CommandName:        cmdSpec.Name,
@@ -648,7 +666,7 @@ func generateSkillInto(roleId protocol.RoleId, paths skillPaths, figuresDir stri
 	}
 
 	// Single-pass render: template produces all content inside BEGIN/END.
-	rendered, err := renderSkill(roleId, figuresDir, TemplateSkill)
+	rendered, err := renderSkill(roleId, figuresDir, TemplateSkill, versionForSkillPath(skillPath))
 	if err != nil {
 		return "", err
 	}
@@ -755,7 +773,7 @@ func generateSubSkillInto(commandId string, paths skillPaths, figuresDir string,
 	}
 
 	// Single-pass render: template produces frontmatter + H1 + BEGIN/END content.
-	rendered, err := renderSubSkill(commandId, figuresDir, TemplateSubSkill)
+	rendered, err := renderSubSkill(commandId, figuresDir, TemplateSubSkill, versionForSkillPath(skillPath))
 	if err != nil {
 		return "", err
 	}

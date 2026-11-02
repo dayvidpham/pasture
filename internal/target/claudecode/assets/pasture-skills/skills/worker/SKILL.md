@@ -7,6 +7,7 @@ skills: pasture:worker-blocked, pasture:worker-complete, pasture:worker-implemen
 # Worker Agent
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.24 artifact v1 -->
 **Role:** `worker` | **Phases owned:** p9-worker-slices
 
 ## Protocol Context (generated from schema.xml)

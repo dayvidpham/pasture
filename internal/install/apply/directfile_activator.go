@@ -132,7 +132,7 @@ func (a *DirectFileActivator) inspect(ctx context.Context, source Source, key re
 		current, prior bool
 	}
 	var live []liveLeaf
-	present, absent := 0, 0
+	present, absent, absentRecorded := 0, 0, 0
 	priorByPath := map[string]registry.Leaf{}
 	if prior != nil {
 		for _, leaf := range prior.Leaves() {
@@ -149,6 +149,11 @@ func (a *DirectFileActivator) inspect(ctx context.Context, source Source, key re
 		}
 		if !exists {
 			absent++
+			// A leaf this install's recorded version never owned is a skill
+			// added by a newer bundle, not a leaf the live tree lost.
+			if _, recorded := priorByPath[entry.Path().String()]; recorded {
+				absentRecorded++
+			}
 			continue
 		}
 		leaf, leafErr := registry.NewLeaf(entry.Path(), artifact.RegularFileType(), identity.mode, identity.digest)
@@ -159,10 +164,13 @@ func (a *DirectFileActivator) inspect(ctx context.Context, source Source, key re
 		live = append(live, liveLeaf{leaf: leaf, current: leaf.Digest() == entry.Digest() && leaf.Mode().Bits() == entry.Mode().Bits(), prior: hasPrior && sameLeaf(leaf, priorLeaf)})
 		present++
 	}
-	if present > 0 && absent > 0 {
+	// Only a leaf the recorded install owned can prove the live tree is partial.
+	// Absent leaves that the record never owned are newly published by this
+	// bundle; the recorded install is intact and Ensure materializes them.
+	if present > 0 && absent > 0 && (prior == nil || absentRecorded > 0) {
 		return Outcome{Observation: registry.ObservationUnknown}, cell.NewFault("direct-file inspection", "complete installed or absent bundle", "only part of the bundle is present", df.DestinationRoot(), "classifying live direct-file state", "partial state cannot be adopted or removed safely", "restore the recorded leaves or move the partial external tree aside, then retry", nil)
 	}
-	if absent > 0 {
+	if absent > 0 && present == 0 {
 		rec, recErr := a.record(source, key, df, prior, nil, registry.ObservationAbsent, false, registry.OperationInspect, registry.OutcomeCompleted, "")
 		return Outcome{Status: Completed(), Observation: registry.ObservationAbsent, Record: &rec}, recErr
 	}
@@ -254,6 +262,13 @@ func (a *DirectFileActivator) ensure(ctx context.Context, source Source, key reg
 			createdDirs = appendUniquePath(createdDirs, p)
 		}
 	}
+	// Retire managed leaves this bundle no longer publishes so an upgrade does
+	// not strand files owned by the recorded version. Writes finished first so a
+	// failure never leaves the destination missing a still-desired leaf.
+	retiredDirs, pruneErr := a.retireStaleLeaves(df, tree, prior)
+	if pruneErr != nil {
+		return a.inspectAfterFailure(ctx, source, key, act, prior, registry.OperationEnsure, pruneErr)
+	}
 	out, inspectErr := a.inspect(ctx, source, key, act, prior)
 	if inspectErr != nil {
 		return out, cell.NewFault("direct-file ensure", "live-confirmed postcondition", inspectErr.Error(), df.DestinationRoot(), "inspecting after ensure", "the write may have succeeded but no unproved fact will be persisted", "inspect the destination and rerun", inspectErr)
@@ -262,7 +277,13 @@ func (a *DirectFileActivator) ensure(ctx context.Context, source Source, key reg
 	if managed {
 		out.Diagnostic = ""
 	}
-	created := append([]artifact.Path(nil), out.Record.CreatedDirs()...)
+	created := make([]artifact.Path, 0, len(out.Record.CreatedDirs()))
+	for _, dir := range out.Record.CreatedDirs() {
+		if _, retired := retiredDirs[dir.String()]; retired {
+			continue
+		}
+		created = append(created, dir)
+	}
 	for _, dir := range createdDirs {
 		created = appendUniquePath(created, dir)
 	}
@@ -271,6 +292,53 @@ func (a *DirectFileActivator) ensure(ctx context.Context, source Source, key reg
 		return Outcome{Observation: out.Observation}, recErr
 	}
 	return Outcome{Status: Completed(), Observation: out.Observation, Record: &rec, Diagnostic: out.Diagnostic}, nil
+}
+
+// retireStaleLeaves removes managed leaves the current bundle no longer
+// publishes, then removes directories this install created once they are empty.
+// Only an exact ownership match is deleted: a drifted leaf is a user change and
+// aborts the upgrade instead of being overwritten. External trees are untouched.
+func (a *DirectFileActivator) retireStaleLeaves(df activation.DirectFile, tree *secureDirectTree, prior *registry.Record) (map[string]struct{}, error) {
+	retiredDirs := map[string]struct{}{}
+	if prior == nil || !prior.Managed() {
+		return retiredDirs, nil
+	}
+	desired := map[string]struct{}{}
+	for _, entry := range df.Bundle().Manifest().Entries() {
+		if entry.IsRegular() {
+			desired[entry.Path().String()] = struct{}{}
+		}
+	}
+	for _, leaf := range prior.Leaves() {
+		path := leaf.Path().String()
+		if _, keep := desired[path]; keep {
+			continue
+		}
+		identity, exists, identityErr := tree.identity(path)
+		if identityErr != nil {
+			return nil, identityErr
+		}
+		if !exists {
+			continue
+		}
+		if !secureIdentityMatchesLeaf(identity, leaf) {
+			return nil, directPathFault(path, "the managed leaf drifted from its ownership token", "restore the recorded leaf or move it aside and retry")
+		}
+		if unlinkErr := tree.unlink(path); unlinkErr != nil {
+			return nil, unlinkErr
+		}
+	}
+	dirs := prior.CreatedDirs()
+	for i := len(dirs) - 1; i >= 0; i-- {
+		removed, removeErr := tree.removeDir(dirs[i].String())
+		if removeErr != nil {
+			return nil, removeErr
+		}
+		if removed {
+			retiredDirs[dirs[i].String()] = struct{}{}
+		}
+	}
+	return retiredDirs, nil
 }
 
 func (a *DirectFileActivator) Remove(ctx context.Context, source Source, key registry.Key, act activation.ComponentActivation, prior registry.Record) (Outcome, error) {

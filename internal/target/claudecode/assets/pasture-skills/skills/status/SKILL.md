@@ -6,6 +6,7 @@ description: Project status and monitoring via Pasture queries
 # Pasture Status
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.24 artifact v1 -->
 **Command:** `pasture:status` — Project status and monitoring via Pasture queries
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md)**

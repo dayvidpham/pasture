@@ -7,6 +7,7 @@ skills: pasture:architect-handoff, pasture:architect-propose-plan, pasture:archi
 # Architect Agent
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.24 artifact v1 -->
 **Role:** `architect` | **Phases owned:** p1-request, p2-elicit, p3-propose, p4-review, p5-plan-uat, p6-ratify, p7-handoff
 
 ## Protocol Context (generated from schema.xml)
