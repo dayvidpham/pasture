@@ -11,6 +11,49 @@
         ],
         "type": "string"
       },
+      "ActorClassification": {
+        "description": "`generic-llm` is the exact reserved attribution-only actor; `explicit` is any other stored claim identity. The classification is a fact about the stored claim, never an inference from execution metadata.",
+        "enum": [
+          "generic-llm",
+          "explicit"
+        ],
+        "type": "string"
+      },
+      "AttributionValue": {
+        "properties": {
+          "candidates": {
+            "description": "Source-tagged valid candidates retained on invalid or conflict. A conflicted field has no chosen value.",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionCandidate"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
+          "field": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ExecutionSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ExecutionStatus"
+          },
+          "value": {
+            "type": "string"
+          },
+          "vocabulary": {
+            "$ref": "#/components/schemas/Vocabulary"
+          }
+        },
+        "required": [
+          "status",
+          "source"
+        ],
+        "type": "object"
+      },
       "BindRequest": {
         "properties": {
           "epochId": {
@@ -211,6 +254,81 @@
           "error"
         ],
         "type": "object"
+      },
+      "ExecutionCandidate": {
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ExecutionSource"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "field",
+          "value"
+        ],
+        "type": "object"
+      },
+      "ExecutionHistoryPage": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionExecution"
+            },
+            "type": "array"
+          },
+          "next": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "items"
+        ],
+        "type": "object"
+      },
+      "ExecutionKind": {
+        "enum": [
+          "primary",
+          "compaction",
+          "title",
+          "generate",
+          "selection",
+          "child"
+        ],
+        "type": "string"
+      },
+      "ExecutionSource": {
+        "enum": [
+          "host",
+          "environment",
+          "actor-registry",
+          "none"
+        ],
+        "type": "string"
+      },
+      "ExecutionStatus": {
+        "enum": [
+          "observed",
+          "unavailable",
+          "invalid",
+          "conflict"
+        ],
+        "type": "string"
       },
       "InspectPayload": {
         "properties": {
@@ -529,6 +647,21 @@
         ],
         "type": "object"
       },
+      "SessionActor": {
+        "properties": {
+          "classification": {
+            "$ref": "#/components/schemas/ActorClassification"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "classification"
+        ],
+        "type": "object"
+      },
       "SessionBinding": {
         "properties": {
           "bindingId": {
@@ -597,10 +730,68 @@
         ],
         "type": "object"
       },
+      "SessionExecution": {
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ExecutionKind"
+          },
+          "model": {
+            "$ref": "#/components/schemas/AttributionValue"
+          },
+          "observedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "occurrenceId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "protocolRole": {
+            "$ref": "#/components/schemas/AttributionValue"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/AttributionValue"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AttributionValue"
+          },
+          "turnId": {
+            "type": "string"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/AttributionValue"
+          }
+        },
+        "required": [
+          "occurrenceId",
+          "observedAt",
+          "kind",
+          "provider",
+          "model",
+          "variant",
+          "role",
+          "protocolRole"
+        ],
+        "type": "object"
+      },
       "SessionView": {
         "properties": {
           "activity": {
             "$ref": "#/components/schemas/SessionActivity"
+          },
+          "actor": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionActor"
+              }
+            ],
+            "description": "The stored session claimant, shown separately from execution attribution and epoch binding. Absent when the store has no claim."
           },
           "binding": {
             "$ref": "#/components/schemas/SessionBinding"
@@ -617,6 +808,14 @@
           },
           "epoch": {
             "$ref": "#/components/schemas/EpochRef"
+          },
+          "execution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SessionExecution"
+              }
+            ],
+            "description": "The newest primary OR selection observation by journal id, as one coherent record. Auxiliary and child observations appear only in the execution history. Absent when the session has no execution evidence."
           },
           "harness": {
             "type": "string"
@@ -683,6 +882,14 @@
         },
         "required": [],
         "type": "object"
+      },
+      "Vocabulary": {
+        "description": "Native agent names and Pasture protocol roles are different vocabularies and are never translated into one another.",
+        "enum": [
+          "native-agent",
+          "pasture-role"
+        ],
+        "type": "string"
       },
       "WebSocketClientMessage": {
         "properties": {
@@ -1722,6 +1929,118 @@
           }
         },
         "summary": "Bind a session to an epoch"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/execution": {
+      "get": {
+        "description": "Returns one snapshot-pinned page of occurrence.v3 execution records, newest first. The page includes auxiliary and child records; the session summary uses only the newest primary or selection record. Each attribution field carries its own status, source, vocabulary, and bounded candidates rather than one guessed value.",
+        "operationId": "listSessionExecution",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum observations to return (1-100, default 50)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Resume after the cursor printed by a previous page; the cursor pins one journal snapshot",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionHistoryPage"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key, limit, or cursor"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Session not found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "List a session's normalized execution observations"
       }
     },
     "/api/v1/sessions/{harness}/{nativeSessionId}/transcript": {

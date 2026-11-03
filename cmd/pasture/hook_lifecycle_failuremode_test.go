@@ -6029,6 +6029,7 @@ func TestTheWarrantRefusalCarriesItsOwnEvidence(t *testing.T) {
 var guardSweepOwned = []string{
 	"hook_default_llm_fault_test.go",
 	"hook_environment_test.go",
+	"hook_execution_environment_test.go",
 	"hook_lifecycle_additive_test.go",
 	"hook_lifecycle_budget_test.go",
 	"hook_lifecycle_capture_test.go",

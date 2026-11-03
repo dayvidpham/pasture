@@ -7,6 +7,8 @@ package sessionapi
 import (
 	"errors"
 	"time"
+
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 )
 
 // ActivityState is the derived liveness of one session.
@@ -147,19 +149,72 @@ type EndMarker struct {
 	EndReason string    `json:"endReason"`
 }
 
+// ActorClassification separates the reserved generic LLM actor from an actor
+// the operator named explicitly. It is a fact about the stored claim identity,
+// never an inference from execution metadata, a name, or a role.
+type ActorClassification string
+
+const (
+	// ActorGenericLLM is the exact reserved attribution-only actor.
+	ActorGenericLLM ActorClassification = "generic-llm"
+	// ActorExplicit is any other stored claim identity.
+	ActorExplicit ActorClassification = "explicit"
+)
+
+// SessionActor is the stored session claimant shown beside, not instead of,
+// execution attribution.
+type SessionActor struct {
+	ID             string              `json:"id"`
+	Classification ActorClassification `json:"classification"`
+}
+
+// SessionExecution is one coherent execution observation: the occurrence
+// identity and observed time come from the producing journal row, and the
+// metadata is the normalized constructor-owned evidence. Provider, model,
+// variant, role, and protocolRole keep their status, source, and vocabulary
+// instead of collapsing into one guessed value.
+type SessionExecution struct {
+	OccurrenceID int64     `json:"occurrenceId"`
+	ObservedAt   time.Time `json:"observedAt"`
+	execution.Metadata
+}
+
+// ExecutionHistoryPage is one snapshot-pinned page of execution observations,
+// newest first. Snapshot is the journal id maximum the cursor is pinned to.
+type ExecutionHistoryPage struct {
+	Revision int64              `json:"revision"`
+	AsOf     time.Time          `json:"asOf"`
+	Items    []SessionExecution `json:"items"`
+	Next     string             `json:"next,omitempty"`
+}
+
+// ExecutionHistoryOptions is the supported filter set for the execution
+// history route.
+type ExecutionHistoryOptions struct {
+	Limit  int
+	Cursor string
+}
+
 // SessionView is one session mapped to the latest known epoch binding.
 // Binding and Epoch describe the EFFECTIVE current binding: the latest explicit
 // binding when the session has one, otherwise the open inferred derivation.
 // Bindings carries every known interval in chronological order without changing
 // page rows.
 type SessionView struct {
-	Harness         string                   `json:"harness"`
-	NativeSessionID string                   `json:"nativeSessionId"`
-	Epoch           *EpochRef                `json:"epoch,omitempty"`
-	Activity        SessionActivity          `json:"activity"`
-	Binding         *SessionBinding          `json:"binding,omitempty"`
-	Bindings        []SessionBindingInterval `json:"bindings"`
-	End             *EndMarker               `json:"end,omitempty"`
+	Harness         string          `json:"harness"`
+	NativeSessionID string          `json:"nativeSessionId"`
+	Epoch           *EpochRef       `json:"epoch,omitempty"`
+	Activity        SessionActivity `json:"activity"`
+	// Actor is the stored session claimant, when the store has one. It is shown
+	// separately from execution attribution and never implies authority.
+	Actor *SessionActor `json:"actor,omitempty"`
+	// Execution is the newest primary or selection observation for the session,
+	// chosen as one coherent record by journal id. Auxiliary and child records
+	// appear only in the execution history.
+	Execution *SessionExecution        `json:"execution,omitempty"`
+	Binding   *SessionBinding          `json:"binding,omitempty"`
+	Bindings  []SessionBindingInterval `json:"bindings"`
+	End       *EndMarker               `json:"end,omitempty"`
 	// Project and ProjectHash are Peasant-owned project identity, present only
 	// when the operator enabled project enrichment and Peasant mapped this
 	// session. They are omitted otherwise; Pasture never derives a project.

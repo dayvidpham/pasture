@@ -25,6 +25,8 @@ func TestOpenAPIIsFresh(t *testing.T) {
 	require.Contains(t, document, `"version": "0.7.0"`)
 	require.Contains(t, document, `"StateBasis"`)
 	require.Contains(t, document, `"lastPromptAt"`)
+	require.Contains(t, document, `"AttributionValue"`)
+	require.Contains(t, document, `/execution`)
 	require.Contains(t, document, "/api/v1/settings/peasant")
 	require.Contains(t, document, "PeasantSettingsRequest")
 }

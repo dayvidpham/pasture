@@ -757,7 +757,7 @@ var (
 )
 
 const (
-	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")
+	occurrenceEvidenceKind        = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
 	interpretedEvidenceKind       = provenance.EvidenceKind("pasture.lifecycle.interpreted.v3")
 	expectedSessionIdentity       = "c02859c0-10ab-49c3-9b93-29280bd45fbb"
 	expectedInterpretedIdentities = `[{"kind":1,"value":"c02859c0-10ab-49c3-9b93-29280bd45fbb"}]`
@@ -1627,6 +1627,11 @@ type lifecycleOccurrencePayload struct {
 	Bindings []lifecycleBindingPayload   `json:"bindings"`
 	Capture  model.CaptureDisposition    `json:"capture"`
 	Body     string                      `json:"body_digest"`
+	// The optional members are part of occurrence.v3. A v2 record omits them;
+	// a v3 receipt carries normalized execution and, when proven, a resume.
+	Origin            json.RawMessage `json:"origin"`
+	Execution         json.RawMessage `json:"execution"`
+	SessionTransition string          `json:"sessionTransition"`
 }
 
 type lifecycleBindingPayload struct {
@@ -2160,7 +2165,7 @@ func readProductionClaudeFixtureAt(t *testing.T, fixture, expectedEvent, expecte
 func decodeOccurrencePayload(t *testing.T, raw []byte) lifecycleOccurrencePayload {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
-	require.ElementsMatch(t, []string{"contract", "event", "envelope", "bindings", "capture", "body_digest"}, mapKeys(members))
+	require.ElementsMatch(t, occurrencePayloadKeys(members), mapKeys(members))
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var payload lifecycleOccurrencePayload
@@ -2168,6 +2173,18 @@ func decodeOccurrencePayload(t *testing.T, raw []byte) lifecycleOccurrencePayloa
 	var trailing any
 	require.ErrorIs(t, decoder.Decode(&trailing), io.EOF)
 	return payload
+}
+
+// occurrencePayloadKeys is the required v2 member set plus the v3 members that
+// are present only when they carry meaning.
+func occurrencePayloadKeys(members map[string]json.RawMessage) []string {
+	allowed := []string{"contract", "event", "envelope", "bindings", "capture", "body_digest"}
+	for _, optional := range []string{"origin", "execution", "sessionTransition"} {
+		if _, present := members[optional]; present {
+			allowed = append(allowed, optional)
+		}
+	}
+	return allowed
 }
 
 func decodeInterpretedPayload(t *testing.T, raw []byte) interpretedEvidencePayload {
@@ -2220,7 +2237,7 @@ func publicUnresolvedPayloads(values []waist.UnresolvedFact) []interpretedUnreso
 func assertOccurrencePayload(t *testing.T, raw []byte, body []byte, capture model.CaptureDisposition, event model.ContractEventKind) lifecycleOccurrencePayload {
 	t.Helper()
 	members := decodeJSONObject(t, raw)
-	require.ElementsMatch(t, []string{"contract", "event", "envelope", "bindings", "capture", "body_digest"}, mapKeys(members))
+	require.ElementsMatch(t, occurrencePayloadKeys(members), mapKeys(members))
 	require.JSONEq(t, strconv.Quote(occurrenceLifecycleContract), string(members["contract"]))
 	require.JSONEq(t, fmt.Sprintf("%d", event), string(members["event"]))
 	if capture == model.CaptureMalformed {

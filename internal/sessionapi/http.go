@@ -69,6 +69,7 @@ func newHandlerWithProject(service *Service, store *tasks.SessionAPIStore, proje
 	mux.HandleFunc("GET /api/v1/sessions", h.list)
 	mux.HandleFunc("GET /api/v1/sessions/{harness}/{nativeSessionId}", h.get)
 	mux.HandleFunc("GET /api/v1/sessions/{harness}/{nativeSessionId}/transcript", h.sessionTranscript)
+	mux.HandleFunc("GET /api/v1/sessions/{harness}/{nativeSessionId}/execution", h.executionHistory)
 	mux.HandleFunc("POST /api/v1/sessions/{harness}/{nativeSessionId}/bind", h.bind)
 	mux.HandleFunc("POST /api/v1/sessions/{harness}/{nativeSessionId}/unbind", h.unbind)
 	mux.HandleFunc("GET /api/v1/projects", h.projects)
@@ -118,6 +119,29 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 		Limit:   limit,
 		Cursor:  query.Get("cursor"),
 	})
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// executionHistory serves one snapshot-pinned page of a session's normalized
+// execution observations, including auxiliary and child records.
+func (h *handler) executionHistory(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	limit := 50
+	if raw := query.Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			writeError(w, http.StatusBadRequest, "invalid_filter", "limit must be an integer between 1 and 100")
+			return
+		}
+		limit = parsed
+	}
+	page, err := h.service.ExecutionHistory(r.Context(),
+		r.PathValue("harness"), r.PathValue("nativeSessionId"),
+		ExecutionHistoryOptions{Limit: limit, Cursor: query.Get("cursor")})
 	if err != nil {
 		writeServiceError(w, err)
 		return

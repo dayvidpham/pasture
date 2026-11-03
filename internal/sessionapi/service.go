@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/peasantproject"
+	"github.com/dayvidpham/pasture/internal/provadapter"
 )
 
 // Prompt-based liveness defaults. A prompt younger than ActiveWindow is active;
@@ -97,6 +99,7 @@ type joinedRow struct {
 	lastEvent      string
 	lastJournal    int64
 	claimedAt      sql.NullInt64
+	actor          sql.NullString
 	bindingIsInfer sql.NullInt64
 	bindingID      sql.NullString
 	epochID        sql.NullString
@@ -113,6 +116,7 @@ type joinedRow struct {
 	lastResume     int64
 	updated        int64
 	bindings       []SessionBindingInterval
+	execution      *SessionExecution
 }
 
 // bindingKey identifies one session for a batched interval read. The read path
@@ -280,6 +284,7 @@ joined AS (
 	       COALESCE(s.last_event, '') AS last_event,
 	       COALESCE(s.last_journal_id, 0) AS last_journal,
 	       c.claimed_at AS claimed_at,
+	       c.actor AS actor,
 	       b.inferred, b.binding_id, b.epoch_id, b.role, b.bound_at, b.unbound_at,
 	       b.unbound_reason, b.confidence, t.title AS epoch_title,
 	       ` + currentBindingLastSeenExpr + ` AS last_seen,
@@ -294,7 +299,7 @@ joined AS (
 	LEFT JOIN binding_current b ON b.harness = i.harness AND b.session = i.session
 	LEFT JOIN tasks t ON t.id = b.epoch_id
 )
-SELECT harness, session, first_seen, last_event, last_journal, claimed_at,
+SELECT harness, session, first_seen, last_event, last_journal, claimed_at, actor,
        inferred, binding_id, epoch_id, role, bound_at, unbound_at, unbound_reason,
        confidence, epoch_title, last_seen, last_prompt_at, host_end_at,
        host_end_journal_id, last_resume_journal_id, updated
@@ -620,7 +625,7 @@ func (s *Service) query(ctx context.Context, now time.Time, where string, args [
 		var row joinedRow
 		if err := rows.Scan(
 			&row.harness, &row.session, &row.firstSeen, &row.lastEvent, &row.lastJournal,
-			&row.claimedAt, &row.bindingIsInfer, &row.bindingID, &row.epochID, &row.role, &row.boundAt,
+			&row.claimedAt, &row.actor, &row.bindingIsInfer, &row.bindingID, &row.epochID, &row.role, &row.boundAt,
 			&row.unboundAt, &row.unboundReason, &row.confidence, &row.epochTitle, &row.lastSeen,
 			&row.lastPromptAt, &row.hostEndAt, &row.hostEndJournal, &row.lastResume, &row.updated,
 		); err != nil {
@@ -634,7 +639,82 @@ func (s *Service) query(ctx context.Context, now time.Time, where string, args [
 	if err := attachBindingIntervals(ctx, tx, out, inferredUsable); err != nil {
 		return nil, 0, err
 	}
+	if err := attachExecutionSummaries(ctx, tx, out); err != nil {
+		return nil, 0, err
+	}
 	return out, revision, nil
+}
+
+// attachExecutionSummaries loads one summary per page row: the newest primary
+// OR selection observation by journal id, chosen as ONE record. Auxiliary and
+// child observations never replace the parent summary, and independent MAX
+// picks from different rows are never merged.
+func attachExecutionSummaries(ctx context.Context, tx *sql.Tx, rows []joinedRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	keys := make([]bindingKey, 0, len(rows))
+	seen := make(map[bindingKey]struct{}, len(rows))
+	for _, row := range rows {
+		key := bindingKey{harness: row.harness, session: row.session}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	keyClause, args := bindingKeyValues(keys)
+	statement := keyClause + `
+,
+ranked AS (
+	SELECT e.harness, e.session_id, e.journal_id, e.observed_at, e.execution_json,
+	       ROW_NUMBER() OVER (PARTITION BY e.harness, e.session_id ORDER BY e.journal_id DESC) AS rn
+	FROM pasture_session_execution e
+	JOIN keys k ON k.harness = e.harness AND k.session = e.session_id
+	WHERE e.kind IN ('primary', 'selection')
+)
+SELECT harness, session_id, journal_id, observed_at, execution_json
+FROM ranked WHERE rn = 1`
+	result, err := tx.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return fmt.Errorf("querying execution summaries: %w — verify pasture_session_execution matches the projection contract", err)
+	}
+	defer result.Close()
+	summaries := make(map[bindingKey]*SessionExecution, len(keys))
+	for result.Next() {
+		var key bindingKey
+		var journalID, observedAt int64
+		var encoded []byte
+		if err := result.Scan(&key.harness, &key.session, &journalID, &observedAt, &encoded); err != nil {
+			return fmt.Errorf("scanning execution summary: %w", err)
+		}
+		summary, err := decodeSessionExecution(journalID, observedAt, encoded)
+		if err != nil {
+			return err
+		}
+		summaries[key] = summary
+	}
+	if err := result.Err(); err != nil {
+		return fmt.Errorf("iterating execution summaries: %w", err)
+	}
+	for i := range rows {
+		rows[i].execution = summaries[bindingKey{harness: rows[i].harness, session: rows[i].session}]
+	}
+	return nil
+}
+
+// decodeSessionExecution decodes one constructor-owned execution record and
+// re-validates it. A corrupt cache row is a storage fault, never a partially
+// rendered observation.
+func decodeSessionExecution(journalID, observedAt int64, encoded []byte) (*SessionExecution, error) {
+	var metadata execution.Metadata
+	if err := json.Unmarshal(encoded, &metadata); err != nil {
+		return nil, fmt.Errorf("decoding execution observation %d: %w — rebuild the session cache from the lifecycle journal", journalID, err)
+	}
+	if err := execution.ValidateMetadata(metadata); err != nil {
+		return nil, fmt.Errorf("validating execution observation %d: %w — rebuild the session cache from the lifecycle journal", journalID, err)
+	}
+	return &SessionExecution{OccurrenceID: journalID, ObservedAt: time.Unix(0, observedAt).UTC(), Metadata: metadata}, nil
 }
 
 // inferredBindingUsable reports whether the inference cache carries the shape
@@ -885,6 +965,14 @@ func (s *Service) view(row joinedRow, now time.Time) SessionView {
 	}
 	view.Activity.State, view.Activity.StateBasis = s.liveness(row, now)
 	view.End = endMarker(row)
+	if row.actor.Valid && row.actor.String != "" {
+		classification := ActorExplicit
+		if row.actor.String == provadapter.DefaultLLMActorID().String() {
+			classification = ActorGenericLLM
+		}
+		view.Actor = &SessionActor{ID: row.actor.String, Classification: classification}
+	}
+	view.Execution = row.execution
 	return view
 }
 

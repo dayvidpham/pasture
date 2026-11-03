@@ -286,6 +286,27 @@ func openAPIDocument() map[string]any {
 					},
 				},
 			},
+			"/api/v1/sessions/{harness}/{nativeSessionId}/execution": map[string]any{
+				"get": map[string]any{
+					"operationId": "listSessionExecution",
+					"summary":     "List a session's normalized execution observations",
+					"description": "Returns one snapshot-pinned page of occurrence.v3 execution records, newest first. The page includes auxiliary and child records; the session summary uses only the newest primary or selection record. Each attribution field carries its own status, source, vocabulary, and bounded candidates rather than one guessed value.",
+					"parameters": []any{
+						pathParameter("harness", "Harness id"),
+						pathParameter("nativeSessionId", "Native session id"),
+						queryParameter("limit", "Maximum observations to return (1-100, default 50)", "integer", nil),
+						queryParameter("cursor", "Resume after the cursor printed by a previous page; the cursor pins one journal snapshot", "string", nil),
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(ref("ExecutionHistoryPage")),
+						"400": errorResponse("Invalid session key, limit, or cursor"),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"404": errorResponse("Session not found"),
+						"503": errorResponse("The session cache is stale"),
+						"500": errorResponse("The session store could not be read"),
+					},
+				},
+			},
 			"/api/v1/sessions/{harness}/{nativeSessionId}/transcript": map[string]any{
 				"get": map[string]any{
 					"operationId": "getSessionTranscript",
@@ -321,6 +342,83 @@ func openAPIDocument() map[string]any {
 					"enum":        []string{"none", "prompt", "inactivity", "explicit-end"},
 					"description": "The evidence that decided `state`. `none` means no prompt evidence exists; `prompt` means the age of the last user prompt decided active or idle; `inactivity` means the prompt aged past the idle window and carries no end marker; `explicit-end` means an unsuperseded host session-end or an applicable explicit user unbind.",
 				},
+				"ActorClassification": map[string]any{
+					"type":        "string",
+					"enum":        []string{"generic-llm", "explicit"},
+					"description": "`generic-llm` is the exact reserved attribution-only actor; `explicit` is any other stored claim identity. The classification is a fact about the stored claim, never an inference from execution metadata.",
+				},
+				"SessionActor": objectSchema(
+					map[string]any{
+						"id":             map[string]any{"type": "string"},
+						"classification": ref("ActorClassification"),
+					},
+					"id", "classification",
+				),
+				"ExecutionKind": map[string]any{
+					"type": "string",
+					"enum": []string{"primary", "compaction", "title", "generate", "selection", "child"},
+				},
+				"ExecutionStatus": map[string]any{
+					"type": "string",
+					"enum": []string{"observed", "unavailable", "invalid", "conflict"},
+				},
+				"ExecutionSource": map[string]any{
+					"type": "string",
+					"enum": []string{"host", "environment", "actor-registry", "none"},
+				},
+				"Vocabulary": map[string]any{
+					"type":        "string",
+					"enum":        []string{"native-agent", "pasture-role"},
+					"description": "Native agent names and Pasture protocol roles are different vocabularies and are never translated into one another.",
+				},
+				"ExecutionCandidate": objectSchema(
+					map[string]any{
+						"source": ref("ExecutionSource"),
+						"field":  map[string]any{"type": "string"},
+						"value":  map[string]any{"type": "string"},
+					},
+					"source", "field", "value",
+				),
+				"AttributionValue": objectSchema(
+					map[string]any{
+						"status":     ref("ExecutionStatus"),
+						"value":      map[string]any{"type": "string"},
+						"source":     ref("ExecutionSource"),
+						"field":      map[string]any{"type": "string"},
+						"vocabulary": ref("Vocabulary"),
+						"reason":     map[string]any{"type": "string"},
+						"candidates": map[string]any{
+							"type": "array", "items": ref("ExecutionCandidate"), "maxItems": 3,
+							"description": "Source-tagged valid candidates retained on invalid or conflict. A conflicted field has no chosen value.",
+						},
+					},
+					"status", "source",
+				),
+				"SessionExecution": objectSchema(
+					map[string]any{
+						"occurrenceId": map[string]any{"type": "integer", "format": "int64"},
+						"observedAt":   map[string]any{"type": "string", "format": "date-time"},
+						"kind":         ref("ExecutionKind"),
+						"agentId":      map[string]any{"type": "string"},
+						"turnId":       map[string]any{"type": "string"},
+						"requestId":    map[string]any{"type": "string"},
+						"provider":     ref("AttributionValue"),
+						"model":        ref("AttributionValue"),
+						"variant":      ref("AttributionValue"),
+						"role":         ref("AttributionValue"),
+						"protocolRole": ref("AttributionValue"),
+					},
+					"occurrenceId", "observedAt", "kind", "provider", "model", "variant", "role", "protocolRole",
+				),
+				"ExecutionHistoryPage": objectSchema(
+					map[string]any{
+						"revision": map[string]any{"type": "integer", "format": "int64"},
+						"asOf":     map[string]any{"type": "string", "format": "date-time"},
+						"items":    map[string]any{"type": "array", "items": ref("SessionExecution")},
+						"next":     map[string]any{"type": "string"},
+					},
+					"revision", "asOf", "items",
+				),
 				"EndReason": map[string]any{
 					"type": "string",
 					"enum": []string{"unbind", "session_end"},
@@ -405,7 +503,15 @@ func openAPIDocument() map[string]any {
 						"nativeSessionId": map[string]any{"type": "string"},
 						"epoch":           ref("EpochRef"),
 						"activity":        ref("SessionActivity"),
-						"binding":         ref("SessionBinding"),
+						"actor": map[string]any{
+							"allOf":       []any{ref("SessionActor")},
+							"description": "The stored session claimant, shown separately from execution attribution and epoch binding. Absent when the store has no claim.",
+						},
+						"execution": map[string]any{
+							"allOf":       []any{ref("SessionExecution")},
+							"description": "The newest primary OR selection observation by journal id, as one coherent record. Auxiliary and child observations appear only in the execution history. Absent when the session has no execution evidence.",
+						},
+						"binding": ref("SessionBinding"),
 						"bindings": map[string]any{
 							"type":        "array",
 							"items":       ref("SessionBindingInterval"),
