@@ -797,6 +797,14 @@ var claudeProductionFixtures = []claudeProductionFixture{
 		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},
 	},
 	{
+		name: "UserPromptSubmit", fixture: "user_prompt_submit_2_1_261.json", event: registration.EventUserPromptSubmit,
+		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
+		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "162e5169-1afa-42d3-913e-6e8c23ad1ec2"}},
+		semantic:   runtime.SemanticGateConsultation,
+		identities: []interpretedIdentityPayload{{Kind: uint8(runtime.IdentitySession), Value: "162e5169-1afa-42d3-913e-6e8c23ad1ec2"}},
+		blocking:   true,
+	},
+	{
 		name: "SessionEnd", fixture: "session_end_2_1_261.json", event: registration.EventSessionEnd,
 		captureVersion: "2.1.261", captureSource: "internal/handlers/capture_sink.go (PASTURE_CAPTURE_DIR)",
 		bindings:   []lifecycleBindingPayload{{Kind: model.BindingSession, NativeName: "session_id", Value: "c02859c0-10ab-49c3-9b93-29280bd45fbb"}},

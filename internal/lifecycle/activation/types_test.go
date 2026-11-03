@@ -24,10 +24,11 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 	for _, event := range activation.ClaudeCode2_1_261TargetEvents() {
 		targets[event] = struct{}{}
 	}
-	require.Len(t, targets, 11)
+	require.Len(t, targets, 12)
 	enabledTargets := map[model.ContractEventKind]struct{}{
 		registration.EventSessionStart: {}, registration.EventSessionEnd: {},
-		registration.EventPreToolUse: {}, registration.EventPostToolUse: {},
+		registration.EventUserPromptSubmit: {},
+		registration.EventPreToolUse:       {}, registration.EventPostToolUse: {},
 		registration.EventPostToolUseFailure: {}, registration.EventPostToolBatch: {},
 		registration.EventPreCompact: {}, registration.EventPostCompact: {},
 		registration.EventFileChanged: {},
@@ -78,7 +79,7 @@ func TestClaudeActivationIsCompleteAndExactlyPartitioned(t *testing.T) {
 func TestActivationTargetEventsReturnsDefensiveCopyAndManifestIsFresh(t *testing.T) {
 	t.Parallel()
 	targets := activation.ClaudeCode2_1_261TargetEvents()
-	require.Len(t, targets, 11)
+	require.Len(t, targets, 12)
 	targets[0] = model.ContractEventKind(999)
 	freshTargets := activation.ClaudeCode2_1_261TargetEvents()
 	require.Equal(t, registration.EventSessionStart, freshTargets[0])
