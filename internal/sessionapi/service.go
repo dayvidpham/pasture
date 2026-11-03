@@ -14,7 +14,13 @@ import (
 	"github.com/dayvidpham/pasture/internal/peasantproject"
 )
 
-const defaultActiveWindow = 15 * time.Minute
+// Prompt-based liveness defaults. A prompt younger than ActiveWindow is active;
+// a prompt older than IdleWindow is inactivity-ended; anything between is idle.
+// The production configuration must satisfy 0 < ActiveWindow < IdleWindow.
+const (
+	defaultActiveWindow = 30 * time.Minute
+	defaultIdleWindow   = 24 * time.Hour
+)
 
 // projectLookupTimeout bounds one project-enrichment lookup. Project labels are
 // optional decoration on a session view: a slow Peasant must not hold a Pasture
@@ -36,9 +42,12 @@ var (
 // Service reads the session cache. Ensure is supplied by the serve command and
 // runs the journal-aware rebuild when the cache is dirty or behind.
 type Service struct {
-	DB           *sql.DB
+	DB *sql.DB
+	// Now is the injected response clock. One response reads it exactly once, so
+	// the Go view, the SQL state filters, the epoch counts, and inspect agree.
 	Now          func() time.Time
 	ActiveWindow time.Duration
+	IdleWindow   time.Duration
 	Ensure       func(context.Context) error
 	// ProjectSource is the opt-in Peasant project enrichment. Nil means the
 	// integration is disabled: no Peasant database or network access happens.
@@ -46,7 +55,29 @@ type Service struct {
 }
 
 func NewService(db *sql.DB) *Service {
-	return &Service{DB: db, Now: time.Now, ActiveWindow: defaultActiveWindow}
+	return &Service{
+		DB:           db,
+		Now:          time.Now,
+		ActiveWindow: defaultActiveWindow,
+		IdleWindow:   defaultIdleWindow,
+	}
+}
+
+// validateWindows enforces 0 < active < idle before any read. Every entry point
+// calls it, so a zero, negative, equal, or inverted pair is refused at the
+// service boundary rather than producing a silently nonsensical state.
+func (s *Service) validateWindows() error {
+	if s.ActiveWindow <= 0 {
+		return fmt.Errorf("%w: active window must be positive", ErrInvalidWindow)
+	}
+	if s.IdleWindow <= 0 {
+		return fmt.Errorf("%w: idle window must be positive", ErrInvalidWindow)
+	}
+	if s.IdleWindow <= s.ActiveWindow {
+		return fmt.Errorf("%w: idle window (%s) must be greater than active window (%s)",
+			ErrInvalidWindow, s.IdleWindow, s.ActiveWindow)
+	}
+	return nil
 }
 
 type pageCursor struct {
@@ -76,6 +107,10 @@ type joinedRow struct {
 	confidence     sql.NullString
 	epochTitle     sql.NullString
 	lastSeen       int64
+	lastPromptAt   int64
+	hostEndAt      int64
+	hostEndJournal int64
+	lastResume     int64
 	updated        int64
 	bindings       []SessionBindingInterval
 }
@@ -96,13 +131,79 @@ var inferredBindingColumns = []string{
 	"unbound_at", "unbound_reason", "inferred_at", "reason", "confidence",
 }
 
-// currentBindingLastSeenExpr is the ONE definition of a session's liveness
-// instant. The session page, the active/idle view, and the epoch active count
-// all measure against it, so an explicit and an inferred binding cannot drift
-// into two different notions of "last seen". The aliases are part of the
-// contract: every caller joins pasture_session_state AS s, binding_current AS b,
-// and pasture_session_claim AS c.
+// currentBindingLastSeenExpr is the ONE definition of a session's broad
+// activity instant. The session page, the active/idle view, and the epoch
+// active count all measure against it, so an explicit and an inferred binding
+// cannot drift into two different notions of "last seen". Broad activity is
+// NOT prompt recency: liveness is decided by promptAtExpr / livenessStateSQL.
+// The aliases are part of the contract: every caller joins
+// pasture_session_state AS s, binding_current AS b, and
+// pasture_session_claim AS c.
 const currentBindingLastSeenExpr = `MAX(COALESCE(s.last_seen, 0), COALESCE(b.bound_at, 0), COALESCE(b.unbound_at, 0), COALESCE(c.claimed_at, 0))`
+
+// promptAtExpr is the ONE definition of a session's prompt recency. Tool,
+// permission, binding, claim, model-switch, and role-change activity is not a
+// prompt, so this reads only the durable prompt watermark.
+const promptAtExpr = `COALESCE(s.last_prompt_at, 0)`
+
+// hostEndJournalExpr and lastResumeJournalExpr are the journal-order pair that
+// decides whether a host session-end is still in force. A later resume
+// supersedes an earlier end: the end counts only while
+// host_end_journal_id > last_resume_journal_id.
+const (
+	hostEndJournalExpr = `COALESCE(s.host_end_journal_id, 0)`
+	lastResumeExpr     = `COALESCE(s.last_resume_journal_id, 0)`
+)
+
+// explicitEndSQL is the ONE definition of an applied explicit end over the
+// session state and the effective current binding. It counts:
+//
+//   - an applicable explicit user unbind (unbound_reason = 'unbind'), which
+//     stays in force until a later deliberate bind;
+//   - a host session-end that no later resume superseded; and
+//   - a legacy binding closed by session_end with no journal evidence either
+//     way, where no resume is proved. Missing evidence is never read as a
+//     guessed resume.
+//
+// A binding closed by session_end before the latest resume is historical and
+// cannot manufacture a current end.
+func explicitEndSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason string) string {
+	return `((
+		` + unboundAt + ` IS NOT NULL AND ` + unboundReason + ` = 'unbind'
+	) OR (
+		` + hostEndJournal + ` > 0 AND ` + hostEndJournal + ` > ` + lastResume + `
+	) OR (
+		` + hostEndJournal + ` = 0 AND ` + unboundAt + ` IS NOT NULL
+		AND ` + unboundReason + ` = 'session_end' AND ` + lastResume + ` = 0
+	))`
+}
+
+// livenessStateSQL is the ONE definition of the prompt liveness state, ordered
+// exactly as the ratified contract's table: an applied explicit end first, then
+// absent prompt evidence, then the active cutoff, then the idle cutoff, then
+// inactivity. The two ? placeholders are the active and idle cutoffs, in that
+// order, so a caller must append them to its argument slice in that order.
+func livenessStateSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason string) string {
+	return `CASE
+		WHEN ` + explicitEndSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason) + ` THEN 'ended'
+		WHEN ` + promptAt + ` = 0 THEN 'unknown'
+		WHEN ` + promptAt + ` >= ? THEN 'active'
+		WHEN ` + promptAt + ` >= ? THEN 'idle'
+		ELSE 'ended'
+	END`
+}
+
+// stateBasisSQL mirrors livenessStateSQL one-for-one: the same evidence decides
+// the state and the basis, so the two can never disagree.
+func stateBasisSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason string) string {
+	return `CASE
+		WHEN ` + explicitEndSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason) + ` THEN 'explicit-end'
+		WHEN ` + promptAt + ` = 0 THEN 'none'
+		WHEN ` + promptAt + ` >= ? THEN 'prompt'
+		WHEN ` + promptAt + ` >= ? THEN 'prompt'
+		ELSE 'inactivity'
+	END`
+}
 
 // currentBindingUpdatedExpr is the freshness twin of
 // currentBindingLastSeenExpr, used for the page's deterministic ordering. It is
@@ -182,6 +283,10 @@ joined AS (
 	       b.inferred, b.binding_id, b.epoch_id, b.role, b.bound_at, b.unbound_at,
 	       b.unbound_reason, b.confidence, t.title AS epoch_title,
 	       ` + currentBindingLastSeenExpr + ` AS last_seen,
+	       ` + promptAtExpr + ` AS last_prompt_at,
+	       COALESCE(s.host_end_at, 0) AS host_end_at,
+	       ` + hostEndJournalExpr + ` AS host_end_journal_id,
+	       ` + lastResumeExpr + ` AS last_resume_journal_id,
 	       ` + currentBindingUpdatedExpr + ` AS updated
 	FROM inventory i
 	LEFT JOIN pasture_session_state s ON s.harness = i.harness AND s.session = i.session
@@ -191,7 +296,8 @@ joined AS (
 )
 SELECT harness, session, first_seen, last_event, last_journal, claimed_at,
        inferred, binding_id, epoch_id, role, bound_at, unbound_at, unbound_reason,
-       confidence, epoch_title, last_seen, updated
+       confidence, epoch_title, last_seen, last_prompt_at, host_end_at,
+       host_end_journal_id, last_resume_journal_id, updated
 FROM joined
 `
 }
@@ -201,6 +307,13 @@ func (s *Service) List(ctx context.Context, opts ListOptions) (Page, error) {
 	if s == nil || s.DB == nil {
 		return Page{}, errors.New("session API has no database handle")
 	}
+	return s.listAt(ctx, s.now(), opts)
+}
+
+// listAt is List with the response clock supplied by the caller, so inspect and
+// the epoch-session route can label every endpoint in one response with the
+// same now.
+func (s *Service) listAt(ctx context.Context, now time.Time, opts ListOptions) (Page, error) {
 	if opts.Limit == 0 {
 		opts.Limit = 50
 	}
@@ -214,11 +327,10 @@ func (s *Service) List(ctx context.Context, opts ListOptions) (Page, error) {
 			return Page{}, fmt.Errorf("%w: unknown session state %q", ErrInvalidFilter, opts.State)
 		}
 	}
-	if s.ActiveWindow <= 0 {
-		return Page{}, errors.New("session API active window must be positive")
+	if err := s.validateWindows(); err != nil {
+		return Page{}, err
 	}
 
-	now := s.now()
 	where := " WHERE 1=1"
 	args := make([]any, 0, 8)
 	if opts.Harness != "" {
@@ -229,18 +341,16 @@ func (s *Service) List(ctx context.Context, opts ListOptions) (Page, error) {
 		where += " AND epoch_id = ?"
 		args = append(args, opts.Epoch)
 	}
-	cutoff := s.activeCutoff(now)
-	switch opts.State {
-	case StateEnded:
-		where += " AND unbound_at IS NOT NULL"
-	case StateUnknown:
-		where += " AND binding_id IS NULL"
-	case StateActive:
-		where += " AND binding_id IS NOT NULL AND unbound_at IS NULL AND last_seen >= ?"
-		args = append(args, cutoff)
-	case StateIdle:
-		where += " AND binding_id IS NOT NULL AND unbound_at IS NULL AND last_seen < ?"
-		args = append(args, cutoff)
+	if opts.State != "" {
+		// The filter and the view share livenessStateSQL, so a page selected as
+		// "active" can never contain a row the view calls idle, and the filter no
+		// longer requires a binding: an unbound session with a recent prompt is
+		// active.
+		where += " AND " + livenessStateSQL(
+			"last_prompt_at", "host_end_journal_id", "last_resume_journal_id",
+			"unbound_at", "unbound_reason",
+		) + " = ?"
+		args = append(args, s.activeCutoff(now), s.idleCutoff(now), string(opts.State))
 	}
 	if opts.Cursor != "" {
 		cursor, err := decodeCursor(opts.Cursor)
@@ -277,8 +387,8 @@ func (s *Service) Get(ctx context.Context, harness, session string) (Detail, err
 	if strings.TrimSpace(harness) == "" || strings.TrimSpace(session) == "" {
 		return Detail{}, ErrNotFound
 	}
-	if s.ActiveWindow <= 0 {
-		return Detail{}, errors.New("session API active window must be positive")
+	if err := s.validateWindows(); err != nil {
+		return Detail{}, err
 	}
 	now := s.now()
 	rows, revision, err := s.query(ctx, now,
@@ -399,9 +509,78 @@ func (s *Service) now() time.Time {
 // activeCutoff is the ONE definition of the active/idle boundary. Every site
 // that decides active vs idle (the SQL state filters, the view, and the epoch
 // counts) takes the cutoff from here, so the rule cannot drift between the
-// query that selects rows and the view that labels them.
+// query that selects rows and the view that labels them. A prompt exactly at
+// the cutoff is active.
 func (s *Service) activeCutoff(now time.Time) int64 {
 	return now.Add(-s.ActiveWindow).UnixNano()
+}
+
+// idleCutoff is the ONE definition of the idle/inactivity-ended boundary. A
+// prompt exactly at the cutoff is idle; older prompt evidence has aged out.
+func (s *Service) idleCutoff(now time.Time) int64 {
+	return now.Add(-s.IdleWindow).UnixNano()
+}
+
+// appliedExplicitEnd reports whether an explicit end is still in force, using
+// the same three cases as explicitEndSQL.
+func appliedExplicitEnd(row joinedRow) bool {
+	switch {
+	case row.unboundAt.Valid && row.unboundReason.String == "unbind":
+		return true
+	case row.hostEndJournal > 0 && row.hostEndJournal > row.lastResume:
+		return true
+	case row.hostEndJournal == 0 && row.unboundAt.Valid &&
+		row.unboundReason.String == "session_end" && row.lastResume == 0:
+		return true
+	default:
+		return false
+	}
+}
+
+// liveness is the Go twin of livenessStateSQL. The two are exercised together
+// by the parity test, so a SQL filter and a view cannot disagree.
+func (s *Service) liveness(row joinedRow, now time.Time) (ActivityState, StateBasis) {
+	if appliedExplicitEnd(row) {
+		return StateEnded, BasisExplicitEnd
+	}
+	if row.lastPromptAt == 0 {
+		return StateUnknown, BasisNone
+	}
+	switch {
+	case row.lastPromptAt >= s.activeCutoff(now):
+		return StateActive, BasisPrompt
+	case row.lastPromptAt >= s.idleCutoff(now):
+		return StateIdle, BasisPrompt
+	default:
+		return StateEnded, BasisInactivity
+	}
+}
+
+// endMarker renders the recorded end for an explicit-end state. Inactivity has
+// no end marker: the contract forbids inventing endedAt for an aged-out prompt.
+func endMarker(row joinedRow) *EndMarker {
+	if !appliedExplicitEnd(row) {
+		return nil
+	}
+	if row.unboundAt.Valid && row.unboundReason.String == "unbind" {
+		endedAt := row.unboundAt.Int64
+		if row.boundAt.Valid && endedAt < row.boundAt.Int64 {
+			endedAt = row.boundAt.Int64
+		}
+		return &EndMarker{EndedAt: time.Unix(0, endedAt).UTC(), EndReason: "unbind"}
+	}
+	if row.hostEndJournal > 0 && row.hostEndJournal > row.lastResume {
+		return &EndMarker{EndedAt: time.Unix(0, row.hostEndAt).UTC(), EndReason: "session_end"}
+	}
+	endedAt := row.unboundAt.Int64
+	if row.boundAt.Valid && endedAt < row.boundAt.Int64 {
+		endedAt = row.boundAt.Int64
+	}
+	reason := row.unboundReason.String
+	if reason == "" {
+		reason = "session_end"
+	}
+	return &EndMarker{EndedAt: time.Unix(0, endedAt).UTC(), EndReason: reason}
 }
 
 func (s *Service) query(ctx context.Context, now time.Time, where string, args []any, limit int) ([]joinedRow, int64, error) {
@@ -442,7 +621,8 @@ func (s *Service) query(ctx context.Context, now time.Time, where string, args [
 		if err := rows.Scan(
 			&row.harness, &row.session, &row.firstSeen, &row.lastEvent, &row.lastJournal,
 			&row.claimedAt, &row.bindingIsInfer, &row.bindingID, &row.epochID, &row.role, &row.boundAt,
-			&row.unboundAt, &row.unboundReason, &row.confidence, &row.epochTitle, &row.lastSeen, &row.updated,
+			&row.unboundAt, &row.unboundReason, &row.confidence, &row.epochTitle, &row.lastSeen,
+			&row.lastPromptAt, &row.hostEndAt, &row.hostEndJournal, &row.lastResume, &row.updated,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning session: %w", err)
 		}
@@ -676,6 +856,10 @@ func (s *Service) view(row joinedRow, now time.Time) SessionView {
 		t := time.Unix(0, row.lastSeen).UTC()
 		view.Activity.LastSeen = &t
 	}
+	if row.lastPromptAt > 0 {
+		t := time.Unix(0, row.lastPromptAt).UTC()
+		view.Activity.LastPromptAt = &t
+	}
 	view.Activity.LastEvent = row.lastEvent
 	inferred := row.bindingIsInfer.Valid && row.bindingIsInfer.Int64 != 0
 	if row.bindingID.Valid {
@@ -699,25 +883,8 @@ func (s *Service) view(row joinedRow, now time.Time) SessionView {
 			}
 		}
 	}
-	switch {
-	case row.unboundAt.Valid:
-		view.Activity.State = StateEnded
-		reason := row.unboundReason.String
-		if reason == "" {
-			reason = "unbind"
-		}
-		endedAt := row.unboundAt.Int64
-		if row.boundAt.Valid && endedAt < row.boundAt.Int64 {
-			endedAt = row.boundAt.Int64
-		}
-		view.End = &EndMarker{EndedAt: time.Unix(0, endedAt).UTC(), EndReason: reason}
-	case !row.bindingID.Valid:
-		view.Activity.State = StateUnknown
-	case row.lastSeen >= s.activeCutoff(now):
-		view.Activity.State = StateActive
-	default:
-		view.Activity.State = StateIdle
-	}
+	view.Activity.State, view.Activity.StateBasis = s.liveness(row, now)
+	view.End = endMarker(row)
 	return view
 }
 

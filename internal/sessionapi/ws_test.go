@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -212,4 +213,63 @@ func TestWebSocketStorageFaultFrameIsDeduplicated(t *testing.T) {
 	var netErr net.Error
 	require.True(t, errors.As(readErr, &netErr) && netErr.Timeout(),
 		"expected the read deadline to expire with no frame, got %v", readErr)
+}
+
+// TestWebSocketRepublishesSameRevisionWhenTheClockCrossesACutoff pins the
+// watch contract: time alone can change liveness without a new persisted
+// revision, and the changed payload must be republished with a later asOf
+// while the revision stays the same.
+func TestWebSocketRepublishesSameRevisionWhenTheClockCrossesACutoff(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	now := f.now.UnixNano()
+	// Exactly on the active cutoff at f.now: active. Two minutes later the same
+	// prompt is idle, with no database write in between.
+	f.stateWithPrompt(t, "crossing", now-int64(30*time.Minute), now-int64(30*time.Minute),
+		now-int64(30*time.Minute), "UserPromptSubmit", 1)
+
+	service := f.service()
+	var mu sync.Mutex
+	calls := 0
+	service.Now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls == 1 {
+			return f.now
+		}
+		return f.now.Add(2 * time.Minute)
+	}
+
+	server := httptest.NewServer(sessionapi.NewHandler(service))
+	t.Cleanup(server.Close)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_ = readWSFrame(t, conn)
+	require.NoError(t, conn.WriteJSON(map[string]string{"type": "subscribe", "topic": "sessions"}))
+
+	first := readWSFrameOfType(t, conn, "sessions")
+	require.Equal(t, int64(7), first.Revision)
+	require.Equal(t, f.now, first.AsOf)
+	var payload struct {
+		Items []sessionapi.SessionView `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(first.Payload, &payload))
+	require.Len(t, payload.Items, 1)
+	require.Equal(t, sessionapi.StateActive, payload.Items[0].Activity.State)
+
+	second := readWSFrameOfType(t, conn, "sessions")
+	require.Equal(t, int64(7), second.Revision, "liveness alone must not invent a persisted revision")
+	require.True(t, second.AsOf.After(first.AsOf), "the later frame carries the later response clock")
+	require.NoError(t, json.Unmarshal(second.Payload, &payload))
+	require.Len(t, payload.Items, 1)
+	require.Equal(t, sessionapi.StateIdle, payload.Items[0].Activity.State)
+	require.Equal(t, sessionapi.BasisPrompt, payload.Items[0].Activity.StateBasis)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.GreaterOrEqual(t, calls, 2)
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
@@ -54,14 +55,41 @@ func SeedStore(tb testing.TB) string {
 		tb.Fatalf("seed session store: close tracker: %v", err)
 	}
 
+	now := time.Now().UnixNano()
+	minute := int64(time.Minute)
+
 	db, err := dbconn.OpenSharedDBWithProfile(path, timeouts.TestProfile())
 	if err != nil {
 		tb.Fatalf("seed session store: open seeded handle: %v", err)
 	}
 	defer func() { _ = db.Close() }()
 
-	now := time.Now().UnixNano()
-	minute := int64(time.Minute)
+	// The session cache is disposable, and this fixture seeds it directly: both
+	// prompt-bearing rows declare their prompt watermark, so the CLI sees the
+	// same evidence a journal rebuild would produce without fabricating a host
+	// delivery. The api-state row is marked current, so the CLI's refresh is a
+	// clean no-op instead of a full delete-and-rebuild.
+	for _, row := range []struct {
+		session string
+		prompt  int64
+	}{
+		{ActiveSession, now - minute},
+		{IdleSession, now - 45*minute},
+	} {
+		if _, err := db.ExecContext(context.Background(), `
+			INSERT INTO pasture_session_state
+				(harness, session, first_seen, last_seen, last_prompt_at, last_event, last_journal_id, updated_at)
+			VALUES (?, ?, ?, ?, ?, 'UserPromptSubmit', 0, ?)`,
+			HarnessClaudeCode, row.session, row.prompt, row.prompt, row.prompt, row.prompt); err != nil {
+			tb.Fatalf("seed session store: state %s: %v", row.session, err)
+		}
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		UPDATE pasture_session_api_state
+		SET revision = 1, dirty = 0, completed_through_jid = 0, cache_version = ?
+		WHERE singleton_id = 0`, audit.SessionCacheVersion); err != nil {
+		tb.Fatalf("seed session store: mark session cache current: %v", err)
+	}
 	closed := func(minutesAgo int) *int64 {
 		at := now - int64(minutesAgo)*minute
 		return &at

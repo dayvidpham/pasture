@@ -565,6 +565,10 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "invalid_page_token", "the page token is malformed or no longer valid")
 	case errors.Is(err, ErrInvalidFilter):
 		writeError(w, http.StatusBadRequest, "invalid_filter", err.Error())
+	case errors.Is(err, ErrInvalidWindow):
+		// A liveness window is server configuration, not client input. Report a
+		// server fault with an actionable message instead of blaming the caller.
+		writeError(w, http.StatusInternalServerError, "invalid_window", err.Error())
 	case errors.Is(err, ErrStaleCache):
 		writeError(w, http.StatusServiceUnavailable, "stale_session_cache", staleSessionCacheMessage)
 	default:

@@ -91,7 +91,8 @@ it is Peasant's resolved project label.`,
 
 func init() {
 	serveCmd.Flags().String("listen", "127.0.0.1:0", "Loopback TCP address to listen on")
-	serveCmd.Flags().Duration("active-window", 15*time.Minute, "Age after which an open session is idle")
+	serveCmd.Flags().Duration("active-window", 30*time.Minute, "Prompt age at or under which a session is active")
+	serveCmd.Flags().Duration("idle-window", 24*time.Hour, "Prompt age above which a session is inactivity-ended")
 	serveCmd.Flags().Bool("backfill", false, "Rebuild historical session state before serving (can be slow on a large journal)")
 	serveCmd.Flags().String("peasant-db", "", "Opt-in: read project labels from the Peasant SQLite database at this path (read-only)")
 	serveCmd.Flags().String("peasant-url", "", "Opt-in: read project labels from the Peasant HTTP API at this base URL")
@@ -102,12 +103,19 @@ func init() {
 func runServe(cmd *cobra.Command) error {
 	listen, _ := cmd.Flags().GetString("listen")
 	activeWindow, _ := cmd.Flags().GetDuration("active-window")
+	idleWindow, _ := cmd.Flags().GetDuration("idle-window")
 	backfill, _ := cmd.Flags().GetBool("backfill")
 	peasantDB, _ := cmd.Flags().GetString("peasant-db")
 	peasantURL, _ := cmd.Flags().GetString("peasant-url")
 	webDir, _ := cmd.Flags().GetString("web-dir")
 	if activeWindow <= 0 {
-		return fmt.Errorf("active window must be positive")
+		return fmt.Errorf("--active-window must be positive, got %s", activeWindow)
+	}
+	if idleWindow <= 0 {
+		return fmt.Errorf("--idle-window must be positive, got %s", idleWindow)
+	}
+	if idleWindow <= activeWindow {
+		return fmt.Errorf("--idle-window (%s) must be greater than --active-window (%s)", idleWindow, activeWindow)
 	}
 	projectSwitch, err := newPeasantProjectSource(peasantDB, peasantURL)
 	if err != nil {
@@ -174,6 +182,7 @@ func runServe(cmd *cobra.Command) error {
 
 	service := sessionapi.NewService(readDB)
 	service.ActiveWindow = activeWindow
+	service.IdleWindow = idleWindow
 	service.ProjectSource = projectSwitch
 	if backfill {
 		service.Ensure = func(ctx context.Context) error {

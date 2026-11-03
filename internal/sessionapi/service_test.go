@@ -80,10 +80,18 @@ func (f fixture) addEpoch(t *testing.T, title string) string {
 
 func (f fixture) state(t *testing.T, session string, first, last int64, lastEvent string, journal int64) {
 	t.Helper()
+	f.stateWithPrompt(t, session, first, last, last, lastEvent, journal)
+}
+
+// stateWithPrompt seeds the durable prompt watermark explicitly, so a test can
+// separate broad activity (last_seen) from prompt recency. A zero prompt is the
+// "no prompt evidence" case; it must never be inferred from last_seen.
+func (f fixture) stateWithPrompt(t *testing.T, session string, first, last, prompt int64, lastEvent string, journal int64) {
+	t.Helper()
 	_, err := f.db.Exec(`
-		INSERT INTO pasture_session_state(harness, session, first_seen, last_seen, last_event, last_journal_id, updated_at)
-		VALUES ('claude-code', ?, ?, ?, ?, ?, ?)`,
-		session, first, last, lastEvent, journal, last)
+		INSERT INTO pasture_session_state(harness, session, first_seen, last_seen, last_prompt_at, last_event, last_journal_id, updated_at)
+		VALUES ('claude-code', ?, ?, ?, ?, ?, ?, ?)`,
+		session, first, last, prompt, lastEvent, journal, last)
 	require.NoError(t, err)
 }
 
@@ -154,7 +162,12 @@ func (f fixture) claim(t *testing.T, session string, claimedAt int64) {
 }
 
 func (f fixture) service() *sessionapi.Service {
-	return &sessionapi.Service{DB: f.db, Now: func() time.Time { return f.now }, ActiveWindow: 15 * time.Minute}
+	return &sessionapi.Service{
+		DB:           f.db,
+		Now:          func() time.Time { return f.now },
+		ActiveWindow: 30 * time.Minute,
+		IdleWindow:   24 * time.Hour,
+	}
 }
 
 func seedSessions(t *testing.T) fixture {
@@ -164,8 +177,8 @@ func seedSessions(t *testing.T) fixture {
 	f.state(t, "active", now-1*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
 	f.binding(t, "binding-active-old", "active", now-40*int64(time.Minute), sql.NullInt64{Int64: now - 25*int64(time.Minute), Valid: true}, "session_end")
 	f.binding(t, "binding-active", "active", now-1*int64(time.Minute), sql.NullInt64{}, "")
-	f.state(t, "idle", now-20*int64(time.Minute), now-20*int64(time.Minute), "SessionStart", 2)
-	f.binding(t, "binding-idle", "idle", now-20*int64(time.Minute), sql.NullInt64{}, "")
+	f.state(t, "idle", now-45*int64(time.Minute), now-45*int64(time.Minute), "UserPromptSubmit", 2)
+	f.binding(t, "binding-idle", "idle", now-45*int64(time.Minute), sql.NullInt64{}, "")
 	f.state(t, "ended", now-30*int64(time.Minute), now-5*int64(time.Minute), "SessionEnd", 3)
 	f.binding(t, "binding-ended", "ended", now-30*int64(time.Minute), sql.NullInt64{Int64: now - 5*int64(time.Minute), Valid: true}, "session_end")
 	f.claim(t, "unknown", now-2*int64(time.Minute))
@@ -327,7 +340,11 @@ func TestHTTPBindAndUnbind(t *testing.T) {
 	require.NotNil(t, detail.Session.Binding)
 	require.Equal(t, sessionapi.BindingSourceExplicit, detail.Session.Binding.Source)
 	require.Equal(t, sessionapi.ConfidenceVerified, detail.Session.Binding.Confidence)
-	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+	// Liveness is prompt-based: a freshly bound session has no prompt evidence,
+	// so it is unknown even though its mapping is open. The binding is not a
+	// prompt.
+	require.Equal(t, sessionapi.StateUnknown, detail.Session.Activity.State)
+	require.Equal(t, sessionapi.BasisNone, detail.Session.Activity.StateBasis)
 	require.Nil(t, detail.Session.End)
 
 	response = bind("new-session", `{"epochId":"`+f.epoch+`","role":"worker","expectedBinding":"missing"}`)
@@ -525,7 +542,10 @@ func TestInferredBindingsMergeWithoutOverridingExplicit(t *testing.T) {
 	require.Equal(t, sessionapi.ConfidenceCorrelated, ghost.Binding.Confidence)
 	require.NotNil(t, ghost.Epoch)
 	require.Equal(t, f.epoch, ghost.Epoch.ID)
-	require.Equal(t, sessionapi.StateActive, ghost.Activity.State)
+	// An inferred binding is a mapping observation, not a prompt: with no prompt
+	// evidence the session is unknown even though its epoch is filled in.
+	require.Equal(t, sessionapi.StateUnknown, ghost.Activity.State)
+	require.Equal(t, sessionapi.BasisNone, ghost.Activity.StateBasis)
 
 	detail, err := f.service().Get(context.Background(), "claude-code", "active")
 	require.NoError(t, err)
@@ -597,16 +617,17 @@ func TestInferredOnlySessionIsThePrimaryView(t *testing.T) {
 	require.Equal(t, "provisional", sessions.Items[0].NativeSessionID)
 }
 
-// TestNewServiceDefaults pins the production default active window. A caller
-// that constructs the service directly must get the documented 15-minute
-// window, and the clock seam must be live.
+// TestNewServiceDefaults pins the production liveness windows. A caller that
+// constructs the service directly must get the documented 30-minute active and
+// 24-hour idle windows, and the clock seam must be live.
 func TestNewServiceDefaults(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	service := sessionapi.NewService(f.db)
 	require.Same(t, f.db, service.DB)
 	require.NotNil(t, service.Now)
-	require.Equal(t, 15*time.Minute, service.ActiveWindow)
+	require.Equal(t, 30*time.Minute, service.ActiveWindow)
+	require.Equal(t, 24*time.Hour, service.IdleWindow)
 }
 
 // TestConfidenceVocabularyMatchesLifecycle pins the wire tokens to the
@@ -800,8 +821,8 @@ func TestEpochActiveCountMatchesActiveSessions(t *testing.T) {
 	now := f.now.UnixNano()
 	f.state(t, "explicit-active", now-2*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
 	f.binding(t, "binding-explicit-active", "explicit-active", now-2*int64(time.Minute), sql.NullInt64{}, "")
-	f.state(t, "explicit-idle", now-21*int64(time.Minute), now-20*int64(time.Minute), "SessionStart", 2)
-	f.binding(t, "binding-explicit-idle", "explicit-idle", now-21*int64(time.Minute), sql.NullInt64{}, "")
+	f.state(t, "explicit-idle", now-46*int64(time.Minute), now-45*int64(time.Minute), "UserPromptSubmit", 2)
+	f.binding(t, "binding-explicit-idle", "explicit-idle", now-46*int64(time.Minute), sql.NullInt64{}, "")
 	f.state(t, "explicit-ended", now-30*int64(time.Minute), now-5*int64(time.Minute), "SessionEnd", 3)
 	f.binding(t, "binding-explicit-ended", "explicit-ended", now-30*int64(time.Minute), sql.NullInt64{Int64: now - 5*int64(time.Minute), Valid: true}, "session_end")
 	f.state(t, "inferred-active", now-2*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 4)

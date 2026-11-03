@@ -198,7 +198,7 @@ func TestRebuildSessionStateRepairsASessionEndBinding(t *testing.T) {
 		Event:          "SessionEnd",
 		HostVersion:    "2.1.261",
 		Input:          bytes.NewReader(end),
-		Clock:          &liveFoldClock{at:1700000002},
+		Clock:          &liveFoldClock{at: 1700000002},
 		Operations:     claimOperation("repair.end"),
 		ActorClaim:     tasks.ActorClaim(actor.ID.String()),
 		TimeoutProfile: timeouts.TestProfile(),

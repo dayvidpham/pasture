@@ -16,8 +16,8 @@ func (s *Service) Epochs(ctx context.Context) (EpochPage, error) {
 	if s == nil || s.DB == nil {
 		return EpochPage{}, errors.New("session API has no database handle")
 	}
-	if s.ActiveWindow <= 0 {
-		return EpochPage{}, errors.New("session API active window must be positive")
+	if err := s.validateWindows(); err != nil {
+		return EpochPage{}, err
 	}
 	now := s.now()
 	rows, revision, err := s.epochRows(ctx, now, "")
@@ -34,6 +34,9 @@ func (s *Service) Epoch(ctx context.Context, epochID string) (EpochDetail, error
 	}
 	if epochID == "" {
 		return EpochDetail{}, ErrNotFound
+	}
+	if err := s.validateWindows(); err != nil {
+		return EpochDetail{}, err
 	}
 	now := s.now()
 	rows, revision, err := s.epochRows(ctx, now, epochID)
@@ -55,21 +58,30 @@ func (s *Service) EpochSessions(ctx context.Context, epochID string, opts ListOp
 	return s.List(ctx, opts)
 }
 
-// Inspect returns the combined epoch and session snapshot.
+// Inspect returns the combined epoch and session snapshot. One response clock
+// labels the epochs and the sessions, so the active count and the session rows
+// cannot straddle a cutoff and disagree.
 func (s *Service) Inspect(ctx context.Context) (InspectPayload, error) {
-	epochs, err := s.Epochs(ctx)
+	if s == nil || s.DB == nil {
+		return InspectPayload{}, errors.New("session API has no database handle")
+	}
+	if err := s.validateWindows(); err != nil {
+		return InspectPayload{}, err
+	}
+	now := s.now()
+	epochRows, revision, err := s.epochRows(ctx, now, "")
 	if err != nil {
 		return InspectPayload{}, err
 	}
-	sessions, err := s.List(ctx, ListOptions{Limit: 100})
+	sessions, err := s.listAt(ctx, now, ListOptions{Limit: 100})
 	if err != nil {
 		return InspectPayload{}, err
 	}
 	return InspectPayload{
-		Revision:           epochs.Revision,
-		AsOf:               epochs.AsOf,
+		Revision:           revision,
+		AsOf:               now,
 		Truncated:          sessions.Next != "",
-		Epochs:             epochs.Items,
+		Epochs:             epochRows,
 		Sessions:           sessions.Items,
 		PeasantIntegration: s.peasantIntegrationState(),
 	}, nil
@@ -136,7 +148,7 @@ func (s *Service) epochRows(ctx context.Context, now time.Time, epochID string) 
 		return nil, 0, fmt.Errorf("iterating epochs: %w", err)
 	}
 	inferredUsable := inferredBindingUsable(ctx, tx)
-	counts, err := epochSessionCounts(ctx, tx, s.activeCutoff(now), inferredUsable)
+	counts, err := epochSessionCounts(ctx, tx, s.activeCutoff(now), s.idleCutoff(now), inferredUsable)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -159,16 +171,21 @@ type epochCount struct {
 // counted exactly as an explicit binding would be. The definition of the
 // current binding and of the active cutoff is shared with the session page:
 // bindingCurrentCTE and Service.activeCutoff, never a second copy.
-func epochSessionCounts(ctx context.Context, tx *sql.Tx, cutoff int64, inferredUsable bool) (map[string]epochCount, error) {
+func epochSessionCounts(ctx context.Context, tx *sql.Tx, activeCutoff, idleCutoff int64, inferredUsable bool) (map[string]epochCount, error) {
+	// SUM over the shared liveness CASE is the same predicate the session page
+	// filters on: a session counted active here is a session the page labels
+	// active. The two placeholders are the active cutoff then the idle cutoff.
 	statement := bindingCurrentCTE(inferredUsable) + `
 	SELECT b.epoch_id, COUNT(*),
-	       SUM(CASE WHEN b.unbound_at IS NULL AND ` + currentBindingLastSeenExpr + ` >= ?
-	           THEN 1 ELSE 0 END)
+	       SUM(CASE WHEN ` + livenessStateSQL(
+		promptAtExpr, hostEndJournalExpr, lastResumeExpr,
+		"b.unbound_at", "b.unbound_reason",
+	) + ` = 'active' THEN 1 ELSE 0 END)
 	FROM binding_current b
 	LEFT JOIN pasture_session_state s ON s.harness = b.harness AND s.session = b.session
 	LEFT JOIN pasture_session_claim c ON c.harness = b.harness AND c.session = b.session
 	GROUP BY b.epoch_id`
-	rows, err := tx.QueryContext(ctx, statement, cutoff)
+	rows, err := tx.QueryContext(ctx, statement, activeCutoff, idleCutoff)
 	if err != nil {
 		return nil, fmt.Errorf("querying epoch session counts: %w", err)
 	}
