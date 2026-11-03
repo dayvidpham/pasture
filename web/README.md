@@ -46,6 +46,44 @@ restarting returns to the startup default (off without flags, on with an
 explicit flag). A missing or incompatible source returns an actionable error
 and leaves enrichment off without affecting the session API.
 
+## reading liveness, actor, and execution
+
+These are three separate facts; the console never merges them.
+
+- **State and basis.** Liveness is prompt-based, not binding-based. A prompt
+  younger than `--active-window` (default 30m) is `active`; a prompt older than
+  `--idle-window` (default 24h) is `ended` with basis `inactivity` and **no**
+  end marker; a prompt between them is `idle`. A session with no prompt
+  evidence is `unknown` even when it has an open binding, and an unbound
+  session with a recent prompt is `active`. `lastSeen`/`lastEvent` are broad
+  activity, not prompt recency. An unsuperseded host end or an applicable user
+  unbind is `ended` with basis `explicit-end`. `serve` refuses a zero,
+  negative, equal, or inverted window pair.
+- **Actor.** The rail shows the stored session claim and classifies it as the
+  reserved `pasture/default-llm` actor (`generic-llm`, attribution only) or
+  `explicit`. A claim is first-claim-wins: a later explicit actor never
+  rewrites it. To enroll a real actor, start a new harness session with
+  `PASTURE_ACTOR_ID` set; do not expect an existing generic claim to change.
+  No claim means no actor is shown.
+- **Execution.** The summary is the newest `primary` or `selection`
+  observation by journal id, as one coherent record. Provider, model, variant,
+  native role, and protocol role each carry their own status (`observed`,
+  `unavailable`, `invalid`, `conflict`), evidence source, and (for roles)
+  vocabulary. Native agent names are never translated into Pasture roles. A
+  conflict shows its bounded source-tagged candidates instead of a winner, and
+  an absent field is stated, not filled from an older observation. Optional
+  per-invocation declarations are `PASTURE_EXECUTION_PROVIDER`,
+  `PASTURE_EXECUTION_MODEL`, and `PASTURE_EXECUTION_ROLE`; host evidence wins,
+  and a concrete registered actor's metadata is an additional labeled source.
+- **History.** The execution history is a snapshot-pinned, newest-first page
+  that includes auxiliary and child observations; it never replaces the
+  summary. `load more` uses the opaque cursor, so a live replay committed after
+  the first page does not move its boundaries.
+- **Resume and unbind.** A genuine same-session resume supersedes a host end
+  and re-evaluates liveness from the unchanged actual prompt (it does not
+  refresh `lastPromptAt`). A user `unbind` is an explicit mapping/end decision
+  until a later deliberate bind; resume does not undo it.
+
 Historical bindings and activity are projected from the lifecycle journal. On a
 fresh store, pass `--backfill` once so older sessions appear in the inventory:
 
