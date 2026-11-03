@@ -194,6 +194,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{harness}/{nativeSessionId}/execution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a session's normalized execution observations
+         * @description Returns one snapshot-pinned page of occurrence.v3 execution records, newest first. The page includes auxiliary and child records; the session summary uses only the newest primary or selection record. Each attribution field carries its own status, source, vocabulary, and bounded candidates rather than one guessed value.
+         */
+        get: operations["listSessionExecution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sessions/{harness}/{nativeSessionId}/transcript": {
         parameters: {
             query?: never;
@@ -275,8 +295,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** @enum {string} */
+        /**
+         * @description Prompt-based liveness. A recent user prompt makes an unbound session active. Tool, permission, binding, claim, model-switch, and role-change activity is not a prompt.
+         * @enum {string}
+         */
         ActivityState: "active" | "idle" | "ended" | "unknown";
+        /**
+         * @description `generic-llm` is the exact reserved attribution-only actor; `explicit` is any other stored claim identity. The classification is a fact about the stored claim, never an inference from execution metadata.
+         * @enum {string}
+         */
+        ActorClassification: "generic-llm" | "explicit";
+        AttributionValue: {
+            /** @description Source-tagged valid candidates retained on invalid or conflict. A conflicted field has no chosen value. */
+            candidates?: components["schemas"]["ExecutionCandidate"][];
+            field?: string;
+            reason?: string;
+            source: components["schemas"]["ExecutionSource"];
+            status: components["schemas"]["ExecutionStatus"];
+            value?: string;
+            vocabulary?: components["schemas"]["Vocabulary"];
+        };
         BindRequest: {
             epochId: string;
             expectedBinding?: string;
@@ -340,6 +378,25 @@ export interface components {
         ErrorEnvelope: {
             error: components["schemas"]["ErrorBody"];
         };
+        ExecutionCandidate: {
+            field: string;
+            source: components["schemas"]["ExecutionSource"];
+            value: string;
+        };
+        ExecutionHistoryPage: {
+            /** Format: date-time */
+            asOf: string;
+            items: components["schemas"]["SessionExecution"][];
+            next?: string;
+            /** Format: int64 */
+            revision: number;
+        };
+        /** @enum {string} */
+        ExecutionKind: "primary" | "compaction" | "title" | "generate" | "selection" | "child";
+        /** @enum {string} */
+        ExecutionSource: "host" | "environment" | "actor-registry" | "none";
+        /** @enum {string} */
+        ExecutionStatus: "observed" | "unavailable" | "invalid" | "conflict";
         InspectPayload: {
             /** Format: date-time */
             asOf: string;
@@ -440,9 +497,22 @@ export interface components {
             /** Format: date-time */
             firstSeen?: string;
             lastEvent?: string;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description The newest user-prompt instant. Absent when the store has no prompt evidence.
+             */
+            lastPromptAt?: string;
+            /**
+             * Format: date-time
+             * @description Broad activity instant (journal, binding, claim, and state updates). This is not prompt recency.
+             */
             lastSeen?: string;
             state: components["schemas"]["ActivityState"];
+            stateBasis: components["schemas"]["StateBasis"];
+        };
+        SessionActor: {
+            classification: components["schemas"]["ActorClassification"];
+            id: string;
         };
         SessionBinding: {
             bindingId: string;
@@ -466,13 +536,32 @@ export interface components {
             /** Format: date-time */
             unboundAt?: string;
         };
+        SessionExecution: {
+            agentId?: string;
+            kind: components["schemas"]["ExecutionKind"];
+            model: components["schemas"]["AttributionValue"];
+            /** Format: date-time */
+            observedAt: string;
+            /** Format: int64 */
+            occurrenceId: number;
+            protocolRole: components["schemas"]["AttributionValue"];
+            provider: components["schemas"]["AttributionValue"];
+            requestId?: string;
+            role: components["schemas"]["AttributionValue"];
+            turnId?: string;
+            variant: components["schemas"]["AttributionValue"];
+        };
         SessionView: {
             activity: components["schemas"]["SessionActivity"];
+            /** @description The stored session claimant, shown separately from execution attribution and epoch binding. Absent when the store has no claim. */
+            actor?: components["schemas"]["SessionActor"];
             binding?: components["schemas"]["SessionBinding"];
             /** @description Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` is the effective current binding: the latest explicit binding when one exists, otherwise the open inferred derivation. */
             bindings: components["schemas"]["SessionBindingInterval"][];
             end?: components["schemas"]["EndMarker"];
             epoch?: components["schemas"]["EpochRef"];
+            /** @description The newest primary OR selection observation by journal id, as one coherent record. Auxiliary and child observations appear only in the execution history. Absent when the session has no execution evidence. */
+            execution?: components["schemas"]["SessionExecution"];
             harness: string;
             nativeSessionId: string;
             /** @description Peasant-owned project display label for the session. The label depends on the configured source: with --peasant-db it is the canonical remote label when the remote is recognizable, else the canonical cwd, else the project hash; with --peasant-url it is Peasant's resolved project label. Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never derives it. */
@@ -480,6 +569,11 @@ export interface components {
             /** @description Peasant-owned opaque project hash for the session, preserved exactly. Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never recomputes it. */
             projectHash?: string;
         };
+        /**
+         * @description The evidence that decided `state`. `none` means no prompt evidence exists; `prompt` means the age of the last user prompt decided active or idle; `inactivity` means the prompt aged past the idle window and carries no end marker; `explicit-end` means an unsuperseded host session-end or an applicable explicit user unbind.
+         * @enum {string}
+         */
+        StateBasis: "none" | "prompt" | "inactivity" | "explicit-end";
         /** @description The durable Peasant SessionDetailPayload document, proxied unchanged. Pasture guarantees only the identity fields; every other field belongs to the shared @peasant-labs/schema session contract and is validated by the browser. */
         TranscriptPayload: {
             harness: string;
@@ -491,6 +585,11 @@ export interface components {
         UnbindRequest: {
             expectedBinding?: string;
         };
+        /**
+         * @description Native agent names and Pasture protocol roles are different vocabularies and are never translated into one another.
+         * @enum {string}
+         */
+        Vocabulary: "native-agent" | "pasture-role";
         WebSocketClientMessage: {
             /** @enum {string} */
             topic?: "sessions" | "epochs";
@@ -1242,6 +1341,81 @@ export interface operations {
                 };
             };
             /** @description The session cache is stale or writes are unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listSessionExecution: {
+        parameters: {
+            query?: {
+                /** @description Maximum observations to return (1-100, default 50) */
+                limit?: number;
+                /** @description Resume after the cursor printed by a previous page; the cursor pins one journal snapshot */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Harness id */
+                harness: string;
+                /** @description Native session id */
+                nativeSessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionHistoryPage"];
+                };
+            };
+            /** @description Invalid session key, limit, or cursor */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Non-loopback Host or Origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description Session not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The session store could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The session cache is stale */
             503: {
                 headers: {
                     [name: string]: unknown;

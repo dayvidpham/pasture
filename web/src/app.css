@@ -712,3 +712,74 @@ body {
   font: var(--fs-sm)/var(--lh-body) var(--font-mono);
   overflow-wrap: anywhere;
 }
+
+/* Prompt liveness, actor, and execution attribution stay visually separate
+   from the epoch binding. Basis and attribution source are quiet annotations,
+   because they explain a value rather than compete with it. */
+.state-cell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.state-basis {
+  color: var(--ink-5);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+
+.execution-summary,
+.execution-history {
+  margin-top: 1rem;
+}
+
+.execution-summary[data-empty='true'] {
+  opacity: 0.85;
+}
+
+.attribution-source {
+  display: block;
+  color: var(--ink-5);
+  font-size: 0.72rem;
+}
+
+.execution-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.execution-list li {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+}
+
+.execution-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: var(--ink-3);
+  font-size: 0.78rem;
+  text-transform: lowercase;
+}
+
+.link-button {
+  margin-top: 0.5rem;
+  background: none;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  color: var(--ink-5);
+  cursor: default;
+  text-decoration: none;
+}

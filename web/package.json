@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsc --noEmit \u0026\u0026 vite build",
     "dev": "vite",
-    "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.6.0.json -o src/generated/api.ts",
+    "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.7.0.json -o src/generated/api.ts",
     "preview": "vite preview",
     "test": "vitest run"
   },

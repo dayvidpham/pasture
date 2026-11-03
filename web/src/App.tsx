@@ -25,6 +25,7 @@ import {
 
 import {
   bindProject,
+  fetchExecutionHistory,
   fetchInspect,
   fetchProject,
   fetchTranscript,
@@ -36,9 +37,17 @@ import {
   type ProjectRole,
   type ProjectView,
   type SessionBindingInterval,
+  type SessionExecution,
   type SessionView,
   type WireFrame,
 } from './api'
+import {
+  actorLabel,
+  appendExecutionPage,
+  attributionSource,
+  attributionText,
+  executionKindLabel,
+} from './execution'
 import {
   adaptTranscriptPayload,
   describeTranscriptError,
@@ -105,6 +114,7 @@ type SessionRow = {
   harness: string
   nativeSessionId: string
   state: string
+  stateBasis: string
   project?: string
   projectHash?: string
   projectSort: string
@@ -209,6 +219,113 @@ export function BindingHistory({ bindings }: { bindings: SessionBindingInterval[
             </li>
           ))}
         </ol>
+      )}
+    </div>
+  )
+}
+
+/**
+ * ExecutionSummary renders the session's newest primary or selection
+ * observation. Every field keeps its own status, source, and vocabulary; a
+ * missing observation is stated rather than filled with a guessed model.
+ */
+export function ExecutionSummary({ execution }: { execution?: SessionExecution }) {
+  if (!execution) {
+    return (
+      <div className="execution-summary" data-empty="true">
+        <p className="eyebrow">execution</p>
+        <p className="rail-copy muted">
+          no normalized execution observation is recorded for this session.
+        </p>
+      </div>
+    )
+  }
+  const fields: Array<[string, SessionExecution['provider']]> = [
+    ['provider', execution.provider],
+    ['model', execution.model],
+    ['variant', execution.variant],
+    ['native role', execution.role],
+    ['protocol role', execution.protocolRole],
+  ]
+  return (
+    <div className="execution-summary" data-kind={execution.kind}>
+      <p className="eyebrow">execution · {executionKindLabel(execution.kind)}</p>
+      <dl className="detail-list">
+        {fields.map(([label, value]) => (
+          <div key={label} data-status={value.status}>
+            <dt>{label}</dt>
+            <dd>
+              <span>{attributionText(value)}</span>
+              <span className="attribution-source">
+                {attributionSource(value)}
+                {value.vocabulary ? ` · ${value.vocabulary}` : ''}
+              </span>
+            </dd>
+          </div>
+        ))}
+        {execution.agentId && (
+          <div><dt>native agent</dt><dd className="mono-wrap">{execution.agentId}</dd></div>
+        )}
+        {execution.turnId && (
+          <div><dt>turn</dt><dd className="mono-wrap">{execution.turnId}</dd></div>
+        )}
+        {execution.requestId && (
+          <div><dt>request</dt><dd className="mono-wrap">{execution.requestId}</dd></div>
+        )}
+      </dl>
+      <p className="rail-copy muted">
+        occurrence {execution.occurrenceId} · {formatTime(execution.observedAt)}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * ExecutionHistoryList is the snapshot-pinned history, newest first. It includes
+ * auxiliary and child records, which never replace the summary above.
+ */
+export function ExecutionHistoryList({
+  items,
+  next,
+  busy = false,
+  error = null,
+  onLoadMore,
+}: {
+  items: SessionExecution[]
+  next?: string
+  busy?: boolean
+  error?: string | null
+  onLoadMore?: () => void
+}) {
+  return (
+    <div className="execution-history">
+      <p className="eyebrow">execution history</p>
+      {error && <p className="rail-copy">{error}</p>}
+      {items.length === 0 ? (
+        <p className="rail-copy muted">no execution observations are recorded.</p>
+      ) : (
+        <ol className="execution-list" aria-label="execution history">
+          {items.map((item) => (
+            <li key={item.occurrenceId} data-kind={item.kind}>
+              <div className="execution-head">
+                <span>{executionKindLabel(item.kind)}</span>
+                <span className="tnum">#{item.occurrenceId}</span>
+              </div>
+              <p className="rail-copy">
+                {attributionText(item.provider)} · {attributionText(item.model)}
+              </p>
+              <p className="rail-copy muted">
+                {formatTime(item.observedAt)} · {attributionText(item.role)} /{' '}
+                {attributionText(item.protocolRole)}
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+      {next && onLoadMore && (
+        <button type="button" className="link-button" onClick={onLoadMore} disabled={busy}>
+          {busy ? 'loading more…' : 'load more'}
+        </button>
       )}
     </div>
   )
@@ -630,6 +747,13 @@ export default function App() {
   const [transcriptRetry, setTranscriptRetry] = useState(0)
   const [transcriptLeftRail, setTranscriptLeftRail] = useState(false)
   const [transcriptRightRail, setTranscriptRightRail] = useState(false)
+  const [executionHistory, setExecutionHistory] = useState<{
+    key: string
+    items: SessionExecution[]
+    next?: string
+    error: string | null
+  }>({ key: '', items: [], error: null })
+  const [executionBusy, setExecutionBusy] = useState(false)
   const [projectMapping, dispatchProjectMapping] = useReducer(
     reduceProjectMapping,
     EMPTY_PROJECT_MAPPING,
@@ -773,6 +897,7 @@ export default function App() {
       harness: session.harness,
       nativeSessionId: session.nativeSessionId,
       state: session.activity.state,
+      stateBasis: session.activity.stateBasis,
       project: session.project,
       projectHash: session.projectHash,
       projectSort: projectLabel(session),
@@ -827,6 +952,74 @@ export default function App() {
       })
     return () => controller.abort()
   }, [selectedHarness, selectedNativeId, transcriptKey, transcriptRetry])
+
+  // Execution history is fetched once per selected session and then extended
+  // through its opaque cursor. Live WebSocket snapshots never restart it,
+  // because the summary arrives on the session view while the history page is
+  // independently snapshot-pinned.
+  useEffect(() => {
+    if (!selectedHarness || !selectedNativeId || !transcriptKey) {
+      setExecutionHistory({ key: '', items: [], error: null })
+      return
+    }
+    const controller = new AbortController()
+    setExecutionBusy(true)
+    fetchExecutionHistory(selectedHarness, selectedNativeId, { limit: 50 }, controller.signal)
+      .then((page) => {
+        if (controller.signal.aborted) return
+        setExecutionHistory({ key: transcriptKey, items: page.items, next: page.next, error: null })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setExecutionHistory({
+          key: transcriptKey,
+          items: [],
+          error:
+            error instanceof Error
+              ? `execution history unavailable: ${error.message}`
+              : 'execution history unavailable',
+        })
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setExecutionBusy(false)
+      })
+    return () => controller.abort()
+  }, [selectedHarness, selectedNativeId, transcriptKey])
+
+  const loadMoreExecution = useCallback(() => {
+    if (!selectedHarness || !selectedNativeId || !transcriptKey || !executionHistory.next) return
+    setExecutionBusy(true)
+    fetchExecutionHistory(selectedHarness, selectedNativeId, {
+      limit: 50,
+      cursor: executionHistory.next,
+    })
+      .then((page) => {
+        setExecutionHistory((previous) =>
+          previous.key === transcriptKey
+            ? {
+                key: transcriptKey,
+                items: appendExecutionPage(previous.items, page),
+                next: page.next,
+                error: null,
+              }
+            : previous,
+        )
+      })
+      .catch((error: unknown) => {
+        setExecutionHistory((previous) =>
+          previous.key === transcriptKey
+            ? {
+                ...previous,
+                error:
+                  error instanceof Error
+                    ? `execution history unavailable: ${error.message}`
+                    : 'execution history unavailable',
+              }
+            : previous,
+        )
+      })
+      .finally(() => setExecutionBusy(false))
+  }, [selectedHarness, selectedNativeId, transcriptKey, executionHistory.next])
 
   // Fetch the project-level mapping once per selected project hash. A 404 is
   // classified by the reducer as "never mapped" and leaves the bind controls
@@ -925,7 +1118,10 @@ export default function App() {
         sortable: true,
         width: '8rem',
         render: (_: unknown, row: SessionRow) => (
-          <StatusDot label={row.state} color={STATE_COLOR[row.state]} />
+          <div className="state-cell" data-basis={row.stateBasis}>
+            <StatusDot label={row.state} color={STATE_COLOR[row.state]} />
+            <span className="state-basis">{row.stateBasis}</span>
+          </div>
         ),
       },
       {
@@ -1052,6 +1248,21 @@ export default function App() {
                 <dl className="detail-list">
                   <div><dt>harness</dt><dd>{selectedSession.harness}</dd></div>
                   <div><dt>state</dt><dd>{selectedSession.activity.state}</dd></div>
+                  <div><dt>basis</dt><dd>{selectedSession.activity.stateBasis}</dd></div>
+                  <div>
+                    <dt>last prompt</dt>
+                    <dd className={selectedSession.activity.lastPromptAt ? undefined : 'muted'}>
+                      {formatTime(selectedSession.activity.lastPromptAt)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>actor</dt>
+                    <dd className={selectedSession.actor ? 'mono-wrap' : 'muted'}>
+                      {selectedSession.actor
+                        ? `${actorLabel(selectedSession.actor)} · ${selectedSession.actor.id}`
+                        : 'no stored claim'}
+                    </dd>
+                  </div>
                   <div><dt>epoch</dt><dd>{epochLabel(selectedSession.epoch)}</dd></div>
                   <div><dt>role</dt><dd>{selectedSession.binding?.role ?? '—'}</dd></div>
                   <div><dt>binding</dt><dd className="mono-wrap">{selectedSession.binding?.bindingId ?? '—'}</dd></div>
@@ -1067,6 +1278,28 @@ export default function App() {
                 <ProjectDetail session={selectedSession} integration={peasantIntegration} />
 
                 <BindingHistory bindings={selectedSession.bindings ?? []} />
+
+                <ExecutionSummary execution={selectedSession.execution} />
+
+                <ExecutionHistoryList
+                  items={
+                    executionHistory.key === sessionKey(selectedSession)
+                      ? executionHistory.items
+                      : []
+                  }
+                  next={
+                    executionHistory.key === sessionKey(selectedSession)
+                      ? executionHistory.next
+                      : undefined
+                  }
+                  busy={executionBusy}
+                  error={
+                    executionHistory.key === sessionKey(selectedSession)
+                      ? executionHistory.error
+                      : null
+                  }
+                  onLoadMore={loadMoreExecution}
+                />
               </div>
             ) : (
               <p className="rail-copy muted">choose a session in the table to inspect its binding.</p>

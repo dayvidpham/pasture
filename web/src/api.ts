@@ -1,6 +1,11 @@
 import type { components } from './generated/api'
 
 export type SessionView = components['schemas']['SessionView']
+export type SessionActivity = components['schemas']['SessionActivity']
+export type SessionActor = components['schemas']['SessionActor']
+export type SessionExecution = components['schemas']['SessionExecution']
+export type AttributionValue = components['schemas']['AttributionValue']
+export type ExecutionHistoryPage = components['schemas']['ExecutionHistoryPage']
 export type SessionBindingInterval = components['schemas']['SessionBindingInterval']
 export type EpochView = components['schemas']['EpochView']
 export type InspectPayload = components['schemas']['InspectPayload']
@@ -120,6 +125,25 @@ export function fetchTranscript(
 ): Promise<unknown> {
   const path = `/api/v1/sessions/${encodeURIComponent(harness)}/${encodeURIComponent(nativeSessionId)}/transcript`
   return requestJSON<unknown>(path, signal)
+}
+
+/**
+ * Fetch one page of a session's normalized execution history. The cursor is
+ * opaque and pins its journal snapshot, so "load more" cannot change the page
+ * boundaries under a live replay.
+ */
+export function fetchExecutionHistory(
+  harness: string,
+  nativeSessionId: string,
+  opts: { limit?: number; cursor?: string } = {},
+  signal?: AbortSignal,
+): Promise<ExecutionHistoryPage> {
+  const params = new URLSearchParams()
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit))
+  if (opts.cursor) params.set('cursor', opts.cursor)
+  const query = params.toString()
+  const path = `/api/v1/sessions/${encodeURIComponent(harness)}/${encodeURIComponent(nativeSessionId)}/execution${query ? `?${query}` : ''}`
+  return requestJSON<ExecutionHistoryPage>(path, signal)
 }
 
 /**
