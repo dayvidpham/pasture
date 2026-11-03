@@ -83,6 +83,7 @@ func TestCodexEvidenceLeavesOpenCodeAndClaudeActivationUnchanged(t *testing.T) {
 	require.Equal(t, []model.ContractEventKind{
 		registration.EventSessionStart,
 		registration.EventSessionEnd,
+		registration.EventUserPromptSubmit,
 		registration.EventPreToolUse,
 		registration.EventPostToolUse,
 		registration.EventPostToolUseFailure,

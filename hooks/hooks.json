@@ -118,6 +118,18 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PASTURE_BIN:-pasture}\" hook lifecycle --harness claude-code --event UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
