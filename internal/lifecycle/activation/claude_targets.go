@@ -26,6 +26,7 @@ var claudeCaptureProofs = [...]captureProofDeclaration{
 	{ordinal: 7, arm: "PreCompact", event: registration.EventPreCompact, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/pre_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
 	{ordinal: 8, arm: "PostCompact", event: registration.EventPostCompact, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/post_compact_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
 	{ordinal: 9, arm: "FileChanged", event: registration.EventFileChanged, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/file_changed_2_1_263.json (Claude Code 2.1.263 authentic capture)"},
+	{ordinal: 10, arm: "UserPromptSubmit", event: registration.EventUserPromptSubmit, fixture: "internal/lifecycle/ingress/claude/testdata/fixtures/user_prompt_submit_2_1_261.json (Claude Code 2.1.261 authentic capture)"},
 }
 
 // claudeProductionProofs declares every Claude Code production proof: the
@@ -41,6 +42,7 @@ var claudeProductionProofs = [...]productionProofDeclaration{
 	{ordinal: 7, arm: "PreCompact", event: registration.EventPreCompact, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PreCompact"},
 	{ordinal: 8, arm: "PostCompact", event: registration.EventPostCompact, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/PostCompact"},
 	{ordinal: 9, arm: "FileChanged", event: registration.EventFileChanged, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/FileChanged"},
+	{ordinal: 10, arm: "UserPromptSubmit", event: registration.EventUserPromptSubmit, test: "cmd/pasture/hook_lifecycle_production_test.go:TestEnabledClaudeAuthenticFixturesToDurableEvidence/UserPromptSubmit"},
 }
 
 // claudeTargetEventDeclarations is the static Claude Code target table.
@@ -57,6 +59,7 @@ var claudeTargetEventDeclarations = [...]targetEventDeclaration{
 	// the current directory, with ".envrc|.env" as its example. The watcher
 	// splits on "|", not a match-all regex. Metadata alone supplies no proof.
 	{event: registration.EventFileChanged, captureProof: CaptureProofFileChanged, productionProof: ProductionProofFileChanged, matcher: ".envrc|.env"},
+	{event: registration.EventUserPromptSubmit, captureProof: CaptureProofUserPromptSubmit, productionProof: ProductionProofUserPromptSubmit},
 	{event: registration.EventElicitation, withheldReason: WithheldMissingRequestCorrelation},
 	{event: registration.EventElicitationResult, withheldReason: WithheldMissingRequestCorrelation},
 }

@@ -14,6 +14,7 @@ const (
 	CaptureProofPreCompact         CaptureProof = 7
 	CaptureProofPostCompact        CaptureProof = 8
 	CaptureProofFileChanged        CaptureProof = 9
+	CaptureProofUserPromptSubmit   CaptureProof = 10
 )
 
 // claudeGeneratedCaptureProofs lists the generated capture proof arms of claude_targets.go by name, in ordinal order.
@@ -27,6 +28,7 @@ var claudeGeneratedCaptureProofs = []namedCaptureProof{
 	{name: "PreCompact", proof: CaptureProofPreCompact},
 	{name: "PostCompact", proof: CaptureProofPostCompact},
 	{name: "FileChanged", proof: CaptureProofFileChanged},
+	{name: "UserPromptSubmit", proof: CaptureProofUserPromptSubmit},
 }
 
 // Claude Code production proofs, ordinals 1-99.
@@ -40,6 +42,7 @@ const (
 	ProductionProofPreCompact         ProductionProof = 7
 	ProductionProofPostCompact        ProductionProof = 8
 	ProductionProofFileChanged        ProductionProof = 9
+	ProductionProofUserPromptSubmit   ProductionProof = 10
 )
 
 // claudeGeneratedProductionProofs lists the generated production proof arms of claude_targets.go by name, in ordinal order.
@@ -53,4 +56,5 @@ var claudeGeneratedProductionProofs = []namedProductionProof{
 	{name: "PreCompact", proof: ProductionProofPreCompact},
 	{name: "PostCompact", proof: ProductionProofPostCompact},
 	{name: "FileChanged", proof: ProductionProofFileChanged},
+	{name: "UserPromptSubmit", proof: ProductionProofUserPromptSubmit},
 }
