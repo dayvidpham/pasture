@@ -6,15 +6,27 @@ import "github.com/dayvidpham/provenance"
 const DefaultLLMActorName = "pasture/default-llm"
 
 // DefaultLLMActorID addresses reserved ordinal one, independently of the
-// ordinal-zero system committer and its bootstrap authority.
+// ordinal-zero system committer and its bootstrap authority. It is encoded by
+// the ONE ordinal encoder, never by a second hand-written byte array.
 func DefaultLLMActorID() provenance.ActorID {
-	return provenance.ActorID{Namespace: PastureSystemNamespace, UUID: [16]byte{15: 1}}
+	id, err := OrdinalActorID(1)
+	if err != nil {
+		panic("provadapter: reserved ordinal 1 is outside the fixed-actor range: " + err.Error())
+	}
+	return id
 }
 
 // IsDefaultLLMActor classifies only the exact reserved identity. Names, execution
 // metadata and neighboring reserved identities cannot confer this classification.
 func IsDefaultLLMActor(id provenance.ActorID) bool {
 	return id == DefaultLLMActorID()
+}
+
+// IsDefaultLLMActorText classifies the persisted text spelling of a stored
+// claim with the same rule as the typed predicate, so a session view and a gate
+// reader cannot disagree about the generic actor.
+func IsDefaultLLMActorText(id string) bool {
+	return id == DefaultLLMActorID().String()
 }
 
 // DefaultLLMActorEntry returns a fresh fixed software manifest descriptor. Its

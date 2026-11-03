@@ -136,32 +136,27 @@ func readRebuiltState(t *testing.T, db interface {
 func TestRebuildSessionStateMatchesLiveTail(t *testing.T) {
 	t.Parallel()
 	tracker, db, path := claimStore(t)
-	actor, err := tracker.RegisterHumanAgent("equivalence-holder", "Equivalence Holder", "equivalence-holder@example.test")
+	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "user_prompt_submit_2_1_261.json"))
 	require.NoError(t, err)
-	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
-	require.NoError(t, err)
+	const session = "162e5169-1afa-42d3-913e-6e8c23ad1ec2"
 	_, err = handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{
-		DBPath:         path,
-		Harness:        "claude-code",
-		Event:          "SessionStart",
-		HostVersion:    "2.1.261",
-		Input:          bytes.NewReader(raw),
-		Clock:          claimClock{},
-		Operations:     claimOperation("equivalence.first"),
-		ActorClaim:     tasks.ActorClaim(actor.ID.String()),
-		TimeoutProfile: timeouts.TestProfile(),
+		DBPath: path, Harness: "claude-code", Event: "UserPromptSubmit", HostVersion: "2.1.261", Input: bytes.NewReader(raw), Clock: claimClock{}, Operations: claimOperation("equivalence.prompt"), TimeoutProfile: timeouts.TestProfile(),
 	})
 	require.NoError(t, err)
-
-	first, last, journal, updated, event := readRebuiltState(t, db, "claude-code", rebuildClaudeSession)
+	read := func() [11]any {
+		var a [11]any
+		var first, last, journal, updated, prompt, promptID, end, endID, resume, resumeID int64
+		var event string
+		require.NoError(t, db.QueryRow(`SELECT first_seen,last_seen,last_journal_id,updated_at,last_event,last_prompt_at,last_prompt_journal_id,host_end_at,host_end_journal_id,last_resume_at,last_resume_journal_id FROM pasture_session_state WHERE harness='claude-code' AND session=?`, session).Scan(&first, &last, &journal, &updated, &event, &prompt, &promptID, &end, &endID, &resume, &resumeID))
+		a = [11]any{first, last, journal, updated, event, prompt, promptID, end, endID, resume, resumeID}
+		return a
+	}
+	before := read()
+	require.NotZero(t, before[5])
+	require.NotZero(t, before[6])
 	_, err = tasks.RebuildSessionState(t.Context(), tracker)
 	require.NoError(t, err)
-	firstAfter, lastAfter, journalAfter, updatedAfter, eventAfter := readRebuiltState(t, db, "claude-code", rebuildClaudeSession)
-	require.Equal(t, first, firstAfter)
-	require.Equal(t, last, lastAfter)
-	require.Equal(t, journal, journalAfter)
-	require.Equal(t, updated, updatedAfter)
-	require.Equal(t, event, eventAfter)
+	require.Equal(t, before, read())
 }
 
 func TestRebuildSessionStateRepairsASessionEndBinding(t *testing.T) {
@@ -487,4 +482,28 @@ func TestEnsureSessionStateDetectsCommittedOccurrence(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, rebuilt)
 	require.Greater(t, outcome.CompletedThroughJournalID, int64(0))
+}
+
+func TestFullRebuildRepairsDivergentExecutionCache(t *testing.T) {
+	t.Parallel()
+	tracker, db, path := claimStore(t)
+	raw, err := os.ReadFile(filepath.Join("..", "lifecycle", "ingress", "claude", "testdata", "fixtures", "session_start_2_1_261.json"))
+	require.NoError(t, err)
+	_, err = handlers.HookLifecycleNative(context.Background(), handlers.HookLifecycleInput{DBPath: path, Harness: "claude-code", Event: "SessionStart", HostVersion: "2.1.261", Input: bytes.NewReader(raw), Clock: claimClock{}, Operations: claimOperation("execution.repair"), TimeoutProfile: timeouts.TestProfile()})
+	require.NoError(t, err)
+	_, err = tasks.RebuildSessionState(t.Context(), tracker)
+	require.NoError(t, err)
+	var original string
+	require.NoError(t, db.QueryRow(`SELECT execution_json FROM pasture_session_execution LIMIT 1`).Scan(&original))
+	_, err = db.Exec(`UPDATE pasture_session_execution SET execution_json='{}'`)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE pasture_session_api_state SET completed_through_jid=0 WHERE singleton_id=0`)
+	require.NoError(t, err)
+	_, _, err = tasks.EnsureSessionState(t.Context(), tracker)
+	require.ErrorContains(t, err, "conflicts with journal evidence")
+	_, err = tasks.RebuildSessionState(t.Context(), tracker)
+	require.NoError(t, err)
+	var repaired string
+	require.NoError(t, db.QueryRow(`SELECT execution_json FROM pasture_session_execution LIMIT 1`).Scan(&repaired))
+	require.Equal(t, original, repaired)
 }

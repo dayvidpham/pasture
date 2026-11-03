@@ -630,7 +630,7 @@ func hookLifecycle(ctx context.Context, in HookLifecycleInput, open lifecycleSto
 }
 
 func sessionClaimMismatchDiagnosticForSource(harness ir.HarnessID, actorClaim tasks.ActorClaim, implicit bool, bindings []model.NativeBinding, outcome tasks.SessionClaimOutcome) string {
-	if implicit && string(actorClaim) == provadapter.DefaultLLMActorID().String() {
+	if implicit && provadapter.IsDefaultLLMActorText(string(actorClaim)) {
 		return ""
 	}
 	return sessionClaimMismatchDiagnostic(harness, actorClaim, bindings, outcome)

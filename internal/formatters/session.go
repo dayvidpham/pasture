@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/errors"
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/types"
 )
@@ -111,6 +112,19 @@ func formatSessionDetailText(detail sessionapi.Detail) string {
 		fmt.Sprintf("Harness:    %s", s.Harness),
 		fmt.Sprintf("Session:    %s", s.NativeSessionID),
 		fmt.Sprintf("State:      %s", s.Activity.State),
+		fmt.Sprintf("Basis:      %s", s.Activity.StateBasis),
+		fmt.Sprintf("Last prompt: %s", sessionInstant(s.Activity.LastPromptAt)),
+	}
+	if s.Actor != nil {
+		lines = append(lines, fmt.Sprintf("Actor:      %s (%s)", s.Actor.ID, s.Actor.Classification))
+	}
+	if s.Execution != nil {
+		lines = append(lines,
+			fmt.Sprintf("Provider:   %s", formatAttribution(s.Execution.Provider)),
+			fmt.Sprintf("Model:      %s", formatAttribution(s.Execution.Model)),
+			fmt.Sprintf("Native role: %s", formatAttribution(s.Execution.Role)),
+			fmt.Sprintf("Protocol role: %s", formatAttribution(s.Execution.ProtocolRole)),
+		)
 	}
 	if s.Epoch != nil {
 		lines = append(lines, fmt.Sprintf("Epoch:      %s", s.Epoch.ID))
@@ -148,6 +162,16 @@ func formatSessionDetailText(detail sessionapi.Detail) string {
 		fmt.Sprintf("As of:      %s", detail.AsOf.UTC().Format(sessionTimeLayout)),
 	)
 	return strings.Join(lines, "\n")
+}
+
+func formatAttribution(value execution.AttributionValue) string {
+	if value.Status == execution.Observed {
+		return fmt.Sprintf("%s (%s)", value.Value, value.Source)
+	}
+	if value.Reason != "" {
+		return fmt.Sprintf("%s (%s)", value.Status, value.Reason)
+	}
+	return string(value.Status)
 }
 
 // formatSessionBindingIntervals renders every historical binding, not only the

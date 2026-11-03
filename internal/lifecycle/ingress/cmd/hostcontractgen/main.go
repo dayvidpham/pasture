@@ -214,7 +214,7 @@ func renderProviderManifest(c hostcontract.Contract, funcName, harnessExpr strin
 		for _, id := range e.Identities {
 			fmt.Fprintf(&b, "{Field:%s,Binding:%s,Required:%t},", fieldSymbols[uint16(id.Field)], binding(id.Binding), id.Required)
 		}
-		fmt.Fprintf(&b, "}, Blocking:%s, Mutation:%s, Failure:%s, StopLoop:%s, SessionTransition:model.SessionTransition(%d), TransitionSourceField:%q},\n", blocking(e.Blocking), mutation(e.Mutation), failureIdent(e.Failure), stop(e.StopLoop), e.SessionTransition, e.TransitionSourceField)
+		fmt.Fprintf(&b, "}, Blocking:%s, Mutation:%s, Failure:%s, StopLoop:%s, SessionTransition:%s, TransitionSourceField:%q},\n", blocking(e.Blocking), mutation(e.Mutation), failureIdent(e.Failure), stop(e.StopLoop), sessionTransition(e.SessionTransition), e.TransitionSourceField)
 	}
 	fmt.Fprintf(&b, "\t}\n\tcontract, err := ir.NewRuntimeContractID(%s, %q)\n\tif err != nil { panic(err) }\n\treturn Manifest{Harness:%s, Version:%q, Contract:contract, Events:events}\n}\n", harnessExpr, c.Version, harnessExpr, c.Version)
 	return b.Bytes()
@@ -271,6 +271,24 @@ func renderPayload(c hostcontract.Contract) []byte {
 	}
 	fmt.Fprintln(&b, "}")
 	return b.Bytes()
+}
+
+// sessionTransition renders the typed transition as a named constant. A
+// numeric cast would let a renumbering of model.SessionTransition change the
+// meaning of every pinned manifest without a symbol changing in the diff.
+func sessionTransition(v model.SessionTransition) string {
+	switch v {
+	case model.SessionTransitionNone:
+		return "model.SessionTransitionNone"
+	case model.SessionTransitionPrompt:
+		return "model.SessionTransitionPrompt"
+	case model.SessionTransitionEnd:
+		return "model.SessionTransitionEnd"
+	case model.SessionTransitionResume:
+		return "model.SessionTransitionResume"
+	default:
+		panic(fmt.Sprintf("hostcontractgen: unknown session transition %d", v))
+	}
 }
 
 func blocking(v hostcontract.BlockingMode) string {

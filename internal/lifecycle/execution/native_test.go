@@ -35,3 +35,43 @@ func TestNativeOpenCodeCapturedContextAndTitle(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeClaudeAndCodexCaptures(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		harness, dir, file, event string
+		kind                      execution.Kind
+		model, role, agent, turn  string
+	}{
+		{"claude-code", "claude", "session_start_2_1_261.json", "SessionStart", execution.Selection, "claude-fable-5-1", "", "", ""},
+		{"claude-code", "claude", "post_model_switch_2_1_261.json", "PostModelSwitch", execution.Selection, "claude-haiku-4-5-20251001", "", "", ""},
+		{"claude-code", "claude", "subagent_start_2_1_261.json", "SubagentStart", execution.Child, "", "general-purpose", "a04d0f62f96abb951", ""},
+		{"codex", "codex", "session_start_0_153_0.json", "SessionStart", execution.Selection, "gpt-6-astra", "", "", ""},
+		{"codex", "codex", "user_prompt_submit_0_153_0.json", "UserPromptSubmit", execution.Selection, "gpt-6-astra", "", "", "01a0736d-6431-7730-9321-53425562ab77"},
+		{"codex", "codex", "subagent_start_0_153_0.json", "SubagentStart", execution.Child, "gpt-6-astra", "default", "01a0736f-5370-7d02-9eb9-7a28a3563b32", "01a0736f-5397-7b20-b1a0-ca343c2d5327"},
+	} {
+		t.Run(tc.harness+"/"+tc.event, func(t *testing.T) {
+			body, err := os.ReadFile("../ingress/" + tc.dir + "/testdata/fixtures/" + tc.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			in, ok := execution.Native(tc.harness, tc.event, body)
+			if !ok {
+				t.Fatal("capture not recognized")
+			}
+			got, err := execution.Normalize(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Kind != tc.kind || got.Model.Value != tc.model || got.Provider.Value != "" || got.Role.Value != tc.role || got.AgentID != tc.agent || got.TurnID != tc.turn || got.RequestID != "" {
+				t.Fatalf("unexpected metadata: %+v", got)
+			}
+			if tc.event == "PostModelSwitch" && (in.Host.Model.Member != execution.HostToModel || got.Model.Value == "haiku") {
+				t.Fatalf("must use to_model: %+v", got.Model)
+			}
+		})
+	}
+	if _, ok := execution.Native("claude-code", "Unlisted", []byte(`{}`)); ok {
+		t.Fatal("unlisted event accepted")
+	}
+}

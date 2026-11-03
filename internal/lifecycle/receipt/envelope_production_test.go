@@ -45,7 +45,7 @@ import (
 )
 
 const (
-	envelopeOccurrenceV2   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
+	envelopeOccurrenceV3   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
 	envelopeOccurrenceV1   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v1")
 	envelopeInterpretedV3  = provenance.EvidenceKind("pasture.lifecycle.interpreted.v3")
 	envelopeInterpretedV2  = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
@@ -252,7 +252,7 @@ func TestReceiveCommitsBothCompleteEnvelopes(t *testing.T) {
 		t.Fatal("Receive returned a zero occurrence identity")
 	}
 
-	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)
+	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(occurrences) != 1 {
 		t.Fatalf("occurrence.v2 rows = %d, want exactly one", len(occurrences))
 	}
@@ -449,7 +449,7 @@ func TestReceiveCommitsGatePairWithFinalConsultation(t *testing.T) {
 	if _, err := store.service.Receive(ctx, envelopeWarrant(t, delivery), delivery, prepared...); err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
-	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)
+	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	interpreted := queryEnvelopeKind(t, store.tracker, envelopeInterpretedV3)
 	consultations := queryEnvelopeKind(t, store.tracker, envelopeConsultationV2)
 	if len(occurrences) != 1 || len(interpreted) != 1 || len(consultations) != 1 {
@@ -506,12 +506,12 @@ func TestReceiveRecordOnlyMalformedCommitsCompleteOccurrence(t *testing.T) {
 		t.Fatalf("occurrence owner definitions = %d, want four and no interpreter", definitionsBefore)
 	}
 
-	before := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2))
+	before := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3))
 	committed, err := store.service.Receive(ctx, envelopeWarrant(t, delivery), delivery)
 	if err != nil {
 		t.Fatalf("Receive malformed: %v", err)
 	}
-	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)
+	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(occurrences) != before+1 {
 		t.Fatalf("occurrence.v2 rows = %d, want one new record-only occurrence", len(occurrences))
 	}
@@ -541,7 +541,7 @@ func TestReceiveRecordOnlyMalformedCommitsCompleteOccurrence(t *testing.T) {
 	if _, err := store.service.Receive(ctx, envelopeWarrant(t, malformed), malformed, prepared...); err == nil {
 		t.Fatal("Receive committed prepared effects for an unsupported capture; want refusal")
 	}
-	if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)); got != before+1 {
+	if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)); got != before+1 {
 		t.Fatalf("occurrence.v2 rows = %d after refused write, want no new row", got)
 	}
 
@@ -561,7 +561,7 @@ func TestReceiveRefusesForgedSuppliedRefsBeforeAnyAppend(t *testing.T) {
 	if _, err := store.service.Receive(ctx, envelopeWarrant(t, delivery), delivery, prepared...); err != nil {
 		t.Fatalf("seed Receive: %v", err)
 	}
-	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)
+	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(occurrences) != 1 {
 		t.Fatalf("seed rows = %d, want one", len(occurrences))
 	}
@@ -602,7 +602,7 @@ func TestReceiveRefusesForgedSuppliedRefsBeforeAnyAppend(t *testing.T) {
 			if _, err := store.service.Receive(ctx, envelopeWarrant(t, tc.delivery), tc.delivery); err == nil {
 				t.Fatalf("Receive accepted %s; want refusal before any append", tc.name)
 			}
-			if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)); got != 1 {
+			if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)); got != 1 {
 				t.Fatalf("occurrence.v2 rows = %d after refused write, want exactly the seed row", got)
 			}
 		})
@@ -629,7 +629,7 @@ func TestTransactionReplayRejectsDuplicateInterpretations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve identity: %v", err)
 	}
-	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)
+	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	genuine := decodeEnvelopeOccurrence(t, occurrences[0].Payload)
 	occPayload, err := json.Marshal(map[string]any{
 		"contract": genuine.Contract, "event": genuine.Event, "envelope": genuine.Envelope,
@@ -654,7 +654,7 @@ func TestTransactionReplayRejectsDuplicateInterpretations(t *testing.T) {
 		CommandDigest:      command[:],
 		RecordedAt:         time.Now().UTC().UnixNano(),
 		Effects: []provenance.Effect{
-			{Sort: provenance.EffectEvidence, ResultSlot: provenance.ResultSlotID("occurrence"), EvidenceKind: envelopeOccurrenceV2, ContentDigest: occDigest[:], Payload: append(json.RawMessage(nil), occPayload...)},
+			{Sort: provenance.EffectEvidence, ResultSlot: provenance.ResultSlotID("occurrence"), EvidenceKind: envelopeOccurrenceV3, ContentDigest: occDigest[:], Payload: append(json.RawMessage(nil), occPayload...)},
 			{Sort: provenance.EffectEvidence, ResultSlot: provenance.ResultSlotID("interpreted"), EvidenceKind: envelopeInterpretedV2, ContentDigest: duplicateDigest[:], Payload: append(json.RawMessage(nil), duplicate...)},
 			{Sort: provenance.EffectEvidence, ResultSlot: provenance.ResultSlotID("interpreted-shadow"), EvidenceKind: envelopeInterpretedV2, ContentDigest: duplicateDigest[:], Payload: append(json.RawMessage(nil), duplicate...)},
 		},
@@ -710,7 +710,7 @@ func TestV2OriginOmissionAndRawCarriage(t *testing.T) {
 	if _, err := store.service.Receive(ctx, envelopeWarrant(t, delivery), delivery); err != nil {
 		t.Fatalf("Receive: %v", err)
 	}
-	rows := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)
+	rows := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(rows) != 1 {
 		t.Fatalf("occurrence.v2 rows = %d, want one", len(rows))
 	}
@@ -724,7 +724,7 @@ func TestV2OriginOmissionAndRawCarriage(t *testing.T) {
 	if _, err := store.service.Receive(ctx, envelopeWarrant(t, raw), raw); err != nil {
 		t.Fatalf("Receive raw: %v", err)
 	}
-	rows = queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)
+	rows = queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(rows) != 2 {
 		t.Fatalf("occurrence.v2 rows = %d, want two", len(rows))
 	}
@@ -750,7 +750,7 @@ func TestWindowAcceptanceCommitsOnTheProductionPath(t *testing.T) {
 	if _, err := store.service.Receive(windowed, envelopeWarrant(t, second), second); err != nil {
 		t.Fatalf("inside-window Receive: %v", err)
 	}
-	if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV2)); got != 2 {
+	if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)); got != 2 {
 		t.Fatalf("occurrence.v2 rows = %d, want two accepted deliveries", got)
 	}
 }

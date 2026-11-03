@@ -17,21 +17,15 @@ func ExtractSessionTransition(contract ir.RuntimeContractID, kind model.Contract
 	if capture != model.CaptureValid || len(raw) > model.MaxNativePayloadBytes {
 		return model.SessionTransitionNone
 	}
-	var event registration.Event
-	var harness ir.HarnessID
-	for _, manifest := range []registration.Manifest{registration.ClaudeCode__2_1_261(), registration.Codex__0_153_0(), registration.OpenCode__1_18_29(), registration.OpenCode__2_0_20()} {
-		if manifest.Contract != contract {
-			continue
-		}
-		harness = manifest.Harness
-		for _, candidate := range manifest.Events {
-			if candidate.Kind == kind {
-				event = candidate
-				break
-			}
-		}
-		break
+	manifest, known := registration.ManifestFor(contract)
+	if !known {
+		return model.SessionTransitionNone
 	}
+	event, known := registration.EventFor(contract, kind)
+	if !known {
+		return model.SessionTransitionNone
+	}
+	harness := manifest.Harness
 	if event.SessionTransition == model.SessionTransitionNone {
 		return model.SessionTransitionNone
 	}

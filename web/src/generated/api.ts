@@ -570,7 +570,7 @@ export interface components {
             projectHash?: string;
         };
         /**
-         * @description The evidence that decided `state`. `none` means no prompt evidence exists; `prompt` means the age of the last user prompt decided active or idle; `inactivity` means the prompt aged past the idle window and carries no end marker; `explicit-end` means an unsuperseded host session-end or an applicable explicit user unbind.
+         * @description The evidence that decided `state`. `none` means no prompt evidence exists; `prompt` means the age of the last user prompt decided active or idle; `inactivity` means the prompt aged past the idle window and carries no end marker; `explicit-end` means an unsuperseded host session-end, an applicable explicit user unbind, or a legacy binding closed by session_end with no proved resume.
          * @enum {string}
          */
         StateBasis: "none" | "prompt" | "inactivity" | "explicit-end";
@@ -1390,15 +1390,6 @@ export interface operations {
             };
             /** @description Non-loopback Host or Origin */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorEnvelope"];
-                };
-            };
-            /** @description Session not found */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };

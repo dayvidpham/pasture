@@ -95,6 +95,8 @@ func TestCLI_SessionListAndShow(t *testing.T) {
 		"Harness:    claude-code",
 		"Session:    active-session",
 		"State:      active",
+		"Basis:      prompt",
+		"Last prompt:",
 		"Source:     explicit",
 		"Confidence: verified",
 		"Bindings:   2",

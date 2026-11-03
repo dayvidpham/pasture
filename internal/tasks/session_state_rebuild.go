@@ -306,24 +306,21 @@ func replaySessionTransition(ctx context.Context, store lifecycleReceiptStore, f
 	if fact.Capture != model.CaptureValid {
 		return model.SessionTransitionNone, nil
 	}
-	var event registration.Event
-	for _, manifest := range []registration.Manifest{registration.ClaudeCode__2_1_261(), registration.Codex__0_153_0(), registration.OpenCode__1_18_29(), registration.OpenCode__2_0_20()} {
-		if manifest.Contract != fact.Contract {
-			continue
-		}
-		for _, candidate := range manifest.Events {
-			if candidate.Kind == fact.Event {
-				event = candidate
-				break
-			}
-		}
-		break
+	// A v3 record carries the constructor-owned transition. It is durable
+	// authority and is read BEFORE the manifest, so a later pinned contract
+	// cannot make a genuine resume disappear from this build's inventory.
+	if fact.Version == projection.OccurrenceEvidenceKindV3 && fact.SessionTransition != model.SessionTransitionNone {
+		return fact.SessionTransition, nil
+	}
+	event, known := registration.EventFor(fact.Contract, fact.Event)
+	if !known {
+		return model.SessionTransitionNone, nil
 	}
 	if event.SessionTransition != model.SessionTransitionResume {
 		return event.SessionTransition, nil
 	}
-	if fact.Version == "pasture.lifecycle.occurrence.v3" {
-		return fact.SessionTransition, nil
+	if fact.Version == projection.OccurrenceEvidenceKindV3 {
+		return model.SessionTransitionNone, nil
 	}
 	ref, err := digest.Parse(fact.PayloadDigest)
 	if err != nil || ref.Algorithm() != digest.SHA256 {
@@ -392,20 +389,6 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 		return SessionStateRebuildOutcome{}, err
 	}
 	if full {
-		// Even a full rebuild must not silently rewrite an existing observation
-		// under the same journal identity.
-		for _, row := range rows {
-			for _, observation := range row.executions {
-				var exists, matches bool
-				err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pasture_session_execution WHERE journal_id=?), EXISTS(SELECT 1 FROM pasture_session_execution WHERE journal_id=? AND harness=? AND session_id=? AND kind=? AND native_agent_id=? AND turn_id=? AND request_id=? AND observed_at=? AND execution_json=?)`, observation.journalID, observation.journalID, row.harness, row.session, observation.kind, observation.agent, observation.turn, observation.request, observation.observedAt, observation.encoded).Scan(&exists, &matches)
-				if err != nil {
-					return SessionStateRebuildOutcome{}, err
-				}
-				if exists && !matches {
-					return SessionStateRebuildOutcome{}, fmt.Errorf("execution cache occurrence %d conflicts with journal evidence; inspect the cache and journal before retrying", observation.journalID)
-				}
-			}
-		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM pasture_session_execution`); err != nil {
 			return SessionStateRebuildOutcome{}, err
 		}

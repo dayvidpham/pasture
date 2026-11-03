@@ -78,6 +78,28 @@ func TestLivenessStatesAndBasis(t *testing.T) {
 	f.binding(t, "binding-rebound-old", "rebound", now-60*minute,
 		sql.NullInt64{Int64: now - 50*minute, Valid: true}, "session_end")
 	f.binding(t, "binding-rebound-open", "rebound", now-10*minute, sql.NullInt64{}, "")
+	f.stateWithPrompt(t, "unbind-rebind", now-60*minute, now-minute, now-minute, "UserPromptSubmit", 18)
+	f.binding(t, "binding-unbind-rebind-old", "unbind-rebind", now-60*minute,
+		sql.NullInt64{Int64: now - 20*minute, Valid: true}, "unbind")
+	f.binding(t, "binding-unbind-rebind-new", "unbind-rebind", now-10*minute, sql.NullInt64{}, "")
+
+	// Constructed cache states exercise independent binding and host-end facts.
+	f.stateWithPrompt(t, "end-unbound", now-60*minute, now-20*minute, now-5*minute, "SessionEnd", 12)
+	f.watermark(t, "end-unbound", now-5*minute, now-20*minute, 0, 12, 0)
+	f.stateWithPrompt(t, "end-inferred", now-60*minute, now-20*minute, now-5*minute, "SessionEnd", 13)
+	f.watermark(t, "end-inferred", now-5*minute, now-20*minute, 0, 13, 0)
+	f.inferredBinding(t, "inferred-end", "end-inferred", f.epoch, now-60*minute, sql.NullInt64{}, "", "observed")
+	f.stateWithPrompt(t, "end-rebound", now-60*minute, now-5*minute, now-5*minute, "UserPromptSubmit", 14)
+	f.watermark(t, "end-rebound", now-5*minute, now-20*minute, 0, 14, 0)
+	f.binding(t, "binding-end-rebound", "end-rebound", now-10*minute, sql.NullInt64{}, "")
+	f.stateWithPrompt(t, "resumed-idle", now-60*minute, now-5*minute, now-45*minute, "SessionStart", 15)
+	f.watermark(t, "resumed-idle", now-45*minute, now-20*minute, now-5*minute, 14, 15)
+	f.stateWithPrompt(t, "resumed-noprompt", now-60*minute, now-5*minute, 0, "SessionStart", 16)
+	f.watermark(t, "resumed-noprompt", 0, now-20*minute, now-5*minute, 14, 16)
+	f.stateWithPrompt(t, "resumed-unbind", now-60*minute, now-5*minute, now-minute, "SessionStart", 17)
+	f.watermark(t, "resumed-unbind", now-minute, now-30*minute, now-5*minute, 14, 17)
+	f.binding(t, "binding-resumed-unbind", "resumed-unbind", now-60*minute,
+		sql.NullInt64{Int64: now - 10*minute, Valid: true}, "unbind")
 
 	expected := map[string]struct {
 		state sessionapi.ActivityState
@@ -95,6 +117,13 @@ func TestLivenessStatesAndBasis(t *testing.T) {
 		"resumed-recent":   {sessionapi.StateActive, sessionapi.BasisPrompt, false},
 		"resumed-old":      {sessionapi.StateEnded, sessionapi.BasisInactivity, false},
 		"rebound":          {sessionapi.StateActive, sessionapi.BasisPrompt, false},
+		"unbind-rebind":    {sessionapi.StateActive, sessionapi.BasisPrompt, false},
+		"end-unbound":      {sessionapi.StateEnded, sessionapi.BasisExplicitEnd, true},
+		"end-inferred":     {sessionapi.StateEnded, sessionapi.BasisExplicitEnd, true},
+		"end-rebound":      {sessionapi.StateEnded, sessionapi.BasisExplicitEnd, true},
+		"resumed-idle":     {sessionapi.StateIdle, sessionapi.BasisPrompt, false},
+		"resumed-noprompt": {sessionapi.StateUnknown, sessionapi.BasisNone, false},
+		"resumed-unbind":   {sessionapi.StateEnded, sessionapi.BasisExplicitEnd, true},
 	}
 
 	service := f.service()
@@ -106,6 +135,15 @@ func TestLivenessStatesAndBasis(t *testing.T) {
 		require.Equal(t, want.basis, detail.Session.Activity.StateBasis, session)
 		if want.end {
 			require.NotNil(t, detail.Session.End, session)
+			endAt, reason := now-20*minute, "session_end"
+			switch session {
+			case "manual-unbind":
+				endAt, reason = now-2*minute, "unbind"
+			case "resumed-unbind":
+				endAt, reason = now-10*minute, "unbind"
+			}
+			require.Equal(t, reason, detail.Session.End.EndReason, session)
+			require.Equal(t, time.Unix(0, endAt).UTC(), detail.Session.End.EndedAt, session)
 		} else {
 			require.Nil(t, detail.Session.End, "%s must not carry an invented end marker", session)
 		}

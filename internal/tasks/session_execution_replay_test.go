@@ -140,13 +140,11 @@ func TestExecutionReplayPublishesWithinSessionFence(t *testing.T) {
 	require.Equal(t, 1, count)
 	_, err = store.auditDBHandle().Exec(`UPDATE pasture_session_execution SET execution_json='{}' WHERE journal_id=?`, first)
 	require.NoError(t, err)
-	before, err := ReadSessionStateStatus(t.Context(), tracker)
-	require.NoError(t, err)
 	_, err = RebuildSessionState(t.Context(), tracker)
-	require.ErrorContains(t, err, "conflicts")
-	after, err := ReadSessionStateStatus(t.Context(), tracker)
 	require.NoError(t, err)
-	require.Equal(t, before, after, "refusal must preserve the certified generation")
+	require.NoError(t, store.auditDBHandle().QueryRow(`SELECT execution_json FROM pasture_session_execution WHERE journal_id=?`, first).Scan(&raw))
+	require.NoError(t, json.Unmarshal(raw, &got))
+	require.Equal(t, metadata, got, "full replay repairs disposable divergent rows from journal evidence")
 }
 
 func TestSessionReplayRefusesUnknownOccurrenceKind(t *testing.T) {

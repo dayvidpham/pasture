@@ -66,25 +66,53 @@ func (m Manifest) Entries() []Event {
 	return out
 }
 
+// Manifests is the ONE inventory of pinned supporting contracts. Every reader
+// that must resolve a committed occurrence's contract back to its manifest
+// walks this list, so adding a fifth pinned contract cannot leave one reader
+// silently unable to classify its events (for example dropping a genuine
+// resume because it could not find the manifest).
+func Manifests() []Manifest {
+	return []Manifest{
+		ClaudeCode__2_1_261(),
+		Codex__0_153_0(),
+		OpenCode__1_18_29(),
+		OpenCode__2_0_20(),
+	}
+}
+
+// ManifestFor resolves one pinned contract to its manifest.
+func ManifestFor(contract ir.RuntimeContractID) (Manifest, bool) {
+	for _, manifest := range Manifests() {
+		if manifest.Contract == contract {
+			return manifest, true
+		}
+	}
+	return Manifest{}, false
+}
+
+// EventFor resolves one pinned contract and typed event kind to the exact
+// registered event.
+func EventFor(contract ir.RuntimeContractID, kind model.ContractEventKind) (Event, bool) {
+	manifest, ok := ManifestFor(contract)
+	if !ok {
+		return Event{}, false
+	}
+	for _, event := range manifest.Events {
+		if event.Kind == kind {
+			return event, true
+		}
+	}
+	return Event{}, false
+}
+
 // NativeName resolves the exact native event spelling for one pinned contract
 // and typed event kind. A rebuild reads committed occurrences, which carry the
 // contract and event kind but not the native name; this accessor is the one
 // place that maps those back to the spelling a live delivery carries.
 func NativeName(contract ir.RuntimeContractID, kind model.ContractEventKind) (string, bool) {
-	for _, m := range []Manifest{
-		ClaudeCode__2_1_261(),
-		Codex__0_153_0(),
-		OpenCode__1_18_29(),
-		OpenCode__2_0_20(),
-	} {
-		if m.Contract != contract {
-			continue
-		}
-		for _, e := range m.Events {
-			if e.Kind == kind {
-				return e.NativeName, true
-			}
-		}
+	event, ok := EventFor(contract, kind)
+	if !ok {
+		return "", false
 	}
-	return "", false
+	return event.NativeName, true
 }

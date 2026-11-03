@@ -2,7 +2,6 @@ package sessionapi
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -71,20 +70,11 @@ func (s *Service) ExecutionHistory(ctx context.Context, harness, session string,
 		}
 	}
 	now := s.now()
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, revision, err := beginSessionRead(ctx, s.DB)
 	if err != nil {
-		return ExecutionHistoryPage{}, fmt.Errorf("opening execution history transaction: %w", err)
+		return ExecutionHistoryPage{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	var revision, dirty int64
-	if err := tx.QueryRowContext(ctx, `SELECT revision, dirty FROM pasture_session_api_state WHERE singleton_id = 0`).
-		Scan(&revision, &dirty); err != nil {
-		return ExecutionHistoryPage{}, fmt.Errorf("reading session API revision: %w", err)
-	}
-	if dirty != 0 {
-		return ExecutionHistoryPage{}, ErrStaleCache
-	}
 	if cursor.Snapshot == 0 {
 		if err := tx.QueryRowContext(ctx, `
 			SELECT COALESCE(MAX(journal_id), 0)

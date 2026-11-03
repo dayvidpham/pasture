@@ -95,7 +95,7 @@ import (
 )
 
 const (
-	defCorpusOccurrenceV2   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
+	defCorpusOccurrenceV3   = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
 	defCorpusInterpretedV3  = provenance.EvidenceKind("pasture.lifecycle.interpreted.v3")
 	defCorpusInterpretedV2  = provenance.EvidenceKind("pasture.lifecycle.interpreted.v2")
 	defCorpusConsultationV2 = provenance.EvidenceKind("pasture.lifecycle.consultation.v2")
@@ -387,7 +387,7 @@ func TestDefinitionCompleteCorpusConversionPreservesGraph(t *testing.T) {
 	// Pre-conversion completeness: three v2 occurrences, two v3
 	// interpretations, no legacy emission, no fabricated semantic for the
 	// record-only capture.
-	occRows := defCorpusQueryKind(t, tracker, defCorpusOccurrenceV2)
+	occRows := defCorpusQueryKind(t, tracker, defCorpusOccurrenceV3)
 	if len(occRows) != 3 {
 		t.Fatalf("occurrence.v2 rows = %d, want three (two valid + one record-only)", len(occRows))
 	}
@@ -576,7 +576,7 @@ func TestDefinitionCompleteCorpusConversionPreservesGraph(t *testing.T) {
 	}
 	defer reopened.Close()
 
-	postOcc := defCorpusQueryKind(t, reopened, defCorpusOccurrenceV2)
+	postOcc := defCorpusQueryKind(t, reopened, defCorpusOccurrenceV3)
 	if len(postOcc) != 3 {
 		t.Fatalf("post-conversion occurrence.v2 rows = %d, want three", len(postOcc))
 	}

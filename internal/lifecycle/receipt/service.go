@@ -213,7 +213,7 @@ func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, deliv
 	}
 	transition := ""
 	if ingress.ExtractSessionTransition(delivery.Contract, delivery.Event, delivery.Body, delivery.Capture, delivery.Bindings) == model.SessionTransitionResume {
-		transition = "resume"
+		transition = model.SessionTransitionResumeToken
 	}
 	if s.Settlement != nil && delivery.Capture == model.CaptureValid {
 		if _, known := s.Outcome.Exit.Code(); !known {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/formatters"
+	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/types"
 )
@@ -160,11 +161,15 @@ func TestFormatSessionDetailTextAndJSON(t *testing.T) {
 			Harness:         "claude-code",
 			NativeSessionID: "detail-session",
 			Epoch:           &sessionapi.EpochRef{ID: "file://epoch/detail", Title: "Detail epoch"},
+			Actor:           &sessionapi.SessionActor{ID: "actor-id", Classification: sessionapi.ActorGenericLLM},
+			Execution:       &sessionapi.SessionExecution{Metadata: execution.Metadata{Provider: execution.AttributionValue{Status: execution.Observed, Value: "anthropic", Source: execution.Host}, Model: execution.AttributionValue{Status: execution.Observed, Value: "model", Source: execution.Host}, Role: execution.AttributionValue{Status: execution.Observed, Value: "build", Source: execution.Host}, ProtocolRole: execution.AttributionValue{Status: execution.Observed, Value: "worker", Source: execution.Environment}}},
 			Activity: sessionapi.SessionActivity{
-				State:     sessionapi.StateEnded,
-				FirstSeen: &first,
-				LastSeen:  &last,
-				LastEvent: "SessionEnd",
+				State:        sessionapi.StateEnded,
+				StateBasis:   sessionapi.BasisExplicitEnd,
+				LastPromptAt: &last,
+				FirstSeen:    &first,
+				LastSeen:     &last,
+				LastEvent:    "SessionEnd",
 			},
 			Binding: &sessionapi.SessionBinding{
 				BindingID:  "binding-detail",
@@ -207,6 +212,7 @@ func TestFormatSessionDetailTextAndJSON(t *testing.T) {
 		"Harness:    claude-code",
 		"Session:    detail-session",
 		"State:      ended",
+		"Basis:      explicit-end", "Last prompt: 2026-10-23T11:58:00Z", "Actor:      actor-id (generic-llm)", "Provider:   anthropic (host)", "Model:      model (host)", "Native role: build (host)", "Protocol role: worker (environment)",
 		"Epoch:      file://epoch/detail",
 		"Epoch title: Detail epoch",
 		"Role:       reviewer",

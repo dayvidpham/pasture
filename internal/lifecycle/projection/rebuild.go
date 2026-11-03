@@ -19,6 +19,10 @@ const occurrenceEvidenceKind = provenance.EvidenceKind("pasture.lifecycle.occurr
 const occurrenceEvidenceKindV2 = provenance.EvidenceKind("pasture.lifecycle.occurrence.v2")
 const occurrenceEvidenceKindV3 = provenance.EvidenceKind("pasture.lifecycle.occurrence.v3")
 
+// OccurrenceEvidenceKindV3 is the exported spelling of the third occurrence
+// codec's evidence kind, so a consumer never re-declares the token.
+const OccurrenceEvidenceKindV3 = occurrenceEvidenceKindV3
+
 // occurrenceEvidenceKinds is the closed set of occurrence evidence kinds the
 // replay admits. v1 is read-only legacy (all-zero envelopes pass through;
 // any nonzero ref must validate); v2 and v3 carry the complete four-reference

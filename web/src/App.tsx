@@ -44,9 +44,12 @@ import {
 import {
   actorLabel,
   appendExecutionPage,
-  attributionSource,
   attributionText,
   executionKindLabel,
+  executionRows,
+  applySessionsFrame,
+  applyEpochsFrame,
+  livenessRows,
 } from './execution'
 import {
   adaptTranscriptPayload,
@@ -240,38 +243,19 @@ export function ExecutionSummary({ execution }: { execution?: SessionExecution }
       </div>
     )
   }
-  const fields: Array<[string, SessionExecution['provider']]> = [
-    ['provider', execution.provider],
-    ['model', execution.model],
-    ['variant', execution.variant],
-    ['native role', execution.role],
-    ['protocol role', execution.protocolRole],
-  ]
   return (
     <div className="execution-summary" data-kind={execution.kind}>
       <p className="eyebrow">execution · {executionKindLabel(execution.kind)}</p>
       <dl className="detail-list">
-        {fields.map(([label, value]) => (
-          <div key={label} data-status={value.status}>
-            <dt>{label}</dt>
-            <dd>
-              <span>{attributionText(value)}</span>
-              <span className="attribution-source">
-                {attributionSource(value)}
-                {value.vocabulary ? ` · ${value.vocabulary}` : ''}
-              </span>
+        {executionRows(execution).map((row) => (
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            <dd className={row.muted ? 'muted' : undefined}>
+              <span>{row.value}</span>
+              {row.source && <span className="attribution-source">{row.source}</span>}
             </dd>
           </div>
         ))}
-        {execution.agentId && (
-          <div><dt>native agent</dt><dd className="mono-wrap">{execution.agentId}</dd></div>
-        )}
-        {execution.turnId && (
-          <div><dt>turn</dt><dd className="mono-wrap">{execution.turnId}</dd></div>
-        )}
-        {execution.requestId && (
-          <div><dt>request</dt><dd className="mono-wrap">{execution.requestId}</dd></div>
-        )}
       </dl>
       <p className="rail-copy muted">
         occurrence {execution.occurrenceId} · {formatTime(execution.observedAt)}
@@ -754,6 +738,10 @@ export default function App() {
     error: string | null
   }>({ key: '', items: [], error: null })
   const [executionBusy, setExecutionBusy] = useState(false)
+  // The load-more request belongs to one selection. A selection change aborts
+  // it so a slow older page can never append to the new session or clear its
+  // busy flag.
+  const executionLoadMore = useRef<AbortController | null>(null)
   const [projectMapping, dispatchProjectMapping] = useReducer(
     reduceProjectMapping,
     EMPTY_PROJECT_MAPPING,
@@ -838,21 +826,25 @@ export default function App() {
             subscribe(socket!, 'sessions')
             subscribe(socket!, 'epochs')
             break
-          case 'sessions':
-            setSessions(frame.payload.items)
-            setRevision(frame.revision)
-            setAsOf(frame.asOf)
-            setTruncated(Boolean(frame.payload.next))
+          case 'sessions': {
+            const update = applySessionsFrame(frame)
+            setSessions(update.items)
+            setRevision(update.revision)
+            setAsOf(update.asOf)
+            setTruncated(update.truncated)
             if (!peasantBusyRef.current) {
               setPeasantIntegration(integrationFromSessionsFrame(frame.payload))
             }
             setLoading(false)
             break
-          case 'epochs':
-            setEpochs(frame.payload.items)
-            setRevision(frame.revision)
-            setAsOf(frame.asOf)
+          }
+          case 'epochs': {
+            const update = applyEpochsFrame(frame)
+            setEpochs(update.items)
+            setRevision(update.revision)
+            setAsOf(update.asOf)
             break
+          }
           case 'error':
             setLoadError(frame.error.message)
             break
@@ -924,8 +916,7 @@ export default function App() {
 
   const selectedHarness = selectedSession?.harness
   const selectedNativeId = selectedSession?.nativeSessionId
-  const transcriptKey =
-    selectedHarness && selectedNativeId ? `${selectedHarness}/${selectedNativeId}` : null
+  const transcriptKey = selectedSession ? sessionKey(selectedSession) : null
 
   // Fetch once per selected session, not on every WebSocket snapshot: the
   // stable identity strings are the dependencies, so live revision updates
@@ -983,17 +974,26 @@ export default function App() {
       .finally(() => {
         if (!controller.signal.aborted) setExecutionBusy(false)
       })
-    return () => controller.abort()
+    return () => {
+      controller.abort()
+      executionLoadMore.current?.abort()
+    }
   }, [selectedHarness, selectedNativeId, transcriptKey])
 
   const loadMoreExecution = useCallback(() => {
     if (!selectedHarness || !selectedNativeId || !transcriptKey || !executionHistory.next) return
+    executionLoadMore.current?.abort()
+    const controller = new AbortController()
+    executionLoadMore.current = controller
     setExecutionBusy(true)
-    fetchExecutionHistory(selectedHarness, selectedNativeId, {
-      limit: 50,
-      cursor: executionHistory.next,
-    })
+    fetchExecutionHistory(
+      selectedHarness,
+      selectedNativeId,
+      { limit: 50, cursor: executionHistory.next },
+      controller.signal,
+    )
       .then((page) => {
+        if (controller.signal.aborted) return
         setExecutionHistory((previous) =>
           previous.key === transcriptKey
             ? {
@@ -1006,6 +1006,7 @@ export default function App() {
         )
       })
       .catch((error: unknown) => {
+        if (controller.signal.aborted) return
         setExecutionHistory((previous) =>
           previous.key === transcriptKey
             ? {
@@ -1018,7 +1019,9 @@ export default function App() {
             : previous,
         )
       })
-      .finally(() => setExecutionBusy(false))
+      .finally(() => {
+        if (!controller.signal.aborted) setExecutionBusy(false)
+      })
   }, [selectedHarness, selectedNativeId, transcriptKey, executionHistory.next])
 
   // Fetch the project-level mapping once per selected project hash. A 404 is
@@ -1247,14 +1250,12 @@ export default function App() {
                 <p className="detail-title">{selectedSession.nativeSessionId}</p>
                 <dl className="detail-list">
                   <div><dt>harness</dt><dd>{selectedSession.harness}</dd></div>
-                  <div><dt>state</dt><dd>{selectedSession.activity.state}</dd></div>
-                  <div><dt>basis</dt><dd>{selectedSession.activity.stateBasis}</dd></div>
-                  <div>
-                    <dt>last prompt</dt>
-                    <dd className={selectedSession.activity.lastPromptAt ? undefined : 'muted'}>
-                      {formatTime(selectedSession.activity.lastPromptAt)}
-                    </dd>
-                  </div>
+                  {livenessRows(selectedSession.activity, formatTime).map((row) => (
+                    <div key={row.label}>
+                      <dt>{row.label}</dt>
+                      <dd className={row.muted ? 'muted' : undefined}>{row.value}</dd>
+                    </div>
+                  ))}
                   <div>
                     <dt>actor</dt>
                     <dd className={selectedSession.actor ? 'mono-wrap' : 'muted'}>
@@ -1269,7 +1270,6 @@ export default function App() {
                   <div><dt>source</dt><dd>{selectedSession.binding?.source ?? '—'}</dd></div>
                   <div><dt>confidence</dt><dd>{selectedSession.binding?.confidence ?? '—'}</dd></div>
                   <div><dt>first seen</dt><dd>{formatTime(selectedSession.activity.firstSeen)}</dd></div>
-                  <div><dt>last seen</dt><dd>{formatTime(selectedSession.activity.lastSeen)}</dd></div>
                   {selectedSession.end && (
                     <div><dt>ended</dt><dd>{formatTime(selectedSession.end.endedAt)} · {selectedSession.end.endReason}</dd></div>
                   )}

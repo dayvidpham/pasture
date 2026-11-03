@@ -84,8 +84,8 @@ These are three separate facts; the console never merges them.
   refresh `lastPromptAt`). A user `unbind` is an explicit mapping/end decision
   until a later deliberate bind; resume does not undo it.
 
-Historical bindings and activity are projected from the lifecycle journal. On a
-fresh store, pass `--backfill` once so older sessions appear in the inventory:
+Historical bindings and activity are refreshed from the lifecycle journal on reads.
+To force a full rebuild before serving, pass `--backfill`:
 
 ```bash
 ./bin/pasture serve --db ~/.local/share/pasture/pasture.db --listen 127.0.0.1:37373 --backfill
@@ -147,3 +147,5 @@ snapshot stream, and the durable Peasant transcript rendered by fairtrade's
 a session identity the shared contract cannot express (400), no transcript
 (404), an incomplete/incompatible Peasant refusal (409), Peasant missing from
 `PATH` (503), and a bounded export timeout (504).
+
+After upgrading an existing store, run a normal pasture command or start `pastured` or `pasture serve` before enabling host hooks, so the default actor is initialized before the first hook.

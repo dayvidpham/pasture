@@ -68,6 +68,27 @@ func TestSummarySelectsOneCoherentExecutionObservation(t *testing.T) {
 		page.Items[0].OccurrenceID, page.Items[1].OccurrenceID, page.Items[2].OccurrenceID,
 	}, "history is descending by journal id and includes auxiliary records")
 	require.Equal(t, execution.Child, page.Items[0].Kind)
+
+	// Newer auxiliary work and another session cannot supply the current model.
+	f.state(t, "other", now, now, "PreToolUse", 2)
+	f.executionRow(t, "other", 30, now, execution.Primary, "other-session-model")
+	for i, kind := range []execution.Kind{execution.Title, execution.Compaction, execution.Generate} {
+		f.executionRow(t, "exec", int64(20+i), now, kind, "auxiliary-model")
+	}
+	metadata, err := execution.Normalize(execution.Inputs{Kind: execution.Selection})
+	require.NoError(t, err)
+	encoded, err := json.Marshal(metadata)
+	require.NoError(t, err)
+	_, err = f.db.Exec(`INSERT INTO pasture_session_execution (journal_id,harness,session_id,kind,native_agent_id,turn_id,request_id,observed_at,execution_json) VALUES (23,'claude-code','exec','selection','','','',?,?)`, now, encoded)
+	require.NoError(t, err)
+	detail, err = f.service().Get(context.Background(), "claude-code", "exec")
+	require.NoError(t, err)
+	require.Equal(t, int64(23), detail.Session.Execution.OccurrenceID)
+	require.Equal(t, execution.Unavailable, detail.Session.Execution.Model.Status)
+	require.Empty(t, detail.Session.Execution.Model.Value)
+	other, err := f.service().Get(context.Background(), "claude-code", "other")
+	require.NoError(t, err)
+	require.Equal(t, "other-session-model", other.Session.Execution.Model.Value)
 }
 
 func TestExecutionHistoryCursorIsSnapshotPinned(t *testing.T) {

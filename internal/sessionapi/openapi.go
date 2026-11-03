@@ -301,7 +301,6 @@ func openAPIDocument() map[string]any {
 						"200": jsonResponse(ref("ExecutionHistoryPage")),
 						"400": errorResponse("Invalid session key, limit, or cursor"),
 						"403": errorResponse("Non-loopback Host or Origin"),
-						"404": errorResponse("Session not found"),
 						"503": errorResponse("The session cache is stale"),
 						"500": errorResponse("The session store could not be read"),
 					},
@@ -333,18 +332,18 @@ func openAPIDocument() map[string]any {
 			"schemas": map[string]any{
 				"ActivityState": map[string]any{
 					"type": "string",
-					"enum": []string{"active", "idle", "ended", "unknown"},
+					"enum": activityStateStrings(),
 					"description": "Prompt-based liveness. A recent user prompt makes an unbound session active. " +
 						"Tool, permission, binding, claim, model-switch, and role-change activity is not a prompt.",
 				},
 				"StateBasis": map[string]any{
 					"type":        "string",
-					"enum":        []string{"none", "prompt", "inactivity", "explicit-end"},
-					"description": "The evidence that decided `state`. `none` means no prompt evidence exists; `prompt` means the age of the last user prompt decided active or idle; `inactivity` means the prompt aged past the idle window and carries no end marker; `explicit-end` means an unsuperseded host session-end or an applicable explicit user unbind.",
+					"enum":        stateBasisStrings(),
+					"description": "The evidence that decided `state`. `none` means no prompt evidence exists; `prompt` means the age of the last user prompt decided active or idle; `inactivity` means the prompt aged past the idle window and carries no end marker; `explicit-end` means an unsuperseded host session-end, an applicable explicit user unbind, or a legacy binding closed by session_end with no proved resume.",
 				},
 				"ActorClassification": map[string]any{
 					"type":        "string",
-					"enum":        []string{"generic-llm", "explicit"},
+					"enum":        actorClassificationStrings(),
 					"description": "`generic-llm` is the exact reserved attribution-only actor; `explicit` is any other stored claim identity. The classification is a fact about the stored claim, never an inference from execution metadata.",
 				},
 				"SessionActor": objectSchema(
@@ -356,19 +355,19 @@ func openAPIDocument() map[string]any {
 				),
 				"ExecutionKind": map[string]any{
 					"type": "string",
-					"enum": []string{"primary", "compaction", "title", "generate", "selection", "child"},
+					"enum": executionKindStrings(),
 				},
 				"ExecutionStatus": map[string]any{
 					"type": "string",
-					"enum": []string{"observed", "unavailable", "invalid", "conflict"},
+					"enum": executionStatusStrings(),
 				},
 				"ExecutionSource": map[string]any{
 					"type": "string",
-					"enum": []string{"host", "environment", "actor-registry", "none"},
+					"enum": executionSourceStrings(),
 				},
 				"Vocabulary": map[string]any{
 					"type":        "string",
-					"enum":        []string{"native-agent", "pasture-role"},
+					"enum":        executionVocabularyStrings(),
 					"description": "Native agent names and Pasture protocol roles are different vocabularies and are never translated into one another.",
 				},
 				"ExecutionCandidate": objectSchema(

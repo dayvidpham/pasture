@@ -63,8 +63,8 @@ Opening the store follows the ordinary auto-on-open path: a missing database
 file is created and an existing older schema is migrated. serve never runs a
 separate "pasture migrate", and it refuses non-loopback hosts.
 
-The server starts from the existing session cache; pass --backfill to rebuild
-historical session state from the lifecycle journal before serving.
+The server refreshes session state on reads; pass --backfill to force a full
+rebuild from the lifecycle journal before serving.
 
 Peasant project enrichment is opt-in and disabled by default; the web console
 can turn it on and off at runtime. Turning it on reopens the configured Peasant
@@ -108,14 +108,8 @@ func runServe(cmd *cobra.Command) error {
 	peasantDB, _ := cmd.Flags().GetString("peasant-db")
 	peasantURL, _ := cmd.Flags().GetString("peasant-url")
 	webDir, _ := cmd.Flags().GetString("web-dir")
-	if activeWindow <= 0 {
-		return fmt.Errorf("--active-window must be positive, got %s", activeWindow)
-	}
-	if idleWindow <= 0 {
-		return fmt.Errorf("--idle-window must be positive, got %s", idleWindow)
-	}
-	if idleWindow <= activeWindow {
-		return fmt.Errorf("--idle-window (%s) must be greater than --active-window (%s)", idleWindow, activeWindow)
+	if err := sessionapi.ValidateWindows(activeWindow, idleWindow); err != nil {
+		return fmt.Errorf("%w (--active-window %s, --idle-window %s)", err, activeWindow, idleWindow)
 	}
 	projectSwitch, err := newPeasantProjectSource(peasantDB, peasantURL)
 	if err != nil {
@@ -167,7 +161,7 @@ func runServe(cmd *cobra.Command) error {
 		ctx = context.Background()
 	}
 	if backfill {
-		if _, _, err := tasks.EnsureSessionState(ctx, tracker); err != nil {
+		if _, err := tasks.RebuildSessionState(ctx, tracker); err != nil {
 			return err
 		}
 	}
@@ -184,11 +178,12 @@ func runServe(cmd *cobra.Command) error {
 	service.ActiveWindow = activeWindow
 	service.IdleWindow = idleWindow
 	service.ProjectSource = projectSwitch
-	if backfill {
-		service.Ensure = func(ctx context.Context) error {
-			_, _, err := tasks.EnsureSessionState(ctx, tracker)
-			return err
+	service.Ensure = func(ctx context.Context) error {
+		_, _, err := tasks.EnsureSessionState(ctx, tracker)
+		if err != nil {
+			return fmt.Errorf("%w: %v", sessionapi.ErrStaleCache, err)
 		}
+		return nil
 	}
 	store, err := tasks.NewSessionAPIStore(tracker)
 	if err != nil {

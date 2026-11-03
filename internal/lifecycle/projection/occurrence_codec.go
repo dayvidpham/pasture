@@ -46,18 +46,12 @@ func decodeOccurrence(kind provenance.EvidenceKind, raw, contentDigest []byte, o
 			return err
 		}
 	}
-	if out.SessionTransition != "" && out.SessionTransition != "resume" {
+	if out.SessionTransition != "" && out.SessionTransition != model.SessionTransitionResumeToken {
 		return fmt.Errorf("lifecycle occurrence carries an unsupported session transition; restore the journal row from a verified backup")
 	}
-	if out.SessionTransition == "resume" {
-		eligible := false
-		for _, manifest := range []registration.Manifest{registration.ClaudeCode__2_1_261(), registration.Codex__0_153_0(), registration.OpenCode__1_18_29(), registration.OpenCode__2_0_20()} {
-			if manifest.Contract == contract {
-				for _, event := range manifest.Events {
-					eligible = eligible || (event.Kind == out.Event && event.SessionTransition == model.SessionTransitionResume)
-				}
-			}
-		}
+	if out.SessionTransition == model.SessionTransitionResumeToken {
+		event, known := registration.EventFor(contract, out.Event)
+		eligible := known && event.SessionTransition == model.SessionTransitionResume
 		sessions := 0
 		for _, binding := range out.Bindings {
 			if binding.Kind == model.BindingSession && model.ValidateBindingText("session", binding.Value) == nil && binding.Value != "" {
@@ -72,8 +66,14 @@ func decodeOccurrence(kind provenance.EvidenceKind, raw, contentDigest []byte, o
 }
 
 func storedTransition(value string) model.SessionTransition {
-	if value == "resume" {
+	switch value {
+	case "":
+		return model.SessionTransitionNone
+	case model.SessionTransitionResumeToken:
 		return model.SessionTransitionResume
+	default:
+		// An unknown token is refused by the caller's validation; never fold it
+		// into "none", which would silently reopen a session dressed as absence.
+		return model.SessionTransitionNone
 	}
-	return model.SessionTransitionNone
 }

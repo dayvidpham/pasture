@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import type { AttributionValue, SessionActivity, SessionExecution } from './api'
 import {
   actorLabel,
+  applySessionsFrame,
+  applyEpochsFrame,
   appendExecutionPage,
   attributionSource,
   attributionText,
@@ -153,5 +155,18 @@ describe('execution presentation', () => {
       },
     )
     expect(merged.map((item) => item.occurrenceId)).toEqual([12, 11, 10])
+  })
+})
+
+describe('watch snapshots', () => {
+  it('applies later equal-revision session and epoch frames', () => {
+    const session = { type: 'sessions' as const, revision: 7, asOf: 'first', payload: { items: [] } }
+    const laterSession = { ...session, asOf: 'later', payload: { items: [{ activity: { state: 'idle' } }] as never[] } }
+    expect(applySessionsFrame(session).items).toHaveLength(0)
+    expect(applySessionsFrame(laterSession)).toMatchObject({ revision: 7, asOf: 'later', items: [{ activity: { state: 'idle' } }] })
+    const epoch = { type: 'epochs' as const, revision: 7, asOf: 'first', payload: { items: [] } }
+    const laterEpoch = { ...epoch, asOf: 'later', payload: { items: [{ id: 'new' }] as never[] } }
+    expect(applyEpochsFrame(epoch).items).toHaveLength(0)
+    expect(applyEpochsFrame(laterEpoch)).toMatchObject({ revision: 7, asOf: 'later', items: [{ id: 'new' }] })
   })
 })

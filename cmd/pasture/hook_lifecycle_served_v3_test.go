@@ -93,6 +93,9 @@ func TestBuiltHookExecutionReachesTheSessionAPI(t *testing.T) {
 
 			detail, err := service.Get(context.Background(), "claude-code", session)
 			require.NoError(t, err)
+			require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+			require.Equal(t, sessionapi.BasisPrompt, detail.Session.Activity.StateBasis)
+			require.NotNil(t, detail.Session.Activity.LastPromptAt)
 			require.NotNil(t, detail.Session.Execution, "the summary must come from the committed v3 receipt")
 			require.Equal(t, "claude-test-model", detail.Session.Execution.Model.Value)
 			require.Equal(t, execution.Environment, detail.Session.Execution.Model.Source)

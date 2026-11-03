@@ -4,10 +4,12 @@ import type {
   SessionActivity,
   SessionActor,
   SessionExecution,
+  SessionsFrame,
+  EpochsFrame,
 } from './api'
 
 /** One labelled detail line. `muted` marks an honest absence or uncertainty. */
-export type DetailLine = { label: string; value: string; muted?: boolean }
+export type DetailLine = { label: string; value: string; muted?: boolean; source?: string }
 
 function reasonLabel(reason?: string): string {
   return reason ? reason.replace(/-/g, ' ') : 'unspecified'
@@ -46,10 +48,6 @@ export function attributionSource(value: AttributionValue): string {
   return value.field ? `${value.source} · ${value.field}` : value.source
 }
 
-export function attributionVocabulary(value: AttributionValue): string | null {
-  return value.vocabulary ?? null
-}
-
 /** executionKindLabel names the observation kind without inventing meaning. */
 export function executionKindLabel(kind: SessionExecution['kind']): string {
   switch (kind) {
@@ -76,22 +74,25 @@ export function executionKindLabel(kind: SessionExecution['kind']): string {
  * stay distinct vocabularies.
  */
 export function executionRows(execution: SessionExecution): DetailLine[] {
+  const sourced = (label: string, value: AttributionValue): DetailLine => ({
+    label,
+    value: attributionText(value),
+    source: `${attributionSource(value)}${value.vocabulary ? ` · ${value.vocabulary}` : ''}`,
+    muted: value.status === 'unavailable',
+  })
   const rows: DetailLine[] = [
     { label: 'kind', value: executionKindLabel(execution.kind) },
     { label: 'observed', value: execution.observedAt },
-    { label: 'provider', value: attributionText(execution.provider) },
-    { label: 'model', value: attributionText(execution.model) },
-    { label: 'variant', value: attributionText(execution.variant) },
-    { label: 'native role', value: attributionText(execution.role) },
-    { label: 'protocol role', value: attributionText(execution.protocolRole) },
+    sourced('provider', execution.provider),
+    sourced('model', execution.model),
+    sourced('variant', execution.variant),
+    sourced('native role', execution.role),
+    sourced('protocol role', execution.protocolRole),
   ]
   if (execution.agentId) rows.push({ label: 'agent', value: execution.agentId })
   if (execution.turnId) rows.push({ label: 'turn', value: execution.turnId })
   if (execution.requestId) rows.push({ label: 'request', value: execution.requestId })
-  return rows.map((row) => ({
-    ...row,
-    muted: row.label !== 'kind' && row.label !== 'observed' && row.value.startsWith('unavailable'),
-  }))
+  return rows
 }
 
 /** actorLabel names the stored claimant; it never implies authority. */
@@ -106,20 +107,19 @@ export function actorLabel(actor: SessionActor): string {
  * separate facts. A bound session with no prompt is unknown; the binding is not
  * shown as a prompt, and broad activity is not shown as recency.
  */
-export function livenessRows(activity: SessionActivity): DetailLine[] {
+export function livenessRows(
+  activity: SessionActivity,
+  format: (value: string) => string = (value) => value,
+): DetailLine[] {
+  const time = (value: string | undefined, absent: string) =>
+    value ? { value: format(value) } : { value: absent, muted: true }
+  const prompt = time(activity.lastPromptAt, 'no prompt recorded')
+  const broad = time(activity.lastSeen, 'no activity recorded')
   return [
     { label: 'state', value: activity.state },
     { label: 'basis', value: activity.stateBasis },
-    {
-      label: 'last prompt',
-      value: activity.lastPromptAt ?? 'no prompt recorded',
-      muted: !activity.lastPromptAt,
-    },
-    {
-      label: 'broad activity',
-      value: activity.lastSeen ?? 'no activity recorded',
-      muted: !activity.lastSeen,
-    },
+    { label: 'last prompt', ...prompt },
+    { label: 'broad activity', ...broad },
     {
       label: 'last event',
       value: activity.lastEvent || 'no event recorded',
@@ -145,4 +145,12 @@ export function appendExecutionPage(
     merged.push(item)
   }
   return merged
+}
+
+/** Watch frames are snapshots; equal revisions can carry later clock states. */
+export function applySessionsFrame(frame: SessionsFrame) {
+  return { items: frame.payload.items, revision: frame.revision, asOf: frame.asOf, truncated: Boolean(frame.payload.next) }
+}
+export function applyEpochsFrame(frame: EpochsFrame) {
+  return { items: frame.payload.items, revision: frame.revision, asOf: frame.asOf }
 }

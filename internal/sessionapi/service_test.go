@@ -80,7 +80,7 @@ func (f fixture) addEpoch(t *testing.T, title string) string {
 
 func (f fixture) state(t *testing.T, session string, first, last int64, lastEvent string, journal int64) {
 	t.Helper()
-	f.stateWithPrompt(t, session, first, last, last, lastEvent, journal)
+	f.stateWithPrompt(t, session, first, last, 0, lastEvent, journal)
 }
 
 // stateWithPrompt seeds the durable prompt watermark explicitly, so a test can
@@ -174,10 +174,10 @@ func seedSessions(t *testing.T) fixture {
 	t.Helper()
 	f := newFixture(t)
 	now := f.now.UnixNano()
-	f.state(t, "active", now-1*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
+	f.stateWithPrompt(t, "active", now-1*int64(time.Minute), now-1*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
 	f.binding(t, "binding-active-old", "active", now-40*int64(time.Minute), sql.NullInt64{Int64: now - 25*int64(time.Minute), Valid: true}, "session_end")
 	f.binding(t, "binding-active", "active", now-1*int64(time.Minute), sql.NullInt64{}, "")
-	f.state(t, "idle", now-45*int64(time.Minute), now-45*int64(time.Minute), "UserPromptSubmit", 2)
+	f.stateWithPrompt(t, "idle", now-45*int64(time.Minute), now-45*int64(time.Minute), now-45*int64(time.Minute), "UserPromptSubmit", 2)
 	f.binding(t, "binding-idle", "idle", now-45*int64(time.Minute), sql.NullInt64{}, "")
 	f.state(t, "ended", now-30*int64(time.Minute), now-5*int64(time.Minute), "SessionEnd", 3)
 	f.binding(t, "binding-ended", "ended", now-30*int64(time.Minute), sql.NullInt64{Int64: now - 5*int64(time.Minute), Valid: true}, "session_end")
@@ -440,7 +440,7 @@ func TestBindingsChronologicalAcrossEpochs(t *testing.T) {
 	f := newFixture(t)
 	now := f.now.UnixNano()
 	secondEpoch := f.addEpoch(t, "Second epoch")
-	f.state(t, "rebound", now-40*int64(time.Minute), now-2*int64(time.Minute), "PreToolUse", 1)
+	f.stateWithPrompt(t, "rebound", now-40*int64(time.Minute), now-2*int64(time.Minute), now-2*int64(time.Minute), "PreToolUse", 1)
 	f.bindingEpoch(t, "binding-a", "rebound", f.epoch, now-40*int64(time.Minute), sql.NullInt64{Int64: now - 25*int64(time.Minute), Valid: true}, "unbind")
 	f.bindingEpoch(t, "binding-b", "rebound", secondEpoch, now-10*int64(time.Minute), sql.NullInt64{}, "")
 
@@ -574,7 +574,7 @@ func TestInferredOnlySessionIsThePrimaryView(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	now := f.now.UnixNano()
-	f.state(t, "provisional", now-2*int64(time.Minute), now-30*int64(time.Second), "PreToolUse", 1)
+	f.stateWithPrompt(t, "provisional", now-2*int64(time.Minute), now-30*int64(time.Second), now-30*int64(time.Second), "PreToolUse", 1)
 	f.claim(t, "provisional", now-2*int64(time.Minute))
 	f.inferredBinding(t, "inferred-provisional", "provisional", f.epoch, now-2*int64(time.Minute), sql.NullInt64{}, "", "observed")
 
@@ -696,7 +696,7 @@ func TestEpochCountsStayCurrentOnly(t *testing.T) {
 	f := newFixture(t)
 	now := f.now.UnixNano()
 	historical := f.addEpoch(t, "Historical epoch")
-	f.state(t, "moving", now-30*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
+	f.stateWithPrompt(t, "moving", now-30*int64(time.Minute), now-1*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
 	f.bindingEpoch(t, "binding-old", "moving", historical, now-30*int64(time.Minute), sql.NullInt64{Int64: now - 20*int64(time.Minute), Valid: true}, "unbind")
 	f.bindingEpoch(t, "binding-new", "moving", f.epoch, now-10*int64(time.Minute), sql.NullInt64{}, "")
 
@@ -819,13 +819,13 @@ func TestEpochActiveCountMatchesActiveSessions(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	now := f.now.UnixNano()
-	f.state(t, "explicit-active", now-2*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
+	f.stateWithPrompt(t, "explicit-active", now-2*int64(time.Minute), now-1*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 1)
 	f.binding(t, "binding-explicit-active", "explicit-active", now-2*int64(time.Minute), sql.NullInt64{}, "")
-	f.state(t, "explicit-idle", now-46*int64(time.Minute), now-45*int64(time.Minute), "UserPromptSubmit", 2)
+	f.stateWithPrompt(t, "explicit-idle", now-46*int64(time.Minute), now-45*int64(time.Minute), now-45*int64(time.Minute), "UserPromptSubmit", 2)
 	f.binding(t, "binding-explicit-idle", "explicit-idle", now-46*int64(time.Minute), sql.NullInt64{}, "")
 	f.state(t, "explicit-ended", now-30*int64(time.Minute), now-5*int64(time.Minute), "SessionEnd", 3)
 	f.binding(t, "binding-explicit-ended", "explicit-ended", now-30*int64(time.Minute), sql.NullInt64{Int64: now - 5*int64(time.Minute), Valid: true}, "session_end")
-	f.state(t, "inferred-active", now-2*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 4)
+	f.stateWithPrompt(t, "inferred-active", now-2*int64(time.Minute), now-1*int64(time.Minute), now-1*int64(time.Minute), "PreToolUse", 4)
 	f.claim(t, "inferred-active", now-2*int64(time.Minute))
 	f.inferredBinding(t, "inferred-active", "inferred-active", f.epoch, now-2*int64(time.Minute), sql.NullInt64{}, "", "observed")
 

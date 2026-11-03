@@ -93,6 +93,11 @@ type observation struct {
 	eligible  bool
 }
 
+// sourceCount is the fixed number of attribution sources: host, invocation
+// declaration, concrete registry declaration. It is independent of the
+// per-field candidate cap, which is a different bound.
+const sourceCount = 3
+
 // Normalize constructs evidence using fixed H/E/R priority. Structural input
 // errors refuse construction with content-free diagnostics; malformed optional
 // values instead produce Invalid fields. Neither path retains rejected raw text.
@@ -106,9 +111,9 @@ func Normalize(in Inputs) (Metadata, error) {
 			return Metadata{}, errors.New("execution normalization: invalid native scope before construction; supply bounded UTF-8 coordinates without controls or padding")
 		}
 	}
-	declarations := [MaxCandidates]Declaration{in.Host, in.Environment, in.ActorRegistry}
-	sources := [MaxCandidates]Source{Host, Environment, ActorRegistry}
-	var fields [5][MaxCandidates]observation
+	declarations := [sourceCount]Declaration{in.Host, in.Environment, in.ActorRegistry}
+	sources := [sourceCount]Source{Host, Environment, ActorRegistry}
+	var fields [5][sourceCount]observation
 	for i, d := range declarations {
 		for dim, raw := range [...]Raw{d.Provider, d.Model, d.Variant, d.Role, d.ProtocolRole} {
 			if !raw.Present {
@@ -146,7 +151,7 @@ func Normalize(in Inputs) (Metadata, error) {
 	}, nil
 }
 
-func normalizeField(observations [MaxCandidates]observation, provider bool) AttributionValue {
+func normalizeField(observations [sourceCount]observation, provider bool) AttributionValue {
 	result := AttributionValue{Status: Unavailable, Source: None, Reason: NoEvidence}
 	var winner, rejected *observation
 	var disagree bool

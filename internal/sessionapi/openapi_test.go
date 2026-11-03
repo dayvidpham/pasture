@@ -1,6 +1,8 @@
 package sessionapi_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,18 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 )
+
+// TestFrozenAPIDocumentStaysPreserved pins the plan's requirement that the
+// previous surface is preserved rather than deleted on a version bump. The
+// hash makes "frozen" real: a later edit cannot quietly rot the old document.
+func TestFrozenAPIDocumentStaysPreserved(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile(filepath.Join("openapi", "pasture-local-api-0.6.0.json"))
+	require.NoError(t, err, "the plan requires the previous API artifact to be preserved")
+	sum := sha256.Sum256(raw)
+	require.Equal(t, "52f209b22fdbec38a371d2de75542e70e4c7a906fb5929680f40b1f6cf03e08d", hex.EncodeToString(sum[:]),
+		"a preserved API artifact is immutable; publish a new version instead of editing it")
+}
 
 func TestOpenAPIIsFresh(t *testing.T) {
 	t.Parallel()

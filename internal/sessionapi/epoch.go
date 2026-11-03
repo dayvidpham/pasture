@@ -93,20 +93,11 @@ func (s *Service) epochRows(ctx context.Context, now time.Time, epochID string) 
 			return nil, 0, err
 		}
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, revision, err := beginSessionRead(ctx, s.DB)
 	if err != nil {
-		return nil, 0, fmt.Errorf("opening epoch read transaction: %w", err)
+		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	var revision, dirty int64
-	if err := tx.QueryRowContext(ctx, `SELECT revision, dirty FROM pasture_session_api_state WHERE singleton_id = 0`).
-		Scan(&revision, &dirty); err != nil {
-		return nil, 0, fmt.Errorf("reading session API revision: %w", err)
-	}
-	if dirty != 0 {
-		return nil, 0, ErrStaleCache
-	}
 	exists, err := tableExists(ctx, tx, "epoch_state_projection")
 	if err != nil {
 		return nil, 0, err
@@ -183,7 +174,6 @@ func epochSessionCounts(ctx context.Context, tx *sql.Tx, activeCutoff, idleCutof
 	) + ` = 'active' THEN 1 ELSE 0 END)
 	FROM binding_current b
 	LEFT JOIN pasture_session_state s ON s.harness = b.harness AND s.session = b.session
-	LEFT JOIN pasture_session_claim c ON c.harness = b.harness AND c.session = b.session
 	GROUP BY b.epoch_id`
 	rows, err := tx.QueryContext(ctx, statement, activeCutoff, idleCutoff)
 	if err != nil {

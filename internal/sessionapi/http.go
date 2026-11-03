@@ -101,16 +101,26 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
 }
 
-func (h *handler) list(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
+// parseLimit is the ONE query-limit rule for the routes that page: 1..100,
+// default 50, with the same refusal text.
+func parseLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 	limit := 50
-	if raw := query.Get("limit"); raw != "" {
+	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 100 {
 			writeError(w, http.StatusBadRequest, "invalid_filter", "limit must be an integer between 1 and 100")
-			return
+			return 0, false
 		}
 		limit = parsed
+	}
+	return limit, true
+}
+
+func (h *handler) list(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	limit, ok := parseLimit(w, r)
+	if !ok {
+		return
 	}
 	page, err := h.service.List(r.Context(), ListOptions{
 		Epoch:   query.Get("epoch"),
@@ -130,14 +140,9 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 // execution observations, including auxiliary and child records.
 func (h *handler) executionHistory(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
-	limit := 50
-	if raw := query.Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 100 {
-			writeError(w, http.StatusBadRequest, "invalid_filter", "limit must be an integer between 1 and 100")
-			return
-		}
-		limit = parsed
+	limit, ok := parseLimit(w, r)
+	if !ok {
+		return
 	}
 	page, err := h.service.ExecutionHistory(r.Context(),
 		r.PathValue("harness"), r.PathValue("nativeSessionId"),

@@ -34,10 +34,57 @@ const (
 	// BasisInactivity means an old prompt aged past the idle window; there is no
 	// explicit end marker for this state.
 	BasisInactivity StateBasis = "inactivity"
-	// BasisExplicitEnd means an unsuperseded host session-end or an applicable
-	// explicit user unbind decided the state.
+	// BasisExplicitEnd means an unsuperseded host session-end, an applicable
+	// explicit user unbind, or a legacy binding closed by session_end with no
+	// proved resume decided the state.
 	BasisExplicitEnd StateBasis = "explicit-end"
 )
+
+// activityStateStrings renders the closed ActivityState vocabulary for the
+// OpenAPI enum, so the committed contract cannot name a token the Go type does
+// not define.
+func activityStateStrings() []string {
+	return []string{string(StateActive), string(StateIdle), string(StateEnded), string(StateUnknown)}
+}
+
+// stateBasisStrings renders the closed StateBasis vocabulary.
+func stateBasisStrings() []string {
+	return []string{string(BasisNone), string(BasisPrompt), string(BasisInactivity), string(BasisExplicitEnd)}
+}
+
+// actorClassificationStrings renders the closed ActorClassification vocabulary.
+func actorClassificationStrings() []string {
+	return []string{string(ActorGenericLLM), string(ActorExplicit)}
+}
+
+// executionKindStrings renders the closed execution.Kind vocabulary.
+func executionKindStrings() []string {
+	return []string{
+		string(execution.Primary), string(execution.Compaction), string(execution.Title),
+		string(execution.Generate), string(execution.Selection), string(execution.Child),
+	}
+}
+
+// executionStatusStrings renders the closed execution.Status vocabulary.
+func executionStatusStrings() []string {
+	return []string{
+		string(execution.Observed), string(execution.Unavailable),
+		string(execution.Invalid), string(execution.Conflict),
+	}
+}
+
+// executionSourceStrings renders the closed execution.Source vocabulary.
+func executionSourceStrings() []string {
+	return []string{
+		string(execution.Host), string(execution.Environment),
+		string(execution.ActorRegistry), string(execution.None),
+	}
+}
+
+// executionVocabularyStrings renders the closed execution.Vocabulary vocabulary.
+func executionVocabularyStrings() []string {
+	return []string{string(execution.NativeAgent), string(execution.PastureRole)}
+}
 
 // SessionActivity is the activity half of the session view.
 //
@@ -180,7 +227,8 @@ type SessionExecution struct {
 }
 
 // ExecutionHistoryPage is one snapshot-pinned page of execution observations,
-// newest first. Snapshot is the journal id maximum the cursor is pinned to.
+// newest first. The pinned journal snapshot lives in the opaque cursor, not in
+// this payload.
 type ExecutionHistoryPage struct {
 	Revision int64              `json:"revision"`
 	AsOf     time.Time          `json:"asOf"`

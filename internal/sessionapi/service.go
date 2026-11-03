@@ -65,21 +65,28 @@ func NewService(db *sql.DB) *Service {
 	}
 }
 
-// validateWindows enforces 0 < active < idle before any read. Every entry point
-// calls it, so a zero, negative, equal, or inverted pair is refused at the
-// service boundary rather than producing a silently nonsensical state.
-func (s *Service) validateWindows() error {
-	if s.ActiveWindow <= 0 {
+// ValidateWindows is the ONE rule for 0 < active < idle. The service and the
+// serve command both call it, so configuration cannot be refused by one with a
+// different meaning than the other.
+func ValidateWindows(active, idle time.Duration) error {
+	if active <= 0 {
 		return fmt.Errorf("%w: active window must be positive", ErrInvalidWindow)
 	}
-	if s.IdleWindow <= 0 {
+	if idle <= 0 {
 		return fmt.Errorf("%w: idle window must be positive", ErrInvalidWindow)
 	}
-	if s.IdleWindow <= s.ActiveWindow {
+	if idle <= active {
 		return fmt.Errorf("%w: idle window (%s) must be greater than active window (%s)",
-			ErrInvalidWindow, s.IdleWindow, s.ActiveWindow)
+			ErrInvalidWindow, idle, active)
 	}
 	return nil
+}
+
+// validateWindows enforces the shared rule before any read, so a zero,
+// negative, equal, or inverted pair is refused at the service boundary rather
+// than producing a silently nonsensical state.
+func (s *Service) validateWindows() error {
+	return ValidateWindows(s.ActiveWindow, s.IdleWindow)
 }
 
 type pageCursor struct {
@@ -136,11 +143,9 @@ var inferredBindingColumns = []string{
 }
 
 // currentBindingLastSeenExpr is the ONE definition of a session's broad
-// activity instant. The session page, the active/idle view, and the epoch
-// active count all measure against it, so an explicit and an inferred binding
-// cannot drift into two different notions of "last seen". Broad activity is
-// NOT prompt recency: liveness is decided by promptAtExpr / livenessStateSQL.
-// The aliases are part of the contract: every caller joins
+// activity instant. The page renders it as last_seen; liveness is decided by
+// promptAtExpr / livenessStateSQL instead. Broad activity is NOT prompt
+// recency. The aliases are part of the contract: every caller joins
 // pasture_session_state AS s, binding_current AS b, and
 // pasture_session_claim AS c.
 const currentBindingLastSeenExpr = `MAX(COALESCE(s.last_seen, 0), COALESCE(b.bound_at, 0), COALESCE(b.unbound_at, 0), COALESCE(c.claimed_at, 0))`
@@ -171,7 +176,7 @@ const (
 //
 // A binding closed by session_end before the latest resume is historical and
 // cannot manufacture a current end.
-func explicitEndSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason string) string {
+func explicitEndSQL(hostEndJournal, lastResume, unboundAt, unboundReason string) string {
 	return `((
 		` + unboundAt + ` IS NOT NULL AND ` + unboundReason + ` = 'unbind'
 	) OR (
@@ -189,23 +194,11 @@ func explicitEndSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReas
 // order, so a caller must append them to its argument slice in that order.
 func livenessStateSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason string) string {
 	return `CASE
-		WHEN ` + explicitEndSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason) + ` THEN 'ended'
-		WHEN ` + promptAt + ` = 0 THEN 'unknown'
-		WHEN ` + promptAt + ` >= ? THEN 'active'
-		WHEN ` + promptAt + ` >= ? THEN 'idle'
-		ELSE 'ended'
-	END`
-}
-
-// stateBasisSQL mirrors livenessStateSQL one-for-one: the same evidence decides
-// the state and the basis, so the two can never disagree.
-func stateBasisSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason string) string {
-	return `CASE
-		WHEN ` + explicitEndSQL(promptAt, hostEndJournal, lastResume, unboundAt, unboundReason) + ` THEN 'explicit-end'
-		WHEN ` + promptAt + ` = 0 THEN 'none'
-		WHEN ` + promptAt + ` >= ? THEN 'prompt'
-		WHEN ` + promptAt + ` >= ? THEN 'prompt'
-		ELSE 'inactivity'
+		WHEN ` + explicitEndSQL(hostEndJournal, lastResume, unboundAt, unboundReason) + ` THEN '` + string(StateEnded) + `'
+		WHEN ` + promptAt + ` = 0 THEN '` + string(StateUnknown) + `'
+		WHEN ` + promptAt + ` >= ? THEN '` + string(StateActive) + `'
+		WHEN ` + promptAt + ` >= ? THEN '` + string(StateIdle) + `'
+		ELSE '` + string(StateEnded) + `'
 	END`
 }
 
@@ -588,26 +581,38 @@ func endMarker(row joinedRow) *EndMarker {
 	return &EndMarker{EndedAt: time.Unix(0, endedAt).UTC(), EndReason: reason}
 }
 
+// beginSessionRead opens one read-only transaction and reads the certified
+// cache revision. A dirty cache is a stale-cache refusal; every session read
+// path starts here so the check cannot be forgotten in one of them.
+func beginSessionRead(ctx context.Context, db *sql.DB) (*sql.Tx, int64, error) {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, fmt.Errorf("opening session read transaction: %w", err)
+	}
+	var revision, dirty int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision, dirty FROM pasture_session_api_state WHERE singleton_id = 0`).
+		Scan(&revision, &dirty); err != nil {
+		_ = tx.Rollback()
+		return nil, 0, fmt.Errorf("reading session API revision: %w", err)
+	}
+	if dirty != 0 {
+		_ = tx.Rollback()
+		return nil, 0, ErrStaleCache
+	}
+	return tx, revision, nil
+}
+
 func (s *Service) query(ctx context.Context, now time.Time, where string, args []any, limit int) ([]joinedRow, int64, error) {
 	if s.Ensure != nil {
 		if err := s.Ensure(ctx); err != nil {
 			return nil, 0, err
 		}
 	}
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, revision, err := beginSessionRead(ctx, s.DB)
 	if err != nil {
-		return nil, 0, fmt.Errorf("opening session read transaction: %w", err)
+		return nil, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	var revision, dirty int64
-	if err := tx.QueryRowContext(ctx, `SELECT revision, dirty FROM pasture_session_api_state WHERE singleton_id = 0`).
-		Scan(&revision, &dirty); err != nil {
-		return nil, 0, fmt.Errorf("reading session API revision: %w", err)
-	}
-	if dirty != 0 {
-		return nil, 0, ErrStaleCache
-	}
 	// The inferred table is an additive derivation cache. A store whose table is
 	// absent or shaped differently degrades to explicit-only here rather than
 	// failing the whole session read.
@@ -653,17 +658,9 @@ func attachExecutionSummaries(ctx context.Context, tx *sql.Tx, rows []joinedRow)
 	if len(rows) == 0 {
 		return nil
 	}
-	keys := make([]bindingKey, 0, len(rows))
-	seen := make(map[bindingKey]struct{}, len(rows))
-	for _, row := range rows {
-		key := bindingKey{harness: row.harness, session: row.session}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		keys = append(keys, key)
-	}
+	keys := pageBindingKeys(rows)
 	keyClause, args := bindingKeyValues(keys)
+	args = append(args, string(execution.Primary), string(execution.Selection))
 	statement := keyClause + `
 ,
 ranked AS (
@@ -671,7 +668,7 @@ ranked AS (
 	       ROW_NUMBER() OVER (PARTITION BY e.harness, e.session_id ORDER BY e.journal_id DESC) AS rn
 	FROM pasture_session_execution e
 	JOIN keys k ON k.harness = e.harness AND k.session = e.session_id
-	WHERE e.kind IN ('primary', 'selection')
+	WHERE e.kind IN (?, ?)
 )
 SELECT harness, session_id, journal_id, observed_at, execution_json
 FROM ranked WHERE rn = 1`
@@ -749,13 +746,10 @@ func inferredBindingUsable(ctx context.Context, tx *sql.Tx) bool {
 	return true
 }
 
-// attachBindingIntervals loads every interval for the page's sessions. One
-// bounded query per interval table keeps the read path free of per-session
-// queries while leaving page cardinality untouched.
-func attachBindingIntervals(ctx context.Context, tx *sql.Tx, rows []joinedRow, inferredUsable bool) error {
-	if len(rows) == 0 {
-		return nil
-	}
+// pageBindingKeys returns one de-duplicated key per page row, preserving page
+// order. Both the interval read and the execution-summary read use it, so the
+// batch key shape cannot drift between them.
+func pageBindingKeys(rows []joinedRow) []bindingKey {
 	keys := make([]bindingKey, 0, len(rows))
 	seen := make(map[bindingKey]struct{}, len(rows))
 	for _, row := range rows {
@@ -766,6 +760,17 @@ func attachBindingIntervals(ctx context.Context, tx *sql.Tx, rows []joinedRow, i
 		seen[key] = struct{}{}
 		keys = append(keys, key)
 	}
+	return keys
+}
+
+// attachBindingIntervals loads every interval for the page's sessions. One
+// bounded query per interval table keeps the read path free of per-session
+// queries while leaving page cardinality untouched.
+func attachBindingIntervals(ctx context.Context, tx *sql.Tx, rows []joinedRow, inferredUsable bool) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	keys := pageBindingKeys(rows)
 	intervals, err := loadBindingIntervals(ctx, tx, keys, inferredUsable)
 	if err != nil {
 		return err
@@ -967,7 +972,7 @@ func (s *Service) view(row joinedRow, now time.Time) SessionView {
 	view.End = endMarker(row)
 	if row.actor.Valid && row.actor.String != "" {
 		classification := ActorExplicit
-		if row.actor.String == provadapter.DefaultLLMActorID().String() {
+		if provadapter.IsDefaultLLMActorText(row.actor.String) {
 			classification = ActorGenericLLM
 		}
 		view.Actor = &SessionActor{ID: row.actor.String, Classification: classification}

@@ -34,12 +34,7 @@ import (
 // supports, in canonical order. It is the population every derivation in this
 // file walks.
 func harnessManifests() []registration.Manifest {
-	return []registration.Manifest{
-		registration.ClaudeCode__2_1_261(),
-		registration.Codex__0_153_0(),
-		registration.OpenCode__1_18_29(),
-		registration.OpenCode__2_0_20(),
-	}
+	return registration.Manifests()
 }
 
 // eventClasses is the whole mapping, keyed by harness and then by the native

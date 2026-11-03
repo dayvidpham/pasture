@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/peasantproject"
 )
 
@@ -98,6 +99,13 @@ func TestServeHelpDescribesEverySurface(t *testing.T) {
 func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	previous := flagDBPath
 	flagDBPath = filepath.Join(t.TempDir(), "pasture.db")
+	// An upgraded store starts with a dirty session projection. The default
+	// server path must repair it on the first read without --backfill.
+	legacy, err := sql.Open("sqlite", flagDBPath)
+	require.NoError(t, err)
+	require.NoError(t, audit.MigrateContextToCeiling(context.Background(), legacy, 10))
+	require.NoError(t, legacy.Close())
+
 	t.Cleanup(func() { flagDBPath = previous })
 
 	cmd := &cobra.Command{}
@@ -131,6 +139,16 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	}
 	require.True(t, strings.HasPrefix(line, "pasture serve listening on http://127.0.0.1:"), line)
 	base := strings.TrimSpace(strings.TrimPrefix(line, "pasture serve listening on "))
+	upgraded, err := sql.Open("sqlite", flagDBPath)
+	require.NoError(t, err)
+	// This audit-only legacy fixture had no old session tables; model the dirty
+	// marker that a migration of an existing session cache leaves behind.
+	_, err = upgraded.Exec(`UPDATE pasture_session_api_state SET dirty=1 WHERE singleton_id=0`)
+	require.NoError(t, err)
+	var dirty int
+	require.NoError(t, upgraded.QueryRow(`SELECT dirty FROM pasture_session_api_state WHERE singleton_id=0`).Scan(&dirty))
+	require.Equal(t, 1, dirty, "upgrade must leave the projection dirty before the first read")
+	require.NoError(t, upgraded.Close())
 
 	response, err := http.Get(base + "/api/v1/sessions")
 	require.NoError(t, err)
@@ -488,12 +506,12 @@ func TestServeRejectsInvalidLivenessWindows(t *testing.T) {
 		idle   time.Duration
 		match  string
 	}{
-		{"zero active", 0, time.Hour, "--active-window must be positive"},
-		{"negative active", -time.Minute, time.Hour, "--active-window must be positive"},
-		{"zero idle", time.Minute, 0, "--idle-window must be positive"},
-		{"negative idle", time.Minute, -time.Hour, "--idle-window must be positive"},
-		{"equal windows", time.Hour, time.Hour, "must be greater than --active-window"},
-		{"inverted windows", 2 * time.Hour, time.Hour, "must be greater than --active-window"},
+		{"zero active", 0, time.Hour, "active window must be positive"},
+		{"negative active", -time.Minute, time.Hour, "active window must be positive"},
+		{"zero idle", time.Minute, 0, "idle window must be positive"},
+		{"negative idle", time.Minute, -time.Hour, "idle window must be positive"},
+		{"equal windows", time.Hour, time.Hour, "must be greater than active window"},
+		{"inverted windows", 2 * time.Hour, time.Hour, "must be greater than active window"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
