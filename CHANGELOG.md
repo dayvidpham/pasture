@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.25] - 2026-11-03
+
+### Added
+- feat(install): version-aware upgrades and generated skill provenance
+
+### Other
+- Merge pull request #251 from dayvidpham/pasture-44--fix--install-missing-vs-new
+
 ## [0.0.24] - 2026-10-28
 
 ### Other
