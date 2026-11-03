@@ -1,0 +1,2040 @@
+{
+  "components": {
+    "schemas": {
+      "ActivityState": {
+        "description": "Prompt-based liveness. A recent user prompt makes an unbound session active. Tool, permission, binding, claim, model-switch, and role-change activity is not a prompt.",
+        "enum": [
+          "active",
+          "idle",
+          "ended",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "BindRequest": {
+        "properties": {
+          "epochId": {
+            "type": "string"
+          },
+          "expectedBinding": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "epochId",
+          "role"
+        ],
+        "type": "object"
+      },
+      "BindingSource": {
+        "description": "explicit rows are written by bind, unbind, or the session-end tail and are authoritative. inferred rows are derived from store observations, never override an explicit binding, and are absent when the derivation is ambiguous.",
+        "enum": [
+          "explicit",
+          "inferred"
+        ],
+        "type": "string"
+      },
+      "Confidence": {
+        "description": "How strongly the binding claims to be true, using the lifecycle confidence vocabulary. Explicit bindings are verified. An inferred binding is observed unless the store recorded a stronger derivation; the claim-ownership rule is observed, because it correlates a session claim with active ownership rather than a command that recorded this session's intent.",
+        "enum": [
+          "observed",
+          "correlated",
+          "verified"
+        ],
+        "type": "string"
+      },
+      "Detail": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionView"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "session"
+        ],
+        "type": "object"
+      },
+      "EndMarker": {
+        "properties": {
+          "endReason": {
+            "$ref": "#/components/schemas/EndReason"
+          },
+          "endedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endedAt",
+          "endReason"
+        ],
+        "type": "object"
+      },
+      "EndReason": {
+        "enum": [
+          "unbind",
+          "session_end"
+        ],
+        "type": "string"
+      },
+      "EpochDetail": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochView"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "epoch"
+        ],
+        "type": "object"
+      },
+      "EpochPage": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EpochView"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "items"
+        ],
+        "type": "object"
+      },
+      "EpochRef": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "EpochView": {
+        "properties": {
+          "activeCount": {
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "sessionCount": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phase",
+          "role",
+          "sessionCount",
+          "activeCount"
+        ],
+        "type": "object"
+      },
+      "ErrorBody": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "ErrorEnvelope": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "InspectPayload": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "epochs": {
+            "items": {
+              "$ref": "#/components/schemas/EpochView"
+            },
+            "type": "array"
+          },
+          "peasantIntegration": {
+            "$ref": "#/components/schemas/PeasantIntegration"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionView"
+            },
+            "type": "array"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "truncated",
+          "epochs",
+          "sessions",
+          "peasantIntegration"
+        ],
+        "type": "object"
+      },
+      "Page": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionView"
+            },
+            "type": "array"
+          },
+          "next": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "items"
+        ],
+        "type": "object"
+      },
+      "PeasantIntegration": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the runtime enrichment switch is on. Off is the default and is distinct from unavailable; it does not mean no source was configured.",
+            "type": "boolean"
+          },
+          "message": {
+            "description": "Actionable detail for disabled or unavailable; empty when the source is ok.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Which opt-in backend the switch opens when on: none while the switch is off; db for --peasant-db or the conventional Peasant database that the toggle opens when no flag was supplied; api for --peasant-url.",
+            "enum": [
+              "none",
+              "db",
+              "api"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "description": "disabled when the integration is off; ok after the configured source has answered a lookup successfully; unavailable when it has not been contacted yet or could not be opened, reached, or read.",
+            "enum": [
+              "disabled",
+              "ok",
+              "unavailable"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "source",
+          "status",
+          "message"
+        ],
+        "type": "object"
+      },
+      "PeasantSettingsRequest": {
+        "properties": {
+          "enabled": {
+            "description": "Turn the runtime Peasant project-enrichment switch on (true) or off (false).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "ProjectBindRequest": {
+        "properties": {
+          "epochId": {
+            "type": "string"
+          },
+          "expectedBinding": {
+            "description": "Only change the mapping when this binding ID is still active.",
+            "type": "string"
+          },
+          "role": {
+            "default": "worker",
+            "description": "Role recorded for the project in this epoch. Omit for worker.",
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "epochId"
+        ],
+        "type": "object"
+      },
+      "ProjectBinding": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "role": {
+            "description": "The role the operator recorded for the project in this epoch.",
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProjectBindingSource"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "ProjectBindingInterval": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "endReason": {
+            "enum": [
+              "rebind",
+              "unbind"
+            ],
+            "type": "string"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "role": {
+            "enum": [
+              "epoch",
+              "architect",
+              "reviewer",
+              "supervisor",
+              "worker"
+            ],
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ProjectBindingSource"
+          },
+          "unboundAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "ProjectBindingSource": {
+        "description": "Project mapping provenance. A project mapping is an explicit operator relation; it is never inferred from a working directory or a session binding.",
+        "enum": [
+          "project"
+        ],
+        "type": "string"
+      },
+      "ProjectPage": {
+        "properties": {
+          "items": {
+            "description": "Projects with an active mapping. A project whose mappings are all closed is omitted.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProjectUnbindRequest": {
+        "properties": {
+          "expectedBinding": {
+            "description": "Only close the mapping when this binding ID is still active.",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "ProjectView": {
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/ProjectBinding"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "intervals": {
+            "description": "Full mapping history ordered by boundAt ascending. Present on detail responses; omitted from list rows.",
+            "items": {
+              "$ref": "#/components/schemas/ProjectBindingInterval"
+            },
+            "type": "array"
+          },
+          "projectHash": {
+            "description": "Peasant-owned project identity, preserved exactly. Pasture never derives or recomputes it.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "projectHash"
+        ],
+        "type": "object"
+      },
+      "SessionActivity": {
+        "properties": {
+          "firstSeen": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastEvent": {
+            "type": "string"
+          },
+          "lastPromptAt": {
+            "description": "The newest user-prompt instant. Absent when the store has no prompt evidence.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastSeen": {
+            "description": "Broad activity instant (journal, binding, claim, and state updates). This is not prompt recency.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ActivityState"
+          },
+          "stateBasis": {
+            "$ref": "#/components/schemas/StateBasis"
+          }
+        },
+        "required": [
+          "state",
+          "stateBasis"
+        ],
+        "type": "object"
+      },
+      "SessionBinding": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "role": {
+            "description": "The protocol session role the bind recorded (epoch, architect, reviewer, supervisor, or worker).",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/BindingSource"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "SessionBindingInterval": {
+        "properties": {
+          "bindingId": {
+            "type": "string"
+          },
+          "boundAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence"
+          },
+          "endReason": {
+            "type": "string"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "role": {
+            "description": "For an explicit interval, the protocol session role a bind command recorded. For an inferred interval, the assignment slot the derivation read (currently owner-responsibility), because no command gave the session a role; clients must not read an inferred role as a protocol session role.",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/BindingSource"
+          },
+          "unboundAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bindingId",
+          "role",
+          "boundAt",
+          "source",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "SessionView": {
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/SessionActivity"
+          },
+          "binding": {
+            "$ref": "#/components/schemas/SessionBinding"
+          },
+          "bindings": {
+            "description": "Every known binding interval for the session, ordered by boundAt ascending and then bindingId. `binding` is the effective current binding: the latest explicit binding when one exists, otherwise the open inferred derivation.",
+            "items": {
+              "$ref": "#/components/schemas/SessionBindingInterval"
+            },
+            "type": "array"
+          },
+          "end": {
+            "$ref": "#/components/schemas/EndMarker"
+          },
+          "epoch": {
+            "$ref": "#/components/schemas/EpochRef"
+          },
+          "harness": {
+            "type": "string"
+          },
+          "nativeSessionId": {
+            "type": "string"
+          },
+          "project": {
+            "description": "Peasant-owned project display label for the session. The label depends on the configured source: with --peasant-db it is the canonical remote label when the remote is recognizable, else the canonical cwd, else the project hash; with --peasant-url it is Peasant's resolved project label. Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never derives it.",
+            "type": "string"
+          },
+          "projectHash": {
+            "description": "Peasant-owned opaque project hash for the session, preserved exactly. Present only when the operator enabled project enrichment and Peasant mapped this session; absent otherwise. Pasture never recomputes it.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "harness",
+          "nativeSessionId",
+          "activity",
+          "bindings"
+        ],
+        "type": "object"
+      },
+      "StateBasis": {
+        "description": "The evidence that decided `state`. `none` means no prompt evidence exists; `prompt` means the age of the last user prompt decided active or idle; `inactivity` means the prompt aged past the idle window and carries no end marker; `explicit-end` means an unsuperseded host session-end or an applicable explicit user unbind.",
+        "enum": [
+          "none",
+          "prompt",
+          "inactivity",
+          "explicit-end"
+        ],
+        "type": "string"
+      },
+      "TranscriptPayload": {
+        "additionalProperties": true,
+        "description": "The durable Peasant SessionDetailPayload document, proxied unchanged. Pasture guarantees only the identity fields; every other field belongs to the shared @peasant-labs/schema session contract and is validated by the browser.",
+        "properties": {
+          "harness": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "turns": {
+            "items": {
+              "description": "One Peasant TurnDetail; validated by the browser against the shared contract"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "harness",
+          "turns"
+        ],
+        "type": "object"
+      },
+      "UnbindRequest": {
+        "properties": {
+          "expectedBinding": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "WebSocketClientMessage": {
+        "properties": {
+          "topic": {
+            "enum": [
+              "sessions",
+              "epochs"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "subscribe",
+              "unsubscribe",
+              "ping"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "WebSocketErrorFrame": {
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorBody"
+          },
+          "type": {
+            "enum": [
+              "error"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "error"
+        ],
+        "type": "object"
+      },
+      "WebSocketReadyFrame": {
+        "properties": {
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "ready"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "topics"
+        ],
+        "type": "object"
+      },
+      "WebSocketSnapshotFrame": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "sessions",
+              "epochs"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "revision",
+          "asOf",
+          "payload"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. It also records explicit project-to-epoch mappings: a project hash is Peasant-owned, the mapped epoch is a Pasture task, and the relationship is independent of per-session bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
+    "title": "Pasture Local Session API",
+    "version": "0.7.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/epochs": {
+      "get": {
+        "operationId": "listEpochs",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpochPage"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The epoch store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "List projected epochs"
+      }
+    },
+    "/api/v1/epochs/{epochId}": {
+      "get": {
+        "operationId": "getEpoch",
+        "parameters": [
+          {
+            "description": "Epoch task id (URL-encode it when it contains slashes)",
+            "in": "path",
+            "name": "epochId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EpochDetail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid epoch id"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Epoch not found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The epoch store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "Get one projected epoch"
+      }
+    },
+    "/api/v1/epochs/{epochId}/sessions": {
+      "get": {
+        "operationId": "listEpochSessions",
+        "parameters": [
+          {
+            "description": "Epoch task id (URL-encode it when it contains slashes)",
+            "in": "path",
+            "name": "epochId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by derived activity state",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "idle",
+                "ended",
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by harness id",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (default 50, maximum 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque page token from a previous response",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid filter or page token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Epoch not found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "List sessions bound to an epoch"
+      }
+    },
+    "/api/v1/inspect": {
+      "get": {
+        "operationId": "inspectSessionAPI",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InspectPayload"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "Snapshot epochs and sessions together"
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectPage"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project mapping store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Project mapping routes are unavailable"
+          }
+        },
+        "summary": "List projects with an active epoch mapping"
+      }
+    },
+    "/api/v1/projects/{projectHash}": {
+      "get": {
+        "operationId": "getProject",
+        "parameters": [
+          {
+            "description": "Peasant-owned project hash: exactly 64 lowercase hex characters",
+            "in": "path",
+            "name": "projectHash",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid project hash"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project has no mapping history"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project mapping store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Project mapping routes are unavailable"
+          }
+        },
+        "summary": "Get one project's active mapping and interval history"
+      }
+    },
+    "/api/v1/projects/{projectHash}/bind": {
+      "post": {
+        "description": "Closes any active mapping for the project and opens the requested one. Binding the already-active epoch and role is idempotent. The mapping is a project-level relationship and never writes or overrides a session binding.",
+        "operationId": "bindProject",
+        "parameters": [
+          {
+            "description": "Peasant-owned project hash: exactly 64 lowercase hex characters",
+            "in": "path",
+            "name": "projectHash",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectBindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid project hash or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown epoch"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project mapping store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Project mapping writes are unavailable"
+          }
+        },
+        "summary": "Map a project to an epoch"
+      }
+    },
+    "/api/v1/projects/{projectHash}/unbind": {
+      "post": {
+        "operationId": "unbindProject",
+        "parameters": [
+          {
+            "description": "Peasant-owned project hash: exactly 64 lowercase hex characters",
+            "in": "path",
+            "name": "projectHash",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectUnbindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectView"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid project hash or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "No open mapping or binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The project mapping store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Project mapping writes are unavailable"
+          }
+        },
+        "summary": "Close a project's active epoch mapping"
+      }
+    },
+    "/api/v1/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "parameters": [
+          {
+            "description": "Filter by the latest binding epoch id",
+            "in": "query",
+            "name": "epoch",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by derived activity state",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "idle",
+                "ended",
+                "unknown"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by harness id",
+            "in": "query",
+            "name": "harness",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (default 50, maximum 100)",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque page token from a previous response",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid filter or page token"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "List sessions"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}": {
+      "get": {
+        "operationId": "getSession",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Session not found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale"
+          }
+        },
+        "summary": "Get one session"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/bind": {
+      "post": {
+        "operationId": "bindSession",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unknown epoch"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale or writes are unavailable"
+          }
+        },
+        "summary": "Bind a session to an epoch"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/transcript": {
+      "get": {
+        "description": "Validates the harness and native session id against the shared @peasant-labs/schema contract, runs `peasant export sessions --session \u003cnativeSessionId\u003e` beside the API in a private temporary directory, and streams the durable SessionDetailPayload document unchanged. The route never returns a last-good transcript when Peasant refuses a newer incomplete attempt. The browser validates the body against the same shared contract before rendering it.",
+        "operationId": "getSessionTranscript",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptPayload"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key, harness, or native session id under the shared schema contract"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Peasant has no transcript for that session"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Peasant refused an incomplete attempt, cannot express the session id, or returned a different identity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Peasant failed, or returned a malformed or oversized document"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The peasant executable is absent or cannot be started"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The bounded Peasant export wait ended"
+          }
+        },
+        "summary": "Fetch the durable Peasant transcript for one session"
+      }
+    },
+    "/api/v1/sessions/{harness}/{nativeSessionId}/unbind": {
+      "post": {
+        "operationId": "unbindSession",
+        "parameters": [
+          {
+            "description": "Harness id",
+            "in": "path",
+            "name": "harness",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Native session id",
+            "in": "path",
+            "name": "nativeSessionId",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnbindRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Detail"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid session key or body"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "No open binding or binding conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be written"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session cache is stale or writes are unavailable"
+          }
+        },
+        "summary": "Unbind a session from its epoch"
+      }
+    },
+    "/api/v1/settings/peasant": {
+      "post": {
+        "description": "Runtime toggle for the opt-in Peasant project source. With the switch off, Pasture performs no Peasant access and session project fields stay empty. Turning it on opens the configured source, or the conventional Peasant SQLite database when serve was started without --peasant-db/--peasant-url.",
+        "operationId": "updatePeasantSettings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PeasantSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeasantIntegration"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Malformed body or a missing enabled boolean"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The runtime source or the default Peasant database opener could not be opened; enrichment stays off"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "This serve process has no configurable Peasant source"
+          }
+        },
+        "summary": "Turn Peasant project enrichment on or off"
+      }
+    },
+    "/api/v1/ws": {
+      "get": {
+        "description": "Upgrades to a WebSocket. The server sends a ready frame, then a snapshot frame for each subscribed topic. Snapshots carry revision and asOf at the frame level. A newer frame replaces an unread frame, so a slow client always sees the latest snapshot.",
+        "operationId": "sessionWebSocket",
+        "responses": {
+          "101": {
+            "description": "Switching Protocols; subsequent frames are JSON text messages."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request is not a valid WebSocket upgrade"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          }
+        },
+        "summary": "Subscribe to bounded latest-frame session and epoch snapshots"
+      }
+    }
+  }
+}

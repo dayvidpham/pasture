@@ -22,7 +22,9 @@ func TestOpenAPIIsFresh(t *testing.T) {
 		"the API description must name the write surface; bind/unbind are not read-only")
 	require.NotContains(t, document, "read API",
 		"the API is not read-only; bind/unbind are writes")
-	require.Contains(t, document, `"version": "0.6.0"`)
+	require.Contains(t, document, `"version": "0.7.0"`)
+	require.Contains(t, document, `"StateBasis"`)
+	require.Contains(t, document, `"lastPromptAt"`)
 	require.Contains(t, document, "/api/v1/settings/peasant")
 	require.Contains(t, document, "PeasantSettingsRequest")
 }

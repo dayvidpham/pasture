@@ -19,12 +19,37 @@ const (
 	StateUnknown ActivityState = "unknown"
 )
 
+// StateBasis names the evidence that decided ActivityState. It is required on
+// every session view so a client can tell a prompt-driven state from an
+// explicit end or from the absence of prompt evidence.
+type StateBasis string
+
+const (
+	// BasisNone means no prompt evidence exists; the derived state is unknown.
+	BasisNone StateBasis = "none"
+	// BasisPrompt means the state came from the age of the last user prompt.
+	BasisPrompt StateBasis = "prompt"
+	// BasisInactivity means an old prompt aged past the idle window; there is no
+	// explicit end marker for this state.
+	BasisInactivity StateBasis = "inactivity"
+	// BasisExplicitEnd means an unsuperseded host session-end or an applicable
+	// explicit user unbind decided the state.
+	BasisExplicitEnd StateBasis = "explicit-end"
+)
+
 // SessionActivity is the activity half of the session view.
+//
+// State is prompt-based liveness: a recent user prompt makes an unbound session
+// active. LastSeen and LastEvent remain the broad activity record and are not
+// prompt recency. LastPromptAt is the newest user prompt, nil when the store has
+// none. StateBasis is required; it explains State without implying a binding.
 type SessionActivity struct {
-	State     ActivityState `json:"state"`
-	FirstSeen *time.Time    `json:"firstSeen,omitempty"`
-	LastSeen  *time.Time    `json:"lastSeen,omitempty"`
-	LastEvent string        `json:"lastEvent,omitempty"`
+	State        ActivityState `json:"state"`
+	StateBasis   StateBasis    `json:"stateBasis"`
+	FirstSeen    *time.Time    `json:"firstSeen,omitempty"`
+	LastSeen     *time.Time    `json:"lastSeen,omitempty"`
+	LastPromptAt *time.Time    `json:"lastPromptAt,omitempty"`
+	LastEvent    string        `json:"lastEvent,omitempty"`
 }
 
 // SessionBinding is the effective current binding for a session. It is the
@@ -172,6 +197,7 @@ var (
 	ErrNotFound         = errors.New("session not found")
 	ErrInvalidPageToken = errors.New("invalid page token")
 	ErrInvalidFilter    = errors.New("invalid filter")
+	ErrInvalidWindow    = errors.New("invalid liveness window")
 	ErrStaleCache       = errors.New("session cache is stale")
 )
 

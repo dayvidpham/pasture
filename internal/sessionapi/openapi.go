@@ -4,7 +4,7 @@ import "encoding/json"
 
 // PastureLocalAPIVersion is the frozen document-surface version for the local
 // session API. It changes only when a route or wire shape changes.
-const PastureLocalAPIVersion = "0.6.0"
+const PastureLocalAPIVersion = "0.7.0"
 
 // OpenAPIBytes returns the canonical OpenAPI 3.1 document. The generator and
 // the freshness test call this same function, so the committed artifact cannot
@@ -313,6 +313,13 @@ func openAPIDocument() map[string]any {
 				"ActivityState": map[string]any{
 					"type": "string",
 					"enum": []string{"active", "idle", "ended", "unknown"},
+					"description": "Prompt-based liveness. A recent user prompt makes an unbound session active. " +
+						"Tool, permission, binding, claim, model-switch, and role-change activity is not a prompt.",
+				},
+				"StateBasis": map[string]any{
+					"type":        "string",
+					"enum":        []string{"none", "prompt", "inactivity", "explicit-end"},
+					"description": "The evidence that decided `state`. `none` means no prompt evidence exists; `prompt` means the age of the last user prompt decided active or idle; `inactivity` means the prompt aged past the idle window and carries no end marker; `explicit-end` means an unsuperseded host session-end or an applicable explicit user unbind.",
 				},
 				"EndReason": map[string]any{
 					"type": "string",
@@ -370,12 +377,20 @@ func openAPIDocument() map[string]any {
 				),
 				"SessionActivity": objectSchema(
 					map[string]any{
-						"state":     ref("ActivityState"),
-						"firstSeen": map[string]any{"type": "string", "format": "date-time"},
-						"lastSeen":  map[string]any{"type": "string", "format": "date-time"},
+						"state":      ref("ActivityState"),
+						"stateBasis": ref("StateBasis"),
+						"firstSeen":  map[string]any{"type": "string", "format": "date-time"},
+						"lastSeen": map[string]any{
+							"type": "string", "format": "date-time",
+							"description": "Broad activity instant (journal, binding, claim, and state updates). This is not prompt recency.",
+						},
+						"lastPromptAt": map[string]any{
+							"type": "string", "format": "date-time",
+							"description": "The newest user-prompt instant. Absent when the store has no prompt evidence.",
+						},
 						"lastEvent": map[string]any{"type": "string"},
 					},
-					"state",
+					"state", "stateBasis",
 				),
 				"EndMarker": objectSchema(
 					map[string]any{

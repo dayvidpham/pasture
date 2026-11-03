@@ -102,7 +102,8 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("listen", "127.0.0.1:0", "")
-	cmd.Flags().Duration("active-window", 15*time.Minute, "")
+	cmd.Flags().Duration("active-window", 30*time.Minute, "")
+	cmd.Flags().Duration("idle-window", 24*time.Hour, "")
 	cmd.Flags().Bool("backfill", false, "")
 	cmd.Flags().String("peasant-db", "", "")
 	cmd.Flags().String("peasant-url", "", "")
@@ -203,7 +204,8 @@ func TestServeWebDirOverride(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("listen", "127.0.0.1:0", "")
-	cmd.Flags().Duration("active-window", 15*time.Minute, "")
+	cmd.Flags().Duration("active-window", 30*time.Minute, "")
+	cmd.Flags().Duration("idle-window", 24*time.Hour, "")
 	cmd.Flags().Bool("backfill", false, "")
 	cmd.Flags().String("peasant-db", "", "")
 	cmd.Flags().String("peasant-url", "", "")
@@ -271,7 +273,8 @@ func TestServeRejectsBadWebDirBeforeOpeningStore(t *testing.T) {
 	webDir := t.TempDir()
 	cmd := &cobra.Command{}
 	cmd.Flags().String("listen", "127.0.0.1:0", "")
-	cmd.Flags().Duration("active-window", 15*time.Minute, "")
+	cmd.Flags().Duration("active-window", 30*time.Minute, "")
+	cmd.Flags().Duration("idle-window", 24*time.Hour, "")
 	cmd.Flags().Bool("backfill", false, "")
 	cmd.Flags().String("peasant-db", "", "")
 	cmd.Flags().String("peasant-url", "", "")
@@ -437,7 +440,8 @@ func TestServeRejectsBothPeasantSources(t *testing.T) {
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("listen", "127.0.0.1:0", "")
-	cmd.Flags().Duration("active-window", 15*time.Minute, "")
+	cmd.Flags().Duration("active-window", 30*time.Minute, "")
+	cmd.Flags().Duration("idle-window", 24*time.Hour, "")
 	cmd.Flags().Bool("backfill", false, "")
 	cmd.Flags().String("peasant-db", "/tmp/peasant.db", "")
 	cmd.Flags().String("peasant-url", "http://127.0.0.1:8787", "")
@@ -459,5 +463,58 @@ func TestServePeasantFlagsAreOptInDefaults(t *testing.T) {
 		flag := serveCmd.Flags().Lookup(name)
 		require.NotNil(t, flag, name)
 		require.Empty(t, flag.DefValue, "%s must default to disabled", name)
+	}
+}
+
+// TestServeLivenessWindowDefaults pins the ratified 30-minute active and
+// 24-hour idle windows exposed by `pasture serve`.
+func TestServeLivenessWindowDefaults(t *testing.T) {
+	active := serveCmd.Flags().Lookup("active-window")
+	require.NotNil(t, active)
+	require.Equal(t, (30 * time.Minute).String(), active.DefValue)
+
+	idle := serveCmd.Flags().Lookup("idle-window")
+	require.NotNil(t, idle)
+	require.Equal(t, (24 * time.Hour).String(), idle.DefValue)
+}
+
+// TestServeRejectsInvalidLivenessWindows proves the CLI refuses a zero,
+// negative, equal, or inverted pair before the store is opened, with an
+// actionable message.
+func TestServeRejectsInvalidLivenessWindows(t *testing.T) {
+	cases := []struct {
+		name   string
+		active time.Duration
+		idle   time.Duration
+		match  string
+	}{
+		{"zero active", 0, time.Hour, "--active-window must be positive"},
+		{"negative active", -time.Minute, time.Hour, "--active-window must be positive"},
+		{"zero idle", time.Minute, 0, "--idle-window must be positive"},
+		{"negative idle", time.Minute, -time.Hour, "--idle-window must be positive"},
+		{"equal windows", time.Hour, time.Hour, "must be greater than --active-window"},
+		{"inverted windows", 2 * time.Hour, time.Hour, "must be greater than --active-window"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			previous := flagDBPath
+			flagDBPath = filepath.Join(t.TempDir(), "pasture.db")
+			t.Cleanup(func() { flagDBPath = previous })
+
+			cmd := &cobra.Command{}
+			cmd.Flags().String("listen", "127.0.0.1:0", "")
+			cmd.Flags().Duration("active-window", testCase.active, "")
+			cmd.Flags().Duration("idle-window", testCase.idle, "")
+			cmd.Flags().Bool("backfill", false, "")
+			cmd.Flags().String("peasant-db", "", "")
+			cmd.Flags().String("peasant-url", "", "")
+			cmd.Flags().String("web-dir", "", "")
+
+			err := runServe(cmd)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), testCase.match)
+			_, statErr := os.Stat(flagDBPath)
+			require.True(t, os.IsNotExist(statErr), "validation must run before the store is opened")
+		})
 	}
 }
