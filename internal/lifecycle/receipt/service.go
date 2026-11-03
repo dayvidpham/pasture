@@ -209,7 +209,9 @@ func (s Service) PrepareReceipt(ctx context.Context, warrant gate.Warrant, deliv
 		if err := execution.ValidateMetadata(metadata); err != nil {
 			return PendingReceipt{}, err
 		}
-		attribution = &metadata
+		if execution.HasEvidence(metadata) {
+			attribution = &metadata
+		}
 	}
 	transition := ""
 	if ingress.ExtractSessionTransition(delivery.Contract, delivery.Event, delivery.Body, delivery.Capture, delivery.Bindings) == model.SessionTransitionResume {

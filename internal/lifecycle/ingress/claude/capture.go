@@ -41,7 +41,7 @@ func Parse(raw []byte, event registration.Event, observedVersion string, envelop
 	}
 	result.Delivery.Capture = result.Disposition
 	if result.Disposition == model.CaptureValid {
-		if in, ok := execution.Native("claude-code", event.NativeName, validation.Body); ok {
+		if in, ok := execution.Native(manifest.Harness, event.Kind, validation.Body); ok {
 			result.Delivery.ExecutionInputs = &in
 		}
 	}

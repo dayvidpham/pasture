@@ -175,6 +175,14 @@ func TestLivenessFilterParity(t *testing.T) {
 	f.stateWithPrompt(t, "unbound-manual", now-10*minute, now-1*minute, now-1*minute, "PreToolUse", 5)
 	f.binding(t, "binding-unbound-manual", "unbound-manual", now-5*minute,
 		sql.NullInt64{Int64: now - minute, Valid: true}, "unbind")
+	f.stateWithPrompt(t, "host-ended", now-60*minute, now-minute, now-minute, "UserPromptSubmit", 6)
+	f.watermark(t, "host-ended", now-minute, now-20*minute, 0, 6, 0)
+	f.binding(t, "filter-host-ended", "host-ended", now-60*minute, sql.NullInt64{}, "")
+	f.stateWithPrompt(t, "resumed", now-60*minute, now-minute, now-minute, "UserPromptSubmit", 7)
+	f.watermark(t, "resumed", now-minute, now-20*minute, now-10*minute, 6, 7)
+	f.binding(t, "filter-resumed", "resumed", now-60*minute, sql.NullInt64{}, "")
+	f.stateWithPrompt(t, "legacy-end", now-60*minute, now-minute, now-minute, "UserPromptSubmit", 8)
+	f.binding(t, "filter-legacy", "legacy-end", now-60*minute, sql.NullInt64{Int64: now - 20*minute, Valid: true}, "session_end")
 	// An epoch-bound active session keeps the epoch active count meaningful.
 	f.binding(t, "binding-epoch-active", "unbound-active", now-10*minute, sql.NullInt64{}, "")
 
@@ -207,7 +215,7 @@ func TestLivenessFilterParity(t *testing.T) {
 	epochs, err := service.Epochs(ctx)
 	require.NoError(t, err)
 	require.Len(t, epochs.Items, 1)
-	require.Equal(t, 1, epochs.Items[0].ActiveCount,
+	require.Equal(t, 2, epochs.Items[0].ActiveCount,
 		"the epoch active count must equal the active sessions the page reports")
 }
 

@@ -235,10 +235,7 @@ func claimSessionTx(ctx context.Context, tx *sql.Tx, harness ir.HarnessID, sessi
 // update; last_seen/last_event follow the highest journal id so an out-of-order
 // delivery cannot rewind the cache.
 func upsertSessionStateTx(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) (bool, error) {
-	nativeName, ok := registration.NativeName(in.Contract, in.EventKind)
-	if !ok {
-		nativeName = fmt.Sprintf("event-%d", in.EventKind)
-	}
+	nativeName, _ := registration.NativeName(in.Contract, in.EventKind)
 	recordedAt := in.RecordedAt.UnixNano()
 	journalID := int64(in.OccurrenceID.JournalID())
 	var promptAt, promptID, endAt, endID, resumeAt, resumeID int64
@@ -288,8 +285,8 @@ func isSessionEnd(harness ir.HarnessID, contract ir.RuntimeContractID, kind mode
 	if harness != ir.HarnessClaudeCode && harness != ir.HarnessCodex {
 		return false
 	}
-	name, ok := registration.NativeName(contract, kind)
-	return ok && name == "SessionEnd"
+	event, ok := registration.EventFor(contract, kind)
+	return ok && event.SessionTransition == model.SessionTransitionEnd
 }
 
 func closeSessionBindingTx(ctx context.Context, tx *sql.Tx, harness ir.HarnessID, session string, at int64) error {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1156,4 +1157,109 @@ func TestProjectEnrichmentUnavailableKeepsReads(t *testing.T) {
 	require.Equal(t, peasantproject.SourceDB, inspect.PeasantIntegration.Source)
 	require.Equal(t, sessionapi.PeasantIntegrationUnavailable, inspect.PeasantIntegration.Status)
 	require.Contains(t, inspect.PeasantIntegration.Message, "no such file")
+}
+
+func TestDirtyCacheRefusedAcrossReads(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, err := f.db.Exec(`UPDATE pasture_session_api_state SET dirty=1 WHERE singleton_id=0`)
+	require.NoError(t, err)
+	s := f.service()
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"list", func() error { _, e := s.List(ctx, sessionapi.ListOptions{}); return e }},
+		{"get", func() error { _, e := s.Get(ctx, "claude-code", "missing"); return e }},
+		{"history", func() error {
+			_, e := s.ExecutionHistory(ctx, "claude-code", "missing", sessionapi.ExecutionHistoryOptions{})
+			return e
+		}},
+		{"epochs", func() error { _, e := s.Epochs(ctx); return e }},
+	} {
+		t.Run(tc.name, func(t *testing.T) { require.ErrorIs(t, tc.call(), sessionapi.ErrStaleCache) })
+	}
+}
+
+func TestEnsureCoalescesCleanBurstButNotDirtyCache(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	s := f.service()
+	s.EnsureNow = func() time.Time { return f.now }
+	calls := 0
+	s.Ensure = func(ctx context.Context) error {
+		calls++
+		_, err := f.db.ExecContext(ctx, `UPDATE pasture_session_api_state SET dirty=0 WHERE singleton_id=0`)
+		return err
+	}
+	_, err := s.List(t.Context(), sessionapi.ListOptions{})
+	require.NoError(t, err)
+	_, err = s.List(t.Context(), sessionapi.ListOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+	_, err = f.db.Exec(`UPDATE pasture_session_api_state SET dirty=1 WHERE singleton_id=0`)
+	require.NoError(t, err)
+	_, err = s.List(t.Context(), sessionapi.ListOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
+}
+
+func TestEnsureConcurrentReadsShareOneRun(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	s := f.service()
+	s.EnsureNow = func() time.Time { return f.now }
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int64
+	s.Ensure = func(context.Context) error {
+		if calls.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		return nil
+	}
+	result := make(chan error, 2)
+	go func() { _, err := s.List(t.Context(), sessionapi.ListOptions{}); result <- err }()
+	<-entered
+	go func() { _, err := s.List(t.Context(), sessionapi.ListOptions{}); result <- err }()
+	close(release)
+	require.NoError(t, <-result)
+	require.NoError(t, <-result)
+	require.EqualValues(t, 1, calls.Load())
+}
+
+func TestEnsureStorageFailureIsNotStale(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	s := f.service()
+	s.Ensure = func(context.Context) error { return errors.New("constructed storage failure") }
+	server := httptest.NewServer(sessionapi.NewHandler(s))
+	defer server.Close()
+	res, err := http.Get(server.URL + "/api/v1/sessions")
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, res.StatusCode)
+	var payload struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&payload))
+	require.Equal(t, "storage_fault", payload.Error.Code)
+}
+
+func TestInspectEnsuresOncePerResponse(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	s := f.service()
+	calls := 0
+	s.Ensure = func(context.Context) error { calls++; return nil }
+	// Advance the coalescing clock far enough that caching cannot hide a second call.
+	var tick atomic.Int64
+	s.EnsureNow = func() time.Time { return f.now.Add(time.Duration(tick.Add(1)) * time.Second) }
+	_, err := s.Inspect(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
 }

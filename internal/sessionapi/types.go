@@ -6,6 +6,7 @@ package sessionapi
 
 import (
 	"errors"
+	"github.com/dayvidpham/pasture/internal/sessioncache"
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
@@ -301,7 +302,7 @@ var (
 	ErrInvalidPageToken = errors.New("invalid page token")
 	ErrInvalidFilter    = errors.New("invalid filter")
 	ErrInvalidWindow    = errors.New("invalid liveness window")
-	ErrStaleCache       = errors.New("session cache is stale")
+	ErrStaleCache       = sessioncache.ErrStale
 )
 
 // EpochView is one projected epoch and its current session population.

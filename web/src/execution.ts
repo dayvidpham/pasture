@@ -41,7 +41,7 @@ export function attributionText(value: AttributionValue): string {
 }
 
 /** attributionSource keeps the evidence origin visible beside the value. */
-export function attributionSource(value: AttributionValue): string {
+function attributionSource(value: AttributionValue): string {
   if (value.status !== 'observed') {
     return value.source === 'none' ? 'no source' : value.source
   }
@@ -153,4 +153,9 @@ export function applySessionsFrame(frame: SessionsFrame) {
 }
 export function applyEpochsFrame(frame: EpochsFrame) {
   return { items: frame.payload.items, revision: frame.revision, asOf: frame.asOf }
+}
+
+/** A pending history page belongs only to its original selected session. */
+export function historyPageMatches(currentKey: string, requestKey: string): boolean {
+  return currentKey === requestKey
 }

@@ -245,6 +245,19 @@ func TestExecutionHistoryRoute(t *testing.T) {
 	require.Equal(t, "model-12", executionPayload["model"].(map[string]any)["value"])
 	require.Equal(t, "observed", executionPayload["model"].(map[string]any)["status"])
 
+	unknown, err := http.Get(server.URL + "/api/v1/sessions/claude-code/not-found/execution")
+	require.NoError(t, err)
+	defer unknown.Body.Close()
+	require.Equal(t, http.StatusOK, unknown.StatusCode)
+	var empty sessionapi.ExecutionHistoryPage
+	require.NoError(t, json.NewDecoder(unknown.Body).Decode(&empty))
+	require.NotNil(t, empty.Items)
+	require.Empty(t, empty.Items)
+	badKey, err := http.Get(server.URL + "/api/v1/sessions/claude-code/%20/execution")
+	require.NoError(t, err)
+	defer badKey.Body.Close()
+	require.Equal(t, http.StatusBadRequest, badKey.StatusCode)
+
 	badLimit, err := http.Get(server.URL + "/api/v1/sessions/claude-code/route/execution?limit=0")
 	require.NoError(t, err)
 	badLimit.Body.Close()

@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -19,6 +21,8 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/peasantproject"
+	"github.com/dayvidpham/pasture/internal/sessionapi"
+	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
 // The main-only race job runs this package under heavy instrumentation and CI
@@ -154,6 +158,22 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 	require.NoError(t, err)
 	defer response.Body.Close()
 	require.Equal(t, http.StatusOK, response.StatusCode)
+	db, err := sql.Open("sqlite", flagDBPath)
+	require.NoError(t, err)
+	_, err = db.Exec(`UPDATE pasture_session_api_state SET cache_version=99 WHERE singleton_id=0`)
+	require.NoError(t, err)
+	for _, route := range []string{"/api/v1/sessions", "/api/v1/sessions/claude-code/example"} {
+		res, err := http.Get(base + route)
+		require.NoError(t, err)
+		body, err := io.ReadAll(res.Body)
+		require.NoError(t, err)
+		require.NoError(t, res.Body.Close())
+		require.Equal(t, http.StatusServiceUnavailable, res.StatusCode)
+		require.Contains(t, string(body), "stale_session_cache")
+	}
+	_, err = db.Exec(`UPDATE pasture_session_api_state SET cache_version=2 WHERE singleton_id=0`)
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
 
 	// The compiled console is embedded in the test binary through the same
 	// production package, so this proves the default serve path is UI+API.
@@ -535,4 +555,14 @@ func TestServeRejectsInvalidLivenessWindows(t *testing.T) {
 			require.True(t, os.IsNotExist(statErr), "validation must run before the store is opened")
 		})
 	}
+}
+
+func TestSessionEnsureErrorClassification(t *testing.T) {
+	underlying := errors.New("disk error")
+	require.Same(t, underlying, mapSessionEnsureError(underlying))
+	require.NotErrorIs(t, mapSessionEnsureError(underlying), sessionapi.ErrStaleCache)
+	exhausted := fmt.Errorf("publication: %w", tasks.ErrSessionReplayExhausted)
+	mapped := mapSessionEnsureError(exhausted)
+	require.ErrorIs(t, mapped, sessionapi.ErrStaleCache)
+	require.ErrorIs(t, mapped, tasks.ErrSessionReplayExhausted)
 }

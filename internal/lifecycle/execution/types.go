@@ -127,3 +127,14 @@ type Metadata struct {
 	Role         AttributionValue `json:"role"`
 	ProtocolRole AttributionValue `json:"protocolRole"`
 }
+
+// HasEvidence reports whether an observation conveys any actual evidence,
+// including rejected or conflicting evidence and unchosen candidates.
+func HasEvidence(m Metadata) bool {
+	for _, field := range [...]AttributionValue{m.Provider, m.Model, m.Variant, m.Role, m.ProtocolRole} {
+		if field.Status == Observed || field.Status == Invalid || field.Status == Conflict || len(field.Candidates) != 0 {
+			return true
+		}
+	}
+	return false
+}

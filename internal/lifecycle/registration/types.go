@@ -92,17 +92,21 @@ func ManifestFor(contract ir.RuntimeContractID) (Manifest, bool) {
 
 // EventFor resolves one pinned contract and typed event kind to the exact
 // registered event.
-func EventFor(contract ir.RuntimeContractID, kind model.ContractEventKind) (Event, bool) {
+func EventWithManifest(contract ir.RuntimeContractID, kind model.ContractEventKind) (Manifest, Event, bool) {
 	manifest, ok := ManifestFor(contract)
-	if !ok {
-		return Event{}, false
-	}
-	for _, event := range manifest.Events {
-		if event.Kind == kind {
-			return event, true
+	if ok {
+		for _, event := range manifest.Events {
+			if event.Kind == kind {
+				return manifest, event, true
+			}
 		}
 	}
-	return Event{}, false
+	return Manifest{}, Event{}, false
+}
+
+func EventFor(contract ir.RuntimeContractID, kind model.ContractEventKind) (Event, bool) {
+	_, event, ok := EventWithManifest(contract, kind)
+	return event, ok
 }
 
 // NativeName resolves the exact native event spelling for one pinned contract

@@ -783,3 +783,5 @@ body {
   cursor: default;
   text-decoration: none;
 }
+
+.detail-list dd.muted { color: var(--ink-3); }

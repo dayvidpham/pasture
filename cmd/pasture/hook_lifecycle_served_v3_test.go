@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -114,6 +116,62 @@ func TestBuiltHookExecutionReachesTheSessionAPI(t *testing.T) {
 				"the summary is the newest observation in the history")
 			require.Equal(t, firstOccurrence, history.Items[1].OccurrenceID,
 				"the first receipt remains the older history row")
+		})
+	}
+}
+
+// A bare prompt carries liveness but must not replace the observed startup model.
+func TestBarePromptDoesNotEraseExecutionSummary(t *testing.T) {
+	for _, key := range []string{"PASTURE_EXECUTION_MODEL", "PASTURE_EXECUTION_PROVIDER", "PASTURE_EXECUTION_ROLE"} {
+		t.Setenv(key, "")
+		require.NoError(t, os.Unsetenv(key))
+	}
+	binary := lifecycleBinary(t)
+	start := claudeFixture(t, "session_start_2_1_261.json")
+	prompt := claudeFixture(t, "user_prompt_submit_2_1_261.json")
+	session := captureSessionIDOf(t, start, ir.HarnessClaudeCode)
+	prompt = bytes.ReplaceAll(prompt, []byte(captureSessionIDOf(t, prompt, ir.HarnessClaudeCode)), []byte(session))
+	for _, route := range []string{"direct", "served"} {
+		t.Run(route, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), tasks.DefaultDBFilename.String())
+			initializeWarmLaneTestDatabase(t, path)
+			env := []string{"PASTURE_CAPTURE_DIR="}
+			if route == "direct" {
+				env = append(env, "PASTURE_WRITE_LANE=direct")
+			} else {
+				env = append(env, "PASTURE_WRITE_LANE=auto", "PASTURE_WRITE_LANE_SOCKET="+startHookTestWriteLane(t, path))
+			}
+			first := runLifecycleHook(t, binary, path, "SessionStart", start, env...)
+			require.Zero(t, first.ExitCode, first.Stderr)
+			tracker, err := tasks.OpenTaskTracker(path)
+			require.NoError(t, err)
+			defer tracker.Close()
+			_, err = tasks.RebuildSessionState(context.Background(), tracker)
+			require.NoError(t, err)
+			db, err := dbconn.OpenReadOnlyDB(path)
+			require.NoError(t, err)
+			defer db.Close()
+			svc := sessionapi.NewService(db)
+			before, err := svc.Get(context.Background(), "claude-code", session)
+			require.NoError(t, err)
+			require.NotNil(t, before.Session.Execution)
+			require.Equal(t, "claude-fable-5-1", before.Session.Execution.Model.Value)
+			run := runLifecycleHook(t, binary, path, "UserPromptSubmit", prompt, env...)
+			require.Zero(t, run.ExitCode, run.Stderr)
+			_, _, err = tasks.EnsureSessionState(context.Background(), tracker)
+			require.NoError(t, err)
+			after, err := svc.Get(context.Background(), "claude-code", session)
+			require.NoError(t, err)
+			require.Equal(t, before.Session.Execution.OccurrenceID, after.Session.Execution.OccurrenceID)
+			declared := append(append([]string{}, env...), "PASTURE_EXECUTION_MODEL=declared-model")
+			run = runLifecycleHook(t, binary, path, "UserPromptSubmit", prompt, declared...)
+			require.Zero(t, run.ExitCode, run.Stderr)
+			_, _, err = tasks.EnsureSessionState(context.Background(), tracker)
+			require.NoError(t, err)
+			last, err := svc.Get(context.Background(), "claude-code", session)
+			require.NoError(t, err)
+			require.Greater(t, last.Session.Execution.OccurrenceID, before.Session.Execution.OccurrenceID)
+			require.Equal(t, "declared-model", last.Session.Execution.Model.Value)
 		})
 	}
 }

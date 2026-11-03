@@ -232,7 +232,7 @@ func requireCompleteSemantic(t *testing.T, envelope model.SemanticEnvelopeRef, o
 }
 
 // TestReceiveCommitsBothCompleteEnvelopes is the core production pin: a valid
-// observation delivery commits occurrence.v2 with four nonzero refs plus
+// observation delivery commits occurrence.v3 with four nonzero refs plus
 // interpreted.v3 with five nonzero refs and three exactly shared refs, every
 // ref owner-resolvable, and both envelopes exposed through rebuild, Records,
 // close/reopen, and the non-reclaiming transaction replay. Red-verified by
@@ -254,7 +254,7 @@ func TestReceiveCommitsBothCompleteEnvelopes(t *testing.T) {
 
 	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(occurrences) != 1 {
-		t.Fatalf("occurrence.v2 rows = %d, want exactly one", len(occurrences))
+		t.Fatalf("occurrence.v3 rows = %d, want exactly one", len(occurrences))
 	}
 	occurrence := decodeEnvelopeOccurrence(t, occurrences[0].Payload)
 	requireCompleteOccurrence(t, occurrence.Envelope, delivery.Contract)
@@ -453,7 +453,7 @@ func TestReceiveCommitsGatePairWithFinalConsultation(t *testing.T) {
 	interpreted := queryEnvelopeKind(t, store.tracker, envelopeInterpretedV3)
 	consultations := queryEnvelopeKind(t, store.tracker, envelopeConsultationV2)
 	if len(occurrences) != 1 || len(interpreted) != 1 || len(consultations) != 1 {
-		t.Fatalf("rows = %d/%d/%d, want one occurrence.v2, one interpreted.v3 and one consultation", len(occurrences), len(interpreted), len(consultations))
+		t.Fatalf("rows = %d/%d/%d, want one occurrence.v3, one interpreted.v3 and one consultation", len(occurrences), len(interpreted), len(consultations))
 	}
 	operation := occurrences[0].ProducingOperationID
 	if interpreted[0].ProducingOperationID != operation || consultations[0].ProducingOperationID != operation {
@@ -478,7 +478,7 @@ func TestReceiveCommitsGatePairWithFinalConsultation(t *testing.T) {
 }
 
 // TestReceiveRecordOnlyMalformedCommitsCompleteOccurrence proves malformed and
-// unsupported captures commit a record-only complete occurrence.v2 with no
+// unsupported captures commit a record-only complete occurrence.v3 with no
 // fabricated semantic record, and that prepared effects supplied for a
 // non-valid capture are refused outright rather than committed or dropped.
 func TestReceiveRecordOnlyMalformedCommitsCompleteOccurrence(t *testing.T) {
@@ -513,7 +513,7 @@ func TestReceiveRecordOnlyMalformedCommitsCompleteOccurrence(t *testing.T) {
 	}
 	occurrences := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(occurrences) != before+1 {
-		t.Fatalf("occurrence.v2 rows = %d, want one new record-only occurrence", len(occurrences))
+		t.Fatalf("occurrence.v3 rows = %d, want one new record-only occurrence", len(occurrences))
 	}
 	occurrence := decodeEnvelopeOccurrence(t, occurrences[len(occurrences)-1].Payload)
 	requireCompleteOccurrence(t, occurrence.Envelope, delivery.Contract)
@@ -542,7 +542,7 @@ func TestReceiveRecordOnlyMalformedCommitsCompleteOccurrence(t *testing.T) {
 		t.Fatal("Receive committed prepared effects for an unsupported capture; want refusal")
 	}
 	if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)); got != before+1 {
-		t.Fatalf("occurrence.v2 rows = %d after refused write, want no new row", got)
+		t.Fatalf("occurrence.v3 rows = %d after refused write, want no new row", got)
 	}
 
 	assertBothEnvelopesReadable(t, ctx, store, committed.JournalID(), delivery.Contract, false)
@@ -603,7 +603,7 @@ func TestReceiveRefusesForgedSuppliedRefsBeforeAnyAppend(t *testing.T) {
 				t.Fatalf("Receive accepted %s; want refusal before any append", tc.name)
 			}
 			if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)); got != 1 {
-				t.Fatalf("occurrence.v2 rows = %d after refused write, want exactly the seed row", got)
+				t.Fatalf("occurrence.v3 rows = %d after refused write, want exactly the seed row", got)
 			}
 		})
 	}
@@ -712,7 +712,7 @@ func TestV2OriginOmissionAndRawCarriage(t *testing.T) {
 	}
 	rows := queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(rows) != 1 {
-		t.Fatalf("occurrence.v2 rows = %d, want one", len(rows))
+		t.Fatalf("occurrence.v3 rows = %d, want one", len(rows))
 	}
 	if bytes.Contains(rows[0].Payload, []byte("origin")) {
 		t.Fatalf("unset-origin v2 payload carries an origin member:\n%s", rows[0].Payload)
@@ -726,7 +726,7 @@ func TestV2OriginOmissionAndRawCarriage(t *testing.T) {
 	}
 	rows = queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)
 	if len(rows) != 2 {
-		t.Fatalf("occurrence.v2 rows = %d, want two", len(rows))
+		t.Fatalf("occurrence.v3 rows = %d, want two", len(rows))
 	}
 	if got := strings.Count(string(rows[1].Payload), `"origin":"raw"`); got != 2 {
 		t.Fatalf("raw-origin v2 payload carries origin %d times, want payload + envelope (2)", got)
@@ -751,7 +751,7 @@ func TestWindowAcceptanceCommitsOnTheProductionPath(t *testing.T) {
 		t.Fatalf("inside-window Receive: %v", err)
 	}
 	if got := len(queryEnvelopeKind(t, store.tracker, envelopeOccurrenceV3)); got != 2 {
-		t.Fatalf("occurrence.v2 rows = %d, want two accepted deliveries", got)
+		t.Fatalf("occurrence.v3 rows = %d, want two accepted deliveries", got)
 	}
 }
 

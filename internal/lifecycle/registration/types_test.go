@@ -49,3 +49,22 @@ func moduleRoot(t *testing.T) string {
 	require.NoError(t, err)
 	return filepath.Clean(filepath.Join(dir, "..", "..", ".."))
 }
+
+func TestManifestInventoryMatchesPinnedConstructors(t *testing.T) {
+	t.Parallel()
+	expected := []registration.Manifest{registration.ClaudeCode__2_1_261(), registration.Codex__0_153_0(), registration.OpenCode__1_18_29(), registration.OpenCode__2_0_20()}
+	actual := registration.Manifests()
+	require.Len(t, actual, 4)
+	type key struct {
+		harness  string
+		contract string
+	}
+	keys := func(in []registration.Manifest) []key {
+		out := make([]key, 0, len(in))
+		for _, m := range in {
+			out = append(out, key{string(m.Harness), m.Contract.String()})
+		}
+		return out
+	}
+	require.ElementsMatch(t, keys(expected), keys(actual))
+}

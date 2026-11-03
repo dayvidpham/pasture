@@ -26,7 +26,7 @@ const OccurrenceEvidenceKindV3 = occurrenceEvidenceKindV3
 // occurrenceEvidenceKinds is the closed set of occurrence evidence kinds the
 // replay admits. v1 is read-only legacy (all-zero envelopes pass through;
 // any nonzero ref must validate); v2 and v3 carry the complete four-reference
-// envelope. The writer still emits v2 until the v3 path is coordinated.
+// envelope. New receipts are emitted as v3.
 var occurrenceEvidenceKinds = []provenance.EvidenceKind{occurrenceEvidenceKind, occurrenceEvidenceKindV2, occurrenceEvidenceKindV3}
 
 type occurrencePayload struct {

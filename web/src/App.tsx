@@ -47,6 +47,7 @@ import {
   attributionText,
   executionKindLabel,
   executionRows,
+  historyPageMatches,
   applySessionsFrame,
   applyEpochsFrame,
   livenessRows,
@@ -247,11 +248,11 @@ export function ExecutionSummary({ execution }: { execution?: SessionExecution }
     <div className="execution-summary" data-kind={execution.kind}>
       <p className="eyebrow">execution · {executionKindLabel(execution.kind)}</p>
       <dl className="detail-list">
-        {executionRows(execution).map((row) => (
+        {executionRows(execution).filter((row) => row.label !== 'kind').map((row) => (
           <div key={row.label}>
             <dt>{row.label}</dt>
             <dd className={row.muted ? 'muted' : undefined}>
-              <span>{row.value}</span>
+              <span>{row.label === 'observed' ? formatTime(row.value) : row.value}</span>
               {row.source && <span className="attribution-source">{row.source}</span>}
             </dd>
           </div>
@@ -950,6 +951,7 @@ export default function App() {
   // independently snapshot-pinned.
   useEffect(() => {
     if (!selectedHarness || !selectedNativeId || !transcriptKey) {
+      setExecutionBusy(false)
       setExecutionHistory({ key: '', items: [], error: null })
       return
     }
@@ -995,7 +997,7 @@ export default function App() {
       .then((page) => {
         if (controller.signal.aborted) return
         setExecutionHistory((previous) =>
-          previous.key === transcriptKey
+          historyPageMatches(previous.key, transcriptKey)
             ? {
                 key: transcriptKey,
                 items: appendExecutionPage(previous.items, page),
@@ -1008,7 +1010,7 @@ export default function App() {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setExecutionHistory((previous) =>
-          previous.key === transcriptKey
+          historyPageMatches(previous.key, transcriptKey)
             ? {
                 ...previous,
                 error:
@@ -1426,7 +1428,7 @@ export default function App() {
             title="no sessions match"
             message={
               sessions.length === 0
-                ? 'The local store has no claimed or bound sessions yet. Start a harness session, or restart serve with --backfill to load history.'
+                ? 'The local store has no claimed or bound sessions yet. Start a harness session; inventory refreshes on reads. Use --backfill to force a full rebuild.'
                 : 'Adjust the state, epoch, or project filter to widen the inventory.'
             }
           />

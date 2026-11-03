@@ -167,3 +167,19 @@ func TestSessionReplayRefusesUnknownOccurrenceKind(t *testing.T) {
 	_, err := RebuildSessionState(t.Context(), tracker)
 	require.ErrorContains(t, err, "unsupported lifecycle occurrence")
 }
+
+// Constructed fact: a validated v3 resume token remains authoritative even if
+// the pinned manifest later changes; an absent token never proves resume.
+func TestReplayV3TransitionPrecedesCurrentManifest(t *testing.T) {
+	t.Parallel()
+	fact := projection.OccurrenceFact{Version: projection.OccurrenceEvidenceKindV3, Capture: model.CaptureValid, Contract: registration.OpenCode__2_0_20().Contract, Event: registration.EventOpenCode2SessionContext, SessionTransition: model.SessionTransitionResume}
+	got, err := replaySessionTransition(t.Context(), nil, fact)
+	require.NoError(t, err)
+	require.Equal(t, model.SessionTransitionResume, got)
+	fact.Contract = registration.ClaudeCode__2_1_261().Contract
+	fact.Event = registration.EventSessionStart
+	fact.SessionTransition = model.SessionTransitionNone
+	got, err = replaySessionTransition(t.Context(), nil, fact)
+	require.NoError(t, err)
+	require.Equal(t, model.SessionTransitionNone, got)
+}

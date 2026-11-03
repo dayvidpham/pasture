@@ -72,8 +72,7 @@ func storedTransition(value string) model.SessionTransition {
 	case model.SessionTransitionResumeToken:
 		return model.SessionTransitionResume
 	default:
-		// An unknown token is refused by the caller's validation; never fold it
-		// into "none", which would silently reopen a session dressed as absence.
+		// The decoder rejects unknown tokens before this conversion is called.
 		return model.SessionTransitionNone
 	}
 }

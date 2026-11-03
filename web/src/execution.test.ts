@@ -6,7 +6,7 @@ import {
   applySessionsFrame,
   applyEpochsFrame,
   appendExecutionPage,
-  attributionSource,
+  historyPageMatches,
   attributionText,
   executionKindLabel,
   executionRows,
@@ -69,7 +69,7 @@ function execution(overrides: Partial<SessionExecution> = {}): SessionExecution 
 describe('attribution rendering', () => {
   it('renders one observed value with its exact source and member', () => {
     expect(attributionText(observed('claude-sonnet'))).toBe('claude-sonnet')
-    expect(attributionSource(observed('claude-sonnet'))).toBe('host · model.id')
+    expect(executionRows(execution()).find((row) => row.label === 'model')?.source).toBe('host · model.id')
   })
 
   it('never invents a value for unavailable or invalid evidence', () => {
@@ -77,7 +77,7 @@ describe('attribution rendering', () => {
     expect(
       attributionText({ status: 'invalid', source: 'host', field: 'model', reason: 'rejected-input' }),
     ).toBe('invalid evidence (rejected input)')
-    expect(attributionSource(unavailable)).toBe('no source')
+    expect(executionRows(execution({ model: unavailable })).find((row) => row.label === 'model')?.source).toBe('no source')
   })
 
   it('shows every bounded candidate for a conflict instead of picking a winner', () => {
@@ -106,6 +106,7 @@ describe('execution presentation', () => {
   it('keeps native role and protocol role in their own vocabularies', () => {
     const rows = executionRows(execution())
     expect(rows.find((row) => row.label === 'native role')?.value).toBe('build')
+    expect(rows.find((row) => row.label === 'native role')?.source).toBe('host · agent · native-agent')
     expect(rows.find((row) => row.label === 'protocol role')?.value).toBe('worker')
     const unavailableRows = executionRows(
       execution({ provider: unavailable, model: unavailableRole, protocolRole: unavailableProtocolRole }),
@@ -133,11 +134,11 @@ describe('execution presentation', () => {
       lastSeen: '2026-11-03T00:30:00Z',
       lastEvent: 'PreToolUse',
     }
-    const rows = livenessRows(activity)
+    const rows = livenessRows(activity, (value) => `formatted:${value}`)
     expect(rows.find((row) => row.label === 'basis')?.value).toBe('prompt')
-    expect(rows.find((row) => row.label === 'last prompt')?.value).toBe('2026-11-03T00:00:00Z')
+    expect(rows.find((row) => row.label === 'last prompt')?.value).toBe('formatted:2026-11-03T00:00:00Z')
     expect(rows.find((row) => row.label === 'broad activity')?.value).toBe(
-      '2026-11-03T00:30:00Z',
+      'formatted:2026-11-03T00:30:00Z',
     )
     const noPrompt = livenessRows({ state: 'unknown', stateBasis: 'none' })
     expect(noPrompt.find((row) => row.label === 'last prompt')?.muted).toBe(true)
@@ -169,4 +170,9 @@ describe('watch snapshots', () => {
     expect(applyEpochsFrame(epoch).items).toHaveLength(0)
     expect(applyEpochsFrame(laterEpoch)).toMatchObject({ revision: 7, asOf: 'later', items: [{ id: 'new' }] })
   })
+})
+
+it('ignores history pages for a previous selection', () => {
+  expect(historyPageMatches('claude:a', 'claude:a')).toBe(true)
+  expect(historyPageMatches('claude:b', 'claude:a')).toBe(false)
 })

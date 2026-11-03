@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/dayvidpham/pasture/internal/sessioncache"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
@@ -118,6 +119,9 @@ const sessionReplayMaxAttempts = 8
 
 var errSessionReplayChanged = errors.New("session replay generation or journal changed")
 
+// ErrSessionReplayExhausted identifies contention across every bounded replay attempt.
+var ErrSessionReplayExhausted = errors.New("session replay publication attempts exhausted")
+
 // The observer is private, per-invocation dependency injection for deterministic
 // interleavings. Both public production entry points supply nil. It is not an
 // execution-publication hook: publication itself is one concrete SQL path below.
@@ -137,7 +141,7 @@ func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forc
 			return SessionStateRebuildOutcome{}, false, staleSessionReplay(err)
 		}
 		if start.CacheVersion > audit.SessionCacheVersion {
-			return SessionStateRebuildOutcome{}, false, staleSessionReplay(fmt.Errorf("cache version %d is newer than supported version %d; upgrade Pasture", start.CacheVersion, audit.SessionCacheVersion))
+			return SessionStateRebuildOutcome{}, false, fmt.Errorf("%w: cache version %d is newer than supported version %d; upgrade Pasture", sessioncache.ErrStale, start.CacheVersion, audit.SessionCacheVersion)
 		}
 		full := forceFull || !start.Found || start.Dirty || start.Revision == 0 || start.CacheVersion != audit.SessionCacheVersion
 		after := provenance.JournalID(start.CompletedThroughJournalID)
@@ -170,7 +174,7 @@ func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forc
 		}
 		return out, true, nil
 	}
-	return SessionStateRebuildOutcome{}, false, staleSessionReplay(fmt.Errorf("the store changed during all %d bounded publication attempts", sessionReplayMaxAttempts))
+	return SessionStateRebuildOutcome{}, false, staleSessionReplay(fmt.Errorf("%w: the store changed during all %d bounded publication attempts", ErrSessionReplayExhausted, sessionReplayMaxAttempts))
 }
 
 func staleSessionReplay(cause error) error {
@@ -236,11 +240,7 @@ func scanSessionReplay(ctx context.Context, store lifecycleReceiptStore, after p
 			}
 			if jid > row.lastJournalID {
 				row.lastSeen, row.lastJournalID = fact.ReceivedAt, jid
-				var known bool
-				row.lastEvent, known = registration.NativeName(fact.Contract, fact.Event)
-				if !known {
-					row.lastEvent = fmt.Sprintf("event-%d", fact.Event)
-				}
+				row.lastEvent, _ = registration.NativeName(fact.Contract, fact.Event)
 			}
 			transition, err := replaySessionTransition(ctx, store, fact)
 			if err != nil {

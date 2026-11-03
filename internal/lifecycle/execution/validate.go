@@ -7,8 +7,10 @@ import (
 
 // ValidateMetadata checks a decoded attribution before it is exposed. Its error
 // never includes supplied evidence, which may have come from a damaged journal.
+var invalidMetadata = errors.New("execution metadata is malformed or exceeds its bounds; restore the occurrence from a verified backup")
+
 func ValidateMetadata(m Metadata) error {
-	invalid := errors.New("execution metadata is malformed or exceeds its bounds; restore the occurrence from a verified backup")
+	invalid := invalidMetadata
 	if !m.Kind.IsValid() {
 		return invalid
 	}

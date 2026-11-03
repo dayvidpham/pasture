@@ -121,18 +121,6 @@ func TestEnsureSessionStateRebuildsOnlyWhenNeeded(t *testing.T) {
 	require.Equal(t, int64(0), dirty)
 }
 
-func readRebuiltState(t *testing.T, db interface {
-	QueryRow(string, ...any) *sql.Row
-}, harness, session string) (first, last, journal, updated int64, event string) {
-	t.Helper()
-	err := db.QueryRow(`
-		SELECT first_seen, last_seen, last_journal_id, updated_at, last_event
-		FROM pasture_session_state WHERE harness = ? AND session = ?`, harness, session).
-		Scan(&first, &last, &journal, &updated, &event)
-	require.NoError(t, err)
-	return first, last, journal, updated, event
-}
-
 func TestRebuildSessionStateMatchesLiveTail(t *testing.T) {
 	t.Parallel()
 	tracker, db, path := claimStore(t)
@@ -499,8 +487,13 @@ func TestFullRebuildRepairsDivergentExecutionCache(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec(`UPDATE pasture_session_api_state SET completed_through_jid=0 WHERE singleton_id=0`)
 	require.NoError(t, err)
+	before, err := tasks.ReadSessionStateStatus(t.Context(), tracker)
+	require.NoError(t, err)
 	_, _, err = tasks.EnsureSessionState(t.Context(), tracker)
 	require.ErrorContains(t, err, "conflicts with journal evidence")
+	after, err := tasks.ReadSessionStateStatus(t.Context(), tracker)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 	_, err = tasks.RebuildSessionState(t.Context(), tracker)
 	require.NoError(t, err)
 	var repaired string

@@ -139,6 +139,10 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 // executionHistory serves one snapshot-pinned page of a session's normalized
 // execution observations, including auxiliary and child records.
 func (h *handler) executionHistory(w http.ResponseWriter, r *http.Request) {
+	if !validSessionKey(r.PathValue("harness")) || !validSessionKey(r.PathValue("nativeSessionId")) {
+		writeError(w, http.StatusBadRequest, "invalid_session_key", "harness and nativeSessionId must be non-empty, at most 512 bytes, and contain no controls or slashes")
+		return
+	}
 	query := r.URL.Query()
 	limit, ok := parseLimit(w, r)
 	if !ok {
@@ -563,7 +567,7 @@ func knownHarnessNames() string {
 }
 
 func validSessionKey(value string) bool {
-	if value == "" || len(value) > 512 || strings.Contains(value, "/") {
+	if strings.TrimSpace(value) == "" || len(value) > 512 || strings.Contains(value, "/") {
 		return false
 	}
 	for _, r := range value {

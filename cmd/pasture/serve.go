@@ -181,9 +181,9 @@ func runServe(cmd *cobra.Command) error {
 	service.Ensure = func(ctx context.Context) error {
 		_, _, err := tasks.EnsureSessionState(ctx, tracker)
 		if err != nil {
-			return fmt.Errorf("%w: %v", sessionapi.ErrStaleCache, err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "pasture serve: session cache refresh: %v\n", err)
 		}
-		return nil
+		return mapSessionEnsureError(err)
 	}
 	store, err := tasks.NewSessionAPIStore(tracker)
 	if err != nil {
@@ -233,6 +233,13 @@ func runServe(cmd *cobra.Command) error {
 		}
 		return nil
 	}
+}
+
+func mapSessionEnsureError(err error) error {
+	if errors.Is(err, tasks.ErrSessionReplayExhausted) {
+		return fmt.Errorf("%w: %w", sessionapi.ErrStaleCache, err)
+	}
+	return err
 }
 
 // newPeasantProjectSource constructs the operator's runtime project source

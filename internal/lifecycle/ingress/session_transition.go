@@ -17,11 +17,7 @@ func ExtractSessionTransition(contract ir.RuntimeContractID, kind model.Contract
 	if capture != model.CaptureValid || len(raw) > model.MaxNativePayloadBytes {
 		return model.SessionTransitionNone
 	}
-	manifest, known := registration.ManifestFor(contract)
-	if !known {
-		return model.SessionTransitionNone
-	}
-	event, known := registration.EventFor(contract, kind)
+	manifest, event, known := registration.EventWithManifest(contract, kind)
 	if !known {
 		return model.SessionTransitionNone
 	}

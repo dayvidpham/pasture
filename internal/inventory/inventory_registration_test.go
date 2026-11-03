@@ -14,14 +14,6 @@ import (
 // agreement here is a belt-and-suspenders check on top of the
 // by-construction emission — any divergence means a generated projection
 // drifted from the pinned contract.
-func registrationManifests() []registration.Manifest {
-	return []registration.Manifest{
-		registration.ClaudeCode__2_1_261(),
-		registration.OpenCode__1_18_29(),
-		registration.OpenCode__2_0_20(),
-		registration.Codex__0_153_0(),
-	}
-}
 
 // TestLifecycleEventRowsAgreeWithRegistration proves exhaustive, exact
 // agreement between the inventory lifecycle-event rows and the pinned
@@ -52,7 +44,7 @@ func TestLifecycleEventRowsAgreeWithRegistration(t *testing.T) {
 	// coordinates with version-specific payloads), and the inventory row for
 	// that coordinate is emitted once.
 	want := make(map[inventory.Key]bool)
-	for _, m := range registrationManifests() {
+	for _, m := range registration.Manifests() {
 		for _, e := range m.Entries() {
 			want[inventory.Key{Harness: m.Harness, Kind: inventory.KindLifecycleEvent, ID: e.NativeName}] = true
 		}

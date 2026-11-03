@@ -30,13 +30,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
-// harnessManifests returns the registration manifest of every harness pasture
-// supports, in canonical order. It is the population every derivation in this
-// file walks.
-func harnessManifests() []registration.Manifest {
-	return registration.Manifests()
-}
-
 // eventClasses is the whole mapping, keyed by harness and then by the native
 // event name the manifest carries.
 //
@@ -198,7 +191,7 @@ func init() {
 // entry is a class for something that cannot happen, and it would sit in the
 // reachability column as a rule the host can never apply.
 func checkEventClassesAreTotal() error {
-	manifests := harnessManifests()
+	manifests := registration.Manifests()
 	if len(manifests) == 0 {
 		return fmt.Errorf("the harness manifest list is empty, so no event was classified and the check proves nothing")
 	}
@@ -361,7 +354,7 @@ func reachingEvents(manifest registration.Manifest, action ActionClass) []string
 }
 
 func buildDeniedCellReachability() []CellReachability {
-	manifests := harnessManifests()
+	manifests := registration.Manifests()
 	var entries []CellReachability
 
 	add := func(entry CellReachability) {

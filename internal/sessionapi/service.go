@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/provadapter"
@@ -51,9 +53,78 @@ type Service struct {
 	ActiveWindow time.Duration
 	IdleWindow   time.Duration
 	Ensure       func(context.Context) error
+	// EnsureNow is an optional clock for bounded ensure coalescing.
+	EnsureNow       func() time.Time
+	ensureMu        sync.Mutex
+	ensurePending   *ensureFlight
+	ensureCompleted time.Time
+	ensureVersion   int
 	// ProjectSource is the opt-in Peasant project enrichment. Nil means the
 	// integration is disabled: no Peasant database or network access happens.
 	ProjectSource peasantproject.Source
+}
+
+type ensuredContextKey struct{}
+type ensureFlight struct {
+	done    chan struct{}
+	err     error
+	version int
+}
+
+// ensureFresh coalesces simultaneous reads and a short clean-cache burst. Every
+// caller checks the dirty marker, so a dirty write invalidates the shortcut.
+func (s *Service) ensureFresh(ctx context.Context) error {
+	if s.Ensure == nil || ctx.Value(ensuredContextKey{}) == true {
+		return nil
+	}
+	var dirty, version int
+	if err := s.DB.QueryRowContext(ctx, `SELECT dirty,cache_version FROM pasture_session_api_state WHERE singleton_id=0`).Scan(&dirty, &version); err != nil {
+		return err
+	}
+	now := time.Now()
+	if s.EnsureNow != nil {
+		now = s.EnsureNow()
+	}
+	s.ensureMu.Lock()
+	if s.ensurePending != nil {
+		pending := s.ensurePending
+		s.ensureMu.Unlock()
+		select {
+		case <-pending.done:
+			if pending.err != nil {
+				return pending.err
+			}
+			if dirty != 0 || version != pending.version {
+				return s.ensureFresh(ctx)
+			}
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if dirty == 0 && version == s.ensureVersion && !s.ensureCompleted.IsZero() && now.Sub(s.ensureCompleted) >= 0 && now.Sub(s.ensureCompleted) < 50*time.Millisecond {
+		s.ensureMu.Unlock()
+		return nil
+	}
+	pending := &ensureFlight{done: make(chan struct{}), version: version}
+	s.ensurePending = pending
+	s.ensureMu.Unlock()
+	err := s.Ensure(ctx)
+	s.ensureMu.Lock()
+	pending.err = err
+	if err == nil {
+		s.ensureCompleted = time.Now()
+		if s.EnsureNow != nil {
+			s.ensureCompleted = s.EnsureNow()
+		}
+		s.ensureVersion = version
+	} else {
+		s.ensureCompleted = time.Time{}
+	}
+	s.ensurePending = nil
+	close(pending.done)
+	s.ensureMu.Unlock()
+	return err
 }
 
 func NewService(db *sql.DB) *Service {
@@ -312,12 +383,11 @@ func (s *Service) List(ctx context.Context, opts ListOptions) (Page, error) {
 // the epoch-session route can label every endpoint in one response with the
 // same now.
 func (s *Service) listAt(ctx context.Context, now time.Time, opts ListOptions) (Page, error) {
-	if opts.Limit == 0 {
-		opts.Limit = 50
+	limit, err := pageLimit(opts.Limit)
+	if err != nil {
+		return Page{}, err
 	}
-	if opts.Limit < 1 || opts.Limit > 100 {
-		return Page{}, fmt.Errorf("%w: limit must be between 1 and 100", ErrInvalidFilter)
-	}
+	opts.Limit = limit
 	if opts.State != "" {
 		switch opts.State {
 		case StateActive, StateIdle, StateEnded, StateUnknown:
@@ -589,13 +659,13 @@ func beginSessionRead(ctx context.Context, db *sql.DB) (*sql.Tx, int64, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("opening session read transaction: %w", err)
 	}
-	var revision, dirty int64
-	if err := tx.QueryRowContext(ctx, `SELECT revision, dirty FROM pasture_session_api_state WHERE singleton_id = 0`).
-		Scan(&revision, &dirty); err != nil {
+	var revision, dirty, cacheVersion int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision, dirty, cache_version FROM pasture_session_api_state WHERE singleton_id = 0`).
+		Scan(&revision, &dirty, &cacheVersion); err != nil {
 		_ = tx.Rollback()
 		return nil, 0, fmt.Errorf("reading session API revision: %w", err)
 	}
-	if dirty != 0 {
+	if dirty != 0 || cacheVersion != audit.SessionCacheVersion {
 		_ = tx.Rollback()
 		return nil, 0, ErrStaleCache
 	}
@@ -603,10 +673,8 @@ func beginSessionRead(ctx context.Context, db *sql.DB) (*sql.Tx, int64, error) {
 }
 
 func (s *Service) query(ctx context.Context, now time.Time, where string, args []any, limit int) ([]joinedRow, int64, error) {
-	if s.Ensure != nil {
-		if err := s.Ensure(ctx); err != nil {
-			return nil, 0, err
-		}
+	if err := s.ensureFresh(ctx); err != nil {
+		return nil, 0, err
 	}
 	tx, revision, err := beginSessionRead(ctx, s.DB)
 	if err != nil {
@@ -994,22 +1062,39 @@ func firstPositive(rowFirst int64, values ...sql.NullInt64) int64 {
 	return out
 }
 
-func encodeCursor(cursor pageCursor) string {
+func pageLimit(limit int) (int, error) {
+	if limit == 0 {
+		limit = 50
+	}
+	if limit < 1 || limit > 100 {
+		return 0, fmt.Errorf("%w: limit must be between 1 and 100", ErrInvalidFilter)
+	}
+	return limit, nil
+}
+
+func encodePageCursor[T any](cursor T) string {
 	raw, _ := json.Marshal(cursor)
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
-
-func decodeCursor(encoded string) (pageCursor, error) {
+func decodePageCursor[T any](encoded string) (T, error) {
+	var cursor T
 	raw, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
-		return pageCursor{}, fmt.Errorf("%w: cursor is not base64", ErrInvalidPageToken)
+		return cursor, fmt.Errorf("%w: cursor is not base64", ErrInvalidPageToken)
 	}
-	var cursor pageCursor
-	if err := json.Unmarshal(raw, &cursor); err != nil {
-		return pageCursor{}, fmt.Errorf("%w: cursor is not JSON", ErrInvalidPageToken)
+	if err = json.Unmarshal(raw, &cursor); err != nil {
+		return cursor, fmt.Errorf("%w: cursor is not JSON", ErrInvalidPageToken)
+	}
+	return cursor, nil
+}
+func encodeCursor(cursor pageCursor) string { return encodePageCursor(cursor) }
+func decodeCursor(encoded string) (pageCursor, error) {
+	cursor, err := decodePageCursor[pageCursor](encoded)
+	if err != nil {
+		return cursor, err
 	}
 	if cursor.Harness == "" || cursor.Session == "" || cursor.Journal < 0 || cursor.Updated < 0 {
-		return pageCursor{}, fmt.Errorf("%w: cursor is incomplete", ErrInvalidPageToken)
+		return cursor, fmt.Errorf("%w: cursor is incomplete", ErrInvalidPageToken)
 	}
 	return cursor, nil
 }

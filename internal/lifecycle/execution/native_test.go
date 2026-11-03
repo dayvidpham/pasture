@@ -4,7 +4,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
+	"github.com/dayvidpham/pasture/internal/lifecycle/model"
+	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
 func TestNativeOpenCodeCapturedContextAndTitle(t *testing.T) {
@@ -21,7 +24,7 @@ func TestNativeOpenCodeCapturedContextAndTitle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			in, ok := execution.Native("opencode", tc.event, body)
+			in, ok := execution.Native(ir.HarnessOpenCode, map[string]model.ContractEventKind{"session.context": registration.EventOpenCode2SessionContext, "session.model.request": registration.EventOpenCode2SessionModelRequest}[tc.event], body)
 			if !ok {
 				t.Fatal("capture not recognized")
 			}
@@ -55,7 +58,7 @@ func TestNativeClaudeAndCodexCaptures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			in, ok := execution.Native(tc.harness, tc.event, body)
+			in, ok := execution.Native(ir.HarnessID(tc.harness), map[string]model.ContractEventKind{"SessionStart": registration.EventSessionStart, "UserPromptSubmit": registration.EventUserPromptSubmit, "PostModelSwitch": registration.EventPostModelSwitch, "SubagentStart": registration.EventSubagentStart}[tc.event], body)
 			if !ok {
 				t.Fatal("capture not recognized")
 			}
@@ -71,7 +74,26 @@ func TestNativeClaudeAndCodexCaptures(t *testing.T) {
 			}
 		})
 	}
-	if _, ok := execution.Native("claude-code", "Unlisted", []byte(`{}`)); ok {
+	if _, ok := execution.Native(ir.HarnessClaudeCode, model.ContractEventKind(65535), []byte(`{}`)); ok {
 		t.Fatal("unlisted event accepted")
+	}
+}
+
+func TestHasEvidence(t *testing.T) {
+	t.Parallel()
+	m, err := execution.Normalize(execution.Inputs{Kind: execution.Selection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.HasEvidence(m) {
+		t.Fatal("empty observation is not evidence")
+	}
+	m.Model = execution.AttributionValue{Status: execution.Invalid}
+	if !execution.HasEvidence(m) {
+		t.Fatal("invalid evidence was lost")
+	}
+	m.Model = execution.AttributionValue{Status: execution.Unavailable, Candidates: []execution.Candidate{{Value: "candidate"}}}
+	if !execution.HasEvidence(m) {
+		t.Fatal("candidate is evidence")
 	}
 }

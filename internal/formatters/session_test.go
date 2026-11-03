@@ -293,3 +293,15 @@ func TestFormatSessionRejectsUnknownFormat(t *testing.T) {
 		t.Fatal("expected an error for an unknown detail format")
 	}
 }
+
+func TestFormatAttributionInvalidAndUnavailable(t *testing.T) {
+	t.Parallel()
+	d := sessionapi.Detail{Session: sessionapi.SessionView{Execution: &sessionapi.SessionExecution{Metadata: execution.Metadata{Model: execution.AttributionValue{Status: execution.Invalid, Reason: execution.RejectedInput}, Provider: execution.AttributionValue{Status: execution.Unavailable}}}}}
+	text, err := formatters.FormatSessionDetail(d, types.OutputText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "invalid (rejected-input)") || !strings.Contains(text, "Provider:   unavailable") {
+		t.Fatalf("missing evidence statuses: %s", text)
+	}
+}

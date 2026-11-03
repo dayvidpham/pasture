@@ -8,7 +8,11 @@ const DefaultLLMActorName = "pasture/default-llm"
 // DefaultLLMActorID addresses reserved ordinal one, independently of the
 // ordinal-zero system committer and its bootstrap authority. It is encoded by
 // the ONE ordinal encoder, never by a second hand-written byte array.
-func DefaultLLMActorID() provenance.ActorID {
+var defaultLLMActorID = makeDefaultLLMActorID()
+
+func DefaultLLMActorID() provenance.ActorID { return defaultLLMActorID }
+
+func makeDefaultLLMActorID() provenance.ActorID {
 	id, err := OrdinalActorID(1)
 	if err != nil {
 		panic("provadapter: reserved ordinal 1 is outside the fixed-actor range: " + err.Error())

@@ -73,7 +73,7 @@ func (s *Service) Inspect(ctx context.Context) (InspectPayload, error) {
 	if err != nil {
 		return InspectPayload{}, err
 	}
-	sessions, err := s.listAt(ctx, now, ListOptions{Limit: 100})
+	sessions, err := s.listAt(context.WithValue(ctx, ensuredContextKey{}, true), now, ListOptions{Limit: 100})
 	if err != nil {
 		return InspectPayload{}, err
 	}
@@ -88,10 +88,8 @@ func (s *Service) Inspect(ctx context.Context) (InspectPayload, error) {
 }
 
 func (s *Service) epochRows(ctx context.Context, now time.Time, epochID string) ([]EpochView, int64, error) {
-	if s.Ensure != nil {
-		if err := s.Ensure(ctx); err != nil {
-			return nil, 0, err
-		}
+	if err := s.ensureFresh(ctx); err != nil {
+		return nil, 0, err
 	}
 	tx, revision, err := beginSessionRead(ctx, s.DB)
 	if err != nil {
@@ -171,7 +169,7 @@ func epochSessionCounts(ctx context.Context, tx *sql.Tx, activeCutoff, idleCutof
 	       SUM(CASE WHEN ` + livenessStateSQL(
 		promptAtExpr, hostEndJournalExpr, lastResumeExpr,
 		"b.unbound_at", "b.unbound_reason",
-	) + ` = 'active' THEN 1 ELSE 0 END)
+	) + ` = '` + string(StateActive) + `' THEN 1 ELSE 0 END)
 	FROM binding_current b
 	LEFT JOIN pasture_session_state s ON s.harness = b.harness AND s.session = b.session
 	GROUP BY b.epoch_id`

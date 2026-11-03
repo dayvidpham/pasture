@@ -2,8 +2,6 @@ package sessionapi
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -18,22 +16,14 @@ type executionCursor struct {
 	Before   int64 `json:"b"`
 }
 
-func encodeExecutionCursor(cursor executionCursor) string {
-	raw, _ := json.Marshal(cursor)
-	return base64.RawURLEncoding.EncodeToString(raw)
-}
-
+func encodeExecutionCursor(cursor executionCursor) string { return encodePageCursor(cursor) }
 func decodeExecutionCursor(encoded string) (executionCursor, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(encoded)
+	cursor, err := decodePageCursor[executionCursor](encoded)
 	if err != nil {
-		return executionCursor{}, fmt.Errorf("%w: cursor is not base64", ErrInvalidPageToken)
-	}
-	var cursor executionCursor
-	if err := json.Unmarshal(raw, &cursor); err != nil {
-		return executionCursor{}, fmt.Errorf("%w: cursor is not JSON", ErrInvalidPageToken)
+		return cursor, err
 	}
 	if cursor.Snapshot <= 0 || cursor.Before < 0 {
-		return executionCursor{}, fmt.Errorf("%w: execution cursor is incomplete", ErrInvalidPageToken)
+		return cursor, fmt.Errorf("%w: execution cursor is incomplete", ErrInvalidPageToken)
 	}
 	return cursor, nil
 }
@@ -50,12 +40,11 @@ func (s *Service) ExecutionHistory(ctx context.Context, harness, session string,
 	if strings.TrimSpace(harness) == "" || strings.TrimSpace(session) == "" {
 		return ExecutionHistoryPage{}, ErrNotFound
 	}
-	if opts.Limit == 0 {
-		opts.Limit = 50
+	limit, err := pageLimit(opts.Limit)
+	if err != nil {
+		return ExecutionHistoryPage{}, err
 	}
-	if opts.Limit < 1 || opts.Limit > 100 {
-		return ExecutionHistoryPage{}, fmt.Errorf("%w: limit must be between 1 and 100", ErrInvalidFilter)
-	}
+	opts.Limit = limit
 	var cursor executionCursor
 	if opts.Cursor != "" {
 		decoded, err := decodeExecutionCursor(opts.Cursor)
@@ -64,10 +53,8 @@ func (s *Service) ExecutionHistory(ctx context.Context, harness, session string,
 		}
 		cursor = decoded
 	}
-	if s.Ensure != nil {
-		if err := s.Ensure(ctx); err != nil {
-			return ExecutionHistoryPage{}, err
-		}
+	if err := s.ensureFresh(ctx); err != nil {
+		return ExecutionHistoryPage{}, err
 	}
 	now := s.now()
 	tx, revision, err := beginSessionRead(ctx, s.DB)

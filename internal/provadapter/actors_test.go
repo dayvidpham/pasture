@@ -330,3 +330,16 @@ func TestActivate_NilTracker(t *testing.T) {
 		t.Fatal("expected nil-tracker rejection")
 	}
 }
+
+func TestDefaultLLMActorTextExcludesSystemActor(t *testing.T) {
+	zero, err := OrdinalActorID(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if IsDefaultLLMActorText(zero.String()) {
+		t.Fatal("system committer must not classify as default LLM")
+	}
+	if !IsDefaultLLMActorText(DefaultLLMActorID().String()) {
+		t.Fatal("default LLM should classify")
+	}
+}
