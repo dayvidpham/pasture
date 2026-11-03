@@ -766,6 +766,7 @@ const (
 var expectedEnabledClaudeEvents = []model.ContractEventKind{
 	registration.EventSessionStart,
 	registration.EventSessionEnd,
+	registration.EventUserPromptSubmit,
 	registration.EventPreToolUse,
 	registration.EventPostToolUse,
 	registration.EventPostToolUseFailure,

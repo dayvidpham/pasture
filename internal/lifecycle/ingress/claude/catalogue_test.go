@@ -199,7 +199,8 @@ func TestRealCaptureCorpusDrivesStaticActivation(t *testing.T) {
 	}, seenReasons)
 	require.Equal(t, map[model.ContractEventKind]struct{}{
 		registration.EventSessionStart: {}, registration.EventSessionEnd: {},
-		registration.EventPreToolUse: {}, registration.EventPostToolUse: {},
+		registration.EventUserPromptSubmit: {},
+		registration.EventPreToolUse:       {}, registration.EventPostToolUse: {},
 		registration.EventPostToolUseFailure: {}, registration.EventPostToolBatch: {},
 		registration.EventPreCompact: {}, registration.EventPostCompact: {},
 		registration.EventFileChanged: {},

@@ -7,9 +7,9 @@ import (
 
 func migrateV12toV13Step(tx *sql.Tx, now int64) error {
 	statements := []string{
-		`CREATE TABLE pasture_session_execution (journal_id INTEGER PRIMARY KEY, harness TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, agent_id TEXT NOT NULL, turn_id TEXT NOT NULL, request_id TEXT NOT NULL, observed_at INTEGER NOT NULL, execution_json BLOB NOT NULL)`,
+		`CREATE TABLE pasture_session_execution (journal_id INTEGER PRIMARY KEY, harness TEXT NOT NULL, session_id TEXT NOT NULL, kind TEXT NOT NULL, native_agent_id TEXT NOT NULL, turn_id TEXT NOT NULL, request_id TEXT NOT NULL, observed_at INTEGER NOT NULL, execution_json BLOB NOT NULL)`,
 		`CREATE INDEX pasture_session_execution_session ON pasture_session_execution(harness, session_id, journal_id)`,
-		`CREATE INDEX pasture_session_execution_scope ON pasture_session_execution(harness, session_id, agent_id, turn_id, request_id, kind, journal_id)`,
+		`CREATE INDEX pasture_session_execution_scope ON pasture_session_execution(harness, session_id, native_agent_id, turn_id, request_id, kind, journal_id)`,
 	}
 	for _, statement := range statements {
 		if _, err := tx.Exec(statement); err != nil {

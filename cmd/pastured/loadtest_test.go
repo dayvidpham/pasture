@@ -373,7 +373,7 @@ func inspectStore(t *testing.T, dbPath string) (bytes int64, tasks, schema, evid
 	if err := db.QueryRow("SELECT version FROM audit_schema_meta ORDER BY version DESC LIMIT 1").Scan(&schema); err != nil {
 		t.Fatalf("read the schema version of the disposable store: %v", err)
 	}
-	if err := db.QueryRow("SELECT COUNT(*) FROM journal_evidence WHERE evidence_kind IN ('pasture.lifecycle.occurrence.v1','pasture.lifecycle.occurrence.v2')").Scan(&evidence); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM journal_evidence WHERE evidence_kind IN ('pasture.lifecycle.occurrence.v1','pasture.lifecycle.occurrence.v2','pasture.lifecycle.occurrence.v3')").Scan(&evidence); err != nil {
 		t.Fatalf("count occurrence evidence in the disposable store: %v", err)
 	}
 	return bytes, tasks, schema, evidence
@@ -411,7 +411,7 @@ func countOccurrenceEvidence(t *testing.T, dbPath string) int {
 	}
 	defer func() { _ = db.Close() }()
 	var n int
-	if err := db.QueryRow("SELECT COUNT(*) FROM journal_evidence WHERE evidence_kind IN ('pasture.lifecycle.occurrence.v1','pasture.lifecycle.occurrence.v2')").Scan(&n); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM journal_evidence WHERE evidence_kind IN ('pasture.lifecycle.occurrence.v1','pasture.lifecycle.occurrence.v2','pasture.lifecycle.occurrence.v3')").Scan(&n); err != nil {
 		t.Fatalf("count occurrence evidence: %v", err)
 	}
 	return n

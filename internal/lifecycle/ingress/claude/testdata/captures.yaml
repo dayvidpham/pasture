@@ -107,6 +107,18 @@ cases:
       ref: internal/lifecycle/ingress/claude/testdata/fixtures/CLEARANCE.md
     mutation:
       description: The reviewed authentic fixture remains unchanged.
+  - name: authentic-user-prompt-submit
+    input:
+      fixture: fixtures/user_prompt_submit_2_1_261.json
+    expected:
+      decision: enabled
+      reason: ""
+    classification: must-pass
+    provenance:
+      source: requirement
+      ref: internal/lifecycle/ingress/claude/testdata/fixtures/CLEARANCE.md
+    mutation:
+      description: The reviewed authentic fixture remains unchanged.
   - name: authored-origin-control
     input:
       fixture: fixtures/session_start_2_1_261_origin_authored.json

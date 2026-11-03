@@ -33,7 +33,7 @@ func (f fixture) executionRow(t *testing.T, session string, journal, at int64, k
 	require.NoError(t, err)
 	_, err = f.db.Exec(`
 		INSERT INTO pasture_session_execution
-			(journal_id, harness, session_id, kind, agent_id, turn_id, request_id, observed_at, execution_json)
+			(journal_id, harness, session_id, kind, native_agent_id, turn_id, request_id, observed_at, execution_json)
 		VALUES (?, 'claude-code', ?, ?, '', '', '', ?, ?)`,
 		journal, session, string(kind), at, encoded)
 	require.NoError(t, err)
@@ -177,7 +177,7 @@ func TestExecutionHistoryRejectsCorruptCacheRow(t *testing.T) {
 	f.state(t, "corrupt", now-int64(time.Minute), now-int64(time.Minute), "PreToolUse", 1)
 	_, err := f.db.Exec(`
 		INSERT INTO pasture_session_execution
-			(journal_id, harness, session_id, kind, agent_id, turn_id, request_id, observed_at, execution_json)
+			(journal_id, harness, session_id, kind, native_agent_id, turn_id, request_id, observed_at, execution_json)
 		VALUES (5, 'claude-code', 'corrupt', 'primary', '', '', '', ?, ?)`,
 		now, []byte(`{"kind":"primary","provider":{"status":"observed","source":"host"},"model":{"status":"unavailable","source":"none"},"variant":{"status":"unavailable","source":"none"},"role":{"status":"unavailable","source":"none"},"protocolRole":{"status":"unavailable","source":"none"}}`))
 	require.NoError(t, err)

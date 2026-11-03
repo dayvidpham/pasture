@@ -325,7 +325,8 @@ func TestSessionEndClearsInferredBinding(t *testing.T) {
 	service := &sessionapi.Service{
 		DB:           db,
 		Now:          func() time.Time { return claimClock{}.Now() },
-		ActiveWindow: 15 * time.Minute,
+		ActiveWindow: 30 * time.Minute,
+		IdleWindow:   24 * time.Hour,
 	}
 	detail, err := service.Get(t.Context(), "claude-code", rebuildClaudeSession)
 	require.NoError(t, err)
@@ -337,7 +338,10 @@ func TestSessionEndClearsInferredBinding(t *testing.T) {
 	require.NotNil(t, detail.Session.Binding, "an inferred interval fills the primary binding when no explicit binding exists")
 	require.Equal(t, sessionapi.BindingSourceInferred, detail.Session.Binding.Source)
 	require.Equal(t, sessionapi.ConfidenceObserved, detail.Session.Binding.Confidence)
-	require.Equal(t, sessionapi.StateActive, detail.Session.Activity.State)
+	// Liveness is prompt-based: a SessionStart occurrence is not a prompt, so
+	// the inferred binding fills the mapping while the state stays unknown.
+	require.Equal(t, sessionapi.StateUnknown, detail.Session.Activity.State)
+	require.Equal(t, sessionapi.BasisNone, detail.Session.Activity.StateBasis)
 	require.NotNil(t, detail.Session.Epoch)
 	require.Equal(t, epoch.String(), detail.Session.Epoch.ID)
 	var confidence string
@@ -372,8 +376,10 @@ func TestSessionEndClearsInferredBinding(t *testing.T) {
 	require.Empty(t, detail.Session.Bindings, "an ended session keeps no inferred interval")
 	require.Nil(t, detail.Session.Binding, "an ended session has no current binding")
 	require.Nil(t, detail.Session.Epoch)
-	require.Equal(t, sessionapi.StateUnknown, detail.Session.Activity.State,
-		"a session with no explicit OR inferred binding is unknown")
+	require.Equal(t, sessionapi.StateEnded, detail.Session.Activity.State,
+		"an unsuperseded host end still ends the session without any binding")
+	require.Equal(t, sessionapi.BasisExplicitEnd, detail.Session.Activity.StateBasis)
+	require.NotNil(t, detail.Session.End)
 }
 
 // TestEndedSessionKeepsNoInferredRowAcrossAFailedInferenceWrite pins the

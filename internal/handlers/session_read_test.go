@@ -145,6 +145,11 @@ func TestSessionListReportsAStaleCacheAsStorageExit(t *testing.T) {
 	dbPath := sessionapitest.SeedStore(t)
 	db, err := dbconn.OpenSharedDBWithProfile(dbPath, timeouts.TestProfile())
 	require.NoError(t, err)
+	// The seeded cache is deliberately current, so force one repair pass. The
+	// trigger then keeps every publication dirty and the bounded retry must
+	// exhaust honestly.
+	_, err = db.ExecContext(t.Context(), `UPDATE pasture_session_api_state SET dirty = 1 WHERE singleton_id = 0`)
+	require.NoError(t, err)
 	_, err = db.ExecContext(t.Context(), `
 		CREATE TRIGGER keep_session_cache_dirty
 		AFTER UPDATE ON pasture_session_api_state
@@ -162,8 +167,8 @@ func TestSessionListReportsAStaleCacheAsStorageExit(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, 5, code, "a stale cache is a storage error")
 	require.Equal(t, pasterrors.ExitCode(err), code)
-	require.Contains(t, err.Error(), "session state cache is stale")
-	require.Contains(t, err.Error(), "previous certified cache is preserved")
+	require.Contains(t, err.Error(), "marked stale")
+	require.Contains(t, err.Error(), "session cache is stale")
 	require.Empty(t, out.String())
 }
 
@@ -339,7 +344,7 @@ func TestSessionShowRendersHistoricalBindingIntervals(t *testing.T) {
 		"Role:       implementer",
 		"Source:     explicit",
 		"Confidence: verified",
-		"Last event: -",
+		"Last event: UserPromptSubmit",
 		"Bindings:   2",
 	} {
 		require.Contains(t, text.String(), want)

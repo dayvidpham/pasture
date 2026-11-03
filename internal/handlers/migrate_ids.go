@@ -486,6 +486,7 @@ var identityCountTables = []string{
 	"governed_allocation_genesis", "governed_composed_supplement_owners",
 	"pasture_system_identity", "pasture_session_claim", "pasture_governed_allocation_audit",
 	"pasture_session_epoch_binding", "pasture_session_inferred_binding",
+	"pasture_session_execution",
 	"pasture_project_epoch_binding",
 	"session_entries", "provenance_verified_store",
 }

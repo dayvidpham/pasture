@@ -26,7 +26,7 @@ func TestExecutionCacheUpgradeInvalidatesOnce(t *testing.T) {
 	if revision != 9 || dirty != 1 || cursor != 0 || version != 2 {
 		t.Fatalf("upgrade state = %d/%d/%d/%d", revision, dirty, cursor, version)
 	}
-	if _, err := db.Exec(`INSERT INTO pasture_session_execution(journal_id,harness,session_id,kind,agent_id,turn_id,request_id,observed_at,execution_json) VALUES(1,'claude-code','s','selection','','','',1,'{}')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO pasture_session_execution(journal_id,harness,session_id,kind,native_agent_id,turn_id,request_id,observed_at,execution_json) VALUES(1,'claude-code','s','selection','','','',1,'{}')`); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -43,8 +43,12 @@ Pasture's persisted system identity") after the capture was written; the host
 proceeded and the capture is unaffected.
 
 Claude Code transport: `hooks/hooks.json` from the kit, sha256 `c361d66f810d6d26b0fb8e3f1faa6f63dee306da5b4a854912279a4d84b8418a`
-(byte-identical to the committed file; the host version reaches the hook
-through `CLAUDE_CODE_VERSION`, exported from `claude --version`). Project
+(at capture time byte-identical to the committed file; the host version reaches
+the hook through `CLAUDE_CODE_VERSION`, exported from `claude --version`). The
+committed file is now sha256
+`25db72cc56f521f7d5939d4c78d0ecf24ac3044d039d82cf6ddfe37676f7d7b2`: the later
+`UserPromptSubmit` enablement adds that hook row, and the hook commands for the
+events captured above are unchanged. Project
 directory `~/.local/share/pasture-captures/project-claude`
 holding README.md and NOTES.md from the kit; the folder was trusted at the
 session's prompt.

@@ -397,7 +397,7 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 		for _, row := range rows {
 			for _, observation := range row.executions {
 				var exists, matches bool
-				err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pasture_session_execution WHERE journal_id=?), EXISTS(SELECT 1 FROM pasture_session_execution WHERE journal_id=? AND harness=? AND session_id=? AND kind=? AND agent_id=? AND turn_id=? AND request_id=? AND observed_at=? AND execution_json=?)`, observation.journalID, observation.journalID, row.harness, row.session, observation.kind, observation.agent, observation.turn, observation.request, observation.observedAt, observation.encoded).Scan(&exists, &matches)
+				err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pasture_session_execution WHERE journal_id=?), EXISTS(SELECT 1 FROM pasture_session_execution WHERE journal_id=? AND harness=? AND session_id=? AND kind=? AND native_agent_id=? AND turn_id=? AND request_id=? AND observed_at=? AND execution_json=?)`, observation.journalID, observation.journalID, row.harness, row.session, observation.kind, observation.agent, observation.turn, observation.request, observation.observedAt, observation.encoded).Scan(&exists, &matches)
 				if err != nil {
 					return SessionStateRebuildOutcome{}, err
 				}
@@ -418,7 +418,7 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 			return SessionStateRebuildOutcome{}, err
 		}
 		for _, observation := range row.executions {
-			result, err := tx.ExecContext(ctx, `INSERT INTO pasture_session_execution(journal_id,harness,session_id,kind,agent_id,turn_id,request_id,observed_at,execution_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(journal_id) DO UPDATE SET journal_id=excluded.journal_id WHERE harness=excluded.harness AND session_id=excluded.session_id AND kind=excluded.kind AND agent_id=excluded.agent_id AND turn_id=excluded.turn_id AND request_id=excluded.request_id AND observed_at=excluded.observed_at AND execution_json=excluded.execution_json`, observation.journalID, row.harness, row.session, observation.kind, observation.agent, observation.turn, observation.request, observation.observedAt, observation.encoded)
+			result, err := tx.ExecContext(ctx, `INSERT INTO pasture_session_execution(journal_id,harness,session_id,kind,native_agent_id,turn_id,request_id,observed_at,execution_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(journal_id) DO UPDATE SET journal_id=excluded.journal_id WHERE harness=excluded.harness AND session_id=excluded.session_id AND kind=excluded.kind AND native_agent_id=excluded.native_agent_id AND turn_id=excluded.turn_id AND request_id=excluded.request_id AND observed_at=excluded.observed_at AND execution_json=excluded.execution_json`, observation.journalID, row.harness, row.session, observation.kind, observation.agent, observation.turn, observation.request, observation.observedAt, observation.encoded)
 			if err != nil {
 				return SessionStateRebuildOutcome{}, err
 			}
