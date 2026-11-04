@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/dayvidpham/pasture/internal/sessioncache"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
@@ -14,6 +13,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/sessioncache"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 	digest "github.com/opencontainers/go-digest"
@@ -141,7 +141,7 @@ func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forc
 			return SessionStateRebuildOutcome{}, false, staleSessionReplay(err)
 		}
 		if start.CacheVersion > audit.SessionCacheVersion {
-			return SessionStateRebuildOutcome{}, false, fmt.Errorf("%w: cache version %d is newer than supported version %d; upgrade Pasture", sessioncache.ErrStale, start.CacheVersion, audit.SessionCacheVersion)
+			return SessionStateRebuildOutcome{}, false, fmt.Errorf("%w: cache version %d is newer than supported version %d; upgrade Pasture", sessioncache.ErrNewerLayout, start.CacheVersion, audit.SessionCacheVersion)
 		}
 		full := forceFull || !start.Found || start.Dirty || start.Revision == 0 || start.CacheVersion != audit.SessionCacheVersion
 		after := provenance.JournalID(start.CompletedThroughJournalID)
@@ -240,6 +240,7 @@ func scanSessionReplay(ctx context.Context, store lifecycleReceiptStore, after p
 			}
 			if jid > row.lastJournalID {
 				row.lastSeen, row.lastJournalID = fact.ReceivedAt, jid
+				// Unknown kinds have no evidenced native name; do not invent one.
 				row.lastEvent, _ = registration.NativeName(fact.Contract, fact.Event)
 			}
 			transition, err := replaySessionTransition(ctx, store, fact)

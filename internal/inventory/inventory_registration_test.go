@@ -8,13 +8,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
 )
 
-// registrationManifests is the pinned lifecycle-event truth: the generated
-// registration manifests. The inventory lifecycle-event rows are emitted by
-// hostcontractgen in the SAME contract walk that renders these manifests, so
-// agreement here is a belt-and-suspenders check on top of the
-// by-construction emission — any divergence means a generated projection
-// drifted from the pinned contract.
-
 // TestLifecycleEventRowsAgreeWithRegistration proves exhaustive, exact
 // agreement between the inventory lifecycle-event rows and the pinned
 // registration manifests: every registration event has a row

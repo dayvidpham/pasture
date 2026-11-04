@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -20,9 +21,11 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/dayvidpham/pasture/internal/audit"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
 	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/provenance"
 )
 
 // The main-only race job runs this package under heavy instrumentation and CI
@@ -169,7 +172,8 @@ func TestServeBindsEphemeralLoopbackAndShutsDown(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, res.Body.Close())
 		require.Equal(t, http.StatusServiceUnavailable, res.StatusCode)
-		require.Contains(t, string(body), "stale_session_cache")
+		require.Contains(t, string(body), "newer_session_cache")
+		require.Contains(t, string(body), "upgrade Pasture")
 	}
 	_, err = db.Exec(`UPDATE pasture_session_api_state SET cache_version=2 WHERE singleton_id=0`)
 	require.NoError(t, err)
@@ -565,4 +569,30 @@ func TestSessionEnsureErrorClassification(t *testing.T) {
 	mapped := mapSessionEnsureError(exhausted)
 	require.ErrorIs(t, mapped, sessionapi.ErrStaleCache)
 	require.ErrorIs(t, mapped, tasks.ErrSessionReplayExhausted)
+}
+
+// Constructed future occurrence tests the real journal-to-serve error boundary.
+func TestSessionEnsureDoesNotMaskUnsupportedOccurrence(t *testing.T) {
+	tracker, err := tasks.OpenTaskTracker(filepath.Join(t.TempDir(), "future.db"))
+	require.NoError(t, err)
+	defer tracker.Close()
+	_, err = tracker.Create("file://serve-test", "bootstrap", "initialize identity", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseUnscoped)
+	require.NoError(t, err)
+	resolver, ok := tracker.(interface {
+		ResolveLifecycleIdentity(context.Context) (receipt.Identity, error)
+	})
+	require.True(t, ok)
+	identity, err := resolver.ResolveLifecycleIdentity(t.Context())
+	require.NoError(t, err)
+	payload := []byte(`{}`)
+	digest := sha256.Sum256(payload)
+	command := sha256.Sum256([]byte("future-occurrence-test"))
+	_, err = tracker.Journal().Apply(provenance.OperationInput{OperationID: "test.future-occurrence", ActorID: identity.Actor, AuthorityJournalID: &identity.Authority, CommandDigest: command[:], RecordedAt: time.Now().UnixNano(), Effects: []provenance.Effect{{Sort: provenance.EffectEvidence, ResultSlot: "occurrence", EvidenceKind: "pasture.lifecycle.occurrence.v4", ContentDigest: digest[:], Payload: payload}}})
+	require.NoError(t, err)
+	var logs bytes.Buffer
+	err = sessionEnsure(tracker, &logs)(t.Context())
+	require.Error(t, err)
+	require.NotErrorIs(t, err, sessionapi.ErrStaleCache)
+	require.ErrorContains(t, err, "unsupported lifecycle occurrence")
+	require.Contains(t, logs.String(), "unsupported lifecycle occurrence")
 }

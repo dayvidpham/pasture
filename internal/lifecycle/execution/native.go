@@ -2,6 +2,7 @@ package execution
 
 import (
 	"encoding/json"
+
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -15,6 +16,24 @@ func Native(harness ir.HarnessID, event model.ContractEventKind, body []byte) (I
 		return Inputs{}, false
 	}
 	in := Inputs{}
+	if harness == ir.HarnessCodex {
+		switch event {
+		case registration.EventCodexSessionStart:
+			event = registration.EventSessionStart
+		case registration.EventCodexUserPromptSubmit:
+			event = registration.EventUserPromptSubmit
+		case registration.EventCodexSubagentStart:
+			event = registration.EventSubagentStart
+		default:
+			return Inputs{}, false
+		}
+	} else if harness == ir.HarnessClaudeCode {
+		switch event {
+		case registration.EventSessionStart, registration.EventUserPromptSubmit, registration.EventPostModelSwitch, registration.EventSubagentStart:
+		default:
+			return Inputs{}, false
+		}
+	}
 	stringField := func(obj map[string]json.RawMessage, name string, member Member) Raw {
 		value, ok := obj[name]
 		if !ok {

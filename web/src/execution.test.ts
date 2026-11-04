@@ -6,7 +6,6 @@ import {
   applySessionsFrame,
   applyEpochsFrame,
   appendExecutionPage,
-  historyPageMatches,
   attributionText,
   executionKindLabel,
   executionRows,
@@ -99,7 +98,6 @@ describe('execution presentation', () => {
     const rows = executionRows(execution())
     expect(rows.find((row) => row.label === 'provider')?.value).toBe('anthropic')
     expect(rows.find((row) => row.label === 'model')?.value).toBe('claude-sonnet')
-    expect(rows.find((row) => row.label === 'kind')?.value).toBe('selection')
     expect(executionKindLabel('child')).toBe('child')
   })
 
@@ -170,9 +168,4 @@ describe('watch snapshots', () => {
     expect(applyEpochsFrame(epoch).items).toHaveLength(0)
     expect(applyEpochsFrame(laterEpoch)).toMatchObject({ revision: 7, asOf: 'later', items: [{ id: 'new' }] })
   })
-})
-
-it('ignores history pages for a previous selection', () => {
-  expect(historyPageMatches('claude:a', 'claude:a')).toBe(true)
-  expect(historyPageMatches('claude:b', 'claude:a')).toBe(false)
 })

@@ -53,11 +53,8 @@ func (s *Service) ExecutionHistory(ctx context.Context, harness, session string,
 		}
 		cursor = decoded
 	}
-	if err := s.ensureFresh(ctx); err != nil {
-		return ExecutionHistoryPage{}, err
-	}
 	now := s.now()
-	tx, revision, err := beginSessionRead(ctx, s.DB)
+	tx, revision, err := s.beginEnsuredSessionRead(ctx)
 	if err != nil {
 		return ExecutionHistoryPage{}, err
 	}

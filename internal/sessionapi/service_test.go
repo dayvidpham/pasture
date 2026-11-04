@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1186,7 +1185,6 @@ func TestEnsureCoalescesCleanBurstButNotDirtyCache(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	s := f.service()
-	s.EnsureNow = func() time.Time { return f.now }
 	calls := 0
 	s.Ensure = func(ctx context.Context) error {
 		calls++
@@ -1197,37 +1195,12 @@ func TestEnsureCoalescesCleanBurstButNotDirtyCache(t *testing.T) {
 	require.NoError(t, err)
 	_, err = s.List(t.Context(), sessionapi.ListOptions{})
 	require.NoError(t, err)
-	require.Equal(t, 1, calls)
+	require.Equal(t, 2, calls)
 	_, err = f.db.Exec(`UPDATE pasture_session_api_state SET dirty=1 WHERE singleton_id=0`)
 	require.NoError(t, err)
 	_, err = s.List(t.Context(), sessionapi.ListOptions{})
 	require.NoError(t, err)
-	require.Equal(t, 2, calls)
-}
-
-func TestEnsureConcurrentReadsShareOneRun(t *testing.T) {
-	t.Parallel()
-	f := newFixture(t)
-	s := f.service()
-	s.EnsureNow = func() time.Time { return f.now }
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	var calls atomic.Int64
-	s.Ensure = func(context.Context) error {
-		if calls.Add(1) == 1 {
-			close(entered)
-		}
-		<-release
-		return nil
-	}
-	result := make(chan error, 2)
-	go func() { _, err := s.List(t.Context(), sessionapi.ListOptions{}); result <- err }()
-	<-entered
-	go func() { _, err := s.List(t.Context(), sessionapi.ListOptions{}); result <- err }()
-	close(release)
-	require.NoError(t, <-result)
-	require.NoError(t, <-result)
-	require.EqualValues(t, 1, calls.Load())
+	require.Equal(t, 3, calls)
 }
 
 func TestEnsureStorageFailureIsNotStale(t *testing.T) {
@@ -1256,9 +1229,6 @@ func TestInspectEnsuresOncePerResponse(t *testing.T) {
 	s := f.service()
 	calls := 0
 	s.Ensure = func(context.Context) error { calls++; return nil }
-	// Advance the coalescing clock far enough that caching cannot hide a second call.
-	var tick atomic.Int64
-	s.EnsureNow = func() time.Time { return f.now.Add(time.Duration(tick.Add(1)) * time.Second) }
 	_, err := s.Inspect(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)

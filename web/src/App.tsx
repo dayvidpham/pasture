@@ -47,7 +47,6 @@ import {
   attributionText,
   executionKindLabel,
   executionRows,
-  historyPageMatches,
   applySessionsFrame,
   applyEpochsFrame,
   livenessRows,
@@ -248,11 +247,11 @@ export function ExecutionSummary({ execution }: { execution?: SessionExecution }
     <div className="execution-summary" data-kind={execution.kind}>
       <p className="eyebrow">execution · {executionKindLabel(execution.kind)}</p>
       <dl className="detail-list">
-        {executionRows(execution).filter((row) => row.label !== 'kind').map((row) => (
+        {executionRows(execution).map((row) => (
           <div key={row.label}>
             <dt>{row.label}</dt>
             <dd className={row.muted ? 'muted' : undefined}>
-              <span>{row.label === 'observed' ? formatTime(row.value) : row.value}</span>
+              <span>{row.value}</span>
               {row.source && <span className="attribution-source">{row.source}</span>}
             </dd>
           </div>
@@ -997,7 +996,7 @@ export default function App() {
       .then((page) => {
         if (controller.signal.aborted) return
         setExecutionHistory((previous) =>
-          historyPageMatches(previous.key, transcriptKey)
+          previous.key === transcriptKey
             ? {
                 key: transcriptKey,
                 items: appendExecutionPage(previous.items, page),
@@ -1010,7 +1009,7 @@ export default function App() {
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
         setExecutionHistory((previous) =>
-          historyPageMatches(previous.key, transcriptKey)
+          previous.key === transcriptKey
             ? {
                 ...previous,
                 error:

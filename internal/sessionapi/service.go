@@ -16,6 +16,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/provadapter"
+	"github.com/dayvidpham/pasture/internal/sessioncache"
 )
 
 // Prompt-based liveness defaults. A prompt younger than ActiveWindow is active;
@@ -49,16 +50,13 @@ type Service struct {
 	DB *sql.DB
 	// Now is the injected response clock. One response reads it exactly once, so
 	// the Go view, the SQL state filters, the epoch counts, and inspect agree.
-	Now          func() time.Time
-	ActiveWindow time.Duration
-	IdleWindow   time.Duration
-	Ensure       func(context.Context) error
-	// EnsureNow is an optional clock for bounded ensure coalescing.
-	EnsureNow       func() time.Time
-	ensureMu        sync.Mutex
-	ensurePending   *ensureFlight
-	ensureCompleted time.Time
-	ensureVersion   int
+	Now           func() time.Time
+	ActiveWindow  time.Duration
+	IdleWindow    time.Duration
+	Ensure        func(context.Context) error
+	ensureMu      sync.Mutex
+	ensurePending *ensureFlight
+	ensureWaiting func()
 	// ProjectSource is the opt-in Peasant project enrichment. Nil means the
 	// integration is disabled: no Peasant database or network access happens.
 	ProjectSource peasantproject.Source
@@ -71,8 +69,7 @@ type ensureFlight struct {
 	version int
 }
 
-// ensureFresh coalesces simultaneous reads and a short clean-cache burst. Every
-// caller checks the dirty marker, so a dirty write invalidates the shortcut.
+// ensureFresh coalesces concurrent refreshes without caching completed results.
 func (s *Service) ensureFresh(ctx context.Context) error {
 	if s.Ensure == nil || ctx.Value(ensuredContextKey{}) == true {
 		return nil
@@ -81,17 +78,19 @@ func (s *Service) ensureFresh(ctx context.Context) error {
 	if err := s.DB.QueryRowContext(ctx, `SELECT dirty,cache_version FROM pasture_session_api_state WHERE singleton_id=0`).Scan(&dirty, &version); err != nil {
 		return err
 	}
-	now := time.Now()
-	if s.EnsureNow != nil {
-		now = s.EnsureNow()
-	}
 	s.ensureMu.Lock()
 	if s.ensurePending != nil {
 		pending := s.ensurePending
+		if s.ensureWaiting != nil {
+			s.ensureWaiting()
+		}
 		s.ensureMu.Unlock()
 		select {
 		case <-pending.done:
 			if pending.err != nil {
+				if (errors.Is(pending.err, context.Canceled) || errors.Is(pending.err, context.DeadlineExceeded)) && ctx.Err() == nil {
+					return s.ensureFresh(ctx)
+				}
 				return pending.err
 			}
 			if dirty != 0 || version != pending.version {
@@ -102,25 +101,14 @@ func (s *Service) ensureFresh(ctx context.Context) error {
 			return ctx.Err()
 		}
 	}
-	if dirty == 0 && version == s.ensureVersion && !s.ensureCompleted.IsZero() && now.Sub(s.ensureCompleted) >= 0 && now.Sub(s.ensureCompleted) < 50*time.Millisecond {
-		s.ensureMu.Unlock()
-		return nil
-	}
+
 	pending := &ensureFlight{done: make(chan struct{}), version: version}
 	s.ensurePending = pending
 	s.ensureMu.Unlock()
 	err := s.Ensure(ctx)
 	s.ensureMu.Lock()
 	pending.err = err
-	if err == nil {
-		s.ensureCompleted = time.Now()
-		if s.EnsureNow != nil {
-			s.ensureCompleted = s.EnsureNow()
-		}
-		s.ensureVersion = version
-	} else {
-		s.ensureCompleted = time.Time{}
-	}
+
 	s.ensurePending = nil
 	close(pending.done)
 	s.ensureMu.Unlock()
@@ -665,6 +653,10 @@ func beginSessionRead(ctx context.Context, db *sql.DB) (*sql.Tx, int64, error) {
 		_ = tx.Rollback()
 		return nil, 0, fmt.Errorf("reading session API revision: %w", err)
 	}
+	if cacheVersion > audit.SessionCacheVersion {
+		_ = tx.Rollback()
+		return nil, 0, sessioncache.ErrNewerLayout
+	}
 	if dirty != 0 || cacheVersion != audit.SessionCacheVersion {
 		_ = tx.Rollback()
 		return nil, 0, ErrStaleCache
@@ -672,11 +664,24 @@ func beginSessionRead(ctx context.Context, db *sql.DB) (*sql.Tx, int64, error) {
 	return tx, revision, nil
 }
 
-func (s *Service) query(ctx context.Context, now time.Time, where string, args []any, limit int) ([]joinedRow, int64, error) {
+func (s *Service) beginEnsuredSessionRead(ctx context.Context) (*sql.Tx, int64, error) {
 	if err := s.ensureFresh(ctx); err != nil {
 		return nil, 0, err
 	}
 	tx, revision, err := beginSessionRead(ctx, s.DB)
+	if errors.Is(err, ErrStaleCache) && s.Ensure != nil {
+		// Dirty can be published after ensure but before the read transaction.
+		retryCtx := context.WithValue(ctx, ensuredContextKey{}, false)
+		if err = s.ensureFresh(retryCtx); err != nil {
+			return nil, 0, err
+		}
+		return beginSessionRead(ctx, s.DB)
+	}
+	return tx, revision, err
+}
+
+func (s *Service) query(ctx context.Context, now time.Time, where string, args []any, limit int) ([]joinedRow, int64, error) {
+	tx, revision, err := s.beginEnsuredSessionRead(ctx)
 	if err != nil {
 		return nil, 0, err
 	}

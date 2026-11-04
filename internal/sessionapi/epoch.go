@@ -88,10 +88,7 @@ func (s *Service) Inspect(ctx context.Context) (InspectPayload, error) {
 }
 
 func (s *Service) epochRows(ctx context.Context, now time.Time, epochID string) ([]EpochView, int64, error) {
-	if err := s.ensureFresh(ctx); err != nil {
-		return nil, 0, err
-	}
-	tx, revision, err := beginSessionRead(ctx, s.DB)
+	tx, revision, err := s.beginEnsuredSessionRead(ctx)
 	if err != nil {
 		return nil, 0, err
 	}

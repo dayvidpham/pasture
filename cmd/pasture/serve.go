@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 	"github.com/dayvidpham/pasture/internal/webui"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 var serveCmd = &cobra.Command{
@@ -178,13 +180,7 @@ func runServe(cmd *cobra.Command) error {
 	service.ActiveWindow = activeWindow
 	service.IdleWindow = idleWindow
 	service.ProjectSource = projectSwitch
-	service.Ensure = func(ctx context.Context) error {
-		_, _, err := tasks.EnsureSessionState(ctx, tracker)
-		if err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "pasture serve: session cache refresh: %v\n", err)
-		}
-		return mapSessionEnsureError(err)
-	}
+	service.Ensure = sessionEnsure(tracker, cmd.ErrOrStderr())
 	store, err := tasks.NewSessionAPIStore(tracker)
 	if err != nil {
 		return err
@@ -232,6 +228,16 @@ func runServe(cmd *cobra.Command) error {
 			return serveErr
 		}
 		return nil
+	}
+}
+
+func sessionEnsure(tracker protocol.TaskTracker, stderr io.Writer) func(context.Context) error {
+	return func(ctx context.Context) error {
+		_, _, err := tasks.EnsureSessionState(ctx, tracker)
+		if err != nil {
+			fmt.Fprintf(stderr, "pasture serve: session cache refresh: %v\n", err)
+		}
+		return mapSessionEnsureError(err)
 	}
 }
 

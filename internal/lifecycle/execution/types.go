@@ -131,6 +131,9 @@ type Metadata struct {
 // HasEvidence reports whether an observation conveys any actual evidence,
 // including rejected or conflicting evidence and unchosen candidates.
 func HasEvidence(m Metadata) bool {
+	if m.AgentID != "" || m.TurnID != "" || m.RequestID != "" {
+		return true
+	}
 	for _, field := range [...]AttributionValue{m.Provider, m.Model, m.Variant, m.Role, m.ProtocolRole} {
 		if field.Status == Observed || field.Status == Invalid || field.Status == Conflict || len(field.Candidates) != 0 {
 			return true

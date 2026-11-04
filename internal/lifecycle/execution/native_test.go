@@ -58,7 +58,21 @@ func TestNativeClaudeAndCodexCaptures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			in, ok := execution.Native(ir.HarnessID(tc.harness), map[string]model.ContractEventKind{"SessionStart": registration.EventSessionStart, "UserPromptSubmit": registration.EventUserPromptSubmit, "PostModelSwitch": registration.EventPostModelSwitch, "SubagentStart": registration.EventSubagentStart}[tc.event], body)
+			manifest := registration.ClaudeCode__2_1_261()
+			if tc.harness == "codex" {
+				manifest = registration.Codex__0_153_0()
+			}
+			var kind model.ContractEventKind
+			for _, event := range manifest.Events {
+				if event.NativeName == tc.event {
+					kind = event.Kind
+					break
+				}
+			}
+			if kind == 0 {
+				t.Fatal("fixture event missing from manifest")
+			}
+			in, ok := execution.Native(manifest.Harness, kind, body)
 			if !ok {
 				t.Fatal("capture not recognized")
 			}
@@ -87,6 +101,11 @@ func TestHasEvidence(t *testing.T) {
 	}
 	if execution.HasEvidence(m) {
 		t.Fatal("empty observation is not evidence")
+	}
+	scoped := m
+	scoped.AgentID = "child"
+	if !execution.HasEvidence(scoped) {
+		t.Fatal("scope-only observation must be retained")
 	}
 	m.Model = execution.AttributionValue{Status: execution.Invalid}
 	if !execution.HasEvidence(m) {

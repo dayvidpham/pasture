@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -152,22 +153,19 @@ func TestBarePromptDoesNotEraseExecutionSummary(t *testing.T) {
 			require.NoError(t, err)
 			defer db.Close()
 			svc := sessionapi.NewService(db)
+			svc.Ensure = sessionEnsure(tracker, io.Discard)
 			before, err := svc.Get(context.Background(), "claude-code", session)
 			require.NoError(t, err)
 			require.NotNil(t, before.Session.Execution)
 			require.Equal(t, "claude-fable-5-1", before.Session.Execution.Model.Value)
 			run := runLifecycleHook(t, binary, path, "UserPromptSubmit", prompt, env...)
 			require.Zero(t, run.ExitCode, run.Stderr)
-			_, _, err = tasks.EnsureSessionState(context.Background(), tracker)
-			require.NoError(t, err)
 			after, err := svc.Get(context.Background(), "claude-code", session)
 			require.NoError(t, err)
 			require.Equal(t, before.Session.Execution.OccurrenceID, after.Session.Execution.OccurrenceID)
 			declared := append(append([]string{}, env...), "PASTURE_EXECUTION_MODEL=declared-model")
 			run = runLifecycleHook(t, binary, path, "UserPromptSubmit", prompt, declared...)
 			require.Zero(t, run.ExitCode, run.Stderr)
-			_, _, err = tasks.EnsureSessionState(context.Background(), tracker)
-			require.NoError(t, err)
 			last, err := svc.Get(context.Background(), "claude-code", session)
 			require.NoError(t, err)
 			require.Greater(t, last.Session.Execution.OccurrenceID, before.Session.Execution.OccurrenceID)

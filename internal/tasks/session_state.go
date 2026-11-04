@@ -235,6 +235,7 @@ func claimSessionTx(ctx context.Context, tx *sql.Tx, harness ir.HarnessID, sessi
 // update; last_seen/last_event follow the highest journal id so an out-of-order
 // delivery cannot rewind the cache.
 func upsertSessionStateTx(ctx context.Context, tx *sql.Tx, in SessionTailInput, session string) (bool, error) {
+	// Unknown kinds have no evidenced native name; do not invent one.
 	nativeName, _ := registration.NativeName(in.Contract, in.EventKind)
 	recordedAt := in.RecordedAt.UnixNano()
 	journalID := int64(in.OccurrenceID.JournalID())

@@ -6,10 +6,10 @@ package sessionapi
 
 import (
 	"errors"
-	"github.com/dayvidpham/pasture/internal/sessioncache"
 	"time"
 
 	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
+	"github.com/dayvidpham/pasture/internal/sessioncache"
 )
 
 // ActivityState is the derived liveness of one session.

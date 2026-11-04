@@ -81,8 +81,6 @@ export function executionRows(execution: SessionExecution): DetailLine[] {
     muted: value.status === 'unavailable',
   })
   const rows: DetailLine[] = [
-    { label: 'kind', value: executionKindLabel(execution.kind) },
-    { label: 'observed', value: execution.observedAt },
     sourced('provider', execution.provider),
     sourced('model', execution.model),
     sourced('variant', execution.variant),
@@ -153,9 +151,4 @@ export function applySessionsFrame(frame: SessionsFrame) {
 }
 export function applyEpochsFrame(frame: EpochsFrame) {
   return { items: frame.payload.items, revision: frame.revision, asOf: frame.asOf }
-}
-
-/** A pending history page belongs only to its original selected session. */
-export function historyPageMatches(currentKey: string, requestKey: string): boolean {
-  return currentKey === requestKey
 }

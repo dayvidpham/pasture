@@ -240,6 +240,7 @@ func TestSessionReplaySustainedWritesExhaustTheAttemptBoundWithoutPublishing(t *
 		appendReplayFact(t, tracker, fmt.Sprintf("replay.interference.%d", scans), "UserPromptSubmit", "", int64(100+scans))
 	})
 	require.ErrorContains(t, err, "stale")
+	require.ErrorIs(t, err, ErrSessionReplayExhausted)
 	require.Equal(t, sessionReplayMaxAttempts, scans, "retry count is finite even without clock expiry")
 	var revision, cursor, count int64
 	require.NoError(t, store.auditDBHandle().QueryRow(`SELECT revision,completed_through_jid FROM pasture_session_api_state`).Scan(&revision, &cursor))

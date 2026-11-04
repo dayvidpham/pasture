@@ -14,6 +14,7 @@ import (
 
 	"github.com/peasant-labs/schema"
 
+	"github.com/dayvidpham/pasture/internal/sessioncache"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -140,7 +141,7 @@ func (h *handler) list(w http.ResponseWriter, r *http.Request) {
 // execution observations, including auxiliary and child records.
 func (h *handler) executionHistory(w http.ResponseWriter, r *http.Request) {
 	if !validSessionKey(r.PathValue("harness")) || !validSessionKey(r.PathValue("nativeSessionId")) {
-		writeError(w, http.StatusBadRequest, "invalid_session_key", "harness and nativeSessionId must be non-empty, at most 512 bytes, and contain no controls or slashes")
+		writeError(w, http.StatusBadRequest, "invalid_session_key", invalidSessionKeyMessage)
 		return
 	}
 	query := r.URL.Query()
@@ -162,7 +163,7 @@ func (h *handler) bind(w http.ResponseWriter, r *http.Request) {
 	harness := r.PathValue("harness")
 	session := r.PathValue("nativeSessionId")
 	if !validSessionKey(harness) || !validSessionKey(session) {
-		writeError(w, http.StatusBadRequest, "invalid_session_key", "harness and nativeSessionId must be non-empty, at most 512 bytes, and contain no controls or slashes")
+		writeError(w, http.StatusBadRequest, "invalid_session_key", invalidSessionKeyMessage)
 		return
 	}
 	if h.store == nil {
@@ -185,7 +186,7 @@ func (h *handler) unbind(w http.ResponseWriter, r *http.Request) {
 	harness := r.PathValue("harness")
 	session := r.PathValue("nativeSessionId")
 	if !validSessionKey(harness) || !validSessionKey(session) {
-		writeError(w, http.StatusBadRequest, "invalid_session_key", "harness and nativeSessionId must be non-empty, at most 512 bytes, and contain no controls or slashes")
+		writeError(w, http.StatusBadRequest, "invalid_session_key", invalidSessionKeyMessage)
 		return
 	}
 	if h.store == nil {
@@ -472,7 +473,7 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 	harness := r.PathValue("harness")
 	session := r.PathValue("nativeSessionId")
 	if !validSessionKey(harness) || !validSessionKey(session) {
-		writeError(w, http.StatusBadRequest, "invalid_session_key", "harness and nativeSessionId must be non-empty, at most 512 bytes, and contain no controls or slashes")
+		writeError(w, http.StatusBadRequest, "invalid_session_key", invalidSessionKeyMessage)
 		return
 	}
 	detail, err := h.service.Get(r.Context(), harness, session)
@@ -495,7 +496,7 @@ func (h *handler) sessionTranscript(w http.ResponseWriter, r *http.Request) {
 	harness := r.PathValue("harness")
 	session := r.PathValue("nativeSessionId")
 	if !validSessionKey(harness) || !validSessionKey(session) {
-		writeError(w, http.StatusBadRequest, "invalid_session_key", "harness and nativeSessionId must be non-empty, at most 512 bytes, and contain no controls or slashes")
+		writeError(w, http.StatusBadRequest, "invalid_session_key", invalidSessionKeyMessage)
 		return
 	}
 	if _, err := schema.NewSessionID(session); err != nil {
@@ -566,8 +567,10 @@ func knownHarnessNames() string {
 	return strings.Join(names, ", ")
 }
 
+const invalidSessionKeyMessage = "harness and nativeSessionId must not be blank or whitespace-padded, must be at most 512 bytes, and must contain no controls or slashes"
+
 func validSessionKey(value string) bool {
-	if strings.TrimSpace(value) == "" || len(value) > 512 || strings.Contains(value, "/") {
+	if strings.TrimSpace(value) == "" || strings.TrimSpace(value) != value || len(value) > 512 || strings.Contains(value, "/") {
 		return false
 	}
 	for _, r := range value {
@@ -582,6 +585,8 @@ func validSessionKey(value string) bool {
 // surface carries. A plain serve restart does not repair a dirty cache; both the
 // HTTP error body and the WebSocket error frame must name the two commands that
 // do, so the two surfaces cannot drift into different advice.
+const newerSessionCacheMessage = "the session cache uses a newer layout; upgrade Pasture before reading this store"
+
 const staleSessionCacheMessage = "the session cache is behind the journal; run `pasture session list` or `pasture serve --backfill` to rebuild it"
 
 // storageReadFaultMessage is the ONE wording a read-side storage failure carries
@@ -602,6 +607,8 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		// A liveness window is server configuration, not client input. Report a
 		// server fault with an actionable message instead of blaming the caller.
 		writeError(w, http.StatusInternalServerError, "invalid_window", err.Error())
+	case errors.Is(err, sessioncache.ErrNewerLayout):
+		writeError(w, http.StatusServiceUnavailable, "newer_session_cache", newerSessionCacheMessage)
 	case errors.Is(err, ErrStaleCache):
 		writeError(w, http.StatusServiceUnavailable, "stale_session_cache", staleSessionCacheMessage)
 	default:

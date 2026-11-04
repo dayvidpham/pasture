@@ -91,6 +91,11 @@ func TestProductionIngressPreservesExactBytesAndCodexIdentities(t *testing.T) {
 			require.Equal(t, observedVersion, capture.Delivery.Envelope.HostVersion)
 			require.Equal(t, event.Kind, capture.Delivery.Event)
 			require.Equal(t, capturedCodexBindings(t, raw), capture.Delivery.Bindings)
+			if event.NativeName == "SessionStart" || event.NativeName == "UserPromptSubmit" || event.NativeName == "SubagentStart" {
+				require.NotNil(t, capture.Delivery.ExecutionInputs)
+				require.True(t, capture.Delivery.ExecutionInputs.Host.Model.Present)
+				require.Equal(t, "gpt-6-astra", capture.Delivery.ExecutionInputs.Host.Model.Value)
+			}
 		})
 	}
 }
