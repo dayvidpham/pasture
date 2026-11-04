@@ -6,6 +6,7 @@ import type {
   SessionExecution,
   SessionsFrame,
   EpochsFrame,
+  InspectPayload,
 } from './api'
 
 /** One labelled detail line. `muted` marks an honest absence or uncertainty. */
@@ -145,10 +146,19 @@ export function appendExecutionPage(
   return merged
 }
 
+/** The wire may come from an older or malformed server despite generated types. */
+function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+export function inspectCollections(payload: InspectPayload) {
+  return { sessions: arrayOrEmpty(payload?.sessions), epochs: arrayOrEmpty(payload?.epochs) }
+}
+
 /** Watch frames are snapshots; equal revisions can carry later clock states. */
 export function applySessionsFrame(frame: SessionsFrame) {
-  return { items: frame.payload.items, revision: frame.revision, asOf: frame.asOf, truncated: Boolean(frame.payload.next) }
+  return { items: arrayOrEmpty(frame.payload?.items), revision: frame.revision, asOf: frame.asOf, truncated: Boolean(frame.payload?.next) }
 }
 export function applyEpochsFrame(frame: EpochsFrame) {
-  return { items: frame.payload.items, revision: frame.revision, asOf: frame.asOf }
+  return { items: arrayOrEmpty(frame.payload?.items), revision: frame.revision, asOf: frame.asOf }
 }

@@ -1262,3 +1262,33 @@ func TestListRetriesWhenDirtyAfterEnsure(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, calls)
 }
+
+func TestEmptyStoreHTTPArrays(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, err := f.db.Exec(`DROP TABLE epoch_state_projection`)
+	require.NoError(t, err)
+	server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+	defer server.Close()
+	for _, tc := range []struct {
+		path   string
+		fields []string
+	}{
+		{"/api/v1/epochs", []string{"items"}},
+		{"/api/v1/inspect", []string{"epochs", "sessions"}},
+		{"/api/v1/sessions", []string{"items"}},
+		{"/api/v1/sessions/claude-code/missing/execution", []string{"items"}},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			resp, err := http.Get(server.URL + tc.path)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+			for _, name := range tc.fields {
+				require.Equal(t, []any{}, body[name], "%s.%s must be []", tc.path, name)
+			}
+		})
+	}
+}

@@ -98,7 +98,7 @@ func (s *Service) epochRows(ctx context.Context, now time.Time, epochID string) 
 		return nil, 0, err
 	}
 	if !exists {
-		return nil, revision, nil
+		return []EpochView{}, revision, nil
 	}
 	query := `
 		SELECT p.epoch_id, p.current_phase, p.state_json, COALESCE(t.title, '')

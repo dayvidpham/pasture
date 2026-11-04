@@ -47,6 +47,7 @@ import {
   attributionText,
   executionKindLabel,
   executionRows,
+  inspectCollections,
   applySessionsFrame,
   applyEpochsFrame,
   livenessRows,
@@ -758,8 +759,9 @@ export default function App() {
     setLoadError(null)
     try {
       const payload = await fetchInspect(signal)
-      setSessions(payload.sessions)
-      setEpochs(payload.epochs)
+      const collections = inspectCollections(payload)
+      setSessions(collections.sessions)
+      setEpochs(collections.epochs)
       setRevision(payload.revision)
       setAsOf(payload.asOf)
       setTruncated(payload.truncated)
@@ -833,7 +835,7 @@ export default function App() {
             setAsOf(update.asOf)
             setTruncated(update.truncated)
             if (!peasantBusyRef.current) {
-              setPeasantIntegration(integrationFromSessionsFrame(frame.payload))
+              setPeasantIntegration(integrationFromSessionsFrame(frame.payload ?? { items: [] }))
             }
             setLoading(false)
             break

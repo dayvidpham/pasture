@@ -5,6 +5,7 @@ import {
   actorLabel,
   applySessionsFrame,
   applyEpochsFrame,
+  inspectCollections,
   appendExecutionPage,
   attributionText,
   executionKindLabel,
@@ -167,5 +168,17 @@ describe('watch snapshots', () => {
     const laterEpoch = { ...epoch, asOf: 'later', payload: { items: [{ id: 'new' }] as never[] } }
     expect(applyEpochsFrame(epoch).items).toHaveLength(0)
     expect(applyEpochsFrame(laterEpoch)).toMatchObject({ revision: 7, asOf: 'later', items: [{ id: 'new' }] })
+  })
+})
+
+
+describe('wire array boundaries', () => {
+  it('normalizes null or missing inspect and watch arrays', () => {
+    expect(inspectCollections({ sessions: null, epochs: null } as never)).toEqual({ sessions: [], epochs: [] })
+    expect(inspectCollections({} as never)).toEqual({ sessions: [], epochs: [] })
+    expect(applySessionsFrame({ revision: 7, asOf: 'now', payload: { items: null } } as never).items).toEqual([])
+    expect(applySessionsFrame({ revision: 7, asOf: 'now', payload: {} } as never).items).toEqual([])
+    expect(applyEpochsFrame({ revision: 7, asOf: 'now', payload: { items: null } } as never).items).toEqual([])
+    expect(applyEpochsFrame({ revision: 7, asOf: 'now' } as never).items).toEqual([])
   })
 })
