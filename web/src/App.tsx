@@ -835,7 +835,7 @@ export default function App() {
             setAsOf(update.asOf)
             setTruncated(update.truncated)
             if (!peasantBusyRef.current) {
-              setPeasantIntegration(integrationFromSessionsFrame(frame.payload ?? { items: [] }))
+              setPeasantIntegration(integrationFromSessionsFrame(frame.payload))
             }
             setLoading(false)
             break
