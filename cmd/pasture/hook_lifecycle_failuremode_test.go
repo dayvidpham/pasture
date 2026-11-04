@@ -6047,6 +6047,7 @@ var guardSweepOwned = []string{
 	"hook_lifecycle_production_test.go",
 	"hook_lifecycle_raw_test.go",
 	"hook_lifecycle_reader_production_test.go",
+	"hook_lifecycle_served_v3_test.go",
 	"hook_lifecycle_worker_lifetime_test.go",
 	"hook_lifecycle_writers_test.go",
 	"opencode_plugin_load_test.go",
