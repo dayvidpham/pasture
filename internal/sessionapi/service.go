@@ -16,7 +16,6 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/provadapter"
-	"github.com/dayvidpham/pasture/internal/sessioncache"
 )
 
 // Prompt-based liveness defaults. A prompt younger than ActiveWindow is active;
@@ -74,45 +73,47 @@ func (s *Service) ensureFresh(ctx context.Context) error {
 	if s.Ensure == nil || ctx.Value(ensuredContextKey{}) == true {
 		return nil
 	}
-	var dirty, version int
-	if err := s.DB.QueryRowContext(ctx, `SELECT dirty,cache_version FROM pasture_session_api_state WHERE singleton_id=0`).Scan(&dirty, &version); err != nil {
+	for {
+		var dirty, version int
+		if err := s.DB.QueryRowContext(ctx, `SELECT dirty,cache_version FROM pasture_session_api_state WHERE singleton_id=0`).Scan(&dirty, &version); err != nil {
+			return err
+		}
+		s.ensureMu.Lock()
+		if s.ensurePending != nil {
+			pending := s.ensurePending
+			if s.ensureWaiting != nil {
+				s.ensureWaiting()
+			}
+			s.ensureMu.Unlock()
+			select {
+			case <-pending.done:
+				if pending.err != nil {
+					if (errors.Is(pending.err, context.Canceled) || errors.Is(pending.err, context.DeadlineExceeded)) && ctx.Err() == nil {
+						continue
+					}
+					return pending.err
+				}
+				if dirty != 0 || version != pending.version {
+					continue
+				}
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+
+		pending := &ensureFlight{done: make(chan struct{}), version: version}
+		s.ensurePending = pending
+		s.ensureMu.Unlock()
+		err := s.Ensure(ctx)
+		s.ensureMu.Lock()
+		pending.err = err
+
+		s.ensurePending = nil
+		close(pending.done)
+		s.ensureMu.Unlock()
 		return err
 	}
-	s.ensureMu.Lock()
-	if s.ensurePending != nil {
-		pending := s.ensurePending
-		if s.ensureWaiting != nil {
-			s.ensureWaiting()
-		}
-		s.ensureMu.Unlock()
-		select {
-		case <-pending.done:
-			if pending.err != nil {
-				if (errors.Is(pending.err, context.Canceled) || errors.Is(pending.err, context.DeadlineExceeded)) && ctx.Err() == nil {
-					return s.ensureFresh(ctx)
-				}
-				return pending.err
-			}
-			if dirty != 0 || version != pending.version {
-				return s.ensureFresh(ctx)
-			}
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	pending := &ensureFlight{done: make(chan struct{}), version: version}
-	s.ensurePending = pending
-	s.ensureMu.Unlock()
-	err := s.Ensure(ctx)
-	s.ensureMu.Lock()
-	pending.err = err
-
-	s.ensurePending = nil
-	close(pending.done)
-	s.ensureMu.Unlock()
-	return err
 }
 
 func NewService(db *sql.DB) *Service {
@@ -655,7 +656,7 @@ func beginSessionRead(ctx context.Context, db *sql.DB) (*sql.Tx, int64, error) {
 	}
 	if cacheVersion > audit.SessionCacheVersion {
 		_ = tx.Rollback()
-		return nil, 0, sessioncache.ErrNewerLayout
+		return nil, 0, ErrNewerLayout
 	}
 	if dirty != 0 || cacheVersion != audit.SessionCacheVersion {
 		_ = tx.Rollback()

@@ -938,6 +938,7 @@ func TestHTTPBindUnbindErrorMapping(t *testing.T) {
 		{"padded unbind expectedBinding", unbindURL("request-session"), `{"expectedBinding":" padded "}`, http.StatusBadRequest, "invalid_body"},
 		{"malformed body", bindURL("request-session"), `{`, http.StatusBadRequest, "invalid_body"},
 		{"two JSON objects", bindURL("request-session"), `{"epochId":"` + f.epoch + `","role":"worker"}{}`, http.StatusBadRequest, "invalid_body"},
+		{"whitespace-padded key", bindURL("%20padded%20"), `{"epochId":"` + f.epoch + `","role":"worker"}`, http.StatusBadRequest, "invalid_session_key"},
 		{"escaped slash key", bindURL("a%2Fb"), `{"epochId":"` + f.epoch + `","role":"worker"}`, http.StatusBadRequest, "invalid_session_key"},
 		{"unknown epoch", bindURL("request-session"), `{"epochId":"file://missing","role":"worker"}`, http.StatusNotFound, "unknown_epoch"},
 		{"stale expected binding", bindURL("active"), `{"epochId":"` + f.epoch + `","role":"worker","expectedBinding":"binding-does-not-exist"}`, http.StatusConflict, "binding_conflict"},
@@ -1181,7 +1182,7 @@ func TestDirtyCacheRefusedAcrossReads(t *testing.T) {
 	}
 }
 
-func TestEnsureCoalescesCleanBurstButNotDirtyCache(t *testing.T) {
+func TestSequentialReadsEnsureAndRefreshDirtyCache(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	s := f.service()
@@ -1232,4 +1233,32 @@ func TestInspectEnsuresOncePerResponse(t *testing.T) {
 	_, err := s.Inspect(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
+}
+
+func TestNewerLayoutWithoutEnsure(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, err := f.db.Exec(`UPDATE pasture_session_api_state SET cache_version=99 WHERE singleton_id=0`)
+	require.NoError(t, err)
+	_, err = f.service().List(t.Context(), sessionapi.ListOptions{})
+	require.ErrorIs(t, err, sessionapi.ErrNewerLayout)
+}
+
+func TestListRetriesWhenDirtyAfterEnsure(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	s := f.service()
+	calls := 0
+	s.Ensure = func(ctx context.Context) error {
+		calls++
+		dirty := 1
+		if calls == 2 {
+			dirty = 0
+		}
+		_, err := f.db.ExecContext(ctx, `UPDATE pasture_session_api_state SET dirty=? WHERE singleton_id=0`, dirty)
+		return err
+	}
+	_, err := s.List(t.Context(), sessionapi.ListOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
 }

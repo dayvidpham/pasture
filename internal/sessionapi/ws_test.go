@@ -273,3 +273,21 @@ func TestWebSocketRepublishesSameRevisionWhenTheClockCrossesACutoff(t *testing.T
 	defer mu.Unlock()
 	require.GreaterOrEqual(t, calls, 2)
 }
+
+func TestWebSocketNewerLayoutAdvisesUpgrade(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	_, err := f.db.Exec(`UPDATE pasture_session_api_state SET cache_version=99 WHERE singleton_id=0`)
+	require.NoError(t, err)
+	server := httptest.NewServer(sessionapi.NewHandler(f.service()))
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/v1/ws", nil)
+	require.NoError(t, err)
+	defer conn.Close()
+	require.Equal(t, "ready", readWSFrame(t, conn).Type)
+	require.NoError(t, conn.WriteJSON(map[string]string{"type": "subscribe", "topic": "sessions"}))
+	frame := readWSFrameOfType(t, conn, "error")
+	require.NotNil(t, frame.Error)
+	require.Equal(t, "newer_session_cache", frame.Error.Code)
+	require.Contains(t, frame.Error.Message, "upgrade Pasture")
+}

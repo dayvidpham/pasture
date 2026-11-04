@@ -303,6 +303,7 @@ var (
 	ErrInvalidFilter    = errors.New("invalid filter")
 	ErrInvalidWindow    = errors.New("invalid liveness window")
 	ErrStaleCache       = sessioncache.ErrStale
+	ErrNewerLayout      = sessioncache.ErrNewerLayout
 )
 
 // EpochView is one projected epoch and its current session population.

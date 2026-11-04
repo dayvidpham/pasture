@@ -323,10 +323,25 @@ func sessionOpenError(dbPath string, err error) error {
 	}
 }
 
-// sessionCacheError translates a session-cache rebuild failure. The rebuild is
-// the only write the read command performs, and a failure there means the cache
-// cannot be trusted rather than that the requested session is missing.
+// sessionRemediationError gives actionable advice for classified cache failures.
+func sessionRemediationError(dbPath string, err error) error {
+	var fix string
+	switch {
+	case stderrors.Is(err, sessionapi.ErrNewerLayout):
+		fix = "Upgrade Pasture to a version that supports this store, then retry."
+	case stderrors.Is(err, tasks.ErrSessionReplayExhausted):
+		fix = "Retry after concurrent writers settle; if needed, run `pasture serve --backfill` to rebuild."
+	default:
+		return nil
+	}
+	return &pasterrors.StructuredError{Category: pasterrors.CategoryStorage, What: fmt.Sprintf("Couldn't refresh or read the session cache at %q.", dbPath), Why: err.Error(), Where: "Reading sessions (internal/handlers/session_read.go).", Impact: "No session result was returned.", Fix: fix, Cause: err}
+}
+
+// sessionCacheError translates a rebuild failure without reporting a missing session.
 func sessionCacheError(dbPath string, err error) error {
+	if remedied := sessionRemediationError(dbPath, err); remedied != nil {
+		return remedied
+	}
 	var se *pasterrors.StructuredError
 	if stderrors.As(err, &se) {
 		return err
@@ -349,6 +364,9 @@ func sessionCacheError(dbPath string, err error) error {
 // categories. ErrNotFound is a workflow error because the caller asked for a
 // specific session that the store does not record.
 func sessionReadError(err error, dbPath string) error {
+	if remedied := sessionRemediationError(dbPath, err); remedied != nil {
+		return remedied
+	}
 	var se *pasterrors.StructuredError
 	if stderrors.As(err, &se) {
 		return err

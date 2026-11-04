@@ -27,12 +27,6 @@ func Native(harness ir.HarnessID, event model.ContractEventKind, body []byte) (I
 		default:
 			return Inputs{}, false
 		}
-	} else if harness == ir.HarnessClaudeCode {
-		switch event {
-		case registration.EventSessionStart, registration.EventUserPromptSubmit, registration.EventPostModelSwitch, registration.EventSubagentStart:
-		default:
-			return Inputs{}, false
-		}
 	}
 	stringField := func(obj map[string]json.RawMessage, name string, member Member) Raw {
 		value, ok := obj[name]

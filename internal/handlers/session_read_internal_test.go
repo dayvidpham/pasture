@@ -9,6 +9,7 @@ import (
 
 	pasterrors "github.com/dayvidpham/pasture/internal/errors"
 	"github.com/dayvidpham/pasture/internal/sessionapi"
+	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
 // The CLI refreshes the cache before it reads, so a dirty marker is normally
@@ -104,4 +105,25 @@ func TestSessionOpenErrorPreservesAnAlreadyStructuredCause(t *testing.T) {
 		What:     "already classified",
 	}
 	require.Same(t, original, sessionOpenError("/tmp/pasture.db", original))
+}
+
+func TestSessionCacheAndReadRemediation(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		err  error
+		fix  string
+	}{
+		{"newer", fmt.Errorf("wrapped: %w", sessionapi.ErrNewerLayout), "Upgrade Pasture"},
+		{"exhausted", fmt.Errorf("wrapped: %w", tasks.ErrSessionReplayExhausted), "backfill"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, got := range []error{sessionReadError(tc.err, "store"), sessionCacheError("store", tc.err)} {
+				var se *pasterrors.StructuredError
+				require.ErrorAs(t, got, &se)
+				require.Contains(t, se.Fix, tc.fix)
+				require.ErrorIs(t, got, tc.err)
+			}
+		})
+	}
 }

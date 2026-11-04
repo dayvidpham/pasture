@@ -2,6 +2,7 @@ package execution
 
 import (
 	"errors"
+
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 

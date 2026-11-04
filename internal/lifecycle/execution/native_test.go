@@ -102,10 +102,14 @@ func TestHasEvidence(t *testing.T) {
 	if execution.HasEvidence(m) {
 		t.Fatal("empty observation is not evidence")
 	}
-	scoped := m
-	scoped.AgentID = "child"
-	if !execution.HasEvidence(scoped) {
-		t.Fatal("scope-only observation must be retained")
+	for name, scope := range map[string]execution.Scope{"agent": {AgentID: "a"}, "turn": {TurnID: "t"}, "request": {RequestID: "r"}} {
+		t.Run(name, func(t *testing.T) {
+			scoped := m
+			scoped.Scope = scope
+			if !execution.HasEvidence(scoped) {
+				t.Fatal("scope-only observation must be retained")
+			}
+		})
 	}
 	m.Model = execution.AttributionValue{Status: execution.Invalid}
 	if !execution.HasEvidence(m) {

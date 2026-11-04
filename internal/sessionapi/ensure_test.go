@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/stretchr/testify/require"
 	_ "modernc.org/sqlite"
 )
@@ -101,4 +103,38 @@ func TestEnsureFlightPropagatesFaultAndRechecksDirtyVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConcurrentListSharesSuccessfulEnsure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions.db")
+	tracker, err := tasks.OpenTaskTracker(path)
+	require.NoError(t, err)
+	defer tracker.Close()
+	_, _, err = tasks.EnsureSessionState(t.Context(), tracker)
+	require.NoError(t, err)
+	db, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer db.Close()
+	s := NewService(db)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	waiting := make(chan struct{}, 1)
+	var count atomic.Int64
+	s.ensureWaiting = func() { waiting <- struct{}{} }
+	s.Ensure = func(context.Context) error {
+		if count.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		return nil
+	}
+	results := make(chan error, 2)
+	go func() { _, e := s.List(t.Context(), ListOptions{}); results <- e }()
+	<-started
+	go func() { _, e := s.List(t.Context(), ListOptions{}); results <- e }()
+	<-waiting
+	close(release)
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+	require.EqualValues(t, 1, count.Load())
 }

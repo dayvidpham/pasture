@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-
-	"github.com/dayvidpham/pasture/internal/sessioncache"
 )
 
 const (
@@ -224,7 +222,7 @@ func (c *wsClient) publishError(topic wsTopic, sub *wsSubscription, err error) {
 
 func wsErrorFor(err error) (string, string) {
 	switch {
-	case errors.Is(err, sessioncache.ErrNewerLayout):
+	case errors.Is(err, ErrNewerLayout):
 		return "newer_session_cache", newerSessionCacheMessage
 	case errors.Is(err, ErrStaleCache):
 		return "stale_session_cache", staleSessionCacheMessage

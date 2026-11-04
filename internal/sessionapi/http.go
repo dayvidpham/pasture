@@ -14,7 +14,6 @@ import (
 
 	"github.com/peasant-labs/schema"
 
-	"github.com/dayvidpham/pasture/internal/sessioncache"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -581,12 +580,9 @@ func validSessionKey(value string) bool {
 	return true
 }
 
-// staleSessionCacheMessage is the ONE remediation sentence every stale-cache
-// surface carries. A plain serve restart does not repair a dirty cache; both the
-// HTTP error body and the WebSocket error frame must name the two commands that
-// do, so the two surfaces cannot drift into different advice.
 const newerSessionCacheMessage = "the session cache uses a newer layout; upgrade Pasture before reading this store"
 
+// staleSessionCacheMessage is the shared remediation for a stale cache.
 const staleSessionCacheMessage = "the session cache is behind the journal; run `pasture session list` or `pasture serve --backfill` to rebuild it"
 
 // storageReadFaultMessage is the ONE wording a read-side storage failure carries
@@ -607,7 +603,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		// A liveness window is server configuration, not client input. Report a
 		// server fault with an actionable message instead of blaming the caller.
 		writeError(w, http.StatusInternalServerError, "invalid_window", err.Error())
-	case errors.Is(err, sessioncache.ErrNewerLayout):
+	case errors.Is(err, ErrNewerLayout):
 		writeError(w, http.StatusServiceUnavailable, "newer_session_cache", newerSessionCacheMessage)
 	case errors.Is(err, ErrStaleCache):
 		writeError(w, http.StatusServiceUnavailable, "stale_session_cache", staleSessionCacheMessage)
