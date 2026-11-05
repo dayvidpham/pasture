@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.28] - 2026-11-05
+
+### Changed
+- perf(projection): lead the kind guard with the indexed column
+
+### Other
+- chore(deps): provenance v0.10.3
+
 ## [0.0.27] - 2026-11-05
 
 ### Fixed
