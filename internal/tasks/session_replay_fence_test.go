@@ -202,7 +202,7 @@ func TestSessionReplayResumeParityAndMissingBodyNeverInventsResume(t *testing.T)
 	require.Contains(t, diagnostics.String(), "restore")
 }
 
-func TestSessionReplayConcurrentRebuildCannotOverwriteANewerGeneration(t *testing.T) {
+func TestSessionReplayDefersToANewerConcurrentGeneration(t *testing.T) {
 	t.Parallel()
 	tracker, _, _ := replayStore(t)
 	appendReplayFact(t, tracker, "replay.concurrent", "UserPromptSubmit", "", 100)
@@ -219,35 +219,45 @@ func TestSessionReplayConcurrentRebuildCannotOverwriteANewerGeneration(t *testin
 			require.NoError(t, err)
 		}
 	})
+	// A peer published a generation at or beyond this scan's pinned snapshot, so
+	// its work subsumes ours: this replay reports that generation and never
+	// overwrites it with an older scan.
 	require.NoError(t, err)
-	require.Equal(t, 2, scans)
-	require.Greater(t, out.Revision, peer.Revision)
+	require.Equal(t, 1, scans, "a subsumed scan is not repeated")
+	require.Equal(t, peer.Revision, out.Revision)
+	require.Equal(t, peer.CompletedThroughJournalID, out.CompletedThroughJournalID)
 	_, rebuilt, err := EnsureSessionState(t.Context(), tracker)
 	require.NoError(t, err)
 	require.False(t, rebuilt, "a certified suffix with no new facts is inert")
 }
 
-func TestSessionReplaySustainedWritesExhaustTheAttemptBoundWithoutPublishing(t *testing.T) {
+func TestSessionReplayPublishesACoherentSnapshotUnderSustainedWrites(t *testing.T) {
 	t.Parallel()
 	tracker, store, _ := replayStore(t)
 	appendReplayFact(t, tracker, "replay.seed", "UserPromptSubmit", "", 100)
 	scans := 0
-	_, _, err := refreshSessionState(t.Context(), tracker, true, func(stage sessionReplayStage) {
+	out, changed, err := refreshSessionState(t.Context(), tracker, true, func(stage sessionReplayStage) {
 		if stage != sessionReplayScanned {
 			return
 		}
 		scans++
 		appendReplayFact(t, tracker, fmt.Sprintf("replay.interference.%d", scans), "UserPromptSubmit", "", int64(100+scans))
 	})
-	require.ErrorContains(t, err, "stale")
-	require.ErrorIs(t, err, ErrSessionReplayExhausted)
-	require.Equal(t, sessionReplayMaxAttempts, scans, "retry count is finite even without clock expiry")
-	var revision, cursor, count int64
+	// A writer appending during the scan no longer invalidates it: the replay
+	// pins one snapshot, publishes a coherent cache at that watermark, and
+	// leaves the newer rows to the next suffix refresh.
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.GreaterOrEqual(t, scans, 1)
+	require.LessOrEqual(t, scans, sessionReplayMaxAttempts)
+	var revision, cursor int64
 	require.NoError(t, store.auditDBHandle().QueryRow(`SELECT revision,completed_through_jid FROM pasture_session_api_state`).Scan(&revision, &cursor))
-	require.Zero(t, revision)
-	require.Zero(t, cursor)
+	require.NotZero(t, revision)
+	require.NotZero(t, cursor, "a pinned snapshot is certified even while writers append")
+	require.Equal(t, out.CompletedThroughJournalID, cursor)
+	var count int64
 	require.NoError(t, store.auditDBHandle().QueryRow(`SELECT count(*) FROM pasture_session_state`).Scan(&count))
-	require.Zero(t, count, "failed certification never exposes a partial cache")
+	require.NotZero(t, count, "the published cache holds the scanned snapshot, never a partial one")
 }
 
 func TestSessionReplayCorruptLegacyBodyPreservesTheOldCache(t *testing.T) {

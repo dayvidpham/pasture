@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
@@ -125,6 +126,11 @@ var ErrSessionReplayExhausted = errors.New("session replay publication attempts 
 // The observer is private, per-invocation dependency injection for deterministic
 // interleavings. Both public production entry points supply nil. It is not an
 // execution-publication hook: publication itself is one concrete SQL path below.
+// sessionCatchUpBudget bounds the suffix chase after an explicit rebuild. The
+// pinned snapshot is already coherent; this only closes the gap opened by
+// writers during the scan, and stops rather than chasing a hot journal forever.
+const sessionCatchUpBudget = 2 * time.Minute
+
 func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forceFull bool, observer func(sessionReplayStage)) (SessionStateRebuildOutcome, bool, error) {
 	store, ok := tracker.(lifecycleReceiptStore)
 	if !ok || store.auditDBHandle() == nil || store.Journal() == nil {
@@ -141,6 +147,12 @@ func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forc
 		bounded, cancel = context.WithTimeout(ctx, store.lifecycleTimeoutProfile().WorkflowResult())
 		defer cancel()
 	}
+	catchUpDeadline := time.Time{}
+	if forceFull {
+		catchUpDeadline = time.Now().Add(sessionCatchUpBudget)
+	}
+	var last SessionStateRebuildOutcome
+	published := false
 	for range sessionReplayMaxAttempts {
 		if err := bounded.Err(); err != nil {
 			return SessionStateRebuildOutcome{}, false, staleSessionReplay(err)
@@ -162,6 +174,9 @@ func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forc
 			return SessionStateRebuildOutcome{}, false, staleSessionReplay(err)
 		}
 		if !full && !found {
+			if published {
+				return last, true, nil
+			}
 			return SessionStateRebuildOutcome{}, false, nil
 		}
 		// Ownership reads are pooled and must finish before taking the writer
@@ -181,7 +196,21 @@ func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forc
 		if err != nil {
 			return SessionStateRebuildOutcome{}, false, staleSessionReplay(err)
 		}
-		return out, true, nil
+		last, published = out, true
+		// The publish is coherent at the pinned snapshot. Close the gap opened by
+		// writers during the scan with a suffix pass; stop when the tail is empty,
+		// when the implicit budget is spent, or when an explicit repair's catch-up
+		// window closes. A cache that is behind is still a valid snapshot.
+		advanced, tailErr := sessionJournalAdvanced(bounded, store, provenance.JournalID(out.CompletedThroughJournalID))
+		if tailErr != nil || !advanced {
+			return out, true, nil
+		}
+		if !forceFull || time.Now().After(catchUpDeadline) {
+			return out, true, nil
+		}
+	}
+	if published {
+		return last, true, nil
 	}
 	return SessionStateRebuildOutcome{}, false, staleSessionReplay(fmt.Errorf("%w: the store changed during all %d bounded publication attempts", ErrSessionReplayExhausted, sessionReplayMaxAttempts))
 }
@@ -214,6 +243,12 @@ func scanSessionReplay(ctx context.Context, store lifecycleReceiptStore, after p
 		page, err := readSessionOccurrencePage(ctx, store.auditDBHandle(), request)
 		if err != nil {
 			return nil, 0, false, err
+		}
+		// Pin the first resolved snapshot for the whole replay. Rows at or below
+		// it are immutable, so a lifecycle writer appending during the scan cannot
+		// move the target; anything newer is the next suffix refresh's work.
+		if request.SnapshotMaxJournalID == 0 {
+			request.SnapshotMaxJournalID = page.SnapshotMaxJournalID
 		}
 		watermark = page.SnapshotMaxJournalID
 		for _, fact := range page.Facts {
@@ -379,19 +414,19 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 		start = current
 	}
 	if current != start {
-		return SessionStateRebuildOutcome{}, errSessionReplayChanged
-	}
-	// CURRENT transaction evidence, not a query pinned at the old scan W. All
-	// pooled scans/ownership work ended before this single connection was held.
-	reader, err := provenance.NewTransactionEvidenceReader(ctx, tx)
-	if err != nil {
-		return SessionStateRebuildOutcome{}, err
-	}
-	post, err := projection.ReadOccurrenceFactPage(ctx, reader, tx, provenance.FactPageRequest{Limit: 1, AfterJournalID: watermark})
-	if err != nil {
-		return SessionStateRebuildOutcome{}, err
-	}
-	if len(post.Facts) > 0 {
+		// Another writer published while this replay scanned. If its cache is
+		// already at or beyond our pinned snapshot and clean, its work subsumes
+		// ours: report it instead of rescanning. A newer layout, a dirty marker,
+		// or an older watermark still needs a fresh attempt.
+		if !current.Dirty && current.CacheVersion == audit.SessionCacheVersion && provenance.JournalID(current.CompletedThroughJournalID) >= watermark {
+			var out SessionStateRebuildOutcome
+			out.CompletedThroughJournalID = current.CompletedThroughJournalID
+			out.Revision = current.Revision
+			if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM pasture_session_state`).Scan(&out.Sessions); err != nil {
+				return SessionStateRebuildOutcome{}, err
+			}
+			return out, nil
+		}
 		return SessionStateRebuildOutcome{}, errSessionReplayChanged
 	}
 	explicit, err := addCurrentSessionBindingsAndClaims(ctx, tx, rows)
@@ -552,4 +587,14 @@ func readUnsupersededSessionEnds(ctx context.Context, tx *sql.Tx) (map[sessionKe
 		ended[key] = at
 	}
 	return ended, rows.Err()
+}
+
+// sessionJournalAdvanced reports whether the journal holds rows beyond the
+// certified watermark. Those rows belong to the next suffix refresh.
+func sessionJournalAdvanced(ctx context.Context, store lifecycleReceiptStore, watermark provenance.JournalID) (bool, error) {
+	var max sql.NullInt64
+	if err := store.auditDBHandle().QueryRowContext(ctx, `SELECT MAX(journal_id) FROM journal`).Scan(&max); err != nil {
+		return false, err
+	}
+	return max.Valid && provenance.JournalID(max.Int64) > watermark, nil
 }
