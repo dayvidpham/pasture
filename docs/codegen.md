@@ -114,6 +114,40 @@ After rendering, `ValidateSkillStructure` parses the result with goldmark and
 fails on malformed heading hierarchy (duplicate H2 titles, orphan H3s), so a
 broken template can't ship a malformed skill.
 
+## Generated skill provenance
+
+Every generated skill's comment fence opens with a provenance line, rendered on
+every run:
+
+```markdown
+<!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.24 artifact v1 -->
+```
+
+The release comes from `.claude-plugin/plugin.json` — the same authority the
+release workflow tags and stamps into the binary with `-X main.version`; see
+`SourceVersion` in `internal/codegen/version.go`. `EmitHarness` resolves it once
+from the source root and threads it through every role and command render.
+Direct `GenerateSkill` and `GenerateSubSkill` calls resolve it from the module
+that owns the skill file, falling back to `devel` outside a Pasture module.
+
+`artifact v1` is the artifact bundle/manifest format version
+(`artifact.bundle.v1`, `artifact.manifest.v1`); see
+`GeneratedArtifactFormat`. The bundle identity cannot appear here: it is a
+content hash over the skill bytes, so embedding it would be self-referential.
+
+The stamp lives in the fence rather than in YAML frontmatter on purpose. Hosts
+parse frontmatter for skill registration, and an unknown key is at best ignored
+and at worst rejected by a strict validator this repository does not control. A
+comment inside the generated region carries the same provenance with no
+frontmatter contract risk.
+
+This is the only installation provenance a skill carries. Installation copies
+bundle bytes verbatim, so an installed `SKILL.md` names the release whose
+generator produced it; the installation registry holds a content address and
+per-leaf digests, which identify bytes but not the release. CI regenerates and
+fails on drift, so a committed stamp cannot lag the declared version.
+
 ## Source-of-truth files (where the facts live)
 
 | File | Holds |

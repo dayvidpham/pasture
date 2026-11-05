@@ -6,6 +6,7 @@ description: Task coordinator, spawns workers, manages parallel execution
 # Supervisor Agent
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.25 artifact v1 -->
 **Role:** `supervisor` | **Phases owned:** p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing
 
 ## Protocol Context (generated from schema.xml)

@@ -6,6 +6,7 @@ description: Review implementation slices with EAGER severity tree
 # Review Code Implementation
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.25 artifact v1 -->
 **Command:** `pasture:reviewer:review-code` — Review implementation slices with EAGER severity tree
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10

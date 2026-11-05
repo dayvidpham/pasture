@@ -6,6 +6,7 @@ description: Domain research — find standards, prior art, and competing approa
 # Research
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.25 artifact v1 -->
 **Command:** `pasture:research` — Domain research — find standards, prior art, and competing approaches
 
 General-purpose domain research skill. Finds standards, prior art, existing solutions, and established patterns for a given topic. Writes structured findings to `llm/research/<topic>.md`.

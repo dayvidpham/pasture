@@ -6,6 +6,7 @@ description: Run an unattended implementation session with small PRs and a clean
 # AFK Implement
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.25 artifact v1 -->
 **Command:** `pasture:afk-implement` — Run an unattended implementation session with small PRs and a clean review wave, never merging
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phases 8-10

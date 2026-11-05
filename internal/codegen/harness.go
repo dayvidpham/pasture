@@ -290,11 +290,12 @@ func EmitHarness(roots HarnessRoots, h TargetHarness, opts GenerateOptions) ([]G
 func renderHarness(roots HarnessRoots, h TargetHarness, opts GenerateOptions) ([]GeneratedFile, error) {
 	root := roots.Output
 	figuresDir := roots.figuresDir()
+	version := SourceVersion(roots.Source)
 	var out []GeneratedFile
 
 	for _, item := range roleSkillItems() {
 		paths := roots.skillPathsFor(h, item.dir)
-		generated, err := emitRoleSkill(h, item.role, paths, figuresDir, opts)
+		generated, err := emitRoleSkill(h, item.role, paths, figuresDir, version, opts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): role skill %s: %w", h.Name, item.dir, err)
 		}
@@ -305,7 +306,7 @@ func renderHarness(roots HarnessRoots, h TargetHarness, opts GenerateOptions) ([
 
 	for _, item := range commandSkillItems() {
 		paths := roots.skillPathsFor(h, item.dir)
-		generated, err := emitCommandSkill(h, item.commandID, paths, figuresDir, opts)
+		generated, err := emitCommandSkill(h, item.commandID, paths, figuresDir, version, opts)
 		if err != nil {
 			return nil, fmt.Errorf("codegen.EmitHarness(%s): command skill %s: %w", h.Name, item.dir, err)
 		}
@@ -413,7 +414,7 @@ var commandSkillDirs = map[string]string{
 // emitRoleSkill renders one role skill. A marker-merge target merges into the
 // hand-authored base file at paths.Src (an input below HarnessRoots.Source) and
 // writes the result to paths.Dst; a full-file target renders paths.Dst alone.
-func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, paths skillPaths, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
+func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, paths skillPaths, figuresDir string, version string, opts GenerateOptions) (GeneratedFile, error) {
 	if h.SkillWrite == WriteMarkerMerge {
 		if _, err := os.Stat(paths.Src); os.IsNotExist(err) {
 			return GeneratedFile{}, nil
@@ -421,7 +422,7 @@ func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, paths skillPaths, fi
 		content, err := generateSkillInto(roleID, paths, figuresDir, opts)
 		return GeneratedFile{Path: paths.Dst, Content: content}, err
 	}
-	content, err := renderSkill(roleID, figuresDir, h.SkillTemplate)
+	content, err := renderSkill(roleID, figuresDir, h.SkillTemplate, version)
 	if err != nil {
 		return GeneratedFile{}, err
 	}
@@ -430,7 +431,7 @@ func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, paths skillPaths, fi
 
 // emitCommandSkill renders one command skill, with the same source/output split
 // as emitRoleSkill.
-func emitCommandSkill(h TargetHarness, commandID string, paths skillPaths, figuresDir string, opts GenerateOptions) (GeneratedFile, error) {
+func emitCommandSkill(h TargetHarness, commandID string, paths skillPaths, figuresDir string, version string, opts GenerateOptions) (GeneratedFile, error) {
 	if h.SkillWrite == WriteMarkerMerge {
 		if _, err := os.Stat(paths.Src); os.IsNotExist(err) {
 			return GeneratedFile{}, nil
@@ -438,7 +439,7 @@ func emitCommandSkill(h TargetHarness, commandID string, paths skillPaths, figur
 		content, err := generateSubSkillInto(commandID, paths, figuresDir, opts)
 		return GeneratedFile{Path: paths.Dst, Content: content}, err
 	}
-	content, err := renderSubSkill(commandID, figuresDir, h.SubSkillTemplate)
+	content, err := renderSubSkill(commandID, figuresDir, h.SubSkillTemplate, version)
 	if err != nil {
 		return GeneratedFile{}, err
 	}

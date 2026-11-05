@@ -6,6 +6,7 @@ description: Vertical slice assignment and tracking
 # Implementation Slice (Phase 9)
 
 <!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.25 artifact v1 -->
 **Command:** `pasture:impl:slice` — Vertical slice assignment and tracking
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
