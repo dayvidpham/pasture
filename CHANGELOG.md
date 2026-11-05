@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.29] - 2026-11-05
+
+### Fixed
+- fix(tasks): replay a pinned snapshot and catch up under an active journal
+
+### Other
+- chore(deps): dbos-transact-golang v1.8.0
+
 ## [0.0.28] - 2026-11-05
 
 ### Changed

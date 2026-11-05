@@ -293,6 +293,18 @@ func openClient(dbPath string, site clientSite) (dbos.Client, *sql.DB, func() er
 		_ = db.Close()
 		return nil, nil, nil, err
 	}
+	// DBOS v1.8 clients never own the system schema: NewClient pins
+	// SkipMigrations and refuses a database below the required version. Migrate
+	// out of band first. The migration is idempotent, and v1.8's SQLite path is
+	// safe when several processes open the same file at once.
+	if err := dbos.Migrate(context.Background(), "sqlite:file:"+dbPath, dbos.WithMigrateLogger(durableClientLogger())); err != nil {
+		_ = db.Close()
+		where, siteErr := site.startupWhere()
+		if siteErr != nil {
+			return nil, nil, nil, errors.Join(siteErr, err)
+		}
+		return nil, nil, nil, engine.DescribeDurableStartupFailure(where, err)
+	}
 	client, err := dbos.NewClient(context.Background(), dbos.ClientConfig{
 		SQLiteSystemDB: db,
 		// Logger keeps the runtime's own log off this command's answer; see

@@ -6,7 +6,7 @@ description: User Acceptance Testing with demonstrative examples
 # User Acceptance Test (UAT)
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.28 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.29 artifact v1 -->
 **Command:** `pasture:user:uat` — User Acceptance Testing with demonstrative examples
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-5-plan-uat)** <- Phase 5 (Plan UAT) and Phase 11 (Impl UAT)

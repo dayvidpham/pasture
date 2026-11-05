@@ -317,7 +317,7 @@ func newEngine(ctx context.Context, cfg Config, beforeAudit func(*sql.DB)) (*Eng
 		ExecutorID:         executorID,
 		ApplicationVersion: cfg.ApplicationVersion,
 		Logger:             logger,
-	}, defaultDBOSRetryPolicy())
+	})
 	if err != nil {
 		_ = db.Close()
 		if trailCloser != nil {

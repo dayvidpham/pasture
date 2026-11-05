@@ -6,7 +6,7 @@ description: Leave structured review comment via Pasture
 # Leave Structured Review Comment
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.28 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.29 artifact v1 -->
 **Command:** `pasture:reviewer:comment` — Leave structured review comment via Pasture
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)** <- Phases 4 + 10
