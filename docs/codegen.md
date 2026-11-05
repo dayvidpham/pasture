@@ -257,7 +257,7 @@ framing, added commands and missing pinned quotations fail closed. Review each
 changed identity explicitly rather than regenerating a permissive baseline.
 
 The gate is unconditional in `make generate` (therefore Codegen Drift CI) and
-`TestOperationalTrackerShippedTree` (therefore main-push race CI). Focused tests:
+`TestOperationalTrackerShippedTree` (therefore main-push CI). Focused tests:
 
 ```sh
 go test -race ./internal/codegen/...

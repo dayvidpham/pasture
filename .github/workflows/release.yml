@@ -1,9 +1,10 @@
 name: Release
 
 # Release consumes the successful CI result for one exact main commit instead
-# of re-running the test suite here. CI is the single authority: race
-# correctness, controlled performance, recovery, lint and codegen drift must
-# already be green for that commit.
+# of re-running the test suite here. CI is the single authority: the full
+# non-race suite, controlled performance, recovery, lint and codegen drift must
+# already be green for that commit. The race detector is a local pre-release
+# check, not part of this gate.
 #
 # Flow: a version bump lands on main -> CI runs -> this workflow starts when CI
 # completes, verifies the CI run is a trusted push-to-main success for the exact
