@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.0.26] - 2026-11-05
+
+### Added
+- feat(web): show prompt liveness, actor, and execution attribution
+- feat(activation): enable Claude UserPromptSubmit as the prompt-liveness event
+- feat(sessionapi): serve coherent execution summaries and history
+- feat(sessionapi): base liveness on prompt recency with two windows
+- feat(lifecycle): record execution attribution in v3 receipts
+- feat(session): publish execution cache under replay fence
+- feat(lifecycle): integrate default session attribution
+- feat(lifecycle): prepare occurrence v3 readers and lane negotiation
+- feat(lifecycle): continue attribution-only sessions
+- feat(tasks): initialize reserved LLM actor on normal open
+- feat(execution): extract native attribution inputs
+- feat(execution): integrate model-anchored normalization core
+- feat(session): integrate fenced replay and authority checkpoints
+- feat(execution): normalize bounded model-anchored evidence
+- feat(session): certify bounded full and suffix replay
+- feat(tasks): exclude generic LLM attribution from authority
+- feat(session): fold independent live lifecycle watermarks
+- feat(session): integrate lifecycle metadata and actor contracts
+- feat(session): version validated lifecycle transition contracts
+- feat(provadapter): define reserved default LLM actor
+
+### Fixed
+- fix(ci): give the race suite headroom past its real cost
+- fix(sessionapi): return empty arrays for fresh stores
+- fix(session): clarify cache errors and test read fences
+- fix(session): restore codex evidence and fresh reads
+- fix(session): preserve evidence and classify replay faults
+- fix(session): address liveness and attribution review
+- fix(lifecycle): align the tree with prompt liveness and occurrence v3
+
+### Changed
+- refactor(web): remove redundant frame fallback
+
+### Documentation
+- docs(web): document liveness, actor, and execution reading rules
+- docs(agents): forbid force-deleting worktrees and branches
+- docs(agents): make worktree cleanup part of landing
+
+### Other
+- Merge remote-tracking branch 'origin/main' into pasture-230--feat--session-attribution
+- merge: origin/main into pasture-230--feat--session-attribution
+- test(lifecycle): classify served v3 guard coverage
+- test(lifecycle): prove direct and served v3 execution end to end
+- Merge branch 'pasture-230--feat--session-attribution' into pasture-230--feat--execution-attribution
+- Merge branch 'pasture-230--feat--session-liveness' into pasture-230--feat--session-attribution
+- Merge branch 'pasture-230--feat--session-attribution' into pasture-230--feat--execution-attribution
+- merge: integrate default actor and lane protocol
+- test(lifecycle): cover fallback continuation and initialization
+- merge: incorporate released context-aware registration
+- merge: integrate session replay contracts
+- test(tasks): distinguish current schema from identity floor
+
 ## [0.0.25] - 2026-11-03
 
 ### Added
