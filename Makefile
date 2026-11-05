@@ -141,8 +141,16 @@ test-race:
 	$(MAKE) test-race-correctness
 	$(MAKE) test-performance
 
+# The per-package cap is 60m, not the 30m the other targets use. `cmd/pasture`
+# now carries the lifecycle integration tables (850 tests, ~1700s of summed
+# race time on a 32-core host) and needs roughly 38 minutes alone on the
+# 4-core runner while the other packages share it. At 30m the package was
+# killed mid-suite with `panic: test timed out`, which failed CI and therefore
+# refused every release; the dump showed ordinary work, not a deadlock. The
+# cap is a hang detector, so it must sit above the suite's real cost: nothing
+# is skipped, weakened, or removed, and the non-race targets keep 30m.
 test-race-correctness:
-	GOWORK=off PASTURE_TEST_PHASE=race-correctness CGO_ENABLED=1 go test -race -count=1 -timeout 30m ./...
+	GOWORK=off PASTURE_TEST_PHASE=race-correctness CGO_ENABLED=1 go test -race -count=1 -timeout 60m ./...
 
 # Run only after the race wave has exited, with no independent heavy builders.
 # Empty GITHUB_ACTIONS deliberately retains unscaled reference-host thresholds.
