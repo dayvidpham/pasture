@@ -2256,7 +2256,7 @@ const reservedQueuePollingInterval = time.Second
 // CADENCE. Both live in a package the runtime keeps internal, so no import can
 // hold this file to them and a version bump could silently make the ceiling
 // meaningless.
-const reservedQueueFactsVerifiedAt = "github.com/dbos-inc/dbos-transact-golang v1.2.0"
+const reservedQueueFactsVerifiedAt = "github.com/dbos-inc/dbos-transact-golang v1.8.0"
 
 // TestReservedQueueFactsMatchThePinnedRuntime fails on a runtime bump so the two
 // reserved-queue facts are re-read instead of assumed.
