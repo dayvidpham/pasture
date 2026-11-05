@@ -1213,6 +1213,51 @@ pass local review and fail that gate.
 Commit hygiene is unchanged and still applies: stage only paths your slice owns,
 never `git add -A`, and commit with `git agent-commit`.
 
+**Worktree cleanup is part of landing.** A merged worktree is removed in the
+same session that verifies the merge, from the repository that owns it:
+
+```bash
+git fetch origin
+# merged: either the branch is an ancestor of the integration branch, or (for a
+# squash/rebase merge) its commits are only patch-equivalent to it.
+git merge-base --is-ancestor "$BRANCH" origin/main
+
+# Any output here is unlanded work: stop and report it.
+git -C "$WORKTREE" status --porcelain
+
+git worktree remove "$WORKTREE"
+git branch -d "$BRANCH"
+git push origin --delete "$BRANCH"   # merged remote branches only
+git worktree prune                    # drop registrations whose dirs are gone
+```
+
+- Remove only merged, clean worktrees. Uncommitted or untracked changes are
+  work: report them.
+- Never force-delete a worktree or branch. Do not use
+  `git worktree remove --force` and do not use `git branch -D`. Let the
+  non-forcing command refuse instead.
+- If any removal or deletion fails — dirty checkout, unmerged branch, detached
+  `HEAD`, submodule, protected ref, permissions — stop and raise the exact
+  command and error to the user. Do not escalate to a force variant, a
+  different deletion mechanism, or a filesystem delete.
+- `git branch -d` compares against the current `HEAD`. The repo-root checkout
+  here is detached at a release, so it may refuse a branch that is in fact
+  merged. Confirm with `git branch --merged <integration>`, then report the
+  failure and wait for the user to approve a forced delete; do not run it
+  yourself.
+- Never delete an unmerged branch without explicit user approval. When an
+  abandoned branch is approved for deletion, record its tip SHA in tracker
+  evidence first; the branch may be the only reference.
+- Delete a remote branch under the same approval rule as any push. A merged
+  branch is safe to delete; an unmerged one is not, regardless of age.
+- A worktree whose git metadata is gone cannot be removed with
+  `git worktree remove`, and must not be removed with `rm -rf`. Move it aside or
+  ask.
+- Leave long-lived checkouts (`main`, `develop`) and any worktree that hosts
+  unmerged nested worktrees in place.
+- Cleanup does not replace landing evidence: record the merge and cleanup in the
+  tracker before the worktree is gone.
+
 ## Build
 
 ```bash
