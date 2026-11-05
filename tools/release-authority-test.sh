@@ -222,14 +222,14 @@ while IFS= read -r job; do
   contract=1
 done < <(jq -r '.[]' <<<"$required")
 # Pin the exact workload each required job runs. A substring match is not
-# enough: "make test-race" is a prefix of "make test-race-correctness", and a
-# no-op step would otherwise satisfy the contract while the measured workload
-# never ran.
+# enough: "make test" is a prefix of "make test-pr" and of
+# "make test-performance", and a no-op step would otherwise satisfy the
+# contract while the measured workload never ran.
 block_for() {
   awk -v k="  $1:" '$0==k{f=1;next} f&&/^  [a-zA-Z0-9_-]+:/{f=0} f' "$ci"
 }
-if ! block_for build | grep -qE '^[[:space:]]+run:[[:space:]]+make test-race-correctness[[:space:]]*$'; then
-  echo "FAIL Build & Test no longer runs 'make test-race-correctness' on main"
+if ! block_for build | grep -qE '^[[:space:]]+run:[[:space:]]+make test[[:space:]]*$'; then
+  echo "FAIL Build & Test no longer runs the full 'make test' suite on main"
   contract=1
 fi
 if ! block_for build | grep -qE '^[[:space:]]+run:[[:space:]]+make test-pr[[:space:]]*$'; then
