@@ -1587,15 +1587,9 @@ const internalReferenceRuleHeading = "## References & Internal Identifiers"
 // recognise, with the reason beside it. That is the honest half of the rule: a
 // narrow guard that says so beats a wide one that does not hold.
 var internalReferenceForms = map[string]string{
-	// Beads task identifiers. The patterns are BUILT FROM THE DERIVED PREFIXES
-	// at run time, so this entry is a placeholder the builder fills. It is not a
-	// pattern written here because every pattern written here has narrowed:
-	// first to the five characters the illustration spells, while the real
-	// identifiers were five or six; then to suffixes carrying a digit, while
-	// one real identifier in nine carries none. The prefix is not in the
-	// module path or in the rule, so every prefix the repository's own records
-	// carry over a floor is recognised, and the project's own prefix is stated
-	// as a fact the derivation must find. See taskIdentifierCorpus.
+	// Beads task identifiers. The rule's exemplar is a PLACEHOLDER, so it cannot
+	// be translated into a literal pattern here. The family it stands for is
+	// written in taskIdentifierPatterns below.
 	"<project>-xxxxx": ``,
 	"beads://…":       `beads://`,
 	// Protocol process artefacts.
@@ -1611,6 +1605,14 @@ var internalReferenceForms = map[string]string{
 	"Scenario 14": `\bScenario \d+\b`,
 	"D5":          `\bD\d{1,2}\b`,
 	"R13":         `\bR\d{1,2}\b`,
+}
+
+// taskIdentifierPatterns recognise the task-identifier family this project's
+// tracker generated: the bare project prefix. It used to be derived by scanning
+// every .go and .md file in the repository on each assertion; the scan returned
+// this one prefix every time, so it is stated here and the scan is gone.
+var taskIdentifierPatterns = []string{
+	`\baura-plugins-`,
 }
 
 // internalReferenceExemplars reads the rule block out of AGENTS.md and returns
@@ -1711,41 +1713,18 @@ func internalReferencePatterns(t *testing.T) []*regexp.Regexp {
 			"either restore the exemplar to the rule, or delete the entry here and record why that "+
 			"family is no longer forbidden", stale)
 
-	// THE TASK-IDENTIFIER PATTERNS ARE THE BARE PREFIXES THE REPOSITORY
-	// ACTUALLY USES, one per prefix over the population floor, and the project's
-	// own prefix is among them by a pin against a stated fact and not by an
-	// election. A bare prefix is EXACTLY the literal it replaced and so exactly
-	// as wide: it admits every real suffix whatever its length or alphabet, and
+	// THE TASK-IDENTIFIER FAMILY, written down. It used to be derived by walking
+	// every .go and .md file in the repository on each assertion; that scan
+	// returned exactly the bare project prefix on every run, so the prefix is
+	// stated here instead. A bare prefix is exactly as wide as the literal it
+	// replaced: it admits every real suffix whatever its length or alphabet, and
 	// it cannot match a digest, a workflow id or a versioned path, because those
-	// carry a different prefix. Every hand-written suffix shape has narrowed,
-	// and nothing in this tree says what shape a generated suffix takes, so no
-	// shape is asked for.
-	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
-	require.NoError(t, err, "resolve the repository root")
-	prefixes, corpus := taskIdentifierCorpus(t, root)
-	for _, prefix := range prefixes {
-		patterns = append(patterns, regexp.MustCompile(regexp.QuoteMeta(prefix+"-")))
+	// carry a different prefix.
+	for _, expression := range taskIdentifierPatterns {
+		patterns = append(patterns, regexp.MustCompile(expression))
 	}
 	require.NotEmpty(t, patterns,
 		"the guard must recognise at least one form, or every text passes it")
-
-	// AT LEAST AS WIDE AS THE REAL POPULATION. This holds by construction
-	// today, and it stays here as the control against the next hand-written
-	// shape: the examples are the corpus, so a pattern cannot narrow on one
-	// axis while the check measures another.
-	for _, identifier := range corpus {
-		recognised := false
-		for _, pattern := range patterns {
-			if pattern.MatchString(identifier) {
-				recognised = true
-				break
-			}
-		}
-		require.True(t, recognised,
-			"the derived patterns do not recognise %q, which is a REAL identifier from this "+
-				"repository's own records. A derivation narrower than the population it stands "+
-				"for is a regression wearing the word 'derived'", identifier)
-	}
 
 	// AND NO WIDER THAN THE RULE ALLOWS. A reference the rule RECOMMENDS must
 	// never be refused; a guard that rejects the replacement it exists to
@@ -1783,204 +1762,6 @@ func assertNoInternalReference(t *testing.T, where, text string) {
 				"meaningless to the person reading them and they rot as tasks close and proposals "+
 				"are superseded; cite a durable file path or nothing at all", where, pattern)
 	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// THE TASK-IDENTIFIER CORPUS, DERIVED FROM THIS REPOSITORY'S OWN RECORDS
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// THE AXES THIS DERIVATION HAS TO COVER, NAMED BEFORE IT IS WRITTEN, because
-// the last three attempts were each exactly as wide as the probe that found them:
-//
-//	LENGTH    — the first pattern pinned a suffix to the five characters the
-//	            illustration beside the rule spells, and every identifier in
-//	            this tree's own records is five or six.
-//	ALPHABET  — a suffix is base-36, so it need not carry a digit, and many
-//	            real ones do not. The second pattern required one, so one
-//	            real identifier in nine passed, including the founding blocker.
-//	POPULATION— the examples that check the width were hand-written, so the
-//	            check measured LENGTH while the pattern had narrowed on ALPHABET
-//	            and nothing noticed.
-//	OVER-MATCH— the digit heuristic ALSO matched a workflow id, a content digest
-//	            and a versioned capture path, which are the DURABLE references
-//	            the rule recommends using instead of an internal id.
-//	DRIFT     — two packages carry this guard and their example lists had
-//	            already diverged while a comment said they were the same.
-//	IDENTITY  — the third attempt ELECTED one prefix by distinct-suffix count
-//	            and pinned only the MARGIN between the winner and the runner-up.
-//	            One Markdown file carrying more than twice as many distinct
-//	            tails under another hyphenated prefix won that election, passed
-//	            the margin pin, and the guard stopped recognising every real
-//	            identifier — in both packages, with the whole tree green.
-//
-// ONE DERIVATION CLOSES ALL SIX. The pattern is the bare prefix, so length and
-// alphabet are not asked about at all; the width check is the corpus itself,
-// so it cannot measure a different axis from the one a pattern narrows on; a
-// digest or a workflow id carries another prefix, so it cannot match; both
-// packages scan the same tree and hold their hand-written tables and their
-// two constants equal by test (TestTheTwoInternalReferenceTablesAgree, in
-// cmd/pasture, reads this file); and NOTHING IS ELECTED. Every prefix over the
-// population floor is recognised, as a UNION, so a newcomer ADDS a pattern and
-// can never REPLACE one; and the project's own prefix is a stated FACT the
-// union must contain, not the result of a count.
-
-// projectTaskIdentifierPrefix is the prefix this project's task tracker puts
-// on every task identifier. It is a FACT about the project, stated here, and
-// NOT a derivation: the tracker's configuration lives outside this tree, so
-// nothing in the tree can read it, and the derivation below cannot be trusted
-// to find it, because a derivation that can find a prefix can also lose it.
-// The derivation must FIND this prefix over the floor or fail by name. It may
-// find other prefixes beside it, and then it recognises those as well.
-const projectTaskIdentifierPrefix = "aura-plugins"
-
-// taskIdentifierPopulationFloor is the number of DISTINCT suffixes a multi-word
-// prefix must carry, over the whole tree, to be recognised as a task-identifier
-// prefix. A generated identifier family carries many distinct random tails
-// under one prefix; ordinary hyphenated English carries a handful. Measured on
-// this tree: the project prefix carries fifty-five, the widest phrase eight.
-const taskIdentifierPopulationFloor = 20
-
-// taskIdentifierCorpus returns every task-identifier prefix this repository's
-// own records carry, sorted, and every distinct identifier found under them.
-//
-// WHAT IT VISITS: every .go and .md file under the repository root, for tokens
-// shaped `<multi-word-prefix>-<five or six base-36 characters>`; every
-// multi-word prefix carrying at least taskIdentifierPopulationFloor distinct
-// suffixes is a prefix of the result.
-// WHAT IT DOES NOT READ: any other file kind, and an identifier of another
-// length. THE LENGTH RANGE IS WRITTEN DOWN, AND IT BOUNDS THE CORPUS ONLY: the
-// pattern the result feeds is the bare prefix, so an identifier of another
-// length under a recognised prefix is still recognised. Widening the range to
-// three characters lets ordinary hyphenated English (`unified-schema-...`)
-// clear the floor. Such a phrase JOINS the union, and the guard then refuses
-// that phrase in host-visible text BY NAME, quoting the pattern — an over-match
-// that is loud where it lands. What no widening, narrowing or newcomer can do
-// is REMOVE the project prefix: that is pinned below against the stated fact,
-// and a floor raised above the project's own records, a file kind that carries
-// them dropped from the walk, or a shape that no longer admits them, each
-// fails here by name instead of leaving the guard blind.
-func taskIdentifierCorpus(t *testing.T, root string) ([]string, []string) {
-	t.Helper()
-
-	shape := regexp.MustCompile(`\b([a-z][a-z0-9]*(?:-[a-z0-9]+)*)-([a-z0-9]{5,6})\b`)
-	found := map[string]map[string]bool{}
-	// kinds records which file kinds each prefix was read from, so the walk
-	// can be held to BOTH kinds its doc names.
-	kinds := map[string]map[string]bool{}
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil || info.IsDir() {
-			return nil
-		}
-		ext := filepath.Ext(path)
-		if ext != ".go" && ext != ".md" {
-			return nil
-		}
-		raw, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return nil
-		}
-		for _, match := range shape.FindAllStringSubmatch(string(raw), -1) {
-			prefix, suffix := match[1], match[2]
-			if found[prefix] == nil {
-				found[prefix] = map[string]bool{}
-				kinds[prefix] = map[string]bool{}
-			}
-			found[prefix][prefix+"-"+suffix] = true
-			kinds[prefix][ext] = true
-		}
-		return nil
-	})
-	require.NoError(t, err, "walk the repository for real task identifiers")
-
-	// THE SELECTOR IS DISTINCT SUFFIXES UNDER A MULTI-WORD PREFIX, and it is
-	// not occurrence count. Ranking by occurrences admits "review", because
-	// ordinary hyphenated English dominates a Go repository and any five- or
-	// six-letter word looks like a suffix. A task identifier is generated, so
-	// ONE prefix carries MANY DISTINCT random suffixes while an English phrase
-	// carries a handful. The prefix must itself be multi-word, which every
-	// project identifier is and most stray matches are not.
-	//
-	// THERE IS NO WINNER. Every prefix over the floor is kept, so the one thing
-	// a newcomer can do is join, and the one thing it cannot do is push another
-	// prefix out. The previous version elected the single prefix with the most
-	// distinct suffixes and pinned the margin over the runner-up; a runner-up
-	// that overtook by MORE than that margin won in silence.
-	prefixes := []string{}
-	for candidate, identifiers := range found {
-		if !strings.Contains(candidate, "-") || len(identifiers) < taskIdentifierPopulationFloor {
-			continue
-		}
-		prefixes = append(prefixes, candidate)
-	}
-	sort.Strings(prefixes)
-	require.NotEmpty(t, prefixes,
-		"no multi-word prefix carries %d distinct five-or-six-character suffixes anywhere in this "+
-			"repository, so this guard has nothing to derive from and every assertion resting on "+
-			"it would pass vacuously", taskIdentifierPopulationFloor)
-
-	// THE PROJECT PREFIX IS A FACT THE DERIVATION MUST FIND, not a result it
-	// may report. This is the pin the election never had: the recognised set
-	// may grow, and it may never lose the prefix the project's own records
-	// carry.
-	require.Contains(t, prefixes, projectTaskIdentifierPrefix,
-		"the prefixes over the floor are %v, and %q — the prefix this project's task tracker "+
-			"assigns, stated as a fact above — is not among them: it carries %d distinct suffixes "+
-			"in the tree against a floor of %d. Either the records that carry it left the tree, "+
-			"the floor was raised above them, a file kind that carries them was dropped from the "+
-			"walk, or the shape no longer admits them. Left unpinned, the guard would stop "+
-			"recognising every real task identifier in silence, which is the flip this pin "+
-			"refuses", prefixes, projectTaskIdentifierPrefix,
-		len(found[projectTaskIdentifierPrefix]), taskIdentifierPopulationFloor)
-
-	// EACH FILE KIND MUST CONTRIBUTE, or a kind can leave the walk in silence.
-	// Measured on this tree, the .md files alone carry the project prefix over
-	// the floor and the .go files alone do not, so dropping .go from the walk
-	// would leave the fact pin above satisfied while the corpus stopped
-	// reading source. The doc of this function names both kinds; this holds it
-	// to both.
-	for _, kind := range []string{".go", ".md"} {
-		require.True(t, kinds[projectTaskIdentifierPrefix][kind],
-			"no %s file carries a %q identifier, so the walk no longer reads that kind, or the "+
-				"kind was dropped from it. The doc of this function states that both kinds are "+
-				"read, and the corpus must be read from both", kind, projectTaskIdentifierPrefix)
-	}
-
-	identifiers := []string{}
-	for _, prefix := range prefixes {
-		for identifier := range found[prefix] {
-			identifiers = append(identifiers, identifier)
-		}
-	}
-	sort.Strings(identifiers)
-
-	// THE CORPUS MUST COVER THE ALPHABET AND THE LENGTH AXES over the project's
-	// own identifiers, or the width check measures one axis while a pattern or
-	// the shape narrows on another.
-	digitFree, fiveLong, sixLong := 0, 0, 0
-	for identifier := range found[projectTaskIdentifierPrefix] {
-		suffix := identifier[len(projectTaskIdentifierPrefix)+1:]
-		if !regexp.MustCompile(`[0-9]`).MatchString(suffix) {
-			digitFree++
-		}
-		switch len(suffix) {
-		case 5:
-			fiveLong++
-		case 6:
-			sixLong++
-		}
-	}
-	require.NotZero(t, digitFree,
-		"the corpus carries no DIGIT-FREE identifier, so it cannot catch a pattern that narrows on "+
-			"the alphabet — which is exactly how the previous width check passed while one real "+
-			"identifier in nine went unrecognised")
-	require.NotZero(t, fiveLong,
-		"the corpus carries no FIVE-character project identifier, so the shape above no longer "+
-			"admits the length most real identifiers have")
-	require.NotZero(t, sixLong,
-		"the corpus carries no SIX-character project identifier, so the shape above no longer "+
-			"admits the length the first width check missed; a corpus bounded to one length "+
-			"cannot catch a pattern that narrows on the other")
-	return prefixes, identifiers
 }
 
 // durableReferenceSamples are references the rule RECOMMENDS. None may be
