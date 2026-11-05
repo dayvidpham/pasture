@@ -6,7 +6,7 @@ description: Report a blocker to supervisor via Pasture
 # Worker: Handle Blockers
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.28 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.29 artifact v1 -->
 **Command:** `pasture:worker:blocked` — Report a blocker to supervisor via Pasture
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9

@@ -6,7 +6,7 @@ description: Monitor worker status via Pasture
 # Supervisor: Track Progress
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.28 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.29 artifact v1 -->
 **Command:** `pasture:supervisor:track-progress` — Monitor worker status via Pasture
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9

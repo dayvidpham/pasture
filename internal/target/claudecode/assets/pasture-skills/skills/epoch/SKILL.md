@@ -6,7 +6,7 @@ description: Master orchestrator for full 12-phase workflow
 # Epoch Agent
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.28 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.29 artifact v1 -->
 **Role:** `epoch` | **Phases owned:** p1-request, p2-elicit, p3-propose, p4-review, p5-plan-uat, p6-ratify, p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing
 
 ## Protocol Context (generated from schema.xml)
