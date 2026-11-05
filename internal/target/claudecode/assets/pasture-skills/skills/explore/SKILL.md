@@ -6,7 +6,7 @@ description: Codebase exploration — find integration points, existing patterns
 # Explore
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.26 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.27 artifact v1 -->
 **Command:** `pasture:explore` — Codebase exploration — find integration points, existing patterns, and related code
 
 General-purpose codebase exploration skill. Searches the codebase for integration points, existing patterns, data flow, dependencies, and potential conflicts relevant to a topic or feature.

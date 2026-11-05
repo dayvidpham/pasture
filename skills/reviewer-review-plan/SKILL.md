@@ -6,7 +6,7 @@ description: Evaluate proposal against one axis (binary ACCEPT/REVISE)
 # Review Plan
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.26 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.27 artifact v1 -->
 **Command:** `pasture:reviewer:review-plan` — Evaluate proposal against one axis (binary ACCEPT/REVISE)
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)** <- Phase 4
