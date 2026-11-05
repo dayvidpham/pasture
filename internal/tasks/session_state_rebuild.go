@@ -130,8 +130,17 @@ func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forc
 	if !ok || store.auditDBHandle() == nil || store.Journal() == nil {
 		return SessionStateRebuildOutcome{}, false, sessionClaimError("the tracker has no unified database and lifecycle journal", "use tasks.OpenTaskTracker")
 	}
-	bounded, cancel := context.WithTimeout(ctx, store.lifecycleTimeoutProfile().WorkflowResult())
-	defer cancel()
+	// An explicit repair walks the whole journal, which takes minutes on a large
+	// store, so it runs under the caller's context: an interrupt still stops it
+	// and a daemon start waits for it. The implicit per-read refresh must stay
+	// inside one workflow-result wait, and its failure names --backfill as the
+	// repair.
+	bounded := ctx
+	if !forceFull {
+		var cancel context.CancelFunc
+		bounded, cancel = context.WithTimeout(ctx, store.lifecycleTimeoutProfile().WorkflowResult())
+		defer cancel()
+	}
 	for range sessionReplayMaxAttempts {
 		if err := bounded.Err(); err != nil {
 			return SessionStateRebuildOutcome{}, false, staleSessionReplay(err)
