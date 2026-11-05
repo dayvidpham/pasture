@@ -25,7 +25,7 @@
 - feat(provadapter): define reserved default LLM actor
 
 ### Fixed
-- fix(ci): give the race suite headroom past its real cost
+- fix(ci): stop running the race detector in CI
 - fix(sessionapi): return empty arrays for fresh stores
 - fix(session): clarify cache errors and test read fences
 - fix(session): restore codex evidence and fresh reads
@@ -34,9 +34,11 @@
 - fix(lifecycle): align the tree with prompt liveness and occurrence v3
 
 ### Changed
+- perf(test): drop the repository-wide scan from the internal-reference guard
 - refactor(web): remove redundant frame fallback
 
 ### Documentation
+- docs(release): regenerate generated output after the version bump
 - docs(web): document liveness, actor, and execution reading rules
 - docs(agents): forbid force-deleting worktrees and branches
 - docs(agents): make worktree cleanup part of landing

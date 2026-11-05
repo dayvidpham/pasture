@@ -420,6 +420,17 @@ git checkout -b chore/release-vX.Y.Z main
 pasture-release patch --dry-run        # preview
 pasture-release patch --no-tag         # writes .claude-plugin/plugin.json + CHANGELOG.md, commits
 
+# 2b. Regenerate the generated output. Every generated SKILL.md carries
+#     `<!-- GENERATED FROM pasture vX.Y.Z -->`, and the generator reads that
+#     version from .claude-plugin/plugin.json. The bump therefore makes the
+#     committed output stale and Codegen Drift fails without this step.
+make generate
+git agent-commit -am "chore: regenerate for vX.Y.Z"
+
+# 2c. Run the race suite locally. CI does not run the race detector: it is a
+#     pre-release check, not a gate.
+make test-race
+
 # 3. Push, open a PR, merge to main (any merge method is allowed).
 git push -u origin chore/release-vX.Y.Z
 gh pr create --base main --fill
