@@ -28,6 +28,9 @@ versions:
   - id: pasture.epoch.implementation
     version: 2
     sha256: febeef30a3d3254c2caf23165589ec308681799b3b4bf0df41011f039441ac98
+  - id: pasture.epoch.implementation
+    version: 3
+    sha256: 33e6061ecfff17bcc3bd09aaba21f843d643b6285fa8463effb339797784305f
   - id: pasture.lifecycle.interpreter
     version: 1
     sha256: 7a3e0bcd5d5d8cfdfd4eef93483dd5ba0e8a3ead7a130060dd146c7f84d06f13

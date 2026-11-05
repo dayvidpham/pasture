@@ -22,7 +22,7 @@ import (
 // semantic change requires a new version. It is tracked independently of the
 // DBOS recovery cohort the document carries: ordinary manifest changes never
 // bump the cohort, and a cohort bump never silently rides a manifest change.
-const EpochDocumentVersion uint32 = 2
+const EpochDocumentVersion uint32 = 3
 
 // EpochDocumentID is the stable definition identity of the epoch
 // implementation document. It does not change across versions and never
@@ -255,15 +255,16 @@ func decodeEpoch(payload []byte) (Document, error) {
 		return Document{}, failure("decodeEpoch", "The typed epoch document contains malformed, duplicate or unknown fields.", err)
 	}
 	// Version 1 shipped in v0.0.21 and remains a historical codec arm.
-	// Version 2 is the current source-inventory refresh. Add a new arm
-	// rather than replacing a released decoder.
+	// Version 2 shipped with the source-inventory refresh. Version 3 is the
+	// current arm. Add a new arm rather than replacing a released decoder.
 	switch wire.Version {
 	case 1:
 	case 2:
+	case 3:
 	default:
 		return Document{}, failure("decodeEpoch", "The epoch document version has no supported historical codec.", nil)
 	}
-	if wire.Kind != model.DefinitionEpochImplementation || (wire.Version != 1 && wire.Version != 2) || wire.Codec != model.DefinitionCanonicalJSON || wire.ID != EpochDocumentID {
+	if wire.Kind != model.DefinitionEpochImplementation || (wire.Version != 1 && wire.Version != 2 && wire.Version != 3) || wire.Codec != model.DefinitionCanonicalJSON || wire.ID != EpochDocumentID {
 		return Document{}, failure("decodeEpoch", "Epoch document kind, owner identity, codec or version is invalid.", fmt.Errorf("kind=%d version=%d codec=%d id=%q", wire.Kind, wire.Version, wire.Codec, wire.ID))
 	}
 	if err := validateEpochSpecification(wire.Specification); err != nil {
