@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.27] - 2026-11-05
+
+### Fixed
+- fix(tasks): let an explicit session rebuild run under the caller's context
+
+### Other
+- chore(deps): provenance v0.10.2
+
 ## [0.0.26] - 2026-11-05
 
 ### Added
