@@ -7,7 +7,7 @@ skills: pasture:afk-implement, pasture:impl-review, pasture:impl-slice, pasture:
 # Supervisor Agent
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.26 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.27 artifact v1 -->
 **Role:** `supervisor` | **Phases owned:** p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing
 
 ## Protocol Context (generated from schema.xml)

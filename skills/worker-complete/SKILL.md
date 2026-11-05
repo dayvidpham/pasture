@@ -6,7 +6,7 @@ description: Signal slice completion after quality gates pass
 # Worker: Signal Completion
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.26 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.27 artifact v1 -->
 **Command:** `pasture:worker:complete` — Signal slice completion after quality gates pass
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9

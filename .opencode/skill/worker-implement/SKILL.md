@@ -6,7 +6,7 @@ description: Implement assigned vertical slice following TDD layers
 # Worker: Implement Vertical Slice
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.26 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.27 artifact v1 -->
 **Command:** `pasture:worker:implement` — Implement assigned vertical slice following TDD layers
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-9-worker-slices)** <- Phase 9
