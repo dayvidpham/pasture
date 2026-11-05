@@ -6,7 +6,7 @@ description: Atomic commit per completed layer/slice
 # Supervisor: Commit
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.25 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.26 artifact v1 -->
 **Command:** `pasture:supervisor:commit` — Atomic commit per completed layer/slice
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-12-landing)** <- Phase 12
