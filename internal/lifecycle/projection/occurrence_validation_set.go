@@ -56,7 +56,7 @@ type occurrenceValidationSet struct {
 }
 
 func newOccurrenceValidationSet() *occurrenceValidationSet {
-	return &occurrenceValidationSet{seen: make(map[occurrenceEnvelopeKey]struct{})}
+	return &occurrenceValidationSet{}
 }
 
 // admitOnce runs validate the first time key is offered and skips it afterwards.
@@ -65,6 +65,9 @@ func newOccurrenceValidationSet() *occurrenceValidationSet {
 func (s *occurrenceValidationSet) admitOnce(key occurrenceEnvelopeKey, validate func() error) error {
 	if _, seen := s.seen[key]; seen {
 		return nil
+	}
+	if s.seen == nil {
+		s.seen = make(map[occurrenceEnvelopeKey]struct{})
 	}
 	s.seen[key] = struct{}{}
 	return validate()
