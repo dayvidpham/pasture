@@ -6,7 +6,7 @@ description: Deprecated orchestration entry; use the supervisor and worker role 
 # Swarm — Unified Agent Orchestration
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.30 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.31 artifact v1 -->
 **Command:** `pasture:swarm` — Deprecated orchestration entry; use the supervisor and worker role workflow
 
 Deprecated orchestration entry. Do not invoke aura-swarm or its session registry. Use the supervisor and worker role workflow in isolated issue-named Git worktrees.

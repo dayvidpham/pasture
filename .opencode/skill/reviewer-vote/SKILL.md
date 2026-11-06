@@ -6,7 +6,7 @@ description: Cast ACCEPT or REVISE vote (binary only)
 # Cast Review Vote
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.30 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.31 artifact v1 -->
 **Command:** `pasture:reviewer:vote` — Cast ACCEPT or REVISE vote (binary only)
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)** <- Phases 4 + 10

@@ -421,7 +421,13 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 	if !start.Found && inserted == 1 {
 		start = current
 	}
-	if current != start {
+	// Fence on what a PUBLICATION changes, not on what an ordinary write changes.
+	// Every incremental lifecycle write bumps revision (and a failed one sets
+	// dirty), so comparing the whole status made a replay impossible under an
+	// active journal: the scan could never win its own compare-and-swap.
+	// Another publisher advances the watermark; a layout change moves the cache
+	// version. Both still fence.
+	if current.CacheVersion != start.CacheVersion || current.CompletedThroughJournalID != start.CompletedThroughJournalID {
 		// Another writer published while this replay scanned. If its cache is
 		// already at or beyond our pinned snapshot and clean, its work subsumes
 		// ours: report it instead of rescanning. A newer layout, a dirty marker,
@@ -497,7 +503,12 @@ func publishSessionReplay(ctx context.Context, store lifecycleReceiptStore, star
 			return SessionStateRebuildOutcome{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE pasture_session_api_state SET revision=revision+1,completed_through_jid=?,cache_version=?,dirty=CASE WHEN ? THEN 0 ELSE dirty END WHERE singleton_id=0`, watermark, audit.SessionCacheVersion, full); err != nil {
+	// The publication is coherent at the pinned snapshot, so it clears the dirty
+	// marker even for a suffix: a dirty marker that appeared during the scan
+	// refers to a write whose row is inside the scanned range, and a marker that
+	// predates the scan forced a full rebuild. Rows after the watermark are the
+	// next suffix refresh's work, not a cache inconsistency.
+	if _, err := tx.ExecContext(ctx, `UPDATE pasture_session_api_state SET revision=revision+1,completed_through_jid=?,cache_version=?,dirty=0 WHERE singleton_id=0`, watermark, audit.SessionCacheVersion); err != nil {
 		return SessionStateRebuildOutcome{}, err
 	}
 	var out SessionStateRebuildOutcome

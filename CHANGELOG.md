@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.0.31] - 2026-11-06
+
+### Fixed
+- fix(tasks): fence a replay on publications, not on ordinary writes
+
 ## [0.0.30] - 2026-11-06
 
 ### Added
