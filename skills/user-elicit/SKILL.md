@@ -6,7 +6,7 @@ description: User Requirements Elicitation survey (Phase 2)
 # User Requirements Elicitation (Phase 2)
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.31 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.32 artifact v1 -->
 **Command:** `pasture:user:elicit` — User Requirements Elicitation survey (Phase 2)
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-2-elicit--urd-aurap2-user)** <- Phase 2

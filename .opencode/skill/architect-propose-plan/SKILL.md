@@ -6,7 +6,7 @@ description: Create PROPOSAL-N task with full technical plan
 # Architect: Propose Plan
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.31 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.32 artifact v1 -->
 **Command:** `pasture:architect:propose-plan` — Create PROPOSAL-N task with full technical plan
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-3-proposal-n)** <- Phase 3
