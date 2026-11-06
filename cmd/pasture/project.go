@@ -42,7 +42,7 @@ var projectListCmd = &cobra.Command{
 			DBPath: flagDBPath,
 			Output: cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishSessionCommand(code, err)
+		return finishCommand(code, err)
 	},
 }
 
@@ -56,7 +56,7 @@ var projectShowCmd = &cobra.Command{
 			ProjectHash: args[0],
 			Output:      cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishSessionCommand(code, err)
+		return finishCommand(code, err)
 	},
 }
 
@@ -76,7 +76,7 @@ var projectBindCmd = &cobra.Command{
 			ExpectedBinding: expected,
 			Output:          cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishSessionCommand(code, err)
+		return finishCommand(code, err)
 	},
 }
 
@@ -92,7 +92,7 @@ var projectUnbindCmd = &cobra.Command{
 			ExpectedBinding: expected,
 			Output:          cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishSessionCommand(code, err)
+		return finishCommand(code, err)
 	},
 }
 

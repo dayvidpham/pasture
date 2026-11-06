@@ -53,7 +53,7 @@ var sessionListCmd = &cobra.Command{
 			Cursor:  cursor,
 			Output:  cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishSessionCommand(code, err)
+		return finishCommand(code, err)
 	},
 }
 
@@ -68,7 +68,7 @@ var sessionShowCmd = &cobra.Command{
 			Session: args[1],
 			Output:  cmd.OutOrStdout(),
 		}, resolveFormat())
-		return finishSessionCommand(code, err)
+		return finishCommand(code, err)
 	},
 }
 
@@ -83,10 +83,10 @@ func init() {
 	rootCmd.AddCommand(sessionCmd)
 }
 
-// finishSessionCommand prints an actionable error report and exits with the
+// finishCommand prints an actionable error report and exits with the
 // handler's category-mapped code. Successful handlers print through the command
 // writer and return a zero code.
-func finishSessionCommand(code int, err error) error {
+func finishCommand(code int, err error) error {
 	if err != nil {
 		printError(err)
 	}

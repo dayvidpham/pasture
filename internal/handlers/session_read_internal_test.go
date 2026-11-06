@@ -115,7 +115,7 @@ func TestSessionCacheAndReadRemediation(t *testing.T) {
 		fix  string
 	}{
 		{"newer", fmt.Errorf("wrapped: %w", sessionapi.ErrNewerLayout), "Upgrade Pasture"},
-		{"exhausted", fmt.Errorf("wrapped: %w", tasks.ErrSessionReplayExhausted), "backfill"},
+		{"exhausted", fmt.Errorf("wrapped: %w", tasks.ErrSessionReplayExhausted), "pasture rebuild session"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, got := range []error{sessionReadError(tc.err, "store"), sessionCacheError("store", tc.err)} {

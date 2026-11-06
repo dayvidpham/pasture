@@ -6,7 +6,7 @@ description: Vertical slice implementer (full production code path)
 # Worker Agent
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.29 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.30 artifact v1 -->
 **Role:** `worker` | **Phases owned:** p9-worker-slices
 
 ## Protocol Context (generated from schema.xml)

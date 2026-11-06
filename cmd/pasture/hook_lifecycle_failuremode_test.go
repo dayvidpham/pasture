@@ -6077,6 +6077,7 @@ var guardSweepForeign = map[string]string{
 	"models_test.go":                             "offline model allowances and registration, outside the lifecycle transport sweep",
 	"project_test.go":                            "project mapping CLI proof, outside the lifecycle transport sweep",
 	"queue_test.go":                              "not changed by this slice",
+	"rebuild_test.go":                            "rebuild verb CLI proof, outside the lifecycle transport sweep",
 	"serve_test.go":                              "session serve loopback and shutdown proof, outside the lifecycle transport sweep",
 	"session_test.go":                            "session CLI list/show proof, outside the lifecycle transport sweep",
 	"task_residual_verbs_test.go":                "task agent registration and events/contexts CLI proof, outside the lifecycle transport sweep",

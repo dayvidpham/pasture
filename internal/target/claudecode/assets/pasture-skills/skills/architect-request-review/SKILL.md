@@ -6,7 +6,7 @@ description: Spawn 3 axis-specific reviewers (A/B/C)
 # Architect: Request Review
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.29 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.30 artifact v1 -->
 **Command:** `pasture:architect:request-review` — Spawn 3 axis-specific reviewers (A/B/C)
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-4-plan-review)** <- Phase 4

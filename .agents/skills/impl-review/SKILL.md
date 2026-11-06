@@ -6,7 +6,7 @@ description: Code review coordination across all slices (Phase 10)
 # Implementation Code Review (Phase 10)
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.29 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.30 artifact v1 -->
 **Command:** `pasture:impl:review` — Code review coordination across all slices (Phase 10)
 
 Conduct code review across ALL implementation slices. Each of 3 reviewers reviews every slice.

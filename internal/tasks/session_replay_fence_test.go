@@ -98,7 +98,7 @@ func TestSessionReplayRejectsFactsCommittedAfterScanOnTheTransactionView(t *test
 	appendReplayFact(t, tracker, "replay.before", "SessionStart", "startup", 100)
 	var newest provenance.JournalID
 	scans := 0
-	out, _, err := refreshSessionState(t.Context(), tracker, true, func(stage sessionReplayStage) {
+	out, _, err := refreshSessionState(t.Context(), tracker, true, false, func(stage sessionReplayStage) {
 		if stage != sessionReplayScanned {
 			return
 		}
@@ -123,7 +123,7 @@ func TestSessionReplayDirtyAndBindingMutationsFenceTheScannedGeneration(t *testi
 	require.NoError(t, err)
 	api := NewSessionAPIStoreWithDB(store.auditDBHandle(), timeouts.TestProfile(), replayClock{})
 	scans := 0
-	out, _, err := refreshSessionState(t.Context(), tracker, true, func(stage sessionReplayStage) {
+	out, _, err := refreshSessionState(t.Context(), tracker, true, false, func(stage sessionReplayStage) {
 		if stage != sessionReplayScanned {
 			return
 		}
@@ -151,7 +151,7 @@ func TestSessionReplayExhaustionPreservesThePreviousCertifiedCache(t *testing.T)
 	appendReplayFact(t, tracker, "replay.new", "UserPromptSubmit", "", 200)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	_, _, err = refreshSessionState(ctx, tracker, false, func(stage sessionReplayStage) {
+	_, _, err = refreshSessionState(ctx, tracker, false, true, func(stage sessionReplayStage) {
 		if stage == sessionReplayScanned {
 			cancel()
 		}
@@ -208,7 +208,7 @@ func TestSessionReplayDefersToANewerConcurrentGeneration(t *testing.T) {
 	appendReplayFact(t, tracker, "replay.concurrent", "UserPromptSubmit", "", 100)
 	scans := 0
 	var peer SessionStateRebuildOutcome
-	out, _, err := refreshSessionState(t.Context(), tracker, true, func(stage sessionReplayStage) {
+	out, _, err := refreshSessionState(t.Context(), tracker, true, false, func(stage sessionReplayStage) {
 		if stage != sessionReplayScanned {
 			return
 		}
@@ -236,7 +236,7 @@ func TestSessionReplayPublishesACoherentSnapshotUnderSustainedWrites(t *testing.
 	tracker, store, _ := replayStore(t)
 	appendReplayFact(t, tracker, "replay.seed", "UserPromptSubmit", "", 100)
 	scans := 0
-	out, changed, err := refreshSessionState(t.Context(), tracker, true, func(stage sessionReplayStage) {
+	out, changed, err := refreshSessionState(t.Context(), tracker, true, false, func(stage sessionReplayStage) {
 		if stage != sessionReplayScanned {
 			return
 		}
@@ -299,7 +299,7 @@ func TestSessionReplayScanBarrierJoinsTheWriterBeforeStoreCleanup(t *testing.T) 
 	})
 	go func() {
 		first := true
-		out, _, err := refreshSessionState(ctx, tracker, true, func(stage sessionReplayStage) {
+		out, _, err := refreshSessionState(ctx, tracker, true, false, func(stage sessionReplayStage) {
 			if stage == sessionReplayScanned && first {
 				first = false
 				close(scanned)
@@ -449,7 +449,7 @@ func TestSessionReplayUnbindAfterScanCannotBeOverwrittenByPublication(t *testing
 	api = NewSessionAPIStoreWithDB(store.auditDBHandle(), timeouts.TestProfile(), replayAtClock(200))
 	var unbound SessionBindingResult
 	scans := 0
-	out, _, err := refreshSessionState(t.Context(), tracker, false, func(stage sessionReplayStage) {
+	out, _, err := refreshSessionState(t.Context(), tracker, false, true, func(stage sessionReplayStage) {
 		if stage != sessionReplayScanned {
 			return
 		}

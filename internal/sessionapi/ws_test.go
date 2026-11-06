@@ -156,7 +156,7 @@ func TestWebSocketStaleCacheErrorIsDeduplicated(t *testing.T) {
 	require.Equal(t, "stale_session_cache", first.Error.Code)
 	require.Contains(t, first.Error.Message, "pasture session list",
 		"the remediation must name the command that rebuilds the cache")
-	require.Contains(t, first.Error.Message, "pasture serve --backfill",
+	require.Contains(t, first.Error.Message, "pasture rebuild session",
 		"the remediation must name the rebuild flag; a plain restart does not repair it")
 
 	// The refresh ticker fires once a second. Waiting past one tick must not

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.30] - 2026-11-06
+
+### Added
+- feat(cli): add a rebuild session maintenance verb
+
+### Other
+- test(cli): classify the rebuild proof and pin the new root verb
+
 ## [0.0.29] - 2026-11-05
 
 ### Fixed
