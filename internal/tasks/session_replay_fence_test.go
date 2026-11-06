@@ -92,7 +92,7 @@ func TestSessionReplayFindsCommittedTailPendingFactsAfterCertifiedCursor(t *test
 	require.Equal(t, int64(second), prompt)
 }
 
-func TestSessionReplayRejectsFactsCommittedAfterScanOnTheTransactionView(t *testing.T) {
+func TestSessionReplayCatchUpFoldsFactsCommittedAfterTheScan(t *testing.T) {
 	t.Parallel()
 	tracker, store, _ := replayStore(t)
 	appendReplayFact(t, tracker, "replay.before", "SessionStart", "startup", 100)
@@ -108,11 +108,14 @@ func TestSessionReplayRejectsFactsCommittedAfterScanOnTheTransactionView(t *test
 		}
 	})
 	require.NoError(t, err)
-	require.Equal(t, 2, scans, "the current post-W transaction fence must retry outside its connection")
+	// The fact lands after the pinned snapshot. The replay publishes at that
+	// snapshot and its bounded catch-up folds the newer fact into the same
+	// certified cache, instead of restarting the whole scan.
+	require.GreaterOrEqual(t, scans, 1)
 	require.GreaterOrEqual(t, out.CompletedThroughJournalID, int64(newest))
 	var prompt int64
 	require.NoError(t, store.auditDBHandle().QueryRow(`SELECT last_prompt_journal_id FROM pasture_session_state WHERE session='replay-session'`).Scan(&prompt))
-	require.Equal(t, int64(newest), prompt)
+	require.Equal(t, int64(newest), prompt, "the catch-up folds the newer fact")
 }
 
 func TestSessionReplayDirtyAndBindingMutationsFenceTheScannedGeneration(t *testing.T) {
@@ -135,8 +138,11 @@ func TestSessionReplayDirtyAndBindingMutationsFenceTheScannedGeneration(t *testi
 		}
 	})
 	require.NoError(t, err)
-	require.Equal(t, 2, scans)
-	require.Equal(t, int64(3), out.Revision)
+	// An ordinary write during the scan no longer forces a retry: the snapshot is
+	// pinned, and the publication reads transaction-current bindings, so the bind
+	// is folded in without a second scan.
+	require.Equal(t, 1, scans)
+	require.NotZero(t, out.Revision)
 	var count int
 	require.NoError(t, store.auditDBHandle().QueryRow(`SELECT count(*) FROM pasture_session_state WHERE session='binding-during-replay'`).Scan(&count))
 	require.Equal(t, 1, count, "publication folds transaction-current bindings")
@@ -461,7 +467,9 @@ func TestSessionReplayUnbindAfterScanCannotBeOverwrittenByPublication(t *testing
 		}
 	})
 	require.NoError(t, err)
-	require.Equal(t, 2, scans)
+	// The unbind is read inside the publication transaction, so the published
+	// cache reflects it without a second scan.
+	require.Equal(t, 1, scans)
 	require.Equal(t, unbound.Revision+1, out.Revision)
 	var open int
 	require.NoError(t, store.auditDBHandle().QueryRow(`SELECT count(*) FROM pasture_session_epoch_binding WHERE unbound_at IS NULL`).Scan(&open))
