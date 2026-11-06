@@ -66,6 +66,7 @@ func ReadOccurrenceFactPage(ctx context.Context, reader EvidencePageReader, tx *
 		return OccurrenceFactPage{}, err
 	}
 	result := OccurrenceFactPage{SnapshotMaxJournalID: page.SnapshotMaxJournalID, Next: page.Next, Facts: make([]OccurrenceFact, 0, len(page.Rows))}
+	validated := newOccurrenceValidationSet()
 	for _, evidence := range page.Rows {
 		if err := ctx.Err(); err != nil {
 			return OccurrenceFactPage{}, err
@@ -83,7 +84,9 @@ func ReadOccurrenceFactPage(ctx context.Context, reader EvidencePageReader, tx *
 			if !ok {
 				return OccurrenceFactPage{}, fmt.Errorf("read lifecycle occurrence %d: definition owner resolution is unavailable; use a journal or transaction reader with committed-result lookup", evidence.JournalID)
 			}
-			if err := receipt.ValidateStoredOccurrenceEnvelope(owner, evidence.EvidenceKind, contract, payload.Envelope, page.SnapshotMaxJournalID); err != nil {
+			if err := validated.admitOnce(occurrenceEnvelopeKeyOf(evidence.EvidenceKind, contract, payload.Envelope), func() error {
+				return receipt.ValidateStoredOccurrenceEnvelope(owner, evidence.EvidenceKind, contract, payload.Envelope, page.SnapshotMaxJournalID)
+			}); err != nil {
 				return OccurrenceFactPage{}, fmt.Errorf("read lifecycle occurrence %d: owner envelope validation failed: %w; restore verified journal evidence", evidence.JournalID, err)
 			}
 		}

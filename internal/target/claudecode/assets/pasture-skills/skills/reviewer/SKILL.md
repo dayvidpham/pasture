@@ -7,7 +7,7 @@ skills: pasture:reviewer-comment, pasture:reviewer-review-code, pasture:reviewer
 # Reviewer Agent
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.31 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.32 artifact v1 -->
 **Role:** `reviewer` | **Phases owned:** p4-review, p10-code-review
 
 ## Protocol Context (generated from schema.xml)

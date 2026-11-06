@@ -6,7 +6,7 @@ description: Create handoff document and transfer to supervisor
 # Architect: Handoff to Supervisor
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.31 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.32 artifact v1 -->
 **Command:** `pasture:architect:handoff` — Create handoff document and transfer to supervisor
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-7-handoff)** <- Phase 7

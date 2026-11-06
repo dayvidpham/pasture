@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.32] - 2026-11-06
+
+### Fixed
+- fix(projection): key the whole runtime ref and prove the call site
+
+### Changed
+- perf(projection): allocate the decision set lazily
+- perf(projection): resolve each distinct definition ref set once per page
+
+### Documentation
+- docs(projection): correct the set and rebuild rationale comments
+
 ## [0.0.31] - 2026-11-06
 
 ### Fixed
