@@ -102,14 +102,22 @@ func ReadSessionStateStatus(ctx context.Context, tracker protocol.TaskTracker) (
 // EnsureSessionState uses a bounded suffix scan for a clean current cache and
 // a full scan for dirty, absent or older-version cache recovery.
 func EnsureSessionState(ctx context.Context, tracker protocol.TaskTracker) (SessionStateRebuildOutcome, bool, error) {
-	return refreshSessionState(ctx, tracker, false, nil)
+	return refreshSessionState(ctx, tracker, false, true, nil)
+}
+
+// RefreshSessionState applies the same cache decision as a read (full when the
+// cache is dirty, absent or an older layout; suffix otherwise) WITHOUT the
+// per-read workflow-result bound. Explicit maintenance callers use it so a
+// large suffix can finish instead of timing out.
+func RefreshSessionState(ctx context.Context, tracker protocol.TaskTracker) (SessionStateRebuildOutcome, bool, error) {
+	return refreshSessionState(ctx, tracker, false, false, nil)
 }
 
 // RebuildSessionState explicitly repairs the complete disposable cache. It
 // publishes only after the same generation and current-evidence fences used by
 // normal suffix refresh, and never fabricates claims from historical evidence.
 func RebuildSessionState(ctx context.Context, tracker protocol.TaskTracker) (SessionStateRebuildOutcome, error) {
-	out, _, err := refreshSessionState(ctx, tracker, true, nil)
+	out, _, err := refreshSessionState(ctx, tracker, true, false, nil)
 	return out, err
 }
 
@@ -131,7 +139,7 @@ var ErrSessionReplayExhausted = errors.New("session replay publication attempts 
 // writers during the scan, and stops rather than chasing a hot journal forever.
 const sessionCatchUpBudget = 2 * time.Minute
 
-func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forceFull bool, observer func(sessionReplayStage)) (SessionStateRebuildOutcome, bool, error) {
+func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forceFull bool, boundedByWorkflowResult bool, observer func(sessionReplayStage)) (SessionStateRebuildOutcome, bool, error) {
 	store, ok := tracker.(lifecycleReceiptStore)
 	if !ok || store.auditDBHandle() == nil || store.Journal() == nil {
 		return SessionStateRebuildOutcome{}, false, sessionClaimError("the tracker has no unified database and lifecycle journal", "use tasks.OpenTaskTracker")
@@ -142,7 +150,7 @@ func refreshSessionState(ctx context.Context, tracker protocol.TaskTracker, forc
 	// inside one workflow-result wait, and its failure names --backfill as the
 	// repair.
 	bounded := ctx
-	if !forceFull {
+	if boundedByWorkflowResult {
 		var cancel context.CancelFunc
 		bounded, cancel = context.WithTimeout(ctx, store.lifecycleTimeoutProfile().WorkflowResult())
 		defer cancel()

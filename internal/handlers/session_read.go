@@ -330,7 +330,7 @@ func sessionRemediationError(dbPath string, err error) error {
 	case stderrors.Is(err, sessionapi.ErrNewerLayout):
 		fix = "Upgrade Pasture to a version that supports this store, then retry."
 	case stderrors.Is(err, tasks.ErrSessionReplayExhausted):
-		fix = "Retry after concurrent writers settle; if needed, run `pasture serve --backfill` to rebuild."
+		fix = "Retry after concurrent writers settle; if needed, run `pasture rebuild session` to rebuild."
 	default:
 		return nil
 	}
@@ -399,7 +399,7 @@ func sessionReadError(err error, dbPath string) error {
 			Why:      "The cache changed between the refresh and the read, so the projection cannot be trusted for this request.",
 			Where:    "Reading sessions (internal/handlers/session_read.go in handlers.sessionReadError).",
 			Impact:   "No session list was returned.",
-			Fix:      "Retry the command, which refreshes the cache; if it keeps failing, run `pasture serve --backfill` to rebuild the cache from the journal.",
+			Fix:      "Retry the command, which refreshes the cache; if it keeps failing, run `pasture rebuild session` to rebuild the cache from the journal.",
 			Cause:    err,
 		}
 	default:

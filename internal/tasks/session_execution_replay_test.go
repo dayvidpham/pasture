@@ -107,7 +107,7 @@ func TestExecutionReplayPublishesWithinSessionFence(t *testing.T) {
 	first := appendExecutionReplayFact(t, tracker, "execution.v3-first", "v3", &metadata)
 	var second provenance.JournalID
 	scans := 0
-	_, _, err = refreshSessionState(t.Context(), tracker, true, func(stage sessionReplayStage) {
+	_, _, err = refreshSessionState(t.Context(), tracker, true, false, func(stage sessionReplayStage) {
 		if stage == sessionReplayScanned {
 			scans++
 			if scans == 1 {

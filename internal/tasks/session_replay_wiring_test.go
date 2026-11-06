@@ -37,17 +37,24 @@ func TestProductionSessionReplayEntriesNeverSupplyTheObserver(t *testing.T) {
 					return true
 				}
 				calls++
-				require.Len(t, call.Args, 4, path)
-				observer, ok := call.Args[3].(*ast.Ident)
+				require.Len(t, call.Args, 5, path)
+				observer, ok := call.Args[4].(*ast.Ident)
 				require.True(t, ok, path)
 				require.Equal(t, "nil", observer.Name, path)
 				full, ok := call.Args[2].(*ast.Ident)
 				require.True(t, ok, path)
+				bounded, ok := call.Args[3].(*ast.Ident)
+				require.True(t, ok, path)
 				switch fn.Name.Name {
 				case "EnsureSessionState":
 					require.Equal(t, "false", full.Name)
+					require.Equal(t, "true", bounded.Name, "a read must stay inside the workflow-result wait")
+				case "RefreshSessionState":
+					require.Equal(t, "false", full.Name)
+					require.Equal(t, "false", bounded.Name, "an explicit maintenance refresh must finish a large suffix")
 				case "RebuildSessionState":
 					require.Equal(t, "true", full.Name)
+					require.Equal(t, "false", bounded.Name)
 				default:
 					t.Fatalf("unexpected production replay entry %s in %s", fn.Name.Name, path)
 				}
@@ -55,7 +62,7 @@ func TestProductionSessionReplayEntriesNeverSupplyTheObserver(t *testing.T) {
 			})
 		}
 	}
-	require.Equal(t, 2, calls, "both real public entries must delegate to the one replay core")
+	require.Equal(t, 3, calls, "every real public entry must delegate to the one replay core")
 }
 
 func TestProductionSessionPageLeaseIsReadOnlyAndContextBound(t *testing.T) {

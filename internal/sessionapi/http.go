@@ -583,7 +583,7 @@ func validSessionKey(value string) bool {
 const newerSessionCacheMessage = "the session cache uses a newer layout; upgrade Pasture before reading this store"
 
 // staleSessionCacheMessage is the shared remediation for a stale cache.
-const staleSessionCacheMessage = "the session cache is behind the journal; run `pasture session list` or `pasture serve --backfill` to rebuild it"
+const staleSessionCacheMessage = "the session cache is behind the journal; run `pasture rebuild session` or `pasture session list` to rebuild it"
 
 // storageReadFaultMessage is the ONE wording a read-side storage failure carries
 // on every surface. The HTTP 500 body and the WebSocket storage_fault frame use
