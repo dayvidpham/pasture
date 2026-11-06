@@ -93,8 +93,9 @@ func TestOccurrenceValidationSetAdmitsOneDecisionPerDistinctKey(t *testing.T) {
 	provenanceOnly.HostVersionSource = model.HostVersionSource("caller-supplied")
 	require.False(t, admit(key(provenanceOnly, contract, v3)), "a provenance-only difference is the same decision")
 
-	// A failed decision is recorded before it runs, so a later row can never
-	// silently reuse it: the caller aborts on error.
+	// A failed decision leaves its key recorded, so admitOnce will not retry it.
+	// That is safe only because the production caller returns on the error, so no
+	// later row ever observes the skipped decision.
 	poisonedEnvelope := base()
 	poisonedEnvelope.Runtime.Definition = ref(model.DefinitionRuntimeContract, 42)
 	poisoned := key(poisonedEnvelope, contract, v3)
