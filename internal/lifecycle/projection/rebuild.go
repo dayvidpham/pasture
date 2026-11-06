@@ -110,6 +110,10 @@ func readOccurrenceRowsWithValidation(ctx context.Context, reader DefinitionReso
 				return nil, 0, projectionError("A lifecycle occurrence journal row carries an invalid contract.", fmt.Sprintf("Evidence row %d does not name a runtime contract.", evidence.JournalID), "No projection rows were changed.", "Repair or restore the malformed journal row before rebuilding.", err)
 			}
 			if validate {
+				// This migration replay resolves every row on purpose. It walks the
+				// whole journal once per projection rebuild, so it does not keep a
+				// page-scoped decision set; the read path's set in fact_pages.go is
+				// scoped to one page and is not shared here.
 				if err := receipt.ValidateStoredOccurrenceEnvelope(reader, evidence.EvidenceKind, contract, payload.Envelope, watermark); err != nil {
 					return nil, 0, projectionError("A lifecycle occurrence journal row failed envelope validation.", fmt.Sprintf("Evidence row %d is not a complete owner-resolved envelope.", evidence.JournalID), "No projection rows were changed.", "Restore the damaged journal row from a verified backup before rebuilding.", err)
 				}

@@ -14,7 +14,10 @@ import (
 	"github.com/dayvidpham/pasture/internal/lifecycle/execution"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/projection"
+	"github.com/dayvidpham/pasture/internal/lifecycle/receipt"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
+	"github.com/dayvidpham/pasture/internal/tasks"
+	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
 )
 
@@ -153,4 +156,99 @@ func TestOccurrenceFactPagesPinOneSnapshotAndCurrentSuffixDoesNotFreezeAtCursor(
 	kinds := projection.OccurrenceEvidenceKinds()
 	kinds[0] = "mutated-local-copy"
 	require.NotEqual(t, kinds, projection.OccurrenceEvidenceKinds(), "callers cannot mutate the shared codec inventory")
+}
+
+type countingOwnerReader struct {
+	inner   *provenance.TransactionEvidenceReader
+	queries int
+	lookups int
+}
+
+func (r *countingOwnerReader) QueryEvidence(q provenance.EvidenceQuery) (provenance.EvidencePage, error) {
+	r.queries++
+	return r.inner.QueryEvidence(q)
+}
+
+func (r *countingOwnerReader) LookupCommitted(op provenance.OperationID) (provenance.CommittedResult, error) {
+	r.lookups++
+	return r.inner.LookupCommitted(op)
+}
+
+type fixedClock struct{}
+
+func (fixedClock) Now() time.Time { return time.Unix(100, 0) }
+
+type fixedOperation string
+
+func (o fixedOperation) NewOperationID() (string, error) { return string(o), nil }
+
+// commitOccurrenceV3 commits one authentic-shaped v3 occurrence carrying the
+// supplied envelope, so the read path's definition resolution is exercised.
+func commitOccurrenceV3(t *testing.T, tracker protocol.TaskTracker, op string, contract ir.RuntimeContractID, event model.ContractEventKind, envelope model.OccurrenceEnvelopeRef) {
+	t.Helper()
+	ctx := t.Context()
+	payload, err := json.Marshal(map[string]any{
+		"contract": contract.String(), "event": event, "capture": model.CaptureValid,
+		"bindings":    []model.NativeBinding{{Kind: model.BindingSession, NativeName: "session_id", Value: "decision-session"}},
+		"body_digest": "sha256:synthetic", "envelope": envelope,
+	})
+	require.NoError(t, err)
+	resolver, ok := tracker.(receipt.IdentityResolver)
+	require.True(t, ok)
+	identity, err := resolver.ResolveLifecycleIdentity(ctx)
+	require.NoError(t, err)
+	sum := sha256.Sum256(payload)
+	command := sha256.Sum256(append([]byte(op), payload...))
+	input := provenance.OperationInput{
+		OperationID: provenance.OperationID(op), ActorID: identity.Actor, AuthorityJournalID: &identity.Authority,
+		CommandDigest: command[:], RecordedAt: time.Unix(100, 0).UnixNano(),
+		Effects: []provenance.Effect{{
+			Sort: provenance.EffectEvidence, ResultSlot: "occurrence", EvidenceKind: "pasture.lifecycle.occurrence.v3",
+			ContentDigest: sum[:], Payload: payload,
+		}},
+	}
+	canonical, err := provenance.Canonicalize(input)
+	require.NoError(t, err)
+	input.Effects = canonical.NormalizedEffects()
+	sum = sha256.Sum256(input.Effects[0].Payload)
+	input.Effects[0].ContentDigest = sum[:]
+	_, err = tracker.Journal().Apply(input)
+	require.NoError(t, err)
+}
+
+// TestOccurrenceFactPageResolvesOneDecisionPerDistinctRefSet is the call-site
+// proof for the per-page set: two v3 rows carrying the same four definition refs
+// must resolve them once, not once per row. It fails if the set is removed (too
+// many lookups) or if the admission call is skipped (the page would still decode,
+// so the query count is asserted as well).
+func TestOccurrenceFactPageResolvesOneDecisionPerDistinctRefSet(t *testing.T) {
+	t.Parallel()
+	tracker, db := openReclaimStore(t)
+	manifest := registration.ClaudeCode__2_1_261()
+	var event model.ContractEventKind
+	for _, candidate := range manifest.Events {
+		if candidate.NativeName == "UserPromptSubmit" {
+			event = candidate.Kind
+		}
+	}
+	require.NotZero(t, event)
+	service, err := tasks.NewLifecycleReceiptService(tracker, fixedClock{}, fixedOperation("decision.definition"))
+	require.NoError(t, err)
+	envelope, err := receipt.EnsureOccurrenceEnvelope(t.Context(), service, manifest.Contract, model.OccurrenceEnvelopeRef{})
+	require.NoError(t, err)
+
+	commitOccurrenceV3(t, tracker, "decision.one", manifest.Contract, event, envelope)
+	commitOccurrenceV3(t, tracker, "decision.two", manifest.Contract, event, envelope)
+
+	tx, err := db.BeginTx(t.Context(), &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer tx.Rollback()
+	inner, err := provenance.NewTransactionEvidenceReader(t.Context(), tx)
+	require.NoError(t, err)
+	reader := &countingOwnerReader{inner: inner}
+	page, err := projection.ReadOccurrenceFactPage(t.Context(), reader, tx, provenance.FactPageRequest{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, page.Facts, 2)
+	require.Equal(t, 4, reader.lookups, "two rows sharing one ref set must resolve it once (four refs, one lookup each)")
+	require.LessOrEqual(t, reader.queries, 10, "one page query plus at most two evidence reads per resolved ref")
 }
