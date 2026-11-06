@@ -6,7 +6,7 @@ description: Ratify proposal, mark old proposals pasture:superseded
 # Architect: Ratify Plan
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.30 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.31 artifact v1 -->
 **Command:** `pasture:architect:ratify` — Ratify proposal, mark old proposals pasture:superseded
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-6-ratification)** <- Phase 6
