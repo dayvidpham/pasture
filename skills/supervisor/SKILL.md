@@ -172,7 +172,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-supervisor-explore-ephemeral]**
 - Given: supervisor needs codebase exploration
 - When: starting Phase 8 (IMPL_PLAN)
-- Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
+- Then: spawn ephemeral Explore subagents via Agent tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
 **[C-supervisor-no-impl]**
@@ -209,7 +209,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 
 **Step 2:** Read RATIFIED_PLAN, URD, UAT, and elicit tasks via pasture task show for full context (`pasture task show "${RATIFIED_PLAN_ID_URI}" && pasture task show "${URD_ID_URI}" && pasture task show "${UAT_ID_URI}" && pasture task show "${ELICIT_ID_URI}"`)
 
-**Step 3:** Spawn ephemeral Explore subagents via Task tool for scoped codebase queries — _Each subagent is short-lived and returns findings; no standing team overhead_
+**Step 3:** Spawn ephemeral Explore subagents via Agent tool for scoped codebase queries — _Each subagent is short-lived and returns findings; no standing team overhead_
 
 **Step 4:** Decompose into vertical slices — _Vertical slices give one worker end-to-end ownership of a feature path (types → tests → impl → wiring) with clear file boundaries_ → `impl-plan`
 
@@ -243,7 +243,7 @@ You own Phases 7-12 of the epoch: receive handoff from architect (p7), create ve
 **[B-sup-model-nontrivial]**
 - Given: non-trivial changes (multi-file, architectural, logic-heavy)
 - When: spawning a worker
-- Then: prefer model: sonnet for the Task tool to ensure quality
+- Then: prefer model: sonnet for the Agent tool to ensure quality
 - Should not: default to haiku for complex work
 
 **[B-sup-ride-the-wave]**
@@ -306,7 +306,7 @@ Exit conditions:
 - **proceed**: All workers have notified completion via pasture task comment add
 
 ### Stage 3: Review + Fix Cycles _(conditional-loop)_
-- Spawn reviewers via Task tool for per-slice code review
+- Spawn reviewers via Agent tool for per-slice code review
 - Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
 - Track findings in the 3 severity groups; ALL groups must reach 0 before wave close (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)
 - Workers fix ALL findings (BLOCKER, IMPORTANT, and MINOR)
@@ -358,7 +358,7 @@ Exit conditions:
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Spawn ephemeral Explore subagents (delegation operation, scoped queries)
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -370,7 +370,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (delegation operation, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review
@@ -404,7 +404,7 @@ Cycle Exit Conditions:
 - Should not: spawn workers sequentially or use specialized agent types
 
 **[sup-teamcreate-msg]**
-- Given: teammates spawned via TeamCreate
+- Given: an assignment delegated with the Agent operation
 - When: assigning work via SendMessage
 - Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `pasture task show "${TASK_ID_URI}"` for full context, and (4) the handoff authored in the Pasture task body
 - Should not: send bare instructions without Pasture context — teammates have no prior knowledge of the task
@@ -554,7 +554,7 @@ Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (Agent t
 
 ```
 // Explore subagent — ephemeral, scoped query
-Agent({
+delegation: {
   subagent_type: "Explore",
   run_in_background: true,
   prompt: `Call Skill(/pasture:explore) to load your exploration role.
@@ -564,7 +564,7 @@ Depth: standard-research
 
 Explore the codebase for the requested topic. Produce structured findings
 (entry points, data flow, dependencies, patterns, conflicts). Return findings.`
-})
+}
 ```
 
 Spawn as many Explore subagents as needed — they are cheap and disposable. Use them during Phase 8 (IMPL_PLAN) to understand codebase areas before decomposing into slices.
@@ -751,29 +751,29 @@ Workers are **general-purpose agents** that call `/pasture:worker` at the start.
 
 ```
 // Non-trivial work → sonnet model
-Agent({
+delegation: {
   subagent_type: "general-purpose",
   model: "sonnet",
   run_in_background: true,
   prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\n\nPasture Task ID: ${taskId}...`
-})
+}
 
 // Trivial work (config tweak, typo fix, single-file edit) → haiku model
-Agent({
+delegation: {
   subagent_type: "general-purpose",
   model: "haiku",
   run_in_background: true,
   prompt: `Call Skill(/pasture:worker) and fix the typo in...\n\nPasture Task ID: ${taskId}...`
-})
+}
 
 // WRONG: Supervisor implementing changes directly
 Edit({ file_path: "src/foo.ts", ... })  // Supervisors coordinate, they don't implement!
 
 // WRONG: Do not use specialized agent types like "pasture:worker" directly
-Agent({
+delegation: {
   subagent_type: "pasture:worker",  // This doesn't exist!
   ...
-})
+}
 ```
 
 ### Model Selection Guide
@@ -787,9 +787,9 @@ Agent({
 
 See: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) for handoff template.
 
-### TeamCreate Context Requirements
+### Delegated Assignment Context Requirements
 
-When using TeamCreate instead of the Agent tool, teammates have **zero prior context**. Every SendMessage assigning work MUST be self-contained:
+A delegated assignment has **zero prior context**. Every SendMessage assigning work MUST be self-contained:
 
 ```
 SendMessage({

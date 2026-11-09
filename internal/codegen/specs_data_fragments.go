@@ -51,13 +51,13 @@ Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_D
 
 Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Run pasture task ready, pasture task blocked, and pasture task list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+Run [[rec]] ready, [[rec]] blocked, and [[rec]] list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run [[rec]] show "$TASK_URI", [[rec]] comments "$TASK_URI", and [[rec]] timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
 Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+Assignment transfer is not initial allocation: before using [[rec]] assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
 
-Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.`,
+Parent stays open and is blocked by child: [[rec]] dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.`,
 		},
 	},
 	FragTaskAuthor: {
@@ -66,7 +66,7 @@ Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --
 		Prose: &ProseSection{
 			Id:      string(FragTaskAuthor),
 			Title:   "Task Attribution",
-			Content: `Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.`,
+			Content: `Select the current registered author with [[rec]] agents list and [[rec]] agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.`,
 		},
 	},
 	FragRevVoteOptions: func() SharedFragment {
@@ -195,40 +195,40 @@ Severity groups:
 
 ` + "```" + `bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
   review_round: 1
 ---
 BLOCKER findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+[[rec]] label add "$BLOCKER_ID_URI" pasture:severity:blocker
+[[rec]] label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
-IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
   review_round: 1
 ---
 IMPORTANT findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+[[rec]] label add "$IMPORTANT_ID_URI" pasture:severity:important
+[[rec]] label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
-MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
   review_round: 1
 ---
 MINOR findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+[[rec]] label add "$MINOR_ID_URI" pasture:severity:minor
+[[rec]] label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire severity groups to the review round task
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$BLOCKER_ID_URI"
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
+[[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$BLOCKER_ID_URI"
+[[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
+[[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
 # IMPORTANT/MINOR must ALSO reach 0 before wave close — they are NOT routed to FOLLOWUP.
@@ -236,8 +236,8 @@ pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
 
 # Step 3: Close empty groups immediately
 # If a group has no findings, close it right away
-pasture task close "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
-pasture task close "$MINOR_ID_URI"        # if no MINOR findings
+[[rec]] close "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
+[[rec]] close "$MINOR_ID_URI"        # if no MINOR findings
 ` + "```" + ``,
 			Subsections: []ProseSection{namingConvention},
 		}

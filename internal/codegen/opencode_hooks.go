@@ -190,7 +190,16 @@ func openCodeRecoveryJSON(fragments map[FragmentId]SharedFragment) (string, erro
 		if !ok || fragment.Kind != FragmentKindProse || fragment.Prose == nil || strings.TrimSpace(fragment.Prose.Content) == "" {
 			return "", fmt.Errorf("codegen.GenerateOpenCodeHooksModule: shared recovery fragment %q is missing or has no prose during plugin emission; no plugin emitted — restore its prose in internal/codegen/specs_data_fragments.go and regenerate", id)
 		}
-		contents = append(contents, fragment.Prose.Content)
+		// The plugin embeds the same authored prose the skills render, so its
+		// typed markers resolve for OpenCode here as well.
+		resolved, err := ResolveBodyMarkers(fragment.Prose.Content, HarnessOpenCode)
+		if err != nil {
+			return "", fmt.Errorf(
+				"codegen.GenerateOpenCodeHooksModule: shared recovery fragment %q has an unresolved marker during plugin emission; no plugin emitted — fix the marker in internal/codegen/specs_data_fragments.go: %w",
+				id, err,
+			)
+		}
+		contents = append(contents, resolved)
 	}
 	// JSON encoding a string cannot fail; fragment lookup is the actual fallible
 	// boundary, including direct callers outside the all-target generator.

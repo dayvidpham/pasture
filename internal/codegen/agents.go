@@ -77,6 +77,14 @@ type agentTemplateData struct {
 //   - The template file cannot be read from the embedded FS.
 //   - Template execution fails (e.g., missing key, rendering error).
 func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
+	return renderAgentForTarget(roleId, figuresDir, HarnessClaudeCode)
+}
+
+// renderAgentForTarget renders one role's agent definition for one generation
+// target. The Claude target is the authored agent file; OpenCode reuses this
+// body with its own frontmatter, so it must resolve markers for OpenCode
+// rather than inherit Claude's native names.
+func renderAgentForTarget(roleId protocol.RoleId, figuresDir string, target HarnessName) (string, error) {
 	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
@@ -108,11 +116,11 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 		figures = loadFiguresForRole(roleId, figuresDir)
 	}
 
-	toolNames, err := RoleToolNames(HarnessClaudeCode, roleSpec)
+	toolNames, err := RoleToolNames(target, roleSpec)
 	if err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderAgent: resolving tools for role %q failed: %w",
-			roleId, err,
+			"codegen.renderAgent: resolving tools for role %q on target %q failed: %w",
+			roleId, target, err,
 		)
 	}
 
@@ -138,6 +146,15 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 	}
 
 	content := buf.String()
+	// Resolve typed markers for this target across the whole agent document,
+	// so role behaviours and constraints never carry a foreign tool name.
+	content, err = ResolveBodyMarkers(content, target)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderAgent: marker resolution failed for role %q on target %q: %w",
+			roleId, target, err,
+		)
+	}
 	// Ensure content always ends with a single newline (mirrors Python behaviour).
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"

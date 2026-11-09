@@ -510,21 +510,6 @@ func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string, ver
 	ctx.BodySections = resolvedSections
 	ctx.BodyBehaviors = resolvedBehaviors
 
-	// Resolve typed body markers (harness tools, orchestration operations,
-	// the tracker entry point) against the target's pinned lowerings. This
-	// pass runs after fragment resolution so a shared fragment's markers are
-	// resolved exactly once, for the target that consumes it.
-	resolvedPreamble, resolvedSections, resolvedBehaviors, resolvedRecipes, err := resolveBodyTargetMarkers(
-		ctx.Preamble, resolvedSections, resolvedBehaviors, ctx.BodyRecipes, target,
-	)
-	if err != nil {
-		return "", fmt.Errorf("codegen.renderSkill: body marker resolution failed for role %q: %w", roleId, err)
-	}
-	ctx.Preamble = resolvedPreamble
-	ctx.BodySections = resolvedSections
-	ctx.BodyBehaviors = resolvedBehaviors
-	ctx.BodyRecipes = resolvedRecipes
-
 	tmpl := mustParseTemplateFS(tmplName)
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
@@ -536,7 +521,20 @@ func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string, ver
 			roleId, err,
 		)
 	}
-	return buf.String(), nil
+
+	// Resolve typed markers (harness tools, orchestration operations, the
+	// tracker entry point) across the WHOLE rendered document. Resolving the
+	// final text, rather than a hand-picked set of body fields, means every
+	// rendering corpus — bodies, fragments, role behaviours, constraints and
+	// workflow prose — goes through the one resolver (tenets 3, 4, 7).
+	rendered, err := ResolveBodyMarkers(buf.String(), target)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderSkill: marker resolution failed for role %q on target %q: %w",
+			roleId, target, err,
+		)
+	}
+	return rendered, nil
 }
 
 // renderSubSkill renders the complete generated content for a sub-skill
@@ -611,17 +609,6 @@ func renderSubSkill(commandId, figuresDir string, tmplName string, version strin
 	ctx.BodySections = resolvedSections
 	ctx.BodyBehaviors = resolvedBehaviors
 
-	resolvedPreamble, resolvedSections, resolvedBehaviors, resolvedRecipes, err := resolveBodyTargetMarkers(
-		ctx.Preamble, resolvedSections, resolvedBehaviors, ctx.BodyRecipes, target,
-	)
-	if err != nil {
-		return "", fmt.Errorf("codegen.renderSubSkill: body marker resolution failed for command %q: %w", commandId, err)
-	}
-	ctx.Preamble = resolvedPreamble
-	ctx.BodySections = resolvedSections
-	ctx.BodyBehaviors = resolvedBehaviors
-	ctx.BodyRecipes = resolvedRecipes
-
 	tmpl := mustParseTemplateFS(tmplName)
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, ctx); err != nil {
@@ -633,7 +620,17 @@ func renderSubSkill(commandId, figuresDir string, tmplName string, version strin
 			commandId, err,
 		)
 	}
-	return buf.String(), nil
+
+	// Resolve typed markers across the whole rendered sub-skill, exactly as
+	// renderSkill does for a role skill.
+	rendered, err := ResolveBodyMarkers(buf.String(), target)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderSubSkill: marker resolution failed for command %q on target %q: %w",
+			commandId, target, err,
+		)
+	}
+	return rendered, nil
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────

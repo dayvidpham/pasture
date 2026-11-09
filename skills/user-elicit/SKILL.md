@@ -48,7 +48,7 @@ description: User Requirements Elicitation survey (Phase 2)
 - Should not: use `pasture task dep add --blocked-by` for URD links (URD is a reference document, not a blocking dependency)
 
 **[user-elicit-code-shown]**
-- Given: any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in an AskUserQuestion preview)
+- Given: any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in the preview the AskUserQuestion call shows)
 - When: recording the Q&A
 - Then: capture the shown definition/code VERBATIM in the elicit task alongside the question and response (parity with UAT's 'Definition shown' / 'Command run' fields)
 - Should not: record only the answer while dropping the code or definition the user was reacting to — the response is meaningless without what was shown

@@ -50,7 +50,7 @@ var userElicitBody = SkillBody{
 		},
 		{
 			Id:        "user-elicit-code-shown",
-			Given:     "any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in an [[op:request_user_decision]] preview)",
+			Given:     "any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in the preview the [[op:request_user_decision]] call shows)",
 			When:      "recording the Q&A",
 			Then:      "capture the shown definition/code VERBATIM in the elicit task alongside the question and response (parity with UAT's 'Definition shown' / 'Command run' fields)",
 			ShouldNot: "record only the answer while dropping the code or definition the user was reacting to — the response is meaningless without what was shown",

@@ -148,7 +148,7 @@ full Ride the Wave cycle.
 			Id:    "sup-spawn-task-call",
 			Title: "Task Call",
 			Content: `` + "```" + `
-[[op:delegate_assignment]]({
+delegation: {
   description: "Worker: implement SLICE-N",
   prompt: ` + "`" + `Call [[op:invoke_skill]](/pasture:worker) and implement the assigned slice.
 
@@ -158,15 +158,15 @@ Read full requirements + handoff: [[rec]] show "${TASK_ID_URI}"
 Do NOT shut down after implementation. You will receive review feedback and may need to fix issues.` + "`" + `,
   subagent_type: "general-purpose",
   run_in_background: true
-})
+}
 ` + "```" + `
 
 Per [sup-spawn-workers], use ` + "`" + `subagent_type: "general-purpose"` + "`" + `, not a custom agent type. The worker skill is invoked inside the agent via ` + "`" + `[[op:invoke_skill]](/pasture:worker)` + "`" + `.`,
 		},
 		{
 			Id:    "sup-spawn-teamcreate-sendmessage",
-			Title: "TeamCreate: [[op:send_assignment_message]] Assignment",
-			Content: `When workers are spawned via TeamCreate, they receive context through [[op:send_assignment_message]] instead of a task prompt. The message MUST be self-contained — teammates have **no prior context**:
+			Title: "Delegated Assignment Message",
+			Content: `When a worker is delegated an assignment, the assignment message is its only context. The message MUST be self-contained — the worker has **no prior context**:
 
 ` + "```" + `
 [[op:send_assignment_message]]({

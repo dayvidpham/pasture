@@ -519,9 +519,9 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/pasture:reviewer` skill (via the Skill tool) to load its role instructions — `/pasture:reviewer` is a **Skill**, not a subagent type.
 
 ```
-Agent(description: "Reviewer A: correctness", prompt: "You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
-Agent(description: "Reviewer B: test quality", prompt: "You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
-Agent(description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
+delegation: description: "Reviewer A: correctness", prompt: "You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose"
+delegation: description: "Reviewer B: test quality", prompt: "You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose"
+delegation: description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose"
 ```
 
 ## Supervisor Handoff
@@ -534,7 +534,7 @@ Skill(skill: "pasture:architect-handoff")
 
 The handoff skill guides you through:
 1. Authoring the handoff in a HANDOFF Pasture task body (no filesystem path)
-2. Launching the supervisor (and workers) as **Opus** teammates via TeamCreate, then assigning work via SendMessage
+2. Delegating the supervisor with the Agent operation, then giving it the handoff context as part of the assignment
 
 **CRITICAL:** The supervisor assignment MUST:
 1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation

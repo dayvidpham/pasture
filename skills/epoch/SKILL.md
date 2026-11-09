@@ -128,7 +128,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-supervisor-explore-ephemeral]**
 - Given: supervisor needs codebase exploration
 - When: starting Phase 8 (IMPL_PLAN)
-- Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
+- Then: spawn ephemeral Explore subagents via Agent tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
 **[C-uat-feedback-disposition]**

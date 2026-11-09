@@ -1,12 +1,18 @@
-# Epoch workflow — body literal mapping (W2)
+# Epoch workflow — rendering-source literal mapping (W2)
 
 Work list for the de-litteralling slice (PROPOSAL-4 W2). It names every literal
-that appeared in a skill body spec file, the typed surface that replaces it, and
-what each target resolves that surface to. The source of truth is the code; this
-file records the mapping that was reviewed before the edits.
+that reaches generated skill or agent prose, the typed surface that replaces it,
+and what each target resolves that surface to. The source of truth is the code;
+this file records the mapping that was reviewed before the edits.
 
-Scope: the 28 `internal/codegen/specs_data_body_*.go` files. Generated trees are
-never edited by hand; `make generate` produces them from these specs.
+Scope: every authored string that the generators render into a generated skill,
+sub-skill, or agent file. That is the 28 `internal/codegen/specs_data_body_*.go`
+files plus the non-body rendering sources: `SharedFragmentSpecs`, role behaviour
+and constraint prose, checklists, coordination commands, procedure steps,
+workflows, review axes, command titles/descriptions, and figure content.
+`schema.xml` is generated too; it resolves markers to the target-neutral
+spelling because it names no single harness. Generated trees are never edited by
+hand; `make generate` produces them from these specs.
 
 Related tenets: tenet 4 (name it once), tenet 6 (fail the build), tenet 3 (write
 the operation, not the tool). Requirements: R20 (no unrendered harness tool
@@ -23,11 +29,20 @@ value, never free prose.
 | `[[op:<ir.OperationKind>]]` | one member of `ir.AllOperationKinds()` | orchestration intent |
 | `[[rec]]` | none | the tracker entry point |
 
-`ToolRef`, `OpRef` and `TrackerRef` in `internal/codegen/body_refs.go` construct
-the markers from typed values. `ResolveBodyMarkers` resolves them per generation
-target through `internal/runtime/profiles.go`; an unknown payload fails
-generation. `TestBodySpecsCarryNoRawHarnessLiterals` fails the build when a raw
-call prefix or command prefix is re-added.
+`ResolveBodyMarkers` resolves them per generation target through
+`internal/runtime/profiles.go`; an unknown payload fails generation. It runs
+over the whole rendered document in `renderSkill`, `renderSubSkill`,
+`renderAgentForTarget`, and the OpenCode lifecycle plugin, so every rendering
+corpus goes through the one resolver. `renderedSources` in
+`internal/codegen/body_refs.go` enumerates every authored rendering input; the
+guards in `body_refs_test.go` iterate that one list, so a new corpus cannot be
+added blind.
+
+`TestRenderingSourcesCarryNoRawHarnessLiterals` fails the build when a raw call
+prefix, harness phrase (`Task tool`, `Agent tool`, `SendMessage`, `TeamCreate`)
+or tracker command prefix is re-added. `TestRenderingSourcesAvoidArticleBeforeMarker`
+fails when an indefinite article precedes a marker: no single article agrees
+with every target's resolved noun.
 
 ## 2. Resolution table
 
@@ -81,6 +96,10 @@ the URD", "Write the tests", "Grep for keywords" are verbs, not tool literals.
 
 ### 3.3 Orchestration
 
+The counts below are the original body-slice census. They are historical, not a
+current invariant: the fix pass also maps the same classes in non-body rendering
+sources, so the live count lives in the guard, not this table.
+
 | Literal | Typed surface | Count |
 |---|---|---|
 | `Skill(` call prefix | `[[op:invoke_skill]](` | 29 |
@@ -97,13 +116,19 @@ resolved text is the current name, not a paraphrase.
 
 | Literal | Why no mapping | Owner |
 |---|---|---|
-| `TeamCreate` | no honest IR kind: the closed orchestration set models delegation, not a team object, and the retired mechanism is dropped | contradiction sweep (W7); reported as an unmapped literal in the slice evidence |
 | `aura-swarm`, `beads`, and the retired Beads command | retired mechanism names, no IR kind | contradiction sweep (W7) |
 | `Read`/`Write`/`Grep` as English verbs | not tool literals | — |
 
-Inventing an IR kind for `TeamCreate` would violate amendment A-3 (zero new
-kinds) and tenet 2 (a closed set is not extended at a use site). Leaving it in
-place until W7 deletes the retired mechanism is the honest option.
+`TeamCreate` needed no IR kind: deleting the retired mechanism from the
+rendering sources was the fix. It is removed from every generated role and
+sub-skill. The hand-authored `skills/protocol/` documents are copied verbatim,
+not rendered, and still name it; their cleanup stays with W7.
+
+The Codex `request-input` binding id is cited at
+`internal/runtime/profiles.go` (Codex contract): the harness-tools research note
+records that Codex 0.167.0's model-facing tool is `request_user_input` and that
+`request-input` is the contract's internal binding id. Correcting the emitted
+name is a contract change, not a rendering change, and is not made here.
 
 ## 4. Work list by file
 
@@ -141,41 +166,54 @@ place until W7 deletes the retired mechanism is the honest option.
 | `specs_data_body_worker_implement.go` | 5 | 0 | 0 |
 | **Total** | **363** | **21** | **82** |
 
+### 4.2 Non-body rendering sources
+
+Counts are intentionally omitted (they change with every wording edit). Each
+source below now authors typed markers and is covered by `renderedSources`:
+
+| Source | Rendered into |
+|---|---|
+| `SharedFragmentSpecs` (`frag--task-recovery`, `frag--task-author`, `frag--sup-*`) | every skill body, plus the OpenCode lifecycle plugin recovery text |
+| `RoleSpecs[].Introduction` / `.OwnershipNarrative` / `.Behaviors` | role skills and agent definitions |
+| `ConstraintSpecs[].Given/When/Then/ShouldNot/Command/Examples` | role skills, agent definitions, `schema.xml` |
+| `CommandSpecs[].Title/Description` | sub-skill headings and frontmatter descriptions |
+| `ChecklistSpecs`, `CoordinationCommands`, `WorkflowSpecs`, `ReviewAxisSpecs`, `ProcedureSteps` | role skills and agent definitions |
+| `FigureSpecs` content (`skills/protocol/figures/*.yaml`) | workflow figures in role skills |
+| `schema.go` section data and directives | target-neutral `schema.xml` |
+
 ## 5. Equivalence
 
-Method: `make generate` was run at the W1 commit to establish the old output,
-then again after this change. Every generated file under `skills/`,
-`.opencode/skill/`, `.agents/skills/`, `agents/`, `.codex/`, and the committed
-target assets was diffed. Each changed line is classified against the
-resolution table in §2: after replacing the old and new token with one
-placeholder, the two lines must be identical. A line that differs by any other
-text is a wording change and fails the check.
+Method (strict): generate the base tree and the changed tree, then diff every
+generated file under `skills/`, `.agents/skills/`, `.opencode/skill/`,
+`agents/`, `.codex/`, `schema.xml`, the committed target assets and
+`internal/inventory/`. Each changed line pair is canonicalised by replacing the
+old and new resolved token with one placeholder. A line pair that differs by any
+other character is UNEXPLAINED. Article, number and grammar differences are not
+normalised: an article that changes because a resolved noun changed is a defect
+in the source, not a legitimate repair.
 
-Result: 312 changed generated lines, 0 unexplained differences. Every changed
-line canonicalises to its old form after the resolution table in §2 is applied
-to both sides.
+Result over this fix pass (base `5ab7cb7e`): 56 generated files changed, 304
+changed line pairs. 91 line pairs are token-only and explained by the
+resolution table in §2. 218 line pairs are unexplained by resolution, in 64
+unique shapes, and every one is an explicit source rewrite required by the
+wave-2 gate:
 
-- Claude Code: 7 of 31 skill files changed. Only the `Task` → `Agent`
-  resolutions changed; `Skill`, `SendMessage`, `AskUserQuestion` and
-  `pasture task` resolve to their existing spellings, so those lines are byte
-  identical.
-- OpenCode: the same lines with `skill`, `task`, `question`; non-native
-  operations keep the neutral kind.
-- Codex: the same lines with neutral capability and operation names.
-- 20 of the 312 lines are the same four source strings appearing in each
-  target tree (and its committed asset copy), where the article or preposition
-  had to change because the resolved noun changed ("spawn the supervisor as a
-  Task tool subagent" → "spawn the supervisor with the Agent tool"). These are
-  resolution-induced grammar repairs, not free rewrites; the checker normalises
-  the two shapes and reports no other wording change.
+- `TeamCreate` deletion and the delegation-prose rewrite (62 shapes across the
+  5 committed copies: `skills/`, `.agents/skills/`, `.opencode/skill/`, and the
+  Claude/OpenCode target assets).
+- The article rewrite at `user-elicit` (3 copies).
+- Five `replace block` changes are the deleted `TeamCreate` code block.
+
+No unexplained line pair is an accidental wording change caused by marker
+resolution. Resolution alone changed only tokens. `schema.xml`, agents, and the
+OpenCode lifecycle plugin are now resolved too: `schema.xml` uses the neutral
+spelling, and the plugin embeds OpenCode-resolved recovery prose.
 
 The classification manifest
 (`internal/codegen/scan/manifest/classifications.json`) is updated only where a
-resolved token changed a classified content window (`Task tool` → `Agent tool`).
-No classification entry is added or removed.
+changed source removed or renamed a classified section (`TeamCreate` blocks and
+the two renamed sections). No new candidate is added.
 
-Out of this slice's file scope, and therefore not de-litteralled here: agent
-definitions (`agents/`, rendered from `RoleSpec.Behaviors` and
-`ConstraintSpecs`) and the hand-authored `skills/protocol/` tree. They are not
-`specs_data_body_*.go` files. Their tool-name prose belongs to the contradiction
-sweep and the harness-binding waves.
+Still out of scope and owned by the contradiction sweep (W7): the hand-authored
+`skills/protocol/` tree is copied verbatim rather than rendered, so its
+`TeamCreate` and `Task tool` prose is unchanged here.

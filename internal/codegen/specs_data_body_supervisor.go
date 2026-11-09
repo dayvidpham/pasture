@@ -21,7 +21,7 @@ var supervisorBody = SkillBody{
 		},
 		{
 			Id:        "sup-teamcreate-msg",
-			Given:     "teammates spawned via TeamCreate",
+			Given:     "an assignment delegated with the [[op:delegate_assignment]] operation",
 			When:      "assigning work via [[op:send_assignment_message]]",
 			Then:      "the message MUST include: (1) explicit instruction to call `[[op:invoke_skill]](/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `[[rec]] show \"${TASK_ID_URI}\"` for full context, and (4) the handoff authored in the Pasture task body",
 			ShouldNot: "send bare instructions without Pasture context — teammates have no prior knowledge of the task",
@@ -130,7 +130,7 @@ See: [../supervisor-plan-tasks/SKILL.md](../supervisor-plan-tasks/SKILL.md) for 
 
 ` + "```" + `
 // Explore subagent — ephemeral, scoped query
-[[op:delegate_assignment]]({
+delegation: {
   subagent_type: "Explore",
   run_in_background: true,
   prompt: ` + "`" + `Call [[op:invoke_skill]](/pasture:explore) to load your exploration role.
@@ -140,7 +140,7 @@ Depth: standard-research
 
 Explore the codebase for the requested topic. Produce structured findings
 (entry points, data flow, dependencies, patterns, conflicts). Return findings.` + "`" + `
-})
+}
 ` + "```" + `
 
 Spawn as many Explore subagents as needed — they are cheap and disposable. Use them during Phase 8 (IMPL_PLAN) to understand codebase areas before decomposing into slices.`,
@@ -314,7 +314,7 @@ Workers are assigned to leaf tasks, not slices. The slice closes when all its le
 		{
 			Id:      "sup-spawning-workers",
 			Title:   "Spawning Workers",
-			Content: "Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.\n\nWorkers are **general-purpose agents** that call `/pasture:worker` at the start. Select the model based on task complexity:\n\n```\n// Non-trivial work → sonnet model\n[[op:delegate_assignment]]({\n  subagent_type: \"general-purpose\",\n  model: \"sonnet\",\n  run_in_background: true,\n  prompt: `Call [[op:invoke_skill]](/pasture:worker) and implement the assigned slice.\\n\\nPasture Task ID: ${taskId}...`\n})\n\n// Trivial work (config tweak, typo fix, single-file edit) → haiku model\n[[op:delegate_assignment]]({\n  subagent_type: \"general-purpose\",\n  model: \"haiku\",\n  run_in_background: true,\n  prompt: `Call [[op:invoke_skill]](/pasture:worker) and fix the typo in...\\n\\nPasture Task ID: ${taskId}...`\n})\n\n// WRONG: Supervisor implementing changes directly\nEdit({ file_path: \"src/foo.ts\", ... })  // Supervisors coordinate, they don't implement!\n\n// WRONG: Do not use specialized agent types like \"pasture:worker\" directly\n[[op:delegate_assignment]]({\n  subagent_type: \"pasture:worker\",  // This doesn't exist!\n  ...\n})\n```",
+			Content: "Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.\n\nWorkers are **general-purpose agents** that call `/pasture:worker` at the start. Select the model based on task complexity:\n\n```\n// Non-trivial work → sonnet model\ndelegation: {\n  subagent_type: \"general-purpose\",\n  model: \"sonnet\",\n  run_in_background: true,\n  prompt: `Call [[op:invoke_skill]](/pasture:worker) and implement the assigned slice.\\n\\nPasture Task ID: ${taskId}...`\n}\n\n// Trivial work (config tweak, typo fix, single-file edit) → haiku model\ndelegation: {\n  subagent_type: \"general-purpose\",\n  model: \"haiku\",\n  run_in_background: true,\n  prompt: `Call [[op:invoke_skill]](/pasture:worker) and fix the typo in...\\n\\nPasture Task ID: ${taskId}...`\n}\n\n// WRONG: Supervisor implementing changes directly\nEdit({ file_path: \"src/foo.ts\", ... })  // Supervisors coordinate, they don't implement!\n\n// WRONG: Do not use specialized agent types like \"pasture:worker\" directly\ndelegation: {\n  subagent_type: \"pasture:worker\",  // This doesn't exist!\n  ...\n}\n```",
 			Subsections: []ProseSection{
 				{
 					Id:      "sup-model-selection",
@@ -323,8 +323,8 @@ Workers are assigned to leaf tasks, not slices. The slice closes when all its le
 				},
 				{
 					Id:    "sup-teamcreate-context",
-					Title: "TeamCreate Context Requirements",
-					Content: `When using TeamCreate instead of the [[op:delegate_assignment]] tool, teammates have **zero prior context**. Every [[op:send_assignment_message]] assigning work MUST be self-contained:
+					Title: "Delegated Assignment Context Requirements",
+					Content: `A delegated assignment has **zero prior context**. Every [[op:send_assignment_message]] assigning work MUST be self-contained:
 
 ` + "```" + `
 [[op:send_assignment_message]]({

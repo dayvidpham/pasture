@@ -20,8 +20,8 @@ description: Create handoff document and transfer to supervisor
 **[arch-handoff-spawn-supervisor]**
 - Given: handoff for the IMPL_PLAN phase
 - When: spawning the supervisor
-- Then: use TeamCreate to spawn the supervisor as an Opus teammate (workers also Opus), then assign work via send_assignment_message
-- Should not: spawn the supervisor with the task tool or via aura-swarm for the IMPL_PLAN phase
+- Then: delegate the supervisor as the implementation-plan owner (workers also Opus), then give it a self-contained assignment
+- Should not: spawn the supervisor without a self-contained assignment, or via aura-swarm, for the IMPL_PLAN phase
 
 **[arch-handoff-supervisor-not-idle]**
 - Given: a freshly spawned supervisor
@@ -110,10 +110,9 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 
    ```
 
-2. Launch the supervisor as an **Opus teammate** via TeamCreate (the IMPL_PLAN phase runs as an Agent Team, not aura-swarm):
+2. Delegate the supervisor with the task operation (the IMPL_PLAN phase runs under the supervisor, not aura-swarm):
    ```
-   TeamCreate({ team_name: "<epoch>-impl", ... })          # supervisor + workers as Opus teammates
-   # then assign the supervisor its task via send_assignment_message (see Example Prompt below)
+   delegate the implementation-plan owner, then give it the self-contained assignment below
    ```
 
 3. Monitor supervisor progress:
@@ -155,7 +154,7 @@ Implement the ratified plan for <feature name>.
 4. Read the ratified plan with `pasture task show "${RATIFIED_PROPOSAL_ID_URI}"` and the URD with `pasture task show "${URD_ID_URI}"`
 ```
 
-Deliver this assignment to the supervisor teammate via send_assignment_message after TeamCreate:
+Deliver this assignment to the supervisor when you delegate it:
 
 ```
 send_assignment_message({
@@ -191,15 +190,15 @@ Given an expired token when accessing protected routes then return 401
 })
 ```
 
-## Spawning via TeamCreate
+## Delegation Notes
 
-- Spawn the supervisor (and the workers it will coordinate) as **Opus** teammates — the IMPL_PLAN phase benefits from the stronger model for decomposition and review.
-- Teammates have **zero prior context**: every send_assignment_message assignment MUST be self-contained (call `skill(/pasture:supervisor)`, the Pasture task IDs, and `pasture task show` commands to fetch full requirements).
-- Do not spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase; the deprecated orchestrator must not be invoked; the supported handoff uses TeamCreate.
+- Delegate the supervisor (and the workers it will coordinate) as **Opus** assignments — the IMPL_PLAN phase benefits from the stronger model for decomposition and review.
+- A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call `skill(/pasture:supervisor)`, the Pasture task IDs, and `pasture task show` commands to fetch full requirements).
+- Do not spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase; the deprecated orchestrator must not be invoked.
 
 ## IMPORTANT
 
-- **DO NOT** spawn the supervisor with the task tool or via `aura-swarm` for the IMPL_PLAN phase — use TeamCreate with an Opus supervisor
+- **DO NOT** spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase — delegate it with the task operation
 - **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks
 - **DO NOT** implement the plan yourself - your role is handoff and monitoring
 - **DO NOT** shut down a supervisor that appears idle right after spawn — it is usually running Explore subagents

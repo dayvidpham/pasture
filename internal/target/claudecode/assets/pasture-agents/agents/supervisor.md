@@ -124,7 +124,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-supervisor-explore-ephemeral]**
 - Given: supervisor needs codebase exploration
 - When: starting Phase 8 (IMPL_PLAN)
-- Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
+- Then: spawn ephemeral Explore subagents via Agent tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
 **[C-supervisor-no-impl]**
@@ -162,7 +162,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[B-sup-model-nontrivial]**
 - Given: non-trivial changes (multi-file, architectural, logic-heavy)
 - When: spawning a worker
-- Then: prefer model: sonnet for the Task tool to ensure quality
+- Then: prefer model: sonnet for the Agent tool to ensure quality
 - Should not: default to haiku for complex work
 
 **[B-sup-ride-the-wave]**
@@ -218,7 +218,7 @@ Exit conditions:
 
 **Stage 3: Review + Fix Cycles** _(conditional-loop)_
 
-- Spawn reviewers via Task tool for per-slice code review
+- Spawn reviewers via Agent tool for per-slice code review
 
 - Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
 
@@ -237,7 +237,7 @@ Exit conditions:
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Spawn ephemeral Explore subagents (delegation operation, scoped queries)
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -249,7 +249,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (delegation operation, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review

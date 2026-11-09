@@ -371,7 +371,7 @@ var phaseDescriptions = map[string]string{
 var p7SkillInvocation = map[string]string{
 	"target-role": "supervisor",
 	"command-ref": "cmd-supervisor",
-	"directive":   "Supervisor launch prompt MUST start with Skill(/pasture:supervisor)",
+	"directive":   "Supervisor launch prompt MUST start with [[op:invoke_skill]](/pasture:supervisor)",
 }
 
 // buildPhaseTaskTitles derives per-phase task-title hints from TitleConventions.
@@ -812,15 +812,15 @@ var handoffFilePatterns = map[string]string{
 // handoffSkillInvocations maps handoff IDs to their skill invocation data.
 var handoffSkillInvocations = map[string]map[string]string{
 	"h1": {
-		"directive": "Skill(/pasture:supervisor)",
+		"directive": "[[op:invoke_skill]](/pasture:supervisor)",
 		"note":      "Supervisor launch prompt MUST start with this invocation. Without it, supervisor skips leaf task creation.",
 	},
 	"h2": {
-		"directive": "Skill(/pasture:worker)",
+		"directive": "[[op:invoke_skill]](/pasture:worker)",
 		"note":      "Worker message MUST include explicit instruction to call this skill.",
 	},
 	"h3": {
-		"directive": "Skill(/pasture:reviewer)",
+		"directive": "[[op:invoke_skill]](/pasture:reviewer)",
 		"note":      "Reviewer prompt MUST include instruction to call this skill.",
 	},
 }
@@ -1218,8 +1218,8 @@ func buildDependencyModel(buf *bytes.Buffer, depth int) {
 	section := DependencyModelSection{
 		Rule:           "Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.",
 		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-N \u2192 blocked-by leaf tasks",
-		Command:        "pasture task dep add {parent-uri} --blocked-by {child-uri}",
-		AntiPattern:    "pasture task dep add {child-uri} --blocked-by {parent-uri}",
+		Command:        "[[rec]] dep add {parent-uri} --blocked-by {child-uri}",
+		AntiPattern:    "[[rec]] dep add {child-uri} --blocked-by {parent-uri}",
 		ReferenceLinks: &ReferenceLinksElem{
 			Note:    "URD and other reference docs use frontmatter, not blocking deps",
 			Pattern: "description frontmatter:\n  references:\n    urd: {urd-task-uri}\n    request: {request-task-uri}",
@@ -1246,7 +1246,7 @@ func buildFollowupLifecycle(buf *bytes.Buffer, depth int) {
 		},
 		LeafTaskAdoption: &LeafTaskAdoptElem{
 			Rule:    "When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.",
-			Command: "pasture task dep add {followup-slice-uri} --blocked-by {important-leaf-task-uri}\npasture task dep add {followup-slice-uri} --blocked-by {minor-leaf-task-uri}",
+			Command: "[[rec]] dep add {followup-slice-uri} --blocked-by {important-leaf-task-uri}\n[[rec]] dep add {followup-slice-uri} --blocked-by {minor-leaf-task-uri}",
 			Note:    "Leaf tasks retain their original parent (the severity group from the original review) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.",
 		},
 		References: &FollowupRefsElem{
@@ -1603,7 +1603,14 @@ func generateSchemaContent() string {
 
 	buf.WriteString("</pasture-protocol>\n")
 
-	return buf.String()
+	// schema.xml names no single harness, so typed markers resolve to the
+	// neutral operation or capability spelling rather than any host's tool
+	// name (tenet 3).
+	content, err := ResolveBodyMarkersNeutral(buf.String())
+	if err != nil {
+		panic(fmt.Sprintf("codegen.generateSchemaContent: marker resolution failed: %v", err))
+	}
+	return content
 }
 
 // printUnifiedDiff prints a simple line-by-line diff between old and new content.

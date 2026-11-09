@@ -83,7 +83,7 @@ func TestWorkerRecipesNeverCloseTasks(t *testing.T) {
 	}
 	for id, command := range CoordinationCommands {
 		if command.RoleRef == protocol.RoleWorker {
-			require.NotContains(t, command.Template, "pasture task close", id)
+			require.NotContains(t, resolvedForClaude(t, command.Template), "pasture task close", id)
 		}
 	}
 }
@@ -116,8 +116,9 @@ func TestCanonicalTaskRecoveryFragmentReferences(t *testing.T) {
 			fragment, ok := SharedFragmentSpecs[id]
 			require.True(t, ok, "recovery instructions must have one canonical shared owner")
 			require.NotNil(t, fragment.Prose)
+			resolved := resolvedForClaude(t, fragment.Prose.Content)
 			for _, text := range tc.Contains {
-				require.Contains(t, fragment.Prose.Content, text)
+				require.Contains(t, resolved, text)
 			}
 			require.NotEmpty(t, refs[id], "an unreferenced fragment supplies no recovery fallback")
 			if tc.EveryBody {

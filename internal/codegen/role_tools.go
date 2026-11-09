@@ -112,6 +112,47 @@ func roleHasToolSurface(spec RoleSpec) bool {
 	return len(spec.Tools) > 0 || len(spec.Operations) > 0
 }
 
+// nativeToolName is the ONE harness-tool lowering used by both the role tool
+// surface and body-marker resolution. It reports ok=false when the target's
+// contract declares no native name for the capability.
+func nativeToolName(harness ir.HarnessID, tool ir.HarnessTool) (name string, ok bool, err error) {
+	lowering, err := runtime.LookupHarnessTool(harness, tool)
+	if err != nil {
+		return "", false, err
+	}
+	if !lowering.Available() {
+		return "", false, nil
+	}
+	return lowering.NativeName(), true, nil
+}
+
+// nativeOperationName is the ONE operation lowering used by both the role tool
+// surface and body-marker resolution. ok is false when the kind is unsupported
+// on the contract or classifies as non-native; a kind with no core descriptor
+// is a fault, not an empty result.
+func nativeOperationName(contract runtime.RuntimeContract, kind ir.OperationKind) (name string, ok bool, err error) {
+	descriptor, registered := runtime.CoreOperationDescriptorFor(kind)
+	if !registered {
+		return "", false, fmt.Errorf(
+			"operation %q has no core descriptor — "+
+				"why: only a registered orchestration kind can be lowered; "+
+				"where: internal/codegen/role_tools.go nativeOperationName; "+
+				"fix: use one of ir.AllOperationKinds",
+			kind,
+		)
+	}
+	binding, err := runtime.LookupOperationBinding(contract, descriptor)
+	if err != nil {
+		// Unsupported on this contract: the operation has no native call.
+		return "", false, nil
+	}
+	call, native := binding.Native()
+	if !native {
+		return "", false, nil
+	}
+	return call.CallName(), true, nil
+}
+
 // RoleToolNames resolves one role's typed capabilities to the target's native
 // tool names, in canonical order. Harness tools come from the harness-tool
 // lowering table and operations from the pinned runtime contract, so no native
@@ -139,39 +180,32 @@ func RoleToolNames(targetName HarnessName, spec RoleSpec) ([]string, error) {
 			if _, wanted := tools[slot.tool]; !wanted {
 				continue
 			}
-			lowering, err := runtime.LookupHarnessTool(target.harness, slot.tool)
+			resolved, ok, err := nativeToolName(target.harness, slot.tool)
 			if err != nil {
 				return nil, err
 			}
-			if !lowering.Available() {
+			if !ok {
 				continue
 			}
-			name = lowering.NativeName()
+			name = resolved
 		} else {
 			if _, wanted := operations[slot.operation]; !wanted {
 				continue
 			}
-			descriptor, ok := runtime.CoreOperationDescriptorFor(slot.operation)
-			if !ok {
+			resolved, ok, err := nativeOperationName(target.contract, slot.operation)
+			if err != nil {
 				return nil, fmt.Errorf(
-					"role %q names operation %q with no core descriptor — "+
+					"role %q names operation %q with no native lowering — "+
 						"why: a role may only declare a registered orchestration kind; "+
 						"where: internal/codegen/role_tools.go RoleToolNames; "+
-						"fix: use one of ir.AllOperationKinds",
-					spec.Id, slot.operation,
+						"fix: use one of ir.AllOperationKinds: %w",
+					spec.Id, slot.operation, err,
 				)
 			}
-			binding, err := runtime.LookupOperationBinding(target.contract, descriptor)
-			if err != nil {
-				// Unsupported on this contract: the operation contributes no
-				// native tool name, exactly as it contributes no binding.
+			if !ok {
 				continue
 			}
-			call, native := binding.Native()
-			if !native {
-				continue
-			}
-			name = call.CallName()
+			name = resolved
 		}
 		if _, duplicate := seen[name]; duplicate {
 			continue

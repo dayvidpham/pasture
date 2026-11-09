@@ -336,7 +336,16 @@ func Codex0_153_0() RuntimeContract {
 			mediated: mustMediated("parent orchestrator", "the parent stops the Codex assignment; this contract binds no native stop call"),
 		},
 		ir.OperationRequestUserDecision: {
-			class:  effects.RuntimeClassNative,
+			class: effects.RuntimeClassNative,
+			// `request-input` is this contract's internal binding id, not a
+			// claim about the host's model-facing tool name. The measurement
+			// that established the distinction is recorded in the harness-tools
+			// research note (aura-plugins docs/research/epoch-workflow-harness-tools.md
+			// §4.1): Codex 0.167.0's binary strings and collaboration-mode prompt
+			// name the model-facing tool `request_user_input`, while the pinned
+			// contract here carries the binding id. Correcting the emitted name
+			// is a contract/binding change; it is deliberately not made in the
+			// name-only rendering wave.
 			native: mustNativeCall("request-input", []string{"prompt", "options"}, "the user's requested input bound to the originating request", "presents to the interactive user"),
 		},
 	}

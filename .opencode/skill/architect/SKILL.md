@@ -111,7 +111,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-handoff-skill-invocation]**
 - Given: an agent is launched for a new phase (especially p7 to p8 handoff)
 - When: composing the launch prompt
-- Then: prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions
+- Then: prompt MUST start with skill(/pasture:{role}) invocation directive so the agent loads its role instructions
 - Should not: launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation
 
 **[C-proposal-naming]**
@@ -123,7 +123,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Pasture
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside question option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 _Example (correct)_
@@ -518,9 +518,9 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/pasture:reviewer` skill (via the skill tool) to load its role instructions — `/pasture:reviewer` is a **Skill**, not a subagent type.
 
 ```
-task(description: "Reviewer A: correctness", prompt: "You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
-task(description: "Reviewer B: test quality", prompt: "You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
-task(description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
+delegation: description: "Reviewer A: correctness", prompt: "You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose"
+delegation: description: "Reviewer B: test quality", prompt: "You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose"
+delegation: description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose"
 ```
 
 ## Supervisor Handoff
@@ -533,7 +533,7 @@ skill(skill: "pasture:architect-handoff")
 
 The handoff skill guides you through:
 1. Authoring the handoff in a HANDOFF Pasture task body (no filesystem path)
-2. Launching the supervisor (and workers) as **Opus** teammates via TeamCreate, then assigning work via send_assignment_message
+2. Delegating the supervisor with the task operation, then giving it the handoff context as part of the assignment
 
 **CRITICAL:** The supervisor assignment MUST:
 1. **Start with `skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation

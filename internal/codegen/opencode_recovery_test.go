@@ -30,9 +30,17 @@ func TestOpenCodeRecoveryComposition(t *testing.T) {
 	if err := json.Unmarshal([]byte(match[1]), &recovery); err != nil {
 		t.Fatal(err)
 	}
-	want := SharedFragmentSpecs[FragTaskRecovery].Prose.Content + "\n\n" + SharedFragmentSpecs[FragTaskAuthor].Prose.Content
+	recoveryFragment, err := ResolveBodyMarkers(SharedFragmentSpecs[FragTaskRecovery].Prose.Content, HarnessOpenCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorFragment, err := ResolveBodyMarkers(SharedFragmentSpecs[FragTaskAuthor].Prose.Content, HarnessOpenCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := recoveryFragment + "\n\n" + authorFragment
 	if recovery != want {
-		t.Fatal("plugin recovery drifted from the shared skill-body fragments")
+		t.Fatal("plugin recovery drifted from the shared skill-body fragments resolved for OpenCode")
 	}
 	name := filepath.Join(t.TempDir(), "pasture-hooks.ts")
 	if err := os.WriteFile(name, []byte(module), 0o600); err != nil {

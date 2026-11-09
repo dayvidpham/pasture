@@ -198,11 +198,11 @@ Reviewer C (Elegance): Reviews SLICE-1, SLICE-2, SLICE-3 →
 
 ## Spawning Reviewers
 
-Supervisor spawns 3 parallel reviewers as **subagents** (via the Agent tool) or via **TeamCreate**. Reviewers are short-lived — keep them in-session.
+Supervisor spawns 3 parallel reviewers as **subagents** via the Agent operation. Reviewers are short-lived — keep them in-session.
 
 ```
 // Spawn 3 reviewers (one per axis)
-Agent({
+delegation: {
   subagent_type: "general-purpose",
   run_in_background: true,
   prompt: `You are Reviewer A (Correctness).
@@ -212,7 +212,7 @@ Review ALL slices: "${SLICE_1_ID_URI}", "${SLICE_2_ID_URI}", "${SLICE_3_ID_URI}"
 For each slice, run: pasture task show "${SLICE_ID_URI}"
 Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: SLICE-N-REVIEW-A-1
 Call Skill(/pasture:reviewer-review-code) for the review procedure.`
-})
+}
 ```
 
 **Handoff:** Before spawning each reviewer, author its handoff in a Pasture task body (the task body IS the handoff — no filesystem path).

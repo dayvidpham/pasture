@@ -18,7 +18,7 @@ Launch the wave of workers for parallel vertical slice implementation, reviewed 
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Spawn ephemeral Explore subagents (delegation operation, scoped queries)
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -30,7 +30,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (delegation operation, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review
@@ -198,7 +198,7 @@ full Ride the Wave cycle.
 ## Task Call
 
 ```
-task({
+delegation: {
   description: "Worker: implement SLICE-N",
   prompt: `Call skill(/pasture:worker) and implement the assigned slice.
 
@@ -208,14 +208,14 @@ Read full requirements + handoff: pasture task show "${TASK_ID_URI}"
 Do NOT shut down after implementation. You will receive review feedback and may need to fix issues.`,
   subagent_type: "general-purpose",
   run_in_background: true
-})
+}
 ```
 
 Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `skill(/pasture:worker)`.
 
-## TeamCreate: send_assignment_message Assignment
+## Delegated Assignment Message
 
-When workers are spawned via TeamCreate, they receive context through send_assignment_message instead of a task prompt. The message MUST be self-contained — teammates have **no prior context**:
+When a worker is delegated an assignment, the assignment message is its only context. The message MUST be self-contained — the worker has **no prior context**:
 
 ```
 send_assignment_message({

@@ -167,12 +167,14 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 	}
 	permissions := buildOpenCodePermissions(toolNames)
 
-	// Reuse the Claude agent body verbatim (no re-authoring): render the full
-	// Claude agent file, then strip its leading YAML frontmatter block.
-	claudeAgent, err := renderAgent(roleID, figuresDir)
+	// Reuse the authored agent body (no re-authoring), but resolve its typed
+	// markers for OpenCode: the OpenCode agent must not carry Claude's native
+	// tool names. Strip the Claude frontmatter, which the OpenCode template
+	// replaces.
+	claudeAgent, err := renderAgentForTarget(roleID, figuresDir, HarnessOpenCode)
 	if err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderOpenCodeAgent: renderAgent for role %q failed: %w",
+			"codegen.renderOpenCodeAgent: renderAgentForTarget for role %q failed: %w",
 			roleID, err,
 		)
 	}

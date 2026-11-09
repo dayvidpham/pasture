@@ -14,8 +14,10 @@ func TestSchemaTaskStorageAndDependencyContract(t *testing.T) {
 	require.Contains(t, storage.String(), `storage-pattern="pasture-task-body"`)
 	var dependencies bytes.Buffer
 	buildDependencyModel(&dependencies, 0)
-	require.Contains(t, dependencies.String(), "pasture task dep add {parent-uri} --blocked-by {child-uri}")
-	require.NotContains(t, dependencies.String(), "bd dep")
+	resolved, err := ResolveBodyMarkersNeutral(dependencies.String())
+	require.NoError(t, err)
+	require.Contains(t, resolved, "pasture task dep add {parent-uri} --blocked-by {child-uri}")
+	require.NotContains(t, resolved, "bd dep")
 	var followup bytes.Buffer
 	buildFollowupLifecycle(&followup, 0)
 	require.NotContains(t, followup.String(), "bd dep")
