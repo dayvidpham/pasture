@@ -125,7 +125,7 @@ const STATE_COLOR: Record<string, string> = {
   active: 'var(--success)',
   idle: 'var(--warning)',
   ended: 'var(--ink-4)',
-  unknown: 'var(--ink-5)',
+  unknown: 'var(--ink-2)',
 }
 
 function sessionKey(session: SessionView): string {

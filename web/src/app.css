@@ -723,7 +723,7 @@ body {
 }
 
 .state-basis {
-  color: var(--ink-5);
+  color: var(--ink-2);
   font-size: 0.72rem;
   letter-spacing: 0.02em;
 }
@@ -739,7 +739,7 @@ body {
 
 .attribution-source {
   display: block;
-  color: var(--ink-5);
+  color: var(--ink-2);
   font-size: 0.72rem;
 }
 
@@ -753,7 +753,7 @@ body {
 }
 
 .execution-list li {
-  border: 1px solid var(--line);
+  border: var(--bd);
   border-radius: 6px;
   padding: 0.5rem 0.6rem;
 }
@@ -771,7 +771,7 @@ body {
   margin-top: 0.5rem;
   background: none;
   border: 0;
-  color: var(--accent);
+  color: var(--ink);
   cursor: pointer;
   font: inherit;
   padding: 0;
@@ -779,7 +779,7 @@ body {
 }
 
 .link-button:disabled {
-  color: var(--ink-5);
+  color: var(--ink-2);
   cursor: default;
   text-decoration: none;
 }
