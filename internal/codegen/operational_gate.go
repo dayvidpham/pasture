@@ -144,7 +144,19 @@ func validateForeignToolNames(root string, files []GeneratedFile, target Harness
 		if !isAgentDeclaration(target, rel) {
 			continue
 		}
-		for _, name := range declaredToolNames(rel, file.Content) {
+		names, err := declaredToolNames(rel, file.Content)
+		if err != nil {
+			return fmt.Errorf(
+				"foreign tool scan could not read the %s agent declaration %s — "+
+					"why: an unrecognised declaration shape would make this guard pass vacuously; "+
+					"where: internal/codegen/operational_gate.go validateForeignToolNames; "+
+					"when: before %s published any byte; "+
+					"what it means: the guard cannot prove the target ships only its own native names; "+
+					"fix: emit the declaration in the single-line generated form or extend the parser: %w",
+				target, rel, step, err,
+			)
+		}
+		for _, name := range names {
 			if _, bad := foreignSet[strings.ToLower(name)]; bad {
 				return fmt.Errorf(
 					"foreign tool name %q in %s — why: the %s agent declaration names a tool that belongs to another harness; where: internal/codegen/operational_gate.go foreign tool scan; when: before %s published any byte; what it means: the target would ship a name its host does not expose; fix: resolve the tool through runtime.LookupHarnessTool or runtime.LookupOperationBinding for %s",
@@ -175,19 +187,41 @@ func isAgentDeclaration(target HarnessName, rel string) bool {
 // declaredToolNames extracts the tool names a generated agent declaration
 // actually grants: the Claude `tools:` frontmatter list, the OpenCode
 // `permission:` keys set to "allow", or the Codex `functions` array.
-func declaredToolNames(rel, content string) []string {
+//
+// It fails closed. An agent declaration the parser cannot recognise returns an
+// error rather than an empty list, because an empty list would make the
+// foreign-name guard pass vacuously whenever a template shape changed.
+func declaredToolNames(rel, content string) ([]string, error) {
 	if strings.HasSuffix(rel, ".toml") {
-		return tomlDeclaredFunctions(content)
+		names, found := parseCodexAgentFunctions(content)
+		if !found {
+			return nil, fmt.Errorf(
+				"%s has no `functions = [...]` declaration — "+
+					"why: a Codex agent profile declares its native functions in that single-line array; "+
+					"where: internal/codegen/operational_gate.go declaredToolNames; "+
+					"fix: emit the functions array in the generated agent profile",
+				rel,
+			)
+		}
+		return names, nil
 	}
-	return markdownDeclaredTools(content)
+	return markdownDeclaredTools(rel, content)
 }
 
-func markdownDeclaredTools(content string) []string {
+func markdownDeclaredTools(rel, content string) ([]string, error) {
 	lines := strings.Split(content, "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return nil
+		return nil, fmt.Errorf(
+			"%s has no leading `---` frontmatter block — "+
+				"why: the scan reads tool declarations from frontmatter; "+
+				"where: internal/codegen/operational_gate.go markdownDeclaredTools; "+
+				"fix: emit the generated agent with YAML frontmatter",
+			rel,
+		)
 	}
 	var names []string
+	sawTools := false
+	sawPermission := false
 	inPermissions := false
 	for _, line := range lines[1:] {
 		trimmed := strings.TrimSpace(line)
@@ -195,7 +229,17 @@ func markdownDeclaredTools(content string) []string {
 			break
 		}
 		if strings.HasPrefix(trimmed, "tools:") {
+			sawTools = true
 			raw := strings.TrimSpace(strings.TrimPrefix(trimmed, "tools:"))
+			if raw == "" {
+				return nil, fmt.Errorf(
+					"%s has a `tools:` key with no inline list — "+
+						"why: the scan reads the generated single-line comma-separated form, and a block list is an unrecognised shape; "+
+						"where: internal/codegen/operational_gate.go markdownDeclaredTools; "+
+						"fix: emit `tools: A, B` on one line",
+					rel,
+				)
+			}
 			for _, name := range strings.Split(raw, ",") {
 				if name = strings.TrimSpace(name); name != "" {
 					names = append(names, name)
@@ -204,6 +248,7 @@ func markdownDeclaredTools(content string) []string {
 			continue
 		}
 		if trimmed == "permission:" || trimmed == "permissions:" {
+			sawPermission = true
 			inPermissions = true
 			continue
 		}
@@ -223,28 +268,14 @@ func markdownDeclaredTools(content string) []string {
 			names = append(names, key)
 		}
 	}
-	return names
-}
-
-func tomlDeclaredFunctions(content string) []string {
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "functions") {
-			continue
-		}
-		_, value, found := strings.Cut(trimmed, "=")
-		if !found {
-			return nil
-		}
-		var names []string
-		for _, part := range strings.Split(value, ",") {
-			part = strings.TrimSpace(part)
-			part = strings.TrimSpace(strings.Trim(part, "[]"))
-			if name := strings.Trim(part, `"`); name != "" {
-				names = append(names, name)
-			}
-		}
-		return names
+	if !sawTools && !sawPermission {
+		return nil, fmt.Errorf(
+			"%s declares neither a `tools:` line nor a `permission:` block — "+
+				"why: an agent declaration must name its granted surface, and an unrecognised shape would let the foreign-name guard pass vacuously; "+
+				"where: internal/codegen/operational_gate.go markdownDeclaredTools; "+
+				"fix: emit the tools line or permission block in the generated agent",
+			rel,
+		)
 	}
-	return nil
+	return names, nil
 }

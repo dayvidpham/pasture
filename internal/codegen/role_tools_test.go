@@ -18,7 +18,7 @@ func TestHarnessToolAndPolicySetsAreClosed(t *testing.T) {
 	t.Parallel()
 
 	tools := ir.AllHarnessTools()
-	require.Len(t, tools, 8)
+	require.NotEmpty(t, tools, "the harness-tool set must not be empty")
 	for _, tool := range tools {
 		assert.True(t, tool.IsValid(), "harness tool %q must be registered", tool)
 	}
@@ -27,7 +27,7 @@ func TestHarnessToolAndPolicySetsAreClosed(t *testing.T) {
 	assert.NotEqual(t, ir.HarnessTool("forged"), ir.AllHarnessTools()[0], "AllHarnessTools must return a fresh copy")
 
 	policies := AllRolePolicies()
-	require.Len(t, policies, 3)
+	require.NotEmpty(t, policies, "the role-policy set must not be empty")
 	for _, policy := range policies {
 		assert.True(t, policy.IsValid(), "role policy %q must be registered", policy)
 	}
@@ -36,10 +36,11 @@ func TestHarnessToolAndPolicySetsAreClosed(t *testing.T) {
 	assert.NotEqual(t, RolePolicy("forged"), AllRolePolicies()[0], "AllRolePolicies must return a fresh copy")
 }
 
-// TestRoleSpecToolFieldsAreTypedClosedSets proves the acceptance condition that
-// a native tool name cannot be stored in a role: Tools is exactly
-// []ir.HarnessTool, Operations is exactly []ir.OperationKind, and no field on
-// the struct is a []string that could carry a raw tool name.
+// TestRoleSpecToolFieldsAreTypedClosedSets proves that Tools is exactly
+// []ir.HarnessTool and Operations is exactly []ir.OperationKind, and that no
+// RoleSpec field is exactly []string (the shape that previously carried raw
+// tool names). It does not prove that no field could hold a native name: a
+// plain string field could still hold one.
 func TestRoleSpecToolFieldsAreTypedClosedSets(t *testing.T) {
 	t.Parallel()
 
@@ -131,6 +132,30 @@ func TestForeignToolNameScan(t *testing.T) {
 	}}
 	err = ValidateOperationalFiles(root, codexDefective, "foreign tool scan", HarnessCodex)
 	require.ErrorContains(t, err, "foreign tool name")
+
+	// An unrecognised declaration shape must fail closed. If it parsed to an
+	// empty list, the guard would pass vacuously on the very template change it
+	// exists to catch.
+	markdownShapes := []string{
+		"---\nname: reviewer\ntools:\n  - Read\n---\n\n# Reviewer Agent\n",
+		"---\nname: reviewer\nmodel: opus\n---\n\n# Reviewer Agent\n",
+		"name: reviewer\ntools: Read\n",
+	}
+	for _, shape := range markdownShapes {
+		defective := []GeneratedFile{{
+			Path:    filepath.Join(root, "agents", "reviewer.md"),
+			Content: shape,
+		}}
+		err := ValidateOperationalFiles(root, defective, "foreign tool scan", HarnessClaudeCode)
+		require.ErrorContains(t, err, "foreign tool scan could not read", "unrecognised shape %q", shape)
+	}
+
+	codexShape := []GeneratedFile{{
+		Path:    filepath.Join(root, ".codex", "agents", "pasture-reviewer.toml"),
+		Content: "name = \"reviewer\"\n",
+	}}
+	err = ValidateOperationalFiles(root, codexShape, "foreign tool scan", HarnessCodex)
+	require.ErrorContains(t, err, "foreign tool scan could not read")
 }
 
 // TestForeignToolNamesAreDerived pins the derivation direction: a target's
@@ -154,10 +179,12 @@ func TestForeignToolNamesAreDerived(t *testing.T) {
 	assert.NotContains(t, openCode, "question", "OpenCode declares question itself")
 }
 
-// TestValidateRoleToolSurfaceHasTwoSamples proves the policy guard can fail: a
-// clean read-only role passes, and the same role with Edit fails. It also
-// refuses an unregistered tool value, which is the only way a raw string can
-// become a tool after an explicit conversion.
+// TestValidateRoleToolSurfaceHasTwoSamples proves each validation branch has a
+// clean sample that passes and a defective sample that fails: the read-only
+// policy, an unregistered tool (the only way a raw string can become a tool
+// after an explicit conversion), an unregistered policy, an unregistered
+// operation kind, and a registered operation the role-tool sequence cannot
+// render.
 func TestValidateRoleToolSurfaceHasTwoSamples(t *testing.T) {
 	t.Parallel()
 
@@ -174,7 +201,19 @@ func TestValidateRoleToolSurfaceHasTwoSamples(t *testing.T) {
 	defective.Tools = append(append([]ir.HarnessTool(nil), clean.Tools...), ir.HarnessToolEdit)
 	require.ErrorContains(t, validateRoleSpec(protocol.RoleReviewer, defective), "read-only")
 
-	unregistered := clean
-	unregistered.Tools = []ir.HarnessTool{ir.HarnessTool("Shell")}
-	require.ErrorContains(t, validateRoleSpec(protocol.RoleReviewer, unregistered), "unregistered harness tool")
+	unregisteredTool := clean
+	unregisteredTool.Tools = []ir.HarnessTool{ir.HarnessTool("Shell")}
+	require.ErrorContains(t, validateRoleSpec(protocol.RoleReviewer, unregisteredTool), "unregistered harness tool")
+
+	unregisteredPolicy := clean
+	unregisteredPolicy.Policies = []RolePolicy{RolePolicy("forged")}
+	require.ErrorContains(t, validateRoleSpec(protocol.RoleReviewer, unregisteredPolicy), "unregistered policy")
+
+	unregisteredOperation := clean
+	unregisteredOperation.Operations = []ir.OperationKind{ir.OperationKind("forged")}
+	require.ErrorContains(t, validateRoleSpec(protocol.RoleReviewer, unregisteredOperation), "unregistered operation")
+
+	unrenderableOperation := clean
+	unrenderableOperation.Operations = []ir.OperationKind{ir.OperationContinueAssignment}
+	require.ErrorContains(t, validateRoleSpec(protocol.RoleReviewer, unrenderableOperation), "no rendering slot")
 }

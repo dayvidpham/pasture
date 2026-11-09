@@ -33,66 +33,91 @@ var roleToolSequence = []roleToolSlot{
 	{operation: ir.OperationSendAssignmentMessage},
 }
 
-// canonicalTargets is the closed, ordered set of generation targets the
-// foreign-name scan compares. Adding a target here is a deliberate act, in the
-// same change that adds its lowering table.
-var canonicalTargets = []HarnessName{HarnessClaudeCode, HarnessOpenCode, HarnessCodex}
+// roleTarget is one generation target together with the runtime identity and
+// pinned contract its native names resolve through. The pair is derived from
+// the two registries — harnessRegistry for the target set, PinnedContracts for
+// the contract — so a target cannot be registered in one place and omitted
+// from the other.
+type roleTarget struct {
+	name     HarnessName
+	harness  ir.HarnessID
+	contract runtime.RuntimeContract
+}
+
+// roleTargets returns every enabled target paired with its pinned contract.
+// The enabled harness set is the closed ir vocabulary, harnessRegistry supplies
+// the generation target for each, and PinnedContracts supplies the contract, so
+// a harness missing from either registry fails here rather than being silently
+// excluded from the foreign-name scan.
+func roleTargets() ([]roleTarget, error) {
+	targetsByName := make(map[ir.HarnessID]HarnessName, len(harnessRegistry))
+	for name := range harnessRegistry {
+		targetsByName[ir.HarnessID(name)] = name
+	}
+	contracts := make(map[ir.HarnessID]runtime.RuntimeContract, len(runtime.PinnedContracts()))
+	for _, contract := range runtime.PinnedContracts() {
+		contracts[contract.Harness()] = contract
+	}
+
+	targets := make([]roleTarget, 0, len(contracts))
+	for _, harness := range ir.EnabledHarnessIDs() {
+		name, registered := targetsByName[harness]
+		if !registered {
+			return nil, fmt.Errorf(
+				"enabled harness %q has no generation target — "+
+					"why: role tool names are derived per generation target; "+
+					"where: internal/codegen/harness.go harnessRegistry; "+
+					"fix: register the target in harnessRegistry or remove the harness from ir.EnabledHarnessIDs",
+				harness,
+			)
+		}
+		contract, pinned := contracts[harness]
+		if !pinned {
+			return nil, fmt.Errorf(
+				"enabled harness %q has no pinned runtime contract — "+
+					"why: role tool names resolve through the contract's lowering table; "+
+					"where: internal/runtime/profiles.go PinnedContracts; "+
+					"fix: add the harness's pinned contract or remove it from ir.EnabledHarnessIDs",
+				harness,
+			)
+		}
+		targets = append(targets, roleTarget{name: name, harness: harness, contract: contract})
+	}
+	return targets, nil
+}
+
+// roleTargetFor resolves one generation target name to its runtime identity and
+// pinned contract.
+func roleTargetFor(name HarnessName) (roleTarget, error) {
+	targets, err := roleTargets()
+	if err != nil {
+		return roleTarget{}, err
+	}
+	for _, target := range targets {
+		if target.name == name {
+			return target, nil
+		}
+	}
+	return roleTarget{}, fmt.Errorf(
+		"target %q has no runtime identity and pinned contract — "+
+			"why: role tool names resolve through the target's contract; "+
+			"where: internal/codegen/role_tools.go roleTargetFor; "+
+			"fix: register the target in harnessRegistry and PinnedContracts",
+		name,
+	)
+}
 
 // roleHasToolSurface reports whether a role emits an agent definition at all.
 func roleHasToolSurface(spec RoleSpec) bool {
 	return len(spec.Tools) > 0 || len(spec.Operations) > 0
 }
 
-// targetHarnessID maps a generation target to its runtime harness identity.
-func targetHarnessID(name HarnessName) (ir.HarnessID, error) {
-	switch name {
-	case HarnessClaudeCode:
-		return ir.HarnessClaudeCode, nil
-	case HarnessOpenCode:
-		return ir.HarnessOpenCode, nil
-	case HarnessCodex:
-		return ir.HarnessCodex, nil
-	default:
-		return "", fmt.Errorf(
-			"target %q has no runtime harness identity — "+
-				"why: role tool names resolve through the pinned runtime contract of the target; "+
-				"where: internal/codegen/role_tools.go targetHarnessID; "+
-				"fix: register the target in ResolveHarness and add its harness identity here",
-			name,
-		)
-	}
-}
-
-// targetContract returns the pinned runtime contract for a generation target.
-func targetContract(name HarnessName) (runtime.RuntimeContract, error) {
-	switch name {
-	case HarnessClaudeCode:
-		return runtime.ClaudeCode2_1_261(), nil
-	case HarnessOpenCode:
-		return runtime.OpenCode2_0_20(), nil
-	case HarnessCodex:
-		return runtime.Codex0_153_0(), nil
-	default:
-		return runtime.RuntimeContract{}, fmt.Errorf(
-			"target %q has no pinned runtime contract — "+
-				"why: role tool names resolve through the contract's lowering table; "+
-				"where: internal/codegen/role_tools.go targetContract; "+
-				"fix: add the target to ResolveHarness and return its pinned contract here",
-			name,
-		)
-	}
-}
-
 // RoleToolNames resolves one role's typed capabilities to the target's native
 // tool names, in canonical order. Harness tools come from the harness-tool
 // lowering table and operations from the pinned runtime contract, so no native
 // name is written here.
-func RoleToolNames(target HarnessName, spec RoleSpec) ([]string, error) {
-	harness, err := targetHarnessID(target)
-	if err != nil {
-		return nil, err
-	}
-	contract, err := targetContract(target)
+func RoleToolNames(targetName HarnessName, spec RoleSpec) ([]string, error) {
+	target, err := roleTargetFor(targetName)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +139,7 @@ func RoleToolNames(target HarnessName, spec RoleSpec) ([]string, error) {
 			if _, wanted := tools[slot.tool]; !wanted {
 				continue
 			}
-			lowering, err := runtime.LookupHarnessTool(harness, slot.tool)
+			lowering, err := runtime.LookupHarnessTool(target.harness, slot.tool)
 			if err != nil {
 				return nil, err
 			}
@@ -136,7 +161,7 @@ func RoleToolNames(target HarnessName, spec RoleSpec) ([]string, error) {
 					spec.Id, slot.operation,
 				)
 			}
-			binding, err := runtime.LookupOperationBinding(contract, descriptor)
+			binding, err := runtime.LookupOperationBinding(target.contract, descriptor)
 			if err != nil {
 				// Unsupported on this contract: the operation contributes no
 				// native tool name, exactly as it contributes no binding.
@@ -177,9 +202,13 @@ func roleHasPolicy(spec RoleSpec, policy RolePolicy) bool {
 	return false
 }
 
-func roleOwnsPhase(spec RoleSpec, phase protocol.PhaseId) bool {
-	for _, owned := range spec.OwnedPhases {
-		if owned == phase {
+// roleToolSequenceRendersOperation reports whether the canonical role-tool
+// order has a slot for one declared operation. A declared operation with no
+// slot would be silently dropped from the emitted surface, so validation
+// refuses it instead.
+func roleToolSequenceRendersOperation(operation ir.OperationKind) bool {
+	for _, slot := range roleToolSequence {
+		if slot.operation == operation {
 			return true
 		}
 	}
@@ -231,10 +260,18 @@ func validateRoleSpec(roleID protocol.RoleId, spec RoleSpec) error {
 				roleID, operation, roleID,
 			)
 		}
+		if !roleToolSequenceRendersOperation(operation) {
+			return fmt.Errorf(
+				"role %q declares operation %q with no rendering slot — "+
+					"why: roleToolSequence renders only the operations a role surface can express, and this kind would be silently dropped; "+
+					"where: RoleSpecs[%q].Operations versus roleToolSequence; "+
+					"fix: add a slot for %q to roleToolSequence or remove it from the role",
+				roleID, operation, roleID, operation,
+			)
+		}
 	}
 
-	readOnly := roleHasPolicy(spec, RolePolicyReadOnly)
-	if readOnly {
+	if roleHasPolicy(spec, RolePolicyReadOnly) {
 		for _, tool := range spec.Tools {
 			if tool == ir.HarnessToolEdit || tool == ir.HarnessToolWrite {
 				return fmt.Errorf(
@@ -247,34 +284,17 @@ func validateRoleSpec(roleID protocol.RoleId, spec RoleSpec) error {
 			}
 		}
 	}
-	if roleHasPolicy(spec, RolePolicyHandoff) && !roleOwnsPhase(spec, protocol.PhaseHandoff) {
-		return fmt.Errorf(
-			"role %q declares policy %q but owns no handoff phase — "+
-				"why: a handoff policy must be backed by the phase that converts it into work; "+
-				"where: RoleSpecs[%q].Policies versus .OwnedPhases; "+
-				"fix: add %q to OwnedPhases or remove the policy",
-			roleID, RolePolicyHandoff, roleID, protocol.PhaseHandoff,
-		)
-	}
 	return nil
 }
 
 // targetDeclaredToolNames derives the complete native tool vocabulary of one
-// target from its own lowerings: every harness tool plus every core operation
-// that resolves natively. It is the source of the foreign-name scan, so the
-// scan has no authored name list to drift.
-func targetDeclaredToolNames(target HarnessName) (map[string]struct{}, error) {
-	harness, err := targetHarnessID(target)
-	if err != nil {
-		return nil, err
-	}
-	contract, err := targetContract(target)
-	if err != nil {
-		return nil, err
-	}
+// target from its own lowerings: every harness tool plus the contract's native
+// operation names. It is the source of the foreign-name scan, so the scan has
+// no authored name list to drift.
+func targetDeclaredToolNames(target roleTarget) (map[string]struct{}, error) {
 	names := make(map[string]struct{})
 	for _, tool := range ir.AllHarnessTools() {
-		lowering, err := runtime.LookupHarnessTool(harness, tool)
+		lowering, err := runtime.LookupHarnessTool(target.harness, tool)
 		if err != nil {
 			return nil, err
 		}
@@ -282,47 +302,51 @@ func targetDeclaredToolNames(target HarnessName) (map[string]struct{}, error) {
 			names[strings.ToLower(lowering.NativeName())] = struct{}{}
 		}
 	}
-	for _, kind := range ir.AllOperationKinds() {
-		descriptor, ok := runtime.CoreOperationDescriptorFor(kind)
-		if !ok {
-			continue
-		}
-		binding, err := runtime.LookupOperationBinding(contract, descriptor)
-		if err != nil {
-			continue
-		}
-		if call, native := binding.Native(); native {
-			names[strings.ToLower(call.CallName())] = struct{}{}
-		}
+	operations, err := runtime.NativeOperationNames(target.contract)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range operations {
+		names[strings.ToLower(name)] = struct{}{}
 	}
 	return names, nil
 }
 
 // foreignToolNames returns the native tool names declared by OTHER targets and
-// not by target, de-duplicated and sorted. The list is derived: a contract
-// change updates it without editing a table here.
-func foreignToolNames(target HarnessName) ([]string, error) {
-	own, err := targetDeclaredToolNames(target)
+// not by target, de-duplicated and sorted. The target set and the names are
+// both derived, so a registry or contract change updates the guard.
+func foreignToolNames(targetName HarnessName) ([]string, error) {
+	targets, err := roleTargets()
 	if err != nil {
 		return nil, err
 	}
+	var own map[string]struct{}
 	foreign := make(map[string]struct{})
-	for _, other := range canonicalTargets {
-		if other == target {
-			continue
-		}
-		names, err := targetDeclaredToolNames(other)
+	for _, target := range targets {
+		names, err := targetDeclaredToolNames(target)
 		if err != nil {
 			return nil, err
 		}
-		for name := range names {
-			if _, isOwn := own[name]; !isOwn {
-				foreign[name] = struct{}{}
-			}
+		if target.name == targetName {
+			own = names
+			continue
 		}
+		for name := range names {
+			foreign[name] = struct{}{}
+		}
+	}
+	if own == nil {
+		return nil, fmt.Errorf(
+			"target %q is not registered — why: its foreign-name set is the difference from the other targets; "+
+				"where: internal/codegen/harness.go harnessRegistry; fix: register the target",
+			targetName,
+		)
 	}
 	out := make([]string, 0, len(foreign))
 	for name := range foreign {
+		if _, isOwn := own[name]; isOwn {
+			continue
+		}
 		out = append(out, name)
 	}
 	sort.Strings(out)

@@ -70,8 +70,12 @@ func TestInventoryNativeFunctionRowsAgreeWithPinnedDerivation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deriveOpenCodeNativeToolNames(): %v", err)
 	}
+	codexNative, err := codexNativeFunctions()
+	if err != nil {
+		t.Fatalf("codexNativeFunctions(): %v", err)
+	}
 	expected := map[ir.HarnessID][]string{
-		ir.HarnessCodex:    codexNativeFunctions(),
+		ir.HarnessCodex:    codexNative,
 		ir.HarnessOpenCode: openCodeNative,
 	}
 
@@ -113,7 +117,10 @@ func TestInventoryNativeFunctionRowsAgreeWithPinnedDerivation(t *testing.T) {
 // (contradiction). This proves the comparison used above turns a contradicting
 // committed row red, independent of the committed generated data.
 func TestInventoryNativeContradictionIsDetected(t *testing.T) {
-	derived := codexNativeFunctions()
+	derived, err := codexNativeFunctions()
+	if err != nil {
+		t.Fatalf("codexNativeFunctions(): %v", err)
+	}
 	if len(derived) == 0 {
 		t.Fatal("codexNativeFunctions() returned no native calls; the pinned Codex contract must classify at least request-input")
 	}

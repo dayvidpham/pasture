@@ -91,7 +91,10 @@ type codexAgentEmitter struct{}
 // Emit renders one standalone agent TOML per tool-bearing role, sorted by
 // output path for deterministic, byte-stable emission.
 func (codexAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
-	functions := codexNativeFunctions()
+	functions, err := codexNativeFunctions()
+	if err != nil {
+		return nil, fmt.Errorf("codegen.codexAgentEmitter.Emit: derive native Codex functions: %w", err)
+	}
 	var out []GeneratedFile
 	for roleID, roleSpec := range RoleSpecs {
 		if !roleHasToolSurface(roleSpec) {

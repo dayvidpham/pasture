@@ -57,7 +57,10 @@ func TestCodexAgentEmitsStandaloneProfilePerToolRole(t *testing.T) {
 func TestCodexAgentFunctionsAreContractDerived(t *testing.T) {
 	t.Parallel()
 
-	want := codexNativeFunctions()
+	want, err := codexNativeFunctions()
+	if err != nil {
+		t.Fatalf("codexNativeFunctions(): %v", err)
+	}
 	if len(want) == 0 {
 		t.Fatal("codexNativeFunctions() returned no native calls; the pinned Codex contract must classify at least request-input")
 	}
@@ -72,7 +75,10 @@ func TestCodexAgentFunctionsAreContractDerived(t *testing.T) {
 		t.Fatalf("codexAgentEmitter.Emit: %v", err)
 	}
 	for _, f := range files {
-		got := parseCodexAgentFunctions(f.Content)
+		got, found := parseCodexAgentFunctions(f.Content)
+		if !found {
+			t.Fatalf("agent %q carries no functions declaration", f.Path)
+		}
 		if strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Fatalf("agent %q declares functions %v, want contract-derived %v", f.Path, got, want)
 		}
@@ -116,7 +122,10 @@ func TestCodexAgentHeaderStatesTheMechanismAndClaimsNothingAboutTheHost(t *testi
 func TestCodexAgentRenderIsDeterministic(t *testing.T) {
 	t.Parallel()
 
-	functions := codexNativeFunctions()
+	functions, err := codexNativeFunctions()
+	if err != nil {
+		t.Fatalf("codexNativeFunctions(): %v", err)
+	}
 	for roleID, spec := range RoleSpecs {
 		if len(spec.Tools) == 0 {
 			continue
@@ -159,7 +168,11 @@ func TestCodexModelCoversEveryToolRole(t *testing.T) {
 func TestRenderCodexAgentUnknownRoleIsActionable(t *testing.T) {
 	t.Parallel()
 
-	_, err := renderCodexAgent("no-such-role", codexNativeFunctions())
+	functions, err := codexNativeFunctions()
+	if err != nil {
+		t.Fatalf("codexNativeFunctions(): %v", err)
+	}
+	_, err = renderCodexAgent("no-such-role", functions)
 	if err == nil {
 		t.Fatal("renderCodexAgent(unknown role) returned nil error")
 	}

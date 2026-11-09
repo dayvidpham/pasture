@@ -742,7 +742,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 			ir.OperationInvokeSkill, ir.OperationDelegateAssignment,
 			ir.OperationSendAssignmentMessage,
 		},
-		Policies: []RolePolicy{RolePolicyTodo, RolePolicyHandoff},
+		Policies: []RolePolicy{RolePolicyHandoff},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseHandoff, protocol.PhaseImplPlan, protocol.PhaseWorkerSlices,
 			protocol.PhaseCodeReview, protocol.PhaseImplUAT, protocol.PhaseLanding,
@@ -804,7 +804,6 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Operations: []ir.OperationKind{
 			ir.OperationInvokeSkill, ir.OperationSendAssignmentMessage,
 		},
-		Policies:    []RolePolicy{RolePolicyTodo},
 		OwnedPhases: []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		Introduction: "You own a vertical slice (full production code path from CLI/API entry point " +
 			"→ service → types). " +

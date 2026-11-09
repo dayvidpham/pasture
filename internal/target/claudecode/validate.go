@@ -3,10 +3,8 @@ package claudecode
 import (
 	"fmt"
 	"io/fs"
-	"sort"
 	"strings"
 
-	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/runtime"
 )
 
@@ -28,29 +26,7 @@ func ReviewedNativeCalls(contract runtime.RuntimeContract) ([]string, error) {
 				"pass a contract built by runtime.ClaudeCode2_1_261 or NewRuntimeContract",
 		)
 	}
-	seen := make(map[string]struct{})
-	for _, kind := range ir.AllOperationKinds() {
-		descriptor, ok := runtime.CoreOperationDescriptorFor(kind)
-		if !ok {
-			continue
-		}
-		binding, err := runtime.LookupOperationBinding(contract, descriptor)
-		if err != nil {
-			// Unsupported operations yield an actionable error and no binding;
-			// mediated and semantic operations yield a binding whose Native is
-			// absent. Neither contributes a native call name.
-			continue
-		}
-		if call, isNative := binding.Native(); isNative {
-			seen[call.CallName()] = struct{}{}
-		}
-	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names, nil
+	return runtime.NativeOperationNames(contract)
 }
 
 // orchestrationVocabulary is the closed set of Claude Code orchestration tool

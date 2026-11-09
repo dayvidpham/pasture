@@ -247,15 +247,12 @@ type RolePolicy string
 const (
 	// RolePolicyReadOnly forbids Edit and Write on the role's tool surface.
 	RolePolicyReadOnly RolePolicy = "read-only"
-	// RolePolicyTodo allows the role to keep a harness-local todo/plan record.
-	RolePolicyTodo RolePolicy = "todo"
 	// RolePolicyHandoff allows the role to author or receive a phase handoff.
 	RolePolicyHandoff RolePolicy = "handoff"
 )
 
 var canonicalRolePolicies = [...]RolePolicy{
 	RolePolicyReadOnly,
-	RolePolicyTodo,
 	RolePolicyHandoff,
 }
 

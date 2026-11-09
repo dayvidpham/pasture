@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/dayvidpham/pasture/artifact"
@@ -346,6 +347,48 @@ func Codex0_153_0() RuntimeContract {
 // each admitting its recorded host version and every later release.
 func PinnedContracts() []RuntimeContract {
 	return []RuntimeContract{ClaudeCode2_1_261(), OpenCode2_0_20(), Codex0_153_0()}
+}
+
+// NativeOperationNames returns, sorted and de-duplicated, exactly the native
+// call names contract classifies across the closed core operation vocabulary.
+// It is the ONE operation→native derivation: every emitter, inventory row and
+// guard that needs a contract's native surface calls this, so a contract change
+// updates all of them together (tenet 7).
+//
+// An operation whose kind has no core descriptor, or whose lookup reports an
+// error, contributes no native name. A missing descriptor is a fault, not an
+// empty result: it means the delivered descriptor table drifted from
+// ir.AllOperationKinds, so it fails closed with an actionable error rather than
+// silently narrowing the set.
+func NativeOperationNames(contract RuntimeContract) ([]string, error) {
+	seen := make(map[string]struct{})
+	for _, kind := range ir.AllOperationKinds() {
+		descriptor, ok := CoreOperationDescriptorFor(kind)
+		if !ok {
+			return nil, runtimeError(
+				fmt.Sprintf("core operation %q has no shared descriptor in the delivered runtime table", kind),
+				"the runtime descriptor set drifted from ir.AllOperationKinds",
+				"NativeOperationNames", "the caller cannot derive a complete native-name set",
+				"regenerate against a runtime revision whose CoreOperationDescriptorFor covers every core kind", nil,
+			)
+		}
+		binding, err := LookupOperationBinding(contract, descriptor)
+		if err != nil {
+			// Unsupported and unbound operations are correctly absent from a
+			// native surface; mediated/semantic bindings resolve but report
+			// Native()==false below. None of them contributes a call name.
+			continue
+		}
+		if call, native := binding.Native(); native {
+			seen[call.CallName()] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // OpenCode2_0_20 is the production runtime contract for OpenCode, at the

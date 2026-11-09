@@ -3,10 +3,8 @@ package codegen
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
-	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/lifecycle/activation"
 	"github.com/dayvidpham/pasture/internal/lifecycle/model"
 	"github.com/dayvidpham/pasture/internal/lifecycle/registration"
@@ -83,47 +81,14 @@ const openCodeV2DenyHook = "permission.evaluate"
 
 // deriveOpenCodeNativeToolNames returns, sorted and de-duplicated, exactly the
 // native tool names the OpenCode runtime contract declares — and
-// nothing else. It resolves every core orchestration operation against the
-// contract via the delivered runtime lookup and collects only the operations the
-// contract classifies as native. Semantic-instruction, parent-mediated, and
-// unsupported operations contribute no tool name, so a generated artifact can
-// never reference an invented OpenCode tool: the allow-list is the contract's
-// own declared surface, computed here rather than hand-copied.
+// nothing else. It delegates to runtime.NativeOperationNames, the one
+// operation→native derivation shared with the Codex emitter and the
+// foreign-name guard. Semantic-instruction, parent-mediated, and unsupported
+// operations contribute no tool name, so a generated artifact can never
+// reference an invented OpenCode tool: the allow-list is the contract's own
+// declared surface, derived rather than hand-copied.
 func deriveOpenCodeNativeToolNames() ([]string, error) {
-	contract := runtime.OpenCode2_0_20()
-	seen := make(map[string]struct{})
-	var names []string
-	for _, kind := range ir.AllOperationKinds() {
-		descriptor, ok := runtime.CoreOperationDescriptorFor(kind)
-		if !ok {
-			// A core operation kind with no shared descriptor would mean the
-			// delivered runtime descriptor table drifted from the operation
-			// vocabulary; fail closed rather than silently narrow the allow-list.
-			return nil, fmt.Errorf(
-				"codegen.deriveOpenCodeNativeToolNames: core operation %q has no shared descriptor in the delivered runtime table — "+
-					"the runtime descriptor set drifted from ir.AllOperationKinds; regenerate against a runtime revision whose CoreOperationDescriptorFor covers every core kind",
-				kind)
-		}
-		binding, err := runtime.LookupOperationBinding(contract, descriptor)
-		if err != nil {
-			// Unsupported operations (for OpenCode at the recorded version, stopping an
-			// assignment) return a lookup error by contract; they are correctly
-			// absent from a native allow-list, so skip rather than fail.
-			continue
-		}
-		call, isNative := binding.Native()
-		if !isNative {
-			continue
-		}
-		name := call.CallName()
-		if _, dup := seen[name]; dup {
-			continue
-		}
-		seen[name] = struct{}{}
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names, nil
+	return runtime.NativeOperationNames(runtime.OpenCode2_0_20())
 }
 
 // GenerateOpenCodeHooksModule returns the deterministic self-contained Bun
