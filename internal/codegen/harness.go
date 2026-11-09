@@ -419,10 +419,10 @@ func emitRoleSkill(h TargetHarness, roleID protocol.RoleId, paths skillPaths, fi
 		if _, err := os.Stat(paths.Src); os.IsNotExist(err) {
 			return GeneratedFile{}, nil
 		}
-		content, err := generateSkillInto(roleID, paths, figuresDir, opts)
+		content, err := generateSkillInto(roleID, paths, figuresDir, opts, h.Name)
 		return GeneratedFile{Path: paths.Dst, Content: content}, err
 	}
-	content, err := renderSkill(roleID, figuresDir, h.SkillTemplate, version)
+	content, err := renderSkill(roleID, figuresDir, h.SkillTemplate, version, h.Name)
 	if err != nil {
 		return GeneratedFile{}, err
 	}
@@ -436,10 +436,10 @@ func emitCommandSkill(h TargetHarness, commandID string, paths skillPaths, figur
 		if _, err := os.Stat(paths.Src); os.IsNotExist(err) {
 			return GeneratedFile{}, nil
 		}
-		content, err := generateSubSkillInto(commandID, paths, figuresDir, opts)
+		content, err := generateSubSkillInto(commandID, paths, figuresDir, opts, h.Name)
 		return GeneratedFile{Path: paths.Dst, Content: content}, err
 	}
-	content, err := renderSubSkill(commandID, figuresDir, h.SubSkillTemplate, version)
+	content, err := renderSubSkill(commandID, figuresDir, h.SubSkillTemplate, version, h.Name)
 	if err != nil {
 		return GeneratedFile{}, err
 	}

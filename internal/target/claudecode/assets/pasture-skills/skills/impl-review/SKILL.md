@@ -198,11 +198,11 @@ Reviewer C (Elegance): Reviews SLICE-1, SLICE-2, SLICE-3 →
 
 ## Spawning Reviewers
 
-Supervisor spawns 3 parallel reviewers as **subagents** (via the Task tool) or via **TeamCreate**. Reviewers are short-lived — keep them in-session.
+Supervisor spawns 3 parallel reviewers as **subagents** (via the Agent tool) or via **TeamCreate**. Reviewers are short-lived — keep them in-session.
 
 ```
 // Spawn 3 reviewers (one per axis)
-Task({
+Agent({
   subagent_type: "general-purpose",
   run_in_background: true,
   prompt: `You are Reviewer A (Correctness).

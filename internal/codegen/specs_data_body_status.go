@@ -16,25 +16,25 @@ var statusBody = SkillBody{
 					Id:    "status-step1-plans",
 					Title: "1. Check for active plans",
 					Content: `` + "```" + `bash
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose" --status=open
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p6-plan:s6-ratify" --status=open
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose" --status=open
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p6-plan:s6-ratify" --status=open
 ` + "```" + ``,
 				},
 				{
 					Id:    "status-step2-impl",
 					Title: "2. Check implementation progress",
 					Content: `` + "```" + `bash
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p8-impl:s8-plan" --status=open
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
-pasture task blocked --label="pasture:p9-impl:s9-slice"
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p8-impl:s8-plan" --status=open
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
+[[rec]] blocked --label="pasture:p9-impl:s9-slice"
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
 ` + "```" + ``,
 				},
 				{
 					Id:    "status-step3-stats",
 					Title: "3. Get project stats",
 					Content: `` + "```" + `bash
-pasture task list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
 ` + "```" + ``,
 				},
 				{
@@ -66,16 +66,16 @@ pasture task list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'i
 - {task-id}: {blocker reason}
 
 ### Recent Activity
-pasture task list --namespace "$PASTURE_NAMESPACE"
+[[rec]] list --namespace "$PASTURE_NAMESPACE"
 ` + "```" + ``,
 		},
 		{
 			Id:    "status-quick-status",
 			Title: "Quick Status",
 			Content: `` + "```" + `bash
-pasture task list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
-pasture task ready
-pasture task blocked
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
+[[rec]] ready
+[[rec]] blocked
 ` + "```" + ``,
 		},
 	},

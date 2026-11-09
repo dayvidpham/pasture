@@ -198,11 +198,11 @@ Reviewer C (Elegance): Reviews SLICE-1, SLICE-2, SLICE-3 →
 
 ## Spawning Reviewers
 
-Supervisor spawns 3 parallel reviewers as **subagents** (via the Task tool) or via **TeamCreate**. Reviewers are short-lived — keep them in-session.
+Supervisor spawns 3 parallel reviewers as **subagents** (via the delegate_assignment tool) or via **TeamCreate**. Reviewers are short-lived — keep them in-session.
 
 ```
 // Spawn 3 reviewers (one per axis)
-Task({
+delegate_assignment({
   subagent_type: "general-purpose",
   run_in_background: true,
   prompt: `You are Reviewer A (Correctness).
@@ -211,7 +211,7 @@ Focus: Does implementation faithfully serve the user? Are technical decisions co
 Review ALL slices: "${SLICE_1_ID_URI}", "${SLICE_2_ID_URI}", "${SLICE_3_ID_URI}"
 For each slice, run: pasture task show "${SLICE_ID_URI}"
 Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: SLICE-N-REVIEW-A-1
-Call Skill(/pasture:reviewer-review-code) for the review procedure.`
+Call invoke_skill(/pasture:reviewer-review-code) for the review procedure.`
 })
 ```
 
@@ -442,6 +442,6 @@ pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blo
 # Should return 0 results
 
 # Proceed to Phase 11 (Implementation UAT)
-Skill(/pasture:user-uat)
+invoke_skill(/pasture:user-uat)
 ```
 <!-- END GENERATED FROM pasture schema -->

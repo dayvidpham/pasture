@@ -22,7 +22,7 @@ See `../protocol/CONSTRAINTS.md` for coding standards.
 **[research-depth-quick-scan]**
 - Given: depth is quick-scan
 - When: researching
-- Then: search local project only (Grep, Glob, Read)
+- Then: search local project only (grep, glob, read)
 - Should not: make web requests
 
 **[research-depth-standard]**

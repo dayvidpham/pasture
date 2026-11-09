@@ -515,28 +515,28 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 
 ## Spawning Reviewers
 
-Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/pasture:reviewer` skill (via the Skill tool) to load its role instructions — `/pasture:reviewer` is a **Skill**, not a subagent type.
+Spawn 3 axis-specific reviewers (A=Correctness, B=Test quality, C=Elegance) as `general-purpose` subagents. Each reviewer must invoke the `/pasture:reviewer` skill (via the skill tool) to load its role instructions — `/pasture:reviewer` is a **Skill**, not a subagent type.
 
 ```
-Task(description: "Reviewer A: correctness", prompt: "You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
-Task(description: "Reviewer B: test quality", prompt: "You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
-Task(description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
+task(description: "Reviewer A: correctness", prompt: "You are Reviewer A (Correctness). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
+task(description: "Reviewer B: test quality", prompt: "You are Reviewer B (Test quality). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
+task(description: "Reviewer C: elegance", prompt: "You are Reviewer C (Elegance). First invoke `/pasture:reviewer` to load your role. Then review PROPOSAL-1 task <id>. URD: <urd-id>...", subagent_type: "general-purpose")
 ```
 
 ## Supervisor Handoff
 
-**DO NOT** spawn the supervisor as a Task tool subagent or via `aura-swarm` for the IMPL_PLAN phase. Instead, invoke:
+**DO NOT** spawn the supervisor with the task tool or via `aura-swarm` for the IMPL_PLAN phase. Instead, invoke:
 
 ```
-Skill(skill: "pasture:architect-handoff")
+skill(skill: "pasture:architect-handoff")
 ```
 
 The handoff skill guides you through:
 1. Authoring the handoff in a HANDOFF Pasture task body (no filesystem path)
-2. Launching the supervisor (and workers) as **Opus** teammates via TeamCreate, then assigning work via SendMessage
+2. Launching the supervisor (and workers) as **Opus** teammates via TeamCreate, then assigning work via send_assignment_message
 
 **CRITICAL:** The supervisor assignment MUST:
-1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation
+1. **Start with `skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation
 2. Include all Pasture task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)
 3. Reference the HANDOFF Pasture task ID — the handoff is in that task body
 

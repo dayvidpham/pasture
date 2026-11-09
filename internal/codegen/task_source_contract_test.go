@@ -59,7 +59,7 @@ func TestCanonicalTaskSourceContract(t *testing.T) {
 			require.NoError(t, err)
 			for owner, value := range owners {
 				visitTaskContractStrings(reflect.ValueOf(value), owner, func(path, text string) {
-					if match := pattern.FindString(text); match != "" {
+					if match := pattern.FindString(resolvedForClaude(t, text)); match != "" {
 						t.Errorf("%s retains unsupported task recipe %q; repair canonical source and regenerate", path, match)
 					}
 				})
@@ -71,7 +71,7 @@ func TestCanonicalTaskSourceContract(t *testing.T) {
 func TestWorkerRecipesNeverCloseTasks(t *testing.T) {
 	t.Parallel()
 	check := func(path, text string) {
-		require.NotRegexp(t, `pasture\s+task\s+(?:close|update[^\n]*--status(?:=|\s+)closed)\b`, text, path)
+		require.NotRegexp(t, `pasture\s+task\s+(?:close|update[^\n]*--status(?:=|\s+)closed)\b`, resolvedForClaude(t, text), path)
 	}
 	visitTaskContractStrings(reflect.ValueOf(RoleSpecs[protocol.RoleWorker].Behaviors), "worker behaviors", check)
 	visitTaskContractStrings(reflect.ValueOf(GetRoleContext(protocol.RoleWorker).Constraints), "worker constraints", check)
@@ -91,13 +91,14 @@ func TestWorkerRecipesNeverCloseTasks(t *testing.T) {
 func TestTaskHandoffAndCommitRecipeIdentities(t *testing.T) {
 	t.Parallel()
 	visitTaskContractStrings(reflect.ValueOf(SkillBodySpecs["architect-handoff"]), "architect-handoff", func(path, text string) {
-		require.NotContains(t, text, `pasture task show "${PROPOSAL_ID_URI}"`, path)
+		require.NotContains(t, resolvedForClaude(t, text), `pasture task show "${PROPOSAL_ID_URI}"`, path)
 	})
 	var closures []string
 	visitTaskContractStrings(reflect.ValueOf(SkillBodySpecs["supervisor-commit"]), "supervisor-commit", func(path, text string) {
-		if strings.Contains(text, `pasture task close "${TASK_A_URI}"`) {
-			closures = append(closures, text)
-			require.Contains(t, text, `pasture task close "${TASK_B_URI}" --reason="Committed in <commit-hash>"`, path)
+		resolved := resolvedForClaude(t, text)
+		if strings.Contains(resolved, `pasture task close "${TASK_A_URI}"`) {
+			closures = append(closures, resolved)
+			require.Contains(t, resolved, `pasture task close "${TASK_B_URI}" --reason="Committed in <commit-hash>"`, path)
 		}
 	})
 	require.Len(t, closures, 1, "the supervisor commit recipe must close both committed tasks")
@@ -126,6 +127,17 @@ func TestCanonicalTaskRecoveryFragmentReferences(t *testing.T) {
 			}
 		})
 	}
+}
+
+// resolvedForClaude renders body markers to the canonical Claude Code spelling
+// before a task-recipe assertion reads the text. The authoring surface is the
+// typed marker; the contract under test is the command a reader actually runs,
+// so the marker must be resolved first or the assertion would pass vacuously.
+func resolvedForClaude(t *testing.T, text string) string {
+	t.Helper()
+	resolved, err := ResolveBodyMarkers(text, HarnessClaudeCode)
+	require.NoError(t, err)
+	return resolved
 }
 
 func visitTaskContractStrings(value reflect.Value, path string, visit func(string, string)) {

@@ -130,9 +130,9 @@ Are there existing implementations that would need modification or could conflic
 
 | Depth | Scope | Tools | Deliverable |
 |-------|-------|-------|-------------|
-| **quick-scan** | Grep for keywords, check obvious entry points, scan file tree | Glob, Grep | 1-paragraph summary per checklist item |
-| **standard-research** | Trace data flow, map dependencies, read related modules, check test patterns | Glob, Grep, Read | Per-section structured findings with file:line citations |
-| **deep-dive** | Full dependency graph, architectural analysis, identify all touchpoints, trace transitive consumers | Glob, Grep, Read, Bash (build/dep tools) | Complete architectural map with dependency diagram and risk assessment |
+| **quick-scan** | Grep for keywords, check obvious entry points, scan file tree | glob, grep | 1-paragraph summary per checklist item |
+| **standard-research** | Trace data flow, map dependencies, read related modules, check test patterns | glob, grep, read | Per-section structured findings with file:line citations |
+| **deep-dive** | Full dependency graph, architectural analysis, identify all touchpoints, trace transitive consumers | glob, grep, read, bash (build/dep tools) | Complete architectural map with dependency diagram and risk assessment |
 
 ## Output Format
 

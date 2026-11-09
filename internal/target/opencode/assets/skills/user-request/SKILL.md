@@ -83,7 +83,7 @@ Select the current registered author with pasture task agents list and pasture t
 
 1. **Get the user's request verbatim:**
    ```
-   AskUserQuestion: "What feature or change would you like to request?"
+   question: "What feature or change would you like to request?"
    ```
 
 2. **Create the request task:**
@@ -123,7 +123,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 After classification, confirm research depth with the user:
 
 ```
-AskUserQuestion:
+question:
   question: "Based on classification ({{scope}}, {{complexity}}, {{risk}}, {{novelty}}), how deep should research go?"
   header: "Research Depth"
   options:
@@ -148,7 +148,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
   "Research depth: {{depth}} (user confirmed)"
 ```
 
-Spawn both agents in parallel (via Task tool with `run_in_background: true`). Each agent invokes its dedicated skill.
+Spawn both agents in parallel (with the task tool and `run_in_background: true`). Each agent invokes its dedicated skill.
 
 ### s1_2-research: Domain Research
 
@@ -208,9 +208,9 @@ See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output fo
 
 | Depth | Scope | Tools |
 |-------|-------|-------|
-| **Quick scan** | Grep for keywords, check obvious entry points | Glob, Grep |
-| **Standard research** | Trace data flow, map dependencies, read related modules | Glob, Grep, Read |
-| **Deep dive** | Full dependency graph, architectural analysis, identify all touchpoints | Glob, Grep, Read, Bash (for build/dep tools) |
+| **Quick scan** | Grep for keywords, check obvious entry points | glob, grep |
+| **Standard research** | Trace data flow, map dependencies, read related modules | glob, grep, read |
+| **Deep dive** | Full dependency graph, architectural analysis, identify all touchpoints | glob, grep, read, bash (for build/dep tools) |
 
 **Record findings** as a comment on the REQUEST task:
 ```bash

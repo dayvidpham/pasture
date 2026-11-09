@@ -92,8 +92,8 @@ var reviewerReviewPlanBody = SkillBody{
 					Id:    "rev-plan-step1-read",
 					Title: "Step 1: Read PROPOSAL-N and URD",
 					Content: `` + "```" + `bash
-pasture task show "${PROPOSAL_ID_URI}"
-pasture task show "${URD_ID_URI}"   # Read URD for user requirements context
+[[rec]] show "${PROPOSAL_ID_URI}"
+[[rec]] show "${URD_ID_URI}"   # Read URD for user requirements context
 ` + "```" + ``,
 				},
 				{
@@ -105,15 +105,15 @@ pasture task show "${URD_ID_URI}"   # Read URD for user requirements context
 					Id:    "rev-plan-step3-create",
 					Title: "Step 3: Create Review Task",
 					Content: `` + "```" + `bash
-REVIEW_ID_URI=$(pasture task create "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review --namespace "$PASTURE_NAMESPACE" --format json \
+REVIEW_ID_URI=$([[rec]] create "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   proposal: "${PROPOSAL_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
 VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$REVIEW_ID_URI" pasture:p4-plan:s4-review
-pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+[[rec]] label add "$REVIEW_ID_URI" pasture:p4-plan:s4-review
+[[rec]] dep add "${PROPOSAL_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -121,10 +121,10 @@ pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 					Title: "Step 4: Add Vote Comment",
 					Content: `` + "```" + `bash
 # If accepting:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
 
 # If requesting revision:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
 ` + "```" + ``,
 				},
 			},

@@ -31,7 +31,7 @@ var supervisorTrackProgressBody = SkillBody{
 			Id:        "sup-track-urd-source-of-truth",
 			Given:     "requirements question arises",
 			When:      "resolving",
-			Then:      "consult the URD (`pasture task show \"${URD_ID_URI}\"`) as the single source of truth",
+			Then:      "consult the URD (`[[rec]] show \"${URD_ID_URI}\"`) as the single source of truth",
 			ShouldNot: "guess at user intent without checking the URD first",
 		},
 		{
@@ -56,22 +56,22 @@ var supervisorTrackProgressBody = SkillBody{
 			Title: "Pasture Status Queries",
 			Content: `` + "```" + `bash
 # Check all implementation slices
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
 
 # Check for blocked slices
-pasture task blocked --label="pasture:p9-impl:s9-slice"
+[[rec]] blocked --label="pasture:p9-impl:s9-slice"
 
 # Check specific task
-pasture task show "${TASK_ID_URI}"
+[[rec]] show "${TASK_ID_URI}"
 
 # Check completed slices
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
 
 # Check BLOCKER severity groups (during/after review)
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
 
 # Check follow-up epic
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
 ` + "```" + ``,
 		},
 		{
@@ -81,13 +81,13 @@ pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followu
 
 ` + "```" + `bash
 # Check for task updates
-pasture task show "${TASK_ID_URI}"
+[[rec]] show "${TASK_ID_URI}"
 
 # Review comments for status updates
-pasture task comments "${TASK_ID_URI}"
+[[rec]] comments "${TASK_ID_URI}"
 
 # Add coordination notes
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "All slices complete — proceeding to Phase 10 (code review)"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "All slices complete — proceeding to Phase 10 (code review)"
 ` + "```" + ``,
 		},
 		{
@@ -96,7 +96,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 			Content: `| Status | Action |
 |--------|--------|
 | ` + "`" + `closed` + "`" + ` | Mark slice progress, check if all slices complete |
-| Open blocked_by child | Review ` + "`" + `pasture task show "${ID_URI}"` + "`" + ` for blocker details, resolve or reassign |
+| Open blocked_by child | Review ` + "`" + `[[rec]] show "${ID_URI}"` + "`" + ` for blocker details, resolve or reassign |
 | ` + "`" + `in_progress` + "`" + ` | Worker is actively working |`,
 		},
 		{
@@ -115,10 +115,10 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 			Title: "Follow-up Lifecycle Tracking",
 			Content: `` + "```" + `bash
 # Track follow-up lifecycle progress
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
 ` + "```" + ``,
 		},
 	},

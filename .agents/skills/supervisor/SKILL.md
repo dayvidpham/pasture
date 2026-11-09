@@ -399,13 +399,13 @@ Cycle Exit Conditions:
 **[sup-spawn-workers]**
 - Given: worker assignments
 - When: spawning
-- Then: use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start
+- Then: use delegate_assignment tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `invoke_skill(/pasture:worker)` at start
 - Should not: spawn workers sequentially or use specialized agent types
 
 **[sup-teamcreate-msg]**
 - Given: teammates spawned via TeamCreate
-- When: assigning work via SendMessage
-- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `pasture task show "${TASK_ID_URI}"` for full context, and (4) the handoff authored in the Pasture task body
+- When: assigning work via send_assignment_message
+- Then: the message MUST include: (1) explicit instruction to call `invoke_skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `pasture task show "${TASK_ID_URI}"` for full context, and (4) the handoff authored in the Pasture task body
 - Should not: send bare instructions without Pasture context — teammates have no prior knowledge of the task
 
 **[sup-layer-integration-points]**
@@ -549,14 +549,14 @@ See: [../supervisor-plan-tasks/SKILL.md](../supervisor-plan-tasks/SKILL.md) for 
 
 ## Exploration (Ephemeral Explore Subagents)
 
-Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (Agent tool, `subagent_type=Explore`) for scoped codebase queries. These are short-lived — they explore, return findings, and terminate. The supervisor stays lean.
+Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (delegate_assignment tool, `subagent_type=Explore`) for scoped codebase queries. These are short-lived — they explore, return findings, and terminate. The supervisor stays lean.
 
 ```
 // Explore subagent — ephemeral, scoped query
-Task({
+delegate_assignment({
   subagent_type: "Explore",
   run_in_background: true,
-  prompt: `Call Skill(/pasture:explore) to load your exploration role.
+  prompt: `Call invoke_skill(/pasture:explore) to load your exploration role.
 
 Query: <specific codebase question>
 Depth: standard-research
@@ -750,26 +750,26 @@ Workers are **general-purpose agents** that call `/pasture:worker` at the start.
 
 ```
 // Non-trivial work → sonnet model
-Task({
+delegate_assignment({
   subagent_type: "general-purpose",
   model: "sonnet",
   run_in_background: true,
-  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\n\nPasture Task ID: ${taskId}...`
+  prompt: `Call invoke_skill(/pasture:worker) and implement the assigned slice.\n\nPasture Task ID: ${taskId}...`
 })
 
 // Trivial work (config tweak, typo fix, single-file edit) → haiku model
-Task({
+delegate_assignment({
   subagent_type: "general-purpose",
   model: "haiku",
   run_in_background: true,
-  prompt: `Call Skill(/pasture:worker) and fix the typo in...\n\nPasture Task ID: ${taskId}...`
+  prompt: `Call invoke_skill(/pasture:worker) and fix the typo in...\n\nPasture Task ID: ${taskId}...`
 })
 
 // WRONG: Supervisor implementing changes directly
 Edit({ file_path: "src/foo.ts", ... })  // Supervisors coordinate, they don't implement!
 
 // WRONG: Do not use specialized agent types like "pasture:worker" directly
-Task({
+delegate_assignment({
   subagent_type: "pasture:worker",  // This doesn't exist!
   ...
 })
@@ -788,13 +788,13 @@ See: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) 
 
 ### TeamCreate Context Requirements
 
-When using TeamCreate instead of the Task tool, teammates have **zero prior context**. Every SendMessage assigning work MUST be self-contained:
+When using TeamCreate instead of the delegate_assignment tool, teammates have **zero prior context**. Every send_assignment_message assigning work MUST be self-contained:
 
 ```
-SendMessage({
+send_assignment_message({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
+  content: `You are assigned SLICE-1. Start by calling invoke_skill(/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
 Run this to get full requirements + handoff: pasture task show "${SLICE_TASK_ID_URI}"

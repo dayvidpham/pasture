@@ -59,40 +59,40 @@ var reviewerReviewCodeBody = SkillBody{
 					Title: "Step 1: Create All 3 Severity Groups Immediately",
 					Content: `` + "```" + `bash
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_GROUP_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_ID_URI}"
   review: "${REVIEW_ID_URI}"
 ---
 BLOCKER findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
+[[rec]] label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
+[[rec]] label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-IMPORTANT_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_GROUP_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_ID_URI}"
   review: "${REVIEW_ID_URI}"
 ---
 IMPORTANT findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
+[[rec]] label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
+[[rec]] label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-MINOR_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_GROUP_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_ID_URI}"
   review: "${REVIEW_ID_URI}"
 ---
 MINOR findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
+[[rec]] label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
+[[rec]] label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire severity groups to review task
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
+[[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
+[[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
+[[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -100,20 +100,20 @@ pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
 					Title: "Adding Findings to Severity Groups",
 					Content: `` + "```" + `bash
 # BLOCKER finding — dual-parent relationship
-BLOCKER_FINDING_ID_URI=$(pasture task create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_FINDING_ID_URI=$([[rec]] create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "<finding details with file:line references>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
-pasture task dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+[[rec]] dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+[[rec]] dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
 
 # IMPORTANT finding — single parent (severity group only)
-IMPORTANT_FINDING_ID_URI=$(pasture task create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_FINDING_ID_URI=$([[rec]] create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
+[[rec]] dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
 
 # MINOR finding — single parent (severity group only)
-MINOR_FINDING_ID_URI=$(pasture task create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_FINDING_ID_URI=$([[rec]] create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
+[[rec]] dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -123,10 +123,10 @@ pasture task dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_UR
 
 ` + "```" + `bash
 # If no IMPORTANT findings were found:
-pasture task close "${IMPORTANT_GROUP_ID_URI}"
+[[rec]] close "${IMPORTANT_GROUP_ID_URI}"
 
 # If no MINOR findings were found:
-pasture task close "${MINOR_GROUP_ID_URI}"
+[[rec]] close "${MINOR_GROUP_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -151,8 +151,8 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 					Id:    "rev-code-step1-read",
 					Title: "Step 1: Read Code Changes and URD",
 					Content: `` + "```" + `bash
-pasture task show "${SLICE_ID_URI}"
-pasture task show "${URD_ID_URI}"   # Read URD for requirements context
+[[rec]] show "${SLICE_ID_URI}"
+[[rec]] show "${URD_ID_URI}"   # Read URD for requirements context
 ` + "```" + ``,
 				},
 				{
@@ -171,15 +171,15 @@ pasture task show "${URD_ID_URI}"   # Read URD for requirements context
 					Id:    "rev-code-step4-create",
 					Title: "Step 4: Create Review Task",
 					Content: `` + "```" + `bash
-REVIEW_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+REVIEW_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
 VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
-pasture task dep add "${SLICE_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+[[rec]] label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
+[[rec]] dep add "${SLICE_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -188,7 +188,7 @@ pasture task dep add "${SLICE_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 					Content: `5. Create severity tree (EAGER — all 3 groups immediately)
 6. Add findings to appropriate severity groups
 7. Close empty severity groups
-8. Cast vote via ` + "`" + `pasture task comment add` + "`" + ``,
+8. Cast vote via ` + "`" + `[[rec]] comment add` + "`" + ``,
 				},
 			},
 		},
@@ -285,10 +285,10 @@ An implementation that ships without validation-case fixtures is an IMPORTANT fi
 			Title: "Report Results",
 			Content: `` + "```" + `bash
 # Add vote comment to the review task
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
 
 # Or
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - BLOCKERs found, see severity tree for details"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - BLOCKERs found, see severity tree for details"
 ` + "```" + ``,
 		},
 	},

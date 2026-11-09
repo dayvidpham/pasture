@@ -53,17 +53,17 @@ var reviewerBody = SkillBody{
 			Title: "Pasture Review Process",
 			Content: `Read the plan and URD:
 ` + "```" + `bash
-pasture task show "${TASK_ID_URI}"
-pasture task show "${URD_ID_URI}"   # Read URD for user requirements context
+[[rec]] show "${TASK_ID_URI}"
+[[rec]] show "${URD_ID_URI}"   # Read URD for user requirements context
 ` + "```" + `
 
 Add review comment with vote:
 ` + "```" + `bash
 # If accepting:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
 
 # If requesting revision:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
 ` + "```" + ``,
 		},
 		{

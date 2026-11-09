@@ -17,7 +17,7 @@ var epochBody = SkillBody{
 			Id:        "epoch-dep-chain",
 			Given:     "any phase transition",
 			When:      "creating new task",
-			Then:      "add dependency to previous: pasture task dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
+			Then:      "add dependency to previous: [[rec]] dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
 			ShouldNot: "skip dependency chaining",
 		},
 		{
@@ -83,7 +83,7 @@ var epochBody = SkillBody{
 			Id:    "epoch-core-principles",
 			Title: "Core Principles",
 			Content: `1. **AUDIT TRAIL PRESERVATION** — Never delete or destroy information, labels, or tasks
-2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: ` + "`" + `pasture task dep add "${PARENT_URI}" --blocked-by "${CHILD_URI}"` + "`" + `
+2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: ` + "`" + `[[rec]] dep add "${PARENT_URI}" --blocked-by "${CHILD_URI}"` + "`" + `
 3. **USER ENGAGEMENT** — URE and UAT at multiple checkpoints
 4. **CONSENSUS REQUIRED** — All 3 reviewers must ACCEPT before proceeding
 5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. ALL three groups must reach 0 before a review wave closes
@@ -128,10 +128,10 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 			Content: `**Option 1: Manual Task Creation**
 ` + "```" + `bash
 # Phase 1: Capture user request
-REQUEST_ID_URI=$(pasture task create "REQUEST: {{feature}}" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
+REQUEST_ID_URI=$([[rec]] create "REQUEST: {{feature}}" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
   --description "{{verbatim user request}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-pasture task update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+[[rec]] label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+[[rec]] update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
 
 # Then proceed through phases manually
 ` + "```" + `
@@ -145,18 +145,18 @@ Use the explicit task graph; no molecule subsystem is required.`,
 
 ` + "```" + `bash
 # After Phase 1 creates "${REQUEST_ID_URI}"
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"    # REQUEST blocked by ELICIT
+[[rec]] dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"    # REQUEST blocked by ELICIT
 
 # After Phase 2 creates "${ELICIT_ID_URI}" and URD
-pasture task dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"   # ELICIT blocked by PROPOSAL
+[[rec]] dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"   # ELICIT blocked by PROPOSAL
 # URD linked via frontmatter in its description:
 #   references:
 #     request: "${REQUEST_ID_URI}"
 #     elicit: "${ELICIT_ID_URI}"
 
 # After Phase 5 (UAT) and Phase 6 (ratify), update URD
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: {{summary}}"
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as {{summary}}"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: {{summary}}"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as {{summary}}"
 ` + "```" + ``,
 		},
 		{
@@ -167,14 +167,14 @@ The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any re
 **Owner:** Supervisor creates the follow-up epic.
 
 ` + "```" + `bash
-FOLLOWUP_EPIC_ID_URI=$(pasture task create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
+FOLLOWUP_EPIC_ID_URI=$([[rec]] create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
   --description "---
 references:
   request: "${REQUEST_ID_URI}"
   uat: "${UAT_ID_URI}"
 ---
 Aggregated user-DEFER'd items from UAT (Phase 5/11)." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
+[[rec]] label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 ` + "```" + `
 
 ### Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
@@ -200,28 +200,28 @@ See ` + "`" + `/pasture:supervisor` + "`" + ` and ` + "`" + `/pasture:impl-revie
 
 ` + "```" + `bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_ID_URI=$(pasture task create "SLICE-N-REVIEW-{axis}-{round} BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_ID_URI=$([[rec]] create "SLICE-N-REVIEW-{axis}-{round} BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$(pasture task create "SLICE-N-REVIEW-{axis}-{round} IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+[[rec]] label add "$BLOCKER_ID_URI" pasture:severity:blocker
+[[rec]] label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT_ID_URI=$([[rec]] create "SLICE-N-REVIEW-{axis}-{round} IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$(pasture task create "SLICE-N-REVIEW-{axis}-{round} MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+[[rec]] label add "$IMPORTANT_ID_URI" pasture:severity:important
+[[rec]] label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+MINOR_ID_URI=$([[rec]] create "SLICE-N-REVIEW-{axis}-{round} MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+[[rec]] label add "$MINOR_ID_URI" pasture:severity:minor
+[[rec]] label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Empty groups are closed immediately
-pasture task close "${IMPORTANT_ID_URI}"
-pasture task close "${MINOR_ID_URI}"
+[[rec]] close "${IMPORTANT_ID_URI}"
+[[rec]] close "${MINOR_ID_URI}"
 ` + "```" + `
 
 **Dual-parent BLOCKER:** Bind BLOCKER_FINDING_ID_URI from the finding task's create output before running this fence. BLOCKER findings block both the severity group AND the slice:
 ` + "```" + `bash
-pasture task dep add "${BLOCKER_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
-pasture task dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+[[rec]] dep add "${BLOCKER_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+[[rec]] dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
 ` + "```" + `
 
 See ` + "`" + `../protocol/CONSTRAINTS.md` + "`" + ` for full severity definitions.`,
@@ -231,22 +231,22 @@ See ` + "`" + `../protocol/CONSTRAINTS.md` + "`" + ` for full severity definitio
 			Title: "Tracking Progress",
 			Content: `` + "```" + `bash
 # View dependency chain
-pasture task dep tree "${LATEST_TASK_ID_URI}"
+[[rec]] dep tree "${LATEST_TASK_ID_URI}"
 
 # Check blocked work
-pasture task blocked
+[[rec]] blocked
 
 # See all epoch tasks by phase
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p1-user:s1_1-classify"    # REQUEST tasks
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p2-user:s2_1-elicit"      # ELICIT tasks
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose"        # PROPOSAL tasks
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice"          # Implementation slices
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p1-user:s1_1-classify"    # REQUEST tasks
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p2-user:s2_1-elicit"      # ELICIT tasks
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose"        # PROPOSAL tasks
+[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice"          # Implementation slices
 ` + "```" + ``,
 		},
 		{
 			Id:      "epoch-skills-table",
 			Title:   "Skills to Invoke",
-			Content: "Each phase transition MUST include an explicit `Skill(...)` invocation directive. When launching agents for a phase, the prompt MUST tell the agent to call the corresponding skill as its first action.\n\n| Phase | Skill | Invocation Directive |\n|-------|-------|---------------------|\n| 1 (REQUEST: classify, research, explore) | `/pasture:user-request` | `Skill(/pasture:user-request)` |\n| 2 (ELICIT + URD) | `/pasture:user-elicit` | `Skill(/pasture:user-elicit)` |\n| 3-6 (PROPOSAL, REVIEW, UAT, RATIFY) | `/pasture:architect` | `Skill(/pasture:architect)` |\n| 5, 11 (UAT) | `/pasture:user-uat` | `Skill(/pasture:user-uat)` |\n| 7 (HANDOFF) | `/pasture:architect-handoff` | Architect calls `Skill(/pasture:architect-handoff)` after ratification |\n| 8-10 (IMPL_PLAN, SLICES, CODE REVIEW) | `/pasture:supervisor` | Supervisor prompt MUST start with `Skill(/pasture:supervisor)` |\n| 12 (LANDING) | Manual git commit and push | N/A |\n\n**CRITICAL — interviewing phases:** The interviewing phases MUST explicitly invoke their skill. Do **not** improvise interview questions:\n- **Phase 2 (URE):** invoke `Skill(/pasture:user-elicit)` — skipping it produces low-quality elicitation.\n- **Phases 5 & 11 (UAT):** invoke `Skill(/pasture:user-uat)` — it drives the FIX-NOW vs DEFER disposition and demonstrative examples.\n\n**CRITICAL:** When the architect hands off to the supervisor (Phase 7 → 8), the supervisor launch prompt MUST:\n1. Start with `Skill(/pasture:supervisor)` — without this, the supervisor skips role-critical procedures\n2. Include all Pasture task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Include the HANDOFF Pasture task ID — the handoff is authored in that task body (no filesystem path)",
+			Content: "Each phase transition MUST include an explicit `[[op:invoke_skill]](...)` invocation directive. When launching agents for a phase, the prompt MUST tell the agent to call the corresponding skill as its first action.\n\n| Phase | Skill | Invocation Directive |\n|-------|-------|---------------------|\n| 1 (REQUEST: classify, research, explore) | `/pasture:user-request` | `[[op:invoke_skill]](/pasture:user-request)` |\n| 2 (ELICIT + URD) | `/pasture:user-elicit` | `[[op:invoke_skill]](/pasture:user-elicit)` |\n| 3-6 (PROPOSAL, REVIEW, UAT, RATIFY) | `/pasture:architect` | `[[op:invoke_skill]](/pasture:architect)` |\n| 5, 11 (UAT) | `/pasture:user-uat` | `[[op:invoke_skill]](/pasture:user-uat)` |\n| 7 (HANDOFF) | `/pasture:architect-handoff` | Architect calls `[[op:invoke_skill]](/pasture:architect-handoff)` after ratification |\n| 8-10 (IMPL_PLAN, SLICES, CODE REVIEW) | `/pasture:supervisor` | Supervisor prompt MUST start with `[[op:invoke_skill]](/pasture:supervisor)` |\n| 12 (LANDING) | Manual git commit and push | N/A |\n\n**CRITICAL — interviewing phases:** The interviewing phases MUST explicitly invoke their skill. Do **not** improvise interview questions:\n- **Phase 2 (URE):** invoke `[[op:invoke_skill]](/pasture:user-elicit)` — skipping it produces low-quality elicitation.\n- **Phases 5 & 11 (UAT):** invoke `[[op:invoke_skill]](/pasture:user-uat)` — it drives the FIX-NOW vs DEFER disposition and demonstrative examples.\n\n**CRITICAL:** When the architect hands off to the supervisor (Phase 7 → 8), the supervisor launch prompt MUST:\n1. Start with `[[op:invoke_skill]](/pasture:supervisor)` — without this, the supervisor skips role-critical procedures\n2. Include all Pasture task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Include the HANDOFF Pasture task ID — the handoff is authored in that task body (no filesystem path)",
 		},
 		{
 			Id:    "epoch-never-delete",
@@ -256,11 +256,11 @@ pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-s
 
 ` + "```" + `bash
 # Correct: Add ratify label
-pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All reviewers ACCEPT"
+[[rec]] label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All reviewers ACCEPT"
 
 # Wrong: Don't close
-# pasture task close "${PROPOSAL_ID_URI}"  # NEVER DO THIS
+# [[rec]] close "${PROPOSAL_ID_URI}"  # NEVER DO THIS
 ` + "```" + ``,
 		},
 	},

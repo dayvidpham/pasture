@@ -21,7 +21,7 @@ description: Create handoff document and transfer to supervisor
 - Given: handoff for the IMPL_PLAN phase
 - When: spawning the supervisor
 - Then: use TeamCreate to spawn the supervisor as an Opus teammate (workers also Opus), then assign work via SendMessage
-- Should not: spawn the supervisor as a Task tool subagent or via aura-swarm for the IMPL_PLAN phase
+- Should not: spawn the supervisor with the Agent tool or via aura-swarm for the IMPL_PLAN phase
 
 **[arch-handoff-supervisor-not-idle]**
 - Given: a freshly spawned supervisor
@@ -68,7 +68,7 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 
 ## Supervisor Startup
 1. Call `Skill(/pasture:supervisor)` to load your role instructions
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
+2. Spawn ephemeral Explore subagents with the Agent tool when codebase exploration is needed
 3. Read the RATIFIED PROPOSAL and URD with `pasture task show` commands below
 4. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1 types / L2 tests / L3 impl triple is only illustrative)
 
@@ -150,7 +150,7 @@ Implement the ratified plan for <feature name>.
 
 ## Reminders
 1. Call `Skill(/pasture:supervisor)` FIRST — do not proceed without loading your role
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
+2. Spawn ephemeral Explore subagents with the Agent tool when codebase exploration is needed
 3. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1/L2/L3 triple is only illustrative); a slice without leaf tasks is undecomposed
 4. Read the ratified plan with `pasture task show "${RATIFIED_PROPOSAL_ID_URI}"` and the URD with `pasture task show "${URD_ID_URI}"`
 ```
@@ -184,7 +184,7 @@ Given an expired token when accessing protected routes then return 401
 
 ## Reminders
 1. Call Skill(/pasture:supervisor) FIRST
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
+2. Spawn ephemeral Explore subagents with the Agent tool when codebase exploration is needed
 3. Every slice MUST have leaf tasks (any number; L1/L2/L3 is only illustrative)
 4. Read ratified plan: pasture task show "${RATIFIED_PROPOSAL_ID_URI}" and URD: pasture task show "${URD_ID_URI}"`,
   summary: "IMPL_PLAN assignment with Pasture context"
@@ -199,7 +199,7 @@ Given an expired token when accessing protected routes then return 401
 
 ## IMPORTANT
 
-- **DO NOT** spawn the supervisor as a Task tool subagent or via `aura-swarm` for the IMPL_PLAN phase — use TeamCreate with an Opus supervisor
+- **DO NOT** spawn the supervisor with the Agent tool or via `aura-swarm` for the IMPL_PLAN phase — use TeamCreate with an Opus supervisor
 - **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks
 - **DO NOT** implement the plan yourself - your role is handoff and monitoring
 - **DO NOT** shut down a supervisor that appears idle right after spawn — it is usually running Explore subagents

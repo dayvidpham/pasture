@@ -400,7 +400,7 @@ Cycle Exit Conditions:
 **[sup-spawn-workers]**
 - Given: worker assignments
 - When: spawning
-- Then: use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start
+- Then: use Agent tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start
 - Should not: spawn workers sequentially or use specialized agent types
 
 **[sup-teamcreate-msg]**
@@ -554,7 +554,7 @@ Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (Agent t
 
 ```
 // Explore subagent — ephemeral, scoped query
-Task({
+Agent({
   subagent_type: "Explore",
   run_in_background: true,
   prompt: `Call Skill(/pasture:explore) to load your exploration role.
@@ -751,7 +751,7 @@ Workers are **general-purpose agents** that call `/pasture:worker` at the start.
 
 ```
 // Non-trivial work → sonnet model
-Task({
+Agent({
   subagent_type: "general-purpose",
   model: "sonnet",
   run_in_background: true,
@@ -759,7 +759,7 @@ Task({
 })
 
 // Trivial work (config tweak, typo fix, single-file edit) → haiku model
-Task({
+Agent({
   subagent_type: "general-purpose",
   model: "haiku",
   run_in_background: true,
@@ -770,7 +770,7 @@ Task({
 Edit({ file_path: "src/foo.ts", ... })  // Supervisors coordinate, they don't implement!
 
 // WRONG: Do not use specialized agent types like "pasture:worker" directly
-Task({
+Agent({
   subagent_type: "pasture:worker",  // This doesn't exist!
   ...
 })
@@ -789,7 +789,7 @@ See: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) 
 
 ### TeamCreate Context Requirements
 
-When using TeamCreate instead of the Task tool, teammates have **zero prior context**. Every SendMessage assigning work MUST be self-contained:
+When using TeamCreate instead of the Agent tool, teammates have **zero prior context**. Every SendMessage assigning work MUST be self-contained:
 
 ```
 SendMessage({

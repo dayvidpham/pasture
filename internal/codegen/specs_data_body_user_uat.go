@@ -59,7 +59,7 @@ var userUatBody = SkillBody{
 			Id:        "uat-update-urd",
 			Given:     "UAT completes",
 			When:      "results are captured",
-			Then:      "update the URD with UAT results via `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${URD_ID_URI}\" \"UAT: <summary>\"`",
+			Then:      "update the URD with UAT results via `[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${URD_ID_URI}\" \"UAT: <summary>\"`",
 			ShouldNot: "leave the URD out of date after UAT",
 		},
 		{
@@ -73,7 +73,7 @@ var userUatBody = SkillBody{
 			Id:        "uat-invoke-skill",
 			Given:     "the Phase 5 or Phase 11 UAT interview",
 			When:      "conducting it",
-			Then:      "MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW/DEFER disposition, and validation-case confirmation procedures are loaded",
+			Then:      "MUST invoke `[[op:invoke_skill]](/pasture:user-uat)` so the verbatim-capture, FIX-NOW/DEFER disposition, and validation-case confirmation procedures are loaded",
 			ShouldNot: "conduct the UAT without invoking its skill — skipping it loses the disposition and verbatim-capture procedures",
 		},
 		// R6: for EVERY request (generalized from fix-intent-only at v2-2), UAT
@@ -122,7 +122,7 @@ The user needs to see the actual thing — definition, behavior, example — and
 2. **Options describe competing tradeoffs, not approval levels.** Each option is a real engineering alternative with its own pros/cons.
 3. **Later questions depend on earlier answers.** Structure the survey as a decision tree — Round 1 settles the highest-leverage boundaries, Round 2 addresses dependent decisions informed by Round 1 answers, etc.
 4. **Show context before asking.** The user MUST see a code snippet, interface definition, or motivating before/after example before being asked to evaluate.
-5. **One component per AskUserQuestion call.** Never batch all components into one survey.`,
+5. **One component per [[op:request_user_decision]] call.** Never batch all components into one survey.`,
 		},
 		{
 			Id:    "uat-wrong-vs-right",
@@ -157,9 +157,9 @@ The user needs to see the actual thing — definition, behavior, example — and
 			Content: `UAT is the **second time** the user evaluates this feature. Before designing UAT questions, cross-reference the URE responses and URD against the proposal:
 
 ` + "```" + `bash
-pasture task show "${ELICIT_ID_URI}"     # Re-read the user's original URE responses
-pasture task show "${URD_ID_URI}"        # The structured requirements document
-pasture task show "${PROPOSAL_ID_URI}"   # The architect's proposal and tradeoffs
+[[rec]] show "${ELICIT_ID_URI}"     # Re-read the user's original URE responses
+[[rec]] show "${URD_ID_URI}"        # The structured requirements document
+[[rec]] show "${PROPOSAL_ID_URI}"   # The architect's proposal and tradeoffs
 ` + "```" + `
 
 Look for:
@@ -173,7 +173,7 @@ Look for:
 			Title: "Question Sequence (Decision Tree)",
 			Content: `Structure questions to progressively validate the proposal against the user's original requirements.
 
-**Round 1: Highest-leverage tradeoffs** (1-2 questions per AskUserQuestion call)
+**Round 1: Highest-leverage tradeoffs** (1-2 questions per [[op:request_user_decision]] call)
 
 Start with the 2-3 architectural decisions where the proposal made the biggest choices. For each, show the user:
 1. What they originally said in URE (their stated requirement/preference)
@@ -239,9 +239,9 @@ One open-ended question — "Is there anything from your original requirements t
 		{
 			Id:    "uat-survey-template",
 			Title: "UAT Survey Template",
-			Content: "Use one AskUserQuestion call per component — do NOT batch all components into one survey.\n\n" +
+			Content: "Use one [[op:request_user_decision]] call per component — do NOT batch all components into one survey.\n\n" +
 				"```\n" +
-				"AskUserQuestion({\n" +
+				"[[op:request_user_decision]]({\n" +
 				"  questions: [\n" +
 				"    {\n" +
 				"      question: `The verbose flag shows the following extra lines for backup events:\n" +
@@ -313,7 +313,7 @@ One open-ended question — "Is there anything from your original requirements t
 					Id:    "uat-plan-task",
 					Title: "Plan UAT Task (Phase 5)",
 					Content: `` + "```" + `bash
-UAT_ID_URI=$(pasture task create "UAT: Plan acceptance for <feature>" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
+UAT_ID_URI=$([[rec]] create "UAT: Plan acceptance for <feature>" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   request: "${REQUEST_ID_URI}"
@@ -332,19 +332,19 @@ references:
 
 ## Final Decision
 <ACCEPT or REVISE with verbatim reason>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$UAT_ID_URI" pasture:p5-user:s5-uat
+[[rec]] label add "$UAT_ID_URI" pasture:p5-user:s5-uat
 
-pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
+[[rec]] dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
 
 # Update URD with plan UAT results
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
 ` + "```" + ``,
 				},
 				{
 					Id:    "uat-impl-task",
 					Title: "Implementation UAT Task (Phase 11)",
 					Content: `` + "```" + `bash
-IMPL_UAT_ID_URI=$(pasture task create "UAT: Implementation acceptance for <feature>" --phase impl_uat --namespace "$PASTURE_NAMESPACE" --format json \
+IMPL_UAT_ID_URI=$([[rec]] create "UAT: Implementation acceptance for <feature>" --phase impl_uat --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   request: "${REQUEST_ID_URI}"
@@ -361,12 +361,12 @@ references:
 
 ## Final Decision
 <ACCEPT or REVISE>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPL_UAT_ID_URI" pasture:p11-user:s11-uat
+[[rec]] label add "$IMPL_UAT_ID_URI" pasture:p11-user:s11-uat
 
-pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${IMPL_UAT_ID_URI}"
+[[rec]] dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${IMPL_UAT_ID_URI}"
 
 # Update URD with implementation UAT results
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
 ` + "```" + ``,
 				},
 			},

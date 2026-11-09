@@ -26,7 +26,7 @@ var workerBody = SkillBody{
 
 1. **Identify your production code path:**
    ` + "```" + `bash
-   pasture task show "${TASK_ID_URI}"  # Look for "productionCodePath" field
+   [[rec]] show "${TASK_ID_URI}"  # Look for "productionCodePath" field
    # Example: "cli-tool command list"
    # This is what end users will actually run
    ` + "```" + `
@@ -163,7 +163,7 @@ Per [wrk-no-stubs], deliver fully wired production code.`,
 			Title: "Reading from Pasture",
 			Content: `Get your task details:
 ` + "```" + `bash
-pasture task show "${TASK_ID_URI}"
+[[rec]] show "${TASK_ID_URI}"
 ` + "```" + `
 
 Look for:
@@ -175,7 +175,7 @@ Look for:
 
 Update status on start:
 ` + "```" + `bash
-pasture task update "${TASK_ID_URI}" --status=in_progress
+[[rec]] update "${TASK_ID_URI}" --status=in_progress
 ` + "```" + ``,
 		},
 		{
@@ -195,13 +195,13 @@ pasture task update "${TASK_ID_URI}" --status=in_progress
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `You may be assigned a ` + "`" + `FOLLOWUP_SLICE-N` + "`" + ` task instead of a ` + "`" + `SLICE-N` + "`" + ` task. The implementation procedure is identical, with these additions:
 
-- **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check ` + "`" + `pasture task show "${TASK_ID_URI}"` + "`" + ` for a "DEFER'd-Item Leaf Tasks" section.
+- **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check ` + "`" + `[[rec]] show "${TASK_ID_URI}"` + "`" + ` for a "DEFER'd-Item Leaf Tasks" section.
 - **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
 - **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which DEFER'd-item leaf tasks were resolved.
 
 ` + "```" + `bash
 # Completion comment for follow-up slices should include:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved DEFER'd-item leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved DEFER'd-item leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
 ` + "```" + ``,
 		},
 		{
@@ -209,18 +209,18 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 			Title: "Updating Pasture Status",
 			Content: `On start:
 ` + "```" + `bash
-pasture task update "${TASK_ID_URI}" --status=in_progress
+[[rec]] update "${TASK_ID_URI}" --status=in_progress
 ` + "```" + `
 
 On complete:
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
-pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working via code inspection."
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
+[[rec]] update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working via code inspection."
 ` + "```" + `
 
 On blocked:
 ` + "```" + `bash
-pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>. Need: <dependency or clarification>"
+[[rec]] update "${TASK_ID_URI}" --notes="Blocked: <reason>. Need: <dependency or clarification>"
 ` + "```" + ``,
 		},
 	},

@@ -52,7 +52,7 @@ Cycle Exit Conditions:
 **[sup-spawn-task-tool]**
 - Given: implementation tasks
 - When: spawning
-- Then: use Task tool with `run_in_background: true`
+- Then: use task tool with `run_in_background: true`
 - Should not: block on worker completion
 
 **[sup-spawn-parallel-wave]**
@@ -133,9 +133,9 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 
 ```
 1. PLAN  → supervisor-plan-tasks: decompose into slices + integration points
-2. EXPLORE → Ephemeral Explore subagents (Task tool): map codebase, short-lived
+2. EXPLORE → Ephemeral Explore subagents (task tool): map codebase, short-lived
 3. BUILD → N Workers: implement slices in parallel
-4. REVIEW → Ephemeral reviewers (Task tool): review per-slice
+4. REVIEW → Ephemeral reviewers (task tool): review per-slice
 5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits
 6. RE-REVIEW → Spawn new ephemeral reviewers for re-review
 7. REPEAT → Steps 5-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface to the user
@@ -144,7 +144,7 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 ```
 
 **Key rules:**
-- Reviewers are ephemeral (spawned per review cycle via Task tool)
+- Reviewers are ephemeral (spawned per review cycle with the task tool)
 - Slices are **never closed** until reviewed at least once
 - **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; on budget exhaustion without clean, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck
 - The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities
@@ -198,9 +198,9 @@ full Ride the Wave cycle.
 ## Task Call
 
 ```
-Task({
+task({
   description: "Worker: implement SLICE-N",
-  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.
+  prompt: `Call skill(/pasture:worker) and implement the assigned slice.
 
 Pasture Task ID: "${TASK_ID_URI}"
 Read full requirements + handoff: pasture task show "${TASK_ID_URI}"
@@ -211,17 +211,17 @@ Do NOT shut down after implementation. You will receive review feedback and may 
 })
 ```
 
-Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/pasture:worker)`.
+Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `skill(/pasture:worker)`.
 
-## TeamCreate: SendMessage Assignment
+## TeamCreate: send_assignment_message Assignment
 
-When workers are spawned via TeamCreate, they receive context through SendMessage instead of a Task prompt. The message MUST be self-contained — teammates have **no prior context**:
+When workers are spawned via TeamCreate, they receive context through send_assignment_message instead of a task prompt. The message MUST be self-contained — teammates have **no prior context**:
 
 ```
-SendMessage({
+send_assignment_message({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
+  content: `You are assigned SLICE-1. Start by calling skill(/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
 Run this to get full requirements + handoff: pasture task show "${SLICE_TASK_ID_URI}"
@@ -259,7 +259,7 @@ Per [sup-worker-persistence], workers stay alive for the full review-fix cycle:
 ### Fix Assignment Message Template
 
 ```
-SendMessage({
+send_assignment_message({
   type: "message",
   recipient: "worker-1",
   content: `Review cycle <N> found issues in your slice (SLICE-1).

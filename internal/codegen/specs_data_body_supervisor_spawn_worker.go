@@ -9,7 +9,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 			Id:        "sup-spawn-task-tool",
 			Given:     "implementation tasks",
 			When:      "spawning",
-			Then:      "use Task tool with `run_in_background: true`",
+			Then:      "use [[op:delegate_assignment]] tool with `run_in_background: true`",
 			ShouldNot: "block on worker completion",
 		},
 		{
@@ -81,9 +81,9 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"\n" +
 				"```\n" +
 				"1. PLAN  → supervisor-plan-tasks: decompose into slices + integration points\n" +
-				"2. EXPLORE → Ephemeral Explore subagents (Task tool): map codebase, short-lived\n" +
+				"2. EXPLORE → Ephemeral Explore subagents ([[op:delegate_assignment]] tool): map codebase, short-lived\n" +
 				"3. BUILD → N Workers: implement slices in parallel\n" +
-				"4. REVIEW → Ephemeral reviewers (Task tool): review per-slice\n" +
+				"4. REVIEW → Ephemeral reviewers ([[op:delegate_assignment]] tool): review per-slice\n" +
 				"5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits\n" +
 				"6. RE-REVIEW → Spawn new ephemeral reviewers for re-review\n" +
 				"7. REPEAT → Steps 5-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface to the user\n" +
@@ -92,7 +92,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"```\n" +
 				"\n" +
 				"**Key rules:**\n" +
-				"- Reviewers are ephemeral (spawned per review cycle via Task tool)\n" +
+				"- Reviewers are ephemeral (spawned per review cycle with the [[op:delegate_assignment]] tool)\n" +
 				"- Slices are **never closed** until reviewed at least once\n" +
 				"- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; on budget exhaustion without clean, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck\n" +
 				"- The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities",
@@ -148,12 +148,12 @@ full Ride the Wave cycle.
 			Id:    "sup-spawn-task-call",
 			Title: "Task Call",
 			Content: `` + "```" + `
-Task({
+[[op:delegate_assignment]]({
   description: "Worker: implement SLICE-N",
-  prompt: ` + "`" + `Call Skill(/pasture:worker) and implement the assigned slice.
+  prompt: ` + "`" + `Call [[op:invoke_skill]](/pasture:worker) and implement the assigned slice.
 
 Pasture Task ID: "${TASK_ID_URI}"
-Read full requirements + handoff: pasture task show "${TASK_ID_URI}"
+Read full requirements + handoff: [[rec]] show "${TASK_ID_URI}"
 
 Do NOT shut down after implementation. You will receive review feedback and may need to fix issues.` + "`" + `,
   subagent_type: "general-purpose",
@@ -161,23 +161,23 @@ Do NOT shut down after implementation. You will receive review feedback and may 
 })
 ` + "```" + `
 
-Per [sup-spawn-workers], use ` + "`" + `subagent_type: "general-purpose"` + "`" + `, not a custom agent type. The worker skill is invoked inside the agent via ` + "`" + `Skill(/pasture:worker)` + "`" + `.`,
+Per [sup-spawn-workers], use ` + "`" + `subagent_type: "general-purpose"` + "`" + `, not a custom agent type. The worker skill is invoked inside the agent via ` + "`" + `[[op:invoke_skill]](/pasture:worker)` + "`" + `.`,
 		},
 		{
 			Id:    "sup-spawn-teamcreate-sendmessage",
-			Title: "TeamCreate: SendMessage Assignment",
-			Content: `When workers are spawned via TeamCreate, they receive context through SendMessage instead of a Task prompt. The message MUST be self-contained — teammates have **no prior context**:
+			Title: "TeamCreate: [[op:send_assignment_message]] Assignment",
+			Content: `When workers are spawned via TeamCreate, they receive context through [[op:send_assignment_message]] instead of a task prompt. The message MUST be self-contained — teammates have **no prior context**:
 
 ` + "```" + `
-SendMessage({
+[[op:send_assignment_message]]({
   type: "message",
   recipient: "worker-1",
-  content: ` + "`" + `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
+  content: ` + "`" + `You are assigned SLICE-1. Start by calling [[op:invoke_skill]](/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
-Run this to get full requirements + handoff: pasture task show "${SLICE_TASK_ID_URI}"
+Run this to get full requirements + handoff: [[rec]] show "${SLICE_TASK_ID_URI}"
 
-Key references (run pasture task show on each for full context):
+Key references (run [[rec]] show on each for full context):
 - Request: "${REQUEST_ID_URI}"
 - URD: "${URD_ID_URI}"
 - IMPL_PLAN: "${IMPL_PLAN_ID_URI}"
@@ -192,7 +192,7 @@ findings. Stay alive for the full Ride the Wave cycle.` + "`" + `,
 })
 ` + "```" + `
 
-Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `pasture task show` + "`" + ` commands in every assignment. Teammates cannot see your conversation or task tree.`,
+Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec]] show` + "`" + ` commands in every assignment. Teammates cannot see your conversation or task tree.`,
 		},
 		{
 			Id:    "sup-spawn-worker-persistence",
@@ -212,22 +212,22 @@ Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `pasture task s
 					Id:    "sup-spawn-fix-assignment-template",
 					Title: "Fix Assignment Message Template",
 					Content: `` + "```" + `
-SendMessage({
+[[op:send_assignment_message]]({
   type: "message",
   recipient: "worker-1",
   content: ` + "`" + `Review cycle <N> found issues in your slice (SLICE-1).
 
 BLOCKERs (must fix — blocks slice closure):
-- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
+- "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
 IMPORTANT (must fix — must reach 0 before wave close):
-- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
+- "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
 MINOR (must fix — must reach 0 before wave close):
-- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
+- "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
 After fixing all items:
-  pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
+  [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
 
 Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
   summary: "Review cycle <N> fixes for SLICE-1"
@@ -239,17 +239,17 @@ Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
 		{
 			Id:    "sup-spawn-task-status",
 			Title: "Worker Should Update Pasture Status",
-			Content: `- On start: ` + "`" + `pasture task update "${TASK_ID_URI}" --status=in_progress` + "`" + `
-- On implementation complete (NOT slice close): ` + "`" + `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"` + "`" + `
-- On blocked: ` + "`" + `pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>"` + "`" + `
+			Content: `- On start: ` + "`" + `[[rec]] update "${TASK_ID_URI}" --status=in_progress` + "`" + `
+- On implementation complete (NOT slice close): ` + "`" + `[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"` + "`" + `
+- On blocked: ` + "`" + `[[rec]] update "${TASK_ID_URI}" --notes="Blocked: <reason>"` + "`" + `
 - Slice closure: **only the supervisor** closes slices after review passes`,
 		},
 		{
 			Id:    "sup-spawn-assign-via-task",
 			Title: "Assign via Pasture",
 			Content: `` + "```" + `bash
-pasture task assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
-pasture task update "${TASK_ID_URI}" --status=in_progress
+[[rec]] assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
+[[rec]] update "${TASK_ID_URI}" --status=in_progress
 ` + "```" + ``,
 		},
 		{
@@ -278,7 +278,7 @@ pasture task update "${TASK_ID_URI}" --status=in_progress
 
 ## Acceptance Criteria
 - All DEFER'd items in this slice resolved (tests pass, production code path verified)
-- See pasture task show "${SLICE_TASK_ID_URI}" for full validation_checklist
+- See [[rec]] show "${SLICE_TASK_ID_URI}" for full validation_checklist
 ` + "```" + ``,
 		},
 	},

@@ -148,7 +148,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
   "Research depth: {{depth}} (user confirmed)"
 ```
 
-Spawn both agents in parallel (via Task tool with `run_in_background: true`). Each agent invokes its dedicated skill.
+Spawn both agents in parallel (with the Agent tool and `run_in_background: true`). Each agent invokes its dedicated skill.
 
 ### s1_2-research: Domain Research
 

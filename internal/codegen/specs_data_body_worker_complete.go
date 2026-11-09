@@ -55,12 +55,12 @@ var workerCompleteBody = SkillBody{
    - [ ] Service wired with real dependencies (not mocks in production)
 3. Verify all validation_checklist items satisfied:
    ` + "```" + `bash
-   pasture task show "${TASK_ID_URI}"  # Review checklist items
+   [[rec]] show "${TASK_ID_URI}"  # Review checklist items
    ` + "```" + `
 4. Update Pasture task:
    ` + "```" + `bash
-   pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
-   pasture task update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working."
+   [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete; awaiting independent review and supervisor closure."
+   [[rec]] update "${TASK_ID_URI}" --notes="Implementation complete. Production code verified working."
    ` + "```" + `
 5. Author the worker→reviewer handoff in the Pasture task body (see template below)`,
 		},
@@ -110,7 +110,7 @@ var workerCompleteBody = SkillBody{
 			Title: "Report Completion",
 			Content: `` + "```" + `bash
 # Report completion; only the supervisor closes after independent review
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Quality gates pass. Production code verified."
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Quality gates pass. Production code verified."
 ` + "```" + ``,
 		},
 		{
@@ -119,7 +119,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 			Content: `When completing a FOLLOWUP_SLICE-N, additionally report which original leaf tasks were resolved:
 
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete. Resolved leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"
 ` + "```" + `
 
 The handoff to the reviewer (h4) must include which original leaf tasks were resolved so reviewers can verify.`,

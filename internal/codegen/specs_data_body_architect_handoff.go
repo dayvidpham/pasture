@@ -17,8 +17,8 @@ var architectHandoffBody = SkillBody{
 			Id:        "arch-handoff-spawn-supervisor",
 			Given:     "handoff for the IMPL_PLAN phase",
 			When:      "spawning the supervisor",
-			Then:      "use TeamCreate to spawn the supervisor as an Opus teammate (workers also Opus), then assign work via SendMessage",
-			ShouldNot: "spawn the supervisor as a Task tool subagent or via aura-swarm for the IMPL_PLAN phase",
+			Then:      "use TeamCreate to spawn the supervisor as an Opus teammate (workers also Opus), then assign work via [[op:send_assignment_message]]",
+			ShouldNot: "spawn the supervisor with the [[op:delegate_assignment]] tool or via aura-swarm for the IMPL_PLAN phase",
 		},
 		{
 			Id:        "arch-handoff-supervisor-not-idle",
@@ -53,15 +53,15 @@ var architectHandoffBody = SkillBody{
 # Handoff: Architect → Supervisor
 
 ## Supervisor Startup
-1. Call ` + "`" + `Skill(/pasture:supervisor)` + "`" + ` to load your role instructions
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
-3. Read the RATIFIED PROPOSAL and URD with ` + "`" + `pasture task show` + "`" + ` commands below
+1. Call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + ` to load your role instructions
+2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed
+3. Read the RATIFIED PROPOSAL and URD with ` + "`" + `[[rec]] show` + "`" + ` commands below
 4. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1 types / L2 tests / L3 impl triple is only illustrative)
 
 ## References
 - REQUEST: "${REQUEST_ID_URI}"
-- URD: "${URD_ID_URI}" (read with ` + "`" + `pasture task show "${URD_ID_URI}"` + "`" + `)
-- RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}" (read with ` + "`" + `pasture task show "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + `)
+- URD: "${URD_ID_URI}" (read with ` + "`" + `[[rec]] show "${URD_ID_URI}"` + "`" + `)
+- RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}" (read with ` + "`" + `[[rec]] show "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + `)
 
 ## Summary
 <1-2 sentence summary of what needs to be implemented>
@@ -84,7 +84,7 @@ var architectHandoffBody = SkillBody{
 			Title: "Steps",
 			Content: `1. Create the HANDOFF Pasture task — its body IS the handoff document (use the template above):
    ` + "```" + `bash
-   HANDOFF_ID_URI=$(pasture task create "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --namespace "$PASTURE_NAMESPACE" --format json --type=task --priority=2 \
+   HANDOFF_ID_URI=$([[rec]] create "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --namespace "$PASTURE_NAMESPACE" --format json --type=task --priority=2 \
      --description="---
    references:
      request: "${REQUEST_ID_URI}"
@@ -93,20 +93,20 @@ var architectHandoffBody = SkillBody{
    ---
    # Handoff: Architect → Supervisor
    <full handoff body per the template above>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-   pasture task label add "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
+   [[rec]] label add "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
 
    ` + "```" + `
 
 2. Launch the supervisor as an **Opus teammate** via TeamCreate (the IMPL_PLAN phase runs as an Agent Team, not aura-swarm):
    ` + "```" + `
    TeamCreate({ team_name: "<epoch>-impl", ... })          # supervisor + workers as Opus teammates
-   # then assign the supervisor its task via SendMessage (see Example Prompt below)
+   # then assign the supervisor its task via [[op:send_assignment_message]] (see Example Prompt below)
    ` + "```" + `
 
 3. Monitor supervisor progress:
    ` + "```" + `bash
    # Check pasture status
-   pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress
+   [[rec]] list --namespace "$PASTURE_NAMESPACE" --status=in_progress
    ` + "```" + `
 
    A supervisor that looks idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.`,
@@ -114,18 +114,18 @@ var architectHandoffBody = SkillBody{
 		{
 			Id:    "arch-handoff-example-prompt",
 			Title: "Example Prompt",
-			Content: `**CRITICAL:** The SendMessage assignment MUST instruct the supervisor to invoke ` + "`" + `/pasture:supervisor` + "`" + ` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.
+			Content: `**CRITICAL:** The [[op:send_assignment_message]] assignment MUST instruct the supervisor to invoke ` + "`" + `/pasture:supervisor` + "`" + ` as its first action. Without this, the supervisor agent starts without its role instructions and skips leaf task creation, ephemeral exploration, and other critical procedures.
 
 ` + "```" + `
-Start by calling ` + "`" + `Skill(/pasture:supervisor)` + "`" + ` to load your role instructions.
+Start by calling ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + ` to load your role instructions.
 
 Implement the ratified plan for <feature name>.
 
 ## Context
 - REQUEST: "${REQUEST_ID_URI}"
-- URD: "${URD_ID_URI}" (read with ` + "`" + `pasture task show "${URD_ID_URI}"` + "`" + ` for user requirements)
+- URD: "${URD_ID_URI}" (read with ` + "`" + `[[rec]] show "${URD_ID_URI}"` + "`" + ` for user requirements)
 - RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}"
-- HANDOFF: "${HANDOFF_ID_URI}" (the handoff body — read with ` + "`" + `pasture task show "${HANDOFF_ID_URI}"` + "`" + `)
+- HANDOFF: "${HANDOFF_ID_URI}" (the handoff body — read with ` + "`" + `[[rec]] show "${HANDOFF_ID_URI}"` + "`" + `)
 
 ## Summary
 <1-2 sentence summary of what needs to be implemented>
@@ -137,18 +137,18 @@ Implement the ratified plan for <feature name>.
 <Given/When/Then criteria from the ratified plan>
 
 ## Reminders
-1. Call ` + "`" + `Skill(/pasture:supervisor)` + "`" + ` FIRST — do not proceed without loading your role
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
+1. Call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + ` FIRST — do not proceed without loading your role
+2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed
 3. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1/L2/L3 triple is only illustrative); a slice without leaf tasks is undecomposed
-4. Read the ratified plan with ` + "`" + `pasture task show "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + ` and the URD with ` + "`" + `pasture task show "${URD_ID_URI}"` + "`" + `
+4. Read the ratified plan with ` + "`" + `[[rec]] show "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + ` and the URD with ` + "`" + `[[rec]] show "${URD_ID_URI}"` + "`" + `
 ` + "```" + `
 
-Deliver this assignment to the supervisor teammate via SendMessage after TeamCreate:
+Deliver this assignment to the supervisor teammate via [[op:send_assignment_message]] after TeamCreate:
 
 ` + "```" + `
-SendMessage({
+[[op:send_assignment_message]]({
   to: "supervisor",
-  message: ` + "`" + `Start by calling Skill(/pasture:supervisor) to load your role instructions.
+  message: ` + "`" + `Start by calling [[op:invoke_skill]](/pasture:supervisor) to load your role instructions.
 
 Implement the ratified plan for User Authentication.
 
@@ -156,7 +156,7 @@ Implement the ratified plan for User Authentication.
 - REQUEST: ${REQUEST_ID_URI}
 - URD: "${URD_ID_URI}"
 - RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}"
-- HANDOFF: "${HANDOFF_ID_URI}" (read with pasture task show "${HANDOFF_ID_URI}")
+- HANDOFF: "${HANDOFF_ID_URI}" (read with [[rec]] show "${HANDOFF_ID_URI}")
 
 ## Summary
 Add JWT-based authentication with login/logout endpoints and middleware.
@@ -171,10 +171,10 @@ Given a valid JWT token when accessing protected routes then allow access
 Given an expired token when accessing protected routes then return 401
 
 ## Reminders
-1. Call Skill(/pasture:supervisor) FIRST
-2. Spawn ephemeral Explore subagents via Task tool when codebase exploration is needed
+1. Call [[op:invoke_skill]](/pasture:supervisor) FIRST
+2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed
 3. Every slice MUST have leaf tasks (any number; L1/L2/L3 is only illustrative)
-4. Read ratified plan: pasture task show "${RATIFIED_PROPOSAL_ID_URI}" and URD: pasture task show "${URD_ID_URI}"` + "`" + `,
+4. Read ratified plan: [[rec]] show "${RATIFIED_PROPOSAL_ID_URI}" and URD: [[rec]] show "${URD_ID_URI}"` + "`" + `,
   summary: "IMPL_PLAN assignment with Pasture context"
 })
 ` + "```" + ``,
@@ -183,13 +183,13 @@ Given an expired token when accessing protected routes then return 401
 			Id:    "arch-handoff-teamcreate-notes",
 			Title: "Spawning via TeamCreate",
 			Content: `- Spawn the supervisor (and the workers it will coordinate) as **Opus** teammates — the IMPL_PLAN phase benefits from the stronger model for decomposition and review.
-- Teammates have **zero prior context**: every SendMessage assignment MUST be self-contained (call ` + "`" + `Skill(/pasture:supervisor)` + "`" + `, the Pasture task IDs, and ` + "`" + `pasture task show` + "`" + ` commands to fetch full requirements).
+- Teammates have **zero prior context**: every [[op:send_assignment_message]] assignment MUST be self-contained (call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + `, the Pasture task IDs, and ` + "`" + `[[rec]] show` + "`" + ` commands to fetch full requirements).
 - Do not spawn the supervisor via ` + "`" + `aura-swarm` + "`" + ` for the IMPL_PLAN phase; the deprecated orchestrator must not be invoked; the supported handoff uses TeamCreate.`,
 		},
 		{
 			Id:    "arch-handoff-important",
 			Title: "IMPORTANT",
-			Content: "- **DO NOT** spawn the supervisor as a Task tool subagent or via `aura-swarm` for the IMPL_PLAN phase — use TeamCreate with an Opus supervisor\n" +
+			Content: "- **DO NOT** spawn the supervisor with the [[op:delegate_assignment]] tool or via `aura-swarm` for the IMPL_PLAN phase — use TeamCreate with an Opus supervisor\n" +
 				"- **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks\n" +
 				"- **DO NOT** implement the plan yourself - your role is handoff and monitoring\n" +
 				"- **DO NOT** shut down a supervisor that appears idle right after spawn — it is usually running Explore subagents\n" +

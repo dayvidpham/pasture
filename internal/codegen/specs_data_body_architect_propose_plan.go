@@ -47,7 +47,7 @@ var architectProposePlanBody = SkillBody{
 			Id:    "arch-propose-task-task",
 			Title: "Pasture Task Creation",
 			Content: `` + "```" + `bash
-PROPOSAL_ID_URI=$(pasture task create "PROPOSAL-1: <feature name>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json --type=feature \
+PROPOSAL_ID_URI=$([[rec]] create "PROPOSAL-1: <feature name>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json --type=feature \
   --description="$(cat <<EOF
 ---
 references:
@@ -114,11 +114,11 @@ const (
 - pkg/path/file2.go (modify)
 EOF
 )" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
-pasture task update "$PROPOSAL_ID_URI" --notes "Design: '{\"validation_checklist\":[\"Item 1\",\"Item 2\",\"Item 3\"],\"tradeoffs\":[{\"decision\":\"Use A\",\"rationale\":\"Because...\"}],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\",\"should_not\":\"W\"}]}'"
+[[rec]] label add "$PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
+[[rec]] update "$PROPOSAL_ID_URI" --notes "Design: '{\"validation_checklist\":[\"Item 1\",\"Item 2\",\"Item 3\"],\"tradeoffs\":[{\"decision\":\"Use A\",\"rationale\":\"Because...\"}],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\",\"should_not\":\"W\"}]}'"
 
 # Link to request
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+[[rec]] dep add "${REQUEST_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
 ` + "```" + ``,
 		},
 		{
@@ -126,8 +126,8 @@ pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
 			Title: "Before Creating the Proposal",
 			Content: `Read the URD and Phase 1 outputs to understand full context before drafting:
 ` + "```" + `bash
-pasture task show "${URD_ID_URI}"
-pasture task show "${REQUEST_ID_URI}"   # includes classification, research findings, explore findings as comments
+[[rec]] show "${URD_ID_URI}"
+[[rec]] show "${REQUEST_ID_URI}"   # includes classification, research findings, explore findings as comments
 ` + "```" + `
 
 The URD contains the structured requirements, priorities, design choices, and MVP goals from the URE survey. The REQUEST task comments contain Phase 1 outputs: classification (4 axes), domain research findings (prior art, standards), and codebase exploration findings (entry points, related types, dependencies). Your proposal must:

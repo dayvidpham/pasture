@@ -19,7 +19,7 @@ var researchBody = SkillBody{
 			Id:        "research-depth-quick-scan",
 			Given:     "depth is quick-scan",
 			When:      "researching",
-			Then:      "search local project only (Grep, Glob, Read)",
+			Then:      "search local project only ([[tool:grep]], [[tool:glob]], [[tool:read]])",
 			ShouldNot: "make web requests",
 		},
 		{
@@ -47,7 +47,7 @@ var researchBody = SkillBody{
 			Id:        "research-phase1-recording",
 			Given:     "Phase 1 context",
 			When:      "recording findings",
-			Then:      "ALSO add a summary comment on the REQUEST task via `pasture task comment add`",
+			Then:      "ALSO add a summary comment on the REQUEST task via `[[rec]] comment add`",
 			ShouldNot: "only write the file without updating the REQUEST task",
 		},
 	},
@@ -203,7 +203,7 @@ code snippet here
 			Content: `When invoked as part of Phase 1 (s1_2-research), record a summary on the REQUEST task in addition to writing the full report:
 
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}
