@@ -84,6 +84,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache: true
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -126,6 +132,18 @@ jobs:
             echo "$stale"
             exit 1
           fi
+
+      - name: List unit tests
+        run: cd web && pnpm exec vitest list --filesOnly
+
+      - name: List browser tests
+        run: cd web && pnpm exec playwright test --list
+
+      - name: Install Chromium
+        run: cd web && pnpm exec playwright install --with-deps chromium
+
+      - name: Browser tests
+        run: cd web && pnpm test:browser
 
   recovery:
     name: Recovery correctness

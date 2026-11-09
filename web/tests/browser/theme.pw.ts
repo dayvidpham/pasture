@@ -10,11 +10,20 @@ let server: ChildProcess
 let directory: string
 let origin: string
 let errors: string[]
-const session = { harness: 'claude-code', nativeSessionId: transcript.id, activity: { state: 'unknown', stateBasis: 'none' }, bindings: [] }
+const observed = (value: string, field: string) => ({ status: 'observed', value, source: 'host', field })
+const execution = {
+  occurrenceId: 12, observedAt: '2026-11-03T00:00:00Z', kind: 'selection',
+  provider: observed('synthetic-provider', 'model.providerID'), model: observed('synthetic-model', 'model.id'),
+  variant: { status: 'unavailable', source: 'none', reason: 'no-evidence' },
+  role: { ...observed('build', 'agent'), vocabulary: 'native-agent' },
+  protocolRole: { ...observed('worker', 'PASTURE_EXECUTION_ROLE'), vocabulary: 'pasture-role' },
+}
+const session = { harness: 'claude-code', nativeSessionId: transcript.id, activity: { state: 'unknown', stateBasis: 'none' }, bindings: [], execution }
 const snapshot = { revision: 1, asOf: '2026-01-01T10:00:00Z', sessions: [session], epochs: [], truncated: false }
 
 test.beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), 'pasture-browser-'))
+  try {
   const binary = join(directory, 'pasture')
   execFileSync('go', ['build', '-o', binary, './cmd/pasture'], { cwd: resolve('..'), timeout: 120000 })
   server = spawn(binary, ['serve', '--db', join(directory, 'private.db'), '--listen', '127.0.0.1:0'])
@@ -27,19 +36,39 @@ test.beforeAll(async () => {
       if (match) { clearTimeout(timer); accept(match[1]) }
     })
     server.stderr!.on('data', chunk => { output += chunk.toString() })
+    server.once('error', error => { clearTimeout(timer); reject(error) })
     server.once('exit', code => { clearTimeout(timer); reject(new Error(`server exited ${code}: ${output}`)) })
   })
   console.log(`real embedded binary: ${origin}; isolated temporary database`)
+  } catch (error) {
+    await cleanup()
+    throw error
+  }
 })
 
-test.afterAll(async () => {
-  if (server && server.exitCode === null) {
-    const exited = new Promise<void>(done => server.once('exit', () => done()))
-    server.kill('SIGTERM')
-    await exited
+async function cleanup() {
+  try {
+    if (server && server.exitCode === null && server.signalCode === null) {
+      const exited = new Promise<void>(done => server.once('exit', () => done()))
+      server.kill('SIGTERM')
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([exited, new Promise<void>(done => { timer = setTimeout(done, 5000) })])
+      } finally { clearTimeout(timer) }
+      if (server.exitCode === null && server.signalCode === null) {
+        server.kill('SIGKILL')
+        await Promise.race([exited, new Promise<never>((_, reject) => {
+          const timeout = setTimeout(() => reject(new Error('server did not exit after SIGKILL')), 5000)
+          exited.finally(() => clearTimeout(timeout))
+        })])
+      }
+    }
+  } finally {
+    if (directory) await rm(directory, { recursive: true, force: true })
   }
-  if (directory) await rm(directory, { recursive: true, force: true })
-})
+}
+
+test.afterAll(cleanup)
 
 test.beforeEach(async ({ page }) => {
   errors = []
@@ -54,7 +83,7 @@ test.afterEach(async () => { expect(errors).toEqual([]) })
 async function mockAPI(page: Page) {
   await page.route('**/api/v1/inspect', route => route.fulfill({ json: snapshot }))
   await page.route('**/api/v1/sessions/*/*/transcript', route => route.fulfill({ json: transcript }))
-  await page.route('**/api/v1/sessions/*/*/execution**', route => route.fulfill({ json: { items: [] } }))
+  await page.route('**/api/v1/sessions/*/*/execution**', route => route.fulfill({ json: { revision: 1, asOf: snapshot.asOf, items: [execution] } }))
   await page.routeWebSocket('**/api/v1/ws', ws => {
     ws.send(JSON.stringify({ type: 'ready', topics: [] }))
     ws.onMessage(message => {
@@ -69,6 +98,8 @@ async function open(page: Page) {
   await page.goto(origin)
   await page.getByRole('button', { name: transcript.id }).click()
   await expect(page.getByText('Synthetic user asks for a greeting.').first()).toBeVisible()
+  await expect(page.locator('.execution-summary:visible').getByText('synthetic-model')).toBeVisible()
+  await expect(page.locator('.execution-history:visible').getByText('synthetic-provider · synthetic-model')).toBeVisible()
 }
 
 async function agrees(page: Page, theme: string) {
@@ -107,7 +138,7 @@ for (const theme of ['light', 'dark'] as const) {
       }
     }, theme)
     await open(page)
-    for (const selector of ['.state-basis', '.session-link', '.execution-summary .rail-copy', '.transcript-host .txn-md-prose', '.theme-control select']) {
+    for (const selector of ['.state-basis', '.session-link', '.attribution-source', '.execution-list', '.transcript-host .txn-md-prose', '.theme-control select']) {
       const locator = page.locator(selector).first()
       console.log('paint', theme, selector, await locator.evaluate(el => {
         const chain = []
