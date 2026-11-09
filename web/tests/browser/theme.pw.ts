@@ -160,6 +160,26 @@ for (const theme of ['light', 'dark'] as const) {
       const result = await new AxeBuilder({ page }).include(selector).withRules(['color-contrast']).analyze()
       console.log(`${theme} ${selector}: ${result.violations.length} violations, ${result.incomplete.length} incomplete`)
       expect(result.violations).toEqual([])
+      const unresolved: string[] = []
+      const violations: string[] = []
+      for (const rule of result.incomplete.filter(rule => rule.id === 'color-contrast')) {
+        for (const node of rule.nodes) {
+          const target = node.target.join(' >> ')
+          const locator = page.locator(target).first()
+          await locator.scrollIntoViewIfNeeded()
+          const focused = await new AxeBuilder({ page }).include(node.target[0]).withRules(['color-contrast']).analyze()
+          const violation = focused.violations.flatMap(rule => rule.nodes).find(item => item.target.join(' >> ') === target)
+          const incomplete = focused.incomplete.flatMap(rule => rule.nodes).find(item => item.target.join(' >> ') === target)
+          const passed = focused.passes.flatMap(rule => rule.nodes).some(item => item.target.join(' >> ') === target)
+          const outcome = violation ? 'violation' : incomplete || !passed ? 'still-incomplete' : 'resolved-pass'
+          const summary = (violation?.failureSummary ?? incomplete?.failureSummary ?? (passed ? 'axe passed' : node.failureSummary) ?? 'axe did not report a pass').replace(/\s+/g, ' ')
+          console.log(`incomplete ${theme} ${selector} ${target} -> ${outcome}: ${summary}`)
+          if (violation) violations.push(`${target}: ${summary}; ${JSON.stringify(violation.any)}`)
+          if (outcome === 'still-incomplete') unresolved.push(`${target}: ${summary}`)
+        }
+      }
+      expect(unresolved, `UNRESOLVED ${theme} ${selector}`).toEqual([])
+      expect(violations, `color-contrast violations ${theme} ${selector}`).toEqual([])
     }
   })
 }
