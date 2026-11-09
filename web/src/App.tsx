@@ -20,8 +20,8 @@ import {
   Select,
   StatGrid,
   StatusDot,
-  TranscriptViewer,
 } from '@peasant-labs/fairtrade/ui'
+import { ReadOnlyTranscriptViewer } from './ReadOnlyTranscriptViewer'
 
 import {
   bindProject,
@@ -102,16 +102,6 @@ type TranscriptState =
   | { status: 'loading'; key: string }
   | { status: 'ready'; key: string; viewModel: TranscriptViewModel }
   | { status: 'error'; key: string; failure: TranscriptFailure }
-
-// The console is a read-only observer: labelling, editing, contributing,
-// visibility changes, and export belong to producers with their own authority.
-const READ_ONLY_TRANSCRIPT_CAPABILITIES = {
-  canEdit: false,
-  canLabel: false,
-  canContribute: false,
-  canChangeVisibility: false,
-  canExport: false,
-} as const
 
 type SessionRow = {
   id: string
@@ -1358,9 +1348,8 @@ export default function App() {
               </div>
             ) : transcript.status === 'ready' && transcript.key === transcriptKey ? (
               <div className="transcript-host">
-                <TranscriptViewer
+                <ReadOnlyTranscriptViewer
                   viewModel={transcript.viewModel}
-                  capabilities={READ_ONLY_TRANSCRIPT_CAPABILITIES}
                   leftRailOpen={transcriptLeftRail}
                   onLeftRailOpenChange={setTranscriptLeftRail}
                   rightRailOpen={transcriptRightRail}

@@ -39,10 +39,9 @@ export function adaptTranscriptPayload(value: unknown): TranscriptViewModel {
     )
   }
   try {
-    // Pasture validates with its pinned @peasant-labs/schema copy; fairtrade
-    // re-validates the same durable contract with its own copy. The two
-    // packages can resolve different schema versions, so this assertion
-    // crosses only the shared-contract boundary, never an unchecked shape.
+    // Pasture validates with its pinned schema; Fairtrade uses its own schema
+    // for conditional normalized-evidence validation. The versions may differ,
+    // so this assertion crosses only the validated shared-contract boundary.
     return adaptTranscript(payload as Parameters<typeof adaptTranscript>[0])
   } catch (cause) {
     throw new TranscriptValidationError(

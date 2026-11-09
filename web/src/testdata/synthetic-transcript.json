@@ -1,0 +1,16 @@
+{
+  "id": "6a46bcd8-b365-4608-be7d-5601e2fdd805",
+  "harness": "claude-code",
+  "startTime": "2026-01-01T10:00:00Z",
+  "endTime": "2026-01-01T10:01:00Z",
+  "durationMins": 1,
+  "totalTokens": 0,
+  "tokensIn": 0,
+  "tokensOut": 0,
+  "turnCount": 2,
+  "toolCallCount": 1,
+  "turns": [
+    { "index": 0, "role": "user", "content": "Synthetic user asks for a greeting.", "timestamp": "2026-01-01T10:00:00Z", "depth": 0 },
+    { "index": 1, "role": "assistant", "content": "Synthetic assistant checks the greeting.", "timestamp": "2026-01-01T10:00:01Z", "depth": 0, "entryType": "tool_use", "toolCalls": [{ "id": "synthetic-tool-1", "name": "Read", "arguments": "{\"file_path\":\"greeting.txt\"}", "result": "\"Synthetic tool result: hello.\"", "toolKind": "read" }] }
+  ]
+}

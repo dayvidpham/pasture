@@ -1,0 +1,2 @@
+minimumReleaseAgeExclude:
+  - '@peasant-labs/fairtrade@0.0.60'

@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.31",
+    "@peasant-labs/fairtrade": "0.0.60",
     "@peasant-labs/schema": "0.31.0",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",
@@ -19,7 +19,7 @@
   "name": "@dayvidpham/pasture-web",
   "private": true,
   "scripts": {
-    "build": "tsc --noEmit \u0026\u0026 vite build",
+    "build": "tsc --noEmit && vite build",
     "dev": "vite",
     "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.7.0.json -o src/generated/api.ts",
     "preview": "vite preview",
