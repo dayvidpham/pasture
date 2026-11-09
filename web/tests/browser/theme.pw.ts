@@ -165,6 +165,23 @@ for (const theme of ['light', 'dark'] as const) {
       const result = await new AxeBuilder({ page }).include(selector).withRules(['color-contrast']).analyze()
       console.log(`${theme} ${selector}: ${result.violations.length} violations, ${result.incomplete.length} incomplete`)
       console.log('incomplete:', JSON.stringify(result.incomplete.map(item => ({ id: item.id, nodes: item.nodes.map(node => ({ target: node.target, summary: node.failureSummary })) }))))
+      for (const issue of result.incomplete) {
+        for (const node of issue.nodes) {
+          // Preserve every indeterminate result; these diagnostics do not turn it into a pass.
+          const target = node.target.join(' >> ')
+          const details = await page.locator(target).first().evaluate(el => {
+            const describe = (candidate: Element) => {
+              const style = getComputedStyle(candidate)
+              return { element: candidate.tagName, id: candidate.id, className: candidate.getAttribute('class'), backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage, position: style.position, zIndex: style.zIndex }
+            }
+            const backgrounds = []
+            for (let ancestor: Element | null = el; ancestor; ancestor = ancestor.parentElement) backgrounds.push(describe(ancestor))
+            const bounds = el.getBoundingClientRect()
+            return { text: (el.textContent || '').trim().slice(0, 160), color: getComputedStyle(el).color, backgrounds, center: { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }, elementsFromPoint: document.elementsFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2).map(describe) }
+          })
+          console.log('AXE_INCOMPLETE_JSON ' + JSON.stringify({ theme, scan: selector, rule: issue.id, target: node.target, summary: node.failureSummary, ...details, result: 'UNRESOLVED' }))
+        }
+      }
       expect(result.violations).toEqual([])
     }
   })
