@@ -11,7 +11,7 @@ const capabilities = {
 } as const
 
 type ViewerProps = ComponentProps<typeof TranscriptViewer>
-type Props = Pick<ViewerProps, 'viewModel' | 'theme' | 'openTools' | 'leftRailOpen' | 'onLeftRailOpenChange' | 'rightRailOpen' | 'onRightRailOpenChange'>
+type Props = Pick<ViewerProps, 'viewModel' | 'theme' | 'openTools' | 'leftRailOpen' | 'onLeftRailOpenChange' | 'rightRailOpen' | 'onRightRailOpenChange' | 'showTail' | 'presentation'>
 
 export function ReadOnlyTranscriptViewer(props: Props) {
   return <TranscriptViewer {...props} capabilities={capabilities} />

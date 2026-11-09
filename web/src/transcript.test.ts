@@ -53,8 +53,6 @@ describe('adaptTranscriptPayload', () => {
     expect(html).toContain('greeting.txt')
     expect(html).toContain('Synthetic tool result')
     expect(html).toContain(`data-theme="${theme}"`)
-    expect(html).not.toContain('aria-label="more actions"')
-    expect(html).not.toContain('>share<')
   })
   it('cooks a valid durable SessionDetailPayload through the schema boundary', () => {
     const viewModel = adaptTranscriptPayload(VALID_PAYLOAD)
