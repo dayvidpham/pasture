@@ -276,7 +276,7 @@ func EmitHarness(roots HarnessRoots, h TargetHarness, opts GenerateOptions) ([]G
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateOperationalFiles(roots.Output, files, "harness candidate validation"); err != nil {
+	if err := ValidateOperationalFiles(roots.Output, files, "harness candidate validation", h.Name); err != nil {
 		return nil, err
 	}
 	if err := publishGeneratedFiles(files, opts); err != nil {
@@ -347,7 +347,7 @@ type claudeCodeAgentEmitter struct{}
 func (claudeCodeAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
 	var out []GeneratedFile
 	for roleID, roleSpec := range RoleSpecs {
-		if len(roleSpec.Tools) == 0 {
+		if !roleHasToolSurface(roleSpec) {
 			continue
 		}
 		path := filepath.Join(root, "agents", fmt.Sprintf("%s.md", roleID))

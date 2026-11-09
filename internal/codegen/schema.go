@@ -677,9 +677,11 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 			role.Invariants = &InvariantsElem{Invariants: invs}
 		}
 
-		// Tools, model, thinking
-		if len(spec.Tools) > 0 {
-			role.Tools = strings.Join(spec.Tools, ", ")
+		// Tools, model, thinking. The schema shows the canonical Claude Code
+		// spelling: it is the harness-neutral document, and every target
+		// resolves its own spelling from the same typed capability sets.
+		if roleHasToolSurface(spec) {
+			role.Tools = strings.Join(mustRoleToolNames(HarnessClaudeCode, spec), ", ")
 		}
 		role.Model = spec.Model
 		role.Thinking = spec.Thinking

@@ -387,3 +387,122 @@ func OpenCode2_0_20() RuntimeContract {
 	}
 	return mustFloorContract(ir.HarnessOpenCode, buildCoreBindings(table))
 }
+
+// HarnessToolLowering is the native resolution of one ir.HarnessTool on one
+// harness. A harness either declares the tool natively (Available is true and
+// NativeName names the exact host spelling) or it has no per-agent declaration
+// for that tool (Available is false and DegradeInstruction says what the
+// emitter must do instead). Exactly one of the two is set, so a caller cannot
+// read a native name from an unavailable lowering or invent one.
+type HarnessToolLowering struct {
+	native    string
+	available bool
+	degrade   string
+}
+
+func (l HarnessToolLowering) NativeName() string { return l.native }
+func (l HarnessToolLowering) Available() bool    { return l.available }
+func (l HarnessToolLowering) DegradeInstruction() string {
+	return l.degrade
+}
+
+// IsValid reports whether the lowering is exactly one of the two documented
+// shapes: an available native name, or an unavailable degradation instruction.
+func (l HarnessToolLowering) IsValid() bool {
+	if l.available {
+		return strings.TrimSpace(l.native) != "" && l.degrade == ""
+	}
+	return l.native == "" && strings.TrimSpace(l.degrade) != ""
+}
+
+func nativeHarnessTool(name string) HarnessToolLowering {
+	return HarnessToolLowering{native: name, available: true}
+}
+
+func unavailableHarnessTool(reason string) HarnessToolLowering {
+	return HarnessToolLowering{degrade: reason}
+}
+
+// harnessToolLowerings is the ONE table that maps the closed ir.HarnessTool set
+// to each harness's native spelling. The code emitters resolve every role tool
+// through it; no other file writes a native file/shell tool name.
+//
+// Codex declares no per-agent tool list in a custom-agent profile, so every
+// HarnessTool is unavailable there and carries the degradation instruction the
+// Codex emitter already follows: the host grants the parent's tool surface to
+// every agent.
+var harnessToolLowerings = map[ir.HarnessID]map[ir.HarnessTool]HarnessToolLowering{
+	ir.HarnessClaudeCode: {
+		ir.HarnessToolRead:     nativeHarnessTool("Read"),
+		ir.HarnessToolGlob:     nativeHarnessTool("Glob"),
+		ir.HarnessToolGrep:     nativeHarnessTool("Grep"),
+		ir.HarnessToolBash:     nativeHarnessTool("Bash"),
+		ir.HarnessToolEdit:     nativeHarnessTool("Edit"),
+		ir.HarnessToolWrite:    nativeHarnessTool("Write"),
+		ir.HarnessToolTask:     nativeHarnessTool("Task"),
+		ir.HarnessToolWebFetch: nativeHarnessTool("WebFetch"),
+	},
+	ir.HarnessOpenCode: {
+		ir.HarnessToolRead:     nativeHarnessTool("read"),
+		ir.HarnessToolGlob:     nativeHarnessTool("glob"),
+		ir.HarnessToolGrep:     nativeHarnessTool("grep"),
+		ir.HarnessToolBash:     nativeHarnessTool("bash"),
+		ir.HarnessToolEdit:     nativeHarnessTool("edit"),
+		ir.HarnessToolWrite:    nativeHarnessTool("write"),
+		ir.HarnessToolTask:     nativeHarnessTool("task"),
+		ir.HarnessToolWebFetch: nativeHarnessTool("webfetch"),
+	},
+	ir.HarnessCodex: {
+		ir.HarnessToolRead:     unavailableHarnessTool(codexNoPerAgentToolList),
+		ir.HarnessToolGlob:     unavailableHarnessTool(codexNoPerAgentToolList),
+		ir.HarnessToolGrep:     unavailableHarnessTool(codexNoPerAgentToolList),
+		ir.HarnessToolBash:     unavailableHarnessTool(codexNoPerAgentToolList),
+		ir.HarnessToolEdit:     unavailableHarnessTool(codexNoPerAgentToolList),
+		ir.HarnessToolWrite:    unavailableHarnessTool(codexNoPerAgentToolList),
+		ir.HarnessToolTask:     unavailableHarnessTool(codexNoPerAgentToolList),
+		ir.HarnessToolWebFetch: unavailableHarnessTool(codexNoPerAgentToolList),
+	},
+}
+
+const codexNoPerAgentToolList = "the Codex custom-agent profile declares no per-agent tool list; the host grants the parent's tool surface to every agent, so the emitter writes no native tool name"
+
+// LookupHarnessTool resolves one HarnessTool on one harness. It accepts only a
+// registered harness and a registered tool; an unregistered operand returns an
+// actionable error instead of an empty lowering.
+func LookupHarnessTool(harness ir.HarnessID, tool ir.HarnessTool) (HarnessToolLowering, error) {
+	table, knownHarness := harnessToolLowerings[harness]
+	if !knownHarness {
+		return HarnessToolLowering{}, runtimeError(
+			fmt.Sprintf("harness %q has no harness-tool lowering table", harness),
+			"only the pinned harnesses declare native file and shell tool names",
+			"LookupHarnessTool", "the caller cannot resolve a tool name",
+			"resolve a harness listed in PinnedContracts", nil,
+		)
+	}
+	if !tool.IsValid() {
+		return HarnessToolLowering{}, runtimeError(
+			fmt.Sprintf("harness tool %q is not registered", tool),
+			"the harness-tool set is closed; an unregistered value has no native spelling",
+			"LookupHarnessTool", "the caller cannot resolve a tool name",
+			"use one of ir.AllHarnessTools", nil,
+		)
+	}
+	lowering, found := table[tool]
+	if !found {
+		return HarnessToolLowering{}, runtimeError(
+			fmt.Sprintf("harness %q has no lowering for registered harness tool %q", harness, tool),
+			"every registered tool must be classified on every pinned harness",
+			"LookupHarnessTool", "the emitter would otherwise write a wrong or missing tool name",
+			"add the harness/tool row to harnessToolLowerings", nil,
+		)
+	}
+	if !lowering.IsValid() {
+		return HarnessToolLowering{}, runtimeError(
+			fmt.Sprintf("harness %q harness-tool lowering for %q is malformed", harness, tool),
+			"a lowering is either an available native name or an unavailable degradation instruction",
+			"LookupHarnessTool", "the emitter cannot trust the row",
+			"fix the harnessToolLowerings row", nil,
+		)
+	}
+	return lowering, nil
+}

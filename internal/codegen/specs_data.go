@@ -6,6 +6,7 @@
 package codegen
 
 import (
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -584,7 +585,14 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Description: "Master orchestrator for full 12-phase workflow",
 		Model:       "opus",
 		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
+			ir.HarnessToolBash, ir.HarnessToolTask,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationDelegateAssignment,
+			ir.OperationSendAssignmentMessage,
+		},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -605,7 +613,15 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Description: "Specification writer and implementation designer",
 		Model:       "opus",
 		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
+			ir.HarnessToolBash, ir.HarnessToolTask,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationDelegateAssignment,
+			ir.OperationSendAssignmentMessage,
+		},
+		Policies: []RolePolicy{RolePolicyReadOnly, RolePolicyHandoff},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -664,7 +680,13 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Name:        "Reviewer",
 		Description: "End-user alignment reviewer for plans and code",
 		Model:       "sonnet",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "SendMessage"},
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep, ir.HarnessToolBash,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationSendAssignmentMessage,
+		},
+		Policies: []RolePolicy{RolePolicyReadOnly},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseReview, protocol.PhaseCodeReview,
 		},
@@ -712,7 +734,15 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Description: "Task coordinator, spawns workers, manages parallel execution",
 		Model:       "opus",
 		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
+			ir.HarnessToolBash, ir.HarnessToolTask,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationDelegateAssignment,
+			ir.OperationSendAssignmentMessage,
+		},
+		Policies: []RolePolicy{RolePolicyTodo, RolePolicyHandoff},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseHandoff, protocol.PhaseImplPlan, protocol.PhaseWorkerSlices,
 			protocol.PhaseCodeReview, protocol.PhaseImplUAT, protocol.PhaseLanding,
@@ -767,7 +797,14 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Name:        "Worker",
 		Description: "Vertical slice implementer (full production code path)",
 		Model:       "sonnet",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Edit", "Write", "SendMessage"},
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
+			ir.HarnessToolBash, ir.HarnessToolEdit, ir.HarnessToolWrite,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationSendAssignmentMessage,
+		},
+		Policies:    []RolePolicy{RolePolicyTodo},
 		OwnedPhases: []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		Introduction: "You own a vertical slice (full production code path from CLI/API entry point " +
 			"→ service → types). " +

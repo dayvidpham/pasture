@@ -11,6 +11,7 @@
 package codegen
 
 import (
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -238,14 +239,57 @@ type SkillBody struct {
 
 // ─── RoleSpec ─────────────────────────────────────────────────────────────────
 
+// RolePolicy is the closed set of non-tool capabilities a role may hold. These
+// are policy decisions, not host tools: they are typed here so a policy cannot
+// be spelled as a free string beside the tool list.
+type RolePolicy string
+
+const (
+	// RolePolicyReadOnly forbids Edit and Write on the role's tool surface.
+	RolePolicyReadOnly RolePolicy = "read-only"
+	// RolePolicyTodo allows the role to keep a harness-local todo/plan record.
+	RolePolicyTodo RolePolicy = "todo"
+	// RolePolicyHandoff allows the role to author or receive a phase handoff.
+	RolePolicyHandoff RolePolicy = "handoff"
+)
+
+var canonicalRolePolicies = [...]RolePolicy{
+	RolePolicyReadOnly,
+	RolePolicyTodo,
+	RolePolicyHandoff,
+}
+
+// AllRolePolicies returns a fresh defensive copy of the closed role-policy set.
+func AllRolePolicies() []RolePolicy {
+	return append([]RolePolicy(nil), canonicalRolePolicies[:]...)
+}
+
+// IsValid reports whether the value is a registered member of the closed set.
+func (p RolePolicy) IsValid() bool {
+	for _, candidate := range canonicalRolePolicies {
+		if candidate == p {
+			return true
+		}
+	}
+	return false
+}
+
 // RoleSpec is the complete specification for an agent role.
+//
+// Tools holds only native file and shell capabilities (ir.HarnessTool), and
+// Operations holds orchestration intents (ir.OperationKind). Both are typed
+// closed sets: a raw string tool name cannot be stored in either field without
+// an explicit conversion, so a harness-specific name cannot leak into a role by
+// accident. The emitter resolves both through internal/runtime/profiles.go.
 type RoleSpec struct {
 	Id                 protocol.RoleId
 	Name               string
 	Description        string
 	Model              string // e.g. "opus", "sonnet", "haiku"
 	Thinking           string // e.g. "medium"
-	Tools              []string
+	Tools              []ir.HarnessTool
+	Operations         []ir.OperationKind
+	Policies           []RolePolicy
 	OwnedPhases        []protocol.PhaseId
 	Introduction       string
 	OwnershipNarrative string

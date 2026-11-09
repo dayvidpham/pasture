@@ -94,7 +94,7 @@ func (codexAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptio
 	functions := codexNativeFunctions()
 	var out []GeneratedFile
 	for roleID, roleSpec := range RoleSpecs {
-		if len(roleSpec.Tools) == 0 {
+		if !roleHasToolSurface(roleSpec) {
 			continue
 		}
 		content, err := renderCodexAgent(roleID, functions)

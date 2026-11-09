@@ -54,19 +54,21 @@ var openCodeModel = map[string]string{
 	"sonnet": "anthropic/claude-sonnet-4-6",
 }
 
-// openCodeToolPermission maps each Claude-side tool name to the OpenCode
-// permission key it grants. Tools with no OpenCode analog (Agent, SendMessage)
-// are intentionally absent and therefore omitted from the emitted permission
-// map. Both Edit and Write map to the single OpenCode "edit" permission.
+// openCodeToolPermission maps each native OpenCode tool name to the permission
+// key it grants. The native names come from the runtime lowerings, so this
+// table is keyed by the resolved name, not by a Claude-side spelling. Tools
+// with no OpenCode native name never reach it. Both "edit" and "write" map to
+// the single OpenCode "edit" permission.
 var openCodeToolPermission = map[string]string{
-	"Read":  "read",
-	"Glob":  "glob",
-	"Grep":  "grep",
-	"Bash":  "bash",
-	"Skill": "skill",
-	"Edit":  "edit",
-	"Write": "edit",
-	"Task":  "task",
+	"read":     "read",
+	"glob":     "glob",
+	"grep":     "grep",
+	"bash":     "bash",
+	"skill":    "skill",
+	"edit":     "edit",
+	"write":    "edit",
+	"task":     "task",
+	"webfetch": "webfetch",
 }
 
 // ─── Template context ─────────────────────────────────────────────────────────
@@ -97,7 +99,7 @@ type openCodeAgentEmitter struct{}
 func (openCodeAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
 	var out []GeneratedFile
 	for roleID, roleSpec := range RoleSpecs {
-		if len(roleSpec.Tools) == 0 {
+		if !roleHasToolSurface(roleSpec) {
 			continue
 		}
 		content, err := renderOpenCodeAgent(roleID, figuresDir)
@@ -156,7 +158,14 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 		)
 	}
 
-	permissions := buildOpenCodePermissions(roleSpec.Tools)
+	toolNames, err := RoleToolNames(HarnessOpenCode, roleSpec)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderOpenCodeAgent: resolving tools for role %q failed: %w",
+			roleID, err,
+		)
+	}
+	permissions := buildOpenCodePermissions(toolNames)
 
 	// Reuse the Claude agent body verbatim (no re-authoring): render the full
 	// Claude agent file, then strip its leading YAML frontmatter block.
@@ -212,10 +221,10 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 }
 
 // buildOpenCodePermissions produces the least-privilege, deterministically
-// ordered permission slice for a role's tools: a leading "*": deny seed, then
-// each granted permission key sorted ascending and de-duplicated (Edit + Write
-// both map to "edit"). Tools with no OpenCode analog (Agent, SendMessage) are
-// omitted because they are absent from openCodeToolPermission.
+// ordered permission slice for a role's resolved native tools: a leading
+// "*": deny seed, then each granted permission key sorted ascending and
+// de-duplicated (Edit + Write both map to "edit"). A tool with no OpenCode
+// native name is absent from openCodeToolPermission and grants nothing.
 func buildOpenCodePermissions(tools []string) []openCodePermissionEntry {
 	granted := make(map[string]struct{})
 	for _, tool := range tools {

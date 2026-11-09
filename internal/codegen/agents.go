@@ -27,6 +27,11 @@ type agentTemplateData struct {
 	// Role is the full RoleSpec for the role being generated.
 	Role RoleSpec
 
+	// ToolNames is the role's typed capability surface resolved through the
+	// Claude Code lowerings. The Claude agent file is the canonical rendered
+	// agent; OpenCode reuses its body with the frontmatter stripped.
+	ToolNames []string
+
 	// PhasesDetail holds PhaseSpec entries for the role's owned phases,
 	// sorted by phase number ascending.
 	PhasesDetail []PhaseSpec
@@ -103,8 +108,17 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 		figures = loadFiguresForRole(roleId, figuresDir)
 	}
 
+	toolNames, err := RoleToolNames(HarnessClaudeCode, roleSpec)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderAgent: resolving tools for role %q failed: %w",
+			roleId, err,
+		)
+	}
+
 	data := agentTemplateData{
 		Role:         roleSpec,
+		ToolNames:    toolNames,
 		PhasesDetail: ownedPhaseDetails(roleSpec),
 		PhaseSlug:    buildPhaseSlug(),
 		Constraints:  roleCtx.Constraints,
@@ -171,7 +185,7 @@ func GenerateAgent(roleId protocol.RoleId, agentPath string, figuresDir string, 
 	}
 
 	// Only generate for roles with tools defined (non-empty slice).
-	if len(roleSpec.Tools) == 0 {
+	if !roleHasToolSurface(roleSpec) {
 		return "", nil
 	}
 
