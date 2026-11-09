@@ -69,6 +69,19 @@ body {
   gap: var(--sp-3);
 }
 
+.theme-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.theme-control [role='status'] {
+  color: var(--ink-2);
+  font: var(--fs-sm)/var(--lh-body) var(--font-body);
+}
+
 .mono-meta {
   color: var(--ink-3);
   font: var(--fs-sm)/var(--lh-mono) var(--font-mono);
@@ -337,7 +350,6 @@ body {
 
 .peasant-switch:disabled {
   cursor: default;
-  opacity: 0.6;
 }
 
 .peasant-switch-track {
@@ -731,10 +743,6 @@ body {
 .execution-summary,
 .execution-history {
   margin-top: 1rem;
-}
-
-.execution-summary[data-empty='true'] {
-  opacity: 0.85;
 }
 
 .attribution-source {

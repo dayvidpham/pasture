@@ -29,6 +29,11 @@ it('gates interactive transcript actions against an enabled viewer', async () =>
     // actual tail and classic presentation so every capability can surface.
     await act(async () => { root.render(createElement(ReadOnlyTranscriptViewer, { viewModel, showTail: true, presentation: 'classic' })) })
     expect(container.textContent).toContain('Synthetic user')
+    for (const theme of ['light', 'dark'] as const) {
+      await act(async () => { root.render(createElement(ReadOnlyTranscriptViewer, { viewModel, theme, showTail: true, presentation: 'classic' })) })
+      expect(container.querySelector(`[data-theme="${theme}"]`)).not.toBeNull()
+      expect(container.querySelector('button[aria-label="more actions"]')).toBeNull()
+    }
     expect(container.querySelector('button[aria-label="more actions"]')).toBeNull()
     expect(container.querySelector('.txn-labelbtn')).toBeNull()
     await click(button('share'))

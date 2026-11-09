@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Activity,
   Clock3,
@@ -22,6 +22,10 @@ import {
   StatusDot,
 } from '@peasant-labs/fairtrade/ui'
 import { ReadOnlyTranscriptViewer } from './ReadOnlyTranscriptViewer'
+import { createThemeController, parseThemePreference, type ThemeSnapshot } from './theme'
+
+const serverTheme: ThemeSnapshot = { preference: 'system', resolvedTheme: 'dark', persistence: 'available' }
+const getServerTheme = () => serverTheme
 
 import {
   bindProject,
@@ -703,6 +707,15 @@ export function ProjectMappingPanel({
 }
 
 export default function App() {
+  const [themeController] = useState(createThemeController)
+  const { preference, resolvedTheme, persistence } = useSyncExternalStore(themeController.subscribe, themeController.getSnapshot, getServerTheme)
+  const [themeSelected, setThemeSelected] = useState(false)
+  const themeId = useId()
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.documentElement.dataset.theme = resolvedTheme
+    document.documentElement.style.colorScheme = resolvedTheme
+  }, [preference, resolvedTheme])
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [epochs, setEpochs] = useState<EpochView[]>([])
   const [revision, setRevision] = useState(0)
@@ -1350,6 +1363,7 @@ export default function App() {
               <div className="transcript-host">
                 <ReadOnlyTranscriptViewer
                   viewModel={transcript.viewModel}
+                  theme={resolvedTheme}
                   leftRailOpen={transcriptLeftRail}
                   onLeftRailOpenChange={setTranscriptLeftRail}
                   rightRailOpen={transcriptRightRail}
@@ -1373,6 +1387,12 @@ export default function App() {
           </p>
         </div>
         <div className="hero-meta">
+          <div className="theme-control">
+            <label className="eyebrow" htmlFor={themeId}>Theme</label>
+            <Select id={themeId} value={preference} onChange={(event) => { setThemeSelected(true); themeController.setPreference(parseThemePreference(event.currentTarget.value)) }}
+              options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'system', label: 'System' }]} />
+            {themeSelected && persistence === 'unavailable' && <span role="status">Theme choice was not saved. Allow site storage in your browser.</span>}
+          </div>
           <ConnectionPill status={connection} />
           <span className="mono-meta">rev {revision}</span>
           <span className="mono-meta">{asOf ? formatTime(asOf) : 'no snapshot'}</span>

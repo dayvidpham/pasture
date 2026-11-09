@@ -8,6 +8,10 @@ const bootstrap = html.match(/<script>([\s\S]*?)<\/script>/)?.[1]
 afterEach(() => vi.unstubAllGlobals())
 
 describe('pre-paint theme bootstrap', () => {
+  it('declares a dark no-script fallback without overriding the bootstrap', () => {
+    expect(html).toContain('<meta name="color-scheme" content="dark" />')
+    expect(html.indexOf('name="color-scheme"')).toBeLessThan(html.indexOf('<script>'))
+  })
   it.each([
     { name: 'system light', value: null, media: 'light' },
     { name: 'system dark', value: null, media: 'dark' },
