@@ -1,12 +1,24 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="color-scheme" content="dark" />
+    <script>
+      (() => {
+        let preference;
+        try { preference = window.localStorage.getItem('pasture.theme.preference'); } catch {}
+        let theme = preference === 'light' || preference === 'dark' ? preference : 'dark';
+        if (preference !== 'light' && preference !== 'dark') {
+          try { if (typeof window.matchMedia === 'function') theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; } catch {}
+        }
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+      })();
+    </script>
     <title>pasture · session epochs</title>
-    <script type="module" crossorigin src="/assets/index-C8u9nuBU.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-5yn4fHfv.css">
+    <script type="module" crossorigin src="/assets/index-BSx8H94G.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BifuFcEo.css">
   </head>
   <body>
     <div id="root"></div>

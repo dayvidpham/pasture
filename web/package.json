@@ -7,6 +7,8 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.0",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -24,7 +26,8 @@
     "dev": "vite",
     "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.7.0.json -o src/generated/api.ts",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser": "playwright test"
   },
   "type": "module",
   "version": "0.0.32"
