@@ -73,6 +73,12 @@ test.afterAll(cleanup)
 test.beforeEach(async ({ page }) => {
   errors = []
   page.on('pageerror', error => errors.push(`pageerror: ${error.message}`))
+  page.on('response', response => {
+    const url = new URL(response.url())
+    if (url.origin === origin && (url.pathname.startsWith('/assets/') || response.request().resourceType() === 'document') && (response.status() < 200 || response.status() >= 400)) {
+      errors.push(`asset: ${response.url()} ${response.status()}`)
+    }
+  })
   page.on('requestfailed', request => {
     if (new URL(request.url()).pathname.startsWith('/assets/')) errors.push(`asset: ${request.url()} ${request.failure()?.errorText}`)
   })
@@ -138,17 +144,6 @@ for (const theme of ['light', 'dark'] as const) {
       }
     }, theme)
     await open(page)
-    for (const selector of ['.state-basis', '.session-link', '.attribution-source', '.execution-list', '.transcript-host .txn-md-prose', '.theme-control select']) {
-      const locator = page.locator(selector).first()
-      console.log('paint', theme, selector, await locator.evaluate(el => {
-        const chain = []
-        for (let node: Element | null = el; node; node = node.parentElement) {
-          const style = getComputedStyle(node)
-          if (style.backgroundColor !== 'rgba(0, 0, 0, 0)' || style.backgroundImage !== 'none') chain.push([node.tagName, style.backgroundColor, style.backgroundImage])
-        }
-        return { color: getComputedStyle(el).color, backgrounds: chain }
-      }))
-    }
     await agrees(page, theme)
     await page.emulateMedia({ colorScheme: theme })
     await page.emulateMedia({ colorScheme: theme === 'light' ? 'dark' : 'light' })
@@ -164,24 +159,6 @@ for (const theme of ['light', 'dark'] as const) {
     for (const selector of ['body', '.transcript-host']) {
       const result = await new AxeBuilder({ page }).include(selector).withRules(['color-contrast']).analyze()
       console.log(`${theme} ${selector}: ${result.violations.length} violations, ${result.incomplete.length} incomplete`)
-      console.log('incomplete:', JSON.stringify(result.incomplete.map(item => ({ id: item.id, nodes: item.nodes.map(node => ({ target: node.target, summary: node.failureSummary })) }))))
-      for (const issue of result.incomplete) {
-        for (const node of issue.nodes) {
-          // Preserve every indeterminate result; these diagnostics do not turn it into a pass.
-          const target = node.target.join(' >> ')
-          const details = await page.locator(target).first().evaluate(el => {
-            const describe = (candidate: Element) => {
-              const style = getComputedStyle(candidate)
-              return { element: candidate.tagName, id: candidate.id, className: candidate.getAttribute('class'), backgroundColor: style.backgroundColor, backgroundImage: style.backgroundImage, position: style.position, zIndex: style.zIndex }
-            }
-            const backgrounds = []
-            for (let ancestor: Element | null = el; ancestor; ancestor = ancestor.parentElement) backgrounds.push(describe(ancestor))
-            const bounds = el.getBoundingClientRect()
-            return { text: (el.textContent || '').trim().slice(0, 160), color: getComputedStyle(el).color, backgrounds, center: { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }, elementsFromPoint: document.elementsFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2).map(describe) }
-          })
-          console.log('AXE_INCOMPLETE_JSON ' + JSON.stringify({ theme, scan: selector, rule: issue.id, target: node.target, summary: node.failureSummary, ...details, result: 'UNRESOLVED' }))
-        }
-      }
       expect(result.violations).toEqual([])
     }
   })
