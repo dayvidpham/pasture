@@ -60,9 +60,9 @@ var architectHandoffBody = SkillBody{
    ` + "```" + `bash
    HANDOFF_ID_URI=$([[rec:create]] --kind task --title "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --priority 2 \
      --body="---
-   ` + handoffReferenceFrontmatter("     ") + `   ---
-   # Handoff: Architect → Supervisor
-   <full handoff body per the template above>")
+` + handoffReferenceFrontmatter("  ") + `---
+# Handoff: Architect → Supervisor
+<full handoff body per the template above>")
    [[rec:label]] "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
 
    ` + "```" + `

@@ -302,3 +302,42 @@ func TestUserGateList(t *testing.T) {
 		}
 	}
 }
+
+// The handoff skill owns the create recipe; architect is only a pointer.
+func findHandoffExportStep(architect, handoff string) []string {
+	var findings []string
+	create := regexp.MustCompile(`(?s)(?:\[\[rec:create\]\]|\$\{?EPOCH_REC\}?"?\s+create).*?--phase[= ]+handoff`)
+	if create.MatchString(architect) {
+		findings = append(findings, "handoff create recipe is duplicated; why: recipes can drift; where: architect skill; fix: invoke architect-handoff instead")
+	}
+	if !strings.Contains(architect, "architect-handoff") {
+		findings = append(findings, "handoff pointer missing; why: the procedure cannot be found; where: architect skill; fix: invoke architect-handoff")
+	}
+	if !create.MatchString(handoff) {
+		findings = append(findings, "handoff create recipe missing; why: no canonical creation step exists; where: architect-handoff; fix: restore the create step")
+	}
+	return findings
+}
+
+func TestHandoffExportStep(t *testing.T) {
+	owner := `HANDOFF_ID_URI=$([[rec:create]] --phase handoff)`
+	if got := findHandoffExportStep("architect-handoff\n"+owner, owner); len(got) == 0 {
+		t.Fatal("duplicate recipe accepted")
+	}
+	if got := findHandoffExportStep("Invoke architect-handoff", owner); len(got) != 0 {
+		t.Fatal(got)
+	}
+	for _, root := range []string{"skills", ".agents/skills", ".opencode/skill", "internal/target/opencode/assets/skills", "internal/target/claudecode/assets/pasture-skills/skills"} {
+		a, err := os.ReadFile(filepath.Join("..", "..", root, "architect", "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := os.ReadFile(filepath.Join("..", "..", root, "architect-handoff", "SKILL.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, finding := range findHandoffExportStep(string(a), string(h)) {
+			t.Error(root, finding)
+		}
+	}
+}

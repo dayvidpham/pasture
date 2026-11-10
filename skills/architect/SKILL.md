@@ -497,22 +497,7 @@ Add label to proposal (DO NOT close, delete, or create new task):
 
 ### Phase 7: HANDOFF
 
-Create the HANDOFF task — its body IS the handoff document:
-```bash
-HANDOFF_ID_URI=$("${EPOCH_REC}" create --kind task --title "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --priority 2 \
-  --body "---
-references:
-  request: "${REQUEST_ID_URI}"
-  urd: "${URD_ID_URI}"
-  proposal: "${RATIFIED_PROPOSAL_ID_URI}"
-  ratified_plan: "${RATIFIED_PLAN_ID_URI}"
----
-# Handoff: Architect → Supervisor
-<full handoff body — the task body IS the handoff>")
-"${EPOCH_REC}" label "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
-```
-
-Storage: the handoff is authored in this HANDOFF Pasture task body (no filesystem path).
+Invoke `/pasture:architect-handoff` to create the handoff and delegate the supervisor.
 
 ## Plan Structure
 

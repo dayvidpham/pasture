@@ -2059,3 +2059,38 @@ func countUnregisteredTrackerCalls(text, entryPoint string, callOp *regexp.Regex
 		}
 	}
 }
+
+// TestHandoffCreateRecipe runs the rendered recipe with a fake adapter and set -u.
+func TestHandoffCreateRecipe(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "skills", "architect-handoff", "SKILL.md"))
+	require.NoError(t, err)
+	text := string(data)
+	start := strings.Index(text, "1. Create the HANDOFF Pasture task")
+	require.GreaterOrEqual(t, start, 0)
+	text = text[start:]
+	start = strings.Index(text, "```bash\n")
+	require.GreaterOrEqual(t, start, 0)
+	text = text[start+len("```bash\n"):]
+	end := strings.Index(text, "```")
+	require.GreaterOrEqual(t, end, 0)
+	dir := t.TempDir()
+	adapter := filepath.Join(dir, "rec")
+	script := `#!/bin/sh
+case "$1" in
+create) shift; for arg do case "$arg" in --body=*) printf '%s' "${arg#--body=}" > "$OUT";; esac; done; printf 'test/handoff\n';;
+label) printf '%s\n' "$*" > "$LABEL";;
+esac
+`
+	require.NoError(t, os.WriteFile(adapter, []byte(script), 0755))
+	cmd := exec.Command("bash", "-uc", text[:end])
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "EPOCH_REC="+adapter, "OUT="+filepath.Join(dir, "body"), "LABEL="+filepath.Join(dir, "label"), "REQUEST_ID_URI=test/request", "URD_ID_URI=test/urd", "RATIFIED_PROPOSAL_ID_URI=test/proposal", "RATIFIED_PLAN_ID_URI=test/plan")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "%s", out)
+	body, err := os.ReadFile(filepath.Join(dir, "body"))
+	require.NoError(t, err)
+	require.Contains(t, string(body), "---\nreferences:\n  request: test/request\n  urd: test/urd\n  proposal: test/proposal\n  ratified_plan: test/plan\n---")
+	label, err := os.ReadFile(filepath.Join(dir, "label"))
+	require.NoError(t, err)
+	require.Contains(t, string(label), "label test/handoff")
+}

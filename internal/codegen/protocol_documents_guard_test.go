@@ -663,7 +663,7 @@ func TestHandoffTemplateBindsEveryReference(t *testing.T) {
 		}
 		assert.Contains(t, rendered, "<"+field+">", "the unbound field %q must render a section the author fills", field)
 	}
-	for skill, body := range map[string]SkillBody{"architect-handoff": architectHandoffBody, "architect": architectBody} {
+	for skill, body := range map[string]SkillBody{"architect-handoff": architectHandoffBody} {
 		for _, finding := range frontmatterBindingFindings(skill, body) {
 			t.Error(finding)
 		}
@@ -723,7 +723,6 @@ func frontmatterBindingFindings(skill string, body SkillBody) []string {
 func TestHandoffCreateStepsBindEveryReference(t *testing.T) {
 	for skill, body := range map[string]SkillBody{
 		"architect-handoff": architectHandoffBody,
-		"architect":         architectBody,
 	} {
 		for _, finding := range frontmatterBindingFindings(skill, body) {
 			t.Error(finding)

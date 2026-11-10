@@ -1,8 +1,6 @@
 // Body content for the architect role SKILL.md.
 package codegen
 
-import "strings"
-
 var architectBody = SkillBody{
 	Preamble: `**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-3-proposal-n)**`,
 	Sections: []ProseSection{
@@ -133,7 +131,7 @@ references:
 				{
 					Id:      "arch-phase7-handoff",
 					Title:   "Phase 7: HANDOFF",
-					Content: architectHandoffCreateStep(),
+					Content: "Invoke `/pasture:architect-handoff` to create the handoff and delegate the supervisor.",
 				},
 			},
 		},
@@ -183,19 +181,4 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 			ShouldNot: "create FOLLOWUP_PROPOSAL without reading the original URD",
 		},
 	},
-}
-
-// architectHandoffCreateStep renders the handoff create command from the same
-// reference registry the handoff skill's template uses, so a required field
-// cannot be named in the table and left unbound in the command.
-func architectHandoffCreateStep() string {
-	var b strings.Builder
-	b.WriteString("Create the HANDOFF task — its body IS the handoff document:\n```bash\n")
-	b.WriteString(`HANDOFF_ID_URI=$([[rec:create]] --kind task --title "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --priority 2 \`)
-	b.WriteString("\n  --body \"---\n")
-	b.WriteString(handoffReferenceFrontmatter("  "))
-	b.WriteString("---\n# Handoff: Architect → Supervisor\n<full handoff body — the task body IS the handoff>\")\n")
-	b.WriteString("[[rec:label]] \"$HANDOFF_ID_URI\" pasture:p7-plan:s7-handoff\n```\n\n")
-	b.WriteString("Storage: the handoff is authored in this HANDOFF Pasture task body (no filesystem path).")
-	return b.String()
 }

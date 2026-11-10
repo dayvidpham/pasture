@@ -320,14 +320,14 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
    ```bash
    HANDOFF_ID_URI=$("${EPOCH_REC}" create --kind task --title "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --priority 2 \
      --body="---
-   references:
-     request: "${REQUEST_ID_URI}"
-     urd: "${URD_ID_URI}"
-     proposal: "${RATIFIED_PROPOSAL_ID_URI}"
-     ratified_plan: "${RATIFIED_PLAN_ID_URI}"
-   ---
-   # Handoff: Architect → Supervisor
-   <full handoff body per the template above>")
+references:
+  request: "${REQUEST_ID_URI}"
+  urd: "${URD_ID_URI}"
+  proposal: "${RATIFIED_PROPOSAL_ID_URI}"
+  ratified_plan: "${RATIFIED_PLAN_ID_URI}"
+---
+# Handoff: Architect → Supervisor
+<full handoff body per the template above>")
    "${EPOCH_REC}" label "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
 
    ```
