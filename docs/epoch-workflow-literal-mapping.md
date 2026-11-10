@@ -34,9 +34,13 @@ value, never free prose.
 over the whole rendered document in `renderSkill`, `renderSubSkill`,
 `renderAgentForTarget`, and the OpenCode lifecycle plugin, so every rendering
 corpus goes through the one resolver. `renderedSources` in
-`internal/codegen/body_refs.go` enumerates every authored rendering input; the
-guards in `body_refs_test.go` iterate that one list, so a new corpus cannot be
-added blind.
+`internal/codegen/body_refs.go` enumerates every authored rendering input,
+including the marker prose that `schema.go` builds into `schema.xml` (read from
+the source itself, because it lives inline rather than in a registry). The
+guards in `body_refs_test.go` iterate that one list.
+`TestEveryMarkerBearingCodegenFileIsRepresented` fails the build when any
+non-test `internal/codegen/*.go` file authors marker prose the sweep does not
+carry, so a new corpus cannot be added blind.
 
 `TestRenderingSourcesCarryNoRawHarnessLiterals` fails the build when a raw call
 prefix, harness phrase (`Task tool`, `Agent tool`, `SendMessage`, `TeamCreate`)
@@ -183,31 +187,66 @@ source below now authors typed markers and is covered by `renderedSources`:
 
 ## 5. Equivalence
 
-Method (strict): generate the base tree and the changed tree, then diff every
-generated file under `skills/`, `.agents/skills/`, `.opencode/skill/`,
-`agents/`, `.codex/`, `schema.xml`, the committed target assets and
-`internal/inventory/`. Each changed line pair is canonicalised by replacing the
-old and new resolved token with one placeholder. A line pair that differs by any
-other character is UNEXPLAINED. Article, number and grammar differences are not
-normalised: an article that changes because a resolved noun changed is a defect
-in the source, not a legitimate repair.
+Method (strict): compare the generated trees at the fix-pass base `5ab7cb7e`
+and at `c1950bc3`. Later commits on this branch change only guards and docs, so
+that is still the branch's generated tree. Every changed generated file under
+`skills/`, `.agents/skills/`, `.opencode/skill/`, `.opencode/agent/`, `agents/`,
+`internal/target/`, and `schema.xml` is diffed line by line with
+`difflib.SequenceMatcher` (no autojunk). A one-to-one `replace` pair is
+**token-only** when the only difference is a marker's resolved name; the
+canonicalisation rules are in the reproducer. Any other pair is a
+**required-rewrite**, classified as one of: delegation call-form opener, its
+structural `})` → `}` closure, the article rewrite, or the retired-mechanism
+(TeamCreate/delegation) prose rewrite. A line with no counterpart in the new
+tree is a **deletion-only** line.
 
-Result over this fix pass (base `5ab7cb7e`): 56 generated files changed, 304
-changed line pairs. 91 line pairs are token-only and explained by the
-resolution table in §2. 218 line pairs are unexplained by resolution, in 64
-unique shapes, and every one is an explicit source rewrite required by the
-wave-2 gate:
+Reproducer: `scripts/epoch_workflow_equivalence.py`. It writes the per-line
+listing; every number below is computed from it, not hand-written.
 
-- `TeamCreate` deletion and the delegation-prose rewrite (62 shapes across the
-  5 committed copies: `skills/`, `.agents/skills/`, `.opencode/skill/`, and the
-  Claude/OpenCode target assets).
-- The article rewrite at `user-elicit` (3 copies).
-- Five `replace block` changes are the deleted `TeamCreate` code block.
+```sh
+python3 scripts/epoch_workflow_equivalence.py --listing docs/epoch-workflow-equivalence-listing.tsv
+```
 
-No unexplained line pair is an accidental wording change caused by marker
-resolution. Resolution alone changed only tokens. `schema.xml`, agents, and the
-OpenCode lifecycle plugin are now resolved too: `schema.xml` uses the neutral
-spelling, and the plugin embeds OpenCode-resolved recovery prose.
+Per-line listing: `docs/epoch-workflow-equivalence-listing.tsv` (one row per
+`replace` pair or deletion, with path, old/new line numbers, classification, and
+both line texts).
+
+Result over this fix pass:
+
+| Account | Count |
+|---|---|
+| Text files changed | 56 |
+| Binary Codex bundle changed (`codex-generated.json.gz`) | 1 |
+| Changed line pairs | 309 |
+| — token-only explained | 90 |
+| — required-rewrite explained | 219 |
+| Deletion-only lines | 5 |
+| Old generated lines accounted (309 pairs + 5 deletions) | 314 |
+| New generated lines added | 309 |
+
+The 219 required rewrites split exactly into:
+
+| Rewrite | Count | Why it is not resolution |
+|---|---|---|
+| Delegation call-form opener (`Agent({` / `task({` / `delegate_assignment({)` → `delegation: {`) | 30 | the pseudocode call shape changes, not just the name |
+| Its structural closure `})` → `}` | 30 | the opener rewrite removes the closing paren |
+| Article rewrite (`in an … preview` → `in the preview the … call shows`) | 5 | one per committed copy: `skills/`, `.agents/skills/`, `.opencode/skill/`, and the Claude and OpenCode target assets |
+| Retired-mechanism prose rewrite (TeamCreate/delegation prose, figure wording) | 154 | deletes the retired mechanism; no marker resolves to it |
+
+The 5 deletion-only lines are the retired-mechanism comment lines
+(`# then assign the supervisor its task via …`) in the five committed copies of
+`architect-handoff/SKILL.md`; they have no counterpart in the new tree.
+
+The equations reconcile exactly: `309 = 90 + 219`, and
+`219 = 30 + 30 + 5 + 154`. The article rewrite is **5** copies, not 3.
+`309 + 5 = 314` old lines; the new tree adds exactly the 309 paired lines.
+
+The binary Codex bundle is not line-diffed: it is a gzip of the
+`.agents/skills` contents, which are already diffed as text, so it carries no
+independent line pair. No unexplained line pair is an accidental wording change
+caused by marker resolution: resolution alone changed only names. `schema.xml`,
+agents, and the OpenCode lifecycle plugin are resolved too; `schema.xml` uses
+the neutral spelling.
 
 The classification manifest
 (`internal/codegen/scan/manifest/classifications.json`) is updated only where a

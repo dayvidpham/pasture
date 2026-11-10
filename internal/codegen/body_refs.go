@@ -2,9 +2,13 @@ package codegen
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dayvidpham/pasture/internal/codegen/ir"
@@ -280,14 +284,55 @@ type renderingSource struct {
 	Text   string
 }
 
-// renderedSources returns every authored string that reaches generated skill,
-// sub-skill, or agent output. It is the ONE enumeration the literal guards
-// iterate: a new rendering corpus is added here once, and every guard sees it
-// (tenets 4, 6 and 8).
+// schemaSourceFile is the codegen source that generates schema.xml. Unlike the
+// body and role specs, its marker prose lives inline in build functions rather
+// than in a registry, so renderedSources reads it from this file.
+const schemaSourceFile = "schema.go"
+
+// completeMarkerPattern matches a whole body marker. A bare "[[ " or "]]"
+// fragment (the grammar constants in this file) is not authored prose and does
+// not match.
+var completeMarkerPattern = regexp.MustCompile(`\[\[(?:tool:[a-z_]+|op:[a-z_]+|rec)\]\]`)
+
+// authoredMarkerLiterals returns every string-literal value in one Go source
+// file that contains a complete body marker. Reading the source keeps one home
+// for the literal (tenet 7): adding a marker to schema.go is swept without a
+// second hand-maintained list. Test-only files are parsed the same way; callers
+// choose which files to hand it.
+func authoredMarkerLiterals(path string) ([]string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	ast.Inspect(file, func(node ast.Node) bool {
+		lit, ok := node.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		value, unquoteErr := strconv.Unquote(lit.Value)
+		if unquoteErr != nil {
+			return true
+		}
+		if completeMarkerPattern.MatchString(value) {
+			out = append(out, value)
+		}
+		return true
+	})
+	return out, nil
+}
+
+// renderedSources returns every authored string that reaches generated output:
+// generated skill and sub-skill files, agent definitions, the OpenCode
+// lifecycle plugin's recovery prose, and schema.xml. It is the ONE enumeration
+// the literal guards iterate: a new rendering corpus is added here once, and
+// every guard sees it (tenets 4, 6 and 8).
 //
-// The enumeration is deliberately closed over the template inputs in
-// skills.go, agents.go and opencode_agent.go. Figures load their content from
-// skills/protocol/figures at generation time, so they are read here too.
+// The enumeration covers the registry inputs in skills.go, agents.go,
+// opencode_agent.go and schema.go. Figure content and schema.go's inline
+// section data live outside the static registries, so both are read from disk
+// at guard time: figures load from skills/protocol/figures, and schema.go's
+// authored marker literals are parsed from its source.
 func renderedSources() ([]renderingSource, error) {
 	var sources []renderingSource
 	add := func(corpus, owner, text string) {
@@ -407,6 +452,10 @@ func renderedSources() ([]renderingSource, error) {
 			add(corpus, owner+".Instruction", step.Instruction)
 			add(corpus, owner+".Command", step.Command)
 			add(corpus, owner+".Context", step.Context)
+			// schema.go renders each step example's code block into schema.xml.
+			for j, example := range step.Examples {
+				add(corpus, fmt.Sprintf("%s.Examples[%d](%s).Code", owner, j, example.Id), example.Code)
+			}
 		}
 	}
 
@@ -471,6 +520,25 @@ func renderedSources() ([]renderingSource, error) {
 			continue
 		}
 		add(corpus, "Content", content)
+	}
+
+	// schema.go builds schema.xml from inline section data and directives; its
+	// authored marker strings are not registry data, so read them from the
+	// source itself. ResolveBodyMarkersNeutral resolves them into schema.xml,
+	// which means they are rendering sources exactly like the registry text.
+	schemaPath := filepath.Join(root, "internal", "codegen", schemaSourceFile)
+	schemaLiterals, err := authoredMarkerLiterals(schemaPath)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"codegen.renderedSources: cannot read schema.go's authored marker prose — "+
+				"why: schema.go renders into schema.xml through ResolveBodyMarkersNeutral, so its "+
+				"marker strings must be swept by the literal guards; where: %s; "+
+				"fix: keep each marker in a string literal so the AST can find it: %w",
+			schemaPath, err,
+		)
+	}
+	for i, literal := range schemaLiterals {
+		add(schemaSourceFile, fmt.Sprintf("MarkerLiteral[%d]", i), literal)
 	}
 
 	sort.SliceStable(sources, func(i, j int) bool {

@@ -2,9 +2,13 @@ package codegen
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
+	"github.com/dayvidpham/pasture/internal/codegen/scan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -105,6 +109,99 @@ func TestRenderingSourcesAvoidArticleBeforeMarker(t *testing.T) {
 			source.Corpus, source.Owner, source.Text,
 		)
 	}
+}
+
+// TestSchemaProseIsSweptByArticleGuard proves schema.go's authored marker prose
+// is in the shared sweep, and that an article before one of its markers fails
+// the same article guard. schema.go renders into schema.xml, so a defect there
+// would ship just like a body defect.
+func TestSchemaProseIsSweptByArticleGuard(t *testing.T) {
+	t.Parallel()
+
+	sources, err := renderedSources()
+	require.NoError(t, err)
+
+	var schemaTexts []string
+	for _, source := range sources {
+		if source.Corpus == schemaSourceFile {
+			schemaTexts = append(schemaTexts, source.Text)
+		}
+	}
+	require.NotEmpty(t, schemaTexts,
+		"renderedSources must sweep schema.go's authored marker prose into schema.xml")
+
+	// Use the real schema prose as the clean sample, then inject the article
+	// the guard exists to catch. This fails if schema.go ever stops flowing
+	// through the sweep or the article guard stops seeing its markers.
+	var clean string
+	for _, text := range schemaTexts {
+		if strings.Contains(text, "[[op:invoke_skill]]") {
+			clean = text
+			break
+		}
+	}
+	require.NotEmpty(t, clean, "schema.go must author at least one [[op:invoke_skill]] directive")
+	assert.Empty(t, articleBeforeMarkerPattern.FindAllString(clean, -1),
+		"clean schema prose must produce no article finding")
+
+	defective := strings.Replace(clean, "[[op:invoke_skill]]", "an [[op:invoke_skill]]", 1)
+	require.NotEmpty(t, articleBeforeMarkerPattern.FindAllString(defective, -1),
+		"an article before a marker in schema.go prose must fail the article guard: %q", defective)
+}
+
+// TestEveryMarkerBearingCodegenFileIsRepresented is the completeness guard for
+// the sweep itself. Every non-test internal/codegen/*.go file that authors a
+// complete body marker must have that authored text represented in
+// renderedSources. A new rendering corpus added to a codegen file fails here
+// until its marker text is swept, so it cannot be added blind.
+func TestEveryMarkerBearingCodegenFileIsRepresented(t *testing.T) {
+	t.Parallel()
+
+	root, err := scan.ModuleRoot()
+	require.NoError(t, err)
+	sources, err := renderedSources()
+	require.NoError(t, err)
+	require.NotEmpty(t, sources, "the rendering-source enumeration must not be empty")
+
+	entries, err := os.ReadDir(filepath.Join(root, "internal", "codegen"))
+	require.NoError(t, err)
+
+	var sawSchema bool
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		// body_refs.go is the sweep itself: it holds the marker grammar and
+		// diagnostic examples, not authored rendering prose. The other files
+		// are the authoring surface the sweep must cover.
+		if name == "body_refs.go" {
+			continue
+		}
+		literals, err := authoredMarkerLiterals(filepath.Join(root, "internal", "codegen", name))
+		require.NoError(t, err)
+		if len(literals) == 0 {
+			continue
+		}
+		if name == schemaSourceFile {
+			sawSchema = true
+		}
+		for _, literal := range literals {
+			represented := false
+			for _, source := range sources {
+				if strings.Contains(source.Text, literal) {
+					represented = true
+					break
+				}
+			}
+			assert.Truef(t, represented,
+				"%s authors marker prose %q that no rendered source carries — "+
+					"add its corpus to renderedSources so the literal guards sweep it",
+				name, literal)
+		}
+	}
+	assert.True(t, sawSchema,
+		"the completeness scan must find schema.go, which authors marker prose for schema.xml")
 }
 
 // TestResolveBodyMarkersPerTarget pins one authored marker to each target's
