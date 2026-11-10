@@ -395,6 +395,17 @@ type HandoffSpec struct {
 	AtPhase        protocol.PhaseId
 	ContentLevel   string // ContentLevel wire value: "full-provenance", "summary-with-ids"
 	RequiredFields []string
+	// Bindings names the required fields the handoff body also binds as task
+	// URIs, with the shell variable that carries each. Every binding names a
+	// field in RequiredFields; a bound field renders as a reference with its
+	// read command, an unbound one renders as a section the author fills.
+	Bindings []HandoffBinding
+}
+
+// HandoffBinding is a required handoff field carried as a shell variable.
+type HandoffBinding struct {
+	Field string
+	Var   string
 }
 
 // ─── FigureSpec ───────────────────────────────────────────────────────────────

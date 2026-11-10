@@ -1165,6 +1165,12 @@ var HandoffSpecs = map[string]HandoffSpec{
 			"request", "urd", "proposal", "ratified-plan",
 			"context", "key-decisions", "open-items", "acceptance-criteria",
 		},
+		Bindings: []HandoffBinding{
+			{Field: "request", Var: "REQUEST_ID_URI"},
+			{Field: "urd", Var: "URD_ID_URI"},
+			{Field: "proposal", Var: "RATIFIED_PROPOSAL_ID_URI"},
+			{Field: "ratified-plan", Var: "RATIFIED_PLAN_ID_URI"},
+		},
 	},
 	"h2": {
 		Id:           "h2",

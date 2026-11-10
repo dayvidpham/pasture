@@ -175,25 +175,10 @@ Given an expired token when accessing protected routes then return 401
 	Recipes: []RecipeBlock{},
 }
 
-// handoffReference is one handoff field the body binds as a task URI, with the
-// shell variable that carries it. The template and the create step both render
-// from this list, so a field cannot be named without a variable to fill it.
-type handoffReference struct {
-	Field string
-	Var   string
-}
-
-var handoffReferences = []handoffReference{
-	{Field: "request", Var: "REQUEST_ID_URI"},
-	{Field: "urd", Var: "URD_ID_URI"},
-	{Field: "proposal", Var: "RATIFIED_PROPOSAL_ID_URI"},
-	{Field: "ratified-plan", Var: "RATIFIED_PLAN_ID_URI"},
-}
-
 // archHandoffTemplate renders the handoff body from the h1 HandoffSpec: the
-// reference fields become bound URIs with a read command, the rest become
-// sections. One registry feeds this template, the architect skill's table and
-// the create step's frontmatter.
+// bound fields become URIs with a read command, the rest become sections, and
+// the create step's frontmatter uses the same Bindings. The architect skill's
+// table renders from RequiredFields, so the field list has one home.
 func archHandoffTemplate() string {
 	spec := HandoffSpecs["h1"]
 	var b strings.Builder
@@ -207,12 +192,12 @@ func archHandoffTemplate() string {
 	b.WriteString("3. Read each reference under References with the command beside it, before you plan\n")
 	b.WriteString("4. Every vertical slice MUST have leaf tasks — any number, named after the real work units\n")
 	b.WriteString("\n## References\n")
-	for _, ref := range handoffReferences {
-		b.WriteString("- " + handoffFieldHeading(ref.Field) + ": \"${" + ref.Var + "}\" — read with `\"${EPOCH_REC}\" show \"${" + ref.Var + "}\"`\n")
+	for _, binding := range spec.Bindings {
+		b.WriteString("- " + handoffFieldHeading(binding.Field) + ": \"${" + binding.Var + "}\" — read with `\"${EPOCH_REC}\" show \"${" + binding.Var + "}\"`\n")
 	}
 	bound := map[string]struct{}{}
-	for _, ref := range handoffReferences {
-		bound[ref.Field] = struct{}{}
+	for _, binding := range spec.Bindings {
+		bound[binding.Field] = struct{}{}
 	}
 	for _, field := range spec.RequiredFields {
 		if _, ok := bound[field]; ok {
@@ -240,13 +225,13 @@ func handoffFieldHeading(field string) string {
 }
 
 // handoffReferenceFrontmatter renders the task body's references: block from
-// handoffReferences, so every create step binds exactly the fields the handoff
-// registry requires and none is left unbound.
+// HandoffSpecs["h1"].Bindings, so every create step binds exactly the fields the
+// handoff registry requires and none is left unbound.
 func handoffReferenceFrontmatter(indent string) string {
 	var b strings.Builder
 	b.WriteString("references:\n")
-	for _, ref := range handoffReferences {
-		b.WriteString(indent + strings.ReplaceAll(ref.Field, "-", "_") + ": \"${" + ref.Var + "}\"\n")
+	for _, binding := range HandoffSpecs["h1"].Bindings {
+		b.WriteString(indent + strings.ReplaceAll(binding.Field, "-", "_") + ": \"${" + binding.Var + "}\"\n")
 	}
 	return b.String()
 }

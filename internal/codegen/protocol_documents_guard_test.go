@@ -633,11 +633,32 @@ func TestMergeRequestFieldsAreRegistered(t *testing.T) {
 // variable for every reference field and shows how to read it, so a field
 // cannot be required without a way to fill it.
 func TestHandoffTemplateBindsEveryReference(t *testing.T) {
-	require.NotEmpty(t, handoffReferences, "the template must declare its reference fields")
+	spec := HandoffSpecs["h1"]
+	require.NotEmpty(t, spec.Bindings, "the handoff registry must declare its bound fields")
 	rendered := archHandoffTemplate()
-	for _, ref := range handoffReferences {
-		assert.Contains(t, rendered, "${"+ref.Var+"}", "the reference field %q must carry its variable", ref.Field)
-		assert.Contains(t, rendered, `show "${`+ref.Var+`}"`, "the reference field %q must show how to read it", ref.Field)
+	for _, binding := range spec.Bindings {
+		assert.Contains(t, rendered, "${"+binding.Var+"}", "the bound field %q must carry its variable", binding.Field)
+		assert.Contains(t, rendered, `show "${`+binding.Var+`}"`, "the bound field %q must show how to read it", binding.Field)
+	}
+	// The partition is asserted both ways: every binding appears exactly once as
+	// a reference line, and no other variable does. A binding removed from the
+	// registry therefore shows up as a changed partition rather than silently
+	// becoming a section.
+	assert.Equal(t, len(spec.Bindings), strings.Count(rendered, `— read with `),
+		"the template must render exactly one reference line per binding")
+	for _, binding := range spec.Bindings {
+		assert.Equal(t, 2, strings.Count(rendered, "${"+binding.Var+"}"),
+			"the variable %q must appear as the value and in its read command", binding.Var)
+	}
+	bound := map[string]struct{}{}
+	for _, binding := range spec.Bindings {
+		bound[binding.Field] = struct{}{}
+	}
+	for _, field := range spec.RequiredFields {
+		if _, ok := bound[field]; ok {
+			continue
+		}
+		assert.Contains(t, rendered, "<"+field+">", "the unbound field %q must render a section the author fills", field)
 	}
 	for skill, body := range map[string]SkillBody{"architect-handoff": architectHandoffBody, "architect": architectBody} {
 		for _, finding := range frontmatterBindingFindings(skill, body) {
@@ -688,9 +709,9 @@ func frontmatterBindingFindings(skill string, body SkillBody) []string {
 		return []string{skill + ": no section creates the handoff"}
 	}
 	var findings []string
-	for _, ref := range handoffReferences {
-		if !strings.Contains(create, "${"+ref.Var+"}") {
-			findings = append(findings, skill+": the create step leaves "+ref.Field+" unbound ("+ref.Var+")")
+	for _, binding := range HandoffSpecs["h1"].Bindings {
+		if !strings.Contains(create, "${"+binding.Var+"}") {
+			findings = append(findings, skill+": the create step leaves "+binding.Field+" unbound ("+binding.Var+")")
 		}
 	}
 	return findings
@@ -716,5 +737,38 @@ references:
 		t.Fatal("a create step that binds one reference was accepted")
 	} else {
 		t.Log(got[0])
+	}
+}
+
+// TestHandoffBindingsNameRequiredFields proves a binding cannot name a field the
+// handoff does not require, which would bind a variable no reader was told to
+// fill.
+func TestHandoffBindingsNameRequiredFields(t *testing.T) {
+	for id, spec := range HandoffSpecs {
+		required := map[string]struct{}{}
+		for _, field := range spec.RequiredFields {
+			required[field] = struct{}{}
+		}
+		for _, binding := range spec.Bindings {
+			if _, ok := required[binding.Field]; !ok {
+				t.Errorf("%s binds %q, which is not one of its required fields", id, binding.Field)
+			}
+			if binding.Var == "" {
+				t.Errorf("%s binds %q with no variable", id, binding.Field)
+			}
+		}
+	}
+
+	defective := HandoffSpec{
+		Id:             "test",
+		RequiredFields: []string{"request"},
+		Bindings:       []HandoffBinding{{Field: "impl-plan", Var: "IMPL_PLAN_ID_URI"}},
+	}
+	required := map[string]struct{}{}
+	for _, field := range defective.RequiredFields {
+		required[field] = struct{}{}
+	}
+	if _, ok := required[defective.Bindings[0].Field]; ok {
+		t.Fatal("the defective sample must bind a field the spec does not require")
 	}
 }
