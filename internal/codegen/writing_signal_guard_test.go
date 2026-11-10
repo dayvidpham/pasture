@@ -87,8 +87,8 @@ var writingQuestionParts = []writingRequiredPart{
 var writingWordingTopLevel = []string{
 	"These rules adapt ASD-STE100",
 	"They are STE-aligned.",
+	"the wording house rule",
 	writingWordingCarrierSentence(),
-	writingQuestionLivesSentence(),
 }
 
 // writingQuestionTopLevel is the question fragment intro: the derived carrier
@@ -319,6 +319,26 @@ func TestWritingPartitionFollowsTheFragmentField(t *testing.T) {
 	assert.NotContains(t, ruleNumbersIn(writingRuleGroupsForFrom(groups, WritingFragmentQuestion)), 2,
 		"flipping rule 2's Fragment field must remove it from the question fragment")
 
+	// The question heading is data on the group, not a rename of "Shape" when
+	// one rule remains. A group that declares QuestionHeading renders it. A
+	// group that does not keeps its heading even when only one question rule
+	// is left.
+	declared := writingRuleGroupsFor(WritingFragmentQuestion)
+	var sawGrounding bool
+	for _, group := range declared {
+		if group.Heading == "Grounding" {
+			sawGrounding = true
+		}
+	}
+	assert.True(t, sawGrounding, "the Shape group's QuestionHeading must render as Grounding")
+	unnamed := []WritingRuleGroup{{
+		Heading: "Shape",
+		Rules:   []WritingRule{{2, "ground", "house", "example", WritingFragmentQuestion}},
+	}}
+	got := writingRuleGroupsForFrom(unnamed, WritingFragmentQuestion)
+	require.Len(t, got, 1)
+	assert.Equal(t, "Shape", got[0].Heading, "a missing QuestionHeading must not be invented from the heading text or the rule count")
+
 	house := append([]WritingHouseRule(nil), WritingHouseRules...)
 	house[len(house)-1].Fragment = WritingFragmentQuestion
 	assert.Contains(t, houseNames(writingHouseRulesForFrom(house, WritingFragmentQuestion)), "No self-praise",
@@ -384,6 +404,44 @@ func TestQuestionFragmentDoesNotClaimRisk(t *testing.T) {
 	err := validateWritingQuestionHeadings(bad)
 	require.Error(t, err, "a question heading that claims risk must fail")
 	assert.Contains(t, err.Error(), "risk")
+}
+
+// TestWritingLivesSentenceIsOnlyOnTheWordingOnlyCarrier proves the four
+// question carriers do not restate where question rules ship. Status, which
+// does not carry the question fragment, is the one document that says it.
+func TestWritingLivesSentenceIsOnlyOnTheWordingOnlyCarrier(t *testing.T) {
+	t.Parallel()
+
+	sentence := writingQuestionLivesSentence()
+	wording := SharedFragmentSpecs[FragWritingStandard]
+	require.NotNil(t, wording.Prose)
+	assert.NotContains(t, wording.Prose.Content, sentence,
+		"the shared wording fragment must not state the carrier fact; question carriers already do")
+
+	status, ok := SkillBodySpecs["status"]
+	require.True(t, ok)
+	var found bool
+	for _, section := range status.Sections {
+		if strings.Contains(section.Content, sentence) {
+			found = true
+		}
+	}
+	assert.True(t, found, "status, the wording-only carrier, must render the lives-sentence")
+}
+
+// TestValidateWritingRulesUsesTheGroupsArgument proves a fixture is validated
+// as itself. The live fragment does not name the question section, so a check
+// that ignored groups would pass this fixture.
+func TestValidateWritingRulesUsesTheGroupsArgument(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, ValidateWritingRules())
+	poisoned := append([]WritingRuleGroup(nil), WritingRuleGroups...)
+	poisoned[0].Rules = append([]WritingRule(nil), WritingRuleGroups[0].Rules...)
+	poisoned[0].Rules[0].Requirement = questionSectionTitle
+	err := validateWritingRules(poisoned)
+	require.Error(t, err, "a groups argument that names the question section must fail")
+	assert.Contains(t, err.Error(), questionSectionTitle)
 }
 
 // TestStatusPreSendDoesNotTestQuestionRules proves the wording check drops

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dayvidpham/provenance/pkg/namespace"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -416,6 +417,16 @@ func TestNamespaceAsksTheBackend(t *testing.T) {
 		require.Equal(t, "file://"+physicalPwd(t, dir), pastureNS)
 	})
 
+	t.Run("no-origin-subdirectory-does-not-split", func(t *testing.T) {
+		dir := initRepoWithoutOrigin(t)
+		sub := filepath.Join(dir, "nested")
+		require.NoError(t, os.Mkdir(sub, 0o755))
+		ledgerNS := createdNamespace(t, bin, sub, "ledger", "")
+		require.Equal(t, "file://"+physicalPwd(t, dir), ledgerNS,
+			"a ledger write from a subdirectory must use the work-tree root, not the caller's cwd")
+		require.NotEqual(t, "file://"+physicalPwd(t, sub), ledgerNS)
+	})
+
 	t.Run("explicit-header-wins", func(t *testing.T) {
 		dir := initRepoWithRemote(t, "git@github.com:example/other.git")
 		const pin = "https://example.test/pinned"
@@ -582,6 +593,86 @@ func TestArgumentBytesRoundTrip(t *testing.T) {
 			require.Equal(t, []string{payload}, labels.Labels, "label")
 		})
 	}
+}
+
+func TestLedgerShowEscapesC0AndKeepsTextOnOneLine(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "ledger")
+	header := filepath.Join(dir, "EPOCH.md")
+	require.NoError(t, os.WriteFile(header, []byte("backend: ledger\nnamespace: https://example.test/c0\nauthor: actor/c0\nledger: "+ledger+"\n"), 0o600))
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "EPOCH_FILE=" + header}
+	payload := "line\x01one\nline two"
+	id := strings.TrimSpace(runRecIn(t, dir, env, "create", "--kind", "task", "--title", "c0", "--phase", "request", "--body", payload))
+	raw := runRecIn(t, dir, env, "show", id)
+	require.NoError(t, json.Unmarshal([]byte(raw), &struct {
+		Description string `json:"description"`
+	}{}), "show --format json must be valid JSON when the body contains a C0 byte: %q", raw)
+	var shown struct {
+		Description string `json:"description"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(raw), &shown))
+	require.Equal(t, payload, shown.Description)
+
+	text := runRecIn(t, dir, env, "show", id, "--format", "text")
+	var description string
+	for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		if strings.HasPrefix(line, "description: ") {
+			require.Empty(t, description, "description must be one line, got a second %q", line)
+			description = strings.TrimPrefix(line, "description: ")
+		}
+	}
+	require.Contains(t, description, `\n`, "a newline in the description must be escaped so the field does not span lines")
+	require.NotContains(t, description, "\n")
+}
+
+func TestBodyHyphenIsLiteralAndAtDashIsStdin(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "ledger")
+	header := filepath.Join(dir, "EPOCH.md")
+	require.NoError(t, os.WriteFile(header, []byte("backend: ledger\nnamespace: https://example.test/body\nauthor: actor/body\nledger: "+ledger+"\n"), 0o600))
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "EPOCH_FILE=" + header}
+
+	literal := strings.TrimSpace(runRecIn(t, dir, env, "create", "--kind", "task", "--title", "hyphen", "--phase", "request", "--body", "-"))
+	shown := runRecIn(t, dir, env, "show", literal)
+	var doc struct {
+		Description string `json:"description"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(shown), &doc), shown)
+	require.Equal(t, "-", doc.Description, "--body - must store a hyphen, not read stdin")
+
+	cmd := exec.Command("sh", append([]string{"-c", TrackerRecScript, "rec"}, "create", "--kind", "task", "--title", "stdin", "--phase", "request", "--body", "@-")...)
+	cmd.Dir = dir
+	cmd.Env = env
+	cmd.Stdin = strings.NewReader("from stdin\n")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	require.NoError(t, cmd.Run(), stderr.String())
+	stdinID := strings.TrimSpace(stdout.String())
+	stdinShown := runRecIn(t, dir, env, "show", stdinID)
+	require.NoError(t, json.Unmarshal([]byte(stdinShown), &doc), stdinShown)
+	require.Equal(t, "from stdin", doc.Description, "command substitution strips the trailing newline; the body is still the stdin text, not a hyphen")
+}
+
+func TestNormalizeGitRemoteTrimsWhitespace(t *testing.T) {
+	start := strings.Index(TrackerRecScript, "normalize_git_remote() {")
+	require.GreaterOrEqual(t, start, 0)
+	var body strings.Builder
+	for _, line := range strings.Split(TrackerRecScript[start:], "\n") {
+		body.WriteString(line)
+		body.WriteByte('\n')
+		if line == "}" {
+			break
+		}
+	}
+	remote := "  git@github.com:example/repo.git  "
+	want, err := namespace.FromGitRemote(remote)
+	require.NoError(t, err)
+	script := "#!/bin/sh\n" + body.String() + "normalize_git_remote '" + remote + "'\n"
+	cmd := exec.Command("sh", "-c", script)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
+	require.Equal(t, want+"\n", string(out))
 }
 
 func runRecIn(t *testing.T, dir string, env []string, args ...string) string {

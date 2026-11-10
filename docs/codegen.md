@@ -250,11 +250,13 @@ Executable or ambiguous command-shaped legacy tracker usage is rejected, even
 when a native-call manifest labels the owner dead or a runtime literal. Retained
 history requires visible non-operational framing and a separate exact
 owner/section/Goldmark-node/byte-range/content-window/document-digest identity in
-`internal/codegen/scan/manifest/operational_history.json`. The inventory pins
-13 canonical quotations across four historical documents; byte-verbatim copies
-inherit canonical identities, never whole-file exemptions. Changed windows,
-framing, added commands and missing pinned quotations fail closed. Review each
-changed identity explicitly rather than regenerating a permissive baseline.
+`internal/codegen/scan/manifest/operational_history.json`. The inventory is empty. The previous 13 quotations were retired tracker
+commands in the protocol documents; those passages were deleted, and the
+inventory no longer authorizes them. A native tracker call with no entry fails
+closed. Byte-verbatim copies inherit canonical identities, never whole-file
+exemptions. Changed windows, framing, added commands and missing pinned
+quotations fail closed. Review each changed identity explicitly rather than
+regenerating a permissive baseline.
 
 The gate is unconditional in `make generate` (therefore Codegen Drift CI) and
 `TestOperationalTrackerShippedTree` (therefore main-push CI). Focused tests:

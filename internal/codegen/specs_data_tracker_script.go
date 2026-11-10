@@ -110,7 +110,7 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 		TrackerOpCreate: {
 			Id:        TrackerOpCreate,
 			Action:    "create an immutable record; the body is verbatim; print the new task URI",
-			Signature: `"${EPOCH_REC}" create --kind K --title T --phase P [--priority N] [--label L]... [--ref K=V]... [--body TEXT|-] -> ID`,
+			Signature: `"${EPOCH_REC}" create --kind K --title T --phase P [--priority N] [--label L]... [--ref K=V]... [--body TEXT|@-] -> ID`,
 			Flags: []trackerFlag{
 				{Name: "kind", Default: "task"},
 				{Name: "title"},
@@ -120,7 +120,7 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 				{Name: "ref", Dest: "refs", Repeat: true, RepeatNL: true},
 				{Name: "body"},
 			},
-			Prelude: `[ "$body" = "-" ] && body="$(cat)"
+			Prelude: `[ "$body" = "@-" ] && body="$(cat)"
     fold_refs`,
 			PastureCalls: []pastureCall{
 				{
@@ -180,7 +180,7 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 		TrackerOpNote: {
 			Id:         TrackerOpNote,
 			Action:     "append an attributed immutable note; --to makes it a message",
-			Signature:  `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body TEXT|-]`,
+			Signature:  `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body TEXT|@-]`,
 			Positional: "id",
 			Flags: []trackerFlag{
 				{Name: "author", Dest: "AUTHOR"},
@@ -189,7 +189,7 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 				{Name: "to", Dest: "note_to"},
 				{Name: "format", Dest: "fmt", Default: "json"},
 			},
-			Prelude: `[ "$note_body" = "-" ] && note_body="$(cat)"
+			Prelude: `[ "$note_body" = "@-" ] && note_body="$(cat)"
     [ -n "$AUTHOR" ] || fail "note needs --author" "the tracker never invents an author" "pass the registered actor id"
     [ -n "$note_kind" ] && note_body="[$note_kind] $note_body"
     [ -n "$note_to" ] && note_body="to:$note_to $note_body"`,
@@ -482,9 +482,11 @@ func insertAfterShebang(script, extra string) string {
 // as NS. Every ledger write calls it unless EPOCH.md records namespace:.
 // Pasture is not given a copy: it derives when the adapter omits --namespace.
 const namespaceDeriveShell = `# derive_namespace is the one ledger normalisation. Forms: git@host:path,
-# ssh://, git://, http://, https:// and user@host:path. An empty remote is
-# file:// of the physical working directory. PASTURE_NAMESPACE matches the
-# value Pasture uses when --namespace is omitted.
+# ssh://, git://, http://, https:// and user@host:path. An empty remote inside
+# a git work tree is file:// of the work-tree root, so a subdirectory does not
+# split the namespace. Outside a work tree it is file:// of the physical
+# working directory. PASTURE_NAMESPACE matches the value Pasture uses when
+# --namespace is omitted.
 derive_namespace() {
   if [ -n "${PASTURE_NAMESPACE:-}" ]; then
     printf '%s\n' "$PASTURE_NAMESPACE"
@@ -493,7 +495,10 @@ derive_namespace() {
   remote=$(git remote get-url origin 2>/dev/null || true)
   remote=$(printf '%s' "$remote" | tr -d '\r\n')
   if [ -z "$remote" ]; then
-    dir=$(pwd -P 2>/dev/null || pwd)
+    dir=$(git rev-parse --show-toplevel 2>/dev/null || true)
+    if [ -z "$dir" ]; then
+      dir=$(pwd -P 2>/dev/null || pwd)
+    fi
     printf 'file://%s\n' "$dir"
     return 0
   fi
@@ -502,6 +507,21 @@ derive_namespace() {
 
 normalize_git_remote() {
   url=$1
+  tab=$(printf '\t')
+  while :; do
+    case $url in
+      ' '*) url=${url# } ;;
+      "$tab"*) url=${url#"$tab"} ;;
+      *) break ;;
+    esac
+  done
+  while :; do
+    case $url in
+      *' ') url=${url% } ;;
+      *"$tab") url=${url%"$tab"} ;;
+      *) break ;;
+    esac
+  done
   case "$url" in
     ssh://*)
       rest=${url#ssh://}
@@ -605,8 +625,10 @@ if [ "$RC" -ne 0 ]; then
 fi
 
 # 4. Author. A missing author is a warning, not an unusable store.
-# The probe does not derive a namespace for pasture. Writing one into
+# Pasture: the probe does not derive a namespace. Writing one into
 # EPOCH.md would freeze it and override Pasture's own derivation.
+# Ledger: emit_ledger derives and prints NS because there is no Pasture store
+# to ask.
 
 ACT="${PASTURE_AUTHOR:-pasture-system/00000000-0000-0000-0000-000000000000}"
 "$PASTURE_BIN" --db "$DB" task agents show "$ACT" --format json >/dev/null 2>&1
@@ -1042,11 +1064,13 @@ need_id() {
 # json_escape and row_encode are total for every byte except NUL, which a
 # shell argument cannot carry. Each is the inverse of its reader (take, and
 # row_decode). A trailing newline is kept: the decoder is not read with a
-# bare command substitution.
+# bare command substitution. C0 controls other than tab, CR and LF are
+# \u00XX, because a raw control byte makes show --format json invalid JSON.
 json_escape() {
   ROW_IN=$1 awk 'BEGIN {
     s = ENVIRON["ROW_IN"]
     out = ""
+    for (i = 0; i < 32; i++) ctrl[sprintf("%c", i)] = i
     for (i = 1; i <= length(s); i++) {
       c = substr(s, i, 1)
       if (c == "\\") out = out "\\\\"
@@ -1054,6 +1078,25 @@ json_escape() {
       else if (c == "\t") out = out "\\t"
       else if (c == "\r") out = out "\\r"
       else if (c == "\n") out = out "\\n"
+      else if (c in ctrl) out = out sprintf("\\u00%02x", ctrl[c])
+      else out = out c
+    }
+    printf "%s", out
+  }'
+}
+
+# text_field keeps one show --format text record to one line per key. A
+# description that contains a newline would otherwise span lines, and the
+# next line would look like a new key.
+text_field() {
+  ROW_IN=$1 awk 'BEGIN {
+    s = ENVIRON["ROW_IN"]
+    out = ""
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (c == "\\") out = out "\\\\"
+      else if (c == "\n") out = out "\\n"
+      else if (c == "\r") out = out "\\r"
       else out = out c
     }
     printf "%s", out
@@ -1248,7 +1291,7 @@ ledger_rows() {
   printf '%s\n' "$files" | while IFS= read -r f; do
     cat "$f"
   done | awk '
-function take(line, pos,   i, c, out, esc) {
+function take(line, pos,   i, c, out, esc, hex, v, ok, h, d) {
   out = ""
   esc = 0
   for (i = pos + 1; i <= length(line); i++) {
@@ -1257,6 +1300,18 @@ function take(line, pos,   i, c, out, esc) {
       if (c == "n") out = out "\n"
       else if (c == "t") out = out "\t"
       else if (c == "r") out = out "\r"
+      else if (c == "u" && i + 4 <= length(line)) {
+        hex = substr(line, i + 1, 4)
+        v = 0
+        ok = 1
+        for (h = 1; h <= 4; h++) {
+          d = index("0123456789abcdef", tolower(substr(hex, h, 1)))
+          if (d == 0) ok = 0
+          else v = v * 16 + d - 1
+        }
+        if (ok) { out = out sprintf("%c", v); i += 4 }
+        else out = out c
+      }
       else out = out c
       esc = 0
     } else if (c == "\\") esc = 1
@@ -1445,7 +1500,7 @@ ledger_show() {
       return 0
     fi
     awk '
-function take(line, pos,   i, c, out, esc) {
+function take(line, pos,   i, c, out, esc, hex, v, ok, h, d) {
   out = ""; esc = 0
   for (i = pos + 1; i <= length(line); i++) {
     c = substr(line, i, 1)
@@ -1453,6 +1508,18 @@ function take(line, pos,   i, c, out, esc) {
       if (c == "n") out = out "\n"
       else if (c == "t") out = out "\t"
       else if (c == "r") out = out "\r"
+      else if (c == "u" && i + 4 <= length(line)) {
+        hex = substr(line, i + 1, 4)
+        v = 0
+        ok = 1
+        for (h = 1; h <= 4; h++) {
+          d = index("0123456789abcdef", tolower(substr(hex, h, 1)))
+          if (d == 0) ok = 0
+          else v = v * 16 + d - 1
+        }
+        if (ok) { out = out sprintf("%c", v); i += 4 }
+        else out = out c
+      }
       else out = out c
       esc = 0
     } else if (c == "\\") esc = 1
@@ -1482,8 +1549,8 @@ function take(line, pos,   i, c, out, esc) {
     found=1
     if [ "$fmt" = text ]; then
       printf 'id: %s\ntitle: %s\nstatus: %s\nnamespace: %s\nlabels: %s\nedges: %s\ncomments: %s\nphase: %s\npriority: %s\nref: %s\ndescription: %s\n' \
-        "$rid" "$rtitle" "$rstatus" "$rns" "$rlabels" "$redges" "$rcomments" \
-        "$rphase" "$rpriority" "$rref" "$rbody"
+        "$(text_field "$rid")" "$(text_field "$rtitle")" "$rstatus" "$(text_field "$rns")" "$(text_field "$rlabels")" "$(text_field "$redges")" "$rcomments" \
+        "$(text_field "$rphase")" "$(text_field "$rpriority")" "$(text_field "$rref")" "$(text_field "$rbody")"
     else
       printf '{"id":"%s","title":"%s","status":"%s","namespace":"%s","labels":"%s","edges":"%s","comments":%s,"phase":"%s","priority":"%s","ref":"%s","description":"%s"}\n' \
         "$(json_escape "$rid")" "$(json_escape "$rtitle")" "$(json_escape "$rstatus")" \

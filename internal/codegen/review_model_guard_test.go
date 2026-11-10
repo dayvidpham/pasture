@@ -32,8 +32,8 @@ import (
 // The guards below are written from the rendered text, not from a line list.
 // That is deliberate (amendment A-4): schema.xml is generated from the Go spec
 // sources, so a guard over generated line numbers would be stale after the
-// next regeneration. renderedSources is the one enumeration of every authored
-// string that reaches a generated artifact.
+// next regeneration. renderedSources enumerates authored spec strings, not
+// hand-authored protocol documents copied into generated artifacts.
 
 // perWaveCleanPattern pairs one retired per-wave clean-round form with a name
 // and the exemplar that proves the pattern can still fail. The patterns are
@@ -273,6 +273,12 @@ var concreteSliceReviewPattern = regexp.MustCompile(`\bSLICE-\d+-REVIEW\b`)
 // its wave number, axis, and round. The review unit is (wave, axis, round).
 var waveReviewTitlePattern = regexp.MustCompile(`\bWAVE-(\d+)-REVIEW-([A-C])-(\d+)\b`)
 
+// literalWaveReviewTitlePattern is a numeric example of the review title.
+// The registry states the shape once as WAVE-{W}-REVIEW-{axis}-{round}. A
+// shipped body that copies one number cannot change when the example changes,
+// so the literal is a defect even when it names only one wave.
+var literalWaveReviewTitlePattern = regexp.MustCompile(`\bWAVE-\d+-REVIEW-[A-C]-\d+\b`)
+
 // followupSliceTokenPattern matches the distinct, non-wave follow-up slice form
 // so it is stripped before the unqualified-slice checks run.
 var followupSliceTokenPattern = regexp.MustCompile(`FOLLOWUP_SLICE-(?:\{N\}|\d+)`)
@@ -302,6 +308,9 @@ func findWaveTitleDefects(content string) []string {
 		}
 		if loc := concreteSliceReviewPattern.FindString(line); loc != "" {
 			defects = append(defects, "concrete unqualified slice review: "+loc)
+		}
+		if loc := literalWaveReviewTitlePattern.FindString(line); loc != "" {
+			defects = append(defects, "literal numeric wave review title: "+loc+"; use WAVE-{W}-REVIEW-{axis}-{round}")
 		}
 
 		// A review is identified by (axis, round). Its wave number must be
@@ -366,11 +375,18 @@ func TestWaveTitleConvention(t *testing.T) {
 
 	clean := strings.Join([]string{
 		"SLICE-{W}-{N}: <slice description>",
-		"Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3. Reviewer A reviews the whole wave and creates WAVE-1-REVIEW-A-1.",
+		"The wave's slices are listed on one review titled WAVE-{W}-REVIEW-{axis}-{round}.",
 		"FOLLOWUP_SLICE-{N}: <description>",
 	}, "\n")
 	assert.Empty(t, findWaveTitleDefects(clean),
-		"the clean sample must produce no finding: one review per wave lists its slices and yields one title")
+		"the clean sample must produce no finding: the body uses the registry shape and does not copy a numeric example")
+
+	// The review-title property, isolated from the unqualified-slice checks:
+	// a body with the registry shape passes; a body with one literal fails.
+	assert.Empty(t, findWaveTitleDefects("title WAVE-{W}-REVIEW-{axis}-{round} BLOCKER"),
+		"a body that uses the registry shape must produce no finding")
+	require.NotEmpty(t, findWaveTitleDefects("title WAVE-1-REVIEW-A-1 BLOCKER"),
+		"a body that copies a numeric review title must produce a finding")
 
 	sources := reviewModelGuardSources(t)
 	var sawSliceWave, sawReviewWave bool

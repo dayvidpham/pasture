@@ -42,11 +42,15 @@ type WritingRule struct {
 }
 
 // WritingRuleGroup is one titled table of rules. Note, when set, is the line
-// that precedes the table.
+// that precedes the table. QuestionHeading, when set, is the heading used when
+// this group is rendered into the question fragment. It is data. The renderer
+// does not rename a group because its heading is "Shape" or because one rule
+// remains.
 type WritingRuleGroup struct {
-	Heading string
-	Note    string
-	Rules   []WritingRule
+	Heading         string
+	QuestionHeading string
+	Note            string
+	Rules           []WritingRule
 }
 
 // WritingRuleGroups is the one authored registry of the rules. Rule numbers are
@@ -54,7 +58,8 @@ type WritingRuleGroup struct {
 // silently renumbering the shipped text.
 var WritingRuleGroups = []WritingRuleGroup{
 	{
-		Heading: "Shape",
+		Heading:         "Shape",
+		QuestionHeading: "Grounding",
 		Rules: []WritingRule{
 			{1, "Lead with the result, the decision, or the blocker.", "6.1, 6.2",
 				"'This pins both the edge and the core case per branch, so a same-count swap fails.' to 'Result: the test now fails if a real case is replaced with a filler case.'", WritingFragmentWording},
@@ -185,7 +190,7 @@ func validateWritingRules(groups []WritingRuleGroup) error {
 	if err := validateWritingCarrierNumerals(); err != nil {
 		return err
 	}
-	if err := validateWordingFragmentResolves(writingStandardFragment()); err != nil {
+	if err := validateWordingFragmentResolves(writingStandardFragmentFrom(groups)); err != nil {
 		return err
 	}
 	return nil
@@ -237,17 +242,33 @@ func proseSubsectionByID(section ProseSection, id string) (ProseSection, bool) {
 	return ProseSection{}, false
 }
 
+// writingRiskNumbers is the set of rules that live in a group headed Risk.
+// The heading is the data. A hardcoded rule number is not.
+func writingRiskNumbers(groups []WritingRuleGroup) map[int]bool {
+	out := map[int]bool{}
+	for _, group := range groups {
+		if !strings.EqualFold(strings.TrimSpace(group.Heading), "Risk") {
+			continue
+		}
+		for _, rule := range group.Rules {
+			out[rule.Number] = true
+		}
+	}
+	return out
+}
+
 // validateWritingQuestionHeadings rejects a question-fragment heading that
 // claims risk when no risk rule is in that rendered group. The live registry
 // splits risk into its own wording group, so the old combined heading fails.
 func validateWritingQuestionHeadings(groups []WritingRuleGroup) error {
+	riskNumbers := writingRiskNumbers(groups)
 	for _, group := range writingRuleGroupsForFrom(groups, WritingFragmentQuestion) {
 		if !strings.Contains(strings.ToLower(group.Heading), "risk") {
 			continue
 		}
 		hasRisk := false
 		for _, rule := range group.Rules {
-			if rule.Number == 25 {
+			if riskNumbers[rule.Number] {
 				hasRisk = true
 			}
 		}
@@ -548,8 +569,8 @@ func RenderWritingHouseRules(intro string, rules []WritingHouseRule) string {
 }
 
 // writingRuleGroupsFor returns the rule groups for one fragment. Membership
-// is the Fragment field. A question-only remainder of Shape is labelled
-// Grounding, which is a display name for that one rule, not a second list.
+// is the Fragment field. A question heading override is QuestionHeading on
+// the group, not a rename inferred from the heading text or the rule count.
 func writingRuleGroupsFor(home WritingFragment) []WritingRuleGroup {
 	return writingRuleGroupsForFrom(WritingRuleGroups, home)
 }
@@ -567,8 +588,8 @@ func writingRuleGroupsForFrom(groups []WritingRuleGroup, home WritingFragment) [
 			continue
 		}
 		rendered := WritingRuleGroup{Heading: group.Heading, Rules: rules}
-		if home == WritingFragmentQuestion && group.Heading == "Shape" && len(rules) == 1 {
-			rendered.Heading = "Grounding"
+		if home == WritingFragmentQuestion && group.QuestionHeading != "" {
+			rendered.Heading = group.QuestionHeading
 		}
 		if home == WritingFragmentQuestion && writingRulesAreHouse(rules) {
 			rendered.Note = "Rules " + writingJoinNumbers(writingNumbers(rules)) + " are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule."
@@ -593,24 +614,31 @@ func writingHouseRulesForFrom(rules []WritingHouseRule, home WritingFragment) []
 	return out
 }
 
-// writingStandardFragment builds the wording fragment. Question design is
-// writingQuestionFragment; this fragment names that fragment and does not
-// copy it.
+// writingStandardFragment builds the wording fragment from the live registry.
 func writingStandardFragment() SharedFragment {
+	return writingStandardFragmentFrom(WritingRuleGroups)
+}
+
+// writingStandardFragmentFrom builds the wording fragment from groups, so a
+// guard that passes a fixture validates that fixture and not the live registry.
+// Question design is writingQuestionFragment. The lives-sentence is not here:
+// the four question carriers already state where question rules ship, and
+// repeating it in this shared fragment states the fact twice. Status, the
+// wording-only carrier, renders the sentence itself.
+func writingStandardFragmentFrom(groups []WritingRuleGroup) SharedFragment {
 	prose := ProseSection{
 		Id:    string(FragWritingStandard),
 		Title: "Writing to the User",
 		Content: "These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are " +
 			"STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can " +
 			"claim full compliance. This fragment covers wording: plain terms, short sentences, " +
-			"active voice, and no invented labels, plus the pre-send check and the status template. " +
-			writingQuestionLivesSentence() + " " +
+			"active voice, no invented labels, and the wording house rule, plus the pre-send check and the status template. " +
 			writingWordingCarrierSentence(),
 		Subsections: []ProseSection{
 			{
 				Id:      "frag-writing-standard-rules",
 				Title:   "The rules",
-				Content: RenderWritingRules(writingRuleGroupsFor(WritingFragmentWording)),
+				Content: RenderWritingRules(writingRuleGroupsForFrom(groups, WritingFragmentWording)),
 			},
 			{
 				Id:      "frag-writing-standard-house-rules",

@@ -10,6 +10,11 @@ var statusBody = SkillBody{
 		fragRef(FragTaskAuthor),
 		fragRef(FragWritingStandard), // wording only; status asks no question
 		{
+			Id:      "status-question-rules-elsewhere",
+			Title:   "Question rules",
+			Content: writingQuestionLivesSentence(),
+		},
+		{
 			Id:    "status-steps",
 			Title: "Steps",
 			Subsections: []ProseSection{
@@ -41,7 +46,7 @@ var statusBody = SkillBody{
 				{
 					Id:      "status-step4-report",
 					Title:   "4. Report status",
-					Content: "Summarize findings across plans, implementation, and blocked tasks in the output format below.",
+					Content: "Summarize findings across plans, implementation, and blocked tasks in the output format in the next section. That format is the protocol status report. Template: status update, in Writing to the User, is the message to the user. Use the report here. Use the message when you write to the user. Do not mix them.",
 				},
 			},
 		},

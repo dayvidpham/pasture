@@ -2708,3 +2708,11 @@ SHA-256). The preceding digest identifies the prior recovery revision; neither
 revision participated in the historical captures above, and no capture payload,
 capture kit, fixture identity, activation state or acceptance record changes.
 No new live session, capture or host capability is claimed.
+# Recovery namespace wording transport addendum
+
+The generated `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`739a8042942a368df4648f177d43597bc690cbcdfb25e36e6dff21e38a75c7c4`.
+The embedded recovery text now references the ledger's remote normalization
+and describes its no-origin work-tree root. This is the current transport
+identity, not the historical build-kit digest or evidence of a new capture.
+No historical fixture bytes or clearance decisions change.

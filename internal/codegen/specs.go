@@ -136,7 +136,8 @@ const (
 
 	// FragWritingStandard is the wording half of the user-facing writing
 	// standard: plain terms, short sentences, active voice, no invented labels,
-	// the STE-aligned claim, the status template, and the pre-send check.
+	// the wording house rule, the STE-aligned claim, the status template, and
+	// the pre-send check.
 	// Question and option design is FragWritingQuestions. Consumers reference
 	// each fragment through fragRef; the reference set is derived by
 	// FragmentToOwnerRefs.

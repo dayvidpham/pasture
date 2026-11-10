@@ -20,8 +20,12 @@ func OperationalHistory() ([]HistoricalTrackerEntry, error) {
 	if err := decoder.Decode(&entries); err != nil {
 		return nil, fmt.Errorf("operational history inventory cannot be decoded: %w; stage outputs withheld; repair internal/codegen/scan/manifest/operational_history.json and regenerate", err)
 	}
-	if len(entries) != 13 {
-		return nil, fmt.Errorf("operational history inventory has %d entries, expected exactly 13 reviewed quotations; stage outputs withheld; review every changed owner/section/range/window and regenerate", len(entries))
+	// Reviewed count is 0. The previous 13 quotations were retired tracker
+	// commands in the protocol documents. Those passages were deleted, so the
+	// inventory no longer authorizes them. A native tracker call with no entry
+	// still fails closed in ValidateOperationalDocuments.
+	if len(entries) != 0 {
+		return nil, fmt.Errorf("operational history inventory has %d entries, expected 0 reviewed quotations; stage outputs withheld; review every changed owner/section/range/window and regenerate", len(entries))
 	}
 	seen := map[HistoricalTrackerEntry]bool{}
 	for _, entry := range entries {

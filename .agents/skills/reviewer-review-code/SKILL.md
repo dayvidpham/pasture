@@ -55,7 +55,7 @@ Recover from live tracker state at session start and after compaction; never tru
 
 Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-The adapter passes `--namespace` only when EPOCH.md records `namespace:`. That pin wins on both backends. Otherwise it omits the flag. Pasture then derives the namespace itself: PASTURE_NAMESPACE, else the git remote, then file:// of the working directory. The ledger calls one derivation function for the header and for every write that has no pin; it handles git@, ssh://, git://, http://, https:// and user@host:path. Queries without a pin follow that backend's derivation; pass `--all-namespaces` to opt out. When neither a pin nor PASTURE_NAMESPACE is set, pasture reads are unscoped and creation falls back to the git remote, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+The adapter passes `--namespace` only when EPOCH.md records `namespace:`. That pin wins on both backends. Otherwise it omits the flag. Pasture then derives the namespace itself: PASTURE_NAMESPACE, else the git remote, then file:// of the working directory. The ledger calls derive_namespace for the header and for every write that has no pin. That function is the one list of remote forms; do not restate it. A ledger with no origin uses file:// of the git work-tree root, so a subdirectory does not split the namespace. Queries without a pin follow that backend's derivation; pass `--all-namespaces` to opt out. When neither a pin nor PASTURE_NAMESPACE is set, pasture reads are unscoped and creation falls back to the git remote, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
 Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
@@ -85,7 +85,7 @@ First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS c
 # One severity trio per wave, per axis, per round — not one per slice.
 # Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
+BLOCKER_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review \
   --body "---
 references:
   wave: 1
@@ -98,7 +98,7 @@ references:
 BLOCKER findings for this wave review round")
 "${EPOCH_REC}" label "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
 
-IMPORTANT_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
+IMPORTANT_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review \
   --body "---
 references:
   wave: 1
@@ -111,7 +111,7 @@ references:
 IMPORTANT findings for this wave review round")
 "${EPOCH_REC}" label "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
 
-MINOR_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
+MINOR_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review \
   --body "---
 references:
   wave: 1

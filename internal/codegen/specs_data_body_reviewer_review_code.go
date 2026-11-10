@@ -61,7 +61,7 @@ var reviewerReviewCodeBody = SkillBody{
 # One severity trio per wave, per axis, per round — not one per slice.
 # Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
+BLOCKER_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review \
   --body "---
 references:
   wave: 1
@@ -74,7 +74,7 @@ references:
 BLOCKER findings for this wave review round")
 [[rec:label]] "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
 
-IMPORTANT_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
+IMPORTANT_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review \
   --body "---
 references:
   wave: 1
@@ -87,7 +87,7 @@ references:
 IMPORTANT findings for this wave review round")
 [[rec:label]] "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
 
-MINOR_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
+MINOR_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review \
   --body "---
 references:
   wave: 1
