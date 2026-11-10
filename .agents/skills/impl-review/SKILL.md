@@ -13,7 +13,7 @@ Conduct code review across ALL implementation slices. Each of 3 reviewers review
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
 
-See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
+See [reviewer-review-code](../reviewer-review-code/SKILL.md) for severity definitions.
 
 **[frag--sup-review-all-slices]**
 - Given: all slices complete

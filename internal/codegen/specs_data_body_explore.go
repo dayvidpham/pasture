@@ -3,8 +3,7 @@
 package codegen
 
 var exploreBody = SkillBody{
-	Preamble: "General-purpose codebase exploration skill. Searches the codebase for integration points, existing patterns, data flow, dependencies, and potential conflicts relevant to a topic or feature.\n\n" +
-		"See `../protocol/CONSTRAINTS.md` for coding standards.",
+	Preamble: "General-purpose codebase exploration skill. Searches the codebase for integration points, existing patterns, data flow, dependencies, and potential conflicts relevant to a topic or feature.",
 
 	Behaviors: []BehaviorSpec{
 		{

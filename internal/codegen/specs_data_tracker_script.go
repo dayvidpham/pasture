@@ -495,6 +495,9 @@ derive_namespace() {
   remote=$(printf '%s' "$remote" | tr -d '\r\n')
   if [ -z "$remote" ]; then
     dir=$(pwd -P 2>/dev/null || pwd)
+    if [ -n "${PWD:-}" ] && [ "$(cd -- "$PWD" 2>/dev/null && pwd -P)" = "$dir" ]; then
+      dir=$PWD
+    fi
     printf 'file://%s\n' "$dir"
     return 0
   fi

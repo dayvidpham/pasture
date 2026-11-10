@@ -6,7 +6,7 @@ var implReviewBody = SkillBody{
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
 
-See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity definitions.`,
+See [reviewer-review-code](../reviewer-review-code/SKILL.md) for severity definitions.`,
 	// Behaviors shared with supervisor body via SharedFragmentSpecs:
 	// all 6 review-wave behaviors are now fragments so the canonical text is
 	// single-sourced and both skill bodies render byte-identical content.

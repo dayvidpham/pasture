@@ -695,8 +695,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseReview, protocol.PhaseCodeReview,
 		},
-		Introduction: "You review from an end-user alignment perspective. " +
-			"See the project's protocol/CONSTRAINTS.md for coding standards.",
+		Introduction: "You review from an end-user alignment perspective.",
 		OwnershipNarrative: "You participate in two phases: " +
 			"Phase 4 (plan review) — evaluate PROPOSAL-N against one axis using binary ACCEPT/REVISE, " +
 			"NO severity tree; " +

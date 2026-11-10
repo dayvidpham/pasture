@@ -739,13 +739,13 @@ func TestElicitExampleIsOneDecisionPerCall(t *testing.T) {
 }
 
 func TestQuestionHeadingUsesRiskRegistryNotFixedNumber(t *testing.T) {
-	groups := []WritingRuleGroup{
-		{Heading: "Risk", Rules: []WritingRule{{Number: 71, Fragment: WritingFragmentWording}}},
-		{Heading: "Questions and risk", Rules: []WritingRule{{Number: 71, Fragment: WritingFragmentQuestion}}},
+	for _, number := range []int{71, 74} {
+		groups := []WritingRuleGroup{
+			{Heading: "Risk", Rules: []WritingRule{{Number: number, Fragment: WritingFragmentWording}}},
+			{Heading: "Questions and risk", Rules: []WritingRule{{Number: number, Fragment: WritingFragmentQuestion}}},
+		}
+		require.NoError(t, validateWritingQuestionHeadings(groups))
+		groups[1].Rules[0].Number = number + 1
+		require.Error(t, validateWritingQuestionHeadings(groups))
 	}
-	require.NoError(t, validateWritingQuestionHeadings(groups), "a renumbered risk rule present in the question group is valid")
-	groups[1].Rules[0].Number = 25
-	err := validateWritingQuestionHeadings(groups)
-	require.Error(t, err, "the old number is not risk unless the registry says so")
-	t.Log(err)
 }

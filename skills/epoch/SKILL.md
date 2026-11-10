@@ -329,6 +329,9 @@ derive_namespace() {
   remote=$(printf '%s' "$remote" | tr -d '\r\n')
   if [ -z "$remote" ]; then
     dir=$(pwd -P 2>/dev/null || pwd)
+    if [ -n "${PWD:-}" ] && [ "$(cd -- "$PWD" 2>/dev/null && pwd -P)" = "$dir" ]; then
+      dir=$PWD
+    fi
     printf 'file://%s\n' "$dir"
     return 0
   fi
@@ -501,6 +504,9 @@ derive_namespace() {
   remote=$(printf '%s' "$remote" | tr -d '\r\n')
   if [ -z "$remote" ]; then
     dir=$(pwd -P 2>/dev/null || pwd)
+    if [ -n "${PWD:-}" ] && [ "$(cd -- "$PWD" 2>/dev/null && pwd -P)" = "$dir" ]; then
+      dir=$PWD
+    fi
     printf 'file://%s\n' "$dir"
     return 0
   fi
@@ -1857,7 +1863,7 @@ MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "MINOR" --phase code_re
 "${EPOCH_REC}" block "${SLICE_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
 ```
 
-See `../protocol/CONSTRAINTS.md` for full severity definitions.
+See [reviewer-review-code](../reviewer-review-code/SKILL.md) for severity definitions.
 
 ## Tracking Progress
 

@@ -11,8 +11,6 @@ description: Domain research — find standards, prior art, and competing approa
 
 General-purpose domain research skill. Finds standards, prior art, existing solutions, and established patterns for a given topic. Writes structured findings to `llm/research/<topic>.md`.
 
-See `../protocol/CONSTRAINTS.md` for coding standards.
-
 **[research-topic-deliverable]**
 - Given: a research topic
 - When: investigating

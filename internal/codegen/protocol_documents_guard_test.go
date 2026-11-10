@@ -16,7 +16,7 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
-var renderedSkillRoots = []string{"skills", ".agents/skills", ".opencode/skill", "internal/target/opencode/assets/skills", "internal/target/claudecode/assets/pasture-skills/skills"}
+var renderedSkillRoots = []string{"skills", ".agents/skills", ".opencode/skill", "internal/target/opencode/assets/skills", "internal/target/claudecode/assets/pasture-skills/skills", "agents", ".opencode/agent", "internal/target/opencode/assets/agents", "internal/target/claudecode/assets/pasture-agents/agents"}
 var explicitAnchor = regexp.MustCompile(`<a\s+id=["']([^"']+)["']`)
 
 func headingSlug(s string) string {
@@ -166,7 +166,7 @@ func TestMarkdownLinkGuardSamples(t *testing.T) {
 	}
 }
 func TestSurvivingProtocolDocumentsHaveContent(t *testing.T) {
-	for _, tree := range renderedSkillRoots {
+	for _, tree := range renderedSkillRoots[:5] {
 		for _, name := range []string{"AGENTS.md", "CLAUDE.md", "CONSTRAINTS.md", "MR_TEMPLATE.md", "PROCESS.md", "README.md", "SKILL.md", "SKILLS.md"} {
 			path := filepath.Join("..", "..", tree, "protocol", name)
 			data, err := os.ReadFile(path)

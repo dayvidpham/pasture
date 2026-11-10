@@ -8,6 +8,6 @@ Read the constraint in the skill that carries it:
 |---|---|
 | Actionable errors, commits, dependency direction | [worker](../worker/SKILL.md) |
 | Review exit and finding close | [supervisor](../supervisor/SKILL.md) and [reviewer](../reviewer/SKILL.md) |
-| Writing to the user | The writing section of [status](../status/SKILL.md), [architect](../architect/SKILL.md), [supervisor](../supervisor/SKILL.md), [user-elicit](../user-elicit/SKILL.md), and [user-uat](../user-uat/SKILL.md) |
+| Writing to the user | The writing section of [status](../status/SKILL.md), [architect-handoff](../architect-handoff/SKILL.md), [supervisor](../supervisor/SKILL.md), [user-elicit](../user-elicit/SKILL.md), and [user-uat](../user-uat/SKILL.md) |
 
 A constraint that is not in the role skill is not a rule. Do not add one here.

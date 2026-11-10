@@ -276,7 +276,7 @@ MINOR_ID_URI=$([[rec:create]] --kind task --title "MINOR" --phase code_review \
 [[rec:block]] "${SLICE_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
 ` + "```" + `
 
-See ` + "`" + `../protocol/CONSTRAINTS.md` + "`" + ` for full severity definitions.`,
+See [reviewer-review-code](../reviewer-review-code/SKILL.md) for severity definitions.`,
 		},
 		{
 			Id:    "epoch-tracking",

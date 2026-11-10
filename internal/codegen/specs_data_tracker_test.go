@@ -427,6 +427,16 @@ func TestNamespaceAsksTheBackend(t *testing.T) {
 		require.Equal(t, pastureNS, ledgerNS, "both backends use the caller's working directory")
 	})
 
+	t.Run("no-origin-symlink-matches-pasture", func(t *testing.T) {
+		dir := initRepoWithoutOrigin(t)
+		link := filepath.Join(t.TempDir(), "linked")
+		require.NoError(t, os.Symlink(dir, link))
+		pastureNS := createdNamespace(t, bin, link, "pasture", "")
+		ledgerNS := createdNamespace(t, bin, link, "ledger", "")
+		require.Equal(t, "file://"+link, pastureNS)
+		require.Equal(t, pastureNS, ledgerNS)
+	})
+
 	t.Run("explicit-header-wins", func(t *testing.T) {
 		dir := initRepoWithRemote(t, "git@github.com:example/other.git")
 		const pin = "https://example.test/pinned"
@@ -490,6 +500,7 @@ func createdNamespace(t *testing.T, bin, dir, backend, pin string) string {
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + dir,
+		"PWD=" + dir,
 		"EPOCH_FILE=" + header,
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_NOSYSTEM=1",

@@ -281,7 +281,7 @@ Plan ratified and user has approved proceeding with implementation.
 
 ## Handoff Template
 
-Include request, requirements, proposal, and plan references, key decisions, open items, and acceptance criteria.
+Use the required handoff fields in [architect](../architect/SKILL.md).
 
 Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (no filesystem path; the task body IS the handoff).
 

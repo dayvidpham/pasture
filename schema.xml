@@ -445,7 +445,7 @@
       <model>standard</model>
       <thinking>medium</thinking>
       <ownership-model></ownership-model>
-      <introduction>You review from an end-user alignment perspective. See the project&#39;s protocol/CONSTRAINTS.md for coding standards.</introduction>
+      <introduction>You review from an end-user alignment perspective.</introduction>
       <ownership-narrative>You participate in two phases: Phase 4 (plan review) — evaluate PROPOSAL-N against one axis using binary ACCEPT/REVISE, NO severity tree; Phase 10 (code review) — review ALL implementation slices against your axis using full severity tree (BLOCKER/IMPORTANT/MINOR), EAGER creation of all 3 severity groups.</ownership-narrative>
       <behaviors>
         <behavior id="B-rev-end-user" given="a review assignment" when="reviewing" then="apply end-user alignment criteria" should-not="focus only on technical details"></behavior>

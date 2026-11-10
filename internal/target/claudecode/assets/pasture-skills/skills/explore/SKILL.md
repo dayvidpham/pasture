@@ -11,8 +11,6 @@ description: Codebase exploration — find integration points, existing patterns
 
 General-purpose codebase exploration skill. Searches the codebase for integration points, existing patterns, data flow, dependencies, and potential conflicts relevant to a topic or feature.
 
-See `../protocol/CONSTRAINTS.md` for coding standards.
-
 **[explore-topic-structured]**
 - Given: a topic or feature
 - When: exploring

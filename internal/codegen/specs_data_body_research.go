@@ -4,8 +4,7 @@ package codegen
 
 var researchBody = SkillBody{
 	Preamble: "General-purpose domain research skill. Finds standards, prior art, existing solutions, and established patterns for a given topic. " +
-		"Writes structured findings to `llm/research/<topic>.md`.\n\n" +
-		"See `../protocol/CONSTRAINTS.md` for coding standards.",
+		"Writes structured findings to `llm/research/<topic>.md`.",
 
 	Behaviors: []BehaviorSpec{
 		{
