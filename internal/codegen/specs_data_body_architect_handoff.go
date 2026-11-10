@@ -60,12 +60,7 @@ var architectHandoffBody = SkillBody{
    ` + "```" + `bash
    HANDOFF_ID_URI=$([[rec:create]] --kind task --title "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --priority 2 \
      --body="---
-   references:
-     request: "${REQUEST_ID_URI}"
-     urd: "${URD_ID_URI}"
-     proposal: "${RATIFIED_PROPOSAL_ID_URI}"
-     ratified_plan: "${RATIFIED_PLAN_ID_URI}"
-   ---
+   ` + handoffReferenceFrontmatter("     ") + `   ---
    # Handoff: Architect → Supervisor
    <full handoff body per the template above>")
    [[rec:label]] "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
@@ -242,4 +237,16 @@ func handoffFieldHeading(field string) string {
 		words[i] = strings.ToUpper(word[:1]) + word[1:]
 	}
 	return strings.Join(words, " ")
+}
+
+// handoffReferenceFrontmatter renders the task body's references: block from
+// handoffReferences, so every create step binds exactly the fields the handoff
+// registry requires and none is left unbound.
+func handoffReferenceFrontmatter(indent string) string {
+	var b strings.Builder
+	b.WriteString("references:\n")
+	for _, ref := range handoffReferences {
+		b.WriteString(indent + strings.ReplaceAll(ref.Field, "-", "_") + ": \"${" + ref.Var + "}\"\n")
+	}
+	return b.String()
 }

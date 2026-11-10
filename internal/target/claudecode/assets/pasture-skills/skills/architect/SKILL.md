@@ -505,6 +505,7 @@ references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
   proposal: "${RATIFIED_PROPOSAL_ID_URI}"
+  ratified_plan: "${RATIFIED_PLAN_ID_URI}"
 ---
 # Handoff: Architect → Supervisor
 <full handoff body — the task body IS the handoff>")

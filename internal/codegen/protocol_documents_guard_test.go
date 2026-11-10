@@ -639,12 +639,82 @@ func TestHandoffTemplateBindsEveryReference(t *testing.T) {
 		assert.Contains(t, rendered, "${"+ref.Var+"}", "the reference field %q must carry its variable", ref.Field)
 		assert.Contains(t, rendered, `show "${`+ref.Var+`}"`, "the reference field %q must show how to read it", ref.Field)
 	}
-	body := architectHandoffBody
-	joined := ""
-	for _, section := range body.Sections {
-		joined += section.Content + "\n"
+	for skill, body := range map[string]SkillBody{"architect-handoff": architectHandoffBody, "architect": architectBody} {
+		for _, finding := range frontmatterBindingFindings(skill, body) {
+			t.Error(finding)
+		}
 	}
+}
+
+// TestCitationGuardAllowsOnlyRuntimeArtefacts pins the skip rule: a shipped
+// dotted tree is checked, a bare name and .agents.local are not.
+func TestCitationGuardAllowsOnlyRuntimeArtefacts(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "skills", "epoch", "SKILL.md")
+	cases := []struct {
+		text string
+		want int
+	}{
+		{"See `../.opencode/gone/SKILL.md`.", 1},
+		{".agents/skills/gone/SKILL.md is missing here.", 0},
+		{"See `.agents/gone/SKILL.md`.", 1},
+		{"Write `EPOCH.md` first.", 0},
+		{"Read `.agents.local/pasture/EPOCH.md`.", 0},
+	}
+	for _, testCase := range cases {
+		got := len(checkBacktickedCitations(source, []byte(testCase.text), root))
+		if got != testCase.want {
+			t.Errorf("%q produced %d findings, want %d", testCase.text, got, testCase.want)
+		}
+	}
+}
+
+// frontmatterBindingFindings reports a create step that leaves a reference
+// variable unbound. It looks at the creating section only: scanning every
+// section would be satisfied by the template that already names them.
+func frontmatterBindingFindings(skill string, body SkillBody) []string {
+	var create string
+	var walk func([]ProseSection)
+	walk = func(sections []ProseSection) {
+		for _, section := range sections {
+			if strings.Contains(section.Content, "HANDOFF: Architect") && strings.Contains(section.Content, "--body") {
+				create += section.Content
+			}
+			walk(section.Subsections)
+		}
+	}
+	walk(body.Sections)
+	if create == "" {
+		return []string{skill + ": no section creates the handoff"}
+	}
+	var findings []string
 	for _, ref := range handoffReferences {
-		assert.Contains(t, joined, ref.Var, "the create step must bind %q", ref.Field)
+		if !strings.Contains(create, "${"+ref.Var+"}") {
+			findings = append(findings, skill+": the create step leaves "+ref.Field+" unbound ("+ref.Var+")")
+		}
+	}
+	return findings
+}
+
+func TestHandoffCreateStepsBindEveryReference(t *testing.T) {
+	for skill, body := range map[string]SkillBody{
+		"architect-handoff": architectHandoffBody,
+		"architect":         architectBody,
+	} {
+		for _, finding := range frontmatterBindingFindings(skill, body) {
+			t.Error(finding)
+		}
+	}
+
+	defective := SkillBody{Sections: []ProseSection{{
+		Content: `HANDOFF: Architect -> Supervisor --body "---
+references:
+  request: "${REQUEST_ID_URI}"
+---`,
+	}}}
+	if got := frontmatterBindingFindings("defective", defective); len(got) == 0 {
+		t.Fatal("a create step that binds one reference was accepted")
+	} else {
+		t.Log(got[0])
 	}
 }
