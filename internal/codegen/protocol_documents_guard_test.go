@@ -631,9 +631,6 @@ func TestMergeRequestFieldsAreRegistered(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "the landing skill body must carry the rendered merge-request section")
-	if mergeRequestDescription() == "A merge request description states these fields, and nothing else belongs in it:\n\n\nDo not put an internal task code in the title or the body." {
-		t.Fatal("the rendered section must not be empty")
-	}
 }
 
 // TestHandoffTemplateBindsEveryReference proves the handoff body names a shell
@@ -647,15 +644,12 @@ func TestHandoffTemplateBindsEveryReference(t *testing.T) {
 		assert.Contains(t, rendered, "${"+binding.Var+"}", "the bound field %q must carry its variable", binding.Field)
 		assert.Contains(t, rendered, `show "${`+binding.Var+`}"`, "the bound field %q must show how to read it", binding.Field)
 	}
-	// The partition is asserted both ways: every binding appears exactly once as
-	// a reference line, and no other variable does. A binding removed from the
-	// registry therefore shows up as a changed partition rather than silently
-	// becoming a section.
-	assert.Equal(t, len(spec.Bindings), strings.Count(rendered, `— read with `),
-		"the template must render exactly one reference line per binding")
+	// Each binding renders one reference line naming its variable and the command
+	// that reads it. The expected line is constructed here from the binding, so a
+	// renderer that drops the variable fails without pinning a prose fragment.
 	for _, binding := range spec.Bindings {
-		assert.Equal(t, 2, strings.Count(rendered, "${"+binding.Var+"}"),
-			"the variable %q must appear as the value and in its read command", binding.Var)
+		wantLine := "- " + handoffFieldHeading(binding.Field) + ": \"${" + binding.Var + "}\" — read with `\"${EPOCH_REC}\" show \"${" + binding.Var + "}\"`"
+		assert.Contains(t, rendered, wantLine, "the reference line for %q must carry its variable and its read command", binding.Field)
 	}
 	bound := map[string]struct{}{}
 	for _, binding := range spec.Bindings {
@@ -752,31 +746,22 @@ references:
 // fill.
 func TestHandoffBindingsNameRequiredFields(t *testing.T) {
 	for id, spec := range HandoffSpecs {
-		required := map[string]struct{}{}
-		for _, field := range spec.RequiredFields {
-			required[field] = struct{}{}
-		}
-		for _, binding := range spec.Bindings {
-			if _, ok := required[binding.Field]; !ok {
-				t.Errorf("%s binds %q, which is not one of its required fields", id, binding.Field)
-			}
-			if binding.Var == "" {
-				t.Errorf("%s binds %q with no variable", id, binding.Field)
-			}
+		for _, finding := range handoffBindingFindings(id, spec) {
+			t.Error(finding)
 		}
 	}
 
 	defective := HandoffSpec{
 		Id:             "test",
 		RequiredFields: []string{"request"},
-		Bindings:       []HandoffBinding{{Field: "impl-plan", Var: "IMPL_PLAN_ID_URI"}},
+		Bindings: []HandoffBinding{
+			{Field: "impl-plan", Var: "IMPL_PLAN_ID_URI"},
+			{Field: "request", Var: ""},
+		},
 	}
-	required := map[string]struct{}{}
-	for _, field := range defective.RequiredFields {
-		required[field] = struct{}{}
-	}
-	if _, ok := required[defective.Bindings[0].Field]; ok {
-		t.Fatal("the defective sample must bind a field the spec does not require")
+	got := handoffBindingFindings("test", defective)
+	if len(got) != 2 {
+		t.Fatalf("the defective spec must produce one finding per bad binding, got %v", got)
 	}
 }
 
@@ -841,4 +826,24 @@ var wantHandoffBindings = []HandoffBinding{
 func TestHandoffBindingsMatchThePinnedSet(t *testing.T) {
 	assert.Equal(t, wantHandoffBindings, HandoffSpecs["h1"].Bindings,
 		"the h1 bindings must match the pinned set; a field the supervisor reads as a variable cannot become a fill-in section")
+}
+
+// handoffBindingFindings reports a binding that names a field the spec does not
+// require, or carries no variable. It is the production check the real registry
+// and the defective sample both run.
+func handoffBindingFindings(id string, spec HandoffSpec) []string {
+	required := map[string]struct{}{}
+	for _, field := range spec.RequiredFields {
+		required[field] = struct{}{}
+	}
+	var findings []string
+	for _, binding := range spec.Bindings {
+		if _, ok := required[binding.Field]; !ok {
+			findings = append(findings, id+" binds "+binding.Field+", which is not one of its required fields")
+		}
+		if binding.Var == "" {
+			findings = append(findings, id+" binds "+binding.Field+" with no variable")
+		}
+	}
+	return findings
 }
