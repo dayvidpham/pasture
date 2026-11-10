@@ -12,6 +12,65 @@ import (
 
 var retiredMechanism = regexp.MustCompile(`(aura-swarm|\bTeamCreate\b|\bbeads\b|\.git/\.aura|\.beads/)`)
 
+var taxonomyToken = regexp.MustCompile(`\b(?:SLICE-[0-9]+(?:-[0-9]+)*|WAVE-[0-9]+|p[0-9]+-(?:review|impl)(?:-[a-z]+)*)\b`)
+var registryLabel = regexp.MustCompile("`pasture:p[0-9]+-[a-z0-9:-]+`")
+var phaseRegistryLine = regexp.MustCompile(`^\s*(?:#{1,6}\s*)?` + "`?" + `p[0-9]+-[a-z0-9-]+`)
+
+// Table rows, backticked label values, and phase registry lines are registry
+// uses; other text is narrative, including text adjacent to inline labels.
+func findInternalTaxonomyTokens(path, body string) []string {
+	var findings []string
+	for n, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "|") || phaseRegistryLine.MatchString(line) || strings.HasPrefix(trimmed, "**Role:**") && strings.Contains(line, "**Phases owned:**") {
+			continue
+		}
+		line = registryLabel.ReplaceAllString(line, "")
+		for _, token := range taxonomyToken.FindAllString(line, -1) {
+			findings = append(findings, fmt.Sprintf("%s:%d: internal taxonomy %q in prose; why: readers should not need internal labels; where: narrative; fix: use a plain-language description", path, n+1, token))
+		}
+	}
+	return findings
+}
+
+func TestInternalTaxonomyTokens(t *testing.T) {
+	for _, sample := range []struct {
+		name, text string
+		bad        bool
+	}{
+		{"narrative", "Review SLICE-1 now.", true},
+		{"registry", "| `pasture:p10-impl:s10-review` |\n## p10-code-review\nUse `pasture:p10-impl:s10-review`.", false},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			got := findInternalTaxonomyTokens(sample.name, sample.text)
+			if (len(got) > 0) != sample.bad {
+				t.Fatal(got)
+			}
+		})
+	}
+	for _, root := range append(append([]string{}, renderedSkillRoots...), ".codex/agents") {
+		err := filepath.WalkDir(filepath.Join("..", "..", root), func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() || filepath.Ext(path) != ".md" {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, finding := range findInternalTaxonomyTokens(path, string(data)) {
+				t.Error(finding)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // Capture fixtures contain authentic host bytes, not generated guidance.
 func findRetiredMechanismNames(path, body string) []string {
 	if strings.Contains("/"+filepath.ToSlash(path)+"/", "/testdata/fixtures/") {
