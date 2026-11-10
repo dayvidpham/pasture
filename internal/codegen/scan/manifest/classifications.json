@@ -399,7 +399,7 @@
     {
       "owner": "skills/user-uat/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- Then: MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW/DEFER disposition, and validation-case confirmation procedures are loaded",
+      "content_window": "- Then: MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW, DEFER, WON'T-DO disposition, and validation-case confirmation procedures are loaded",
       "section": "User Acceptance Test (UAT)",
       "ordinal": 0,
       "classification": "orchestration",

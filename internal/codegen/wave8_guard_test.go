@@ -107,3 +107,79 @@ func TestStubSuccessorResolves(t *testing.T) {
 		}
 	}
 }
+
+// findDispositionEnumIncludesWontDo validates values and generated guidance.
+func findDispositionEnumIncludesWontDo(values []disposition, guidance string) []string {
+	var findings []string
+	for _, value := range values {
+		if !value.valid() {
+			findings = append(findings, fmt.Sprintf("disposition %q is unregistered; why: feedback must have a closed disposition; where: UAT; fix: use a registered disposition", value))
+		}
+	}
+	for _, value := range []disposition{fixNow, deferItem, wontDo} {
+		if !value.valid() || !strings.Contains(guidance, string(value)) {
+			findings = append(findings, fmt.Sprintf("disposition %q missing; why: users need all decisions; where: UAT guidance; fix: register and render it", value))
+		}
+	}
+	return findings
+}
+
+func TestDispositionEnumIncludesWontDo(t *testing.T) {
+	guidance := dispositionNames()
+	for _, sample := range []struct {
+		name   string
+		values []disposition
+		bad    bool
+	}{
+		{"invented", []disposition{"INVENTED"}, true},
+		{"canonical", []disposition{fixNow, deferItem, wontDo}, false},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			got := findDispositionEnumIncludesWontDo(sample.values, guidance)
+			if (len(got) > 0) != sample.bad {
+				t.Fatal(got)
+			}
+		})
+	}
+	for _, root := range []string{"skills", ".agents/skills", ".opencode/skill", "internal/target/opencode/assets/skills", "internal/target/claudecode/assets/pasture-skills/skills"} {
+		path := filepath.Join("..", "..", root, "user-uat", "SKILL.md")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, finding := range findDispositionEnumIncludesWontDo(nil, string(data)) {
+			t.Error(path, finding)
+		}
+	}
+}
+
+func findQuestionStimulusFields(where, guidance string) []string {
+	var findings []string
+	for _, field := range []string{"header", "question text", "option label", "description", "multi-select", "preview"} {
+		if !strings.Contains(strings.ToLower(guidance), field) {
+			findings = append(findings, fmt.Sprintf("%s: missing %s; why: the user's stimulus cannot be reconstructed; fix: record this field", where, field))
+		}
+	}
+	return findings
+}
+
+func TestQuestionStimulusFields(t *testing.T) {
+	clean := "header question text option label description multi-select preview"
+	for _, sample := range []struct {
+		name, text string
+		bad        bool
+	}{
+		{"missing preview", strings.TrimSuffix(clean, " preview"), true},
+		{"complete", clean, false},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			got := findQuestionStimulusFields(sample.name, sample.text)
+			if (len(got) > 0) != sample.bad {
+				t.Fatal(got)
+			}
+		})
+	}
+	for _, finding := range findQuestionStimulusFields("C-ure-verbatim", ConstraintSpecs["C-ure-verbatim"].Then) {
+		t.Error(finding)
+	}
+}

@@ -62,13 +62,13 @@ description: User Acceptance Testing with demonstrative examples
 **[uat-feedback-disposition]**
 - Given: each item of feedback or proposed deferral (deferrals may be flagged by the user OR proposed by the architect/supervisor) gathered during UAT (Phase 5 or Phase 11)
 - When: recording it
-- Then: assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER and echo it back for confirmation; ALL deferred items — whoever proposed them — MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic
+- Then: assign every item an explicit, user-confirmed disposition of FIX-NOW, DEFER, WON'T-DO and echo it back for confirmation; ALL deferred items — whoever proposed them — MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic
 - Should not: leave a feedback item without a confirmed disposition; silently defer any item without raising it to the user at the next gate; route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it
 
 **[uat-invoke-skill]**
 - Given: the Phase 5 or Phase 11 UAT interview
 - When: conducting it
-- Then: MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW/DEFER disposition, and validation-case confirmation procedures are loaded
+- Then: MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW, DEFER, WON'T-DO disposition, and validation-case confirmation procedures are loaded
 - Should not: conduct the UAT without invoking its skill — skipping it loses the disposition and verbatim-capture procedures
 
 **[frag--validation-cases]**
@@ -514,14 +514,15 @@ AskUserQuestion({
 })
 ```
 
-## Per-Item Disposition: FIX-NOW or DEFER
+## Per-Item Disposition: FIX-NOW, DEFER, WON'T-DO
 
-Every piece of UAT feedback — whether a REVISE on a component or an open-ended concern — MUST be given an explicit, **user-confirmed** disposition. There is no third option.
+Every piece of UAT feedback — whether a REVISE on a component or an open-ended concern — MUST be given an explicit, **user-confirmed** disposition. The available dispositions are: FIX-NOW, DEFER, WON'T-DO.
 
 | Disposition | Meaning | Where it goes |
 |-------------|---------|----------------|
 | **FIX-NOW** | Resolve before this wave closes | Back to the architect (Plan UAT) or the relevant slice (Impl UAT) |
 | **DEFER** | Acceptable to ship now; track for later | The **sole** source feeding the FOLLOWUP epic |
+| **WON'T-DO** | The user declined the item; record the user's reason | Does not feed the FOLLOWUP epic and is not re-raised at every gate |
 
 **Echo each disposition back to the user for confirmation** before recording it — e.g. "Recording '{{feedback}}' as DEFER (tracked in follow-up, not fixed this wave) — confirm?". Record the confirmed disposition verbatim alongside the feedback.
 
@@ -561,7 +562,7 @@ references:
 **Question asked:** <exact question text>
 **Options presented:** <exact option labels and descriptions>
 **User response:** <verbatim selection(s)>
-**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>
+**Disposition:** <FIX-NOW, DEFER, WON'T-DO — user-confirmed, echoed back>
 
 ## Final Decision
 <ACCEPT or REVISE with verbatim reason>")
@@ -589,7 +590,7 @@ references:
 **Command run / output shown:** <actual terminal output shown to user>
 **Question asked:** <exact question>
 **User response:** <verbatim response>
-**Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>
+**Disposition:** <FIX-NOW, DEFER, WON'T-DO — user-confirmed, echoed back>
 
 ## Final Decision
 <ACCEPT or REVISE>")
