@@ -511,9 +511,13 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 			for _, line := range strings.Split(block[2], "\n") {
 				lines = append(lines, strings.TrimPrefix(line, block[1]))
 			}
-			script := "set -euo pipefail\npasture() { \"$PASTURE_BINARY\" --db \"$RECIPE_DB\" \"$@\"; }\n" + strings.Join(lines, "\n")
+			// The emitted blocks call the tracker adapter entry point
+			// ("${EPOCH_REC}" <verb>). The production adapter is the rec asset
+			// owned by the ledger slice; this harness supplies the pasture
+			// backend's pass-through so the emitted bytes are executed as-is.
+			script := "set -euo pipefail\npasture() { \"$PASTURE_BINARY\" --db \"$RECIPE_DB\" \"$@\"; }\nrec() { pasture task \"$@\"; }\n" + strings.Join(lines, "\n")
 			cmd := exec.Command("bash", "-c", script)
-			cmd.Env = append(os.Environ(), "PASTURE_BINARY="+binaryPath, "RECIPE_DB="+db,
+			cmd.Env = append(os.Environ(), "PASTURE_BINARY="+binaryPath, "RECIPE_DB="+db, "EPOCH_REC=rec",
 				"PASTURE_NAMESPACE="+namespace, "SLICE_1_ID_URI="+input.ID, "REVIEW_ROUND_ID_URI="+input.ID,
 				"SLICE_ID_URI="+input.ID, "REVIEW_ID_URI="+input.ID, "IMPL_PLAN_ID_URI="+input.ID,
 				"REQUEST_ID_URI="+input.ID, "URD_ID_URI="+input.ID, "RATIFIED_PROPOSAL_ID_URI="+input.ID,
