@@ -1897,7 +1897,7 @@ Each phase transition MUST include an explicit `invoke_skill(...)` invocation di
 
 **CRITICAL — interviewing phases:** The interviewing phases MUST explicitly invoke their skill. Do **not** improvise interview questions:
 - **Phase 2 (URE):** invoke `invoke_skill(/pasture:user-elicit)` — skipping it produces low-quality elicitation.
-- **Phases 5 & 11 (UAT):** invoke `invoke_skill(/pasture:user-uat)` — it drives the FIX-NOW vs DEFER disposition and demonstrative examples.
+- **Phases 5 & 11 (UAT):** invoke `invoke_skill(/pasture:user-uat)` — it drives the FIX-NOW, DEFER, or WON'T-DO disposition and demonstrative examples.
 
 **CRITICAL:** When the architect hands off to the supervisor (Phase 7 → 8), the supervisor launch prompt MUST:
 1. Start with `invoke_skill(/pasture:supervisor)` — without this, the supervisor skips role-critical procedures

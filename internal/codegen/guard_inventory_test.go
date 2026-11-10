@@ -46,6 +46,10 @@ var guardInventory = []struct {
 	{Guard: "TestProtocolGuardRejectsEachStub", Requirement: "R27 per-branch samples"},
 	{Guard: "TestProtocolGuardRejectsAnEmptyIndex", Requirement: "R27 empty index"},
 	{Guard: "TestCitationGuardAllowsOnlyRuntimeArtefacts", Requirement: "R27 citation scope"},
+	{Guard: "TestUserGateListMatchesTheWorkflow", Requirement: "R28 gate order"},
+	{Guard: "TestHandoffCreateRecipe", Requirement: "R31 recipe executes"},
+	{Guard: "TestGuardInventory", Requirement: "meta: every guard asserts"},
+	{Guard: "TestDispositionSetIsPinned", Requirement: "R24 disposition pin"},
 }
 
 var assertionCalls = map[string]struct{}{
@@ -67,12 +71,18 @@ func guardFindings(guard string, files map[string]*ast.File, fset *token.FileSet
 		case *ast.CallExpr:
 			switch callee := node.Fun.(type) {
 			case *ast.SelectorExpr:
-				if _, ok := assertionCalls[callee.Sel.Name]; ok {
+				receiver, isIdent := callee.X.(*ast.Ident)
+				// testify: assert.* and require.* are assertions whatever the method.
+				if isIdent && (receiver.Name == "assert" || receiver.Name == "require") {
 					asserted = true
 				}
-				// testify: assert.* and require.* are assertions whatever the method.
-				if pkg, ok := callee.X.(*ast.Ident); ok && (pkg.Name == "assert" || pkg.Name == "require") {
-					asserted = true
+				// t.Error*/Fatal* only on the test receiver: err.Error() is not an
+				// assertion, and counting it made the meta-guard report a guard
+				// that only formats a message as if it asserted.
+				if isIdent && receiver.Name == "t" {
+					if _, ok := assertionCalls[callee.Sel.Name]; ok {
+						asserted = true
+					}
 				}
 				if callee.Sel.Name == "Skip" || callee.Sel.Name == "Skipf" {
 					skipped = true
@@ -125,12 +135,52 @@ func parseTestPackage(t *testing.T) (map[string]*ast.File, *token.FileSet) {
 	return files, fset
 }
 
+// guardFiles are the files this epoch writes guards in. Completeness is asserted
+// over these, not over the whole package: a guard is added here, and a test added
+// here must be classified. Tests elsewhere are not guards and are out of scope.
+var guardFiles = []string{
+	"wave8_guard_test.go",
+	"records_guard_test.go",
+	"protocol_documents_guard_test.go",
+	"guard_inventory_test.go",
+}
+
+// otherGuardFileTests records a test in a guard file that is not a requirement
+// guard, with the reason. A new test in a guard file fails the inventory until it
+// appears here or in guardInventory.
+var otherGuardFileTests = map[string]string{
+	"TestMarkdownLinkGuardSamples":                "sample test for the link guard",
+	"TestProtocolDocumentGuardSamples":            "sample test for the document guard",
+	"TestBacktickedCitationsResolve":              "sample test for the citation guard",
+	"TestHandoffTemplateBindsEveryReference":      "sample test for the handoff binding guard",
+	"TestHandoffBindingsNameRequiredFields":       "sample test for the binding-field guard",
+	"TestGuardInventoryRejectsAnEmptyBody":        "sample test for the meta-guard",
+	"TestGuardInventoryRejectsAnUnclassifiedTest": "sample test for the completeness check",
+}
+
 // TestGuardInventory proves every named guard exists and asserts something. The
 // inventory is the list above; adding a guard without adding it here is caught by
 // review, and adding it here without a body is caught below.
 func TestGuardInventory(t *testing.T) {
 	require.NotEmpty(t, guardInventory, "the inventory must name the guards this epoch added")
 	files, fset := parseTestPackage(t)
+
+	// Completeness: every test in a guard file is either an inventory entry or
+	// recorded as something else with a reason. A new guard cannot be added and
+	// left unproved, which is the property the honour-system version lacked.
+	inventory := map[string]struct{}{}
+	for _, entry := range guardInventory {
+		inventory[entry.Guard] = struct{}{}
+	}
+	for _, name := range guardFileTests(t, files) {
+		if _, ok := inventory[name]; ok {
+			continue
+		}
+		if reason, ok := otherGuardFileTests[name]; ok && reason != "" {
+			continue
+		}
+		t.Errorf("test %s is in a guard file but is neither an inventory entry nor recorded with a reason — why: an unclassified guard proves nothing and no one agreed it proves nothing; where: internal/codegen/guard_inventory_test.go otherGuardFileTests; fix: add it to guardInventory with its requirement, or record it with a reason", name)
+	}
 	for _, entry := range guardInventory {
 		if entry.Requirement == "" {
 			t.Errorf("guard %s records no requirement — fix: say what it proves", entry.Guard)
@@ -158,5 +208,42 @@ func TestGuardInventoryRejectsAnEmptyBody(t *testing.T) {
 
 	if found := guardFindings("TestAbsentGuard", files, token.NewFileSet()); len(found) == 0 {
 		t.Fatal("an inventory entry with no function was accepted")
+	}
+}
+
+// guardFileTests lists the test functions declared in the guard files.
+func guardFileTests(t *testing.T, files map[string]*ast.File) []string {
+	t.Helper()
+	wanted := map[string]struct{}{}
+	for _, name := range guardFiles {
+		wanted[name] = struct{}{}
+	}
+	var names []string
+	for name, file := range files {
+		if _, ok := wanted[name]; !ok {
+			continue
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name == nil || !strings.HasPrefix(fn.Name.Name, "Test") {
+				continue
+			}
+			names = append(names, fn.Name.Name)
+		}
+	}
+	return names
+}
+
+// TestGuardInventoryRejectsAnUnclassifiedTest is the completeness sample: a test
+// in a guard file with no disposition must be reported.
+func TestGuardInventoryRejectsAnUnclassifiedTest(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "wave8_guard_test.go", "package codegen\n\nimport \"testing\"\n\nfunc TestUnclassified(t *testing.T) {\n\tt.Error(\"x\")\n}\n", 0)
+	require.NoError(t, err)
+	names := guardFileTests(t, map[string]*ast.File{"wave8_guard_test.go": file})
+	if len(names) != 1 || names[0] != "TestUnclassified" {
+		t.Fatalf("the sample file must expose exactly its test, got %v", names)
+	}
+	if _, recorded := otherGuardFileTests["TestUnclassified"]; recorded {
+		t.Fatal("the sample must not be pre-recorded")
 	}
 }

@@ -170,6 +170,9 @@ func TestStubSuccessorResolves(t *testing.T) {
 	}
 }
 
+// twoValuePhrasing matches the pre-R24 wording in any punctuation.
+var twoValuePhrasing = regexp.MustCompile(`(?i)FIX-NOW\s*(?:vs\.?|or|/)\s*DEFER`)
+
 // findDispositionEnumIncludesWontDo validates values and generated guidance.
 func findDispositionEnumIncludesWontDo(values []disposition, guidance string) []string {
 	var findings []string
@@ -180,6 +183,12 @@ func findDispositionEnumIncludesWontDo(values []disposition, guidance string) []
 	}
 	// Only a body that discusses dispositions is held to the full set: a body
 	// that merely says "deferred" is not describing the disposition model.
+	// A two-value phrasing anywhere is a finding, even when a compliant sentence
+	// elsewhere in the same body would satisfy the presence check. Whole-file
+	// presence alone let a compliant line mask a non-compliant one.
+	if match := twoValuePhrasing.FindString(guidance); match != "" {
+		findings = append(findings, fmt.Sprintf("two-value disposition phrasing %q; why: the set has three members, so this teaches a rule the user rejected; where: a body containing %q; fix: name FIX-NOW, DEFER and WON'T-DO, or drop the clause", match, match))
+	}
 	if lower := strings.ToLower(guidance); strings.Contains(lower, "fix-now") || strings.Contains(lower, "won't-do") || strings.Contains(lower, "disposition") {
 		for _, value := range []disposition{fixNow, deferItem, wontDo} {
 			if !value.valid() || !strings.Contains(guidance, string(value)) {
@@ -400,4 +409,19 @@ func guidanceSource(guidance string) string {
 		return guidance[:60] + "..."
 	}
 	return guidance
+}
+
+// wantDispositions is the closed set, written independently of the registry: a
+// guard that reads its expectation from the same list cannot see the list lose a
+// member.
+var wantDispositions = []string{"FIX-NOW", "DEFER", "WON'T-DO"}
+
+// TestDispositionSetIsPinned fails when the enum loses a member, even though
+// every rendered body would render whatever the enum still says.
+func TestDispositionSetIsPinned(t *testing.T) {
+	var got []string
+	for _, entry := range dispositions {
+		got = append(got, string(entry.value))
+	}
+	assert.Equal(t, wantDispositions, got, "the disposition set must match the pinned three")
 }
