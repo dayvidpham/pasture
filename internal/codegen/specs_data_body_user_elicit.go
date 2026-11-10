@@ -79,6 +79,7 @@ var userElicitBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragWritingStandard),
 		{
 			Id:    "user-elicit-substeps",
 			Title: "Sub-steps",
@@ -338,6 +339,7 @@ The proposal task will block the elicit task:
 [[rec:block]] "${ELICIT_ID_URI}" --by "${PROPOSAL_ID_URI}"
 ` + "```" + ``,
 		},
+		fragRef(FragSignalCapture),
 	},
 
 	Recipes: []RecipeBlock{},

@@ -80,6 +80,7 @@ var epochBody = SkillBody{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
 		fragRef(FragTrackerAdapter),
+		fragRef(FragSignalCapture),
 		{
 			Id:    "epoch-core-principles",
 			Title: "Core Principles",

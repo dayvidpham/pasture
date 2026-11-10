@@ -69,6 +69,7 @@ var supervisorBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragWritingStandard),
 		{
 			Id:    "sup-first-steps",
 			Title: "First Steps",
@@ -481,6 +482,7 @@ The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_S
 [[rec:query]] --label="pasture:epic-followup"
 ` + "```" + ``,
 		},
+		fragRef(FragSignalCapture),
 	},
 
 	Recipes: []RecipeBlock{},

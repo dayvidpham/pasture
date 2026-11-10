@@ -6,6 +6,7 @@ var architectBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragSignalCapture),
 		{
 			Id:    "arch-proposal-naming",
 			Title: "PROPOSAL-N Naming",

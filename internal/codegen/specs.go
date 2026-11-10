@@ -120,6 +120,8 @@ var AllFragmentIds = []FragmentId{
 	FragTaskRecovery,
 	FragTaskAuthor,
 	FragTrackerAdapter,
+	FragWritingStandard,
+	FragSignalCapture,
 }
 
 const (
@@ -130,6 +132,21 @@ const (
 	// contract: the runtime entry point, the closed operation set, EPOCH.md,
 	// the probe and the write-failure rule (R21, amendment A-3).
 	FragTrackerAdapter FragmentId = "frag--tracker-adapter"
+
+	// FragWritingStandard is the one authored home of the user-facing writing
+	// standard: the 25 rules adapted from ASD-STE100 Issue 9 Part 1, the seven
+	// house rules for questions and options, the two message templates, the
+	// weak-question-tool degrade clause, the exempt material, and the pre-send
+	// check. Referenced through fragRef by exactly four skills: user-elicit,
+	// user-uat, architect-handoff and supervisor.
+	FragWritingStandard FragmentId = "frag--writing-standard"
+
+	// FragSignalCapture is the one authored home of the signal-capture
+	// component: the closed five-kind list, the one feedback task per epoch,
+	// the stable one-line record format, and the non-blocking recording rule.
+	// Referenced through fragRef by the epoch, architect, supervisor,
+	// user-elicit and user-uat skills.
+	FragSignalCapture FragmentId = "frag--signal-capture"
 
 	// FragModelPolicy is the one authored home of the capability-tier model
 	// policy: the tier table, the primary/secondary/tertiary fallback-chain

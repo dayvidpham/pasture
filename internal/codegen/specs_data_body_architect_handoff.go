@@ -39,6 +39,7 @@ var architectHandoffBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragWritingStandard),
 		{
 			Id:      "arch-handoff-when-to-use",
 			Title:   "When to Use",

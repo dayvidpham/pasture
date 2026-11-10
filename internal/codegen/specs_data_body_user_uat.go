@@ -86,6 +86,7 @@ var userUatBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragWritingStandard),
 		{
 			Id:      "uat-phases",
 			Title:   "UAT Phases",
@@ -380,6 +381,7 @@ references:
 
 Document the specific component and the user's verbatim feedback in the task description. Do not generalize.`,
 		},
+		fragRef(FragSignalCapture),
 	},
 
 	Recipes: []RecipeBlock{},
