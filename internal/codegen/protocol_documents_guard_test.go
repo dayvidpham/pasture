@@ -646,7 +646,9 @@ func TestHandoffTemplateBindsEveryReference(t *testing.T) {
 	}
 	// Each binding renders one reference line naming its variable and the command
 	// that reads it. The expected line is constructed here from the binding, so a
-	// renderer that drops the variable fails without pinning a prose fragment.
+	// renderer that drops the variable fails. The line still contains fixed prose
+	// ("read with", the show command), so rewording the renderer trips this test:
+	// that is a deliberate cost, not an accident.
 	for _, binding := range spec.Bindings {
 		wantLine := "- " + handoffFieldHeading(binding.Field) + ": \"${" + binding.Var + "}\" — read with `\"${EPOCH_REC}\" show \"${" + binding.Var + "}\"`"
 		assert.Contains(t, rendered, wantLine, "the reference line for %q must carry its variable and its read command", binding.Field)
@@ -759,9 +761,12 @@ func TestHandoffBindingsNameRequiredFields(t *testing.T) {
 			{Field: "request", Var: ""},
 		},
 	}
-	got := handoffBindingFindings("test", defective)
-	if len(got) != 2 {
-		t.Fatalf("the defective spec must produce one finding per bad binding, got %v", got)
+	got := strings.Join(handoffBindingFindings("test", defective), "\n")
+	if !strings.Contains(got, "not one of its required fields") {
+		t.Errorf("the defective spec must report the non-required binding: %q", got)
+	}
+	if !strings.Contains(got, "with no variable") {
+		t.Errorf("the defective spec must report the binding with no variable: %q", got)
 	}
 }
 
