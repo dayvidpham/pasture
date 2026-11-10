@@ -432,7 +432,7 @@ Given an expired token when accessing protected routes then return 401
 This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL is ratified. In follow-up context:
 
 - **Storage:** the follow-up handoff is authored in its own HANDOFF Pasture task body (no filesystem path)
-- **References:** Include both original URD and FOLLOWUP_URD task IDs
+- **References:** keep `urd: "${URD_ID_URI}"` and add `followup_urd: "${FOLLOWUP_URD_ID_URI}"`, then read each with `"${EPOCH_REC}" show`
 - **Context:** Summary of FOLLOWUP_PROPOSAL ratification and the user-DEFER'd UAT items the follow-up addresses
 - **Next step:** Supervisor creates the follow-up plan and the follow-up slices for that scope
 <!-- END GENERATED FROM pasture schema -->

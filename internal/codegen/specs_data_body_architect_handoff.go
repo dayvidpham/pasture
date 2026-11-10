@@ -168,7 +168,7 @@ Given an expired token when accessing protected routes then return 401
 		{
 			Id:      "arch-handoff-followup-lifecycle",
 			Title:   "Follow-up Lifecycle (h1 Reuse)",
-			Content: "This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL is ratified. In follow-up context:\n\n- **Storage:** the follow-up handoff is authored in its own HANDOFF Pasture task body (no filesystem path)\n- **References:** Include both original URD and FOLLOWUP_URD task IDs\n- **Context:** Summary of FOLLOWUP_PROPOSAL ratification and the user-DEFER'd UAT items the follow-up addresses\n- **Next step:** Supervisor creates the follow-up plan and the follow-up slices for that scope",
+			Content: "This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL is ratified. In follow-up context:\n\n- **Storage:** the follow-up handoff is authored in its own HANDOFF Pasture task body (no filesystem path)\n- **References:** keep `urd: \"${URD_ID_URI}\"` and add `followup_urd: \"${FOLLOWUP_URD_ID_URI}\"`, then read each with `\"${EPOCH_REC}\" show`\n- **Context:** Summary of FOLLOWUP_PROPOSAL ratification and the user-DEFER'd UAT items the follow-up addresses\n- **Next step:** Supervisor creates the follow-up plan and the follow-up slices for that scope",
 		},
 	},
 

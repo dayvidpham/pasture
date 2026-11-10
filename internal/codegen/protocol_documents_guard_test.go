@@ -822,3 +822,23 @@ func TestProtocolGuardRejectsAnEmptyIndex(t *testing.T) {
 		t.Fatalf("an index with no entries was accepted: %q", joined)
 	}
 }
+
+// wantHandoffBindings is written here, independently of HandoffSpecs, so a
+// binding removed from the registry has to be removed from this pin as well. A
+// guard that derives both sides from the same list cannot fail: deleting the
+// binding would simply move the field from a reference to a section.
+var wantHandoffBindings = []HandoffBinding{
+	{Field: "request", Var: "REQUEST_ID_URI"},
+	{Field: "urd", Var: "URD_ID_URI"},
+	{Field: "proposal", Var: "RATIFIED_PROPOSAL_ID_URI"},
+	{Field: "ratified-plan", Var: "RATIFIED_PLAN_ID_URI"},
+}
+
+// TestHandoffBindingsMatchThePinnedSet proves the handoff still binds every
+// reference the supervisor reads. The expected list is independent of the
+// registry, so removing a binding fails here even though the renderer would
+// happily turn the field into a section.
+func TestHandoffBindingsMatchThePinnedSet(t *testing.T) {
+	assert.Equal(t, wantHandoffBindings, HandoffSpecs["h1"].Bindings,
+		"the h1 bindings must match the pinned set; a field the supervisor reads as a variable cannot become a fill-in section")
+}
