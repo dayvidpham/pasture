@@ -19,6 +19,7 @@ import {
   Select,
   StatGrid,
   StatusDot,
+  useToast,
 } from '@peasant-labs/fairtrade/ui'
 import { listRoute, parseRoute, sessionRoute } from './route'
 import { ReadOnlyTranscriptViewer } from './ReadOnlyTranscriptViewer'
@@ -33,6 +34,7 @@ import {
   fetchInspect,
   fetchProject,
   fetchTranscript,
+  fetchTranscriptCatalog,
   setPeasantEnrichment,
   socketURL,
   subscribe,
@@ -62,6 +64,11 @@ import {
   type TranscriptFailure,
   type TranscriptViewModel,
 } from './transcript'
+import {
+  transcriptAvailability,
+  transcriptMark,
+  type TranscriptCatalogView,
+} from './transcriptCatalog'
 import {
   epochLabel,
   formatTimelineDuration,
@@ -711,6 +718,7 @@ export function ProjectMappingPanel({
 }
 
 export default function App() {
+  const toast = useToast()
   const [themeController] = useState(createThemeController)
   const { preference, resolvedTheme, persistence } = useSyncExternalStore(themeController.subscribe, themeController.getSnapshot, getServerTheme)
   const [themeSelected, setThemeSelected] = useState(false)
@@ -741,6 +749,7 @@ export default function App() {
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [transcriptCatalog, setTranscriptCatalog] = useState<TranscriptCatalogView>({ status: 'loading' })
   const [transcript, setTranscript] = useState<TranscriptState>({ status: 'idle' })
   const [transcriptRetry, setTranscriptRetry] = useState(0)
   const [transcriptLeftRail, setTranscriptLeftRail] = useState(false)
@@ -816,6 +825,38 @@ export default function App() {
     void load(controller.signal)
     return () => controller.abort()
   }, [load])
+
+  // The catalog is one cached read. Load it with the page, and again when the
+  // socket reconnects, so a Peasant outage can recover without a reload. A
+  // failed refresh keeps the last complete catalog; only the first failure
+  // leaves every row unknown.
+  const loadCatalog = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const catalog = await fetchTranscriptCatalog(signal)
+      if (signal?.aborted) return
+      setTranscriptCatalog({
+        status: 'ready',
+        ids: new Set(catalog.items),
+        truncated: catalog.truncated,
+      })
+    } catch {
+      if (signal?.aborted) return
+      setTranscriptCatalog((current) => (current.status === 'ready' ? current : { status: 'error' }))
+    }
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void loadCatalog(controller.signal)
+    return () => controller.abort()
+  }, [loadCatalog])
+
+  useEffect(() => {
+    if (connection !== 'live') return
+    const controller = new AbortController()
+    void loadCatalog(controller.signal)
+    return () => controller.abort()
+  }, [connection, loadCatalog])
 
   useEffect(() => {
     let closed = false
@@ -954,10 +995,14 @@ export default function App() {
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        setTranscript({ status: 'error', key: transcriptKey, failure: describeTranscriptError(error) })
+        const failure = describeTranscriptError(error)
+        setTranscript({ status: 'error', key: transcriptKey, failure })
+        // err(message, opts): the first argument is the toast body, not a
+        // title bag. The inline retry state stays; the toast is the same message.
+        toast.err(failure.message, { title: failure.title, duration: 8000 })
       })
     return () => controller.abort()
-  }, [route.kind, selectedHarness, selectedNativeId, transcriptKey, transcriptRetry])
+  }, [route.kind, selectedHarness, selectedNativeId, transcriptKey, transcriptRetry, toast])
 
   // Execution history is fetched once per selected session and then extended
   // through its opaque cursor. Live WebSocket snapshots never restart it,
@@ -1144,6 +1189,23 @@ export default function App() {
         ),
       },
       {
+        key: 'transcript',
+        label: 'transcript',
+        width: '7rem',
+        render: (_: unknown, row: SessionRow) => {
+          const availability = transcriptAvailability(row.nativeSessionId, transcriptCatalog)
+          return (
+            <span
+              className="transcript-mark"
+              data-availability={availability}
+              data-mark={transcriptMark(availability)}
+            >
+              {availability}
+            </span>
+          )
+        },
+      },
+      {
         key: 'epoch',
         label: 'epoch',
         sortable: true,
@@ -1171,7 +1233,7 @@ export default function App() {
         ),
       },
     ],
-    [],
+    [transcriptCatalog],
   )
 
   const retry = () => {

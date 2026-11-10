@@ -62,11 +62,19 @@ body {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* The title track keeps at least 18.75rem (300px) when the row is wide
+     enough. min(100%, …) lets a narrower container use the full row instead
+     of overflowing. The meta track must be allowed to shrink: an auto track
+     sizes to the connection pill and can collapse the title track to 0. */
+  grid-template-columns: minmax(min(100%, 18.75rem), 1fr) minmax(0, max-content);
   align-items: end;
   gap: var(--sp-6);
   padding: var(--sp-6) 0 var(--sp-5);
   border-bottom: var(--bd);
+}
+
+.hero > :first-child {
+  min-width: 0;
 }
 
 .hero h1 {
@@ -90,6 +98,8 @@ body {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--sp-3);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .theme-control {
@@ -564,9 +574,34 @@ body {
   font-size: var(--fs-label);
 }
 
-@container (max-width: 48rem) {
+.transcript-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--ink-strong);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+}
+
+/* A drawn check, not a symbol-only text node: a lone check mark is not text
+   axe can measure, and an unmeasured contrast node is not a pass. */
+.transcript-mark[data-availability='available']::before {
+  content: "";
+  width: 0.4em;
+  height: 0.7em;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translateY(-0.05em);
+}
+
+.transcript-mark[data-availability='none']::before {
+  content: "";
+  width: 0.7em;
+  border-bottom: 2px solid currentColor;
+}
+
+@container (max-width: 72rem) {
   .hero {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }
 

@@ -86,8 +86,15 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async () => { expect(errors).toEqual([]) })
 
-async function mockAPI(page: Page, sessions = [session]) {
+async function mockAPI(
+  page: Page,
+  sessions = [session],
+  catalog: { items: string[]; truncated?: boolean } = { items: sessions.map(item => item.nativeSessionId) },
+) {
   await page.route('**/api/v1/inspect', route => route.fulfill({ json: { ...snapshot, sessions } }))
+  await page.route('**/api/v1/transcripts', route => route.fulfill({
+    json: { revision: 1, asOf: snapshot.asOf, items: catalog.items, truncated: catalog.truncated ?? false },
+  }))
   await page.route('**/api/v1/sessions/*/*/transcript', route => route.fulfill({ json: transcript }))
   await page.route('**/api/v1/sessions/*/*/execution**', route => route.fulfill({ json: { revision: 1, asOf: snapshot.asOf, items: [execution] } }))
   await page.routeWebSocket('**/api/v1/ws', ws => {
@@ -277,6 +284,84 @@ test('desktop layout keeps a wide internally scrollable rail visible', async ({ 
   expect(card.scrollHeight).toBeGreaterThan(card.height)
   expect(card.scrollTop).toBeGreaterThan(card.initial)
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width)
+})
+
+test('transcript column shows available and none', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const missing = { ...session, nativeSessionId: 'session-without-transcript' }
+  await mockAPI(page, [session, missing], { items: [transcript.id], truncated: false })
+  await page.goto(origin)
+  const available = page.getByRole('row').filter({ has: page.getByRole('button', { name: transcript.id }) })
+  const none = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'session-without-transcript' }) })
+  await expect(available.locator('[data-availability="available"]')).toHaveText('available')
+  await expect(available.locator('[data-availability="available"]')).toHaveAttribute('data-mark', '✓')
+  await expect(none.locator('[data-availability="none"]')).toHaveText('none')
+  await expect(none.locator('[data-availability="none"]')).toHaveAttribute('data-mark', '—')
+})
+
+test('a failed transcript catalog stays unknown', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockAPI(page)
+  await page.route('**/api/v1/transcripts', route => route.fulfill({
+    status: 503,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: { code: 'peasant_unavailable', message: 'Peasant is unavailable: install Peasant and retry' } }),
+  }))
+  await page.goto(origin)
+  await expect(page.locator('[data-availability="unknown"]').first()).toHaveText('unknown')
+  await expect(page.locator('[data-availability="none"]')).toHaveCount(0)
+})
+
+test('a missing transcript shows a dismissible bottom-right toast and keeps retry', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockAPI(page)
+  await page.route('**/api/v1/sessions/*/*/transcript', route => route.fulfill({
+    status: 404,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: { code: 'transcript_not_found', message: 'Peasant has no transcript for that session' } }),
+  }))
+  await page.goto(origin)
+  await page.getByRole('button', { name: transcript.id }).click()
+  const message = 'Peasant has not stored a durable transcript for this session yet. Capture it with Peasant (harvest the session), then retry.'
+  const toast = page.getByRole('alert').filter({ hasText: message })
+  await expect(toast).toBeVisible()
+  await expect(page.getByRole('button', { name: 'retry transcript' })).toBeVisible()
+  const host = page.locator('.tsx-host')
+  await expect(host).toHaveClass(/tsx-bottom-right/)
+  const box = await host.boundingBox()
+  const viewport = page.viewportSize()
+  expect(box).not.toBeNull()
+  expect(viewport).not.toBeNull()
+  expect(box!.x).toBeGreaterThan(viewport!.width / 2)
+  expect(box!.y).toBeGreaterThan(viewport!.height / 2)
+  await page.getByRole('button', { name: 'dismiss notification' }).click()
+  await expect(toast).toBeHidden()
+  await expect(page.getByRole('button', { name: 'retry transcript' })).toBeVisible()
+})
+
+test('hero text keeps width at 1180 without horizontal overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 900 })
+  await mockAPI(page)
+  await page.goto(origin)
+  await expect(page.getByRole('heading', { name: 'session epochs' })).toBeVisible()
+  const measured = await page.evaluate(() => {
+    const hero = document.querySelector('.hero') as HTMLElement
+    const heading = hero.querySelector('h1') as HTMLElement
+    const lede = hero.querySelector('.lede') as HTMLElement
+    const columns = getComputedStyle(hero).gridTemplateColumns
+    return {
+      columns,
+      heading: heading.getBoundingClientRect().width,
+      lede: lede.getBoundingClientRect().width,
+      scroll: document.documentElement.scrollWidth,
+      viewport: document.documentElement.clientWidth,
+    }
+  })
+  console.log('hero 1180', measured)
+  expect(measured.heading).toBeGreaterThanOrEqual(300)
+  expect(measured.lede).toBeGreaterThanOrEqual(300)
+  expect(measured.columns.startsWith('0px')).toBe(false)
+  expect(measured.scroll).toBeLessThanOrEqual(measured.viewport)
 })
 
 test('mobile layout preserves the sheet without horizontal overflow', async ({ page }) => {

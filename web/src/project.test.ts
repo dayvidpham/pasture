@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
+import { ToastProvider } from '@peasant-labs/fairtrade/ui'
 
 import App, {
   PeasantIntegrationState,
@@ -170,7 +171,7 @@ describe('peasantIntegrationPresentation', () => {
 
 describe('project rendering', () => {
   it('wires the project filter and integration rail into the app shell', () => {
-    const html = render(createElement(App))
+    const html = render(createElement(ToastProvider, { placement: 'bottom-right', children: createElement(App) }))
 
     expect(html).toContain('peasant projects')
     expect(html).toContain('reading the Peasant project source')

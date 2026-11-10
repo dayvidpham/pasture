@@ -2,6 +2,7 @@
 import { StrictMode, act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
+import { ToastProvider } from '@peasant-labs/fairtrade/ui'
 import App from './App'
 import { THEME_STORAGE_KEY } from './theme'
 
@@ -27,7 +28,7 @@ it('applies preference and system changes, retaining a choice when storage fails
     expect(document.documentElement.style.colorScheme).toBe(value)
   }
   try {
-    await act(async () => { root.render(<StrictMode><App /></StrictMode>) })
+    await act(async () => { root.render(<StrictMode><ToastProvider placement="bottom-right"><App /></ToastProvider></StrictMode>) })
     const label = [...container.querySelectorAll('label')].find((element) => element.textContent === 'Theme')!
     const select = container.querySelector<HTMLSelectElement>(`select[id="${label.htmlFor}"]`)!
     expect(select.value).toBe('system')
