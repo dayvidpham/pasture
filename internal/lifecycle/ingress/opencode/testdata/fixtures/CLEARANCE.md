@@ -2676,3 +2676,19 @@ preceding digest identifies the prior recovery revision; neither revision
 participated in the historical captures above, and no capture payload, capture
 kit, fixture identity, activation state or acceptance record changes. No new
 live session, capture or host capability is claimed.
+
+### Namespace derivation recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`7719d5586dd013824ca87489a2c32394bd411686f113bb2cf346efdd35bc0e6c`.
+This later generated revision changes the embedded recovery prose so the
+adapter passes `--namespace` only when EPOCH.md records one, and otherwise
+lets Pasture derive it. The ledger derivation is named in that prose. Lifecycle
+transport, activation, version guards, decision handling and the injection
+contract are unchanged; no runtime task query, file read or cached task state
+is added. The generated plugin and embedded hook asset still have identical
+bytes (`internal/target/opencode/assets/hooks/pasture-hooks.ts` has the same
+SHA-256). The preceding digest identifies the prior recovery revision; neither
+revision participated in the historical captures above, and no capture payload,
+capture kit, fixture identity, activation state or acceptance record changes.
+No new live session, capture or host capability is claimed.

@@ -182,15 +182,16 @@ func validateTrackerOps(ops []TrackerOp) error {
 }
 
 // validateTrackerImplementations fails the build when an op has no ledger
-// handler. renderOpArm calls ledger_<id>; a missing function is exit 127 at
-// runtime, after generation has already shipped.
+// handler definition. A comment that merely names ledger_<id>() does not
+// count: renderOpArm calls the function, and a missing definition is exit
+// 127 at runtime, after generation has already shipped.
 func validateTrackerImplementations(ops []TrackerOp, runtime string) error {
 	for _, op := range ops {
-		needle := "ledger_" + string(op.Id) + "()"
+		needle := "\nledger_" + string(op.Id) + "() {"
 		if strings.Contains(runtime, needle) {
 			continue
 		}
-		return fmt.Errorf("tracker contract: operation %q has no %s handler — why: the rec asset calls ledger_%s and a missing function fails at runtime with exit 127 (command not found); where: internal/codegen/specs_data_tracker_script.go ledgerRuntime; when: checking TrackerOps before generation; impact: a ledger epoch dies on the first %s call; fix: define %s in ledgerRuntime", op.Id, needle, op.Id, op.Id, needle)
+		return fmt.Errorf("tracker contract: operation %q has no ledger_%s() { handler — why: a mention of the name is not a definition, and the rec asset calls ledger_%s; a missing function fails at runtime with exit 127 (command not found); where: internal/codegen/specs_data_tracker_script.go ledgerRuntime; when: checking TrackerOps before generation; impact: a ledger epoch dies on the first %s call; fix: define ledger_%s() { in ledgerRuntime", op.Id, op.Id, op.Id, op.Id, op.Id)
 	}
 	return nil
 }
@@ -213,7 +214,7 @@ const TrackerProbeLimits = `Detection limits, by step:
 - pasture --help: detects that the binary is on PATH and that each required verb has a help page. It cannot detect version compatibility, store health, permissions, schema, namespace or author. A help page can exist on a binary whose runtime is broken.
 - test -f: detects a missing store file and stops the probe before anything opens it. It cannot detect a directory, an unreadable or corrupt database, an out-of-date schema, a held lock, or a different store selected by configuration. Never replace it with a read: opening a missing store creates it.
 - migrate --dry-run: detects that the store opens and that its migrations can be planned; it leaves the file's SHA-256 unchanged. It still opens the store and may take locks. It cannot detect concurrent writers, a defect that only a real migration touches, an unregistered author, or a namespace mismatch. A non-zero result is the only error backend: the store exists but cannot be used.
-- Namespace: explicit PASTURE_NAMESPACE, else the git origin remote, else file:// of the working directory. A missing remote is not an unusable store. It cannot detect a remote other than origin.
+- Namespace: the probe does not derive one, and it does not write a derived value into the header. A missing remote is not an unusable store. Pasture derives when EPOCH.md has no namespace: line (PASTURE_NAMESPACE, else the git origin, else file:// of the working directory). The ledger prints NS from derive_namespace, the one function every unpinned ledger write calls. It cannot detect a remote other than origin.
 - Author: a missing or unregistered author is a warning (WARN=no-author), not an error backend. It cannot detect an author registered in another namespace, nor prove a later write will be allowed.
 - The probe cannot detect a store chosen by configuration outside the env/default precedence, and it does not prove that any later write will succeed.`
 
@@ -225,7 +226,7 @@ const TrackerEpochHeaderTemplate = `EPOCH.md lives at .agents.local/pasture/EPOC
 epoch: <epoch id>
 backend: pasture|ledger|error
 probed_at: <UTC timestamp>
-namespace: <namespace URI>        # pasture only
+namespace: <namespace URI>        # optional pin; absent means the backend derives
 db: <absolute store path>         # pasture only
 author: <registered actor id>     # pasture only; what whoami prints
 ledger: <absolute ledger path>    # ledger only

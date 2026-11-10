@@ -200,7 +200,7 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 		},
 		TrackerOpShow: {
 			Id:         TrackerOpShow,
-			Action:     "read one record, including description, phase, priority and refs; timestamps stay on --history; --notes lists notes",
+			Action:     "read one record, including description, phase, priority and refs; --notes lists notes. Pasture show returns createdAt and updatedAt; ledger timestamps stay on --history",
 			Signature:  `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]`,
 			Positional: "id",
 			Flags: []trackerFlag{
@@ -443,8 +443,73 @@ func renderTrackerProbeScript(ops map[TrackerOpId]TrackerOp) string {
 		}
 		fmt.Fprintf(&verbs, " \"%s\"", verb)
 	}
-	return fmt.Sprintf(probeScriptTemplate, verbs.String())
+	return insertAfterShebang(fmt.Sprintf(probeScriptTemplate, verbs.String()), namespaceDeriveShell)
 }
+
+// insertAfterShebang keeps the script executable and puts the shared function
+// where both the header printer and the write path can call it.
+func insertAfterShebang(script, extra string) string {
+	const shebang = "#!/bin/sh\n"
+	if strings.HasPrefix(script, shebang) {
+		return shebang + extra + script[len(shebang):]
+	}
+	return extra + script
+}
+
+// namespaceDeriveShell is the one ledger normalisation. The probe prints it
+// as NS. Every ledger write calls it unless EPOCH.md records namespace:.
+// Pasture is not given a copy: it derives when the adapter omits --namespace.
+const namespaceDeriveShell = `# derive_namespace is the one ledger normalisation. Forms: git@host:path,
+# ssh://, git://, http://, https:// and user@host:path. An empty remote is
+# file:// of the physical working directory. PASTURE_NAMESPACE matches the
+# value Pasture uses when --namespace is omitted.
+derive_namespace() {
+  if [ -n "${PASTURE_NAMESPACE:-}" ]; then
+    printf '%s\n' "$PASTURE_NAMESPACE"
+    return 0
+  fi
+  remote=$(git remote get-url origin 2>/dev/null || true)
+  remote=$(printf '%s' "$remote" | tr -d '\r\n')
+  if [ -z "$remote" ]; then
+    dir=$(pwd -P 2>/dev/null || pwd)
+    printf 'file://%s\n' "$dir"
+    return 0
+  fi
+  normalize_git_remote "$remote"
+}
+
+normalize_git_remote() {
+  url=$1
+  case "$url" in
+    ssh://*)
+      rest=${url#ssh://}
+      case "$rest" in
+        *@*) rest=${rest#*@} ;;
+      esac
+      url="https://$rest"
+      ;;
+    git://*)
+      url="https://${url#git://}"
+      ;;
+    http://*)
+      url="https://${url#http://}"
+      ;;
+    https://*)
+      ;;
+    *@*:*)
+      rest=${url#*@}
+      host=${rest%%:*}
+      path=${rest#*:}
+      url="https://$host/$path"
+      ;;
+  esac
+  case "$url" in
+    *.git) url=${url%.git} ;;
+  esac
+  printf '%s\n' "$url"
+}
+
+`
 
 const probeScriptTemplate = `#!/bin/sh
 # Epoch tracker probe. Side-effect free. Prints KEY=VALUE lines and exits 0.
@@ -469,23 +534,29 @@ emit() {
   exit 0
 }
 
+# Ledger header value. Same function every ledger write calls.
+emit_ledger() {
+  _ns=$(derive_namespace)
+  emit ledger "$1" "${2:-}" "$_ns" "" "${3:-}"
+}
+
 # 1. Capability. --help never opens a store.
 if ! command -v "$PASTURE_BIN" >/dev/null 2>&1; then
-  emit ledger not-installed
+  emit_ledger not-installed
 fi
 
 VER="$("$PASTURE_BIN" --version 2>/dev/null | awk '{print $NF}')"
 
 "$PASTURE_BIN" --help >/dev/null 2>&1
 if [ "$?" -ne 0 ]; then
-  emit ledger help-failed "" "" "" "$VER"
+  emit_ledger help-failed "" "$VER"
 fi
 
 for VERB in %s; do
   # shellcheck disable=SC2086
   "$PASTURE_BIN" $VERB --help >/dev/null 2>&1
   if [ "$?" -ne 0 ]; then
-    emit ledger "missing-verb:$VERB" "" "" "" "$VER"
+    emit_ledger "missing-verb:$VERB" "" "$VER"
   fi
 done
 
@@ -501,7 +572,7 @@ else
 fi
 
 if [ ! -f "$DB" ]; then
-  emit ledger no-store "$DB" "" "" "$VER"
+  emit_ledger no-store "$DB" "$VER"
 fi
 
 # 3. Usability. --dry-run leaves the file's SHA-256 unchanged.
@@ -511,16 +582,9 @@ if [ "$RC" -ne 0 ]; then
   emit error "store-exit-$RC" "$DB" "" "" "$VER"
 fi
 
-# 4. Scope. Same derivation as pasture: explicit env, else git origin, else
-# file:// of the working directory. A missing remote is not an unusable store.
-if [ -n "${PASTURE_NAMESPACE:-}" ]; then
-  NS="$PASTURE_NAMESPACE"
-else
-  NS="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')"
-  if [ -z "$NS" ]; then
-    NS="file://$(pwd)"
-  fi
-fi
+# 4. Author. A missing author is a warning, not an unusable store.
+# The probe does not derive a namespace for pasture. Writing one into
+# EPOCH.md would freeze it and override Pasture's own derivation.
 
 ACT="${PASTURE_AUTHOR:-pasture-system/00000000-0000-0000-0000-000000000000}"
 "$PASTURE_BIN" --db "$DB" task agents show "$ACT" --format json >/dev/null 2>&1
@@ -530,12 +594,12 @@ if [ "$RC" -ne 0 ]; then
   printf 'probe: warning: author %%s is not registered in %%s\n  why: task agents show exited %%s, and a missing author is not an unusable store\n  where: epoch tracker probe, author check\n  fix: register the actor, or export PASTURE_AUTHOR to a registered id; the epoch still records backend pasture\n' "$ACT" "$DB" "$RC" >&2
 fi
 
-emit pasture "" "$DB" "$NS" "$ACT" "$VER"
+emit pasture "" "$DB" "" "$ACT" "$VER"
 `
 
 func renderTrackerRecScript(ops map[TrackerOpId]TrackerOp) string {
 	var b strings.Builder
-	b.WriteString(recPreamble)
+	b.WriteString(insertAfterShebang(recPreamble, namespaceDeriveShell))
 	b.WriteString(renderLedgerLineFunc())
 	b.WriteString(ledgerRuntime)
 	b.WriteString("case \"$OP\" in\n")
@@ -622,6 +686,11 @@ func renderParser(op TrackerOp) string {
 			continue
 		}
 		if flag.Repeat {
+			if dest == "labels" {
+				fmt.Fprintf(&b, "        --%s) label_push \"$2\"; shift 2 ;;\n", flag.Name)
+				fmt.Fprintf(&b, "        --%s=*) label_push \"${1#*=}\"; shift ;;\n", flag.Name)
+				continue
+			}
 			fmt.Fprintf(&b, "        --%s) %s=\"$%s $2\"; shift 2 ;;\n", flag.Name, dest, dest)
 			fmt.Fprintf(&b, "        --%s=*) %s=\"$%s ${1#*=}\"; shift ;;\n", flag.Name, dest, dest)
 			continue
@@ -631,7 +700,11 @@ func renderParser(op TrackerOp) string {
 	}
 	if op.Rest != "" {
 		fmt.Fprintf(&b, "        --*) fail \"%s rejected argument '$1'\" \"the argument is not in the %s contract\" \"pass the label as a positional after the task URI\" ;;\n", op.Id, op.Id)
-		fmt.Fprintf(&b, "        *) %s=\"$%s $1\"; shift ;;\n", op.Rest, op.Rest)
+		if op.Rest == "labels" {
+			b.WriteString("        *) label_push \"$1\"; shift ;;\n")
+		} else {
+			fmt.Fprintf(&b, "        *) %s=\"$%s $1\"; shift ;;\n", op.Rest, op.Rest)
+		}
 	} else {
 		names := make([]string, 0, len(op.Flags))
 		for _, flag := range op.Flags {
@@ -674,8 +747,11 @@ func renderPastureCalls(b *strings.Builder, calls []pastureCall) {
 func writePastureCall(b *strings.Builder, call pastureCall, indent string) {
 	inner := indent
 	if call.RepeatVar != "" {
-		fmt.Fprintf(b, "%sfor label in $%s; do\n", indent, call.RepeatVar)
-		fmt.Fprintf(b, "%s  [ -n \"$label\" ] || continue\n", indent)
+		fmt.Fprintf(b, "%sset -f\n", indent)
+		fmt.Fprintf(b, "%sfor _enc in $%s; do\n", indent, call.RepeatVar)
+		fmt.Fprintf(b, "%s  [ -n \"$_enc\" ] || continue\n", indent)
+		fmt.Fprintf(b, "%s  row_decode_set \"$_enc\"\n", indent)
+		fmt.Fprintf(b, "%s  label=$decoded\n", indent)
 		inner = indent + "  "
 	}
 	if call.CaptureID {
@@ -726,6 +802,7 @@ func writePastureCall(b *strings.Builder, call pastureCall, indent string) {
 	}
 	if call.RepeatVar != "" {
 		fmt.Fprintf(b, "%sdone\n", indent)
+		fmt.Fprintf(b, "%sset +f\n", indent)
 	}
 }
 
@@ -786,7 +863,15 @@ field() {
 
 BACKEND="$(field backend)"
 DB="${PASTURE_DB_PATH:-$(field db)}"
-NS="${PASTURE_NAMESPACE:-$(field namespace)}"
+# --namespace is passed only when EPOCH.md records one. Otherwise pasture
+# derives (env, else git remote, else file:// of cwd). Ledger calls the same
+# derivation function the probe printed, unless the header pins a namespace.
+HEADER_NS="$(field namespace)"
+if [ "$BACKEND" = ledger ] && [ -z "$HEADER_NS" ]; then
+  NS=$(derive_namespace)
+else
+  NS="$HEADER_NS"
+fi
 AUTHOR="${PASTURE_AUTHOR:-$(field author)}"
 LEDGER="$(field ledger)"
 if [ -z "$LEDGER" ]; then
@@ -848,15 +933,86 @@ need_id() {
   [ -n "${1:-}" ] || fail "$OP needs a task ID" "the first operand was empty" "pass the full task URI as the first operand"
 }
 
+# json_escape and row_encode are total for every byte except NUL, which a
+# shell argument cannot carry. Each is the inverse of its reader (take, and
+# row_decode). A trailing newline is kept: the decoder is not read with a
+# bare command substitution.
 json_escape() {
-  printf '%s' "$1" | awk 'BEGIN{ORS=""} {
-    gsub(/\\/, "\\\\")
-    gsub(/"/, "\\\"")
-    gsub(/\t/, "\\t")
-    gsub(/\r/, "\\r")
-    if (NR > 1) printf "\\n"
-    printf "%s", $0
+  ROW_IN=$1 awk 'BEGIN {
+    s = ENVIRON["ROW_IN"]
+    out = ""
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (c == "\\") out = out "\\\\"
+      else if (c == "\"") out = out "\\\""
+      else if (c == "\t") out = out "\\t"
+      else if (c == "\r") out = out "\\r"
+      else if (c == "\n") out = out "\\n"
+      else out = out c
+    }
+    printf "%s", out
   }'
+}
+
+row_encode() {
+  ROW_IN=$1 awk 'BEGIN {
+    s = ENVIRON["ROW_IN"]
+    out = ""
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (c == "\\") out = out "\\\\"
+      else if (c == "\n") out = out "\\n"
+      else if (c == "\r") out = out "\\r"
+      else if (c == "\t") out = out "\\t"
+      else if (c == " ") out = out "\\s"
+      else if (c == "\037") out = out "\\037"
+      else out = out c
+    }
+    printf "%s", out
+  }'
+}
+
+row_decode() {
+  ROW_IN=$1 awk 'BEGIN {
+    s = ENVIRON["ROW_IN"]
+    esc = 0
+    out = ""
+    i = 1
+    n = length(s)
+    while (i <= n) {
+      c = substr(s, i, 1)
+      if (esc) {
+        if (c == "n") out = out "\n"
+        else if (c == "r") out = out "\r"
+        else if (c == "t") out = out "\t"
+        else if (c == "s") out = out " "
+        else if (c == "0" && substr(s, i, 3) == "037") { out = out "\037"; i += 2 }
+        else if (c == "\\") out = out "\\"
+        else out = out c
+        esc = 0
+      } else if (c == "\\") esc = 1
+      else out = out c
+      i++
+    }
+    if (esc) out = out "\\"
+    printf "%s", out
+  }'
+}
+
+# Sets decoded. A bare $(row_decode) would eat a trailing newline.
+row_decode_set() {
+  _raw=$(row_decode "$1"; printf '\003')
+  _mark=$(printf '\003')
+  decoded=${_raw%"$_mark"}
+}
+
+label_push() {
+  enc=$(row_encode "$1")
+  if [ -z "$labels" ]; then
+    labels=$enc
+  else
+    labels="$labels $enc"
+  fi
 }
 
 fold_refs() {
@@ -927,17 +1083,25 @@ ledger_create() {
   [ -n "$priority" ] || priority=medium
   ledger_append "$id" "$(ledger_line op create id "$id" namespace "$NS" title "$title" kind "$kind" phase "$phase" status open priority "$priority" author "$AUTHOR" ref "$refs" body "$body")"
   printf '%s\n' "$id"
-  for label in $labels; do
-    [ -n "$label" ] || continue
+  set -f
+  for _enc in $labels; do
+    [ -n "$_enc" ] || continue
+    row_decode_set "$_enc"
+    label=$decoded
     ledger_append "$id" "$(ledger_line op label id "$id" namespace "$NS" label "$label" author "$AUTHOR")"
   done
+  set +f
 }
 
 ledger_label() {
-  for label in $labels; do
-    [ -n "$label" ] || continue
+  set -f
+  for _enc in $labels; do
+    [ -n "$_enc" ] || continue
+    row_decode_set "$_enc"
+    label=$decoded
     ledger_append "$id" "$(ledger_line op label id "$id" namespace "$NS" label "$label" author "$AUTHOR")"
   done
+  set +f
 }
 
 ledger_block() {
@@ -1022,14 +1186,17 @@ function add_edge(id, kind, child,   cur) {
   if (cur == "") edges[id] = item
   else edges[id] = cur ";" item
 }
-function row_escape(s,   i, c, out) {
+function row_encode(s,   i, c, out) {
   out = ""
   if (s == "") return ""
   for (i = 1; i <= length(s); i++) {
     c = substr(s, i, 1)
-    if (c == "\\") out = out "\\"
+    if (c == "\\") out = out "\\\\"
     else if (c == "\n") out = out "\\n"
-    else if (c == "\037") out = out " "
+    else if (c == "\r") out = out "\\r"
+    else if (c == "\t") out = out "\\t"
+    else if (c == " ") out = out "\\s"
+    else if (c == "\037") out = out "\\037"
     else out = out c
   }
   return out
@@ -1069,27 +1236,10 @@ END {
     }
     ready = 0
     if (st[id] != "closed" && blocked == 0) ready = 1
-    gsub(/\037/, " ", title[id])
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\037%s\037%s\037%s\037%s\n", id, ns[id], title[id], st[id], labels[id], edges[id], notes[id]+0, ready, blocked, row_escape(phase[id]), row_escape(priority[id]), row_escape(ref[id]), row_escape(body[id])
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\037%s\037%s\037%s\037%s\n", id, row_encode(ns[id]), row_encode(title[id]), st[id], row_encode(labels[id]), row_encode(edges[id]), notes[id]+0, ready, blocked, row_encode(phase[id]), row_encode(priority[id]), row_encode(ref[id]), row_encode(body[id])
   }
 }
 '
-}
-
-row_unescape() {
-  printf '%s' "$1" | awk 'BEGIN{ORS=""} {
-    esc = 0
-    for (i = 1; i <= length($0); i++) {
-      c = substr($0, i, 1)
-      if (esc) {
-        if (c == "n") printf "\n"
-        else if (c == "\\") printf "\\"
-        else printf "%s", c
-        esc = 0
-      } else if (c == "\\") esc = 1
-      else printf "%s", c
-    }
-  }'
 }
 
 ledger_split() {
@@ -1101,9 +1251,17 @@ ledger_split() {
   set -- $row
   set +f
   IFS=$old
-  rid=${1:-}; rns=${2:-}; rtitle=${3:-}; rstatus=${4:-}; rlabels=${5:-}
-  redges=${6:-}; rcomments=${7:-}; rready=${8:-}; rblocked=${9:-}
-  rphase=${10:-}; rpriority=${11:-}; rref=${12:-}; rbody=$(row_unescape "${13:-}")
+  rid=${1:-}
+  row_decode_set "${2:-}"; rns=$decoded
+  row_decode_set "${3:-}"; rtitle=$decoded
+  rstatus=${4:-}
+  row_decode_set "${5:-}"; rlabels=$decoded
+  row_decode_set "${6:-}"; redges=$decoded
+  rcomments=${7:-}; rready=${8:-}; rblocked=${9:-}
+  row_decode_set "${10:-}"; rphase=$decoded
+  row_decode_set "${11:-}"; rpriority=$decoded
+  row_decode_set "${12:-}"; rref=$decoded
+  row_decode_set "${13:-}"; rbody=$decoded
 }
 
 ledger_match() {
@@ -1159,6 +1317,51 @@ ledger_emit() {
 ledger_show() {
   rows=$(ledger_rows)
   found=0
+  # notes and history replace the record, matching pasture's separate commands.
+  if [ "$mode" = notes ] || [ "$mode" = history ]; then
+    hit=$(printf '%s\n' "$rows" | while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      ledger_split "$row"
+      [ "$rid" = "$id" ] && printf yes
+    done)
+    [ -n "$hit" ] || fail "no ledger record $id" "no line names that id under $LEDGER" "create the record first, or pass the id create printed"
+    safe=$(printf '%s' "$id" | sed -e 's/%/%25/g' -e 's#/#%2F#g' -e 's/ /%20/g' -e 's/:/%3A/g')
+    file="$LEDGER/$safe.jsonl"
+    if [ "$mode" = history ]; then
+      cat "$file"
+      return 0
+    fi
+    awk '
+function take(line, pos,   i, c, out, esc) {
+  out = ""; esc = 0
+  for (i = pos + 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (esc) {
+      if (c == "n") out = out "\n"
+      else if (c == "t") out = out "\t"
+      else if (c == "r") out = out "\r"
+      else out = out c
+      esc = 0
+    } else if (c == "\\") esc = 1
+    else if (c == "\"") { got = out; got_i = i + 1; return }
+    else out = out c
+  }
+}
+{
+  i = 1
+  while (i <= length($0)) {
+    if (substr($0, i, 1) == "\"") {
+      take($0, i); key = got; i = got_i
+      while (i <= length($0) && substr($0, i, 1) != "\"") i++
+      take($0, i); f[key] = got; i = got_i
+    } else i++
+  }
+  if (f["op"] == "note") print f["body"]
+  delete f
+}
+' "$file"
+    return 0
+  fi
   printf '%s\n' "$rows" | while IFS= read -r row; do
     [ -n "$row" ] || continue
     ledger_split "$row"
@@ -1188,42 +1391,6 @@ ledger_show() {
     [ "$rid" = "$id" ] && printf yes
   done)
   [ -n "$hit" ] || fail "no ledger record $id" "no line names that id under $LEDGER" "create the record first, or pass the id create printed"
-  if [ "$mode" = notes ] || [ "$mode" = history ]; then
-    safe=$(printf '%s' "$id" | sed -e 's/%/%25/g' -e 's#/#%2F#g' -e 's/ /%20/g' -e 's/:/%3A/g')
-    file="$LEDGER/$safe.jsonl"
-    if [ "$mode" = history ]; then
-      cat "$file"
-    else
-      awk '
-function take(line, pos,   i, c, out, esc) {
-  out = ""; esc = 0
-  for (i = pos + 1; i <= length(line); i++) {
-    c = substr(line, i, 1)
-    if (esc) {
-      if (c == "n") out = out "\n"
-      else if (c == "t") out = out "\t"
-      else out = out c
-      esc = 0
-    } else if (c == "\\") esc = 1
-    else if (c == "\"") { got = out; got_i = i + 1; return }
-    else out = out c
-  }
-}
-{
-  i = 1
-  while (i <= length($0)) {
-    if (substr($0, i, 1) == "\"") {
-      take($0, i); key = got; i = got_i
-      while (i <= length($0) && substr($0, i, 1) != "\"") i++
-      take($0, i); f[key] = got; i = got_i
-    } else i++
-  }
-  if (f["op"] == "note") print f["body"]
-  delete f
-}
-' "$file"
-    fi
-  fi
 }
 
 ledger_query() {

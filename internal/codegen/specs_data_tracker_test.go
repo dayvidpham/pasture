@@ -90,8 +90,8 @@ func TestTrackerOpsRequireCallsAndLedgerHandlers(t *testing.T) {
 	require.NoError(t, validateTrackerImplementations(SortedTrackerOps(), ledgerRuntime))
 	for _, id := range AllTrackerOpIds() {
 		require.NotEmpty(t, TrackerOps[id].PastureCalls, "clean sample: %s has Pasture calls", id)
-		needle := "ledger_" + string(id) + "()"
-		require.Contains(t, ledgerRuntime, needle)
+		needle := "\nledger_" + string(id) + "() {"
+		require.Contains(t, ledgerRuntime, needle, "clean sample: %s is a handler definition, not a mention", id)
 		require.Contains(t, TrackerRecScript, needle)
 	}
 
@@ -101,10 +101,18 @@ func TestTrackerOpsRequireCallsAndLedgerHandlers(t *testing.T) {
 	require.Error(t, err, "an op with zero Pasture calls must fail")
 	require.Contains(t, err.Error(), "no Pasture calls")
 
-	missing := strings.Replace(ledgerRuntime, "ledger_create()", "ledger_create_missing()", 1)
+	missing := strings.Replace(ledgerRuntime, "ledger_create() {", "ledger_create_missing() {", 1)
 	require.NotEqual(t, ledgerRuntime, missing, "the defective runtime must actually drop the handler")
 	err = validateTrackerImplementations(SortedTrackerOps(), missing)
 	require.Error(t, err, "a missing ledger_create() must fail")
+	require.Contains(t, err.Error(), "ledger_create()")
+
+	// A stale comment names the handler. The old substring check would pass.
+	commented := "# ledger_create() is mentioned by a stale comment\n" + missing
+	require.Contains(t, commented, "ledger_create()")
+	require.NotContains(t, commented, "\nledger_create() {")
+	err = validateTrackerImplementations(SortedTrackerOps(), commented)
+	require.Error(t, err, "a comment mention of ledger_create() must not satisfy the handler check")
 	require.Contains(t, err.Error(), "ledger_create()")
 
 	// Runtime sample: the rendered asset calls the function the validator names.
@@ -233,7 +241,7 @@ func TestProbeSubprocess(t *testing.T) {
 		})
 		require.Equal(t, "pasture", result["BACKEND"])
 		require.Equal(t, store, result["DB"])
-		require.Equal(t, "https://example.test/repo", result["NS"])
+		require.Empty(t, result["NS"], "the probe must not freeze a derived namespace into the header")
 		require.Empty(t, result["WARN"], "a registered author is not a warning")
 		require.Equal(t, "pasture-system/00000000-0000-0000-0000-000000000000", result["ACT"])
 		require.Equal(t, "v9.9.9", result["VER"])
@@ -325,7 +333,7 @@ func TestProbeSubprocess(t *testing.T) {
 			"PASTURE_DB_PATH": store,
 		})
 		require.Equal(t, "pasture", result["BACKEND"])
-		require.Equal(t, "file://"+probePwd(t, dir), result["NS"])
+		require.Empty(t, result["NS"], "a missing origin is not derived by the probe; pasture derives file:// at write time")
 		require.NotEqual(t, "error", result["BACKEND"])
 	})
 
@@ -362,13 +370,230 @@ func initRepoWithoutOrigin(t *testing.T) string {
 	return dir
 }
 
-func probePwd(t *testing.T, dir string) string {
+// TestNamespaceAsksTheBackend proves the probe no longer derives a namespace,
+// an explicit EPOCH.md namespace wins on both backends, and a remote-bearing
+// repo yields the same namespace on both. The ledger function is the one
+// normalisation; pasture derives when the adapter omits --namespace.
+func TestNamespaceAsksTheBackend(t *testing.T) {
+	require.Contains(t, TrackerProbeScript, "derive_namespace()")
+	require.Contains(t, TrackerRecScript, "derive_namespace()")
+	require.Equal(t, 1, strings.Count(TrackerProbeScript, "normalize_git_remote()"))
+	require.Equal(t, 1, strings.Count(TrackerRecScript, "normalize_git_remote()"))
+	require.NotContains(t, TrackerProbeScript, "sed -E")
+	require.NotContains(t, TrackerProbeScript, "s#^git@")
+	require.NotContains(t, TrackerRecScript, "s#^git@")
+
+	bin := buildPastureForTracker(t)
+	remotes := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"git@", "git@github.com:example/repo.git", "https://github.com/example/repo"},
+		{"ssh://", "ssh://git@github.com/example/repo.git", "https://github.com/example/repo"},
+		{"git://", "git://github.com/example/repo.git", "https://github.com/example/repo"},
+		{"http://", "http://github.com/example/repo.git", "https://github.com/example/repo"},
+		{"https://", "https://github.com/example/repo.git", "https://github.com/example/repo"},
+		{"user@host:path", "user@host:example/repo.git", "https://host/example/repo"},
+	}
+	for _, remote := range remotes {
+		remote := remote
+		t.Run(remote.name, func(t *testing.T) {
+			dir := initRepoWithRemote(t, remote.url)
+			pastureNS := createdNamespace(t, bin, dir, "pasture", "")
+			ledgerNS := createdNamespace(t, bin, dir, "ledger", "")
+			require.Equal(t, remote.want, pastureNS, "pasture derived namespace")
+			require.Equal(t, pastureNS, ledgerNS, "both backends derive the same namespace")
+		})
+	}
+
+	t.Run("no-origin", func(t *testing.T) {
+		dir := initRepoWithoutOrigin(t)
+		pastureNS := createdNamespace(t, bin, dir, "pasture", "")
+		ledgerNS := createdNamespace(t, bin, dir, "ledger", "")
+		require.True(t, strings.HasPrefix(pastureNS, "file://"), "pasture namespace %q", pastureNS)
+		require.Equal(t, pastureNS, ledgerNS, "no-origin repo yields the same working namespace")
+		require.Equal(t, "file://"+physicalPwd(t, dir), pastureNS)
+	})
+
+	t.Run("explicit-header-wins", func(t *testing.T) {
+		dir := initRepoWithRemote(t, "git@github.com:example/other.git")
+		const pin = "https://example.test/pinned"
+		pastureNS := createdNamespace(t, bin, dir, "pasture", pin)
+		ledgerNS := createdNamespace(t, bin, dir, "ledger", pin)
+		require.Equal(t, pin, pastureNS)
+		require.Equal(t, pin, ledgerNS)
+	})
+}
+
+func initRepoWithRemote(t *testing.T, remote string) string {
 	t.Helper()
-	cmd := exec.Command("pwd")
+	dir := initRepoWithoutOrigin(t)
+	cmd := exec.Command("git", "-C", dir, "remote", "add", "origin", remote)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git remote add %s: %s", remote, out)
+	return dir
+}
+
+func physicalPwd(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("pwd", "-P")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	return strings.TrimSpace(string(out))
+}
+
+func buildPastureForTracker(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "pasture")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/pasture")
+	build.Dir = testModuleRoot(t)
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	out, err := build.CombinedOutput()
+	require.NoError(t, err, "build pasture: %s", out)
+	return bin
+}
+
+// createdNamespace runs rec create with no PASTURE_NAMESPACE and returns the
+// namespace the record landed in. pin is written to EPOCH.md when non-empty.
+func createdNamespace(t *testing.T, bin, dir, backend, pin string) string {
+	t.Helper()
+	db := filepath.Join(dir, "store.db")
+	ledger := filepath.Join(dir, "ledger")
+	header := filepath.Join(dir, "EPOCH-"+backend+".md")
+	var b strings.Builder
+	fmt.Fprintf(&b, "backend: %s\nauthor: actor/ns\n", backend)
+	if pin != "" {
+		fmt.Fprintf(&b, "namespace: %s\n", pin)
+	}
+	if backend == "pasture" {
+		fmt.Fprintf(&b, "db: %s\n", db)
+	} else {
+		fmt.Fprintf(&b, "ledger: %s\n", ledger)
+	}
+	require.NoError(t, os.WriteFile(header, []byte(b.String()), 0o600))
+	cmd := exec.Command("sh", "-c", TrackerRecScript, "rec", "create", "--kind", "task", "--title", "ns-"+backend, "--phase", "request", "--body", "ns")
+	cmd.Dir = dir
+	env := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + dir,
+		"EPOCH_FILE=" + header,
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
+	}
+	if backend == "pasture" {
+		env = append(env, "PASTURE_BIN="+bin, "PASTURE_DB_PATH="+db)
+	}
+	cmd.Env = env
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	require.NoErrorf(t, cmd.Run(), "rec create %s\nstdout: %s\nstderr: %s", backend, stdout.String(), stderr.String())
+	id := strings.TrimSpace(stdout.String())
+	require.NotEmpty(t, id)
+	if backend == "pasture" {
+		slash := strings.LastIndex(id, "/")
+		require.Greater(t, slash, 0, "pasture id %q", id)
+		return id[:slash]
+	}
+	show := exec.Command("sh", "-c", TrackerRecScript, "rec", "show", id)
+	show.Dir = dir
+	show.Env = env
+	var showOut, showErr bytes.Buffer
+	show.Stdout = &showOut
+	show.Stderr = &showErr
+	require.NoErrorf(t, show.Run(), "rec show %s\nstdout: %s\nstderr: %s", id, showOut.String(), showErr.String())
+	var doc struct {
+		Namespace string `json:"namespace"`
+	}
+	require.NoError(t, json.Unmarshal(showOut.Bytes(), &doc), showOut.String())
+	return doc.Namespace
+}
+
+// TestArgumentBytesRoundTrip writes and reads back a body, a note and a label
+// that contain a backslash, a newline, a tab, quotes and a literal backslash-n.
+// Both backends must return the same bytes.
+func TestArgumentBytesRoundTrip(t *testing.T) {
+	bin := buildPastureForTracker(t)
+	payload := "C:\\a\\b\nline\twith tab and \"quotes\" and 'singles'\nliteral \\n and two\\\\slashes\n"
+	require.Contains(t, payload, `C:\a\b`)
+	require.Contains(t, payload, "\n")
+	require.Contains(t, payload, "\t")
+	require.Contains(t, payload, `"`)
+	require.Contains(t, payload, `'`)
+	require.Contains(t, payload, `\n`)
+	require.Contains(t, payload, `\\`)
+
+	for _, backend := range []string{"pasture", "ledger"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			dir := t.TempDir()
+			db := filepath.Join(dir, "store.db")
+			ledger := filepath.Join(dir, "ledger")
+			header := filepath.Join(dir, "EPOCH.md")
+			const ns = "https://example.test/bytes"
+			author := "actor/bytes"
+			if backend == "pasture" {
+				author = registerParityAuthor(t, bin, db, ns)
+			}
+			var b strings.Builder
+			fmt.Fprintf(&b, "backend: %s\nnamespace: %s\nauthor: %s\n", backend, ns, author)
+			if backend == "pasture" {
+				fmt.Fprintf(&b, "db: %s\n", db)
+			} else {
+				fmt.Fprintf(&b, "ledger: %s\n", ledger)
+			}
+			require.NoError(t, os.WriteFile(header, []byte(b.String()), 0o600))
+			env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "EPOCH_FILE=" + header}
+			if backend == "pasture" {
+				env = append(env, "PASTURE_BIN="+bin, "PASTURE_DB_PATH="+db)
+			}
+			id := strings.TrimSpace(runRecIn(t, dir, env, "create", "--kind", "task", "--title", "bytes", "--phase", "request", "--body", payload, "--label", payload))
+			require.NotEmpty(t, id)
+			runRecIn(t, dir, env, "note", id, "--author", author, "--body", payload)
+
+			showRaw := runRecIn(t, dir, env, "show", id)
+			var shown struct {
+				Description string `json:"description"`
+				Labels      string `json:"labels"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(showRaw), &shown), showRaw)
+			require.Equal(t, payload, shown.Description, "body")
+
+			notes := runRecIn(t, dir, env, "show", id, "--notes")
+			if backend == "ledger" {
+				require.Equal(t, payload, strings.TrimSuffix(notes, "\n"), "note")
+				require.Equal(t, payload, shown.Labels, "label")
+				return
+			}
+			var comments []struct {
+				Body string `json:"body"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(notes), &comments), notes)
+			require.NotEmpty(t, comments)
+			require.Equal(t, payload, comments[0].Body, "note")
+			labelsRaw := runPasture(t, bin, db, "--format", "json", "task", "label", "list", id)
+			var labels struct {
+				Labels []string `json:"labels"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(labelsRaw), &labels), labelsRaw)
+			require.Equal(t, []string{payload}, labels.Labels, "label")
+		})
+	}
+}
+
+func runRecIn(t *testing.T, dir string, env []string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("sh", append([]string{"-c", TrackerRecScript, "rec"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = env
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	require.NoErrorf(t, cmd.Run(), "rec %v\nstdout: %s\nstderr: %s", args, stdout.String(), stderr.String())
+	return stdout.String()
 }
 
 // runTrackerProbe executes the production probe script in dir with exactly the
@@ -1286,6 +1511,9 @@ func requireEquivalent(t *testing.T, pasture, ledger []parityTask) {
 	}
 }
 
+// requireShowParity compares description, phase and priority, and the ledger
+// ref. It does not compare timestamps: pasture show returns createdAt and
+// updatedAt, and ledger show keeps timestamps on --history.
 func requireShowParity(t *testing.T, bin, db, pastureHeader, pastureID, ledgerHeader, ledgerID string) {
 	t.Helper()
 	pastureRaw := runOne(t, pastureHeader, bin, db, "show", pastureID)
@@ -1294,23 +1522,33 @@ func requireShowParity(t *testing.T, bin, db, pastureHeader, pastureID, ledgerHe
 		Description string `json:"description"`
 		Phase       string `json:"phase"`
 		Priority    string `json:"priority"`
+		CreatedAt   string `json:"createdAt"`
+		UpdatedAt   string `json:"updatedAt"`
 	}
 	var ledger struct {
 		Description string `json:"description"`
 		Phase       string `json:"phase"`
 		Priority    string `json:"priority"`
 		Ref         string `json:"ref"`
+		CreatedAt   string `json:"createdAt"`
+		UpdatedAt   string `json:"updatedAt"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(pastureRaw), &pasture), pastureRaw)
 	require.NoError(t, json.Unmarshal([]byte(ledgerRaw), &ledger), ledgerRaw)
-	require.Equal(t, pasture.Description, ledger.Description, "show description")
-	require.Equal(t, pasture.Phase, ledger.Phase, "show phase")
-	require.Equal(t, pasture.Priority, ledger.Priority, "show priority")
-	require.Equal(t, "spec=alpha", ledger.Ref, "show must include refs, not only show --history")
+	require.Equal(t, pasture.Description, ledger.Description, "compared: description")
+	require.Equal(t, pasture.Phase, ledger.Phase, "compared: phase")
+	require.Equal(t, pasture.Priority, ledger.Priority, "compared: priority")
+	require.Equal(t, "spec=alpha", ledger.Ref, "compared: ledger ref; not only show --history")
 	require.Contains(t, pasture.Description, "spec: alpha")
 	require.NotEmpty(t, ledger.Description)
 	require.NotEmpty(t, ledger.Phase)
 	require.NotEmpty(t, ledger.Priority)
+	require.NotEmpty(t, pasture.CreatedAt, "not compared: pasture show returns createdAt")
+	require.NotEmpty(t, pasture.UpdatedAt, "not compared: pasture show returns updatedAt")
+	require.Empty(t, ledger.CreatedAt, "not compared: ledger show keeps timestamps on --history")
+	require.Empty(t, ledger.UpdatedAt, "not compared: ledger show keeps timestamps on --history")
+	require.NotContains(t, ledgerRaw, "createdAt")
+	require.NotContains(t, ledgerRaw, "updatedAt")
 }
 
 func nonempty(values []string) []string {

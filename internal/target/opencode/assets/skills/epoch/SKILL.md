@@ -235,7 +235,7 @@ Recover from live tracker state at session start and after compaction; never tru
 
 Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The adapter reads it when set, otherwise the header's `namespace:`, and passes `--namespace` itself. Queries are scoped to that namespace; pass `--all-namespaces` to opt out. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+The adapter passes `--namespace` only when EPOCH.md records `namespace:`. That pin wins on both backends. Otherwise it omits the flag. Pasture then derives the namespace itself: PASTURE_NAMESPACE, else the git remote, then file:// of the working directory. The ledger calls one derivation function for the header and for every write that has no pin; it handles git@, ssh://, git://, http://, https:// and user@host:path. Queries without a pin follow that backend's derivation; pass `--all-namespaces` to opt out. When neither a pin nor PASTURE_NAMESPACE is set, pasture reads are unscoped and creation falls back to the git remote, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
 Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
@@ -279,7 +279,7 @@ The operation set is closed. `relate` is `block --kind`; `assign` is `label ID o
 | `label` | `"${EPOCH_REC}" label ID L   (assignment: label ID owner:<role>)` | add a label; never remove one |
 | `block` | `"${EPOCH_REC}" block PARENT --by CHILD [--kind blocked_by|derived_from|supersedes|discovered_from]` | add an edge; a blocked_by edge keeps the parent open until the child closes; a typed edge uses --kind |
 | `note` | `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body TEXT|-]` | append an attributed immutable note; --to makes it a message |
-| `show` | `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]` | read one record, including description, phase, priority and refs; timestamps stay on --history; --notes lists notes |
+| `show` | `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]` | read one record, including description, phase, priority and refs; --notes lists notes. Pasture show returns createdAt and updatedAt; ledger timestamps stay on --history |
 | `query` | `"${EPOCH_REC}" query [--status S] [--label L] [--blocked] [--tree ID] [--all-namespaces] [--format text|json]` | enumerate records by status, label, blocked state, or dependency tree; --blocked rejects --status |
 | `ready` | `"${EPOCH_REC}" ready [--label L] [--all-namespaces] [--format text|json]` | list non-closed records with no non-closed blocker |
 | `status` | `"${EPOCH_REC}" status ID --set open|in_progress|closed` | change state (start work); the store keeps the only status field |
@@ -292,7 +292,7 @@ EPOCH.md lives at .agents.local/pasture/EPOCH.md (offer a gitignore entry; never
 epoch: <epoch id>
 backend: pasture|ledger|error
 probed_at: <UTC timestamp>
-namespace: <namespace URI>        # pasture only
+namespace: <namespace URI>        # optional pin; absent means the backend derives
 db: <absolute store path>         # pasture only
 author: <registered actor id>     # pasture only; what whoami prints
 ledger: <absolute ledger path>    # ledger only
@@ -313,6 +313,56 @@ Write this probe to `.agents.local/pasture/probe.sh` and run it before the first
 <!-- pasture:asset probe -->
 ~~~sh
 #!/bin/sh
+# derive_namespace is the one ledger normalisation. Forms: git@host:path,
+# ssh://, git://, http://, https:// and user@host:path. An empty remote is
+# file:// of the physical working directory. PASTURE_NAMESPACE matches the
+# value Pasture uses when --namespace is omitted.
+derive_namespace() {
+  if [ -n "${PASTURE_NAMESPACE:-}" ]; then
+    printf '%s\n' "$PASTURE_NAMESPACE"
+    return 0
+  fi
+  remote=$(git remote get-url origin 2>/dev/null || true)
+  remote=$(printf '%s' "$remote" | tr -d '\r\n')
+  if [ -z "$remote" ]; then
+    dir=$(pwd -P 2>/dev/null || pwd)
+    printf 'file://%s\n' "$dir"
+    return 0
+  fi
+  normalize_git_remote "$remote"
+}
+
+normalize_git_remote() {
+  url=$1
+  case "$url" in
+    ssh://*)
+      rest=${url#ssh://}
+      case "$rest" in
+        *@*) rest=${rest#*@} ;;
+      esac
+      url="https://$rest"
+      ;;
+    git://*)
+      url="https://${url#git://}"
+      ;;
+    http://*)
+      url="https://${url#http://}"
+      ;;
+    https://*)
+      ;;
+    *@*:*)
+      rest=${url#*@}
+      host=${rest%%:*}
+      path=${rest#*:}
+      url="https://$host/$path"
+      ;;
+  esac
+  case "$url" in
+    *.git) url=${url%.git} ;;
+  esac
+  printf '%s\n' "$url"
+}
+
 # Epoch tracker probe. Side-effect free. Prints KEY=VALUE lines and exits 0.
 # Order: capability (--help), store existence (test -f), usability (migrate --dry-run).
 # Verb list is generated from TrackerOps.
@@ -335,16 +385,22 @@ emit() {
   exit 0
 }
 
+# Ledger header value. Same function every ledger write calls.
+emit_ledger() {
+  _ns=$(derive_namespace)
+  emit ledger "$1" "${2:-}" "$_ns" "" "${3:-}"
+}
+
 # 1. Capability. --help never opens a store.
 if ! command -v "$PASTURE_BIN" >/dev/null 2>&1; then
-  emit ledger not-installed
+  emit_ledger not-installed
 fi
 
 VER="$("$PASTURE_BIN" --version 2>/dev/null | awk '{print $NF}')"
 
 "$PASTURE_BIN" --help >/dev/null 2>&1
 if [ "$?" -ne 0 ]; then
-  emit ledger help-failed "" "" "" "$VER"
+  emit_ledger help-failed "" "$VER"
 fi
 
 for VERB in "task create" "task label" "task dep" \
@@ -355,7 +411,7 @@ for VERB in "task create" "task label" "task dep" \
   # shellcheck disable=SC2086
   "$PASTURE_BIN" $VERB --help >/dev/null 2>&1
   if [ "$?" -ne 0 ]; then
-    emit ledger "missing-verb:$VERB" "" "" "" "$VER"
+    emit_ledger "missing-verb:$VERB" "" "$VER"
   fi
 done
 
@@ -371,7 +427,7 @@ else
 fi
 
 if [ ! -f "$DB" ]; then
-  emit ledger no-store "$DB" "" "" "$VER"
+  emit_ledger no-store "$DB" "$VER"
 fi
 
 # 3. Usability. --dry-run leaves the file's SHA-256 unchanged.
@@ -381,16 +437,9 @@ if [ "$RC" -ne 0 ]; then
   emit error "store-exit-$RC" "$DB" "" "" "$VER"
 fi
 
-# 4. Scope. Same derivation as pasture: explicit env, else git origin, else
-# file:// of the working directory. A missing remote is not an unusable store.
-if [ -n "${PASTURE_NAMESPACE:-}" ]; then
-  NS="$PASTURE_NAMESPACE"
-else
-  NS="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')"
-  if [ -z "$NS" ]; then
-    NS="file://$(pwd)"
-  fi
-fi
+# 4. Author. A missing author is a warning, not an unusable store.
+# The probe does not derive a namespace for pasture. Writing one into
+# EPOCH.md would freeze it and override Pasture's own derivation.
 
 ACT="${PASTURE_AUTHOR:-pasture-system/00000000-0000-0000-0000-000000000000}"
 "$PASTURE_BIN" --db "$DB" task agents show "$ACT" --format json >/dev/null 2>&1
@@ -400,7 +449,7 @@ if [ "$RC" -ne 0 ]; then
   printf 'probe: warning: author %s is not registered in %s\n  why: task agents show exited %s, and a missing author is not an unusable store\n  where: epoch tracker probe, author check\n  fix: register the actor, or export PASTURE_AUTHOR to a registered id; the epoch still records backend pasture\n' "$ACT" "$DB" "$RC" >&2
 fi
 
-emit pasture "" "$DB" "$NS" "$ACT" "$VER"
+emit pasture "" "$DB" "" "$ACT" "$VER"
 ~~~
 <!-- /pasture:asset probe -->
 
@@ -409,7 +458,7 @@ Detection limits, by step:
 - pasture --help: detects that the binary is on PATH and that each required verb has a help page. It cannot detect version compatibility, store health, permissions, schema, namespace or author. A help page can exist on a binary whose runtime is broken.
 - test -f: detects a missing store file and stops the probe before anything opens it. It cannot detect a directory, an unreadable or corrupt database, an out-of-date schema, a held lock, or a different store selected by configuration. Never replace it with a read: opening a missing store creates it.
 - migrate --dry-run: detects that the store opens and that its migrations can be planned; it leaves the file's SHA-256 unchanged. It still opens the store and may take locks. It cannot detect concurrent writers, a defect that only a real migration touches, an unregistered author, or a namespace mismatch. A non-zero result is the only error backend: the store exists but cannot be used.
-- Namespace: explicit PASTURE_NAMESPACE, else the git origin remote, else file:// of the working directory. A missing remote is not an unusable store. It cannot detect a remote other than origin.
+- Namespace: the probe does not derive one, and it does not write a derived value into the header. A missing remote is not an unusable store. Pasture derives when EPOCH.md has no namespace: line (PASTURE_NAMESPACE, else the git origin, else file:// of the working directory). The ledger prints NS from derive_namespace, the one function every unpinned ledger write calls. It cannot detect a remote other than origin.
 - Author: a missing or unregistered author is a warning (WARN=no-author), not an error backend. It cannot detect an author registered in another namespace, nor prove a later write will be allowed.
 - The probe cannot detect a store chosen by configuration outside the env/default precedence, and it does not prove that any later write will succeed.
 
@@ -418,6 +467,56 @@ Write this adapter to the path the header records in `rec:` and make it executab
 <!-- pasture:asset rec -->
 ~~~sh
 #!/bin/sh
+# derive_namespace is the one ledger normalisation. Forms: git@host:path,
+# ssh://, git://, http://, https:// and user@host:path. An empty remote is
+# file:// of the physical working directory. PASTURE_NAMESPACE matches the
+# value Pasture uses when --namespace is omitted.
+derive_namespace() {
+  if [ -n "${PASTURE_NAMESPACE:-}" ]; then
+    printf '%s\n' "$PASTURE_NAMESPACE"
+    return 0
+  fi
+  remote=$(git remote get-url origin 2>/dev/null || true)
+  remote=$(printf '%s' "$remote" | tr -d '\r\n')
+  if [ -z "$remote" ]; then
+    dir=$(pwd -P 2>/dev/null || pwd)
+    printf 'file://%s\n' "$dir"
+    return 0
+  fi
+  normalize_git_remote "$remote"
+}
+
+normalize_git_remote() {
+  url=$1
+  case "$url" in
+    ssh://*)
+      rest=${url#ssh://}
+      case "$rest" in
+        *@*) rest=${rest#*@} ;;
+      esac
+      url="https://$rest"
+      ;;
+    git://*)
+      url="https://${url#git://}"
+      ;;
+    http://*)
+      url="https://${url#http://}"
+      ;;
+    https://*)
+      ;;
+    *@*:*)
+      rest=${url#*@}
+      host=${rest%%:*}
+      path=${rest#*:}
+      url="https://$host/$path"
+      ;;
+  esac
+  case "$url" in
+    *.git) url=${url%.git} ;;
+  esac
+  printf '%s\n' "$url"
+}
+
 # Epoch tracker adapter (rec). Generated from TrackerOps. Do not hand-edit.
 # Backend: the one recorded in EPOCH_FILE. Never re-probes, never switches.
 set -u
@@ -440,7 +539,15 @@ field() {
 
 BACKEND="$(field backend)"
 DB="${PASTURE_DB_PATH:-$(field db)}"
-NS="${PASTURE_NAMESPACE:-$(field namespace)}"
+# --namespace is passed only when EPOCH.md records one. Otherwise pasture
+# derives (env, else git remote, else file:// of cwd). Ledger calls the same
+# derivation function the probe printed, unless the header pins a namespace.
+HEADER_NS="$(field namespace)"
+if [ "$BACKEND" = ledger ] && [ -z "$HEADER_NS" ]; then
+  NS=$(derive_namespace)
+else
+  NS="$HEADER_NS"
+fi
 AUTHOR="${PASTURE_AUTHOR:-$(field author)}"
 LEDGER="$(field ledger)"
 if [ -z "$LEDGER" ]; then
@@ -502,15 +609,86 @@ need_id() {
   [ -n "${1:-}" ] || fail "$OP needs a task ID" "the first operand was empty" "pass the full task URI as the first operand"
 }
 
+# json_escape and row_encode are total for every byte except NUL, which a
+# shell argument cannot carry. Each is the inverse of its reader (take, and
+# row_decode). A trailing newline is kept: the decoder is not read with a
+# bare command substitution.
 json_escape() {
-  printf '%s' "$1" | awk 'BEGIN{ORS=""} {
-    gsub(/\\/, "\\\\")
-    gsub(/"/, "\\\"")
-    gsub(/\t/, "\\t")
-    gsub(/\r/, "\\r")
-    if (NR > 1) printf "\\n"
-    printf "%s", $0
+  ROW_IN=$1 awk 'BEGIN {
+    s = ENVIRON["ROW_IN"]
+    out = ""
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (c == "\\") out = out "\\\\"
+      else if (c == "\"") out = out "\\\""
+      else if (c == "\t") out = out "\\t"
+      else if (c == "\r") out = out "\\r"
+      else if (c == "\n") out = out "\\n"
+      else out = out c
+    }
+    printf "%s", out
   }'
+}
+
+row_encode() {
+  ROW_IN=$1 awk 'BEGIN {
+    s = ENVIRON["ROW_IN"]
+    out = ""
+    for (i = 1; i <= length(s); i++) {
+      c = substr(s, i, 1)
+      if (c == "\\") out = out "\\\\"
+      else if (c == "\n") out = out "\\n"
+      else if (c == "\r") out = out "\\r"
+      else if (c == "\t") out = out "\\t"
+      else if (c == " ") out = out "\\s"
+      else if (c == "\037") out = out "\\037"
+      else out = out c
+    }
+    printf "%s", out
+  }'
+}
+
+row_decode() {
+  ROW_IN=$1 awk 'BEGIN {
+    s = ENVIRON["ROW_IN"]
+    esc = 0
+    out = ""
+    i = 1
+    n = length(s)
+    while (i <= n) {
+      c = substr(s, i, 1)
+      if (esc) {
+        if (c == "n") out = out "\n"
+        else if (c == "r") out = out "\r"
+        else if (c == "t") out = out "\t"
+        else if (c == "s") out = out " "
+        else if (c == "0" && substr(s, i, 3) == "037") { out = out "\037"; i += 2 }
+        else if (c == "\\") out = out "\\"
+        else out = out c
+        esc = 0
+      } else if (c == "\\") esc = 1
+      else out = out c
+      i++
+    }
+    if (esc) out = out "\\"
+    printf "%s", out
+  }'
+}
+
+# Sets decoded. A bare $(row_decode) would eat a trailing newline.
+row_decode_set() {
+  _raw=$(row_decode "$1"; printf '\003')
+  _mark=$(printf '\003')
+  decoded=${_raw%"$_mark"}
+}
+
+label_push() {
+  enc=$(row_encode "$1")
+  if [ -z "$labels" ]; then
+    labels=$enc
+  else
+    labels="$labels $enc"
+  fi
 }
 
 fold_refs() {
@@ -645,17 +823,25 @@ ledger_create() {
   [ -n "$priority" ] || priority=medium
   ledger_append "$id" "$(ledger_line op create id "$id" namespace "$NS" title "$title" kind "$kind" phase "$phase" status open priority "$priority" author "$AUTHOR" ref "$refs" body "$body")"
   printf '%s\n' "$id"
-  for label in $labels; do
-    [ -n "$label" ] || continue
+  set -f
+  for _enc in $labels; do
+    [ -n "$_enc" ] || continue
+    row_decode_set "$_enc"
+    label=$decoded
     ledger_append "$id" "$(ledger_line op label id "$id" namespace "$NS" label "$label" author "$AUTHOR")"
   done
+  set +f
 }
 
 ledger_label() {
-  for label in $labels; do
-    [ -n "$label" ] || continue
+  set -f
+  for _enc in $labels; do
+    [ -n "$_enc" ] || continue
+    row_decode_set "$_enc"
+    label=$decoded
     ledger_append "$id" "$(ledger_line op label id "$id" namespace "$NS" label "$label" author "$AUTHOR")"
   done
+  set +f
 }
 
 ledger_block() {
@@ -740,14 +926,17 @@ function add_edge(id, kind, child,   cur) {
   if (cur == "") edges[id] = item
   else edges[id] = cur ";" item
 }
-function row_escape(s,   i, c, out) {
+function row_encode(s,   i, c, out) {
   out = ""
   if (s == "") return ""
   for (i = 1; i <= length(s); i++) {
     c = substr(s, i, 1)
-    if (c == "\\") out = out "\\"
+    if (c == "\\") out = out "\\\\"
     else if (c == "\n") out = out "\\n"
-    else if (c == "\037") out = out " "
+    else if (c == "\r") out = out "\\r"
+    else if (c == "\t") out = out "\\t"
+    else if (c == " ") out = out "\\s"
+    else if (c == "\037") out = out "\\037"
     else out = out c
   }
   return out
@@ -787,27 +976,10 @@ END {
     }
     ready = 0
     if (st[id] != "closed" && blocked == 0) ready = 1
-    gsub(/\037/, " ", title[id])
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\037%s\037%s\037%s\037%s\n", id, ns[id], title[id], st[id], labels[id], edges[id], notes[id]+0, ready, blocked, row_escape(phase[id]), row_escape(priority[id]), row_escape(ref[id]), row_escape(body[id])
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\037%s\037%s\037%s\037%s\n", id, row_encode(ns[id]), row_encode(title[id]), st[id], row_encode(labels[id]), row_encode(edges[id]), notes[id]+0, ready, blocked, row_encode(phase[id]), row_encode(priority[id]), row_encode(ref[id]), row_encode(body[id])
   }
 }
 '
-}
-
-row_unescape() {
-  printf '%s' "$1" | awk 'BEGIN{ORS=""} {
-    esc = 0
-    for (i = 1; i <= length($0); i++) {
-      c = substr($0, i, 1)
-      if (esc) {
-        if (c == "n") printf "\n"
-        else if (c == "\\") printf "\\"
-        else printf "%s", c
-        esc = 0
-      } else if (c == "\\") esc = 1
-      else printf "%s", c
-    }
-  }'
 }
 
 ledger_split() {
@@ -819,9 +991,17 @@ ledger_split() {
   set -- $row
   set +f
   IFS=$old
-  rid=${1:-}; rns=${2:-}; rtitle=${3:-}; rstatus=${4:-}; rlabels=${5:-}
-  redges=${6:-}; rcomments=${7:-}; rready=${8:-}; rblocked=${9:-}
-  rphase=${10:-}; rpriority=${11:-}; rref=${12:-}; rbody=$(row_unescape "${13:-}")
+  rid=${1:-}
+  row_decode_set "${2:-}"; rns=$decoded
+  row_decode_set "${3:-}"; rtitle=$decoded
+  rstatus=${4:-}
+  row_decode_set "${5:-}"; rlabels=$decoded
+  row_decode_set "${6:-}"; redges=$decoded
+  rcomments=${7:-}; rready=${8:-}; rblocked=${9:-}
+  row_decode_set "${10:-}"; rphase=$decoded
+  row_decode_set "${11:-}"; rpriority=$decoded
+  row_decode_set "${12:-}"; rref=$decoded
+  row_decode_set "${13:-}"; rbody=$decoded
 }
 
 ledger_match() {
@@ -877,6 +1057,51 @@ ledger_emit() {
 ledger_show() {
   rows=$(ledger_rows)
   found=0
+  # notes and history replace the record, matching pasture's separate commands.
+  if [ "$mode" = notes ] || [ "$mode" = history ]; then
+    hit=$(printf '%s\n' "$rows" | while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      ledger_split "$row"
+      [ "$rid" = "$id" ] && printf yes
+    done)
+    [ -n "$hit" ] || fail "no ledger record $id" "no line names that id under $LEDGER" "create the record first, or pass the id create printed"
+    safe=$(printf '%s' "$id" | sed -e 's/%/%25/g' -e 's#/#%2F#g' -e 's/ /%20/g' -e 's/:/%3A/g')
+    file="$LEDGER/$safe.jsonl"
+    if [ "$mode" = history ]; then
+      cat "$file"
+      return 0
+    fi
+    awk '
+function take(line, pos,   i, c, out, esc) {
+  out = ""; esc = 0
+  for (i = pos + 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (esc) {
+      if (c == "n") out = out "\n"
+      else if (c == "t") out = out "\t"
+      else if (c == "r") out = out "\r"
+      else out = out c
+      esc = 0
+    } else if (c == "\\") esc = 1
+    else if (c == "\"") { got = out; got_i = i + 1; return }
+    else out = out c
+  }
+}
+{
+  i = 1
+  while (i <= length($0)) {
+    if (substr($0, i, 1) == "\"") {
+      take($0, i); key = got; i = got_i
+      while (i <= length($0) && substr($0, i, 1) != "\"") i++
+      take($0, i); f[key] = got; i = got_i
+    } else i++
+  }
+  if (f["op"] == "note") print f["body"]
+  delete f
+}
+' "$file"
+    return 0
+  fi
   printf '%s\n' "$rows" | while IFS= read -r row; do
     [ -n "$row" ] || continue
     ledger_split "$row"
@@ -906,42 +1131,6 @@ ledger_show() {
     [ "$rid" = "$id" ] && printf yes
   done)
   [ -n "$hit" ] || fail "no ledger record $id" "no line names that id under $LEDGER" "create the record first, or pass the id create printed"
-  if [ "$mode" = notes ] || [ "$mode" = history ]; then
-    safe=$(printf '%s' "$id" | sed -e 's/%/%25/g' -e 's#/#%2F#g' -e 's/ /%20/g' -e 's/:/%3A/g')
-    file="$LEDGER/$safe.jsonl"
-    if [ "$mode" = history ]; then
-      cat "$file"
-    else
-      awk '
-function take(line, pos,   i, c, out, esc) {
-  out = ""; esc = 0
-  for (i = pos + 1; i <= length(line); i++) {
-    c = substr(line, i, 1)
-    if (esc) {
-      if (c == "n") out = out "\n"
-      else if (c == "t") out = out "\t"
-      else out = out c
-      esc = 0
-    } else if (c == "\\") esc = 1
-    else if (c == "\"") { got = out; got_i = i + 1; return }
-    else out = out c
-  }
-}
-{
-  i = 1
-  while (i <= length($0)) {
-    if (substr($0, i, 1) == "\"") {
-      take($0, i); key = got; i = got_i
-      while (i <= length($0) && substr($0, i, 1) != "\"") i++
-      take($0, i); f[key] = got; i = got_i
-    } else i++
-  }
-  if (f["op"] == "note") print f["body"]
-  delete f
-}
-' "$file"
-    fi
-  fi
 }
 
 ledger_query() {
@@ -986,8 +1175,8 @@ case "$OP" in
         --phase=*) phase="${1#*=}"; shift ;;
         --priority) priority="$2"; shift 2 ;;
         --priority=*) priority="${1#*=}"; shift ;;
-        --label) labels="$labels $2"; shift 2 ;;
-        --label=*) labels="$labels ${1#*=}"; shift ;;
+        --label) label_push "$2"; shift 2 ;;
+        --label=*) label_push "${1#*=}"; shift ;;
         --ref)
           if [ -z "$refs" ]; then refs="$2"; else refs="$refs
 $2"; fi
@@ -1016,11 +1205,15 @@ $_val"; fi
       id="$(printf '%s\n' "$out" | sed -n 's/^ID: *//p' | head -1)"
       [ -n "$id" ] || fail "create returned no task ID" "the backend text output had no ID line" "check the store named in $EPOCH_FILE and the backend help page"
       printf '%s\n' "$id"
-      for label in $labels; do
-        [ -n "$label" ] || continue
+      set -f
+      for _enc in $labels; do
+        [ -n "$_enc" ] || continue
+        row_decode_set "$_enc"
+        label=$decoded
         set -- task label add "$id" "$label"
         pb "$@" >/dev/null || exit $?
       done
+      set +f
     ;;
   # dispatch:label
   label)
@@ -1031,7 +1224,7 @@ $_val"; fi
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --*) fail "label rejected argument '$1'" "the argument is not in the label contract" "pass the label as a positional after the task URI" ;;
-        *) labels="$labels $1"; shift ;;
+        *) label_push "$1"; shift ;;
       esac
     done
     [ -n "$labels" ] || fail "label needs at least one label" "no label operand was given" "pass the label after the task URI"
@@ -1039,11 +1232,15 @@ $_val"; fi
       ledger_label
       exit $?
     fi
-      for label in $labels; do
-        [ -n "$label" ] || continue
+      set -f
+      for _enc in $labels; do
+        [ -n "$_enc" ] || continue
+        row_decode_set "$_enc"
+        label=$decoded
         set -- task label add "$id" "$label"
         pb "$@" || exit $?
       done
+      set +f
     ;;
   # dispatch:block
   block)
@@ -1325,7 +1522,7 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 
 **Step 0: detect the tracker backend before the first write.**
 
-Write the probe and the adapter by running the installer below against this skill file. It writes `.agents.local/pasture/probe.sh` and `.agents.local/pasture/rec` from the shipped fences in the Tracker Adapter section. Set `SKILL_FILE` to this file, run the installer, then the probe. Write `EPOCH.md` from the probe output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe. A missing git origin is not an error backend: the probe sets NS to file:// of the working directory. A missing or unregistered author is a warning (`WARN=no-author`), not an error backend.
+Write the probe and the adapter by running the installer below against this skill file. It writes `.agents.local/pasture/probe.sh` and `.agents.local/pasture/rec` from the shipped fences in the Tracker Adapter section. Set `SKILL_FILE` to this file, run the installer, then the probe. Write `EPOCH.md` from the probe output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe. A missing git origin is not an error backend. The probe does not derive a namespace: for pasture, record `namespace:` only to pin one, otherwise the adapter omits `--namespace` and Pasture derives it. For ledger, NS is the one derivation function that every unpinned write also calls; copy it to `namespace:` only to override that function. A missing or unregistered author is a warning (`WARN=no-author`), not an error backend.
 
 ```bash
 # pasture:install-tracker
@@ -1355,12 +1552,13 @@ install_tracker_assets() {
 # /pasture:install-tracker
 install_tracker_assets "$SKILL_FILE" .agents.local/pasture
 sh .agents.local/pasture/probe.sh
-# Then write .agents.local/pasture/EPOCH.md from the KEY=VALUE output, and in
-# every shell session resolve the entry point:
+# Then write .agents.local/pasture/EPOCH.md from the keys named below. Do not
+# copy a derived NS into namespace: unless you mean to pin it. In every shell
+# session resolve the entry point:
 EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
 ```
 
-If the probe prints `BACKEND=error`, stop and report before the first mutation: the store exists but cannot be used. If it prints `BACKEND=ledger`, record `ledger:`, `rec:` and `probed_at:` from the output and continue; the adapter writes one JSONL line per mutation under that ledger. Offer a gitignore entry; never require one. If it prints `BACKEND=pasture`, record `namespace:`, `db:`, `author:`, `rec:` and `probed_at:` from the output.
+If the probe prints `BACKEND=error`, stop and report before the first mutation: the store exists but cannot be used. If it prints `BACKEND=ledger`, record `ledger:`, `rec:` and `probed_at:` from the output and continue; the adapter writes one JSONL line per mutation under that ledger and derives the namespace with the same function that printed NS. Offer a gitignore entry; never require one. If it prints `BACKEND=pasture`, record `db:`, `author:`, `rec:` and `probed_at:` from the output. Record `namespace:` only to pin one; the adapter then passes `--namespace`, and that pin wins over Pasture's derivation.
 
 **Option 1: Manual Task Creation**
 ```bash

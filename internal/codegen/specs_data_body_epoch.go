@@ -128,7 +128,7 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 			Title: "Starting an Epoch",
 			Content: `**Step 0: detect the tracker backend before the first write.**
 
-Write the probe and the adapter by running the installer below against this skill file. It writes ` + "`" + `.agents.local/pasture/probe.sh` + "`" + ` and ` + "`" + `.agents.local/pasture/rec` + "`" + ` from the shipped fences in the Tracker Adapter section. Set ` + "`SKILL_FILE`" + ` to this file, run the installer, then the probe. Write ` + "`EPOCH.md`" + ` from the probe output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe. A missing git origin is not an error backend: the probe sets NS to file:// of the working directory. A missing or unregistered author is a warning (` + "`WARN=no-author`" + `), not an error backend.
+Write the probe and the adapter by running the installer below against this skill file. It writes ` + "`" + `.agents.local/pasture/probe.sh` + "`" + ` and ` + "`" + `.agents.local/pasture/rec` + "`" + ` from the shipped fences in the Tracker Adapter section. Set ` + "`SKILL_FILE`" + ` to this file, run the installer, then the probe. Write ` + "`EPOCH.md`" + ` from the probe output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe. A missing git origin is not an error backend. The probe does not derive a namespace: for pasture, record ` + "`namespace:`" + ` only to pin one, otherwise the adapter omits ` + "`--namespace`" + ` and Pasture derives it. For ledger, NS is the one derivation function that every unpinned write also calls; copy it to ` + "`namespace:`" + ` only to override that function. A missing or unregistered author is a warning (` + "`WARN=no-author`" + `), not an error backend.
 
 ` + "```" + `bash
 # pasture:install-tracker
@@ -158,12 +158,13 @@ install_tracker_assets() {
 # /pasture:install-tracker
 install_tracker_assets "$SKILL_FILE" .agents.local/pasture
 sh .agents.local/pasture/probe.sh
-# Then write .agents.local/pasture/EPOCH.md from the KEY=VALUE output, and in
-# every shell session resolve the entry point:
+# Then write .agents.local/pasture/EPOCH.md from the keys named below. Do not
+# copy a derived NS into namespace: unless you mean to pin it. In every shell
+# session resolve the entry point:
 EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
 ` + "```" + `
 
-If the probe prints ` + "`BACKEND=error`" + `, stop and report before the first mutation: the store exists but cannot be used. If it prints ` + "`BACKEND=ledger`" + `, record ` + "`ledger:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output and continue; the adapter writes one JSONL line per mutation under that ledger. Offer a gitignore entry; never require one. If it prints ` + "`BACKEND=pasture`" + `, record ` + "`namespace:`" + `, ` + "`db:`" + `, ` + "`author:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output.
+If the probe prints ` + "`BACKEND=error`" + `, stop and report before the first mutation: the store exists but cannot be used. If it prints ` + "`BACKEND=ledger`" + `, record ` + "`ledger:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output and continue; the adapter writes one JSONL line per mutation under that ledger and derives the namespace with the same function that printed NS. Offer a gitignore entry; never require one. If it prints ` + "`BACKEND=pasture`" + `, record ` + "`db:`" + `, ` + "`author:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output. Record ` + "`namespace:`" + ` only to pin one; the adapter then passes ` + "`--namespace`" + `, and that pin wins over Pasture's derivation.
 
 **Option 1: Manual Task Creation**
 ` + "```" + `bash
