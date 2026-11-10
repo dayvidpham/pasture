@@ -80,7 +80,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ` + "```" + ``,
 		},
 		{
-			Id:    "sup-commit-commands",
+			Id:    "sup-commit-merge-request",
 			Title: "Merge Request Description",
 			Content: `A merge request description states three things, and nothing else belongs in it:
 
@@ -91,6 +91,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 Do not put an internal task code in the title or the body.`,
 		},
 		{
+			Id:    "sup-commit-commands",
 			Title: "Commands",
 			Content: `` + "```" + `bash
 # Set these to the reviewed canonical source and direct test paths for this slice.
