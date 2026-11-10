@@ -2,6 +2,9 @@
 description: {{ .Description }}
 mode: {{ .Mode }}
 model: {{ .Model }}
+{{- if .TierCatalog }}
+{{ .TierCatalog }}
+{{- end }}
 permission:
 {{- range .Permissions }}
   {{ .Key }}: {{ .Value }}

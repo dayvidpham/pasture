@@ -35,8 +35,9 @@ type agentTemplateData struct {
 	// Model is the harness-native model id resolved from the role's effective
 	// capability tier. Effort is the tier's effort level. Both are emitted in
 	// frontmatter; neither is authored as prose in the role spec.
-	Model  string
-	Effort string
+	Model       string
+	Effort      string
+	TierCatalog string
 
 	// PhasesDetail holds PhaseSpec entries for the role's owned phases,
 	// sorted by phase number ascending.
@@ -142,12 +143,17 @@ func renderAgentForTarget(roleId protocol.RoleId, figuresDir string, target Harn
 	if err != nil {
 		return "", fmt.Errorf("codegen.renderAgent: resolving effort for role %q failed: %w", roleId, err)
 	}
+	catalog, err := harnessTierCatalog(target)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderAgent: resolving tier catalog for role %q failed: %w", roleId, err)
+	}
 
 	data := agentTemplateData{
 		Role:         roleSpec,
 		ToolNames:    toolNames,
 		Model:        model,
 		Effort:       string(effort),
+		TierCatalog:  catalog,
 		PhasesDetail: ownedPhaseDetails(roleSpec),
 		PhaseSlug:    buildPhaseSlug(),
 		Constraints:  roleCtx.Constraints,

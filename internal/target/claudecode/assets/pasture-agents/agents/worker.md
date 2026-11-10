@@ -3,6 +3,9 @@ name: worker
 description: Vertical slice implementer (full production code path)
 tools: Read, Glob, Grep, Bash, Skill, Edit, Write, SendMessage
 model: claude-sonnet-4-6
+# capability-tier T1 claude-opus-4-8
+# capability-tier T2 claude-sonnet-4-6
+# capability-tier T3 claude-haiku-4-5
 thinking: medium
 ---
 

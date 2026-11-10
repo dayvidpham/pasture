@@ -73,6 +73,7 @@ type openCodeAgentTemplateData struct {
 	Description string
 	Mode        string
 	Model       string
+	TierCatalog string
 	Permissions []openCodePermissionEntry
 	Body        string
 }
@@ -185,10 +186,15 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 		)
 	}
 
+	catalog, err := harnessTierCatalog(HarnessOpenCode)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderOpenCodeAgent: resolving tier catalog for role %q failed: %w", roleID, err)
+	}
 	data := openCodeAgentTemplateData{
 		Description: roleSpec.Description,
 		Mode:        mode,
 		Model:       model,
+		TierCatalog: catalog,
 		Permissions: permissions,
 		Body:        body,
 	}

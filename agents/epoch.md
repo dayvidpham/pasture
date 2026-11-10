@@ -3,6 +3,9 @@ name: epoch
 description: Master orchestrator for full 12-phase workflow
 tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage
 model: claude-opus-4-8
+# capability-tier T1 claude-opus-4-8
+# capability-tier T2 claude-sonnet-4-6
+# capability-tier T3 claude-haiku-4-5
 thinking: high
 ---
 

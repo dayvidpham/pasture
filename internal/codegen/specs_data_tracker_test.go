@@ -1,10 +1,14 @@
 package codegen
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -321,6 +325,12 @@ func writeFakePasture(t *testing.T, dir string) (binPath, logPath string) {
 	logPath = filepath.Join(dir, "pasture.log")
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$PROBE_FAKE_LOG"
+if [ -n "${PROBE_FAKE_ARGV:-}" ]; then
+  for _a in "$@"; do
+    printf '%s\037' "$_a" >> "$PROBE_FAKE_ARGV"
+  done
+  printf '\036' >> "$PROBE_FAKE_ARGV"
+fi
 mode="${PROBE_FAKE_MODE:-ok}"
 case "$1" in
   --version) printf 'pasture version v9.9.9\n'; exit 0 ;;
@@ -400,52 +410,168 @@ func TestProbeStoreGuardIsLive(t *testing.T) {
 }
 
 // TestRecAssetServesTheTenOps runs the shipped rec asset against a fake Pasture
-// binary and proves every neutral op lowers to its backend recipe. It exercises
-// the production constant, not a hand-written imitation.
+// binary and proves every neutral op lowers to the argv declared in TrackerOps.
+// It compares the argument vector, not a substring of a joined command line,
+// with a namespace and without one.
 func TestRecAssetServesTheTenOps(t *testing.T) {
 	t.Parallel()
 
+	ns := "https://example.test/repo"
 	cases := []struct {
-		name string
-		args []string
-		want string
+		name    string
+		args    []string
+		withNS  []string
+		without []string
 	}{
-		{"create", []string{"create", "--kind", "task", "--title", "T", "--phase", "request", "--body", "B"}, "task create T --type task --phase request --namespace https://example.test/repo --description B"},
-		{"label", []string{"label", "ID", "pasture:urd"}, "task label add ID pasture:urd"},
-		{"block", []string{"block", "P", "--by", "C"}, "task dep add P --blocked-by C"},
-		{"block-typed", []string{"block", "P", "--by", "C", "--kind", "supersedes"}, "task dep add P --target C --kind supersedes"},
-		{"note", []string{"note", "ID", "--author", "actor/x", "--body", "hello"}, "task comment add ID --author actor/x -- hello"},
-		{"show", []string{"show", "ID"}, "task show ID"},
-		{"show-notes", []string{"show", "ID", "--notes"}, "task comments ID"},
-		{"show-history", []string{"show", "ID", "--history"}, "task timeline ID"},
-		{"query", []string{"query", "--label", "pasture:urd", "--status", "open"}, "task list --namespace https://example.test/repo --status open --label pasture:urd"},
-		{"query-blocked", []string{"query", "--blocked", "--label", "x"}, "task blocked --label x"},
-		{"query-tree", []string{"query", "--tree", "ID"}, "task dep tree ID"},
-		{"ready", []string{"ready", "--label", "x"}, "task ready --label x"},
-		{"status", []string{"status", "ID", "--set", "in_progress"}, "task update ID --status in_progress"},
-		{"close", []string{"close", "ID", "--reason", "done"}, "task close ID --reason done"},
+		{
+			name:    "create",
+			args:    []string{"create", "--kind", "task", "--title", "T", "--phase", "request", "--body", "B"},
+			withNS:  []string{"task", "create", "T", "--type", "task", "--phase", "request", "--description", "B", "--namespace", ns, "--format", "text"},
+			without: []string{"task", "create", "T", "--type", "task", "--phase", "request", "--description", "B", "--format", "text"},
+		},
+		{
+			name:    "label",
+			args:    []string{"label", "ID", "pasture:urd"},
+			withNS:  []string{"task", "label", "add", "ID", "pasture:urd"},
+			without: []string{"task", "label", "add", "ID", "pasture:urd"},
+		},
+		{
+			name:    "block",
+			args:    []string{"block", "P", "--by", "C"},
+			withNS:  []string{"task", "dep", "add", "P", "--blocked-by", "C"},
+			without: []string{"task", "dep", "add", "P", "--blocked-by", "C"},
+		},
+		{
+			name:    "block-typed",
+			args:    []string{"block", "P", "--by", "C", "--kind", "supersedes"},
+			withNS:  []string{"task", "dep", "add", "P", "--target", "C", "--kind", "supersedes"},
+			without: []string{"task", "dep", "add", "P", "--target", "C", "--kind", "supersedes"},
+		},
+		{
+			name:    "note",
+			args:    []string{"note", "ID", "--author", "actor/x", "--body", "hello"},
+			withNS:  []string{"task", "comment", "add", "ID", "--author", "actor/x", "--", "hello"},
+			without: []string{"task", "comment", "add", "ID", "--author", "actor/x", "--", "hello"},
+		},
+		{
+			name:    "show",
+			args:    []string{"show", "ID"},
+			withNS:  []string{"task", "show", "ID", "--format", "json"},
+			without: []string{"task", "show", "ID", "--format", "json"},
+		},
+		{
+			name:    "show-notes",
+			args:    []string{"show", "ID", "--notes"},
+			withNS:  []string{"task", "comments", "ID", "--format", "json"},
+			without: []string{"task", "comments", "ID", "--format", "json"},
+		},
+		{
+			name:    "show-history",
+			args:    []string{"show", "ID", "--history"},
+			withNS:  []string{"task", "timeline", "ID"},
+			without: []string{"task", "timeline", "ID"},
+		},
+		{
+			name:    "query",
+			args:    []string{"query", "--label", "pasture:urd", "--status", "open"},
+			withNS:  []string{"task", "list", "--status", "open", "--label", "pasture:urd", "--namespace", ns, "--format", "json"},
+			without: []string{"task", "list", "--status", "open", "--label", "pasture:urd", "--format", "json"},
+		},
+		{
+			name:    "query-blocked",
+			args:    []string{"query", "--blocked", "--label", "x"},
+			withNS:  []string{"task", "blocked", "--label", "x", "--namespace", ns, "--format", "json"},
+			without: []string{"task", "blocked", "--label", "x", "--format", "json"},
+		},
+		{
+			name:    "query-tree",
+			args:    []string{"query", "--tree", "ID"},
+			withNS:  []string{"task", "dep", "tree", "ID"},
+			without: []string{"task", "dep", "tree", "ID"},
+		},
+		{
+			name:    "ready",
+			args:    []string{"ready", "--label", "x"},
+			withNS:  []string{"task", "ready", "--label", "x", "--namespace", ns, "--format", "json"},
+			without: []string{"task", "ready", "--label", "x", "--format", "json"},
+		},
+		{
+			name:    "status",
+			args:    []string{"status", "ID", "--set", "in_progress"},
+			withNS:  []string{"task", "update", "ID", "--status", "in_progress"},
+			without: []string{"task", "update", "ID", "--status", "in_progress"},
+		},
+		{
+			name:    "close",
+			args:    []string{"close", "ID", "--reason", "done"},
+			withNS:  []string{"task", "close", "ID", "--reason", "done"},
+			without: []string{"task", "close", "ID", "--reason", "done"},
+		},
+		{
+			name:    "whoami",
+			args:    []string{"whoami"},
+			withNS:  []string{"task", "agents", "show", "actor/x"},
+			without: []string{"task", "agents", "show", "actor/x"},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name+"/namespace", func(t *testing.T) {
 			t.Parallel()
-			dir := t.TempDir()
-			bin, log := writeFakePasture(t, dir)
-			header := filepath.Join(dir, "EPOCH.md")
-			require.NoError(t, os.WriteFile(header, []byte("backend: pasture\ndb: "+filepath.Join(dir, "store.db")+"\nnamespace: https://example.test/repo\nauthor: actor/x\nrec: "+header+"\n"), 0o600))
-			out, code := runRec(t, dir, map[string]string{
-				"HOME":            dir,
-				"PASTURE_BIN":     bin,
-				"PASTURE_DB_PATH": filepath.Join(dir, "store.db"),
-				"EPOCH_FILE":      header,
-				"PROBE_FAKE_LOG":  log,
-			}, tc.args...)
-			require.Zero(t, code, out)
-			invocations, err := os.ReadFile(log)
-			require.NoError(t, err)
-			require.Contains(t, string(invocations), tc.want)
+			got := recArgv(t, tc.args, true)
+			require.Equal(t, tc.withNS, got, "pasture argv with a namespace")
+			require.NotContains(t, got, "--all-namespaces")
+		})
+		t.Run(tc.name+"/no-namespace", func(t *testing.T) {
+			t.Parallel()
+			got := recArgv(t, tc.args, false)
+			require.Equal(t, tc.without, got, "pasture argv without a namespace")
+			require.NotContains(t, got, "--namespace")
 		})
 	}
+}
+
+// recArgv runs one op against the fake backend and returns the task argv of
+// the first invocation, with --db and its value removed.
+func recArgv(t *testing.T, args []string, withNS bool) []string {
+	t.Helper()
+	dir := t.TempDir()
+	bin, log := writeFakePasture(t, dir)
+	argvLog := filepath.Join(dir, "argv.log")
+	header := filepath.Join(dir, "EPOCH.md")
+	body := "backend: pasture\ndb: " + filepath.Join(dir, "store.db") + "\nauthor: actor/x\nrec: " + header + "\n"
+	if withNS {
+		body += "namespace: https://example.test/repo\n"
+	}
+	require.NoError(t, os.WriteFile(header, []byte(body), 0o600))
+	out, code := runRec(t, dir, map[string]string{
+		"HOME":            dir,
+		"PASTURE_BIN":     bin,
+		"PASTURE_DB_PATH": filepath.Join(dir, "store.db"),
+		"EPOCH_FILE":      header,
+		"PROBE_FAKE_LOG":  log,
+		"PROBE_FAKE_ARGV": argvLog,
+	}, args...)
+	require.Zero(t, code, out)
+	if args[0] == "whoami" {
+		require.Equal(t, "actor/x\n", out, "whoami prints the recorded author and nothing else")
+	}
+	return firstTaskArgv(t, argvLog)
+}
+
+func firstTaskArgv(t *testing.T, argvLog string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(argvLog)
+	require.NoError(t, err)
+	record := strings.Split(string(raw), "\x1e")[0]
+	fields := strings.Split(record, "\x1f")
+	if len(fields) > 0 && fields[len(fields)-1] == "" {
+		fields = fields[:len(fields)-1]
+	}
+	if len(fields) >= 2 && fields[0] == "--db" {
+		fields = fields[2:]
+	}
+	return fields
 }
 
 // TestRecAssetStopsOnErrorBackend proves the adapter's error backend prints an
@@ -536,6 +662,442 @@ func TestRenderedTrackerCallsUseRegisteredOps(t *testing.T) {
 		require.Equalf(t, 0, countUnregisteredTrackerCalls(neutral, neutralTrackerEntryPoint, callOp),
 			"%s %s resolves a native verb after the entry point for schema.xml", source.Corpus, source.Owner)
 	}
+}
+
+// TestCreateRefIsHonored proves --ref is folded into the description instead of
+// being parsed and dropped.
+func TestCreateRefIsHonored(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	bin, log := writeFakePasture(t, dir)
+	argvLog := filepath.Join(dir, "argv.log")
+	header := filepath.Join(dir, "EPOCH.md")
+	require.NoError(t, os.WriteFile(header, []byte("backend: pasture\ndb: "+filepath.Join(dir, "store.db")+"\nauthor: actor/x\nnamespace: https://example.test/repo\n"), 0o600))
+	out, code := runRec(t, dir, map[string]string{
+		"HOME":            dir,
+		"PASTURE_BIN":     bin,
+		"EPOCH_FILE":      header,
+		"PROBE_FAKE_LOG":  log,
+		"PROBE_FAKE_ARGV": argvLog,
+	}, "create", "--kind", "task", "--title", "T", "--phase", "request", "--ref", "k=v", "--body", "hello")
+	require.Zero(t, code, out)
+	fields := firstTaskArgv(t, argvLog)
+	desc := ""
+	for i, field := range fields {
+		if field == "--description" && i+1 < len(fields) {
+			desc = fields[i+1]
+		}
+	}
+	require.Equal(t, "---\nreferences:\n  k: v\n---\nhello", desc)
+}
+
+// TestWhoamiWithoutAuthorDoesNotCallTheBackend proves the one whoami mapping
+// stops before any second command when no author is recorded.
+func TestWhoamiWithoutAuthorDoesNotCallTheBackend(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	bin, log := writeFakePasture(t, dir)
+	header := filepath.Join(dir, "EPOCH.md")
+	require.NoError(t, os.WriteFile(header, []byte("backend: pasture\ndb: "+filepath.Join(dir, "store.db")+"\n"), 0o600))
+	out, code := runRec(t, dir, map[string]string{
+		"PASTURE_BIN":    bin,
+		"EPOCH_FILE":     header,
+		"PROBE_FAKE_LOG": log,
+	}, "whoami")
+	require.Equal(t, 3, code)
+	require.Contains(t, out, "no recorded author")
+	require.Contains(t, out, "fix:")
+	_, err := os.Stat(log)
+	require.True(t, os.IsNotExist(err), "whoami must not fall back to agents list")
+}
+
+// TestQueryAllNamespacesSkipsNamespace proves a caller that opts out does not
+// receive a namespace flag.
+func TestQueryAllNamespacesSkipsNamespace(t *testing.T) {
+	t.Parallel()
+
+	got := recArgv(t, []string{"query", "--blocked", "--all-namespaces"}, true)
+	require.Equal(t, []string{"task", "blocked", "--all-namespaces", "--format", "json"}, got)
+}
+
+// TestTrackerDispatchScopeGuard is the two-sample guard: the production table
+// passes, and a ready call that forgets to be scoped fails the build.
+func TestTrackerDispatchScopeGuard(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateTrackerDispatch(TrackerOps))
+	ops := make(map[TrackerOpId]TrackerOp, len(TrackerOps))
+	for id, op := range TrackerOps {
+		ops[id] = op
+	}
+	ready := ops[TrackerOpReady]
+	calls := append([]pastureCall(nil), ready.PastureCalls...)
+	require.NotEmpty(t, calls)
+	calls[0].Scoped = false
+	ready.PastureCalls = calls
+	ops[TrackerOpReady] = ready
+	require.Error(t, validateTrackerDispatch(ops))
+}
+
+// TestEmptyHomeInstallUsesLedger follows the install path: write the probe and
+// adapter, run the probe against an empty home, write EPOCH.md, and complete
+// the first operation on the ledger backend.
+func TestEmptyHomeInstallUsesLedger(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	require.NoError(t, os.MkdirAll(home, 0o755))
+	work := filepath.Join(dir, "work")
+	require.NoError(t, os.MkdirAll(filepath.Join(work, ".agents.local", "pasture"), 0o755))
+	probe := filepath.Join(work, ".agents.local", "pasture", "probe.sh")
+	rec := filepath.Join(work, ".agents.local", "pasture", "rec")
+	require.NoError(t, os.WriteFile(probe, []byte(TrackerProbeScript), 0o755))
+	require.NoError(t, os.WriteFile(rec, []byte(TrackerRecScript), 0o755))
+	bin, log := writeFakePasture(t, dir)
+
+	cmd := exec.Command("sh", probe)
+	cmd.Dir = work
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home,
+		"PASTURE_BIN=" + bin,
+		"PWD=" + work,
+		"PROBE_FAKE_LOG=" + log,
+		"PROBE_FAKE_MODE=ok",
+	}
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "probe: %s", out)
+	probeOut := parseKV(string(out))
+	require.Equal(t, "ledger", probeOut["BACKEND"])
+	require.Equal(t, "no-store", probeOut["REASON"])
+	store := filepath.Join(home, ".local", "share", "pasture", "pasture.db")
+	_, statErr := os.Stat(store)
+	require.True(t, os.IsNotExist(statErr), "probe must not create a store")
+
+	header := filepath.Join(work, ".agents.local", "pasture", "EPOCH.md")
+	epoch := "backend: " + probeOut["BACKEND"] + "\n" +
+		"namespace: https://example.test/fresh\n" +
+		"author: actor/fresh\n" +
+		"ledger: " + probeOut["LEDGER"] + "\n" +
+		"rec: " + rec + "\n" +
+		"probed_at: " + probeOut["PROBED_AT"] + "\n"
+	require.NoError(t, os.WriteFile(header, []byte(epoch), 0o600))
+
+	created := exec.Command(rec, "create", "--kind", "task", "--title", "first", "--phase", "request", "--body", "hello")
+	created.Dir = work
+	created.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "EPOCH_FILE=" + header, "PASTURE_BIN=" + bin}
+	var stdout, stderr bytes.Buffer
+	created.Stdout = &stdout
+	created.Stderr = &stderr
+	err = created.Run()
+	require.NoError(t, err, "first ledger op stdout=%s stderr=%s", stdout.String(), stderr.String())
+	require.Contains(t, stderr.String(), "gitignore", "the ledger must offer a gitignore entry")
+	id := strings.TrimSpace(stdout.String())
+	require.True(t, strings.HasPrefix(id, "ledger/"), "create must print a ledger id, got %q", stdout.String())
+	matches, err := filepath.Glob(filepath.Join(probeOut["LEDGER"], "*.jsonl"))
+	require.NoError(t, err)
+	require.NotEmpty(t, matches, "the first operation must write a ledger line")
+	raw, err := os.ReadFile(matches[0])
+	require.NoError(t, err)
+	require.Contains(t, string(raw), `"op":"create"`)
+	require.Contains(t, string(raw), `"title":"first"`)
+}
+
+func parseKV(text string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+// TestLedgerReplayParity runs one sequence through the production adapter on
+// the ledger and on Pasture, then compares the equivalence projection.
+func TestLedgerReplayParity(t *testing.T) {
+	root := testModuleRoot(t)
+	bin := filepath.Join(t.TempDir(), "pasture")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/pasture")
+	build.Dir = root
+	build.Env = append(os.Environ(), "CGO_ENABLED=0")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build pasture: %v\n%s", err, output)
+	}
+
+	ns := "https://example.test/parity"
+	pastureDir := t.TempDir()
+	db := filepath.Join(pastureDir, "pasture.db")
+	author := registerParityAuthor(t, bin, db, ns)
+	pastureHeader := writeEpoch(t, pastureDir, "pasture", ns, author, db, "")
+	ledgerDir := t.TempDir()
+	ledgerPath := filepath.Join(ledgerDir, "ledger")
+	ledgerHeader := writeEpoch(t, ledgerDir, "ledger", ns, author, "", ledgerPath)
+
+	sequence := [][]string{
+		{"create", "--kind", "task", "--title", "alpha", "--phase", "request", "--label", "L1", "--body", "hello"},
+		{"create", "--kind", "task", "--title", "beta", "--phase", "request", "--body", "other"},
+	}
+	pastureIDs := runSequence(t, pastureHeader, bin, db, sequence)
+	ledgerIDs := runSequence(t, ledgerHeader, "", "", sequence)
+	require.Len(t, pastureIDs, 2)
+	require.Len(t, ledgerIDs, 2)
+	runOne(t, pastureHeader, bin, db, "label", pastureIDs[0], "L2")
+	runOne(t, ledgerHeader, "", "", "label", ledgerIDs[0], "L2")
+	runOne(t, pastureHeader, bin, db, "block", pastureIDs[0], "--by", pastureIDs[1])
+	runOne(t, ledgerHeader, "", "", "block", ledgerIDs[0], "--by", ledgerIDs[1])
+	runOne(t, pastureHeader, bin, db, "note", pastureIDs[0], "--author", author, "--body", "a note")
+	runOne(t, ledgerHeader, "", "", "note", ledgerIDs[0], "--author", author, "--body", "a note")
+	runOne(t, pastureHeader, bin, db, "status", pastureIDs[1], "--set", "in_progress")
+	runOne(t, ledgerHeader, "", "", "status", ledgerIDs[1], "--set", "in_progress")
+	runOne(t, pastureHeader, bin, db, "close", pastureIDs[1], "--reason", "done")
+	runOne(t, ledgerHeader, "", "", "close", ledgerIDs[1], "--reason", "done")
+
+	pastureProj := projectPasture(t, bin, db, ns)
+	ledgerProj := projectLedger(t, ledgerPath)
+	requireEquivalent(t, pastureProj, ledgerProj)
+
+	other := writeEpochFile(t, filepath.Join(ledgerDir, "EPOCH-other.md"), "ledger", "https://example.test/other", author, "", ledgerPath)
+	runOne(t, other, "", "", "create", "--kind", "task", "--title", "otherns", "--phase", "request", "--body", "x")
+	scoped := ledgerQueryTitles(t, ledgerHeader)
+	require.NotContains(t, scoped, "otherns")
+	all := ledgerQueryTitles(t, ledgerHeader, "--all-namespaces")
+	require.Contains(t, all, "otherns")
+}
+
+func writeEpoch(t *testing.T, dir, backend, ns, author, db, ledger string) string {
+	t.Helper()
+	return writeEpochFile(t, filepath.Join(dir, "EPOCH.md"), backend, ns, author, db, ledger)
+}
+
+func writeEpochFile(t *testing.T, header, backend, ns, author, db, ledger string) string {
+	t.Helper()
+	var b strings.Builder
+	fmt.Fprintf(&b, "backend: %s\nnamespace: %s\nauthor: %s\n", backend, ns, author)
+	if db != "" {
+		fmt.Fprintf(&b, "db: %s\n", db)
+	}
+	if ledger != "" {
+		fmt.Fprintf(&b, "ledger: %s\n", ledger)
+	}
+	require.NoError(t, os.WriteFile(header, []byte(b.String()), 0o600))
+	return header
+}
+
+func registerParityAuthor(t *testing.T, bin, db, ns string) string {
+	t.Helper()
+	cmd := exec.Command(bin, "--db", db, "--format", "json", "--namespace", ns, "task", "agents", "register", "software", "--name", "rec-parity", "--version", "0")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "register author: %s", out)
+	var doc struct {
+		AgentID string `json:"agentId"`
+	}
+	require.NoError(t, json.Unmarshal(out, &doc), "register output: %s", out)
+	require.NotEmpty(t, doc.AgentID, "register output: %s", out)
+	return doc.AgentID
+}
+
+func runSequence(t *testing.T, header, bin, db string, steps [][]string) []string {
+	t.Helper()
+	ids := make([]string, 0, len(steps))
+	for _, step := range steps {
+		out := runOne(t, header, bin, db, step...)
+		if step[0] == "create" {
+			ids = append(ids, strings.TrimSpace(out))
+		}
+	}
+	return ids
+}
+
+func runOne(t *testing.T, header, bin, db string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("sh", append([]string{"-c", TrackerRecScript, "rec"}, args...)...)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "EPOCH_FILE=" + header}
+	if bin != "" {
+		cmd.Env = append(cmd.Env, "PASTURE_BIN="+bin, "PASTURE_DB_PATH="+db)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	require.NoErrorf(t, err, "rec %v\nstdout: %s\nstderr: %s", args, stdout.String(), stderr.String())
+	return stdout.String()
+}
+
+type parityTask struct {
+	ID       string
+	Title    string
+	Status   string
+	Labels   []string
+	Edges    []string
+	Comments int
+}
+
+func projectPasture(t *testing.T, bin, db, ns string) []parityTask {
+	t.Helper()
+	raw := runPasture(t, bin, db, "--format", "json", "--namespace", ns, "task", "list")
+	var listed []struct {
+		ID     string `json:"id"`
+		Title  string `json:"title"`
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(raw), &listed), raw)
+	out := make([]parityTask, 0, len(listed))
+	for _, item := range listed {
+		labelsRaw := runPasture(t, bin, db, "--format", "json", "task", "label", "list", item.ID)
+		var labels struct {
+			Labels []string `json:"labels"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(labelsRaw), &labels), labelsRaw)
+		commentsRaw := runPasture(t, bin, db, "--format", "json", "task", "comments", item.ID)
+		var comments []json.RawMessage
+		require.NoError(t, json.Unmarshal([]byte(commentsRaw), &comments), commentsRaw)
+		treeRaw := runPasture(t, bin, db, "--format", "json", "task", "dep", "tree", item.ID, "--kind", "all")
+		var tree struct {
+			Edges []struct {
+				TargetID string `json:"targetId"`
+				Kind     string `json:"kind"`
+			} `json:"edges"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(treeRaw), &tree), treeRaw)
+		edges := make([]string, 0, len(tree.Edges))
+		for _, edge := range tree.Edges {
+			edges = append(edges, edge.Kind+">"+edge.TargetID)
+		}
+		sort.Strings(labels.Labels)
+		sort.Strings(edges)
+		out = append(out, parityTask{
+			ID: item.ID, Title: item.Title, Status: item.Status,
+			Labels: labels.Labels, Edges: edges, Comments: len(comments),
+		})
+	}
+	return out
+}
+
+func runPasture(t *testing.T, bin, db string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(bin, append([]string{"--db", db}, args...)...)
+	out, err := cmd.CombinedOutput()
+	require.NoErrorf(t, err, "pasture %v: %s", args, out)
+	return string(out)
+}
+
+func projectLedger(t *testing.T, dir string) []parityTask {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	require.NoError(t, err)
+	byID := map[string]*parityTask{}
+	order := []string{}
+	for _, path := range matches {
+		raw, err := os.ReadFile(path)
+		require.NoError(t, err)
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			if line == "" {
+				continue
+			}
+			var row map[string]string
+			require.NoError(t, json.Unmarshal([]byte(line), &row), line)
+			id := row["id"]
+			task, ok := byID[id]
+			if !ok {
+				task = &parityTask{ID: id}
+				byID[id] = task
+				order = append(order, id)
+			}
+			switch row["op"] {
+			case "create":
+				task.Title = row["title"]
+				if task.Status == "" {
+					task.Status = row["status"]
+				}
+			case "status", "close":
+				if row["status"] != "" {
+					task.Status = row["status"]
+				}
+			case "label":
+				if row["label"] != "" {
+					task.Labels = append(task.Labels, row["label"])
+				}
+			case "block":
+				task.Edges = append(task.Edges, row["edge_kind"]+">"+row["child"])
+			case "note":
+				task.Comments++
+			}
+		}
+	}
+	out := make([]parityTask, 0, len(order))
+	for _, id := range order {
+		task := *byID[id]
+		sort.Strings(task.Labels)
+		sort.Strings(task.Edges)
+		out = append(out, task)
+	}
+	return out
+}
+
+func requireEquivalent(t *testing.T, pasture, ledger []parityTask) {
+	t.Helper()
+	require.Equal(t, len(pasture), len(ledger))
+	byTitle := map[string]parityTask{}
+	ids := map[string]string{}
+	for _, task := range pasture {
+		require.NotEmpty(t, task.ID)
+		byTitle[task.Title] = task
+		ids[task.ID] = task.Title
+	}
+	for _, task := range ledger {
+		require.NotEmpty(t, task.ID)
+		want, ok := byTitle[task.Title]
+		require.Truef(t, ok, "ledger task %q has no pasture peer", task.Title)
+		require.Equal(t, want.Status, task.Status, task.Title)
+		require.Equal(t, nonempty(want.Labels), nonempty(task.Labels), task.Title)
+		require.Equal(t, want.Comments, task.Comments, task.Title)
+		wantEdges := make([]string, len(want.Edges))
+		for i, edge := range want.Edges {
+			kind, target, _ := strings.Cut(edge, ">")
+			wantEdges[i] = kind + ">" + ids[target]
+		}
+		gotEdges := make([]string, len(task.Edges))
+		ledgerTitle := map[string]string{}
+		for _, peer := range ledger {
+			ledgerTitle[peer.ID] = peer.Title
+		}
+		for i, edge := range task.Edges {
+			kind, target, _ := strings.Cut(edge, ">")
+			gotEdges[i] = kind + ">" + ledgerTitle[target]
+		}
+		sort.Strings(wantEdges)
+		sort.Strings(gotEdges)
+		require.Equal(t, nonempty(wantEdges), nonempty(gotEdges), task.Title)
+	}
+}
+
+func nonempty(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
+}
+
+func ledgerQueryTitles(t *testing.T, header string, extra ...string) []string {
+	t.Helper()
+	args := append([]string{"query", "--format", "text"}, extra...)
+	out := runOne(t, header, "", "", args...)
+	var titles []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) >= 2 {
+			titles = append(titles, fields[1])
+		}
+	}
+	return titles
 }
 
 // countUnregisteredTrackerCalls counts entry-point occurrences whose next

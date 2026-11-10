@@ -159,6 +159,16 @@ func renderCodexAgent(roleID protocol.RoleId, functions []string) (string, error
 	fmt.Fprintf(&b, "schema = %s\n", tomlString(codexAgentSchema))
 	fmt.Fprintf(&b, "name = %s\n", tomlString(string(roleID)))
 	fmt.Fprintf(&b, "description = %s\n", tomlString(roleSpec.Description))
+	catalog, err := harnessTierCatalog(HarnessCodex)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderCodexAgent: role %q has no Codex tier catalog — "+
+				"where: harnessTierCatalog — fix: map every capability tier for Codex",
+			roleID,
+		)
+	}
+	b.WriteString(catalog)
+	b.WriteByte('\n')
 	fmt.Fprintf(&b, "model = %s\n", tomlString(model))
 	fmt.Fprintf(&b, "role_class = %s\n", tomlString(string(class)))
 	fmt.Fprintf(&b, "functions = %s\n", tomlStringArray(functions))

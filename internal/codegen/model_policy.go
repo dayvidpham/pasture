@@ -9,6 +9,8 @@ package codegen
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -114,15 +116,15 @@ var CapabilityTierSpecs = map[CapabilityTier]CapabilityTierSpec{
 	},
 }
 
-// MaxConcurrentAgents is the concurrency cap for one stage of a workflow. It
-// bounds how many delegated agents run at once, independent of the review
-// round bound (maxRounds).
-//
-// Four is the widest concurrent delegation the protocol creates: one wave
-// dispatches three standing reviewers plus the supervisor that sends fixes, so
-// a lower cap would serialize review and a higher one would admit a fifth
-// writer to the same store for no phase the protocol defines. The number lives
-// here only; rendered prose interpolates it instead of repeating the literal.
+// MaxConcurrentAgents is the batch size for one stage of delegated agents. It
+// is not a protocol maximum. Phase 9 spawns one worker per slice, and a plan
+// may have more slices than this cap; the supervisor starts those workers in
+// batches of this size so one store does not take an unbounded writer set.
+// Four covers a three-reviewer wave plus the supervisor dispatching fixes,
+// which is the widest standing delegation, and the same batch applies to
+// phase-9 workers. The number lives here only; rendered prose interpolates it
+// instead of repeating the literal. maxRounds remains the only bound on
+// review rounds.
 const MaxConcurrentAgents = 4
 
 // concurrencyCapSentence is the one rendered sentence for the cap. Callers
@@ -130,6 +132,42 @@ const MaxConcurrentAgents = 4
 // home for the literal.
 func concurrencyCapSentence() string {
 	return fmt.Sprintf("respect the concurrency cap of %d.", MaxConcurrentAgents)
+}
+
+// effectiveRoleNames returns the roles whose effective tier is tier, sorted.
+// The reviewer maps to T3 and overrides to T2, so it is listed under T2.
+func effectiveRoleNames(tier CapabilityTier) []string {
+	names := make([]string, 0)
+	for roleID, spec := range RoleSpecs {
+		if spec.EffectiveTier() == tier {
+			names = append(names, string(roleID))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// harnessTierCatalog renders one comment line per tier's native model id.
+// A harness whose mini id equals its standard id says so, because that choice
+// is a no-op rather than a smaller model.
+func harnessTierCatalog(harness HarnessName) (string, error) {
+	var b strings.Builder
+	standard, err := ModelForTier(harness, TierStandard)
+	if err != nil {
+		return "", err
+	}
+	for _, tier := range AllCapabilityTiers() {
+		id, err := ModelForTier(harness, tier)
+		if err != nil {
+			return "", err
+		}
+		note := ""
+		if tier == TierMini && id == standard {
+			note = " equal-to T2; this harness has no smaller model"
+		}
+		fmt.Fprintf(&b, "# capability-tier %s %s%s\n", tier, id, note)
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
 }
 
 // mustCapabilityTierSpec returns a registered tier row or panics. It is for

@@ -2,6 +2,9 @@
 description: Task coordinator, spawns workers, manages parallel execution
 mode: primary
 model: anthropic/claude-opus-4-8
+# capability-tier T1 anthropic/claude-opus-4-8
+# capability-tier T2 anthropic/claude-sonnet-4-6
+# capability-tier T3 anthropic/claude-haiku-4-5
 permission:
   "*": deny
   bash: allow

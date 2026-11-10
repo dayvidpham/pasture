@@ -115,7 +115,7 @@ If the header records `backend: error`, stop before the first mutation: the stor
 
 ## Task Attribution
 
-Select the current registered author with "${EPOCH_REC}" whoami; when neither the header nor PASTURE_AUTHOR names one, it lists the registered agents. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami. It prints the author recorded in the header or PASTURE_AUTHOR, and on the pasture backend it confirms that actor with agents show. It does not list agents and it does not invent one. If neither source names an author, it stops: set author: in EPOCH.md or export PASTURE_AUTHOR. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Model Policy and Fallback Chain
 
@@ -123,19 +123,19 @@ A role names a capability tier. A tier carries a neutral default model nickname,
 
 <!-- pasture:model-chain-ask -->
 
-| Tier | Name | Default model | Effort | Default roles |
-|------|------|---------------|--------|---------------|
-| T1 | frontier | frontier | high | epoch, architect, supervisor |
-| T2 | standard | standard | medium | worker |
-| T3 | mini | mini | low | reviewer |
+| Tier | Name | Default model | Effort | Effective roles |
+|------|------|---------------|--------|----------------|
+| T1 | frontier | frontier | high | architect, epoch, supervisor |
+| T2 | standard | standard | medium | reviewer, worker |
+| T3 | mini | mini | low | (runtime choice only) |
 
-The reviewer's tier is its role override: the emitted reviewer agent defaults to T2 standard. The phase-8 gate may choose T3 mini for a cheap review; record the choice as `reviewer_tier: T3` in `.agents.local/pasture/EPOCH.md` and pass that tier's native model id when reviewers are spawned. The field stays the default; the header carries the runtime choice.
+The reviewer's effective default is T2 standard, so the table lists reviewer under T2, not under T3. T3 mini has no effective default role; it is a phase-8 runtime choice. Record that choice as `reviewer_tier: T3` in `.agents.local/pasture/EPOCH.md` and pass that tier's native model id when reviewers are spawned. Each harness publishes every tier's native id in its emitted agent files (`capability-tier` lines). On a harness with no smaller model than T2, T3's id equals T2's; Codex is that harness, so a cheap review there uses the standard profile.
 
 **Ask here, and at the matching gate in the other phase.** At phase 1 and again at phase 8, ask the user for three models: a primary, a secondary, and a tertiary. One gate, two asks, not five. The three form one fallback chain: when a provider is exhausted, use the next model in the chain; never fail the epoch. Record the chain on the request or IMPL_PLAN task and repeat it in every handoff. Advance the chain in the architect and supervisor surfaces too: they spawn the reviewers and workers, so a provider exhaustion reaches them first.
 
 **Reviewer override.** The reviewer tier is the reviewer role's TierOverride, not a separate review-budget type. The default is T2 standard (full review); treat T3 mini as an epoch-recorded runtime choice, never a compile-time one.
 
-**Concurrency cap.** Run at most 4 delegated agents at once in one stage. The cap bounds concurrency only; maxRounds remains the only bound on review rounds.
+**Concurrency cap.** Run at most 4 delegated agents at once in one stage. Phase 9 spawns one worker per slice and has no slice bound; when a plan has more slices than the cap, start them in batches of that size. The cap is a batching policy, not a protocol maximum. It bounds concurrency only; maxRounds remains the only bound on review rounds.
 
 ## When to Use
 

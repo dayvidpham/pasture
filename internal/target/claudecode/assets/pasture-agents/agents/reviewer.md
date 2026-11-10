@@ -3,6 +3,9 @@ name: reviewer
 description: End-user alignment reviewer for plans and code
 tools: Read, Glob, Grep, Bash, Skill, SendMessage
 model: claude-sonnet-4-6
+# capability-tier T1 claude-opus-4-8
+# capability-tier T2 claude-sonnet-4-6
+# capability-tier T3 claude-haiku-4-5
 thinking: medium
 ---
 

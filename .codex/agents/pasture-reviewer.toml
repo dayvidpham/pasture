@@ -9,6 +9,9 @@
 schema = "pasture.codex.agent.v1"
 name = "reviewer"
 description = "End-user alignment reviewer for plans and code"
+# capability-tier T1 gpt-5.6-sol
+# capability-tier T2 gpt-5.6-terra
+# capability-tier T3 gpt-5.6-terra equal-to T2; this harness has no smaller model
 model = "gpt-5.6-terra"
 role_class = "delegated"
 functions = ["request-input"]

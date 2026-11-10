@@ -142,7 +142,7 @@ sh .agents.local/pasture/probe.sh
 EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
 ` + "```" + `
 
-If the probe prints ` + "`BACKEND=error`" + `, stop and report before the first mutation: the store exists but cannot be used. If it prints ` + "`BACKEND=ledger`" + `, this adapter build cannot record; install a build that ships the ledger store. If it prints ` + "`BACKEND=pasture`" + `, record ` + "`namespace:`" + `, ` + "`db:`" + `, ` + "`author:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output.
+If the probe prints ` + "`BACKEND=error`" + `, stop and report before the first mutation: the store exists but cannot be used. If it prints ` + "`BACKEND=ledger`" + `, record ` + "`ledger:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output and continue; the adapter writes one JSONL line per mutation under that ledger. Offer a gitignore entry; never require one. If it prints ` + "`BACKEND=pasture`" + `, record ` + "`namespace:`" + `, ` + "`db:`" + `, ` + "`author:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output.
 
 **Option 1: Manual Task Creation**
 ` + "```" + `bash

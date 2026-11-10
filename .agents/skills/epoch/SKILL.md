@@ -249,7 +249,7 @@ If the header records `backend: error`, stop before the first mutation: the stor
 
 ## Task Attribution
 
-Select the current registered author with "${EPOCH_REC}" whoami; when neither the header nor PASTURE_AUTHOR names one, it lists the registered agents. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami. It prints the author recorded in the header or PASTURE_AUTHOR, and on the pasture backend it confirms that actor with agents show. It does not list agents and it does not invent one. If neither source names an author, it stops: set author: in EPOCH.md or export PASTURE_AUTHOR. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Tracker Adapter
 
@@ -281,7 +281,7 @@ The operation set is closed. `relate` is `block --kind`; `assign` is `label ID o
 | `note` | `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body TEXT|-]` | append an attributed immutable note; --to makes it a message |
 | `show` | `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]` | read one record, optionally with its notes or history |
 | `query` | `"${EPOCH_REC}" query [--status S] [--label L] [--blocked] [--tree ID] [--all-namespaces] [--format text|json]` | enumerate records by status, label, blocked state, or dependency tree |
-| `ready` | `"${EPOCH_REC}" ready [--label L] [--format text|json]` | list non-closed records with no non-closed blocker |
+| `ready` | `"${EPOCH_REC}" ready [--label L] [--all-namespaces] [--format text|json]` | list non-closed records with no non-closed blocker |
 | `status` | `"${EPOCH_REC}" status ID --set open|in_progress|closed` | change state (start work); the store keeps the only status field |
 | `close` | `"${EPOCH_REC}" close ID --reason R` | close a record; policy reserves this for the supervisor |
 | `whoami` | `"${EPOCH_REC}" whoami` | resolve the acting author; never invent one |
@@ -314,9 +314,12 @@ Write this probe to `.agents.local/pasture/probe.sh` and run it before the first
 #!/bin/sh
 # Epoch tracker probe. Side-effect free. Prints KEY=VALUE lines and exits 0.
 # Order: capability (--help), store existence (test -f), usability (migrate --dry-run).
+# Verb list is generated from TrackerOps.
 set -u
 
 PASTURE_BIN="${PASTURE_BIN:-pasture}"
+LEDGER_DIR="${PWD}/.agents.local/pasture/ledger"
+REC_PATH="${PWD}/.agents.local/pasture/rec"
 
 emit() {
   printf 'BACKEND=%s\n' "$1"
@@ -325,6 +328,9 @@ emit() {
   [ -n "${4:-}" ] && printf 'NS=%s\n' "$4"
   [ -n "${5:-}" ] && printf 'ACT=%s\n' "$5"
   [ -n "${6:-}" ] && printf 'VER=%s\n' "$6"
+  printf 'LEDGER=%s\n' "$LEDGER_DIR"
+  printf 'REC=%s\n' "$REC_PATH"
+  printf 'PROBED_AT=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   exit 0
 }
 
@@ -340,9 +346,11 @@ if [ "$?" -ne 0 ]; then
   emit ledger help-failed "" "" "" "$VER"
 fi
 
-for VERB in "task create" "task label" "task dep" "task comment" "task show" \
-            "task comments" "task timeline" "task list" "task ready" \
-            "task close" "task update" "task agents"; do
+for VERB in "task create" "task label" "task dep" \
+            "task comment" "task comments" "task timeline" \
+            "task show" "task blocked" "task list" \
+            "task ready" "task update" "task close" \
+            "task agents"; do
   # shellcheck disable=SC2086
   "$PASTURE_BIN" $VERB --help >/dev/null 2>&1
   if [ "$?" -ne 0 ]; then
@@ -404,7 +412,7 @@ Write this adapter to the path the header records in `rec:` and make it executab
 
 ~~~sh
 #!/bin/sh
-# Epoch tracker adapter (rec). Serves the ten neutral tracker operations.
+# Epoch tracker adapter (rec). Generated from TrackerOps. Do not hand-edit.
 # Backend: the one recorded in EPOCH_FILE. Never re-probes, never switches.
 set -u
 
@@ -417,8 +425,8 @@ fail() {
 }
 
 [ -f "$EPOCH_FILE" ] || fail "no epoch header at $EPOCH_FILE" \
-  "the backend is chosen once and recorded before the first write" \
-  "run the Starting an Epoch detection step, or set EPOCH_FILE to the header"
+  "the backend is chosen once and recorded before the first write; EPOCH_FILE is relative to the working directory" \
+  "run from the repository root, or set EPOCH_FILE to the absolute header path, then run the Starting an Epoch detection step"
 
 field() {
   sed -n "s/^$1: //p" "$EPOCH_FILE" 2>/dev/null | tail -1
@@ -428,17 +436,18 @@ BACKEND="$(field backend)"
 DB="${PASTURE_DB_PATH:-$(field db)}"
 NS="${PASTURE_NAMESPACE:-$(field namespace)}"
 AUTHOR="${PASTURE_AUTHOR:-$(field author)}"
+LEDGER="$(field ledger)"
+if [ -z "$LEDGER" ]; then
+  LEDGER=".agents.local/pasture/ledger"
+fi
 
 case "$BACKEND" in
   pasture) : ;;
+  ledger) : ;;
   error)
     fail "the recorded backend is error" \
       "the store exists but cannot be used, and falling back could lose earlier epochs" \
       "repair the store named in $EPOCH_FILE, or start a new epoch with a working backend" ;;
-  ledger)
-    fail "the recorded backend is ledger" \
-      "this adapter build serves only the pasture backend; the ledger store lands in a later slice" \
-      "use a build that ships the ledger store, or re-probe with a working pasture" ;;
   "")
     fail "no backend recorded in $EPOCH_FILE" \
       "the probe has not written the header yet" \
@@ -452,6 +461,29 @@ esac
 OP="${1:-}"
 [ "$#" -gt 0 ] && shift
 
+allns=0
+blocked=0
+refs=
+labels=
+body=
+kind=task
+title=
+phase=
+priority=
+label=
+status=
+tree=
+fmt=json
+mode=show
+reason=
+note_body=
+note_kind=
+note_to=
+parent=
+child=
+edge_kind=blocked_by
+id=
+
 pb() {
   if [ -n "$DB" ]; then
     "$PASTURE_BIN" --db "$DB" "$@"
@@ -464,9 +496,444 @@ need_id() {
   [ -n "${1:-}" ] || fail "$OP needs a task ID" "the first operand was empty" "pass the full task URI as the first operand"
 }
 
+json_escape() {
+  printf '%s' "$1" | awk 'BEGIN{ORS=""} {
+    gsub(/\\/, "\\\\")
+    gsub(/"/, "\\\"")
+    gsub(/\t/, "\\t")
+    gsub(/\r/, "\\r")
+    if (NR > 1) printf "\\n"
+    printf "%s", $0
+  }'
+}
+
+fold_refs() {
+  [ -n "$refs" ] || return 0
+  block="references:"
+  old=$IFS
+  IFS='
+'
+  for pair in $refs; do
+    key=${pair%%=*}
+    val=${pair#*=}
+    block="$block
+  $key: $val"
+  done
+  IFS=$old
+  if [ -z "$body" ]; then
+    body="---
+$block
+---"
+  else
+    body="---
+$block
+---
+$body"
+  fi
+}
+
+mint_id() {
+  if [ -r /proc/sys/kernel/random/uuid ]; then
+    printf 'ledger/%s\n' "$(cat /proc/sys/kernel/random/uuid)"
+    return 0
+  fi
+  printf 'ledger/%s-%s\n' "$(date -u +%Y%m%dT%H%M%SZ)" "$$"
+}
+
+ledger_append() {
+  rec_id="$1"
+  rec_line="$2"
+  mkdir -p "$LEDGER" || fail "cannot create ledger directory $LEDGER" "the parent is not writable" "choose a writable ledger: path in $EPOCH_FILE"
+  safe=$(printf '%s' "$rec_id" | sed -e 's/%/%25/g' -e 's#/#%2F#g' -e 's/ /%20/g' -e 's/:/%3A/g')
+  file="$LEDGER/$safe.jsonl"
+  lock="$LEDGER/.lock"
+  n=0
+  while ! mkdir "$lock" 2>/dev/null; do
+    n=$((n + 1))
+    if [ "$n" -gt 100 ]; then
+      fail "ledger lock held at $lock" "another rec process did not release it" "remove $lock only if no rec process is running, then retry"
+    fi
+    sleep 0.1
+  done
+  if [ ! -f "$LEDGER/.gitignore-offered" ]; then
+    printf 'rec: ledger records are under %s\n  offer: add that directory to .gitignore if the records should stay uncommitted\n  note: a gitignore entry is offered, never required\n' "$LEDGER" >&2
+    : > "$LEDGER/.gitignore-offered" || true
+  fi
+  printf '%s\n' "$rec_line" >> "$file" || {
+    rmdir "$lock" 2>/dev/null || true
+    fail "ledger append failed for $file" "the ledger directory was not writable" "make $LEDGER writable and retry the same operation"
+  }
+  rmdir "$lock" 2>/dev/null || true
+}
+
+ledger_line() {
+  _f_op=
+  _f_id=
+  _f_namespace=
+  _f_title=
+  _f_kind=
+  _f_phase=
+  _f_status=
+  _f_priority=
+  _f_label=
+  _f_parent=
+  _f_child=
+  _f_edge_kind=
+  _f_author=
+  _f_note_kind=
+  _f_to=
+  _f_reason=
+  _f_ref=
+  _f_body=
+  _f_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  while [ "$#" -gt 1 ]; do
+    case "$1" in
+      op) _f_op="$2"; shift 2 ;;
+      id) _f_id="$2"; shift 2 ;;
+      namespace) _f_namespace="$2"; shift 2 ;;
+      title) _f_title="$2"; shift 2 ;;
+      kind) _f_kind="$2"; shift 2 ;;
+      phase) _f_phase="$2"; shift 2 ;;
+      status) _f_status="$2"; shift 2 ;;
+      priority) _f_priority="$2"; shift 2 ;;
+      label) _f_label="$2"; shift 2 ;;
+      parent) _f_parent="$2"; shift 2 ;;
+      child) _f_child="$2"; shift 2 ;;
+      edge_kind) _f_edge_kind="$2"; shift 2 ;;
+      author) _f_author="$2"; shift 2 ;;
+      note_kind) _f_note_kind="$2"; shift 2 ;;
+      to) _f_to="$2"; shift 2 ;;
+      reason) _f_reason="$2"; shift 2 ;;
+      ref) _f_ref="$2"; shift 2 ;;
+      body) _f_body="$2"; shift 2 ;;
+      *) fail "ledger_line rejected field '$1'" "the ledger field set is closed" "use a field from the stable ledger order" ;;
+    esac
+  done
+  printf '{'
+  printf '"op":"%s"' "$(json_escape "$_f_op")"
+  printf ',"id":"%s"' "$(json_escape "$_f_id")"
+  printf ',"at":"%s"' "$(json_escape "$_f_at")"
+  printf ',"namespace":"%s"' "$(json_escape "$_f_namespace")"
+  printf ',"title":"%s"' "$(json_escape "$_f_title")"
+  printf ',"kind":"%s"' "$(json_escape "$_f_kind")"
+  printf ',"phase":"%s"' "$(json_escape "$_f_phase")"
+  printf ',"status":"%s"' "$(json_escape "$_f_status")"
+  printf ',"priority":"%s"' "$(json_escape "$_f_priority")"
+  printf ',"label":"%s"' "$(json_escape "$_f_label")"
+  printf ',"parent":"%s"' "$(json_escape "$_f_parent")"
+  printf ',"child":"%s"' "$(json_escape "$_f_child")"
+  printf ',"edge_kind":"%s"' "$(json_escape "$_f_edge_kind")"
+  printf ',"author":"%s"' "$(json_escape "$_f_author")"
+  printf ',"note_kind":"%s"' "$(json_escape "$_f_note_kind")"
+  printf ',"to":"%s"' "$(json_escape "$_f_to")"
+  printf ',"reason":"%s"' "$(json_escape "$_f_reason")"
+  printf ',"ref":"%s"' "$(json_escape "$_f_ref")"
+  printf ',"body":"%s"' "$(json_escape "$_f_body")"
+  printf '}'
+}
+
+
+ledger_create() {
+  id=$(mint_id)
+  ledger_append "$id" "$(ledger_line op create id "$id" namespace "$NS" title "$title" kind "$kind" phase "$phase" status open priority "$priority" author "$AUTHOR" ref "$refs" body "$body")"
+  printf '%s\n' "$id"
+  for label in $labels; do
+    [ -n "$label" ] || continue
+    ledger_append "$id" "$(ledger_line op label id "$id" namespace "$NS" label "$label" author "$AUTHOR")"
+  done
+}
+
+ledger_label() {
+  for label in $labels; do
+    [ -n "$label" ] || continue
+    ledger_append "$id" "$(ledger_line op label id "$id" namespace "$NS" label "$label" author "$AUTHOR")"
+  done
+}
+
+ledger_block() {
+  ledger_append "$parent" "$(ledger_line op block id "$parent" namespace "$NS" parent "$parent" child "$child" edge_kind "$edge_kind" author "$AUTHOR")"
+}
+
+ledger_note() {
+  ledger_append "$id" "$(ledger_line op note id "$id" namespace "$NS" author "$AUTHOR" note_kind "$note_kind" to "$note_to" body "$note_body")"
+}
+
+ledger_status() {
+  ledger_append "$id" "$(ledger_line op status id "$id" namespace "$NS" status "$status" author "$AUTHOR")"
+}
+
+ledger_close() {
+  ledger_append "$id" "$(ledger_line op close id "$id" namespace "$NS" status closed reason "$reason" author "$AUTHOR")"
+}
+
+ledger_whoami() {
+  printf '%s\n' "$AUTHOR"
+}
+
+ledger_files() {
+  [ -d "$LEDGER" ] || return 0
+  find "$LEDGER" -name '*.jsonl' -type f | sort
+}
+
+ledger_rows() {
+  files=$(ledger_files)
+  [ -n "$files" ] || return 0
+  printf '%s\n' "$files" | while IFS= read -r f; do
+    cat "$f"
+  done | awk '
+function take(line, pos,   i, c, out, esc) {
+  out = ""
+  esc = 0
+  for (i = pos + 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (esc) {
+      if (c == "n") out = out "\n"
+      else if (c == "t") out = out "\t"
+      else if (c == "r") out = out "\r"
+      else out = out c
+      esc = 0
+    } else if (c == "\\") esc = 1
+    else if (c == "\"") { got = out; got_i = i + 1; return }
+    else out = out c
+  }
+  got = out
+  got_i = length(line) + 1
+}
+function parse(line,   i, n, c) {
+  delete f
+  i = 1
+  n = length(line)
+  while (i <= n) {
+    c = substr(line, i, 1)
+    if (c == "\"") {
+      take(line, i)
+      key = got
+      i = got_i
+      while (i <= n && substr(line, i, 1) != "\"") i++
+      if (i > n) return
+      take(line, i)
+      f[key] = got
+      i = got_i
+    } else i++
+  }
+}
+function add_label(id, lab,   cur, i, n, p) {
+  if (lab == "") return
+  cur = labels[id]
+  n = split(cur, p, ",")
+  for (i = 1; i <= n; i++) if (p[i] == lab) return
+  if (cur == "") labels[id] = lab
+  else labels[id] = cur "," lab
+}
+function add_edge(id, kind, child,   cur) {
+  if (child == "") return
+  cur = edges[id]
+  item = kind ">" child
+  if (cur == "") edges[id] = item
+  else edges[id] = cur ";" item
+}
+{
+  parse($0)
+  id = f["id"]
+  if (id == "") next
+  seen[id] = 1
+  if (f["op"] == "create") {
+    title[id] = f["title"]
+    ns[id] = f["namespace"]
+    body[id] = f["body"]
+    if (st[id] == "") st[id] = "open"
+  }
+  if (f["namespace"] != "" && ns[id] == "") ns[id] = f["namespace"]
+  if (f["op"] == "status" || f["op"] == "close" || f["op"] == "create") {
+    if (f["status"] != "") st[id] = f["status"]
+  }
+  add_label(id, f["label"])
+  if (f["op"] == "block") add_edge(id, f["edge_kind"], f["child"])
+  if (f["op"] == "note") notes[id]++
+}
+END {
+  for (id in seen) {
+    blocked = 0
+    n = split(edges[id], e, ";")
+    for (i = 1; i <= n; i++) {
+      split(e[i], p, ">")
+      if (p[1] != "blocked_by") continue
+      child = p[2]
+      cst = st[child]
+      if (cst != "closed") blocked = 1
+    }
+    ready = 0
+    if (st[id] != "closed" && blocked == 0) ready = 1
+    gsub(/\037/, " ", title[id])
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\n", id, ns[id], title[id], st[id], labels[id], edges[id], notes[id]+0, ready, blocked
+  }
+}
+'
+}
+
+ledger_split() {
+  row="$1"
+  old=$IFS
+  set -f
+  IFS=$(printf '\037')
+  # shellcheck disable=SC2086
+  set -- $row
+  set +f
+  IFS=$old
+  rid=${1:-}; rns=${2:-}; rtitle=${3:-}; rstatus=${4:-}; rlabels=${5:-}
+  redges=${6:-}; rcomments=${7:-}; rready=${8:-}; rblocked=${9:-}
+}
+
+ledger_match() {
+  if [ "$allns" != 1 ] && [ -n "$NS" ] && [ "$rns" != "$NS" ]; then
+    return 1
+  fi
+  if [ -n "$status" ] && [ "$rstatus" != "$status" ]; then
+    return 1
+  fi
+  if [ -n "$label" ]; then
+    case ",$rlabels," in
+      *",$label,"*) : ;;
+      *) return 1 ;;
+    esac
+  fi
+  if [ "${want_blocked:-0}" = 1 ] && [ "$rblocked" != 1 ]; then
+    return 1
+  fi
+  if [ "${want_ready:-0}" = 1 ] && [ "$rready" != 1 ]; then
+    return 1
+  fi
+  return 0
+}
+
+ledger_emit() {
+  want_blocked=${1:-0}
+  want_ready=${2:-0}
+  rows=$(ledger_rows | sort)
+  if [ "$fmt" = text ]; then
+    printf '%s\n' "$rows" | while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      ledger_split "$row"
+      ledger_match || continue
+      printf '%s\t%s\t%s\n' "$rid" "$rtitle" "$rstatus"
+    done
+    return 0
+  fi
+  printf '['
+  first=1
+  printf '%s\n' "$rows" | while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    ledger_split "$row"
+    ledger_match || continue
+    if [ "$first" = 1 ]; then first=0; else printf ','; fi
+    printf '{"id":"%s","title":"%s","status":"%s","namespace":"%s","labels":"%s","edges":"%s","comments":%s}' \
+      "$(json_escape "$rid")" "$(json_escape "$rtitle")" "$(json_escape "$rstatus")" \
+      "$(json_escape "$rns")" "$(json_escape "$rlabels")" "$(json_escape "$redges")" \
+      "$rcomments"
+  done
+  printf ']\n'
+}
+
+ledger_show() {
+  rows=$(ledger_rows)
+  found=0
+  printf '%s\n' "$rows" | while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    ledger_split "$row"
+    [ "$rid" = "$id" ] || continue
+    found=1
+    if [ "$fmt" = text ]; then
+      printf 'id: %s\ntitle: %s\nstatus: %s\nnamespace: %s\nlabels: %s\nedges: %s\ncomments: %s\n' \
+        "$rid" "$rtitle" "$rstatus" "$rns" "$rlabels" "$redges" "$rcomments"
+    else
+      printf '{"id":"%s","title":"%s","status":"%s","namespace":"%s","labels":"%s","edges":"%s","comments":%s}\n' \
+        "$(json_escape "$rid")" "$(json_escape "$rtitle")" "$(json_escape "$rstatus")" \
+        "$(json_escape "$rns")" "$(json_escape "$rlabels")" "$(json_escape "$redges")" \
+        "$rcomments"
+    fi
+  done
+  printf '%s\n' "$rows" | while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    ledger_split "$row"
+    [ "$rid" = "$id" ] && found=1
+  done
+  # The pipeline above cannot export found. Re-scan plainly.
+  hit=$(printf '%s\n' "$rows" | while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    ledger_split "$row"
+    [ "$rid" = "$id" ] && printf yes
+  done)
+  [ -n "$hit" ] || fail "no ledger record $id" "no line names that id under $LEDGER" "create the record first, or pass the id create printed"
+  if [ "$mode" = notes ] || [ "$mode" = history ]; then
+    safe=$(printf '%s' "$id" | sed -e 's/%/%25/g' -e 's#/#%2F#g' -e 's/ /%20/g' -e 's/:/%3A/g')
+    file="$LEDGER/$safe.jsonl"
+    if [ "$mode" = history ]; then
+      cat "$file"
+    else
+      awk '
+function take(line, pos,   i, c, out, esc) {
+  out = ""; esc = 0
+  for (i = pos + 1; i <= length(line); i++) {
+    c = substr(line, i, 1)
+    if (esc) {
+      if (c == "n") out = out "\n"
+      else if (c == "t") out = out "\t"
+      else out = out c
+      esc = 0
+    } else if (c == "\\") esc = 1
+    else if (c == "\"") { got = out; got_i = i + 1; return }
+    else out = out c
+  }
+}
+{
+  i = 1
+  while (i <= length($0)) {
+    if (substr($0, i, 1) == "\"") {
+      take($0, i); key = got; i = got_i
+      while (i <= length($0) && substr($0, i, 1) != "\"") i++
+      take($0, i); f[key] = got; i = got_i
+    } else i++
+  }
+  if (f["op"] == "note") print f["body"]
+  delete f
+}
+' "$file"
+    fi
+  fi
+}
+
+ledger_query() {
+  if [ -n "$tree" ]; then
+    ledger_tree "$tree"
+    return 0
+  fi
+  ledger_emit "$blocked" 0
+}
+
+ledger_ready() {
+  ledger_emit 0 1
+}
+
+ledger_tree() {
+  root="$1"
+  rows=$(ledger_rows)
+  printf '%s\n' "$rows" | while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    ledger_split "$row"
+    [ "$rid" = "$root" ] || continue
+    printf '%s\t%s\n' "$rid" "$redges"
+  done
+}
 case "$OP" in
+  # dispatch:create
   create)
-    kind=task title= phase= body= priority= labels=
+    kind=task
+    title=
+    phase=
+    priority=
+    labels=
+    refs=
+    body=
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --kind) kind="$2"; shift 2 ;;
@@ -477,57 +944,103 @@ case "$OP" in
         --phase=*) phase="${1#*=}"; shift ;;
         --priority) priority="$2"; shift 2 ;;
         --priority=*) priority="${1#*=}"; shift ;;
-        --body) body="$2"; shift 2 ;;
-        --body=*) body="${1#*=}"; shift ;;
         --label) labels="$labels $2"; shift 2 ;;
         --label=*) labels="$labels ${1#*=}"; shift ;;
-        --ref) shift 2 ;;
-        --ref=*) shift ;;
-        *) shift ;;
+        --ref)
+          if [ -z "$refs" ]; then refs="$2"; else refs="$refs
+$2"; fi
+          shift 2 ;;
+        --ref=*)
+          _val="${1#*=}"
+          if [ -z "$refs" ]; then refs="$_val"; else refs="$refs
+$_val"; fi
+          shift ;;
+        --body) body="$2"; shift 2 ;;
+        --body=*) body="${1#*=}"; shift ;;
+        *) fail "create rejected argument '$1'" "the argument is not in the create contract" "use --kind, --title, --phase, --priority, --label, --ref, --body" ;;
       esac
     done
     [ "$body" = "-" ] && body="$(cat)"
-    set -- task create "$title" --type "$kind" --phase "$phase"
-    [ -n "$NS" ] && set -- "$@" --namespace "$NS"
-    [ -n "$priority" ] && set -- "$@" --priority "$priority"
-    [ -n "$body" ] && set -- "$@" --description "$body"
-    out="$(pb "$@" --format text)" || exit $?
-    id="$(printf '%s\n' "$out" | sed -n 's/^ID: *//p' | head -1)"
-    [ -n "$id" ] || fail "create returned no task ID" "the backend text output had no ID line" "check the store named in $EPOCH_FILE and the backend help page"
-    printf '%s\n' "$id"
-    for label in $labels; do
-      pb task label add "$id" "$label" >/dev/null || exit $?
-    done
+    fold_refs
+    if [ "$BACKEND" = ledger ]; then
+      ledger_create
+      exit $?
+    fi
+      set -- task create "$title" --type "$kind" --phase "$phase"
+      [ -n "$priority" ] && set -- "$@" --priority "$priority"
+      [ -n "$body" ] && set -- "$@" --description "$body"
+      if [ "$allns" != 1 ] && [ -n "$NS" ]; then set -- "$@" --namespace "$NS"; fi
+      out="$(pb "$@" --format text)" || exit $?
+      id="$(printf '%s\n' "$out" | sed -n 's/^ID: *//p' | head -1)"
+      [ -n "$id" ] || fail "create returned no task ID" "the backend text output had no ID line" "check the store named in $EPOCH_FILE and the backend help page"
+      printf '%s\n' "$id"
+      for label in $labels; do
+        [ -n "$label" ] || continue
+        set -- task label add "$id" "$label"
+        pb "$@" >/dev/null || exit $?
+      done
     ;;
+  # dispatch:label
   label)
-    id="${1:-}"; shift; need_id "$id"
-    [ "$#" -gt 0 ] || fail "label needs at least one label" "no label operand was given" "pass the label after the task URI"
-    for label in "$@"; do
-      pb task label add "$id" "$label" || exit $?
+    id="${1:-}"
+    [ "$#" -gt 0 ] && shift
+    need_id "$id"
+    labels=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --*) fail "label rejected argument '$1'" "the argument is not in the label contract" "pass the label as a positional after the task URI" ;;
+        *) labels="$labels $1"; shift ;;
+      esac
     done
+    [ -n "$labels" ] || fail "label needs at least one label" "no label operand was given" "pass the label after the task URI"
+    if [ "$BACKEND" = ledger ]; then
+      ledger_label
+      exit $?
+    fi
+      for label in $labels; do
+        [ -n "$label" ] || continue
+        set -- task label add "$id" "$label"
+        pb "$@" || exit $?
+      done
     ;;
+  # dispatch:block
   block)
-    parent="${1:-}"; shift; need_id "$parent"
-    child= kind=blocked_by
+    child=
+    edge_kind=blocked_by
+    parent="${1:-}"
+    [ "$#" -gt 0 ] && shift
+    need_id "$parent"
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --by) child="$2"; shift 2 ;;
         --by=*) child="${1#*=}"; shift ;;
-        --kind) kind="$2"; shift 2 ;;
-        --kind=*) kind="${1#*=}"; shift ;;
-        *) shift ;;
+        --kind) edge_kind="$2"; shift 2 ;;
+        --kind=*) edge_kind="${1#*=}"; shift ;;
+        *) fail "block rejected argument '$1'" "the argument is not in the block contract" "use --by, --kind" ;;
       esac
     done
     [ -n "$child" ] || fail "block needs --by CHILD" "the child operand was empty" "pass block PARENT --by CHILD"
-    if [ "$kind" = blocked_by ]; then
-      pb task dep add "$parent" --blocked-by "$child" || exit $?
-    else
-      pb task dep add "$parent" --target "$child" --kind "$kind" || exit $?
+    if [ "$BACKEND" = ledger ]; then
+      ledger_block
+      exit $?
     fi
+      if [ "$edge_kind" = blocked_by ]; then
+        set -- task dep add "$parent" --blocked-by "$child"
+        pb "$@" || exit $?
+      else
+        set -- task dep add "$parent" --target "$child" --kind "$edge_kind"
+        pb "$@" || exit $?
+      fi
     ;;
+  # dispatch:note
   note)
-    id="${1:-}"; shift; need_id "$id"
-    note_body= note_kind= note_to= fmt=json
+    note_body=
+    note_kind=
+    note_to=
+    fmt=json
+    id="${1:-}"
+    [ "$#" -gt 0 ] && shift
+    need_id "$id"
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --author) AUTHOR="$2"; shift 2 ;;
@@ -540,37 +1053,60 @@ case "$OP" in
         --to=*) note_to="${1#*=}"; shift ;;
         --format) fmt="$2"; shift 2 ;;
         --format=*) fmt="${1#*=}"; shift ;;
-        *) shift ;;
+        *) fail "note rejected argument '$1'" "the argument is not in the note contract" "use --author, --body, --kind, --to, --format" ;;
       esac
     done
     [ "$note_body" = "-" ] && note_body="$(cat)"
     [ -n "$AUTHOR" ] || fail "note needs --author" "the tracker never invents an author" "pass the registered actor id"
     [ -n "$note_kind" ] && note_body="[$note_kind] $note_body"
     [ -n "$note_to" ] && note_body="to:$note_to $note_body"
-    # The body is the last positional argument and may begin with dashes; -- stops
-    # the CLI's flag parser so a body like "---" is text, not a malformed flag.
-    pb task comment add "$id" --author "$AUTHOR" -- "$note_body" || exit $?
+    if [ "$BACKEND" = ledger ]; then
+      ledger_note
+      exit $?
+    fi
+      set -- task comment add "$id" --author "$AUTHOR" -- "$note_body"
+      pb "$@" || exit $?
     ;;
+  # dispatch:show
   show)
-    id="${1:-}"; shift; need_id "$id"
-    mode=show fmt=json
+    mode=show
+    mode=show
+    fmt=json
+    id="${1:-}"
+    [ "$#" -gt 0 ] && shift
+    need_id "$id"
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --notes) mode=notes; shift ;;
         --history) mode=history; shift ;;
         --format) fmt="$2"; shift 2 ;;
         --format=*) fmt="${1#*=}"; shift ;;
-        *) shift ;;
+        *) fail "show rejected argument '$1'" "the argument is not in the show contract" "use --notes, --history, --format" ;;
       esac
     done
-    case "$mode" in
-      notes) pb task comments "$id" --format "$fmt" ;;
-      history) pb task timeline "$id" ;;
-      *) pb task show "$id" --format "$fmt" ;;
-    esac
+    if [ "$BACKEND" = ledger ]; then
+      ledger_show
+      exit $?
+    fi
+      if [ "$mode" = notes ]; then
+        set -- task comments "$id" --format "$fmt"
+        pb "$@" || exit $?
+      elif [ "$mode" = history ]; then
+        set -- task timeline "$id"
+        pb "$@" || exit $?
+      else
+        set -- task show "$id" --format "$fmt"
+        pb "$@" || exit $?
+      fi
     ;;
+  # dispatch:query
   query)
-    status= label= tree= fmt=json blocked=0 allns=0
+    status=
+    label=
+    tree=
+    fmt=json
+    blocked=0
+    allns=0
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --status) status="$2"; shift 2 ;;
@@ -583,74 +1119,115 @@ case "$OP" in
         --format=*) fmt="${1#*=}"; shift ;;
         --blocked) blocked=1; shift ;;
         --all-namespaces) allns=1; shift ;;
-        *) shift ;;
+        *) fail "query rejected argument '$1'" "the argument is not in the query contract" "use --status, --label, --tree, --format, --blocked, --all-namespaces" ;;
       esac
     done
-    if [ -n "$tree" ]; then
-      pb task dep tree "$tree"
+    if [ "$BACKEND" = ledger ]; then
+      ledger_query
       exit $?
     fi
-    if [ "$blocked" = 1 ]; then
-      set -- task blocked
-    else
-      set -- task list
-      [ -n "$NS" ] && set -- "$@" --namespace "$NS"
-    fi
-    [ -n "$status" ] && set -- "$@" --status "$status"
-    [ -n "$label" ] && set -- "$@" --label "$label"
-    [ "$allns" = 1 ] && set -- "$@" --all-namespaces
-    pb "$@" --format "$fmt"
+      if [ -n "$tree" ]; then
+        set -- task dep tree "$tree"
+        pb "$@" || exit $?
+        exit $?
+      elif [ "$blocked" = 1 ]; then
+        set -- task blocked
+        [ -n "$status" ] && set -- "$@" --status "$status"
+        [ -n "$label" ] && set -- "$@" --label "$label"
+        if [ "$allns" != 1 ] && [ -n "$NS" ]; then set -- "$@" --namespace "$NS"; fi
+        [ "$allns" = 1 ] && set -- "$@" --all-namespaces
+        set -- "$@" --format "$fmt"
+        pb "$@" || exit $?
+      else
+        set -- task list
+        [ -n "$status" ] && set -- "$@" --status "$status"
+        [ -n "$label" ] && set -- "$@" --label "$label"
+        if [ "$allns" != 1 ] && [ -n "$NS" ]; then set -- "$@" --namespace "$NS"; fi
+        [ "$allns" = 1 ] && set -- "$@" --all-namespaces
+        set -- "$@" --format "$fmt"
+        pb "$@" || exit $?
+      fi
     ;;
+  # dispatch:ready
   ready)
-    label= fmt=json
+    label=
+    fmt=json
+    allns=0
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --label) label="$2"; shift 2 ;;
         --label=*) label="${1#*=}"; shift ;;
         --format) fmt="$2"; shift 2 ;;
         --format=*) fmt="${1#*=}"; shift ;;
-        *) shift ;;
+        --all-namespaces) allns=1; shift ;;
+        *) fail "ready rejected argument '$1'" "the argument is not in the ready contract" "use --label, --format, --all-namespaces" ;;
       esac
     done
-    set -- task ready
-    [ -n "$label" ] && set -- "$@" --label "$label"
-    pb "$@" --format "$fmt"
+    if [ "$BACKEND" = ledger ]; then
+      ledger_ready
+      exit $?
+    fi
+      set -- task ready
+      [ -n "$label" ] && set -- "$@" --label "$label"
+      if [ "$allns" != 1 ] && [ -n "$NS" ]; then set -- "$@" --namespace "$NS"; fi
+      [ "$allns" = 1 ] && set -- "$@" --all-namespaces
+      set -- "$@" --format "$fmt"
+      pb "$@" || exit $?
     ;;
+  # dispatch:status
   status)
-    id="${1:-}"; shift; need_id "$id"
-    want=
+    status=
+    id="${1:-}"
+    [ "$#" -gt 0 ] && shift
+    need_id "$id"
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        --set) want="$2"; shift 2 ;;
-        --set=*) want="${1#*=}"; shift ;;
-        *) shift ;;
+        --set) status="$2"; shift 2 ;;
+        --set=*) status="${1#*=}"; shift ;;
+        *) fail "status rejected argument '$1'" "the argument is not in the status contract" "use --set" ;;
       esac
     done
-    [ -n "$want" ] || fail "status needs --set" "no target status was given" "pass --set open, in_progress or closed"
-    pb task update "$id" --status "$want"
+    [ -n "$status" ] || fail "status needs --set" "no target status was given" "pass --set open, in_progress or closed"
+    if [ "$BACKEND" = ledger ]; then
+      ledger_status
+      exit $?
+    fi
+      set -- task update "$id" --status "$status"
+      pb "$@" || exit $?
     ;;
+  # dispatch:close
   close)
-    id="${1:-}"; shift; need_id "$id"
     reason=
+    id="${1:-}"
+    [ "$#" -gt 0 ] && shift
+    need_id "$id"
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --reason) reason="$2"; shift 2 ;;
         --reason=*) reason="${1#*=}"; shift ;;
-        *) shift ;;
+        *) fail "close rejected argument '$1'" "the argument is not in the close contract" "use --reason" ;;
       esac
     done
-    if [ -n "$reason" ]; then
-      pb task close "$id" --reason "$reason"
-    else
-      pb task close "$id"
+    if [ "$BACKEND" = ledger ]; then
+      ledger_close
+      exit $?
     fi
+      set -- task close "$id"
+      [ -n "$reason" ] && set -- "$@" --reason "$reason"
+      pb "$@" || exit $?
     ;;
+  # dispatch:whoami
   whoami)
-    if [ -n "$AUTHOR" ]; then
-      printf '%s\n' "$AUTHOR"
-    else
-      pb task agents list
+    [ -n "$AUTHOR" ] || fail "whoami has no recorded author" \
+      "neither the header author: line nor PASTURE_AUTHOR names an actor" \
+      "set author: in $EPOCH_FILE or export PASTURE_AUTHOR to a registered actor id"
+    if [ "$BACKEND" = ledger ]; then
+      ledger_whoami
+      exit $?
     fi
+      set -- task agents show "$AUTHOR"
+      pb "$@" >/dev/null || exit $?
+      printf '%s\n' "$AUTHOR"
     ;;
   *)
     fail "unknown operation '$OP'" "the operation set is closed to the ten neutral ops" \
@@ -719,7 +1296,7 @@ sh .agents.local/pasture/probe.sh
 EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
 ```
 
-If the probe prints `BACKEND=error`, stop and report before the first mutation: the store exists but cannot be used. If it prints `BACKEND=ledger`, this adapter build cannot record; install a build that ships the ledger store. If it prints `BACKEND=pasture`, record `namespace:`, `db:`, `author:`, `rec:` and `probed_at:` from the output.
+If the probe prints `BACKEND=error`, stop and report before the first mutation: the store exists but cannot be used. If it prints `BACKEND=ledger`, record `ledger:`, `rec:` and `probed_at:` from the output and continue; the adapter writes one JSONL line per mutation under that ledger. Offer a gitignore entry; never require one. If it prints `BACKEND=pasture`, record `namespace:`, `db:`, `author:`, `rec:` and `probed_at:` from the output.
 
 **Option 1: Manual Task Creation**
 ```bash

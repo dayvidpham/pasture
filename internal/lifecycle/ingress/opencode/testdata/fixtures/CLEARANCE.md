@@ -2644,3 +2644,35 @@ revision; neither revision participated in the historical captures above, and
 no capture payload, capture kit, fixture identity, activation state or
 acceptance record changes. No new live session, capture or host capability is
 claimed.
+
+### Generated adapter and ledger recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`935d7942d50ca1e39617f92bb4e5beee318a6072455994ee622e566fad780515`.
+This later generated revision changes the embedded recovery prose so whoami
+prints the recorded author and confirms it with agents show, instead of listing
+agents when none is recorded, and so the adapter text describes the ledger
+backend that writes one JSONL line per mutation. Lifecycle transport,
+activation, version guards, decision handling and the injection contract are
+unchanged; no runtime task query, file read or cached task state is added. The
+generated plugin and embedded hook asset still have identical bytes. The
+preceding digest identifies the prior recovery revision; neither revision
+participated in the historical captures above, and no capture payload, capture
+kit, fixture identity, activation state or acceptance record changes. No new
+live session, capture or host capability is claimed.
+
+### Generated adapter and ledger recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`935d7942d50ca1e39617f92bb4e5beee318a6072455994ee622e566fad780515`.
+This later generated revision changes the embedded recovery prose so whoami
+prints the recorded author and confirms it with agents show, instead of listing
+agents when none is recorded, and so the adapter text describes the ledger
+backend that writes one JSONL line per mutation. Lifecycle transport,
+activation, version guards, decision handling and the injection contract are
+unchanged; no runtime task query, file read or cached task state is added. The
+generated plugin and embedded hook asset still have identical bytes. The
+preceding digest identifies the prior recovery revision; neither revision
+participated in the historical captures above, and no capture payload, capture
+kit, fixture identity, activation state or acceptance record changes. No new
+live session, capture or host capability is claimed.

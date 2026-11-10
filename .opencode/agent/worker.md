@@ -2,6 +2,9 @@
 description: Vertical slice implementer (full production code path)
 mode: subagent
 model: anthropic/claude-sonnet-4-6
+# capability-tier T1 anthropic/claude-opus-4-8
+# capability-tier T2 anthropic/claude-sonnet-4-6
+# capability-tier T3 anthropic/claude-haiku-4-5
 permission:
   "*": deny
   bash: allow

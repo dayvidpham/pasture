@@ -164,7 +164,7 @@ func TestModelChainAtP1AndP8(t *testing.T) {
 		"skills/user-request/SKILL.md",
 	}, owners, "the model-chain ask must render at one gate in phase 1 and one gate in phase 8, not five places")
 
-	assert.Equal(t, 4, MaxConcurrentAgents, "the concurrency cap is the observed 4-agent bound")
+	assert.Equal(t, 4, MaxConcurrentAgents, "the concurrency cap is a batch size, not a protocol maximum")
 }
 
 // TestModelPolicyTableIsRenderedFromTheRegistry proves the shipped table is
@@ -188,6 +188,14 @@ func TestModelPolicyTableIsRenderedFromTheRegistry(t *testing.T) {
 	}
 	assert.Contains(t, content, strconv.Itoa(MaxConcurrentAgents),
 		"the concurrency cap must interpolate the one constant")
+	for _, line := range strings.Split(content, "\n") {
+		if strings.Contains(line, "| T3 |") {
+			assert.NotContains(t, line, "reviewer",
+				"the reviewer effective default is T2; the T3 row must not list it")
+		}
+	}
+	assert.Contains(t, content, "Codex is that harness",
+		"a harness with no smaller model must say T3 equals T2")
 }
 
 // vendorModelToken matches vendor model identifiers, not harness names. "Claude
@@ -282,6 +290,48 @@ func emittedAgentModel(path, content string, harness HarnessName) (protocol.Role
 		}
 	}
 	return "", "", false
+}
+
+// TestTierNativeIDsArePublishedPerHarness proves each harness's emitted agent
+// files publish T3's native id, and say when that id equals T2.
+func TestTierNativeIDsArePublishedPerHarness(t *testing.T) {
+	t.Parallel()
+
+	root := modelPolicyRepoRoot(t)
+	cases := []struct {
+		dir     string
+		harness HarnessName
+	}{
+		{"agents", HarnessClaudeCode},
+		{".opencode/agent", HarnessOpenCode},
+		{".codex/agents", HarnessCodex},
+	}
+	for _, tc := range cases {
+		paths, err := filepath.Glob(filepath.Join(root, tc.dir, "*"))
+		require.NoError(t, err)
+		require.NotEmpty(t, paths, "no agent files under %s", tc.dir)
+		mini, err := ModelForTier(tc.harness, TierMini)
+		require.NoError(t, err)
+		standard, err := ModelForTier(tc.harness, TierStandard)
+		require.NoError(t, err)
+		var saw bool
+		for _, path := range paths {
+			info, err := os.Stat(path)
+			require.NoError(t, err)
+			if info.IsDir() {
+				continue
+			}
+			content, err := os.ReadFile(path)
+			require.NoError(t, err)
+			text := string(content)
+			require.Contains(t, text, "capability-tier T3 "+mini, path)
+			if mini == standard {
+				require.Contains(t, text, "no smaller model", path)
+			}
+			saw = true
+		}
+		require.True(t, saw, "harness %s published no agent file", tc.harness)
+	}
 }
 
 // TestCodexProfileConformanceIsEmitted proves the Codex developer_instructions
