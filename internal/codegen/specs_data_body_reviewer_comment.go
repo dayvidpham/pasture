@@ -81,8 +81,8 @@ var reviewerCommentBody = SkillBody{
 		{
 			Id:    "rev-comment-plan-vs-code",
 			Title: "Plan Review vs Code Review",
-			Content: `- **Plan review (Phase 4, ` + "`pasture:p4-plan:s4-review`" + `):** ACCEPT/REVISE only. No severity tree. Findings are described inline in the vote comment.
-- **Code review (Phase 10, ` + "`pasture:p10-impl:s10-review`" + `):** ACCEPT/REVISE vote + full severity tree with EAGER creation (3 groups per wave, per axis, per round). Findings are tracked as child tasks of severity groups.`,
+			Content: `- **Plan review (Phase 4):** ACCEPT/REVISE only. No severity tree. Findings are described inline in the vote comment.
+- **Code review (Phase 10):** ACCEPT/REVISE vote + full severity tree with EAGER creation (3 groups per wave, per axis, per round). Findings are tracked as child tasks of severity groups.`,
 		},
 	},
 }

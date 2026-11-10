@@ -327,7 +327,7 @@
     {
       "owner": "skills/supervisor-spawn-worker/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "content: `You are assigned SLICE-{W}-{N}. Start by calling Skill(/pasture:worker).",
+      "content_window": "content: `You are assigned the slice. Start by calling Skill(/pasture:worker).",
       "section": "Delegated Assignment Message",
       "ordinal": 0,
       "classification": "orchestration",
@@ -426,7 +426,7 @@
     {
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "content: `You are assigned SLICE-{W}-{N}. Start by calling Skill(/pasture:worker).",
+      "content_window": "content: `You are assigned the slice. Start by calling Skill(/pasture:worker).",
       "section": "Delegated Assignment Context Requirements",
       "ordinal": 0,
       "classification": "orchestration",

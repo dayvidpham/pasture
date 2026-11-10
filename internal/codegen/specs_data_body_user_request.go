@@ -44,7 +44,7 @@ var userRequestBody = SkillBody{
 		// R6/A2: surface the shared validation-cases lifecycle at the classification
 		// entry point — it applies to EVERY request (generalized from fix-intent-only
 		// at v2-2). behaviorRef resolves to SharedFragmentSpecs[FragValidationCases]
-		// (SLICE-1).
+		//.
 		behaviorRef(FragValidationCases),
 	},
 

@@ -116,7 +116,7 @@ _Example (anti-pattern)_
 - Should not: close a finding from a worker or supervisor, close one at a wave boundary, or record severity in the finding label (severity lives on its parent group)
 
 **[C-followup-leaf-adoption]**
-- Given: supervisor creates FOLLOWUP_SLICE-N
+- Given: supervisor creates the follow-up slice
 - When: assigning user-DEFER'd UAT-item leaf tasks to follow-up slices
 - Then: add leaf task as child of follow-up slice (dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice)
 - Should not: remove the leaf task from its original DEFER'd-items tracking parent
@@ -219,10 +219,9 @@ _Example (anti-pattern)_
 
 **Step 4:** Decompose into vertical slices — _Vertical slices give one worker end-to-end ownership of a feature path (types → tests → impl → wiring) with clear file boundaries_ → `impl-plan`
 
-**Step 5:** Create leaf tasks (L1/L2/L3) for every slice (`CREATED_URI=$("${EPOCH_REC}" create --kind task --title "SLICE-{K}-L{1,2,3}: <description>" --phase worker_slices --body "Describe the specific work and reference full task URIs")
-"${EPOCH_REC}" label "$CREATED_URI" pasture:p9-impl:s9-slice`)
+**Step 5:** Create leaf tasks (L1/L2/L3) for every slice (`CREATED_URI=$("${EPOCH_REC}" create --kind task --title "<description>" --phase worker_slices --body "Describe the specific work and reference full task URIs")`)
 
-**Step 6:** Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4. → `worker-slices`
+**Step 6:** Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent. Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4. → `worker-slices`
 
 ### Introduction
 
@@ -230,7 +229,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 
 ### What You Own
 
-You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation SLICE-{W}-{N} (p9), spawn reviewers for whole-wave code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.
+You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation the slice (p9), spawn reviewers for whole-wave code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.
 
 ### Role Behaviors (Given/When/Then/Should Not)
 
@@ -275,7 +274,7 @@ You own Phases 7-12 of the epoch: receive handoff from architect (p7), create ve
 
 ### Inter-Agent Coordination
 
-Agents coordinate through **beads** tasks and comments:
+Agents coordinate through tracker tasks and comments:
 
 | Action | Command |
 |--------|---------|
@@ -283,7 +282,7 @@ Agents coordinate through **beads** tasks and comments:
 | List blocked | `"${EPOCH_REC}" query --blocked` |
 | Add progress note | `"${EPOCH_REC}" note "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Progress: ..."` |
 | Chain dependency | `"${EPOCH_REC}" block "${PARENT_URI}" --by "${CHILD_URI}"` |
-| Label completed slice | `"${EPOCH_REC}" label "${SLICE_ID_URI}" pasture:p9-impl:slice-complete` |
+| Record slice completion | `"${EPOCH_REC}" note "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Slice complete."` |
 | List in-progress | `"${EPOCH_REC}" query --status=in_progress` |
 | Check task details | `"${EPOCH_REC}" show "${TASK_ID_URI}"` |
 | Update status | `"${EPOCH_REC}" status "${TASK_ID_URI}" --set in_progress` |
@@ -304,8 +303,8 @@ Exit conditions:
 - **proceed**: All slices created with leaf tasks, dependency-chained, assigned
 
 ### Stage 2: Build _(parallel)_
-- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.
-- Monitor worker progress via "${EPOCH_REC}" query and "${EPOCH_REC}" show (`"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=in_progress`)
+- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent. Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.
+- Monitor worker progress via "${EPOCH_REC}" query and "${EPOCH_REC}" show (`"${EPOCH_REC}" query --phase worker_slices --status=in_progress`)
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 
 Exit conditions:
@@ -755,8 +754,8 @@ The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it
    ## Layer Structure (TDD)
 
    ### Vertical Slices (Preferred)
-   - SLICE-1-1: Feature X command (Worker A owns types → tests → impl → CLI wiring)
-   - SLICE-1-2: Feature Y endpoint (Worker B owns types → tests → impl → API wiring)
+   - the first slice: Feature X command (Worker A owns types → tests → impl → CLI wiring)
+   - the second slice: Feature Y endpoint (Worker B owns types → tests → impl → API wiring)
 
    OR
 
@@ -767,8 +766,8 @@ The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it
    - Layer 4: integration_test.go (depends on L3)
 
    ## Tasks
-   - "${SLICE_1_ID_URI}": SLICE-{W}-{N} ...
-   - "${SLICE_2_ID_URI}": SLICE-{W}-{N} ...
+   - "${SLICE_1_ID_URI}": the slice ...
+   - "${SLICE_2_ID_URI}": the slice ...
    ...
    EOF
    )"
@@ -848,16 +847,15 @@ references:
 - L3: Implementation + wiring
 
 ## Vertical Slices
-- SLICE-1-1: <description> (files: ...)
-- SLICE-1-2: <description> (files: ...)")
-"${EPOCH_REC}" label "$IMPL_PLAN_ID_URI" pasture:p8-impl:s8-plan
+- the first slice: <description> (files: ...)
+- the second slice: <description> (files: ...)")
 "${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${IMPL_PLAN_ID_URI}"
 ```
 
 ### Step 2: Create each slice
 
 ```bash
-SLICE_1_ID_URI=$("${EPOCH_REC}" create --kind task --title "SLICE-1-1: <slice name>" --phase worker_slices \
+SLICE_1_ID_URI=$("${EPOCH_REC}" create --kind task --title "<slice name>" --phase worker_slices \
   --body "---
 references:
   impl_plan: "${IMPL_PLAN_ID_URI}"
@@ -870,16 +868,15 @@ references:
 <list of files>
 
 ## Leaf Tasks
-- SLICE-1-1-L1: Types and interfaces
-- SLICE-1-1-L2: Tests (import production code)
-- SLICE-1-1-L3: Implementation + wiring
+- the types task: Types and interfaces
+- the tests task: Tests (import production code)
+- the implementation task: Implementation + wiring
 
 ## Validation Checklist
 - [ ] Types defined
 - [ ] Tests written (import production code)
 - [ ] Implementation complete
 - [ ] Production path verified")
-"${EPOCH_REC}" label "$SLICE_1_ID_URI" pasture:p9-impl:s9-slice
 "${EPOCH_REC}" note "$SLICE_1_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Design: '{\"validation_checklist\":[\"Types defined\",\"Tests written (import production code)\",\"Implementation complete\",\"Production path verified\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"ratified_plan\":\"${RATIFIED_PLAN_ID_URI}\"}'"
 "${EPOCH_REC}" block "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
 ```
@@ -890,7 +887,7 @@ Per [C-slice-leaf-tasks], create Pasture tasks for each implementation unit with
 
 ```bash
 # L1: Types and interfaces for this slice
-LEAF_L1=$("${EPOCH_REC}" create --kind task --title "SLICE-1-1-L1: Types — <slice name>" --phase worker_slices \
+LEAF_L1=$("${EPOCH_REC}" create --kind task --title "Types — <slice name>" --phase worker_slices \
   --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -906,11 +903,10 @@ Define types, interfaces, and schemas for this slice.
 
 ## Acceptance Criteria
 Given <context> when <action> then <outcome> should never <anti-pattern>")
-"${EPOCH_REC}" label "$LEAF_L1" pasture:p9-impl:s9-slice
 "${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "$LEAF_L1"
 
 # L2: Tests (import production code, will fail until L3)
-LEAF_L2=$("${EPOCH_REC}" create --kind task --title "SLICE-1-1-L2: Tests — <slice name>" --phase worker_slices \
+LEAF_L2=$("${EPOCH_REC}" create --kind task --title "Tests — <slice name>" --phase worker_slices \
   --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -924,13 +920,12 @@ Write tests that import from production code paths. Tests MUST fail until L3.
 
 ## Acceptance Criteria
 Given <context> when <action> then <outcome> should never <anti-pattern>")
-"${EPOCH_REC}" label "$LEAF_L2" pasture:p9-impl:s9-slice
 "${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "$LEAF_L2"
 # L2 depends on L1 types being defined first
 "${EPOCH_REC}" block "$LEAF_L2" --by "$LEAF_L1"
 
 # L3: Implementation (makes tests pass)
-LEAF_L3=$("${EPOCH_REC}" create --kind task --title "SLICE-1-1-L3: Impl — <slice name>" --phase worker_slices \
+LEAF_L3=$("${EPOCH_REC}" create --kind task --title "Implementation — <slice name>" --phase worker_slices \
   --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -944,7 +939,6 @@ Implement production code to make L2 tests pass.
 
 ## Acceptance Criteria
 Given <context> when <action> then <outcome> should never <anti-pattern>")
-"${EPOCH_REC}" label "$LEAF_L3" pasture:p9-impl:s9-slice
 "${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "$LEAF_L3"
 # L3 depends on L2 tests existing first
 "${EPOCH_REC}" block "$LEAF_L3" --by "$LEAF_L2"
@@ -954,10 +948,10 @@ The resulting tree per slice:
 
 ```
 IMPL_PLAN
-  └── blocked by SLICE-{W}-{N}
-        ├── blocked by SLICE-{W}-{N}-L1: Types
-        ├── blocked by SLICE-{W}-{N}-L2: Tests (blocked by L1)
-        └── blocked by SLICE-{W}-{N}-L3: Impl  (blocked by L2)
+  └── blocked by the slice
+        ├── blocked by the types task: Types
+        ├── blocked by the tests task: Tests (blocked by L1)
+        └── blocked by the implementation task: Impl  (blocked by L2)
 ```
 
 Workers are assigned to leaf tasks, not slices. The slice closes when all its leaf tasks close.
@@ -1023,7 +1017,7 @@ A delegated assignment has **zero prior context**. Every SendMessage assigning w
 SendMessage({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-{W}-{N}. Start by calling Skill(/pasture:worker).
+  content: `You are assigned the slice. Start by calling Skill(/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
 Run this to get full requirements + handoff: "${EPOCH_REC}" show "${SLICE_TASK_ID_URI}"
@@ -1034,7 +1028,7 @@ Key context:
 - IMPL_PLAN: "${IMPL_PLAN_ID_URI}" (run: "${EPOCH_REC}" show "${IMPL_PLAN_ID_URI}")
 
 Read the handoff doc and your Pasture task before starting implementation.`,
-  summary: "SLICE-{W}-{N} assignment with Pasture context"
+  summary: "slice assignment"
 })
 ```
 
@@ -1081,10 +1075,10 @@ FOLLOWUP epic (pasture:epic-followup)
         ├── frontmatter reference: FOLLOWUP_URD (living requirements document)
         └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
               └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
-                    ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
+                    ├── blocked-by: the first follow-up slice  (Phase 9)
                     │     ├── blocked-by: deferred-item-leaf-task-...
                     │     └── blocked-by: deferred-item-leaf-task-...
-                    └── blocked-by: FOLLOWUP_SLICE-2
+                    └── blocked-by: the second follow-up slice
 ```
 
 ```bash
@@ -1116,7 +1110,7 @@ The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_S
 
 ### Step 3: DEFER'd-item leaf adoption (dual-parent)
 
-When the supervisor creates FOLLOWUP_SLICE-N tasks during the follow-up implementation phase, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
+When the supervisor creates the follow-up slice tasks during the follow-up implementation phase, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
 
 ```bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
@@ -1138,7 +1132,7 @@ The follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-tim
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
-| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
+| 6 | h2 | Supervisor → Worker: the follow-up slice with DEFER'd-item leaf tasks |
 | 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
@@ -1155,7 +1149,7 @@ The severity behaviors for code review (Phase 10) are defined above as structure
 Per [frag--sup-review-severity-groups], create ONE severity trio per wave, per axis, per round — not one per slice:
 
 ```bash
-# Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
+# Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER)
 BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
   --body "---
@@ -1169,7 +1163,6 @@ references:
 ---
 BLOCKER findings from Reviewer A (Correctness) on wave 1.")
 "${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:severity:blocker
-"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
 IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
   --body "---
@@ -1183,7 +1176,6 @@ references:
 ---
 IMPORTANT findings from Reviewer A (Correctness) on wave 1.")
 "${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:severity:important
-"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
 MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
   --body "---
@@ -1197,7 +1189,6 @@ references:
 ---
 MINOR findings from Reviewer A (Correctness) on wave 1.")
 "${EPOCH_REC}" label "$MINOR_ID_URI" pasture:severity:minor
-"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review round task
 "${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$BLOCKER_ID_URI"
@@ -1216,34 +1207,21 @@ MINOR findings from Reviewer A (Correctness) on wave 1.")
 
 ### Naming Convention
 
-```
-WAVE-{W}-REVIEW-{axis}-{round}
-```
+Name the review for one wave, one axis, and one round. Axis A is correctness, B is test quality, and C is elegance. List every slice of that wave on the review. Create one severity trio under it: blocker, important, and minor. Do not create one review per slice.
 
-Where axis = A (Correctness), B (Test quality), C (Elegance). Slice titles use `SLICE-{W}-{N}`, where W is the wave and N is the slice within it.
-
-One review covers one whole wave. The review task lists every slice of that wave (for example, wave 1 holds `SLICE-1-1`, `SLICE-1-2`, and `SLICE-1-3`), and one severity trio hangs under it — never one wave per reviewed slice.
-
-Examples:
-- `WAVE-1-REVIEW-A-1` — Reviewer A (Correctness), Round 1, wave 1
-- `WAVE-2-REVIEW-C-2` — Reviewer C (Elegance), Round 2, wave 2
-
-Severity groups:
-- `WAVE-1-REVIEW-A-1 BLOCKER`
-- `WAVE-1-REVIEW-A-1 IMPORTANT`
-- `WAVE-1-REVIEW-A-1 MINOR`
+The first wave's correctness review, first round, has one blocker group, one important group, and one minor group. A later wave gets its own review.
 
 ## Tracking Progress
 
 ```bash
 # Check all implementation slices
-"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=in_progress
+"${EPOCH_REC}" query --phase worker_slices --status=in_progress
 
 # Check for blocked tasks
-"${EPOCH_REC}" query --blocked --label="pasture:p9-impl:s9-slice"
+"${EPOCH_REC}" query --blocked --phase worker_slices
 
 # Check completed slices
-"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=closed
+"${EPOCH_REC}" query --phase worker_slices --status=closed
 
 # Check specific task
 "${EPOCH_REC}" show "${TASK_ID_URI}"

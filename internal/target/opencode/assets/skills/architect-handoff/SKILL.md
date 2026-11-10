@@ -21,7 +21,7 @@ description: Create handoff document and transfer to supervisor
 - Given: handoff for the IMPL_PLAN phase
 - When: spawning the supervisor
 - Then: delegate the supervisor as the implementation-plan owner (workers also on the frontier tier), then give it a self-contained assignment
-- Should not: spawn the supervisor without a self-contained assignment, or via aura-swarm, for the IMPL_PLAN phase
+- Should not: spawn the supervisor without a self-contained assignment for the IMPL_PLAN phase
 
 **[arch-handoff-supervisor-not-idle]**
 - Given: a freshly spawned supervisor
@@ -330,7 +330,7 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 
    ```
 
-2. Delegate the supervisor with the task operation (the IMPL_PLAN phase runs under the supervisor, not aura-swarm):
+2. Delegate the supervisor with the task operation (the IMPL_PLAN phase runs under the supervisor):
    ```
    delegate the implementation-plan owner, then give it the self-contained assignment below
    ```
@@ -414,11 +414,11 @@ Given an expired token when accessing protected routes then return 401
 
 - Delegate the supervisor (and the workers it will coordinate) as **T1 frontier** assignments — the IMPL_PLAN phase benefits from the frontier tier for decomposition and review.
 - A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call `skill(/pasture:supervisor)`, the Pasture task IDs, and `"${EPOCH_REC}" show` commands to fetch full requirements).
-- Do not spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase; the deprecated orchestrator must not be invoked.
+- Do not spawn the supervisor for the IMPL_PLAN phase except through this handoff.
 
 ## IMPORTANT
 
-- **DO NOT** spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase — delegate it with the task operation
+- **DO NOT** skip the handoff and spawn the supervisor for the IMPL_PLAN phase — delegate it with the task operation
 - **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks
 - **DO NOT** implement the plan yourself - your role is handoff and monitoring
 - **DO NOT** shut down a supervisor that appears idle right after spawn — it is usually running Explore subagents
@@ -432,5 +432,5 @@ This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL 
 - **Storage:** the follow-up handoff is authored in its own HANDOFF Pasture task body (no filesystem path)
 - **References:** Include both original URD and FOLLOWUP_URD task IDs
 - **Context:** Summary of FOLLOWUP_PROPOSAL ratification and the user-DEFER'd UAT items the follow-up addresses
-- **Next step:** Supervisor creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks for the follow-up scope
+- **Next step:** Supervisor creates the follow-up plan and the follow-up slices for that scope
 <!-- END GENERATED FROM pasture schema -->

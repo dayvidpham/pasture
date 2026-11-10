@@ -251,15 +251,12 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 				Lang:  "bash",
 				Label: "correct",
 				Code: `# Create all 3 severity groups immediately (even if empty)
-BLOCKER_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review)
+BLOCKER_ID_URI=$([[rec:create]] --kind task --title "BLOCKER" --phase code_review)
 [[rec:label]] "$BLOCKER_ID_URI" pasture:severity:blocker
-[[rec:label]] "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review)
+IMPORTANT_ID_URI=$([[rec:create]] --kind task --title "IMPORTANT" --phase code_review)
 [[rec:label]] "$IMPORTANT_ID_URI" pasture:severity:important
-[[rec:label]] "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review)
+MINOR_ID_URI=$([[rec:create]] --kind task --title "MINOR" --phase code_review)
 [[rec:label]] "$MINOR_ID_URI" pasture:severity:minor
-[[rec:label]] "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Close empty groups immediately
 [[rec:close]] "${IMPORTANT_ID_URI}"
@@ -515,7 +512,7 @@ UAT_ID_URI=$([[rec:create]] --kind task --title "UAT: Plan acceptance" --phase p
 	},
 	"C-followup-leaf-adoption": {
 		Id:    "C-followup-leaf-adoption",
-		Given: "supervisor creates FOLLOWUP_SLICE-N",
+		Given: "supervisor creates the follow-up slice",
 		When:  "assigning user-DEFER'd UAT-item leaf tasks to follow-up slices",
 		Then: "add leaf task as child of follow-up slice " +
 			"(dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice)",
@@ -759,7 +756,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		OwnershipNarrative: "You own Phases 7-12 of the epoch: " +
 			"receive handoff from architect (p7), " +
 			"create vertical slice decomposition IMPL_PLAN (p8), " +
-			"spawn workers for parallel implementation SLICE-{W}-{N} (p9), " +
+			"spawn workers for parallel implementation the slice (p9), " +
 			"spawn reviewers for whole-wave code review with severity tree (p10), " +
 			"coordinate user acceptance test (p11), " +
 			"commit, push, and hand off (p12). " +
@@ -1350,8 +1347,8 @@ var CoordinationCommands = map[string]CoordinationCommand{
 	},
 	"cmd-coord-label": {
 		Id:       "cmd-coord-label",
-		Action:   "Label completed slice",
-		Template: "[[rec:label]] \"${SLICE_ID_URI}\" pasture:p9-impl:slice-complete",
+		Action:   "Record slice completion",
+		Template: "[[rec:note]] \"${SLICE_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"Slice complete.\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-dep-add": {
@@ -1431,15 +1428,14 @@ var WorkflowSpecs = map[string]Workflow{
 					{
 						Id: "rtw-build-spawn",
 						Instruction: "Spawn workers via the [[op:delegate_assignment]] tool — " +
-							"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
-							"(NOT aura-swarm). " +
+							"set `name` for a named teammate, leave `name` empty for a backgrounded subagent. " +
 							"Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. " +
 							"Pass the tier-mapped native model id and " + concurrencyCapSentence(),
 					},
 					{
 						Id:          "rtw-build-monitor",
 						Instruction: "Monitor worker progress via [[rec:query]] and [[rec:show]]",
-						Command:     "[[rec:query]] --label=\"pasture:p9-impl:s9-slice\" --status=in_progress",
+						Command:     "[[rec:query]] --phase worker_slices --status=in_progress",
 					},
 					{
 						Id:          "rtw-build-integrate",
@@ -1886,22 +1882,20 @@ var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 			Id:          "S-supervisor-create-leaf-tasks",
 			Order:       5,
 			Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
-			Command: `CREATED_URI=$([[rec:create]] --kind task --title "SLICE-{K}-L{1,2,3}: <description>" --phase worker_slices --body "Describe the specific work and reference full task URIs")
-[[rec:label]] "$CREATED_URI" pasture:p9-impl:s9-slice`,
+			Command:     `CREATED_URI=$([[rec:create]] --kind task --title "<description>" --phase worker_slices --body "Describe the specific work and reference full task URIs")`,
 			Examples: []Example{
 				{
 					Id:    "S-supervisor-create-leaf-tasks-frontmatter",
 					Lang:  "bash",
 					Label: "template",
-					Code: `CREATED_URI=$([[rec:create]] --kind task --title "SLICE-1-L1: Types -- <slice name>" --phase worker_slices \
+					Code: `CREATED_URI=$([[rec:create]] --kind task --title "Types — <slice name>" --phase worker_slices \
   --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
   impl_plan: "${IMPL_PLAN_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
-Layer 1: types and interfaces for <slice name>.")
-[[rec:label]] "$CREATED_URI" pasture:p9-impl:s9-slice`,
+Layer 1: types and interfaces for <slice name>.")`,
 					AlsoIllustrates: "C-frontmatter-refs",
 				},
 			},
@@ -1910,8 +1904,7 @@ Layer 1: types and interfaces for <slice name>.")
 			Id:    "S-supervisor-spawn-workers",
 			Order: 6,
 			Instruction: "Spawn workers via the [[op:delegate_assignment]] tool — " +
-				"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
-				"(NOT aura-swarm). " +
+				"set `name` for a named teammate, leave `name` empty for a backgrounded subagent. " +
 				"Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. " +
 				"Pass the tier-mapped native model id and " + concurrencyCapSentence(),
 			NextState: protocol.PhaseWorkerSlices,
@@ -2098,7 +2091,7 @@ var SubstepDataMap = map[string][]SubstepData{
 		{
 			Id: "s8", Type: "plan", Execution: "sequential", Order: 1,
 			LabelRef:        "L-p8s8",
-			Description:     "Identify production code paths. Create SLICE-{W}-{N} tasks with leaf tasks. Assign workers.",
+			Description:     "Identify production code paths. Create the slice tasks with leaf tasks. Assign workers.",
 			StartupSequence: true,
 		},
 	},

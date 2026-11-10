@@ -63,7 +63,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 		},
 		// R7/A1: code review gates each wave on open BLOCKERs and converges over
 		// open findings at the end; on exhaustion, surface outstanding findings to
-		// the user. Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		// the user. Resolves to SharedFragmentSpecs[FragReviewCleanExit].
 		behaviorRef(FragReviewCleanExit),
 	},
 	Sections: []ProseSection{
@@ -114,7 +114,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 - Ratified Proposal: ${PROPOSAL_ID_URI}
 
 ## Your Slice
-- Slice: SLICE-<N>
+- Slice: the assigned work
 - Task ID: ${SLICE_TASK_ID_URI}
 - Production Code Path: <what end users run>
 
@@ -149,7 +149,7 @@ full Ride the Wave cycle.
 			Title: "Task Call",
 			Content: `` + "```" + `
 delegation: {
-  description: "Worker: implement SLICE-{W}-{N}",
+  description: "Worker: implement the slice",
   prompt: ` + "`" + `Call [[op:invoke_skill]](/pasture:worker) and implement the assigned slice.
 
 Pasture Task ID: "${TASK_ID_URI}"
@@ -172,7 +172,7 @@ Per [sup-spawn-workers], use ` + "`" + `subagent_type: "general-purpose"` + "`" 
 [[op:send_assignment_message]]({
   type: "message",
   recipient: "worker-1",
-  content: ` + "`" + `You are assigned SLICE-{W}-{N}. Start by calling [[op:invoke_skill]](/pasture:worker).
+  content: ` + "`" + `You are assigned the slice. Start by calling [[op:invoke_skill]](/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
 Run this to get full requirements + handoff: [[rec:show]] "${SLICE_TASK_ID_URI}"
@@ -188,7 +188,7 @@ Read the handoff doc and your Pasture task before starting implementation.
 IMPORTANT: Do NOT shut down after completing implementation. You will receive
 review feedback from ephemeral reviewers and may need to fix BLOCKERs and IMPORTANT
 findings. Stay alive for the full Ride the Wave cycle.` + "`" + `,
-  summary: "SLICE-{W}-{N} assignment with Pasture context"
+  summary: "slice assignment"
 })
 ` + "```" + `
 
@@ -215,7 +215,7 @@ Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec:show]]` 
 [[op:send_assignment_message]]({
   type: "message",
   recipient: "worker-1",
-  content: ` + "`" + `Review cycle <N> found issues in your slice (SLICE-{W}-{N}).
+  content: ` + "`" + `Review cycle <N> found issues in your slice (the slice).
 
 BLOCKERs (must fix — blocks slice closure):
 - "${FINDING_ID_URI}": <description> ([[rec:show]] "${FINDING_ID_URI}")
@@ -230,7 +230,7 @@ After fixing all items:
   [[rec:note]] "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Fixes applied for review cycle <N>"
 
 Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
-  summary: "Review cycle <N> fixes for SLICE-{W}-{N}"
+  summary: "Review cycle <N> fixes for the slice"
 })
 ` + "```" + ``,
 				},
@@ -254,7 +254,7 @@ Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
 		},
 		{
 			Id:    "sup-spawn-followup-slice-handoff",
-			Title: "Follow-up Slice Handoff (FOLLOWUP_SLICE-N)",
+			Title: "Follow-up slice handoff",
 			Content: `For follow-up slices, the handoff (authored in the Pasture task body — no filesystem path) extends with additional fields:
 
 ` + "```" + `markdown
@@ -267,7 +267,7 @@ Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
 - FOLLOWUP_IMPL_PLAN: "${FOLLOWUP_IMPL_PLAN_ID_URI}"
 
 ## Your Slice
-- Slice: FOLLOWUP_SLICE-<N>
+- Slice: the follow-up slice
 - Task ID: "${SLICE_TASK_ID_URI}"
 
 ## DEFER'd Items (from UAT)

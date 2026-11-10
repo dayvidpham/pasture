@@ -61,7 +61,7 @@ Select the current registered author with "${EPOCH_REC}" whoami. It prints the a
 
 ## When to Use
 
-Assigned to review a plan specification (Phase 4, `pasture:p4-plan:s4-review`).
+Assigned to review a plan specification (Phase 4).
 
 ## End-User Alignment Criteria
 
@@ -125,7 +125,6 @@ references:
   urd: "${URD_ID_URI}"
 ---
 VOTE: <ACCEPT|REVISE> - <justification>")
-"${EPOCH_REC}" label "$REVIEW_ID_URI" pasture:p4-plan:s4-review
 "${EPOCH_REC}" block "${PROPOSAL_ID_URI}" --by "${REVIEW_ID_URI}"
 ```
 

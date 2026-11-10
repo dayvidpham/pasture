@@ -81,7 +81,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ## Update IMPL_PLAN
 
 ```bash
-"${EPOCH_REC}" note "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="SLICE-{W}-{N} complete: "${TASK_A_URI}", ${TASK_B_URI}"
+"${EPOCH_REC}" note "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="Slice complete: "${TASK_A_URI}", ${TASK_B_URI}"
 ```
 
 ## Follow-up Commits
@@ -92,7 +92,7 @@ For follow-up slices, add `Followup-Epic:` to the commit message trailer:
 feat|fix(scope): Description (follow-up)
 
 Files: file1.go, file2.go
-Task: ${TASK_A_URI} (FOLLOWUP_SLICE-1)
+Task: ${TASK_A_URI} (the first follow-up slice)
 Followup-Epic: ${TASK_B_URI}
 Ratified-Plan: ${TASK_C_URI} (FOLLOWUP_PROPOSAL-1)
 

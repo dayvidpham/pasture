@@ -79,7 +79,7 @@ var userUatBody = SkillBody{
 		// R6: for EVERY request (generalized from fix-intent-only at v2-2), UAT
 		// confirms the validation-case set with the user and evaluates the
 		// implementation against it. behaviorRef resolves to
-		// SharedFragmentSpecs[FragValidationCases] (SLICE-1).
+		// SharedFragmentSpecs[FragValidationCases].
 		behaviorRef(FragValidationCases),
 	},
 

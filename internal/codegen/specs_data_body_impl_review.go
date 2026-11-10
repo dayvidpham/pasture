@@ -7,7 +7,7 @@ var implReviewBody = SkillBody{
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
 
 See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity definitions.`,
-	// Behaviors shared with supervisor body via SharedFragmentSpecs (SLICE-3):
+	// Behaviors shared with supervisor body via SharedFragmentSpecs:
 	// all 6 review-wave behaviors are now fragments so the canonical text is
 	// single-sourced and both skill bodies render byte-identical content.
 	Behaviors: []BehaviorSpec{
@@ -42,7 +42,6 @@ references:
   round: 1
 ---
 Missing error handling causes silent failure in auth flow.")
-[[rec:label]] "$FINDING_ID" pasture:p10-impl:s10-review
 [[rec:label]] "$FINDING_ID" pasture:finding
 
 # Wire dual-parent: finding blocks BOTH severity group AND slice
@@ -63,7 +62,6 @@ references:
   round: 1
 ---
 API calls should have configurable timeouts.")
-[[rec:label]] "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
 [[rec:label]] "$IMPORTANT_FINDING_ID" pasture:finding
 
 # Attaches to the IMPORTANT severity group (NOT the slice); its close rule is C-finding-lifecycle
@@ -73,22 +71,22 @@ API calls should have configurable timeouts.")
 		{
 			Id:    "impl-rev-review-structure",
 			Title: "Review Structure",
-			Content: `One review round covers one whole wave, never a single slice. Wave 1 holds SLICE-1-1, SLICE-1-2, and SLICE-1-3; each reviewer reviews all three together and creates ONE review title for the wave:
+			Content: `One review round covers one whole wave, never a single slice. Wave 1 holds the first slice, the second slice, and the third slice; each reviewer reviews all three together and creates ONE review title for the wave:
 
 ` + "```\n" +
-				`Wave 1: SLICE-1-1, SLICE-1-2, SLICE-1-3
+				`Wave 1: the first slice, the second slice, the third slice
   Reviewer A (Correctness): reviews the whole wave →
-    Creates: WAVE-1-REVIEW-A-1 (references: wave: 1, slices: SLICE-1-1, SLICE-1-2, SLICE-1-3)
+    Creates: the review (references: wave: 1, slices: the first slice, the second slice, the third slice)
     Each review has 3 severity groups (BLOCKER/IMPORTANT/MINOR)
 
   Reviewer B (Test quality): reviews the whole wave →
-    Creates: WAVE-1-REVIEW-B-1
+    Creates: the review
 
   Reviewer C (Elegance): reviews the whole wave →
-    Creates: WAVE-1-REVIEW-C-1
+    Creates: the review
 ` + "```" + `
 
-A later wave gets its own review titles (for example, wave 2 → WAVE-2-REVIEW-A-1). A wave never produces one title per reviewed slice.`,
+A later wave gets its own review titles (for example, wave 2 → the later review). A wave never produces one title per reviewed slice.`,
 		},
 		{
 			Id:    "impl-rev-spawning",
@@ -105,7 +103,7 @@ URD: "${URD_ID_URI}" (read with [[rec:show]] "${URD_ID_URI}" for user requiremen
 Focus: Does implementation faithfully serve the user? Are technical decisions consistent with rationale?
 Review the whole wave: "${SLICE_1_1_ID_URI}", "${SLICE_1_2_ID_URI}", "${SLICE_1_3_ID_URI}"
 For each slice, run: [[rec:show]] "${SLICE_ID_URI}"
-Create ONE severity trio (BLOCKER/IMPORTANT/MINOR) for the wave, listing every slice in its references. Title: WAVE-{W}-REVIEW-A-1
+Create ONE severity trio (BLOCKER/IMPORTANT/MINOR) for the wave, listing every slice in its references. Title: the review
 Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure.` + "`" + `
 }
 ` + "```" + `
@@ -127,8 +125,8 @@ Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure
 ## Slices to Review
 | Slice | Task ID | Description | Worker |
 |-------|---------|-------------|--------|
-| SLICE-1-1 | "${ID_URI}" | <description> | worker-1 |
-| SLICE-1-2 | "${ID_URI}" | <description> | worker-2 |
+| the first slice | "${ID_URI}" | <description> | worker-1 |
+| the second slice | "${ID_URI}" | <description> | worker-2 |
 
 ## Review Procedure
 1. For each slice: ` + "`" + `[[rec:show]] "${SLICE_ID_URI}"` + "`" + `
@@ -190,7 +188,7 @@ One vote per wave on the wave review task (not one per slice):
 
 ` + "```" + `bash
 # Check for any REVISE votes
-[[rec:query]] --label="pasture:p10-impl:s10-review"
+[[rec:query]] --phase code_review
 
 # Check for unresolved BLOCKERs
 [[rec:query]] --label="pasture:severity:blocker" --status=open
@@ -253,10 +251,10 @@ FOLLOWUP epic (pasture:epic-followup)
         ├── frontmatter reference: FOLLOWUP_URD (living requirements document)
         └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
               └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
-                    ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
+                    ├── blocked-by: the first follow-up slice  (Phase 9)
                     │     ├── blocked-by: deferred-item-leaf-task-...
                     │     └── blocked-by: deferred-item-leaf-task-...
-                    └── blocked-by: FOLLOWUP_SLICE-2
+                    └── blocked-by: the second follow-up slice
 ` + "```" + `
 
 ` + "```" + `bash
@@ -286,7 +284,7 @@ Scoping URE: determine which user-DEFER'd UAT items to address.")
 				{
 					Id:    "impl-rev-followup-step3",
 					Title: "Step 3: DEFER'd-item leaf adoption (dual-parent)",
-					Content: `When the supervisor creates FOLLOWUP_SLICE-N tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
+					Content: `When the supervisor creates the follow-up slice tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
 
 ` + "```" + `bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
@@ -318,7 +316,7 @@ Scoping URE: determine which user-DEFER'd UAT items to address.")
 				{
 					Id:      "impl-rev-followup-chain",
 					Title:   "Follow-up Handoff Chain",
-					Content: "Inside the follow-up lifecycle, the same handoff types (h1-h4) apply but scoped to the follow-up epic:\n\nThe follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`); code review never starts it. The Supervisor creates the FOLLOWUP epic from those items (same actor), then:\n\n| Order | Handoff | Transition |\n|-------|---------|------------|\n| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |\n| 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |\n| 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |\n| 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |\n| 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |\n| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |\n| 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |\n| 8 | h4 | Worker → Reviewer: Follow-up slice completion |\n\nFollow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).\n\nSee `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples and field requirements.",
+					Content: "Inside the follow-up lifecycle, the same handoff types (h1-h4) apply but scoped to the follow-up epic:\n\nThe follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`); code review never starts it. The Supervisor creates the FOLLOWUP epic from those items (same actor), then:\n\n| Order | Handoff | Transition |\n|-------|---------|------------|\n| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |\n| 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |\n| 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |\n| 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |\n| 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |\n| 6 | h2 | Supervisor → Worker: the follow-up slice with DEFER'd-item leaf tasks |\n| 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |\n| 8 | h4 | Worker → Reviewer: Follow-up slice completion |\n\nFollow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).\n\nSee `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples and field requirements.",
 				},
 			},
 		},

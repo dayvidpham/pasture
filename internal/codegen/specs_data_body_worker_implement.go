@@ -51,7 +51,7 @@ var workerImplementBody = SkillBody{
 		// R6: for EVERY request (generalized from fix-intent-only at v2-2), evaluate
 		// the implementation against the concrete validation cases captured in
 		// URE/UAT and store the failing real-data cases as test fixtures. Resolves to
-		// SharedFragmentSpecs[FragValidationCases] (SLICE-1). See C-validation-cases.
+		// SharedFragmentSpecs[FragValidationCases]. See C-validation-cases.
 		behaviorRef(FragValidationCases),
 	},
 
@@ -177,8 +177,8 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 		},
 		{
 			Id:    "wimpl-followup-slices",
-			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
-			Content: `If your Pasture task is a ` + "`" + `FOLLOWUP_SLICE-N` + "`" + `, the implementation procedure is identical. Additionally:
+			Title: "Follow-up slices",
+			Content: `If your Pasture task is a follow-up slice, the implementation procedure is identical. Additionally:
 - Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`" + `[[rec:show]] "${TASK_ID_URI}"` + "`" + ` — these are user-DEFER'd UAT items you must resolve
 - Your implementation must address each DEFER'd-item leaf task's acceptance criteria
 - On completion, report which DEFER'd-item leaf tasks were resolved`,

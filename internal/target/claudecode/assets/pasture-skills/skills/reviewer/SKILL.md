@@ -130,15 +130,12 @@ _Example (correct)_
 
 ```bash
 # Create all 3 severity groups immediately (even if empty)
-BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review)
+BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "BLOCKER" --phase code_review)
 "${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:severity:blocker
-"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review)
+IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "IMPORTANT" --phase code_review)
 "${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:severity:important
-"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review)
+MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "MINOR" --phase code_review)
 "${EPOCH_REC}" label "$MINOR_ID_URI" pasture:severity:minor
-"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Close empty groups immediately
 "${EPOCH_REC}" close "${IMPORTANT_ID_URI}"
@@ -209,7 +206,7 @@ You participate in two phases: Phase 4 (plan review) — evaluate PROPOSAL-N aga
 
 ### Inter-Agent Coordination
 
-Agents coordinate through **beads** tasks and comments:
+Agents coordinate through tracker tasks and comments:
 
 | Action | Command |
 |--------|---------|
@@ -263,10 +260,10 @@ Select the current registered author with "${EPOCH_REC}" whoami. It prints the a
 
 | Aspect | Plan Review (Phase 4) | Code Review (Phase 10) |
 |--------|-----------------------|------------------------|
-| Label | `pasture:p4-plan:s4-review` | `pasture:p10-impl:s10-review` |
+| Phase | plan review | code review |
 | Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
-| Naming | PROPOSAL-N-REVIEW-{axis}-{round} | WAVE-{W}-REVIEW-{axis}-{round} |
+| Naming | the proposal review | the wave review |
 | Focus | End-user alignment, MVP scope | Production code paths, severity findings |
 
 ## End-User Alignment Criteria
@@ -302,7 +299,7 @@ Binary only. No intermediate levels.
 Reviewers also participate in the follow-up lifecycle:
 
 - **FOLLOWUP_PROPOSAL review (Phase 4):** Same procedure as standard plan review. Task naming: `FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`. Binary ACCEPT/REVISE, no severity tree.
-- **FOLLOWUP_SLICE code review (Phase 10):** Same procedure as standard code review. Task naming: `FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
+- **Follow-up code review (Phase 10):** Same procedure as standard code review. Name the review for the follow-up slice, the axis, and the round. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
 - **Open findings converge at the end (no followup-of-followup):** findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review stay open past the wave gate and converge at the end — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.
 
 ## Pasture Review Process

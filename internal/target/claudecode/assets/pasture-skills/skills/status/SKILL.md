@@ -161,10 +161,10 @@ Run this list on every user-facing message. A clean pass is not a gate.
 ### 2. Check implementation progress
 
 ```bash
-"${EPOCH_REC}" query --label="pasture:p8-impl:s8-plan" --status=open
-"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=in_progress
-"${EPOCH_REC}" query --blocked --label="pasture:p9-impl:s9-slice"
-"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=closed
+"${EPOCH_REC}" query --phase impl_plan --status=open
+"${EPOCH_REC}" query --phase worker_slices --status=in_progress
+"${EPOCH_REC}" query --blocked --phase worker_slices
+"${EPOCH_REC}" query --phase worker_slices --status=closed
 ```
 
 ### 3. Get project stats

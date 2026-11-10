@@ -77,7 +77,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - Should not: close a finding from a worker or supervisor, close one at a wave boundary, or record severity in the finding label (severity lives on its parent group)
 
 **[C-followup-leaf-adoption]**
-- Given: supervisor creates FOLLOWUP_SLICE-N
+- Given: supervisor creates the follow-up slice
 - When: assigning user-DEFER'd UAT-item leaf tasks to follow-up slices
 - Then: add leaf task as child of follow-up slice (dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice)
 - Should not: remove the leaf task from its original DEFER'd-items tracking parent
@@ -222,9 +222,9 @@ Exit conditions:
 
 **Stage 2: Build** _(parallel)_
 
-- Spawn workers via the task tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.
+- Spawn workers via the task tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent. Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.
 
-- Monitor worker progress via "${EPOCH_REC}" query and "${EPOCH_REC}" show (`"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=in_progress`)
+- Monitor worker progress via "${EPOCH_REC}" query and "${EPOCH_REC}" show (`"${EPOCH_REC}" query --phase worker_slices --status=in_progress`)
 
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 

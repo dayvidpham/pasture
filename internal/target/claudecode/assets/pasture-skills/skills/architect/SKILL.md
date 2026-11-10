@@ -203,7 +203,7 @@ You own Phases 1-7 of the epoch: capture and classify user request (p1), run req
 
 ### Inter-Agent Coordination
 
-Agents coordinate through **beads** tasks and comments:
+Agents coordinate through tracker tasks and comments:
 
 | Action | Command |
 |--------|---------|
@@ -459,7 +459,6 @@ Each reviewer creates their own task:
 ```bash
 REVIEW_ID_URI=$("${EPOCH_REC}" create --kind task --title "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review \
   --body "VOTE: <ACCEPT|REVISE> - <justification>")
-"${EPOCH_REC}" label "$REVIEW_ID_URI" pasture:p4-plan:s4-review
 "${EPOCH_REC}" block "${PROPOSAL_ID_URI}" --by "${REVIEW_ID_URI}"
 ```
 
@@ -572,7 +571,7 @@ delegation: description: "Reviewer C: elegance", prompt: "You are Reviewer C (El
 
 ## Supervisor Handoff
 
-**DO NOT** spawn the supervisor with the Agent tool or via `aura-swarm` for the IMPL_PLAN phase. Instead, invoke:
+**DO NOT** spawn the supervisor directly for the IMPL_PLAN phase. Invoke the handoff skill first:
 
 ```
 Skill(skill: "pasture:architect-handoff")

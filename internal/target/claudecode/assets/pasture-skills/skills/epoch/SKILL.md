@@ -155,7 +155,7 @@ You own the full 12-phase lifecycle from Request to Landing. You delegate phases
 
 ### Inter-Agent Coordination
 
-Agents coordinate through **beads** tasks and comments:
+Agents coordinate through tracker tasks and comments:
 
 | Action | Command |
 |--------|---------|
@@ -1611,11 +1611,11 @@ Phase 4:  pasture:p4-plan       -> REVIEW (3 parallel reviewers, ACCEPT/REVISE)
 Phase 5:  pasture:p5-user       -> Plan UAT (user acceptance test)
 Phase 6:  pasture:p6-plan       -> Ratification (supersede old proposals)
 Phase 7:  pasture:p7-plan       -> Handoff (architect -> supervisor)
-Phase 8:  pasture:p8-impl       -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
-Phase 9:  pasture:p9-impl       -> SLICE-{W}-{N} (parallel workers; Ride the Wave — workers persist for review)
-Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; only an open BLOCKER gates a wave, then convergence at the end, else surface to user)
-Phase 11: pasture:p11-user      -> Implementation UAT
-Phase 12: pasture:p12-impl      -> Landing (commit, push, hand off)
+Phase 8:  implementation plan -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
+Phase 9:  worker slices       -> one slice per worker (parallel workers; Ride the Wave — workers persist for review)
+Phase 10: code review         -> reviewers review every slice in the wave; only an open BLOCKER gates a wave, then convergence at the end, else surface to the user
+Phase 11: pasture:p11-user    -> Implementation UAT
+Phase 12: landing             -> commit, push, hand off
 ```
 
 ### Phase 1 Expanded: REQUEST
@@ -1740,14 +1740,14 @@ Aggregated user-DEFER'd items from UAT (Phase 5/11).")
 The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types:
 
 ```
-FOLLOWUP → FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL-1 → FOLLOWUP_IMPL_PLAN → FOLLOWUP_SLICE-N
+FOLLOWUP → FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL-1 → FOLLOWUP_IMPL_PLAN → the follow-up slice
 ```
 
 - **FOLLOWUP_URE**: Scoping URE with user to determine which DEFER'd items to address
 - **FOLLOWUP_URD**: Requirements doc for follow-up scope (references original URD)
 - **FOLLOWUP_PROPOSAL-{N}**: Proposal accounting for original URD + FOLLOWUP_URD + the DEFER'd items
 - **FOLLOWUP_IMPL_PLAN**: Supervisor decomposes follow-up into slices
-- **FOLLOWUP_SLICE-{N}**: Each slice implements the DEFER'd-item work decomposed into leaf tasks
+- **the follow-up slice**: Each slice implements the DEFER'd-item work decomposed into leaf tasks
 
 See `/pasture:supervisor` and `/pasture:impl-review` for full creation commands.
 
@@ -1757,18 +1757,15 @@ Code reviews ALWAYS create ONE severity trio (3 group tasks) per wave, per axis,
 
 ```bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review \
+BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "BLOCKER" --phase code_review \
    --body "Severity group for this review round; close only if empty")
 "${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:severity:blocker
-"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review \
+IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "IMPORTANT" --phase code_review \
    --body "Severity group for this review round; close only if empty")
 "${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:severity:important
-"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review \
+MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "MINOR" --phase code_review \
    --body "Severity group for this review round; close only if empty")
 "${EPOCH_REC}" label "$MINOR_ID_URI" pasture:severity:minor
-"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Empty groups are closed immediately
 "${EPOCH_REC}" close "${IMPORTANT_ID_URI}"
@@ -1796,7 +1793,7 @@ See `../protocol/CONSTRAINTS.md` for full severity definitions.
 "${EPOCH_REC}" query --label="pasture:p1-user:s1_1-classify"    # REQUEST tasks
 "${EPOCH_REC}" query --label="pasture:p2-user:s2_1-elicit"      # ELICIT tasks
 "${EPOCH_REC}" query --label="pasture:p3-plan:s3-propose"        # PROPOSAL tasks
-"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice"          # Implementation slices
+"${EPOCH_REC}" query --phase worker_slices          # Implementation slices
 ```
 
 ## Skills to Invoke

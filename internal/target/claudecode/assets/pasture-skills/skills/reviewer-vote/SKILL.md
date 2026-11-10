@@ -68,8 +68,8 @@ Binary only. No intermediate levels.
 
 ## Plan Review vs Code Review
 
-- **Plan review (Phase 4, `pasture:p4-plan:s4-review`):** ACCEPT/REVISE only. No severity tree.
-- **Code review (Phase 10, `pasture:p10-impl:s10-review`):** ACCEPT/REVISE vote. Findings tracked via severity tree (3 groups: BLOCKER, IMPORTANT, MINOR created per wave, per axis, per round).
+- **Plan review (Phase 4):** ACCEPT/REVISE only. No severity tree.
+- **Code review (Phase 10):** ACCEPT/REVISE vote. Findings tracked via severity tree (3 groups: BLOCKER, IMPORTANT, MINOR created per wave, per axis, per round).
 
 ## Consensus
 

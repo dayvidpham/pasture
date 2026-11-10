@@ -27,17 +27,17 @@ var reviewerReviewCodeBody = SkillBody{
 			Then:      "use BLOCKER/IMPORTANT/MINOR severity with EAGER group creation",
 			ShouldNot: "skip creating empty severity groups",
 		},
-		// 3rd owner of frag--sup-blocker-dual-parent (SLICE-4): canonical Then
+		// 3rd owner of frag--sup-blocker-dual-parent: canonical Then
 		// "add dual-parent: blocks BOTH the severity group AND the slice".
 		behaviorRef(FragSupBlockerDualParent),
 		// R7/A1: code review gates each wave on open BLOCKERs and then converges
 		// over open findings; on budget exhaustion without convergence, surface
 		// outstanding findings to the user. Resolves to
-		// SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		// SharedFragmentSpecs[FragReviewCleanExit].
 		behaviorRef(FragReviewCleanExit),
 		// R6: verify EVERY request carries validation-case fixtures (generalized
 		// from fix-intent-only at v2-2). Resolves to
-		// SharedFragmentSpecs[FragValidationCases] (SLICE-1).
+		// SharedFragmentSpecs[FragValidationCases].
 		behaviorRef(FragValidationCases),
 	},
 
@@ -59,7 +59,7 @@ var reviewerReviewCodeBody = SkillBody{
 					Title: "Step 1: Create All 3 Severity Groups Immediately",
 					Content: `` + "```" + `bash
 # One severity trio per wave, per axis, per round — not one per slice.
-# Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
+# Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
 BLOCKER_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
   --body "---
@@ -73,7 +73,6 @@ references:
 ---
 BLOCKER findings for this wave review round")
 [[rec:label]] "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
-[[rec:label]] "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 IMPORTANT_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
   --body "---
@@ -87,7 +86,6 @@ references:
 ---
 IMPORTANT findings for this wave review round")
 [[rec:label]] "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
-[[rec:label]] "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 MINOR_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
   --body "---
@@ -101,7 +99,6 @@ references:
 ---
 MINOR findings for this wave review round")
 [[rec:label]] "$MINOR_GROUP_ID_URI" pasture:severity:minor
-[[rec:label]] "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review task
 [[rec:block]] "${REVIEW_ID_URI}" --by "${BLOCKER_GROUP_ID_URI}"
@@ -210,7 +207,7 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 					Id:    "rev-code-step4-create",
 					Title: "Step 4: Create Review Task",
 					Content: `` + "```" + `bash
-REVIEW_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1: <feature>" --phase code_review \
+REVIEW_ID_URI=$([[rec:create]] --kind task --title "Review: <feature>" --phase code_review \
   --body "---
 references:
   wave: 1
@@ -221,7 +218,6 @@ references:
   urd: \"${URD_ID_URI}\"
 ---
 VOTE: <ACCEPT|REVISE> - <justification>")
-[[rec:label]] "$REVIEW_ID_URI" pasture:p10-impl:s10-review
 # One review covers the whole wave, so wire every slice in the wave to it.
 [[rec:block]] "${SLICE_1_1_ID_URI}" --by "${REVIEW_ID_URI}"
 [[rec:block]] "${SLICE_1_2_ID_URI}" --by "${REVIEW_ID_URI}"
@@ -319,9 +315,9 @@ An implementation that ships without validation-case fixtures is an IMPORTANT fi
 		},
 		{
 			Id:    "rev-code-followup-slice",
-			Title: "Reviewing FOLLOWUP_SLICE-N (Follow-up Code Review)",
+			Title: "Reviewing a follow-up slice",
 			Content: `When reviewing follow-up slices, use the same procedure:
-- **Review task naming:** ` + "`FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`" + `
+- **Review task naming:** name the review for the follow-up slice, the axis, and the round
 - **Same EAGER severity tree** (BLOCKER/IMPORTANT/MINOR per wave, per axis, per round)
 - **Open findings converge at the end:** findings (BLOCKER/IMPORTANT/MINOR) in a FOLLOWUP_SLICE review also stay open past the wave gate and converge at the end — they are **never** re-routed to a follow-up epic (no followup-of-followup; the FOLLOWUP epic is fed only by user-DEFER'd UAT items)
 - The worker's completion handoff (h4) reports which DEFER'd-item leaf tasks were resolved — verify these during review`,

@@ -83,7 +83,7 @@ var workerCompleteBody = SkillBody{
 ## Context
 - Request: ${REQUEST_ID_URI}
 - URD: ${URD_ID_URI}
-- Slice: SLICE-<N>
+- Slice: the assigned work
 - Task ID: ${SLICE_TASK_ID_URI}
 
 ## What Was Implemented
@@ -115,8 +115,8 @@ var workerCompleteBody = SkillBody{
 		},
 		{
 			Id:    "wcomp-followup-slice",
-			Title: "Follow-up Slice Completion (FOLLOWUP_SLICE-N)",
-			Content: `When completing a FOLLOWUP_SLICE-N, additionally report which original leaf tasks were resolved:
+			Title: "Follow-up slice completion",
+			Content: `When completing a follow-up slice, additionally report which original leaf tasks were resolved:
 
 ` + "```" + `bash
 [[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Implementation complete. Resolved leaf tasks: "${LEAF_TASK_ID_1_URI}", ${LEAF_TASK_ID_2_URI}"

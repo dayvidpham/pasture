@@ -25,10 +25,10 @@ var statusBody = SkillBody{
 					Id:    "status-step2-impl",
 					Title: "2. Check implementation progress",
 					Content: `` + "```" + `bash
-[[rec:query]] --label="pasture:p8-impl:s8-plan" --status=open
-[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=in_progress
-[[rec:query]] --blocked --label="pasture:p9-impl:s9-slice"
-[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=closed
+[[rec:query]] --phase impl_plan --status=open
+[[rec:query]] --phase worker_slices --status=in_progress
+[[rec:query]] --blocked --phase worker_slices
+[[rec:query]] --phase worker_slices --status=closed
 ` + "```" + ``,
 				},
 				{

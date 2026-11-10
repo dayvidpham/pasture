@@ -56,16 +56,16 @@ var supervisorTrackProgressBody = SkillBody{
 			Title: "Pasture Status Queries",
 			Content: `` + "```" + `bash
 # Check all implementation slices
-[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=in_progress
+[[rec:query]] --phase worker_slices --status=in_progress
 
 # Check for blocked slices
-[[rec:query]] --blocked --label="pasture:p9-impl:s9-slice"
+[[rec:query]] --blocked --phase worker_slices
 
 # Check specific task
 [[rec:show]] "${TASK_ID_URI}"
 
 # Check completed slices
-[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=closed
+[[rec:query]] --phase worker_slices --status=closed
 
 # Check BLOCKER severity groups (during/after review)
 [[rec:query]] --label="pasture:severity:blocker" --status=open
@@ -118,7 +118,7 @@ var supervisorTrackProgressBody = SkillBody{
 [[rec:query]] --label="pasture:epic-followup"
 [[rec:query]] --label="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
 [[rec:query]] --label="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
-[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
+[[rec:query]] --phase worker_slices --status=in_progress  # FOLLOWUP_SLICE in progress
 ` + "```" + ``,
 		},
 	},

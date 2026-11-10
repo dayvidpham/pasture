@@ -112,6 +112,6 @@ After ratifying PROPOSAL-N:
 
 When ratifying a FOLLOWUP_PROPOSAL-N, the next step is the same h1 handoff but scoped to the follow-up epic:
 - **Storage:** the follow-up handoff is authored in its HANDOFF Pasture task body (no filesystem path)
-- The supervisor then creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks
+- The supervisor then creates the follow-up plan and the follow-up slices
 - The follow-up scope comes from the user-DEFER'd UAT items the FOLLOWUP epic was created from
 <!-- END GENERATED FROM pasture schema -->

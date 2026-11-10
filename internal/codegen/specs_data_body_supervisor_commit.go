@@ -60,7 +60,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 			Id:    "sup-commit-update-impl-plan",
 			Title: "Update IMPL_PLAN",
 			Content: `` + "```" + `bash
-[[rec:note]] "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="SLICE-{W}-{N} complete: "${TASK_A_URI}", ${TASK_B_URI}"
+[[rec:note]] "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="Slice complete: "${TASK_A_URI}", ${TASK_B_URI}"
 ` + "```" + ``,
 		},
 		{
@@ -72,7 +72,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 feat|fix(scope): Description (follow-up)
 
 Files: file1.go, file2.go
-Task: ${TASK_A_URI} (FOLLOWUP_SLICE-1)
+Task: ${TASK_A_URI} (the first follow-up slice)
 Followup-Epic: ${TASK_B_URI}
 Ratified-Plan: ${TASK_C_URI} (FOLLOWUP_PROPOSAL-1)
 

@@ -90,7 +90,6 @@ references:
 ` + "```" + `bash
 REVIEW_ID_URI=$([[rec:create]] --kind task --title "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review \
   --body "VOTE: <ACCEPT|REVISE> - <justification>")
-[[rec:label]] "$REVIEW_ID_URI" pasture:p4-plan:s4-review
 [[rec:block]] "${PROPOSAL_ID_URI}" --by "${REVIEW_ID_URI}"
 ` + "```" + ``,
 				},
@@ -184,7 +183,7 @@ The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PR
 		{
 			Id:      "arch-supervisor-handoff",
 			Title:   "Supervisor Handoff",
-			Content: "**DO NOT** spawn the supervisor with the [[op:delegate_assignment]] tool or via `aura-swarm` for the IMPL_PLAN phase. Instead, invoke:\n\n```\n[[op:invoke_skill]](skill: \"pasture:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Authoring the handoff in a HANDOFF Pasture task body (no filesystem path)\n2. Delegating the supervisor with the [[op:delegate_assignment]] operation, then giving it the handoff context as part of the assignment\n\n**CRITICAL:** The supervisor assignment MUST:\n1. **Start with `[[op:invoke_skill]](/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Pasture task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Reference the HANDOFF Pasture task ID — the handoff is in that task body\n\nA supervisor that appears idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
+			Content: "**DO NOT** spawn the supervisor directly for the IMPL_PLAN phase. Invoke the handoff skill first:\n\n```\n[[op:invoke_skill]](skill: \"pasture:architect-handoff\")\n```\n\nThe handoff skill guides you through:\n1. Authoring the handoff in a HANDOFF Pasture task body (no filesystem path)\n2. Delegating the supervisor with the [[op:delegate_assignment]] operation, then giving it the handoff context as part of the assignment\n\n**CRITICAL:** The supervisor assignment MUST:\n1. **Start with `[[op:invoke_skill]](/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation\n2. Include all Pasture task IDs (REQUEST, URD, RATIFIED PROPOSAL, HANDOFF)\n3. Reference the HANDOFF Pasture task ID — the handoff is in that task body\n\nA supervisor that appears idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.\n\n**DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks from the ratified plan.",
 		},
 	},
 	Behaviors: []BehaviorSpec{

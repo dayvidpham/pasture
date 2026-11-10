@@ -73,16 +73,16 @@ Workers spawned and running — monitoring for completions and blockers until al
 
 ```bash
 # Check all implementation slices
-"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=in_progress
+"${EPOCH_REC}" query --phase worker_slices --status=in_progress
 
 # Check for blocked slices
-"${EPOCH_REC}" query --blocked --label="pasture:p9-impl:s9-slice"
+"${EPOCH_REC}" query --blocked --phase worker_slices
 
 # Check specific task
 "${EPOCH_REC}" show "${TASK_ID_URI}"
 
 # Check completed slices
-"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=closed
+"${EPOCH_REC}" query --phase worker_slices --status=closed
 
 # Check BLOCKER severity groups (during/after review)
 "${EPOCH_REC}" query --label="pasture:severity:blocker" --status=open
@@ -131,6 +131,6 @@ When tracking review progress, monitor severity groups:
 "${EPOCH_REC}" query --label="pasture:epic-followup"
 "${EPOCH_REC}" query --label="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
 "${EPOCH_REC}" query --label="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
-"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
+"${EPOCH_REC}" query --phase worker_slices --status=in_progress  # FOLLOWUP_SLICE in progress
 ```
 <!-- END GENERATED FROM pasture schema -->

@@ -179,7 +179,7 @@ NOT: A single file or horizontal layer (e.g., 'all types' or 'all tests'). YES: 
 
 ### Inter-Agent Coordination
 
-Agents coordinate through **beads** tasks and comments:
+Agents coordinate through tracker tasks and comments:
 
 | Action | Command |
 |--------|---------|
@@ -464,12 +464,12 @@ Update status on start:
 - `acceptance_criteria`: BDD criteria for your slice
 - `ratified_plan`: Link to parent plan
 
-## Follow-up Slices (FOLLOWUP_SLICE-N)
+## Follow-up slices
 
-You may be assigned a `FOLLOWUP_SLICE-N` task instead of a `SLICE-{W}-{N}` task. The implementation procedure is identical, with these additions:
+You may be assigned a follow-up slice instead of an ordinary slice. The implementation procedure is identical, with these additions:
 
 - **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check `"${EPOCH_REC}" show "${TASK_ID_URI}"` for a "DEFER'd-Item Leaf Tasks" section.
-- **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.
+- **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your the follow-up slice. Resolving the leaf task satisfies both parents.
 - **Completion handoff (h4)**: When completing a follow-up slice, your handoff to the reviewer must list which DEFER'd-item leaf tasks were resolved.
 
 ```bash

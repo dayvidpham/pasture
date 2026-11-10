@@ -3,7 +3,7 @@
 package codegen
 
 var swarmBody = SkillBody{
-	Preamble: "Deprecated orchestration entry. Do not invoke aura-swarm or its session registry. Use the supervisor and worker role workflow in isolated issue-named Git worktrees.",
+	Preamble: "Deprecated orchestration entry. Do not invoke this skill. Use the supervisor and worker role workflow in isolated issue-named Git worktrees.",
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),

@@ -193,9 +193,9 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 - [ ] Files staged individually by name (no `git add .` / `git add -A`)
 - [ ] No destructive git operations (`reset --hard`, `checkout HEAD -- <path>`, `stash pop/apply`, `clean -fd`, `branch -D`) used on the shared worktree
 
-## Follow-up Slices (FOLLOWUP_SLICE-N)
+## Follow-up slices
 
-If your Pasture task is a `FOLLOWUP_SLICE-N`, the implementation procedure is identical. Additionally:
+If your Pasture task is a follow-up slice, the implementation procedure is identical. Additionally:
 - Check for a "DEFER'd-Item Leaf Tasks" section in `"${EPOCH_REC}" show "${TASK_ID_URI}"` — these are user-DEFER'd UAT items you must resolve
 - Your implementation must address each DEFER'd-item leaf task's acceptance criteria
 - On completion, report which DEFER'd-item leaf tasks were resolved

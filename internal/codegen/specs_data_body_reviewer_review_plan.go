@@ -42,7 +42,7 @@ var reviewerReviewPlanBody = SkillBody{
 		{
 			Id:      "rev-plan-when-to-use",
 			Title:   "When to Use",
-			Content: `Assigned to review a plan specification (Phase 4, ` + "`pasture:p4-plan:s4-review`" + `).`,
+			Content: `Assigned to review a plan specification (Phase 4).`,
 		},
 		{
 			Id:    "rev-plan-criteria",
@@ -112,7 +112,6 @@ references:
   urd: "${URD_ID_URI}"
 ---
 VOTE: <ACCEPT|REVISE> - <justification>")
-[[rec:label]] "$REVIEW_ID_URI" pasture:p4-plan:s4-review
 [[rec:block]] "${PROPOSAL_ID_URI}" --by "${REVIEW_ID_URI}"
 ` + "```" + ``,
 				},
@@ -129,7 +128,7 @@ VOTE: <ACCEPT|REVISE> - <justification>")
 				},
 			},
 		},
-		// SLICE-4: promoted to fragment for registry completeness and D2
+		// : promoted to fragment for registry completeness and D2
 		// distinctness enforcement. Content verbatim → golden byte-identical.
 		fragRef(FragRevPlanVoteOptions),
 		{

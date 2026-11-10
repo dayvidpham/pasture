@@ -100,7 +100,7 @@ var architectRatifyBody = SkillBody{
 		{
 			Id:      "arch-ratify-followup",
 			Title:   "Follow-up Proposals (FOLLOWUP_PROPOSAL-N)",
-			Content: "When ratifying a FOLLOWUP_PROPOSAL-N, the next step is the same h1 handoff but scoped to the follow-up epic:\n- **Storage:** the follow-up handoff is authored in its HANDOFF Pasture task body (no filesystem path)\n- The supervisor then creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks\n- The follow-up scope comes from the user-DEFER'd UAT items the FOLLOWUP epic was created from",
+			Content: "When ratifying a FOLLOWUP_PROPOSAL-N, the next step is the same h1 handoff but scoped to the follow-up epic:\n- **Storage:** the follow-up handoff is authored in its HANDOFF Pasture task body (no filesystem path)\n- The supervisor then creates the follow-up plan and the follow-up slices\n- The follow-up scope comes from the user-DEFER'd UAT items the FOLLOWUP epic was created from",
 		},
 	},
 

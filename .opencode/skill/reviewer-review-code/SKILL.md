@@ -83,7 +83,7 @@ First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS c
 
 ```bash
 # One severity trio per wave, per axis, per round — not one per slice.
-# Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
+# Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
 BLOCKER_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
   --body "---
@@ -97,7 +97,6 @@ references:
 ---
 BLOCKER findings for this wave review round")
 "${EPOCH_REC}" label "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
-"${EPOCH_REC}" label "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 IMPORTANT_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
   --body "---
@@ -111,7 +110,6 @@ references:
 ---
 IMPORTANT findings for this wave review round")
 "${EPOCH_REC}" label "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
-"${EPOCH_REC}" label "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 MINOR_GROUP_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
   --body "---
@@ -125,7 +123,6 @@ references:
 ---
 MINOR findings for this wave review round")
 "${EPOCH_REC}" label "$MINOR_GROUP_ID_URI" pasture:severity:minor
-"${EPOCH_REC}" label "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review task
 "${EPOCH_REC}" block "${REVIEW_ID_URI}" --by "${BLOCKER_GROUP_ID_URI}"
@@ -224,7 +221,7 @@ Apply end-user alignment criteria (see `pasture:reviewer`) and verify production
 ### Step 4: Create Review Task
 
 ```bash
-REVIEW_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1: <feature>" --phase code_review \
+REVIEW_ID_URI=$("${EPOCH_REC}" create --kind task --title "Review: <feature>" --phase code_review \
   --body "---
 references:
   wave: 1
@@ -235,7 +232,6 @@ references:
   urd: \"${URD_ID_URI}\"
 ---
 VOTE: <ACCEPT|REVISE> - <justification>")
-"${EPOCH_REC}" label "$REVIEW_ID_URI" pasture:p10-impl:s10-review
 # One review covers the whole wave, so wire every slice in the wave to it.
 "${EPOCH_REC}" block "${SLICE_1_1_ID_URI}" --by "${REVIEW_ID_URI}"
 "${EPOCH_REC}" block "${SLICE_1_2_ID_URI}" --by "${REVIEW_ID_URI}"
@@ -319,10 +315,10 @@ Per [frag--review-clean-exit], `C-finding-lifecycle`, and `C-review-effort-budge
 
 The FOLLOWUP epic is **not** created from review findings. Open review findings converge at the end; their close rule is `C-finding-lifecycle` (R7/A1). The FOLLOWUP epic is fed ONLY by **user-DEFER'd UAT items** (Phase 11), and the Supervisor creates it from those (label `pasture:epic-followup`).
 
-## Reviewing FOLLOWUP_SLICE-N (Follow-up Code Review)
+## Reviewing a follow-up slice
 
 When reviewing follow-up slices, use the same procedure:
-- **Review task naming:** `FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`
+- **Review task naming:** name the review for the follow-up slice, the axis, and the round
 - **Same EAGER severity tree** (BLOCKER/IMPORTANT/MINOR per wave, per axis, per round)
 - **Open findings converge at the end:** findings (BLOCKER/IMPORTANT/MINOR) in a FOLLOWUP_SLICE review also stay open past the wave gate and converge at the end — they are **never** re-routed to a follow-up epic (no followup-of-followup; the FOLLOWUP epic is fed only by user-DEFER'd UAT items)
 - The worker's completion handoff (h4) reports which DEFER'd-item leaf tasks were resolved — verify these during review

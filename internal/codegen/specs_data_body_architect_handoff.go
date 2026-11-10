@@ -18,7 +18,7 @@ var architectHandoffBody = SkillBody{
 			Given:     "handoff for the IMPL_PLAN phase",
 			When:      "spawning the supervisor",
 			Then:      "delegate the supervisor as the implementation-plan owner (workers also on the frontier tier), then give it a self-contained assignment",
-			ShouldNot: "spawn the supervisor without a self-contained assignment, or via aura-swarm, for the IMPL_PLAN phase",
+			ShouldNot: "spawn the supervisor without a self-contained assignment for the IMPL_PLAN phase",
 		},
 		{
 			Id:        "arch-handoff-supervisor-not-idle",
@@ -99,7 +99,7 @@ var architectHandoffBody = SkillBody{
 
    ` + "```" + `
 
-2. Delegate the supervisor with the [[op:delegate_assignment]] operation (the IMPL_PLAN phase runs under the supervisor, not aura-swarm):
+2. Delegate the supervisor with the [[op:delegate_assignment]] operation (the IMPL_PLAN phase runs under the supervisor):
    ` + "```" + `
    delegate the implementation-plan owner, then give it the self-contained assignment below
    ` + "```" + `
@@ -185,12 +185,12 @@ Given an expired token when accessing protected routes then return 401
 			Title: "Delegation Notes",
 			Content: `- Delegate the supervisor (and the workers it will coordinate) as **T1 frontier** assignments — the IMPL_PLAN phase benefits from the frontier tier for decomposition and review.
 - A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + `, the Pasture task IDs, and ` + "`" + `[[rec:show]]` + "`" + ` commands to fetch full requirements).
-- Do not spawn the supervisor via ` + "`" + `aura-swarm` + "`" + ` for the IMPL_PLAN phase; the deprecated orchestrator must not be invoked.`,
+- Do not spawn the supervisor for the IMPL_PLAN phase except through this handoff.`,
 		},
 		{
 			Id:    "arch-handoff-important",
 			Title: "IMPORTANT",
-			Content: "- **DO NOT** spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase — delegate it with the [[op:delegate_assignment]] operation\n" +
+			Content: "- **DO NOT** skip the handoff and spawn the supervisor for the IMPL_PLAN phase — delegate it with the [[op:delegate_assignment]] operation\n" +
 				"- **DO NOT** create implementation tasks yourself - the supervisor creates vertical slice tasks\n" +
 				"- **DO NOT** implement the plan yourself - your role is handoff and monitoring\n" +
 				"- **DO NOT** shut down a supervisor that appears idle right after spawn — it is usually running Explore subagents\n" +
@@ -200,7 +200,7 @@ Given an expired token when accessing protected routes then return 401
 		{
 			Id:      "arch-handoff-followup-lifecycle",
 			Title:   "Follow-up Lifecycle (h1 Reuse)",
-			Content: "This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL is ratified. In follow-up context:\n\n- **Storage:** the follow-up handoff is authored in its own HANDOFF Pasture task body (no filesystem path)\n- **References:** Include both original URD and FOLLOWUP_URD task IDs\n- **Context:** Summary of FOLLOWUP_PROPOSAL ratification and the user-DEFER'd UAT items the follow-up addresses\n- **Next step:** Supervisor creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks for the follow-up scope",
+			Content: "This handoff (h1: Architect → Supervisor) also occurs after FOLLOWUP_PROPOSAL is ratified. In follow-up context:\n\n- **Storage:** the follow-up handoff is authored in its own HANDOFF Pasture task body (no filesystem path)\n- **References:** Include both original URD and FOLLOWUP_URD task IDs\n- **Context:** Summary of FOLLOWUP_PROPOSAL ratification and the user-DEFER'd UAT items the follow-up addresses\n- **Next step:** Supervisor creates the follow-up plan and the follow-up slices for that scope",
 		},
 	},
 

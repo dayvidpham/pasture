@@ -20,22 +20,22 @@ import (
 // Keyed by FragmentId typed constant (must match the FragRef field used in
 // placement marker entries).
 //
-// SLICE-2 adds: FragRevVoteOptions (green-enabler; resolves the sole
+// adds: FragRevVoteOptions (green-enabler; resolves the sole
 // pre-existing same-id collision between reviewer-vote and reviewer skill
 // bodies). Canonical content per D3 (UAT-ratified): ACCEPT row = "All review
 // criteria satisfied; no BLOCKER items". Both consumer bodies carry fragRef
 // markers. Set keys MUST equal AllFragmentIds (validated by ValidateGlobalIds).
 //
-// SLICE-3 adds: 6 supervisor review-wave behavior fragments (FragSupReview*,
+// adds: 6 supervisor review-wave behavior fragments (FragSupReview*,
 // FragSupBlockerDualParent, FragSupDeferredFollowup,
 // FragSupFollowupEpicTiming) and 2 prose fragments (FragSupSeverityTree,
 // FragSupNamingConvention). These replace identical inline definitions in both
 // the supervisor and impl-review skill bodies, eliminating the last same-id
 // collision group. Canonical content = supervisor text.
 //
-// SLICE-1 (epoch improvements) adds: FragValidationCases (R6, wired into
-// user-elicit/user-uat/worker-implement bodies by SLICE-2) and FragReviewCleanExit
-// (R7, wired into supervisor/impl-review bodies by SLICE-3). It also renames
+// (epoch improvements) adds: FragValidationCases (R6, wired into
+// user-elicit/user-uat/worker-implement bodies) and FragReviewCleanExit
+// (R7, wired into supervisor/impl-review bodies). It also renames
 // FragSupImportantMinorFollowup -> FragSupDeferredFollowup (R7/A1): review
 // severities no longer feed FOLLOWUP; the FOLLOWUP epic is fed solely by
 // user-DEFER'd UAT items.
@@ -69,7 +69,7 @@ Binary only. No intermediate levels.`,
 		}
 	}(),
 
-	// ── SLICE-3 behavior fragments ─────────────────────────────────────────────
+	// ── supervisor review-wave behavior fragments ──────────────────────────────
 
 	FragSupReviewAllSlices: {
 		Id:   FragSupReviewAllSlices,
@@ -143,7 +143,7 @@ Binary only. No intermediate levels.`,
 		},
 	},
 
-	// ── SLICE-3 prose fragments ────────────────────────────────────────────────
+	// ── supervisor review-wave prose fragments ─────────────────────────────────
 
 	FragSupSeverityTree: func() SharedFragment {
 		// Naming Convention is embedded as an inline Subsection so that
@@ -151,26 +151,11 @@ Binary only. No intermediate levels.`,
 		// Sections list and still render ### Naming Convention (H3 via the template's
 		// Subsections iteration). The standalone FragSupNamingConvention fragment
 		// carries byte-identical content for supervisor's use as a sibling Subsection.
-		// See Part 6 of worker-b-SLICE-3-4-implplan.md for the full heading-level analysis.
+		// The heading-level analysis is why the naming section is a subsection here.
 		namingConvention := ProseSection{
-			Id:    string(FragSupNamingConvention),
-			Title: "Naming Convention",
-			Content: "```" + `
-WAVE-{W}-REVIEW-{axis}-{round}
-` + "```" + `
-
-Where axis = A (Correctness), B (Test quality), C (Elegance). Slice titles use ` + "`SLICE-{W}-{N}`" + `, where W is the wave and N is the slice within it.
-
-One review covers one whole wave. The review task lists every slice of that wave (for example, wave 1 holds ` + "`SLICE-1-1`" + `, ` + "`SLICE-1-2`" + `, and ` + "`SLICE-1-3`" + `), and one severity trio hangs under it — never one wave per reviewed slice.
-
-Examples:
-- ` + "`WAVE-1-REVIEW-A-1`" + ` — Reviewer A (Correctness), Round 1, wave 1
-- ` + "`WAVE-2-REVIEW-C-2`" + ` — Reviewer C (Elegance), Round 2, wave 2
-
-Severity groups:
-- ` + "`WAVE-1-REVIEW-A-1 BLOCKER`" + `
-- ` + "`WAVE-1-REVIEW-A-1 IMPORTANT`" + `
-- ` + "`WAVE-1-REVIEW-A-1 MINOR`",
+			Id:      string(FragSupNamingConvention),
+			Title:   "Naming Convention",
+			Content: "Name the review for one wave, one axis, and one round. Axis A is correctness, B is test quality, and C is elegance. List every slice of that wave on the review. Create one severity trio under it: blocker, important, and minor. Do not create one review per slice.\n\nThe first wave's correctness review, first round, has one blocker group, one important group, and one minor group. A later wave gets its own review.",
 		}
 		prose := ProseSection{
 			Id:    string(FragSupSeverityTree),
@@ -178,7 +163,7 @@ Severity groups:
 			Content: `Per [frag--sup-review-severity-groups], create ONE severity trio per wave, per axis, per round — not one per slice:
 
 ` + "```" + `bash
-# Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
+# Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER)
 BLOCKER_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
   --body "---
@@ -192,7 +177,6 @@ references:
 ---
 BLOCKER findings from Reviewer A (Correctness) on wave 1.")
 [[rec:label]] "$BLOCKER_ID_URI" pasture:severity:blocker
-[[rec:label]] "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
 IMPORTANT_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
   --body "---
@@ -206,7 +190,6 @@ references:
 ---
 IMPORTANT findings from Reviewer A (Correctness) on wave 1.")
 [[rec:label]] "$IMPORTANT_ID_URI" pasture:severity:important
-[[rec:label]] "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
 MINOR_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
   --body "---
@@ -220,7 +203,6 @@ references:
 ---
 MINOR findings from Reviewer A (Correctness) on wave 1.")
 [[rec:label]] "$MINOR_ID_URI" pasture:severity:minor
-[[rec:label]] "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review round task
 [[rec:block]] "${REVIEW_ROUND_ID_URI}" --by "$BLOCKER_ID_URI"
@@ -247,24 +229,9 @@ MINOR findings from Reviewer A (Correctness) on wave 1.")
 
 	FragSupNamingConvention: func() SharedFragment {
 		prose := ProseSection{
-			Id:    string(FragSupNamingConvention),
-			Title: "Naming Convention",
-			Content: "```" + `
-WAVE-{W}-REVIEW-{axis}-{round}
-` + "```" + `
-
-Where axis = A (Correctness), B (Test quality), C (Elegance). Slice titles use ` + "`SLICE-{W}-{N}`" + `, where W is the wave and N is the slice within it.
-
-One review covers one whole wave. The review task lists every slice of that wave (for example, wave 1 holds ` + "`SLICE-1-1`" + `, ` + "`SLICE-1-2`" + `, and ` + "`SLICE-1-3`" + `), and one severity trio hangs under it — never one wave per reviewed slice.
-
-Examples:
-- ` + "`WAVE-1-REVIEW-A-1`" + ` — Reviewer A (Correctness), Round 1, wave 1
-- ` + "`WAVE-2-REVIEW-C-2`" + ` — Reviewer C (Elegance), Round 2, wave 2
-
-Severity groups:
-- ` + "`WAVE-1-REVIEW-A-1 BLOCKER`" + `
-- ` + "`WAVE-1-REVIEW-A-1 IMPORTANT`" + `
-- ` + "`WAVE-1-REVIEW-A-1 MINOR`",
+			Id:      string(FragSupNamingConvention),
+			Title:   "Naming Convention",
+			Content: "Name the review for one wave, one axis, and one round. Axis A is correctness, B is test quality, and C is elegance. List every slice of that wave on the review. Create one severity trio under it: blocker, important, and minor. Do not create one review per slice.\n\nThe first wave's correctness review, first round, has one blocker group, one important group, and one minor group. A later wave gets its own review.",
 		}
 		return SharedFragment{
 			Id:    FragSupNamingConvention,
@@ -273,7 +240,7 @@ Severity groups:
 		}
 	}(),
 
-	// ── SLICE-4 prose fragment ─────────────────────────────────────────────────
+	// ── plan-review vote fragment ──────────────────────────────────────────────
 
 	// FragRevPlanVoteOptions is DISTINCT from FragRevVoteOptions (code review) by
 	// its final line: "Binary only. No severity tree for plan reviews."
@@ -299,7 +266,7 @@ Binary only. No severity tree for plan reviews.`,
 		}
 	}(),
 
-	// ── SLICE-1 (epoch improvements) behavior fragments ────────────────────────
+	// ── validation and review-exit behavior fragments ──────────────────────────
 
 	FragValidationCases: {
 		Id:   FragValidationCases,
@@ -327,7 +294,7 @@ Binary only. No severity tree for plan reviews.`,
 
 	FragModelPolicy: modelPolicyFragment(),
 
-	// ── SLICE-6: writing standard and signal capture ───────────────────────────
+	// ── writing standard and signal capture ────────────────────────────────────
 
 	// FragWritingStandard is the wording half of the writing standard.
 	// Consumers reference it through fragRef; none copies the text.

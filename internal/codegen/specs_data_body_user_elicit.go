@@ -71,7 +71,7 @@ var userElicitBody = SkillBody{
 		},
 		// R6: EVERY REQUEST elicits concrete validation cases during URE (generalized
 		// from fix-intent-only at v2-2). behaviorRef resolves to
-		// SharedFragmentSpecs[FragValidationCases] (SLICE-1) so the lifecycle renders
+		// SharedFragmentSpecs[FragValidationCases] so the lifecycle renders
 		// into the generated SKILL.md.
 		behaviorRef(FragValidationCases),
 	},

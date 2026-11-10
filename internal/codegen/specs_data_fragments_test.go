@@ -1,4 +1,4 @@
-// White-box tests for the SharedFragment registry mechanism (SLICE-1).
+// White-box tests for the SharedFragment registry mechanism.
 //
 // These tests exercise the production code paths directly:
 //   - fragRef / behaviorRef helper constructors
@@ -238,7 +238,7 @@ func TestResolveBodyFragments_NestedSubsections(t *testing.T) {
 // FragmentToOwnerRefs returns both owners in sorted order.
 //
 // This test drives FragmentToOwnerRefs via the REAL SkillBodySpecs (which
-// contains no markers in SLICE-1, producing an empty result). To verify the
+// contains no markers, producing an empty result). To verify the
 // inversion logic itself, we temporarily replace SkillBodySpecs with a fixture
 // map containing known markers using a helper that drives the same inversion
 // logic but against a supplied map.
@@ -276,16 +276,16 @@ func TestFragmentToOwnerRefs_SortedDeterministic(t *testing.T) {
 
 // TestFragmentToOwnerRefs_RealRegistryHasRevVoteOptionsMarkers verifies that
 // FragmentToOwnerRefs returns the expected owner map for the real SkillBodySpecs
-// after the SLICE-2 rev-vote-options dedup: both "reviewer" and "reviewer-vote"
+// after the rev-vote-options dedup: both "reviewer" and "reviewer-vote"
 // reference frag--rev-vote-options via placement markers.
 //
-// NOTE: In SLICE-1, when SharedFragmentSpecs was empty and no markers existed,
-// this map was expected to be empty. SLICE-2 introduces the first real markers.
+// NOTE: when SharedFragmentSpecs was empty and no markers existed,
+// this map was expected to be empty. The vote-options fragment introduces the first real markers.
 func TestFragmentToOwnerRefs_RealRegistryHasRevVoteOptionsMarkers(t *testing.T) {
 	result := FragmentToOwnerRefs()
 	owners, ok := result[FragRevVoteOptions]
 	require.True(t, ok,
-		"FragmentToOwnerRefs must include FragRevVoteOptions after SLICE-2 dedup")
+		"FragmentToOwnerRefs must include FragRevVoteOptions after the vote-options dedup")
 	assert.Equal(t, []string{"reviewer", "reviewer-vote"}, owners,
 		"frag--rev-vote-options owners must be sorted: reviewer before reviewer-vote")
 }

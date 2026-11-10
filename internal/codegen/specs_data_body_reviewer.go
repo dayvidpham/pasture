@@ -11,10 +11,10 @@ var reviewerBody = SkillBody{
 			Title: "Plan Review vs Code Review",
 			Content: `| Aspect | Plan Review (Phase 4) | Code Review (Phase 10) |
 |--------|-----------------------|------------------------|
-| Label | ` + "`pasture:p4-plan:s4-review`" + ` | ` + "`pasture:p10-impl:s10-review`" + ` |
+| Phase | plan review | code review |
 | Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
-| Naming | PROPOSAL-N-REVIEW-{axis}-{round} | WAVE-{W}-REVIEW-{axis}-{round} |
+| Naming | the proposal review | the wave review |
 | Focus | End-user alignment, MVP scope | Production code paths, severity findings |`,
 		},
 		{
@@ -45,7 +45,7 @@ var reviewerBody = SkillBody{
 			Content: `Reviewers also participate in the follow-up lifecycle:
 
 - **FOLLOWUP_PROPOSAL review (Phase 4):** Same procedure as standard plan review. Task naming: ` + "`FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`" + `. Binary ACCEPT/REVISE, no severity tree.
-- **FOLLOWUP_SLICE code review (Phase 10):** Same procedure as standard code review. Task naming: ` + "`FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`" + `. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
+- **Follow-up code review (Phase 10):** Same procedure as standard code review. Name the review for the follow-up slice, the axis, and the round. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
 - **Open findings converge at the end (no followup-of-followup):** findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review stay open past the wave gate and converge at the end — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.`,
 		},
 		{

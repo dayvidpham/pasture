@@ -80,7 +80,7 @@ Select the current registered author with "${EPOCH_REC}" whoami. It prints the a
 Per [frag--sup-review-severity-groups], create ONE severity trio per wave, per axis, per round — not one per slice:
 
 ```bash
-# Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
+# Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER)
 BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
   --body "---
@@ -94,7 +94,6 @@ references:
 ---
 BLOCKER findings from Reviewer A (Correctness) on wave 1.")
 "${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:severity:blocker
-"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
 IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
   --body "---
@@ -108,7 +107,6 @@ references:
 ---
 IMPORTANT findings from Reviewer A (Correctness) on wave 1.")
 "${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:severity:important
-"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
 MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
   --body "---
@@ -122,7 +120,6 @@ references:
 ---
 MINOR findings from Reviewer A (Correctness) on wave 1.")
 "${EPOCH_REC}" label "$MINOR_ID_URI" pasture:severity:minor
-"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review round task
 "${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$BLOCKER_ID_URI"
@@ -141,22 +138,9 @@ MINOR findings from Reviewer A (Correctness) on wave 1.")
 
 ### Naming Convention
 
-```
-WAVE-{W}-REVIEW-{axis}-{round}
-```
+Name the review for one wave, one axis, and one round. Axis A is correctness, B is test quality, and C is elegance. List every slice of that wave on the review. Create one severity trio under it: blocker, important, and minor. Do not create one review per slice.
 
-Where axis = A (Correctness), B (Test quality), C (Elegance). Slice titles use `SLICE-{W}-{N}`, where W is the wave and N is the slice within it.
-
-One review covers one whole wave. The review task lists every slice of that wave (for example, wave 1 holds `SLICE-1-1`, `SLICE-1-2`, and `SLICE-1-3`), and one severity trio hangs under it — never one wave per reviewed slice.
-
-Examples:
-- `WAVE-1-REVIEW-A-1` — Reviewer A (Correctness), Round 1, wave 1
-- `WAVE-2-REVIEW-C-2` — Reviewer C (Elegance), Round 2, wave 2
-
-Severity groups:
-- `WAVE-1-REVIEW-A-1 BLOCKER`
-- `WAVE-1-REVIEW-A-1 IMPORTANT`
-- `WAVE-1-REVIEW-A-1 MINOR`
+The first wave's correctness review, first round, has one blocker group, one important group, and one minor group. A later wave gets its own review.
 
 ## Dual-Parent BLOCKER Relationship
 
@@ -175,7 +159,6 @@ references:
   round: 1
 ---
 Missing error handling causes silent failure in auth flow.")
-"${EPOCH_REC}" label "$FINDING_ID" pasture:p10-impl:s10-review
 "${EPOCH_REC}" label "$FINDING_ID" pasture:finding
 
 # Wire dual-parent: finding blocks BOTH severity group AND slice
@@ -196,7 +179,6 @@ references:
   round: 1
 ---
 API calls should have configurable timeouts.")
-"${EPOCH_REC}" label "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
 "${EPOCH_REC}" label "$IMPORTANT_FINDING_ID" pasture:finding
 
 # Attaches to the IMPORTANT severity group (NOT the slice); its close rule is C-finding-lifecycle
@@ -205,22 +187,22 @@ API calls should have configurable timeouts.")
 
 ## Review Structure
 
-One review round covers one whole wave, never a single slice. Wave 1 holds SLICE-1-1, SLICE-1-2, and SLICE-1-3; each reviewer reviews all three together and creates ONE review title for the wave:
+One review round covers one whole wave, never a single slice. Wave 1 holds the first slice, the second slice, and the third slice; each reviewer reviews all three together and creates ONE review title for the wave:
 
 ```
-Wave 1: SLICE-1-1, SLICE-1-2, SLICE-1-3
+Wave 1: the first slice, the second slice, the third slice
   Reviewer A (Correctness): reviews the whole wave →
-    Creates: WAVE-1-REVIEW-A-1 (references: wave: 1, slices: SLICE-1-1, SLICE-1-2, SLICE-1-3)
+    Creates: the review (references: wave: 1, slices: the first slice, the second slice, the third slice)
     Each review has 3 severity groups (BLOCKER/IMPORTANT/MINOR)
 
   Reviewer B (Test quality): reviews the whole wave →
-    Creates: WAVE-1-REVIEW-B-1
+    Creates: the review
 
   Reviewer C (Elegance): reviews the whole wave →
-    Creates: WAVE-1-REVIEW-C-1
+    Creates: the review
 ```
 
-A later wave gets its own review titles (for example, wave 2 → WAVE-2-REVIEW-A-1). A wave never produces one title per reviewed slice.
+A later wave gets its own review titles (for example, wave 2 → the later review). A wave never produces one title per reviewed slice.
 
 ## Spawning Reviewers
 
@@ -236,7 +218,7 @@ URD: "${URD_ID_URI}" (read with "${EPOCH_REC}" show "${URD_ID_URI}" for user req
 Focus: Does implementation faithfully serve the user? Are technical decisions consistent with rationale?
 Review the whole wave: "${SLICE_1_1_ID_URI}", "${SLICE_1_2_ID_URI}", "${SLICE_1_3_ID_URI}"
 For each slice, run: "${EPOCH_REC}" show "${SLICE_ID_URI}"
-Create ONE severity trio (BLOCKER/IMPORTANT/MINOR) for the wave, listing every slice in its references. Title: WAVE-{W}-REVIEW-A-1
+Create ONE severity trio (BLOCKER/IMPORTANT/MINOR) for the wave, listing every slice in its references. Title: the review
 Call invoke_skill(/pasture:reviewer-review-code) for the review procedure.`
 }
 ```
@@ -257,8 +239,8 @@ Call invoke_skill(/pasture:reviewer-review-code) for the review procedure.`
 ## Slices to Review
 | Slice | Task ID | Description | Worker |
 |-------|---------|-------------|--------|
-| SLICE-1-1 | "${ID_URI}" | <description> | worker-1 |
-| SLICE-1-2 | "${ID_URI}" | <description> | worker-2 |
+| the first slice | "${ID_URI}" | <description> | worker-1 |
+| the second slice | "${ID_URI}" | <description> | worker-2 |
 
 ## Review Procedure
 1. For each slice: `"${EPOCH_REC}" show "${SLICE_ID_URI}"`
@@ -315,7 +297,7 @@ All reviews across all slices must be ACCEPT:
 
 ```bash
 # Check for any REVISE votes
-"${EPOCH_REC}" query --label="pasture:p10-impl:s10-review"
+"${EPOCH_REC}" query --phase code_review
 
 # Check for unresolved BLOCKERs
 "${EPOCH_REC}" query --label="pasture:severity:blocker" --status=open
@@ -374,10 +356,10 @@ FOLLOWUP epic (pasture:epic-followup)
         ├── frontmatter reference: FOLLOWUP_URD (living requirements document)
         └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
               └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
-                    ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
+                    ├── blocked-by: the first follow-up slice  (Phase 9)
                     │     ├── blocked-by: deferred-item-leaf-task-...
                     │     └── blocked-by: deferred-item-leaf-task-...
-                    └── blocked-by: FOLLOWUP_SLICE-2
+                    └── blocked-by: the second follow-up slice
 ```
 
 ```bash
@@ -406,7 +388,7 @@ Scoping URE: determine which user-DEFER'd UAT items to address.")
 
 ### Step 3: DEFER'd-item leaf adoption (dual-parent)
 
-When the supervisor creates FOLLOWUP_SLICE-N tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
+When the supervisor creates the follow-up slice tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
 
 ```bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
@@ -447,7 +429,7 @@ The follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-tim
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
-| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
+| 6 | h2 | Supervisor → Worker: the follow-up slice with DEFER'd-item leaf tasks |
 | 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
