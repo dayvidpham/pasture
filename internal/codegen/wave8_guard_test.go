@@ -186,11 +186,14 @@ func findDispositionEnumIncludesWontDo(values []disposition, guidance string) []
 	// A two-value phrasing anywhere is a finding, even when a compliant sentence
 	// elsewhere in the same body would satisfy the presence check. Whole-file
 	// presence alone let a compliant line mask a non-compliant one.
-	if match := twoValuePhrasing.FindString(guidance); match != "" {
+	if match := twoValuePhrasing.FindString(guidance); match != "" && !strings.Contains(guidance[strings.Index(guidance, match):], match+"/WON'T-DO") {
 		findings = append(findings, fmt.Sprintf("two-value disposition phrasing %q; why: the set has three members, so this teaches a rule the user rejected; where: a body containing %q; fix: name FIX-NOW, DEFER and WON'T-DO, or drop the clause", match, match))
 	}
 	if lower := strings.ToLower(guidance); strings.Contains(lower, "fix-now") || strings.Contains(lower, "won't-do") || strings.Contains(lower, "disposition") {
-		for _, value := range []disposition{fixNow, deferItem, wontDo} {
+		// The required set is the pinned oracle, not a literal here: deleting a
+		// member from this list would otherwise weaken the guard silently.
+		for _, name := range wantDispositions {
+			value := disposition(name)
 			if !value.valid() || !strings.Contains(guidance, string(value)) {
 				findings = append(findings, fmt.Sprintf("disposition %q missing; why: a body that names a disposition must name the closed set; where: %s; fix: render all three from the registry", value, guidanceSource(guidance)))
 			}

@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -54,73 +55,76 @@ func TestValidationCasesStateEveryStep(t *testing.T) {
 // TestQuestionRecordShapeIsStable proves a question's recorded fields are
 // declared once and can be serialised, so a dataset can be derived from what the
 // skills write.
-func TestQuestionRecordShapeIsStable(t *testing.T) {
-	require.NotEmpty(t, QuestionRecordFields, "the question record must declare its fields")
+// findQuestionRecordShape reports a record registry that cannot be read as a
+// dataset: an incomplete or duplicate field, a missing required name, or a shape
+// that does not serialise.
+func findQuestionRecordShape(fields []QuestionRecordField) []string {
+	var findings []string
+	if len(fields) == 0 {
+		return []string{"the question record declares no fields; why: a dataset cannot be derived from nothing; fix: declare the fields"}
+	}
 	seen := map[string]struct{}{}
-	for _, field := range QuestionRecordFields {
+	for _, field := range fields {
 		if field.Name == "" || field.Phrase == "" {
-			t.Errorf("a question record field is incomplete: %+v", field)
+			findings = append(findings, fmt.Sprintf("a question record field is incomplete: %+v", field))
+			continue
 		}
 		if _, ok := seen[field.Name]; ok {
-			t.Errorf("the question record declares %q twice", field.Name)
+			findings = append(findings, fmt.Sprintf("the question record declares %q twice", field.Name))
 		}
 		seen[field.Name] = struct{}{}
 	}
 	for _, required := range []string{"header", "question", "options", "multi"} {
 		if _, ok := seen[required]; !ok {
-			t.Errorf("the question record omits %q, so a derived dataset cannot read it", required)
+			findings = append(findings, fmt.Sprintf("the question record omits %q, so a derived dataset cannot read it", required))
 		}
 	}
 	if _, err := json.Marshal(seen); err != nil {
-		t.Fatalf("the question record shape is not serialisable: %v", err)
+		findings = append(findings, fmt.Sprintf("the question record shape is not serialisable: %v", err))
 	}
+	return findings
+}
+
+func TestQuestionRecordShapeIsStable(t *testing.T) {
+	assert.Empty(t, findQuestionRecordShape(QuestionRecordFields), "the shipped question record must be readable as a dataset")
 
 	defective := []QuestionRecordField{{Name: "header", Phrase: "the header"}}
-	defectiveSeen := map[string]struct{}{}
-	for _, field := range defective {
-		defectiveSeen[field.Name] = struct{}{}
-	}
-	missing := 0
-	for _, required := range []string{"header", "question", "options", "multi"} {
-		if _, ok := defectiveSeen[required]; !ok {
-			missing++
-		}
-	}
-	if missing == 0 {
-		t.Fatal("the defective sample must omit at least one required field")
+	if got := findQuestionRecordShape(defective); len(got) == 0 {
+		t.Fatal("a record registry missing three required fields and serialisable shape checks was accepted")
 	}
 }
 
 // TestSignalRecordShapeIsStable proves the signal line's declared field order is
 // the order the writer emits, and that every declared field is present.
+// findSignalRecordShape reports a signal line the writer emits that does not
+// match the declared registry field-for-field.
+func findSignalRecordShape(fields []SignalLineField, emitted map[string]any) []string {
+	var findings []string
+	if len(fields) == 0 {
+		return []string{"the signal line declares no fields; why: a dataset cannot count what it cannot name; fix: declare the fields"}
+	}
+	for _, field := range fields {
+		if _, ok := emitted[field.Field]; !ok {
+			findings = append(findings, fmt.Sprintf("the signal writer omits the declared field %q, so a derived dataset loses it", field.Field))
+		}
+	}
+	if len(emitted) != len(fields) {
+		findings = append(findings, fmt.Sprintf("the writer emits %d fields but the registry declares %d", len(emitted), len(fields)))
+	}
+	return findings
+}
+
 func TestSignalRecordShapeIsStable(t *testing.T) {
-	require.NotEmpty(t, SignalLineFields, "the signal line must declare its fields")
 	line := signalLine{Kind: "confusion", Phase: "elicit", Skill: "user-elicit", Entry: "e", Quote: "q"}
 	encoded, err := json.Marshal(line)
 	require.NoError(t, err)
-	var decoded map[string]any
-	require.NoError(t, json.Unmarshal(encoded, &decoded))
-	for _, field := range SignalLineFields {
-		if _, ok := decoded[field.Field]; !ok {
-			t.Errorf("the signal writer omits the declared field %q, so a derived dataset loses it", field.Field)
-		}
-	}
-	if len(decoded) != len(SignalLineFields) {
-		t.Errorf("the writer emits %d fields but the registry declares %d", len(decoded), len(SignalLineFields))
-	}
-	// Defective sample: a line built without the registry's fields must not
-	// satisfy the same check.
+	var emitted map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &emitted))
+	assert.Empty(t, findSignalRecordShape(SignalLineFields, emitted), "the shipped signal line must match its registry")
+
 	var sparse map[string]any
-	if err := json.Unmarshal([]byte(`{"kind":"confusion"}`), &sparse); err != nil {
-		t.Fatal(err)
-	}
-	sparseMissing := 0
-	for _, field := range SignalLineFields {
-		if _, ok := sparse[field.Field]; !ok {
-			sparseMissing++
-		}
-	}
-	if sparseMissing != len(SignalLineFields)-1 {
-		t.Fatalf("the defective sample must omit all but one declared field, omitted %d", sparseMissing)
+	require.NoError(t, json.Unmarshal([]byte(`{"kind":"confusion"}`), &sparse))
+	if got := findSignalRecordShape(SignalLineFields, sparse); len(got) == 0 {
+		t.Fatal("a line emitting one of five declared fields was accepted")
 	}
 }

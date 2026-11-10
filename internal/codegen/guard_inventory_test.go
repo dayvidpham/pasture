@@ -66,8 +66,31 @@ func guardFindings(guard string, files map[string]*ast.File, fset *token.FileSet
 	var findings []string
 	asserted := false
 	skipped := false
+	firstAssert := -1
+	firstReturn := -1
+	// A return inside a closure (a WalkDir callback, say) is not the guard
+	// returning early, so collect the closure ranges and skip those returns.
+	var closures [][2]token.Pos
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if lit, ok := n.(*ast.FuncLit); ok {
+			closures = append(closures, [2]token.Pos{lit.Pos(), lit.End()})
+		}
+		return true
+	})
+	inClosure := func(pos token.Pos) bool {
+		for _, span := range closures {
+			if pos >= span[0] && pos <= span[1] {
+				return true
+			}
+		}
+		return false
+	}
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		switch node := n.(type) {
+		case *ast.ReturnStmt:
+			if firstReturn < 0 && !inClosure(node.Pos()) {
+				firstReturn = fset.Position(node.Pos()).Offset
+			}
 		case *ast.CallExpr:
 			switch callee := node.Fun.(type) {
 			case *ast.SelectorExpr:
@@ -75,6 +98,9 @@ func guardFindings(guard string, files map[string]*ast.File, fset *token.FileSet
 				// testify: assert.* and require.* are assertions whatever the method.
 				if isIdent && (receiver.Name == "assert" || receiver.Name == "require") {
 					asserted = true
+					if firstAssert < 0 {
+						firstAssert = fset.Position(node.Pos()).Offset
+					}
 				}
 				// t.Error*/Fatal* only on the test receiver: err.Error() is not an
 				// assertion, and counting it made the meta-guard report a guard
@@ -82,6 +108,9 @@ func guardFindings(guard string, files map[string]*ast.File, fset *token.FileSet
 				if isIdent && receiver.Name == "t" {
 					if _, ok := assertionCalls[callee.Sel.Name]; ok {
 						asserted = true
+						if firstAssert < 0 {
+							firstAssert = fset.Position(node.Pos()).Offset
+						}
 					}
 				}
 				if callee.Sel.Name == "Skip" || callee.Sel.Name == "Skipf" {
@@ -97,6 +126,9 @@ func guardFindings(guard string, files map[string]*ast.File, fset *token.FileSet
 	})
 	if skipped {
 		findings = append(findings, "guard "+guard+" calls t.Skip — why: a skipped guard proves nothing and the suite stays green; where: the guard body; fix: make the guard run, or remove it from the inventory")
+	}
+	if asserted && firstReturn >= 0 && firstReturn < firstAssert {
+		findings = append(findings, "guard "+guard+" returns before it asserts — why: the assertion after the return never runs on that path, so the guard can pass without checking anything; where: the guard body; fix: assert before returning, or remove the early return")
 	}
 	if !asserted {
 		findings = append(findings, "guard "+guard+" contains no assertion call — why: a body that compares and returns cannot fail; where: the guard body; fix: assert the finding, do not just compute it")
@@ -156,6 +188,7 @@ var otherGuardFileTests = map[string]string{
 	"TestHandoffBindingsNameRequiredFields":       "sample test for the binding-field guard",
 	"TestGuardInventoryRejectsAnEmptyBody":        "sample test for the meta-guard",
 	"TestGuardInventoryRejectsAnUnclassifiedTest": "sample test for the completeness check",
+	"TestGuardInventoryRejectsAnEarlyReturn":      "sample test for the early-return check",
 }
 
 // TestGuardInventory proves every named guard exists and asserts something. The
@@ -197,17 +230,34 @@ func TestGuardInventory(t *testing.T) {
 // TestGuardInventoryRejectsAnEmptyBody is the meta-guard's own sample: an
 // inventory entry whose function has no assertion must be reported.
 func TestGuardInventoryRejectsAnEmptyBody(t *testing.T) {
-	empty, err := parser.ParseFile(token.NewFileSet(), "empty_test.go", "package codegen\n\nimport \"testing\"\n\nfunc TestEmptyGuard(t *testing.T) {\n\t_ = t\n}\n", 0)
+	// One FileSet for parsing and checking: offsets from two FileSets do not
+	// compare, and a sample that mixed them could never fail.
+	fset := token.NewFileSet()
+	empty, err := parser.ParseFile(fset, "empty_test.go", "package codegen\n\nimport \"testing\"\n\nfunc TestEmptyGuard(t *testing.T) {\n\t_ = t\n}\n", 0)
 	require.NoError(t, err)
 	files := map[string]*ast.File{"empty_test.go": empty}
-	got := guardFindings("TestEmptyGuard", files, token.NewFileSet())
+	got := guardFindings("TestEmptyGuard", files, fset)
 	if len(got) == 0 {
 		t.Fatal("a guard with an empty body was accepted")
 	}
 	assert.Contains(t, strings.Join(got, "\n"), "no assertion")
 
-	if found := guardFindings("TestAbsentGuard", files, token.NewFileSet()); len(found) == 0 {
+	if found := guardFindings("TestAbsentGuard", files, fset); len(found) == 0 {
 		t.Fatal("an inventory entry with no function was accepted")
+	}
+}
+
+// TestGuardInventoryRejectsAnEarlyReturn proves the early-return check: a guard
+// that returns before its only assertion must be reported.
+func TestGuardInventoryRejectsAnEarlyReturn(t *testing.T) {
+	fset := token.NewFileSet()
+	src := "package codegen\n\nimport \"testing\"\n\nfunc TestEarly(t *testing.T) {\n\tif t == nil {\n\t\treturn\n\t}\n\tt.Error(\"late\")\n}\n"
+	file, err := parser.ParseFile(fset, "early_test.go", src, 0)
+	require.NoError(t, err)
+	got := guardFindings("TestEarly", map[string]*ast.File{"early_test.go": file}, fset)
+	joined := strings.Join(got, "\n")
+	if !strings.Contains(joined, "returns before it asserts") {
+		t.Fatalf("an early return before the assertion was accepted: %q", joined)
 	}
 }
 
