@@ -13,6 +13,29 @@ body {
   min-height: 100vh;
 }
 
+.rs-main {
+  padding-inline: var(--sp-5);
+  container-type: inline-size;
+}
+
+/* The upstream stretched flex item fills the page, preventing sticky travel. */
+.rs-rail {
+  align-self: flex-start;
+  height: calc(100vh - var(--sp-5) * 2);
+}
+
+.rs-rail-card {
+  max-height: 100%;
+}
+
+@media (min-width: 1280px) {
+  .rs-rail { width: 480px; flex: 0 0 480px; }
+}
+
+@media (min-width: 1600px) {
+  .rs-rail { width: 560px; flex: 0 0 560px; }
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -541,7 +564,7 @@ body {
   font-size: var(--fs-label);
 }
 
-@media (max-width: 880px) {
+@container (max-width: 48rem) {
   .hero {
     grid-template-columns: 1fr;
     align-items: start;
@@ -551,9 +574,10 @@ body {
     justify-content: flex-start;
   }
 
-  .detail-list > div {
-    grid-template-columns: 5.5rem minmax(0, 1fr);
-  }
+}
+
+@media (max-width: 880px) {
+  .detail-list > div { grid-template-columns: 5.5rem minmax(0, 1fr); }
 }
 
 .section-meta {

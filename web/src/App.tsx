@@ -1221,7 +1221,7 @@ export default function App() {
           <RailSection title="epochs" icon={Waypoints} meta={String(epochs.length)}>
             {epochs.length === 0 ? (
               <p className="rail-copy muted">
-                no projected epochs in this store. sessions can still appear as unbound.
+                no epochs are projected in this store; session rows still show their own epoch binding when one is recorded.
               </p>
             ) : (
               <div className="epoch-list">

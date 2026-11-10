@@ -86,15 +86,15 @@ test.beforeEach(async ({ page }) => {
 
 test.afterEach(async () => { expect(errors).toEqual([]) })
 
-async function mockAPI(page: Page) {
-  await page.route('**/api/v1/inspect', route => route.fulfill({ json: snapshot }))
+async function mockAPI(page: Page, sessions = [session]) {
+  await page.route('**/api/v1/inspect', route => route.fulfill({ json: { ...snapshot, sessions } }))
   await page.route('**/api/v1/sessions/*/*/transcript', route => route.fulfill({ json: transcript }))
   await page.route('**/api/v1/sessions/*/*/execution**', route => route.fulfill({ json: { revision: 1, asOf: snapshot.asOf, items: [execution] } }))
   await page.routeWebSocket('**/api/v1/ws', ws => {
     ws.send(JSON.stringify({ type: 'ready', topics: [] }))
     ws.onMessage(message => {
       const { topic } = JSON.parse(String(message))
-      ws.send(JSON.stringify({ type: topic, revision: 1, asOf: snapshot.asOf, payload: { items: topic === 'sessions' ? [session] : [] } }))
+      ws.send(JSON.stringify({ type: topic, revision: 1, asOf: snapshot.asOf, payload: { items: topic === 'sessions' ? sessions : [] } }))
     })
   })
 }
@@ -166,7 +166,8 @@ for (const theme of ['light', 'dark'] as const) {
         for (const node of rule.nodes) {
           const target = node.target.join(' >> ')
           const locator = page.locator(target).first()
-          await locator.scrollIntoViewIfNeeded()
+          // Center each sample so the sticky toolbar cannot obscure its pixels.
+          await locator.evaluate(el => el.scrollIntoView({ block: 'center', inline: 'nearest' }))
           const focused = await new AxeBuilder({ page }).include(node.target[0]).withRules(['color-contrast']).analyze()
           const violation = focused.violations.flatMap(rule => rule.nodes).find(item => item.target.join(' >> ') === target)
           const incomplete = focused.incomplete.flatMap(rule => rule.nodes).find(item => item.target.join(' >> ') === target)
@@ -230,3 +231,51 @@ for (const width of [1280, 420]) {
     expect(focus.outline !== 'none' || focus.shadow !== 'none').toBeTruthy()
   })
 }
+
+test('desktop layout keeps a wide internally scrollable rail visible', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const sessions = Array.from({ length: 40 }, (_, i) => ({ ...session, nativeSessionId: `synthetic-${i}` }))
+  await mockAPI(page, sessions)
+  await page.goto(origin)
+  await expect(page.getByText('no epochs are projected in this store; session rows still show their own epoch binding when one is recorded.').first()).toBeVisible()
+  const main = page.locator('.rs-main')
+  const rail = page.locator('.rs-rail')
+  await expect(page.getByRole('button', { name: 'synthetic-0' })).toBeVisible()
+  await page.getByRole('button', { name: 'synthetic-0' }).click()
+  await expect(page.locator('.rs-rail .transcript-host')).toBeVisible()
+  const before = await rail.boundingBox()
+  expect(before!.width).toBeGreaterThanOrEqual(400)
+  const padding = await main.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))
+  expect(padding).toBeGreaterThanOrEqual(12)
+  expect((await page.locator('.hero h1').boundingBox())!.width).toBeGreaterThan(100)
+  await page.evaluate(() => window.scrollTo(0, 1000))
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(900)
+  const after = await rail.boundingBox()
+  const card = await page.locator('.rs-rail-card').evaluate(el => {
+    const initial = el.scrollTop
+    el.scrollTop = 100
+    return { height: el.clientHeight, scrollHeight: el.scrollHeight, scrollTop: el.scrollTop, initial }
+  })
+  const dimensions = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth, scrollY: window.scrollY }))
+  console.log('desktop layout', { before, after, padding, card, dimensions })
+  expect(after!.y).toBeGreaterThanOrEqual(0)
+  expect(after!.y + after!.height).toBeLessThanOrEqual(800)
+  expect(card.scrollHeight).toBeGreaterThan(card.height)
+  expect(card.scrollTop).toBeGreaterThan(card.initial)
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width)
+})
+
+test('mobile layout preserves the sheet without horizontal overflow', async ({ page }) => {
+  await page.setViewportSize({ width: 420, height: 800 })
+  await mockAPI(page)
+  await page.goto(origin)
+  await expect(page.locator('.rs-rail')).toBeHidden()
+  await expect(page.locator('.rs-sheet')).toBeVisible()
+  const toggle = page.locator('.rs-sheet-toggle')
+  await toggle.click()
+  await expect(page.locator('.rs-sheet-body')).toBeVisible()
+  const dimensions = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth, padding: parseFloat(getComputedStyle(document.querySelector('.rs-main')!).paddingLeft) }))
+  console.log('mobile layout', dimensions)
+  expect(dimensions.padding).toBeGreaterThanOrEqual(12)
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width)
+})
