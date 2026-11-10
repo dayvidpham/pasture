@@ -957,83 +957,34 @@ UAT_ID_URI=$(${EPOCH_REC} create --kind task --title "UAT: Plan acceptance" --ph
      Mapping from protocol documentation files to the entities they cover.
        ═══════════════════════════════════════════════════════════════════════ -->
   <documents>
-    <document id="doc-readme" path="protocol/README.md" purpose="Protocol entry point and quick-start guide">
+    <document id="doc-readme" path="protocol/README.md" purpose="Protocol index">
       <covers>
-        <entity type="phase" depth="overview" refs="p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12"></entity>
-        <entity type="label" depth="schema-summary" refs="all"></entity>
+        <entity type="phase" depth="index" refs="all"></entity>
       </covers>
     </document>
-    <document id="doc-claude" path="protocol/CLAUDE.md" purpose="Core agent directive: philosophy, constraints, roles, label schema">
+    <document id="doc-claude" path="protocol/CLAUDE.md" purpose="Agent directive">
       <covers>
-        <entity type="phase" depth="summary" refs="p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12"></entity>
-        <entity type="role" depth="summary" refs="architect,reviewer,supervisor,worker"></entity>
-        <entity type="label" depth="full" refs="all"></entity>
-        <entity type="constraint" depth="full" refs="all-protocol"></entity>
-        <entity type="task-title" depth="full" refs="all"></entity>
-        <entity type="handoff" depth="summary" refs="h1,h2,h3,h4,h5,h6"></entity>
-        <entity type="severity" depth="full" refs="BLOCKER,IMPORTANT,MINOR"></entity>
-        <entity type="review-axis" depth="summary" refs="axis-correctness,axis-test_quality,axis-elegance"></entity>
+        <entity type="role" depth="index" refs="epoch"></entity>
       </covers>
     </document>
-    <document id="doc-constraints" path="protocol/CONSTRAINTS.md" purpose="Coding standards, checklists, severity definitions, naming conventions">
+    <document id="doc-constraints" path="protocol/CONSTRAINTS.md" purpose="Constraint index">
       <covers>
-        <entity type="constraint" depth="full" refs="all"></entity>
-        <entity type="severity" depth="full" refs="BLOCKER,IMPORTANT,MINOR"></entity>
-        <entity type="vote" depth="full" refs="ACCEPT,REVISE"></entity>
-        <entity type="label" depth="schema" refs="all"></entity>
-        <entity type="task-title" depth="full" refs="all"></entity>
+        <entity type="constraint" depth="index" refs="all"></entity>
       </covers>
     </document>
-    <document id="doc-process" path="protocol/PROCESS.md" purpose="Step-by-step workflow execution (single source of truth)">
+    <document id="doc-process" path="protocol/PROCESS.md" purpose="Phase index and workflow anchors">
       <covers>
-        <entity type="phase" depth="full" refs="p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12"></entity>
-        <entity type="substep" depth="full" refs="all"></entity>
-        <entity type="role" depth="tools-matrix" refs="architect,reviewer,supervisor,worker"></entity>
-        <entity type="command" depth="tools-matrix" refs="all"></entity>
-        <entity type="label" depth="full" refs="all"></entity>
-        <entity type="transition" depth="full" refs="all"></entity>
-        <entity type="severity" depth="full" refs="BLOCKER,IMPORTANT,MINOR"></entity>
+        <entity type="phase" depth="index" refs="all"></entity>
       </covers>
     </document>
-    <document id="doc-agents" path="protocol/AGENTS.md" purpose="Role taxonomy: phases owned, tools, handoffs per agent">
+    <document id="doc-agents" path="protocol/AGENTS.md" purpose="Role and phase index">
       <covers>
-        <entity type="role" depth="full" refs="epoch,architect,reviewer,supervisor,worker"></entity>
-        <entity type="phase" depth="role-mapping" refs="all"></entity>
-        <entity type="command" depth="role-mapping" refs="all"></entity>
-        <entity type="handoff" depth="full" refs="h1,h2,h3,h4,h5,h6"></entity>
-        <entity type="review-axis" depth="full" refs="axis-correctness,axis-test_quality,axis-elegance"></entity>
+        <entity type="role" depth="index" refs="epoch,architect,reviewer,supervisor,worker"></entity>
       </covers>
     </document>
-    <document id="doc-skills" path="protocol/SKILLS.md" purpose="Command reference: all /pasture:* skills mapped to phase and role">
+    <document id="doc-skills" path="protocol/SKILLS.md" purpose="Skill and role index">
       <covers>
-        <entity type="command" depth="full" refs="all"></entity>
-        <entity type="phase" depth="command-mapping" refs="all"></entity>
-        <entity type="role" depth="command-mapping" refs="all"></entity>
-        <entity type="label" depth="command-creates" refs="all"></entity>
-        <entity type="review-axis" depth="summary" refs="axis-correctness,axis-test_quality,axis-elegance"></entity>
-      </covers>
-    </document>
-    <document id="doc-handoff" path="protocol/HANDOFF_TEMPLATE.md" purpose="Standardized template for 6 actor-change transitions">
-      <covers>
-        <entity type="handoff" depth="full" refs="h1,h2,h3,h4,h5,h6"></entity>
-        <entity type="role" depth="handoff-fields" refs="architect,supervisor,worker,reviewer"></entity>
-      </covers>
-    </document>
-    <document id="doc-migration" path="protocol/MIGRATION_v1_to_v2.md" purpose="Label and title migration from v1 to v2">
-      <covers>
-        <entity type="label" depth="v1-v2-mapping" refs="all"></entity>
-        <entity type="task-title" depth="v1-v2-mapping" refs="all"></entity>
-        <entity type="vote" depth="v1-v2-mapping" refs="ACCEPT,REVISE"></entity>
-      </covers>
-    </document>
-    <document id="doc-uat-template" path="protocol/UAT_TEMPLATE.md" purpose="User Acceptance Test structured output template">
-      <covers>
-        <entity type="phase" depth="template" refs="p5,p11"></entity>
-      </covers>
-    </document>
-    <document id="doc-uat-example" path="protocol/UAT_EXAMPLE.md" purpose="Worked UAT example">
-      <covers>
-        <entity type="phase" depth="example" refs="p5"></entity>
+        <entity type="command" depth="index" refs="all"></entity>
       </covers>
     </document>
     <document id="doc-schema" path="schema.xml" purpose="Generated machine-readable protocol projection (BCNF)">

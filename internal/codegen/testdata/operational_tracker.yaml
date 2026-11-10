@@ -6,7 +6,7 @@
   text: "\nRun `env bd ready`.\n"
 - name: raw document old classified owner
   owner: raw
-  file: skills/protocol/UAT_EXAMPLE.md
+  file: skills/protocol/README.md
   text: "\n## Current operations\nRun `bd ready`.\n"
 - name: new operational file
   owner: raw

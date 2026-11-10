@@ -14,6 +14,4 @@ The generated skills own the procedure. The documents here point at those skills
 | [SKILLS.md](SKILLS.md) | The command skills |
 | [CONSTRAINTS.md](CONSTRAINTS.md) | The role skill that renders the constraint |
 | [CLAUDE.md](CLAUDE.md) | The epoch skill |
-| [HANDOFF_TEMPLATE.md](HANDOFF_TEMPLATE.md) | architect-handoff |
-| [UAT_TEMPLATE.md](UAT_TEMPLATE.md) | user-uat |
 | [MR_TEMPLATE.md](MR_TEMPLATE.md) | supervisor-commit |

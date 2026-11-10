@@ -266,7 +266,7 @@ Use the Phase 1 findings to identify:
 			Id:    "user-elicit-create-task",
 			Title: "Creating the Elicit Task (s2_1)",
 			Content: `After survey completion, capture the full Q&A record using the same structured
-format as [UAT_TEMPLATE.md](../protocol/UAT_TEMPLATE.md). Each question must
+format in [user-uat](../user-uat/SKILL.md). Each question must
 include the exact question text, ALL options with their descriptions, and the
 user's verbatim response. When a definition, code snippet, or example was shown
 to the user before a question, capture it verbatim in a **Definition/code shown:**

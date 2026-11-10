@@ -417,14 +417,14 @@ func TestNamespaceAsksTheBackend(t *testing.T) {
 		require.Equal(t, "file://"+physicalPwd(t, dir), pastureNS)
 	})
 
-	t.Run("no-origin-subdirectory-does-not-split", func(t *testing.T) {
+	t.Run("no-origin-subdirectory-matches-pasture", func(t *testing.T) {
 		dir := initRepoWithoutOrigin(t)
 		sub := filepath.Join(dir, "nested")
 		require.NoError(t, os.Mkdir(sub, 0o755))
 		ledgerNS := createdNamespace(t, bin, sub, "ledger", "")
-		require.Equal(t, "file://"+physicalPwd(t, dir), ledgerNS,
-			"a ledger write from a subdirectory must use the work-tree root, not the caller's cwd")
-		require.NotEqual(t, "file://"+physicalPwd(t, sub), ledgerNS)
+		pastureNS := createdNamespace(t, bin, sub, "pasture", "")
+		require.Equal(t, "file://"+physicalPwd(t, sub), pastureNS)
+		require.Equal(t, pastureNS, ledgerNS, "both backends use the caller's working directory")
 	})
 
 	t.Run("explicit-header-wins", func(t *testing.T) {

@@ -483,9 +483,8 @@ func insertAfterShebang(script, extra string) string {
 // Pasture is not given a copy: it derives when the adapter omits --namespace.
 const namespaceDeriveShell = `# derive_namespace is the one ledger normalisation. Forms: git@host:path,
 # ssh://, git://, http://, https:// and user@host:path. An empty remote inside
-# a git work tree is file:// of the work-tree root, so a subdirectory does not
-# split the namespace. Outside a work tree it is file:// of the physical
-# working directory. PASTURE_NAMESPACE matches the value Pasture uses when
+# a git work tree is file:// of the physical working directory, matching
+# Pasture. PASTURE_NAMESPACE matches the value Pasture uses when
 # --namespace is omitted.
 derive_namespace() {
   if [ -n "${PASTURE_NAMESPACE:-}" ]; then
@@ -495,10 +494,7 @@ derive_namespace() {
   remote=$(git remote get-url origin 2>/dev/null || true)
   remote=$(printf '%s' "$remote" | tr -d '\r\n')
   if [ -z "$remote" ]; then
-    dir=$(git rev-parse --show-toplevel 2>/dev/null || true)
-    if [ -z "$dir" ]; then
-      dir=$(pwd -P 2>/dev/null || pwd)
-    fi
+    dir=$(pwd -P 2>/dev/null || pwd)
     printf 'file://%s\n' "$dir"
     return 0
   fi

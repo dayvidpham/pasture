@@ -84,6 +84,7 @@ var userUatBody = SkillBody{
 	},
 
 	Sections: []ProseSection{
+		{Id: "uat-acceptance-template", Title: "Acceptance Template", Content: "Ground the question in an earlier turn, ask one decision, and record the user’s words verbatim."},
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
 		fragRef(FragWritingStandard),

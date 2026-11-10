@@ -49,7 +49,9 @@ var architectHandoffBody = SkillBody{
 		{
 			Id:    "arch-handoff-template",
 			Title: "Handoff Template",
-			Content: `Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (no filesystem path; the task body IS the handoff).
+			Content: `Include request, requirements, proposal, and plan references, key decisions, open items, and acceptance criteria.
+
+Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (no filesystem path; the task body IS the handoff).
 
 ` + "```" + `markdown
 # Handoff: Architect → Supervisor
