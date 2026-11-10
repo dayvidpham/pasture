@@ -64,6 +64,7 @@ var architectHandoffBody = SkillBody{
      request: "${REQUEST_ID_URI}"
      urd: "${URD_ID_URI}"
      proposal: "${RATIFIED_PROPOSAL_ID_URI}"
+     ratified_plan: "${RATIFIED_PLAN_ID_URI}"
    ---
    # Handoff: Architect → Supervisor
    <full handoff body per the template above>")
@@ -179,23 +180,49 @@ Given an expired token when accessing protected routes then return 401
 	Recipes: []RecipeBlock{},
 }
 
-// archHandoffTemplate renders the handoff body's sections from the h1
-// HandoffSpec, so the required-field list has one home (the registry that the
-// architect skill's handoff table also renders) and the template cannot drift
-// from it.
+// handoffReference is one handoff field the body binds as a task URI, with the
+// shell variable that carries it. The template and the create step both render
+// from this list, so a field cannot be named without a variable to fill it.
+type handoffReference struct {
+	Field string
+	Var   string
+}
+
+var handoffReferences = []handoffReference{
+	{Field: "request", Var: "REQUEST_ID_URI"},
+	{Field: "urd", Var: "URD_ID_URI"},
+	{Field: "proposal", Var: "RATIFIED_PROPOSAL_ID_URI"},
+	{Field: "ratified-plan", Var: "RATIFIED_PLAN_ID_URI"},
+}
+
+// archHandoffTemplate renders the handoff body from the h1 HandoffSpec: the
+// reference fields become bound URIs with a read command, the rest become
+// sections. One registry feeds this template, the architect skill's table and
+// the create step's frontmatter.
 func archHandoffTemplate() string {
 	spec := HandoffSpecs["h1"]
 	var b strings.Builder
 	b.WriteString("Use the required handoff fields in [architect](../architect/SKILL.md). ")
-	b.WriteString("That skill renders the list from the handoff registry; this template's sections are rendered from the same registry.\n\n")
+	b.WriteString("That skill renders the list from the handoff registry; this template renders from the same registry.\n\n")
 	b.WriteString("Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (no filesystem path; the task body IS the handoff).\n\n")
 	b.WriteString("```markdown\n# Handoff: Architect → Supervisor\n\n")
 	b.WriteString("## Supervisor Startup\n")
 	b.WriteString("1. Call `[[op:invoke_skill]](/pasture:supervisor)` to load your role instructions\n")
 	b.WriteString("2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed\n")
-	b.WriteString("3. Read the RATIFIED PROPOSAL and URD before you fill the body; the Steps section shows the commands\n")
+	b.WriteString("3. Read each reference under References with the command beside it, before you plan\n")
 	b.WriteString("4. Every vertical slice MUST have leaf tasks — any number, named after the real work units\n")
+	b.WriteString("\n## References\n")
+	for _, ref := range handoffReferences {
+		b.WriteString("- " + handoffFieldHeading(ref.Field) + ": \"${" + ref.Var + "}\" — read with `\"${EPOCH_REC}\" show \"${" + ref.Var + "}\"`\n")
+	}
+	bound := map[string]struct{}{}
+	for _, ref := range handoffReferences {
+		bound[ref.Field] = struct{}{}
+	}
 	for _, field := range spec.RequiredFields {
+		if _, ok := bound[field]; ok {
+			continue
+		}
 		b.WriteString("\n## " + handoffFieldHeading(field) + "\n<" + field + ">\n")
 	}
 	b.WriteString("```\n")

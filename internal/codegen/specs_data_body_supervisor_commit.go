@@ -2,6 +2,8 @@
 // Ported from aura-plugins/skills/supervisor-commit/SKILL.md.
 package codegen
 
+import "strings"
+
 var supervisorCommitBody = SkillBody{
 	Preamble: `**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-12-landing)** <- Phase 12`,
 
@@ -80,15 +82,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ` + "```" + ``,
 		},
 		{
-			Id:    "sup-commit-merge-request",
-			Title: "Merge Request Description",
-			Content: `A merge request description states three things, and nothing else belongs in it:
-
-- What changed, in one sentence.
-- How it was verified, naming the command.
-- What was not done, if anything remains.
-
-Do not put an internal task code in the title or the body.`,
+			Id:      "sup-commit-merge-request",
+			Title:   "Merge Request Description",
+			Content: mergeRequestDescription(),
 		},
 		{
 			Id:    "sup-commit-commands",
@@ -104,4 +100,30 @@ git agent-commit -m "..."
 	},
 
 	Recipes: []RecipeBlock{},
+}
+
+// MRDescriptionField is one required line of a merge request description.
+type MRDescriptionField struct {
+	Id   string
+	Text string
+}
+
+// MRDescriptionFields is the one declaration of what a merge request
+// description states. The landing skill renders it, and a guard asserts both
+// ends, so the section cannot be deleted or emptied silently.
+var MRDescriptionFields = []MRDescriptionField{
+	{Id: "what-changed", Text: "What changed, in one sentence."},
+	{Id: "how-verified", Text: "How it was verified, naming the command."},
+	{Id: "what-remains", Text: "What was not done, if anything remains."},
+}
+
+// mergeRequestDescription renders the merge-request section from the registry.
+func mergeRequestDescription() string {
+	var b strings.Builder
+	b.WriteString("A merge request description states these fields, and nothing else belongs in it:\n\n")
+	for _, field := range MRDescriptionFields {
+		b.WriteString("- " + field.Text + "\n")
+	}
+	b.WriteString("\nDo not put an internal task code in the title or the body.")
+	return b.String()
 }

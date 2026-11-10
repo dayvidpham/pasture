@@ -281,7 +281,7 @@ Plan ratified and user has approved proceeding with implementation.
 
 ## Handoff Template
 
-Use the required handoff fields in [architect](../architect/SKILL.md). That skill renders the list from the handoff registry; this template's sections are rendered from the same registry.
+Use the required handoff fields in [architect](../architect/SKILL.md). That skill renders the list from the handoff registry; this template renders from the same registry.
 
 Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (no filesystem path; the task body IS the handoff).
 
@@ -291,20 +291,14 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 ## Supervisor Startup
 1. Call `Skill(/pasture:supervisor)` to load your role instructions
 2. Spawn ephemeral Explore subagents with the Agent tool when codebase exploration is needed
-3. Read the RATIFIED PROPOSAL and URD before you fill the body; the Steps section shows the commands
+3. Read each reference under References with the command beside it, before you plan
 4. Every vertical slice MUST have leaf tasks — any number, named after the real work units
 
-## Request
-<request>
-
-## URD
-<urd>
-
-## Proposal
-<proposal>
-
-## Ratified Plan
-<ratified-plan>
+## References
+- Request: "${REQUEST_ID_URI}" — read with `"${EPOCH_REC}" show "${REQUEST_ID_URI}"`
+- URD: "${URD_ID_URI}" — read with `"${EPOCH_REC}" show "${URD_ID_URI}"`
+- Proposal: "${RATIFIED_PROPOSAL_ID_URI}" — read with `"${EPOCH_REC}" show "${RATIFIED_PROPOSAL_ID_URI}"`
+- Ratified Plan: "${RATIFIED_PLAN_ID_URI}" — read with `"${EPOCH_REC}" show "${RATIFIED_PLAN_ID_URI}"`
 
 ## Context
 <context>
@@ -330,6 +324,7 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
      request: "${REQUEST_ID_URI}"
      urd: "${URD_ID_URI}"
      proposal: "${RATIFIED_PROPOSAL_ID_URI}"
+     ratified_plan: "${RATIFIED_PLAN_ID_URI}"
    ---
    # Handoff: Architect → Supervisor
    <full handoff body per the template above>")

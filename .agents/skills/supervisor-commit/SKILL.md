@@ -101,7 +101,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## Merge Request Description
 
-A merge request description states three things, and nothing else belongs in it:
+A merge request description states these fields, and nothing else belongs in it:
 
 - What changed, in one sentence.
 - How it was verified, naming the command.

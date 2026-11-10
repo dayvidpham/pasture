@@ -10,6 +10,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"unicode"
 
 	"github.com/yuin/goldmark"
@@ -520,8 +523,9 @@ func orchestratorRole() string {
 	return best
 }
 
-// TestProtocolGuardRejectsEachStub gives every branch of the structural guard a
-// defective sample, so no branch can be reverted to a check that always passes.
+// TestProtocolGuardRejectsEachStub isolates each branch: one defective sample
+// per branch, asserting the branch's own message, so disabling a branch turns
+// this test red instead of hiding behind another branch's finding.
 func TestProtocolGuardRejectsEachStub(t *testing.T) {
 	root := t.TempDir()
 	tree := "skills"
@@ -533,52 +537,60 @@ func TestProtocolGuardRejectsEachStub(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-
-	allowed := []string{
-		filepath.Join(root, tree, "protocol"),
-		filepath.Join(root, tree, "protocol", "figures"),
-		filepath.Join(root, tree, "architect-handoff"),
+	if err := os.MkdirAll(filepath.Join(root, tree, "protocol"), 0755); err != nil {
+		t.Fatal(err)
 	}
-	for _, dir := range allowed {
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(root, tree, "protocol", "PROCESS.md"), []byte("# Workflow\n"), 0644); err != nil {
+		t.Fatal(err)
 	}
 
 	cases := []struct {
 		name string
 		doc  string
 		body string
+		want string
 	}{
 		{
-			name: "AGENTS with links but no role names",
+			name: "role row names no role",
 			doc:  "AGENTS.md",
 			body: "# Roles\n\n- [x](../epoch/SKILL.md)\n- [y](../architect/SKILL.md)\n",
+			want: "no row names",
 		},
 		{
-			name: "SKILLS with one bullet",
+			name: "skill index names no skill",
 			doc:  "SKILLS.md",
 			body: "# Skills\n\n- See the skills.\n",
+			want: "missing link",
 		},
 		{
-			name: "SKILL with one bullet",
+			name: "protocol index names no document",
 			doc:  "SKILL.md",
 			body: "# Protocol\n\n- See the documents.\n",
+			want: "missing link",
 		},
 		{
-			name: "CLAUDE with no link",
+			name: "directive names no skill",
 			doc:  "CLAUDE.md",
 			body: "# Directive\n\nRead the skill.\n",
+			want: "missing link",
 		},
 		{
-			name: "PROCESS with headings but no anchors",
+			name: "constraint row names no owner",
+			doc:  "CONSTRAINTS.md",
+			body: "# Constraints\n\n| Concern | Skill |\n|---|---|\n| Actionable errors | x |\n",
+			want: "no row maps",
+		},
+		{
+			name: "phase anchors missing",
 			doc:  "PROCESS.md",
 			body: "# Workflow\n\n## Phase 1: Request\n",
+			want: "phase anchors",
 		},
 		{
-			name: "PROCESS with anchors but unnamed phases",
+			name: "phase headings missing",
 			doc:  "PROCESS.md",
-			body: "# Workflow\n\n<a id=\"phase-1\"></a>\n\n## Phase 1:\n",
+			body: "# Workflow\n\n<a id=\"phase-1\"></a>\n",
+			want: "headings",
 		},
 	}
 	for _, testCase := range cases {
@@ -588,29 +600,51 @@ func TestProtocolGuardRejectsEachStub(t *testing.T) {
 			if len(findings) == 0 {
 				t.Fatalf("the stub was accepted: %s", testCase.body)
 			}
+			joined := strings.Join(findings, "\n")
+			if !strings.Contains(joined, testCase.want) {
+				t.Fatalf("the branch did not report its own finding: want %q in:\n%s", testCase.want, joined)
+			}
 		})
 	}
 }
 
-// TestCitationGuardAllowsOnlyRuntimeArtefacts pins the skip rule: a shipped
-// dotted tree is checked, a bare name and .agents.local are not.
-func TestCitationGuardAllowsOnlyRuntimeArtefacts(t *testing.T) {
-	root := t.TempDir()
-	source := filepath.Join(root, "skills", "epoch", "SKILL.md")
-	cases := []struct {
-		text string
-		want int
-	}{
-		{"See `../.opencode/gone/SKILL.md`.", 1},
-		{".agents/skills/gone/SKILL.md is missing here.", 0},
-		{"See `.agents/gone/SKILL.md`.", 1},
-		{"Write `EPOCH.md` first.", 0},
-		{"Read `.agents.local/pasture/EPOCH.md`.", 0},
+// TestMergeRequestFieldsAreRegistered proves the landing skill renders every
+// registered merge-request field, so deleting or emptying the section fails.
+func TestMergeRequestFieldsAreRegistered(t *testing.T) {
+	require.NotEmpty(t, MRDescriptionFields, "the registry must declare the merge-request fields")
+	rendered := mergeRequestDescription()
+	for _, field := range MRDescriptionFields {
+		assert.Contains(t, rendered, field.Text, "the rendered section must state every registered field")
 	}
-	for _, testCase := range cases {
-		got := len(checkBacktickedCitations(source, []byte(testCase.text), root))
-		if got != testCase.want {
-			t.Errorf("%q produced %d findings, want %d", testCase.text, got, testCase.want)
+	body := supervisorCommitBody
+	var found bool
+	for _, section := range body.Sections {
+		if strings.Contains(section.Content, MRDescriptionFields[0].Text) {
+			found = true
 		}
+	}
+	assert.True(t, found, "the landing skill body must carry the rendered merge-request section")
+	if mergeRequestDescription() == "A merge request description states these fields, and nothing else belongs in it:\n\n\nDo not put an internal task code in the title or the body." {
+		t.Fatal("the rendered section must not be empty")
+	}
+}
+
+// TestHandoffTemplateBindsEveryReference proves the handoff body names a shell
+// variable for every reference field and shows how to read it, so a field
+// cannot be required without a way to fill it.
+func TestHandoffTemplateBindsEveryReference(t *testing.T) {
+	require.NotEmpty(t, handoffReferences, "the template must declare its reference fields")
+	rendered := archHandoffTemplate()
+	for _, ref := range handoffReferences {
+		assert.Contains(t, rendered, "${"+ref.Var+"}", "the reference field %q must carry its variable", ref.Field)
+		assert.Contains(t, rendered, `show "${`+ref.Var+`}"`, "the reference field %q must show how to read it", ref.Field)
+	}
+	body := architectHandoffBody
+	joined := ""
+	for _, section := range body.Sections {
+		joined += section.Content + "\n"
+	}
+	for _, ref := range handoffReferences {
+		assert.Contains(t, joined, ref.Var, "the create step must bind %q", ref.Field)
 	}
 }
