@@ -271,6 +271,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/transcripts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Peasant session ids that have a durable transcript
+         * @description Prefers a read-only list of ingested session ids from the Peasant database when project enrichment has opened that database. That list is complete, so an id absent from items has no durable transcript and truncated is false. subagents is the subset of items whose Peasant parent_id is set. When no database catalog is available, the route falls back to a bounded, read-only `peasant sessions list --json` and reuses a successful result briefly so repeated reads do not spawn a process each time. On that fallback, truncated is true when the list filled its page: an id absent from items is then not evidence that Peasant has no transcript, and subagents contains only the parented ids on that page (parentSessionId). Items and subagents are native session ids. The revision and asOf use the same certified session-cache read as the other session routes. A source failure is 503, which the console treats as unknown rather than none.
+         */
+        get: operations["listTranscripts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ws": {
         parameters: {
             query?: never;
@@ -574,6 +594,18 @@ export interface components {
          * @enum {string}
          */
         StateBasis: "none" | "prompt" | "inactivity" | "explicit-end";
+        TranscriptCatalog: {
+            /** Format: date-time */
+            asOf: string;
+            /** @description Peasant session ids that have a durable transcript. When truncated is false, an id absent from this list has no durable transcript. When truncated is true, absence is not that evidence. */
+            items: string[];
+            /** Format: int64 */
+            revision: number;
+            /** @description Native session ids in items whose Peasant parent is set. On a truncated CLI page this is only the parented ids that page printed. */
+            subagents: string[];
+            /** @description True when the backing list filled its page. The console must not treat an absent id as having no transcript while this is true. */
+            truncated: boolean;
+        };
         /** @description The durable Peasant SessionDetailPayload document, proxied unchanged. Pasture guarantees only the identity fields; every other field belongs to the shared @peasant-labs/schema session contract and is validated by the browser. */
         TranscriptPayload: {
             harness: string;
@@ -1629,6 +1661,53 @@ export interface operations {
                 };
             };
             /** @description This serve process has no configurable Peasant source */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+        };
+    };
+    listTranscripts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptCatalog"];
+                };
+            };
+            /** @description Non-loopback Host or Origin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The session store could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorEnvelope"];
+                };
+            };
+            /** @description The peasant executable is absent, the catalog could not be read, or the session cache is stale */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -13,6 +13,95 @@ body {
   min-height: 100vh;
 }
 
+.rs-main {
+  padding-inline: var(--sp-5);
+  container-type: inline-size;
+}
+
+/* The upstream stretched flex item fills the page, preventing sticky travel. */
+.rs-rail {
+  align-self: flex-start;
+  height: calc(100vh - var(--sp-5) * 2);
+}
+
+.rs-rail-card {
+  max-height: 100%;
+}
+
+@media (min-width: 1280px) {
+  .rs-rail { width: 480px; flex: 0 0 480px; }
+}
+
+@media (min-width: 1600px) {
+  .rs-rail { width: 560px; flex: 0 0 560px; }
+}
+
+/* Slide the desktop rail out instead of unmounting it. visibility:hidden is
+   delayed until the slide finishes and applies only to .rs-rail, which is what
+   takes those controls out of the tab order. The sheet renders the same
+   children and must not inherit that hide. */
+.rs-rail {
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rs-rail {
+    transition:
+      transform var(--dur-3) var(--ease-in-out),
+      opacity var(--dur-3) var(--ease-in-out),
+      flex-basis var(--dur-3) var(--ease-in-out),
+      width var(--dur-3) var(--ease-in-out),
+      visibility 0s linear 0s;
+  }
+
+  .rs.rs--rail-collapsed .rs-rail {
+    transition:
+      transform var(--dur-3) var(--ease-in-out),
+      opacity var(--dur-3) var(--ease-in-out),
+      flex-basis var(--dur-3) var(--ease-in-out),
+      width var(--dur-3) var(--ease-in-out),
+      visibility 0s linear var(--dur-3);
+  }
+}
+
+.rs.rs--rail-collapsed .rs-frame {
+  gap: 0;
+}
+
+.rs.rs--rail-collapsed .rs-rail {
+  transform: translateX(100%);
+  opacity: 0;
+  width: 0;
+  flex: 0 0 0;
+  min-width: 0;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.rail-toggle {
+  min-height: var(--target-min);
+  padding: 0 var(--sp-2);
+  border: var(--bd);
+  background: transparent;
+  color: var(--ink-2);
+  font: var(--fs-label) / var(--lh-mono) var(--font-mono);
+  text-transform: lowercase;
+  cursor: pointer;
+}
+
+.rail-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* The sheet owns details below this width. The desktop toggle is a no-op there. */
+@container rs-shell (width <= 560px) {
+  .rail-toggle {
+    display: none;
+  }
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -39,11 +128,19 @@ body {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* The title track keeps at least 18.75rem (300px) when the row is wide
+     enough. min(100%, …) lets a narrower container use the full row instead
+     of overflowing. The meta track must be allowed to shrink: an auto track
+     sizes to the connection pill and can collapse the title track to 0. */
+  grid-template-columns: minmax(min(100%, 18.75rem), 1fr) minmax(0, max-content);
   align-items: end;
   gap: var(--sp-6);
   padding: var(--sp-6) 0 var(--sp-5);
   border-bottom: var(--bd);
+}
+
+.hero > :first-child {
+  min-width: 0;
 }
 
 .hero h1 {
@@ -61,12 +158,31 @@ body {
   font: var(--fs-body)/var(--lh-body) var(--font-body);
 }
 
+.hero .lede {
+  max-width: none;
+}
+
 .hero-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--sp-3);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.theme-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.theme-control [role='status'] {
+  color: var(--ink-2);
+  font: var(--fs-sm)/var(--lh-body) var(--font-body);
 }
 
 .mono-meta {
@@ -337,7 +453,6 @@ body {
 
 .peasant-switch:disabled {
   cursor: default;
-  opacity: 0.6;
 }
 
 .peasant-switch-track {
@@ -529,9 +644,34 @@ body {
   font-size: var(--fs-label);
 }
 
-@media (max-width: 880px) {
+.transcript-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--ink-strong);
+  font: var(--fs-label)/var(--lh-mono) var(--font-mono);
+}
+
+/* A drawn check, not a symbol-only text node: a lone check mark is not text
+   axe can measure, and an unmeasured contrast node is not a pass. */
+.transcript-mark[data-availability='available']::before {
+  content: "";
+  width: 0.4em;
+  height: 0.7em;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translateY(-0.05em);
+}
+
+.transcript-mark[data-availability='none']::before {
+  content: "";
+  width: 0.7em;
+  border-bottom: 2px solid currentColor;
+}
+
+@container (max-width: 72rem) {
   .hero {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     align-items: start;
   }
 
@@ -539,9 +679,10 @@ body {
     justify-content: flex-start;
   }
 
-  .detail-list > div {
-    grid-template-columns: 5.5rem minmax(0, 1fr);
-  }
+}
+
+@media (max-width: 880px) {
+  .detail-list > div { grid-template-columns: 5.5rem minmax(0, 1fr); }
 }
 
 .section-meta {
@@ -723,7 +864,7 @@ body {
 }
 
 .state-basis {
-  color: var(--ink-5);
+  color: var(--ink-2);
   font-size: 0.72rem;
   letter-spacing: 0.02em;
 }
@@ -733,13 +874,9 @@ body {
   margin-top: 1rem;
 }
 
-.execution-summary[data-empty='true'] {
-  opacity: 0.85;
-}
-
 .attribution-source {
   display: block;
-  color: var(--ink-5);
+  color: var(--ink-2);
   font-size: 0.72rem;
 }
 
@@ -753,7 +890,7 @@ body {
 }
 
 .execution-list li {
-  border: 1px solid var(--line);
+  border: var(--bd);
   border-radius: 6px;
   padding: 0.5rem 0.6rem;
 }
@@ -771,7 +908,7 @@ body {
   margin-top: 0.5rem;
   background: none;
   border: 0;
-  color: var(--accent);
+  color: var(--ink);
   cursor: pointer;
   font: inherit;
   padding: 0;
@@ -779,9 +916,25 @@ body {
 }
 
 .link-button:disabled {
-  color: var(--ink-5);
+  color: var(--ink-2);
   cursor: default;
   text-decoration: none;
 }
 
 .detail-list dd.muted { color: var(--ink-3); }
+
+/* A transcript is a destination, not a sidebar: constrain the viewer's own
+   scroller while allowing the page header to wrap on narrow screens. */
+.transcript-page {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-5);
+}
+
+.transcript-identity { overflow-wrap: anywhere; }
+.transcript-page .transcript-host {
+  width: 100%;
+  box-sizing: border-box;
+  height: max(28rem, calc(100vh - 14rem));
+}

@@ -20,10 +20,17 @@ import (
 // API across origins, and Pasture must stay the only origin the console talks
 // to.
 
-// TranscriptSource exports one durable Peasant transcript. Production uses the
-// Peasant CLI adapter; tests inject a fake so no test mutates PATH.
+// TranscriptSource exports one durable Peasant transcript and lists the session
+// ids that have one. Production uses the Peasant CLI adapter; tests inject a
+// fake so no test mutates PATH.
 type TranscriptSource interface {
 	ExportTranscript(ctx context.Context, harness, sessionID string) (*TranscriptExport, error)
+	// AvailableSessions returns Peasant session ids that have a durable
+	// transcript and the subset whose parentSessionId is set. truncated is
+	// true when the list filled its page: an id that is absent is then not
+	// evidence of no transcript, and subagents is only the parented ids on
+	// that page.
+	AvailableSessions(ctx context.Context) (ids []string, subagents []string, truncated bool, err error)
 }
 
 // TranscriptExport is a validated durable transcript ready to stream. Content
@@ -85,6 +92,23 @@ type peasantSource struct {
 // NewHandler: `peasant` on PATH under the exporter's bounded timeout.
 func newPeasantTranscriptSource() TranscriptSource {
 	return &peasantSource{source: peasantexport.NewSource()}
+}
+
+func (s *peasantSource) AvailableSessions(ctx context.Context) ([]string, []string, bool, error) {
+	if s == nil || s.source == nil {
+		return nil, nil, false, fmt.Errorf("%w: the transcript source has no Peasant CLI adapter; restart `pasture serve`, then retry", ErrTranscriptSourceUnavailable)
+	}
+	listed, err := s.source.ListSessions(ctx)
+	if err != nil {
+		return nil, nil, false, mapPeasantExportError(err)
+	}
+	if listed.IDs == nil {
+		listed.IDs = []string{}
+	}
+	if listed.Subagents == nil {
+		listed.Subagents = []string{}
+	}
+	return listed.IDs, listed.Subagents, listed.Truncated, nil
 }
 
 func (s *peasantSource) ExportTranscript(ctx context.Context, harness, sessionID string) (*TranscriptExport, error) {

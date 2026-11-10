@@ -556,6 +556,25 @@ func (s *Service) peasantIntegrationState() PeasantIntegration {
 	}
 }
 
+// ReadRevision returns the certified session-cache revision and the read
+// instant. It uses the same freshness check as the other session reads, so a
+// dirty or outdated cache is refused instead of being stamped onto a catalog.
+func (s *Service) ReadRevision(ctx context.Context) (int64, time.Time, error) {
+	if s == nil || s.DB == nil {
+		return 0, time.Time{}, fmt.Errorf("session API has no database handle; start `pasture serve` against a readable store, then retry")
+	}
+	if err := s.validateWindows(); err != nil {
+		return 0, time.Time{}, err
+	}
+	now := s.now()
+	tx, revision, err := s.beginEnsuredSessionRead(ctx)
+	if err != nil {
+		return 0, time.Time{}, err
+	}
+	_ = tx.Rollback()
+	return revision, now, nil
+}
+
 func (s *Service) now() time.Time {
 	if s.Now == nil {
 		return time.Now().UTC()

@@ -3,7 +3,12 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
 import { BindingHistory } from './App'
+import { ReadOnlyTranscriptViewer } from './ReadOnlyTranscriptViewer'
 import { ApiError } from './api'
+import syntheticTranscript from './testdata/synthetic-transcript.json'
+
+// Synthetic fixture shape follows Fairtrade's transcript adapter contract
+// example (src/ui/transcript/adapter.contract.type-test.js); all text is invented.
 import {
   adaptTranscriptPayload,
   describeTranscriptError,
@@ -30,6 +35,25 @@ const VALID_PAYLOAD = {
 }
 
 describe('adaptTranscriptPayload', () => {
+  it('preserves a synthetic nonempty transcript through the real parser and adapter', () => {
+    const model = adaptTranscriptPayload(syntheticTranscript)
+    expect(model.turns[0].content).toContain('Synthetic user')
+    expect(model.turns[1].content).toContain('Synthetic assistant')
+    expect(model.toolCallsById.get('synthetic-tool-1')?.output).toBe('Synthetic tool result: hello.')
+  })
+
+  it.each(['light', 'dark'] as const)('renders the real read-only viewer in %s', (theme) => {
+    const html = renderToStaticMarkup(createElement(ReadOnlyTranscriptViewer, {
+      viewModel: adaptTranscriptPayload(syntheticTranscript),
+      theme,
+      openTools: { 'synthetic-tool-1': true },
+    }))
+    expect(html).toContain('Synthetic user')
+    expect(html).toContain('Synthetic assistant')
+    expect(html).toContain('greeting.txt')
+    expect(html).toContain('Synthetic tool result')
+    expect(html).toContain(`data-theme="${theme}"`)
+  })
   it('cooks a valid durable SessionDetailPayload through the schema boundary', () => {
     const viewModel = adaptTranscriptPayload(VALID_PAYLOAD)
 

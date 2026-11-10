@@ -77,6 +77,10 @@ import (
 
 func main() {
 	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "sessions" {
+		listSessions(args)
+		return
+	}
 	var session, outDir string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -168,6 +172,46 @@ func main() {
 		write("ok.json", payload)
 	default:
 		write(session+".json", payload)
+	}
+}
+
+func listSessions(args []string) {
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "executable:", err)
+		os.Exit(2)
+	}
+	recorded, err := json.Marshal(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "argv:", err)
+		os.Exit(2)
+	}
+	if err := os.WriteFile(exe+".argv", recorded, 0o600); err != nil {
+		fmt.Fprintln(os.Stderr, "argv write:", err)
+		os.Exit(2)
+	}
+	data, err := os.ReadFile(exe + ".list.json")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "fixture:", err)
+		os.Exit(2)
+	}
+	count, err := os.OpenFile(exe+".count", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "count:", err)
+		os.Exit(2)
+	}
+	if _, err := count.Write([]byte("x")); err != nil {
+		fmt.Fprintln(os.Stderr, "count write:", err)
+		_ = count.Close()
+		os.Exit(2)
+	}
+	if err := count.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "count close:", err)
+		os.Exit(2)
+	}
+	if _, err := os.Stdout.Write(data); err != nil {
+		fmt.Fprintln(os.Stderr, "stdout:", err)
+		os.Exit(2)
 	}
 }
 `

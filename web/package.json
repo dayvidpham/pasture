@@ -1,16 +1,19 @@
 {
   "dependencies": {
-    "@peasant-labs/fairtrade": "0.0.31",
+    "@peasant-labs/fairtrade": "0.0.60",
     "@peasant-labs/schema": "0.31.0",
     "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.65.0",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "happy-dom": "20.8.4",
     "openapi-typescript": "^7.13.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.5",
@@ -19,11 +22,12 @@
   "name": "@dayvidpham/pasture-web",
   "private": true,
   "scripts": {
-    "build": "tsc --noEmit \u0026\u0026 vite build",
+    "build": "tsc --noEmit && vite build",
     "dev": "vite",
     "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.7.0.json -o src/generated/api.ts",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser": "playwright test"
   },
   "type": "module",
   "version": "0.0.32"

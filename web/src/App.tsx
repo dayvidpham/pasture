@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react'
 import {
   Activity,
   Clock3,
-  Database,
   Folder,
   Radio,
   RefreshCw,
@@ -20,8 +19,14 @@ import {
   Select,
   StatGrid,
   StatusDot,
-  TranscriptViewer,
+  useToast,
 } from '@peasant-labs/fairtrade/ui'
+import { listRoute, parseRoute, sessionRoute } from './route'
+import { ReadOnlyTranscriptViewer } from './ReadOnlyTranscriptViewer'
+import { createThemeController, parseThemePreference, type ThemeSnapshot } from './theme'
+
+const serverTheme: ThemeSnapshot = { preference: 'system', resolvedTheme: 'dark', persistence: 'available' }
+const getServerTheme = () => serverTheme
 
 import {
   bindProject,
@@ -29,6 +34,7 @@ import {
   fetchInspect,
   fetchProject,
   fetchTranscript,
+  fetchTranscriptCatalog,
   setPeasantEnrichment,
   socketURL,
   subscribe,
@@ -58,6 +64,16 @@ import {
   type TranscriptFailure,
   type TranscriptViewModel,
 } from './transcript'
+import {
+  missingTranscriptMessage,
+  sessionVisible,
+  shouldRefetchTranscriptCatalog,
+  transcriptAvailability,
+  transcriptMark,
+  transcriptToastDurationMs,
+  type SessionScope,
+  type TranscriptCatalogView,
+} from './transcriptCatalog'
 import {
   epochLabel,
   formatTimelineDuration,
@@ -103,16 +119,6 @@ type TranscriptState =
   | { status: 'ready'; key: string; viewModel: TranscriptViewModel }
   | { status: 'error'; key: string; failure: TranscriptFailure }
 
-// The console is a read-only observer: labelling, editing, contributing,
-// visibility changes, and export belong to producers with their own authority.
-const READ_ONLY_TRANSCRIPT_CAPABILITIES = {
-  canEdit: false,
-  canLabel: false,
-  canContribute: false,
-  canChangeVisibility: false,
-  canExport: false,
-} as const
-
 type SessionRow = {
   id: string
   harness: string
@@ -135,11 +141,15 @@ const STATE_COLOR: Record<string, string> = {
   active: 'var(--success)',
   idle: 'var(--warning)',
   ended: 'var(--ink-4)',
-  unknown: 'var(--ink-5)',
+  unknown: 'var(--ink-2)',
 }
 
 function sessionKey(session: SessionView): string {
-  return `${session.harness}/${session.nativeSessionId}`
+  return sessionIdentity(session.harness, session.nativeSessionId)
+}
+
+function sessionIdentity(harness: string, nativeId: string): string {
+  return JSON.stringify([harness, nativeId])
 }
 
 function formatTime(value?: string | null): string {
@@ -713,6 +723,16 @@ export function ProjectMappingPanel({
 }
 
 export default function App() {
+  const toast = useToast()
+  const [themeController] = useState(createThemeController)
+  const { preference, resolvedTheme, persistence } = useSyncExternalStore(themeController.subscribe, themeController.getSnapshot, getServerTheme)
+  const [themeSelected, setThemeSelected] = useState(false)
+  const themeId = useId()
+  useEffect(() => {
+    if (typeof document === 'undefined') return
+    document.documentElement.dataset.theme = resolvedTheme
+    document.documentElement.style.colorScheme = resolvedTheme
+  }, [preference, resolvedTheme])
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [epochs, setEpochs] = useState<EpochView[]>([])
   const [revision, setRevision] = useState(0)
@@ -722,12 +742,21 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [truncated, setTruncated] = useState(false)
   const [stateFilter, setStateFilter] = useState<StateFilter>('all')
+  const [sessionScope, setSessionScope] = useState<SessionScope>('roots')
+  const [railOpen, setRailOpen] = useState(true)
   const [epochFilter, setEpochFilter] = useState<string | null>(null)
   const [projectFilter, setProjectFilter] = useState<string | null>(null)
   const [peasantIntegration, setPeasantIntegration] = useState<PeasantIntegration | null>(null)
   const [peasantBusy, setPeasantBusy] = useState(false)
   const [peasantError, setPeasantError] = useState<string | null>(null)
+  const [route, setRoute] = useState(() => parseRoute(typeof window === 'undefined' ? '' : window.location.hash))
+  useEffect(() => {
+    const onHashChange = () => setRoute(parseRoute(window.location.hash))
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [transcriptCatalog, setTranscriptCatalog] = useState<TranscriptCatalogView>({ status: 'loading' })
   const [transcript, setTranscript] = useState<TranscriptState>({ status: 'idle' })
   const [transcriptRetry, setTranscriptRetry] = useState(0)
   const [transcriptLeftRail, setTranscriptLeftRail] = useState(false)
@@ -775,13 +804,31 @@ export default function App() {
     }
   }, [])
 
+  const loadCatalog = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const catalog = await fetchTranscriptCatalog(signal)
+      if (signal?.aborted) return
+      setTranscriptCatalog({
+        status: 'ready',
+        ids: new Set(catalog.items),
+        subagents: new Set(catalog.subagents),
+        truncated: catalog.truncated,
+      })
+    } catch {
+      if (signal?.aborted) return
+      setTranscriptCatalog((current) => (current.status === 'ready' ? current : { status: 'error' }))
+    }
+  }, [])
+
   const togglePeasant = useCallback(
     async (enabled: boolean) => {
       peasantBusyRef.current = true
       setPeasantBusy(true)
       setPeasantError(null)
+      let settingsChanged = false
       try {
         const updated = await setPeasantEnrichment(enabled)
+        settingsChanged = true
         setPeasantIntegration(updated)
         // Project fields live on the session views, so reload the inspect
         // snapshot after the switch changes.
@@ -791,11 +838,15 @@ export default function App() {
           error instanceof Error ? error.message : 'the local API did not answer',
         )
       } finally {
+        // Enable and disable both change which catalog the server can answer.
+        // Refresh after the settings call succeeds, even when the inspect
+        // reload failed, so a first CLI 503 does not stay painted as unknown.
+        if (settingsChanged) await loadCatalog()
         peasantBusyRef.current = false
         setPeasantBusy(false)
       }
     },
-    [load],
+    [load, loadCatalog],
   )
 
   useEffect(() => {
@@ -803,6 +854,31 @@ export default function App() {
     void load(controller.signal)
     return () => controller.abort()
   }, [load])
+
+  // The mount effect owns the first catalog read. A later read runs when the
+  // socket leaves `disconnected`, and after a successful enrichment toggle.
+  // The initial connecting -> live is not a reconnect.
+  // shouldRefetchTranscriptCatalog is the reconnect rule. A failed refresh
+  // keeps the last complete catalog; only the first failure leaves every row
+  // unknown.
+  useEffect(() => {
+    const controller = new AbortController()
+    void loadCatalog(controller.signal)
+    return () => controller.abort()
+  }, [loadCatalog])
+
+  const previousConnection = useRef<Connection>(connection)
+  const catalogReconnect = useRef<AbortController | null>(null)
+  useEffect(() => {
+    const previous = previousConnection.current
+    previousConnection.current = connection
+    if (!shouldRefetchTranscriptCatalog(previous, connection)) return
+    catalogReconnect.current?.abort()
+    const controller = new AbortController()
+    catalogReconnect.current = controller
+    void loadCatalog(controller.signal)
+  }, [connection, loadCatalog])
+  useEffect(() => () => catalogReconnect.current?.abort(), [])
 
   useEffect(() => {
     let closed = false
@@ -884,6 +960,7 @@ export default function App() {
     const filtered = sessions.filter((session) => {
       if (stateFilter !== 'all' && session.activity.state !== stateFilter) return false
       if (epochFilter && session.epoch?.id !== epochFilter) return false
+      if (!sessionVisible(session.nativeSessionId, transcriptCatalog, sessionScope)) return false
       return true
     })
     return filterSessionsByProject(filtered, activeProject).map((session) => ({
@@ -904,7 +981,7 @@ export default function App() {
       lastSeen: formatTime(session.activity.lastSeen),
       lastSeenSort: session.activity.lastSeen ? Date.parse(session.activity.lastSeen) || 0 : 0,
     }))
-  }, [sessions, stateFilter, epochFilter, activeProject])
+  }, [sessions, stateFilter, epochFilter, activeProject, transcriptCatalog, sessionScope])
 
   const selectedSession = useMemo(
     () => sessions.find((session) => sessionKey(session) === selectedId) ?? null,
@@ -916,15 +993,15 @@ export default function App() {
   const selectedProjectHash = selectedSession?.projectHash ?? null
   const selectedMapping = projectMappingForSelection(projectMapping, selectedProjectHash)
 
-  const selectedHarness = selectedSession?.harness
-  const selectedNativeId = selectedSession?.nativeSessionId
-  const transcriptKey = selectedSession ? sessionKey(selectedSession) : null
+  const selectedHarness = route.kind === 'session' ? route.harness : selectedSession?.harness
+  const selectedNativeId = route.kind === 'session' ? route.nativeSessionId : selectedSession?.nativeSessionId
+  const transcriptKey = selectedHarness && selectedNativeId ? sessionIdentity(selectedHarness, selectedNativeId) : null
 
   // Fetch once per selected session, not on every WebSocket snapshot: the
   // stable identity strings are the dependencies, so live revision updates
   // never restart the Peasant export.
   useEffect(() => {
-    if (!selectedHarness || !selectedNativeId || !transcriptKey) {
+    if (route.kind !== 'session' || !selectedHarness || !selectedNativeId || !transcriptKey) {
       setTranscript({ status: 'idle' })
       return
     }
@@ -941,10 +1018,14 @@ export default function App() {
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return
-        setTranscript({ status: 'error', key: transcriptKey, failure: describeTranscriptError(error) })
+        const failure = describeTranscriptError(error)
+        setTranscript({ status: 'error', key: transcriptKey, failure })
+        // err(message, opts): the first argument is the toast body, not a
+        // title bag. The inline retry state stays; the toast is the same message.
+        toast.err(failure.message, { title: failure.title, duration: transcriptToastDurationMs })
       })
     return () => controller.abort()
-  }, [selectedHarness, selectedNativeId, transcriptKey, transcriptRetry])
+  }, [route.kind, selectedHarness, selectedNativeId, transcriptKey, transcriptRetry, toast])
 
   // Execution history is fetched once per selected session and then extended
   // through its opaque cursor. Live WebSocket snapshots never restart it,
@@ -1102,7 +1183,17 @@ export default function App() {
             <button
               type="button"
               className="session-link"
-              onClick={() => setSelectedId(row.id)}
+              onClick={() => {
+                if (transcriptAvailability(row.nativeSessionId, transcriptCatalog) === 'none') {
+                  toast.err(missingTranscriptMessage(row.nativeSessionId), {
+                    title: 'no transcript',
+                    duration: transcriptToastDurationMs,
+                  })
+                  return
+                }
+                setSelectedId(row.id)
+                window.location.hash = sessionRoute(row.harness, row.nativeSessionId)
+              }}
             >
               {row.nativeSessionId}
             </button>
@@ -1129,6 +1220,23 @@ export default function App() {
             <span className="state-basis">{row.stateBasis}</span>
           </div>
         ),
+      },
+      {
+        key: 'transcript',
+        label: 'transcript',
+        width: '7rem',
+        render: (_: unknown, row: SessionRow) => {
+          const availability = transcriptAvailability(row.nativeSessionId, transcriptCatalog)
+          return (
+            <span
+              className="transcript-mark"
+              data-availability={availability}
+              data-mark={transcriptMark(availability)}
+            >
+              {availability}
+            </span>
+          )
+        },
       },
       {
         key: 'epoch',
@@ -1158,7 +1266,7 @@ export default function App() {
         ),
       },
     ],
-    [],
+    [transcriptCatalog, toast],
   )
 
   const retry = () => {
@@ -1166,8 +1274,70 @@ export default function App() {
     socketRef.current?.close()
   }
 
+  if (route.kind === 'session') {
+    const session = sessions.find((item) => item.harness === route.harness && item.nativeSessionId === route.nativeSessionId)
+    return (
+      <main className="transcript-page">
+        <header className="hero">
+          <div>
+            <a className="session-link" href={listRoute()}>← back to sessions</a>
+            <p className="eyebrow">{route.harness} / transcript</p>
+            <h1 className="transcript-identity">{route.nativeSessionId}</h1>
+            {session?.project && <p className="lede">project: {session.project}</p>}
+            {session?.epoch && <p className="lede">epoch: {epochLabel(session.epoch)}</p>}
+          </div>
+          <div className="hero-meta">
+            <div className="theme-control">
+              <label className="eyebrow" htmlFor={themeId}>Theme</label>
+              <Select id={themeId} value={preference} onChange={(event) => { setThemeSelected(true); themeController.setPreference(parseThemePreference(event.currentTarget.value)) }}
+                options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'system', label: 'System' }]} />
+              {themeSelected && persistence === 'unavailable' && <span role="status">Theme choice was not saved. Allow site storage in your browser.</span>}
+            </div>
+          </div>
+        </header>
+            {!transcriptKey ? (
+              <p className="rail-copy muted">
+                choose a session in the table to read its Peasant transcript.
+              </p>
+            ) : transcript.status === 'error' && transcript.key === transcriptKey ? (
+              <div className="transcript-state">
+                <EmptyState
+                  title={transcript.failure.title}
+                  message={transcript.failure.message}
+                  action={
+                    transcript.failure.retry ? (
+                      <button
+                        type="button"
+                        className="clear-filter"
+                        onClick={() => setTranscriptRetry((attempt) => attempt + 1)}
+                      >
+                        retry transcript
+                      </button>
+                    ) : undefined
+                  }
+                />
+              </div>
+            ) : transcript.status === 'ready' && transcript.key === transcriptKey ? (
+              <div className="transcript-host">
+                <ReadOnlyTranscriptViewer
+                  viewModel={transcript.viewModel}
+                  theme={resolvedTheme}
+                  leftRailOpen={transcriptLeftRail}
+                  onLeftRailOpenChange={setTranscriptLeftRail}
+                  rightRailOpen={transcriptRightRail}
+                  onRightRailOpenChange={setTranscriptRightRail}
+                />
+              </div>
+            ) : (
+              <p className="rail-copy muted">exporting the Peasant transcript for this session…</p>
+            )}
+      </main>
+    )
+  }
+
   return (
     <RailShell
+      className={railOpen ? undefined : 'rs--rail-collapsed'}
       sheetMeta={null}
       toolbar={
         <div className="toolbar">
@@ -1182,6 +1352,13 @@ export default function App() {
                 {state}
               </FilterChip>
             ))}
+            <span className="eyebrow">scope</span>
+            <FilterChip pressed={sessionScope === 'roots'} onChange={() => setSessionScope('roots')}>
+              roots
+            </FilterChip>
+            <FilterChip pressed={sessionScope === 'all'} onChange={() => setSessionScope('all')}>
+              all sessions
+            </FilterChip>
           </div>
           <ProjectFilter
             options={projects}
@@ -1189,15 +1366,25 @@ export default function App() {
             onChange={setProjectFilter}
             disabled={projects.length === 0}
           />
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={RefreshCw}
-            loading={loading}
-            {...({ onClick: retry } as object)}
-          >
-            refresh
-          </Button>
+          <div className="toolbar-group">
+            <button
+              type="button"
+              className="rail-toggle"
+              aria-expanded={railOpen}
+              onClick={() => setRailOpen((open) => !open)}
+            >
+              {railOpen ? 'hide details' : 'show details'}
+            </button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={RefreshCw}
+              loading={loading}
+              {...({ onClick: retry } as object)}
+            >
+              refresh
+            </Button>
+          </div>
         </div>
       }
       rail={
@@ -1218,7 +1405,7 @@ export default function App() {
           <RailSection title="epochs" icon={Waypoints} meta={String(epochs.length)}>
             {epochs.length === 0 ? (
               <p className="rail-copy muted">
-                no projected epochs in this store. sessions can still appear as unbound.
+                no epochs are projected in this store; session rows still show their own epoch binding when one is recorded.
               </p>
             ) : (
               <div className="epoch-list">
@@ -1328,49 +1515,6 @@ export default function App() {
               />
             </RailSection>
           )}
-
-          <RailSection
-            title="transcript"
-            icon={Database}
-            meta={transcript.status === 'ready' && transcript.key === transcriptKey ? 'peasant' : null}
-          >
-            {!selectedSession || !transcriptKey ? (
-              <p className="rail-copy muted">
-                choose a session in the table to read its Peasant transcript.
-              </p>
-            ) : transcript.status === 'error' && transcript.key === transcriptKey ? (
-              <div className="transcript-state">
-                <EmptyState
-                  title={transcript.failure.title}
-                  message={transcript.failure.message}
-                  action={
-                    transcript.failure.retry ? (
-                      <button
-                        type="button"
-                        className="clear-filter"
-                        onClick={() => setTranscriptRetry((attempt) => attempt + 1)}
-                      >
-                        retry transcript
-                      </button>
-                    ) : undefined
-                  }
-                />
-              </div>
-            ) : transcript.status === 'ready' && transcript.key === transcriptKey ? (
-              <div className="transcript-host">
-                <TranscriptViewer
-                  viewModel={transcript.viewModel}
-                  capabilities={READ_ONLY_TRANSCRIPT_CAPABILITIES}
-                  leftRailOpen={transcriptLeftRail}
-                  onLeftRailOpenChange={setTranscriptLeftRail}
-                  rightRailOpen={transcriptRightRail}
-                  onRightRailOpenChange={setTranscriptRightRail}
-                />
-              </div>
-            ) : (
-              <p className="rail-copy muted">exporting the Peasant transcript for this session…</p>
-            )}
-          </RailSection>
         </>
       }
     >
@@ -1379,11 +1523,16 @@ export default function App() {
           <p className="eyebrow">pasture / local console</p>
           <h1>session epochs</h1>
           <p className="lede">
-            Which harness sessions are active, idle, ended, or waiting for an epoch binding.
-            Everything here comes from the local Pasture store.
+            Active, idle, ended, and unbound sessions from the local Pasture store.
           </p>
         </div>
         <div className="hero-meta">
+          <div className="theme-control">
+            <label className="eyebrow" htmlFor={themeId}>Theme</label>
+            <Select id={themeId} value={preference} onChange={(event) => { setThemeSelected(true); themeController.setPreference(parseThemePreference(event.currentTarget.value)) }}
+              options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'system', label: 'System' }]} />
+            {themeSelected && persistence === 'unavailable' && <span role="status">Theme choice was not saved. Allow site storage in your browser.</span>}
+          </div>
           <ConnectionPill status={connection} />
           <span className="mono-meta">rev {revision}</span>
           <span className="mono-meta">{asOf ? formatTime(asOf) : 'no snapshot'}</span>
@@ -1430,6 +1579,8 @@ export default function App() {
             message={
               sessions.length === 0
                 ? 'The local store has no claimed or bound sessions yet. Start a harness session; inventory refreshes on reads. Use --backfill to force a full rebuild.'
+                : sessionScope === 'roots'
+                ? 'Adjust the state, epoch, or project filter, or show all sessions to include subagents.'
                 : 'Adjust the state, epoch, or project filter to widen the inventory.'
             }
           />

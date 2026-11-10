@@ -1,8 +1,11 @@
 package sessionapi
 
 import (
+	"context"
 	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -41,6 +44,21 @@ func TestMapPeasantExportError(t *testing.T) {
 func TestMapPeasantExportErrorDefaultsToExportFailed(t *testing.T) {
 	t.Parallel()
 	require.ErrorIs(t, mapPeasantExportError(errors.New("plain failure")), ErrTranscriptExportFailed)
+}
+
+func TestPeasantSourceAvailableSessionsMapsAMissingBinary(t *testing.T) {
+	t.Parallel()
+	source := &peasantSource{source: &peasantexport.Source{
+		Binary:  filepath.Join(t.TempDir(), "absent-peasant"),
+		Timeout: time.Second,
+	}}
+
+	ids, subagents, truncated, err := source.AvailableSessions(context.Background())
+	require.Nil(t, ids)
+	require.Nil(t, subagents)
+	require.False(t, truncated)
+	require.ErrorIs(t, err, ErrTranscriptSourceUnavailable)
+	require.Contains(t, err.Error(), "install Peasant")
 }
 
 func TestNewPeasantTranscriptSourceIsTheProductionAdapter(t *testing.T) {

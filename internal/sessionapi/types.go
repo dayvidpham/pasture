@@ -316,6 +316,21 @@ type EpochView struct {
 	ActiveCount  int    `json:"activeCount"`
 }
 
+// TranscriptCatalog is the set of Peasant session ids that have a durable
+// transcript, stamped with the same session-cache revision and read instant as
+// the other session reads. Items are every ingested native session id, not
+// harness-qualified keys and not roots only. Subagents is the subset of Items
+// whose Peasant parent is set. Truncated means the backing list filled its
+// page: an id absent from Items is then not evidence that Peasant has no
+// transcript, and Subagents is only the parented ids on that page.
+type TranscriptCatalog struct {
+	Revision  int64     `json:"revision"`
+	AsOf      time.Time `json:"asOf"`
+	Items     []string  `json:"items"`
+	Subagents []string  `json:"subagents"`
+	Truncated bool      `json:"truncated"`
+}
+
 // EpochPage is the epoch list response.
 type EpochPage struct {
 	Revision int64       `json:"revision"`

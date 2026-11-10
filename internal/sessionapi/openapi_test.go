@@ -43,4 +43,6 @@ func TestOpenAPIIsFresh(t *testing.T) {
 	require.Contains(t, document, `/execution`)
 	require.Contains(t, document, "/api/v1/settings/peasant")
 	require.Contains(t, document, "PeasantSettingsRequest")
+	require.Contains(t, document, "/api/v1/transcripts")
+	require.Contains(t, document, "TranscriptCatalog")
 }
