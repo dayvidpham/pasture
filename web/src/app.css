@@ -36,9 +36,10 @@ body {
   .rs-rail { width: 560px; flex: 0 0 560px; }
 }
 
-/* Slide the desktop rail out instead of unmounting it. The mobile sheet is a
-   sibling, so this does not change the sheet. The motion matches the transcript
-   viewer's rail: transform over the shared duration and ease. */
+/* Slide the desktop rail out instead of unmounting it. visibility:hidden is
+   delayed until the slide finishes and applies only to .rs-rail, which is what
+   takes those controls out of the tab order. The sheet renders the same
+   children and must not inherit that hide. */
 .rs-rail {
   visibility: visible;
 }

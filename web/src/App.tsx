@@ -1388,7 +1388,7 @@ export default function App() {
         </div>
       }
       rail={
-        <div className="rail-contents" inert={!railOpen} aria-hidden={railOpen ? undefined : true}>
+        <>
           <RailSection
             title="peasant projects"
             icon={Folder}
@@ -1515,7 +1515,7 @@ export default function App() {
               />
             </RailSection>
           )}
-        </div>
+        </>
       }
     >
       <header className="hero">

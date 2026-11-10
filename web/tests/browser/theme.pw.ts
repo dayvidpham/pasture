@@ -582,6 +582,46 @@ test('collapsed rail contents leave the tab order until expanded', async ({ page
   expect(restored.join('\n')).toContain('wave six epoch')
 })
 
+test('a collapsed desktop rail leaves the mobile sheet usable', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const integration = { enabled: false, source: 'none', status: 'disabled', message: '' }
+  await mockAPI(page)
+  await page.route('**/api/v1/inspect', route => route.fulfill({
+    json: { ...snapshot, sessions: [session], peasantIntegration: integration },
+  }))
+  await page.routeWebSocket('**/api/v1/ws', ws => {
+    ws.send(JSON.stringify({ type: 'ready', topics: [] }))
+    ws.onMessage(message => {
+      const { topic } = JSON.parse(String(message))
+      const payload = topic === 'sessions'
+        ? { items: [session], peasantIntegration: integration }
+        : { items: [] }
+      ws.send(JSON.stringify({ type: topic, revision: 1, asOf: snapshot.asOf, payload }))
+    })
+  })
+  await page.goto(origin)
+  await expect(page.getByRole('switch', { name: 'Peasant project enrichment' })).toBeVisible()
+  await page.getByRole('button', { name: 'hide details' }).click()
+  await page.setViewportSize({ width: 420, height: 800 })
+  await page.locator('.rs-sheet-toggle').click()
+  const sheetSwitch = page.locator('.rs-sheet-body').getByRole('switch', { name: 'Peasant project enrichment' })
+  await expect(sheetSwitch).toBeVisible()
+  expect(await sheetSwitch.evaluate(element => element.closest('[inert]') !== null)).toBe(false)
+  await page.locator('.rs-sheet-toggle').focus()
+  let reached = false
+  for (let step = 0; step < 20; step++) {
+    await page.keyboard.press('Tab')
+    reached = await page.evaluate(() => {
+      const current = document.activeElement
+      return current?.getAttribute('aria-label') === 'Peasant project enrichment'
+        && current.closest('.rs-sheet-body') !== null
+        && current.closest('[inert]') === null
+    })
+    if (reached) break
+  }
+  expect(reached).toBe(true)
+})
+
 test('mobile layout preserves the sheet without horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 420, height: 800 })
   await mockAPI(page)
