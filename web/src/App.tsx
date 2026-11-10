@@ -133,7 +133,11 @@ const STATE_COLOR: Record<string, string> = {
 }
 
 function sessionKey(session: SessionView): string {
-  return `${session.harness}/${session.nativeSessionId}`
+  return sessionIdentity(session.harness, session.nativeSessionId)
+}
+
+function sessionIdentity(harness: string, nativeId: string): string {
+  return JSON.stringify([harness, nativeId])
 }
 
 function formatTime(value?: string | null): string {
@@ -927,7 +931,7 @@ export default function App() {
 
   const selectedHarness = route.kind === 'session' ? route.harness : selectedSession?.harness
   const selectedNativeId = route.kind === 'session' ? route.nativeSessionId : selectedSession?.nativeSessionId
-  const transcriptKey = selectedHarness && selectedNativeId ? JSON.stringify([selectedHarness, selectedNativeId]) : null
+  const transcriptKey = selectedHarness && selectedNativeId ? sessionIdentity(selectedHarness, selectedNativeId) : null
 
   // Fetch once per selected session, not on every WebSocket snapshot: the
   // stable identity strings are the dependencies, so live revision updates
@@ -1356,18 +1360,18 @@ export default function App() {
 
                 <ExecutionHistoryList
                   items={
-                    executionHistory.key === JSON.stringify([selectedSession.harness, selectedSession.nativeSessionId])
+                    executionHistory.key === sessionKey(selectedSession)
                       ? executionHistory.items
                       : []
                   }
                   next={
-                    executionHistory.key === JSON.stringify([selectedSession.harness, selectedSession.nativeSessionId])
+                    executionHistory.key === sessionKey(selectedSession)
                       ? executionHistory.next
                       : undefined
                   }
                   busy={executionBusy}
                   error={
-                    executionHistory.key === JSON.stringify([selectedSession.harness, selectedSession.nativeSessionId])
+                    executionHistory.key === sessionKey(selectedSession)
                       ? executionHistory.error
                       : null
                   }

@@ -306,8 +306,19 @@ for (const width of [1280, 420]) {
     })
     const dimensions = await measure()
     console.log(`transcript ${width}`, dimensions)
-    expect(dimensions.host).toBeGreaterThanOrEqual(dimensions.main * (width === 1280 ? 0.9 : 0.85))
+    expect(dimensions.host).toBeGreaterThanOrEqual(width === 1280 ? dimensions.viewport * 0.9 : dimensions.viewport - 2 * 24 - 2)
     expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.viewport)
+    expect(await page.evaluate(() => document.querySelector('.rs-rail .transcript-host'))).toBeNull()
+    if (width === 1280) {
+      await page.goBack()
+      await expect(page.locator('.rs-rail .execution-summary')).toContainText('synthetic-provider')
+      await expect(page.locator('.rs-rail .execution-summary')).toContainText('synthetic-model')
+      await expect(page.locator('.rs-rail .execution-history')).toContainText('#12')
+      await expect(page.locator('.rs-rail .execution-history')).toContainText('synthetic-provider')
+      await expect(page.locator('.rs-rail .execution-history')).toContainText('synthetic-model')
+      await page.goForward()
+      await expect(page.locator('.transcript-host').getByText('Synthetic user asks for a greeting.', { exact: true }).locator('visible=true').first()).toBeVisible()
+    }
     await page.getByLabel('Theme').selectOption('light')
     await agrees(page, 'light')
     await page.reload()
@@ -322,3 +333,11 @@ for (const width of [1280, 420]) {
     await expect(page.locator('.rs-rail .transcript-host')).toHaveCount(0)
   })
 }
+
+test('fresh direct transcript load renders without list navigation', async ({ page }) => {
+  await mockAPI(page, [])
+  await page.goto(`${origin}/#/sessions/opencode/${encodeURIComponent(transcript.id)}`)
+  await expect(page.locator('.transcript-host').getByText('Synthetic user asks for a greeting.', { exact: true }).locator('visible=true').first()).toBeVisible()
+  await page.reload()
+  await expect(page.locator('.transcript-host').getByText('Synthetic user asks for a greeting.', { exact: true }).locator('visible=true').first()).toBeVisible()
+})
