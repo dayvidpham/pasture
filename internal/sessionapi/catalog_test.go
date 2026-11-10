@@ -1,6 +1,7 @@
 package sessionapi
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/dayvidpham/pasture/internal/audit"
 	"github.com/dayvidpham/pasture/internal/dbconn"
+	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/timeouts"
 )
 
@@ -95,6 +97,117 @@ func TestTranscriptCatalogHandler(t *testing.T) {
 			require.False(t, catalog.AsOf.IsZero())
 		})
 	}
+}
+
+type catalogProjectSource struct {
+	ids   []string
+	err   error
+	calls int
+}
+
+func (s *catalogProjectSource) Lookup(context.Context, []peasantproject.Key) (map[peasantproject.Key]peasantproject.Project, error) {
+	return map[peasantproject.Key]peasantproject.Project{}, nil
+}
+
+func (s *catalogProjectSource) Status() peasantproject.Status {
+	return peasantproject.Status{Enabled: true, Source: peasantproject.SourceDB, State: peasantproject.StateOK}
+}
+
+func (s *catalogProjectSource) SessionIDs(context.Context) ([]string, error) {
+	s.calls++
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.ids, nil
+}
+
+type plainProjectSource struct{}
+
+func (plainProjectSource) Lookup(context.Context, []peasantproject.Key) (map[peasantproject.Key]peasantproject.Project, error) {
+	return map[peasantproject.Key]peasantproject.Project{}, nil
+}
+
+func (plainProjectSource) Status() peasantproject.Status {
+	return peasantproject.Status{Enabled: true, Source: peasantproject.SourceAPI, State: peasantproject.StateOK}
+}
+
+func TestTranscriptCatalogPrefersTheDatabaseAndFallsBackToTheCLI(t *testing.T) {
+	t.Parallel()
+
+	t.Run("database ids win and are complete", func(t *testing.T) {
+		t.Parallel()
+		cli := &stubTranscriptSource{sessions: []string{"cli-only"}}
+		db := &catalogProjectSource{ids: []string{"db-a", "db-b"}}
+		service := &Service{ProjectSource: db}
+		server := httptest.NewServer(newHandlerWithProject(service, nil, nil, cli))
+		t.Cleanup(server.Close)
+
+		response, err := http.Get(server.URL + "/api/v1/transcripts")
+		require.NoError(t, err)
+		defer response.Body.Close()
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		var catalog TranscriptCatalog
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&catalog))
+		require.Equal(t, []string{"db-a", "db-b"}, catalog.Items)
+		require.False(t, catalog.Truncated)
+		require.Equal(t, 1, db.calls)
+		require.Equal(t, 0, cli.catalogCalls, "a database catalog must not also spawn the CLI list")
+	})
+
+	t.Run("a source that cannot list ids uses the CLI", func(t *testing.T) {
+		t.Parallel()
+		cli := &stubTranscriptSource{sessions: []string{"cli-only"}, truncated: true}
+		service := &Service{ProjectSource: plainProjectSource{}}
+		server := httptest.NewServer(newHandlerWithProject(service, nil, nil, cli))
+		t.Cleanup(server.Close)
+
+		response, err := http.Get(server.URL + "/api/v1/transcripts")
+		require.NoError(t, err)
+		defer response.Body.Close()
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		var catalog TranscriptCatalog
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&catalog))
+		require.Equal(t, []string{"cli-only"}, catalog.Items)
+		require.True(t, catalog.Truncated)
+		require.Equal(t, 1, cli.catalogCalls)
+	})
+
+	t.Run("an unavailable database catalog falls back to the CLI", func(t *testing.T) {
+		t.Parallel()
+		cli := &stubTranscriptSource{sessions: []string{"cli-fallback"}}
+		db := &catalogProjectSource{err: fmt.Errorf("%w: enrichment is off", peasantproject.ErrSessionCatalogUnavailable)}
+		service := &Service{ProjectSource: db}
+		server := httptest.NewServer(newHandlerWithProject(service, nil, nil, cli))
+		t.Cleanup(server.Close)
+
+		response, err := http.Get(server.URL + "/api/v1/transcripts")
+		require.NoError(t, err)
+		defer response.Body.Close()
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		var catalog TranscriptCatalog
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&catalog))
+		require.Equal(t, []string{"cli-fallback"}, catalog.Items)
+		require.Equal(t, 1, cli.catalogCalls)
+	})
+
+	t.Run("a database read failure is not hidden behind the CLI", func(t *testing.T) {
+		t.Parallel()
+		cli := &stubTranscriptSource{sessions: []string{"cli-only"}}
+		db := &catalogProjectSource{err: fmt.Errorf("reading session ids from the Peasant database at %q: disk I/O error; retry", "/tmp/peasant.db")}
+		service := &Service{ProjectSource: db}
+		server := httptest.NewServer(newHandlerWithProject(service, nil, nil, cli))
+		t.Cleanup(server.Close)
+
+		response, err := http.Get(server.URL + "/api/v1/transcripts")
+		require.NoError(t, err)
+		defer response.Body.Close()
+		require.Equal(t, http.StatusServiceUnavailable, response.StatusCode)
+		var envelope errorEnvelope
+		require.NoError(t, json.NewDecoder(response.Body).Decode(&envelope))
+		require.Equal(t, "transcript_catalog_unavailable", envelope.Error.Code)
+		require.Contains(t, envelope.Error.Message, "Peasant database")
+		require.Equal(t, 0, cli.catalogCalls)
+	})
 }
 
 func TestTranscriptCatalogHandlerRejectsAMissingSource(t *testing.T) {

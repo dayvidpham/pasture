@@ -214,7 +214,7 @@ func openAPIDocument() map[string]any {
 				"get": map[string]any{
 					"operationId": "listTranscripts",
 					"summary":     "List Peasant session ids that have a durable transcript",
-					"description": "Runs a bounded, read-only `peasant sessions list --json` beside the API and reuses a successful result briefly so repeated reads do not spawn a process each time. Items are native session ids. truncated is true when the list filled its page: an id absent from items is then not evidence that Peasant has no transcript. The revision and asOf use the same certified session-cache read as the other session routes. A source failure is 503, which the console treats as unknown rather than none.",
+					"description": "Prefers a read-only list of ingested session ids from the Peasant database when project enrichment has opened that database. That list is complete, so an id absent from items has no durable transcript and truncated is false. When no database catalog is available, the route falls back to a bounded, read-only `peasant sessions list --json` and reuses a successful result briefly so repeated reads do not spawn a process each time. On that fallback, truncated is true when the list filled its page: an id absent from items is then not evidence that Peasant has no transcript. Items are native session ids. The revision and asOf use the same certified session-cache read as the other session routes. A source failure is 503, which the console treats as unknown rather than none.",
 					"responses": map[string]any{
 						"200": jsonResponse(ref("TranscriptCatalog")),
 						"403": errorResponse("Non-loopback Host or Origin"),

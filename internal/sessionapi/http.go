@@ -16,6 +16,7 @@ import (
 
 	"github.com/peasant-labs/schema"
 
+	"github.com/dayvidpham/pasture/internal/peasantproject"
 	"github.com/dayvidpham/pasture/internal/tasks"
 )
 
@@ -487,17 +488,36 @@ func (h *handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 // transcriptCatalog lists Peasant session ids that have a durable transcript.
-// The revision and asOf come from the same certified session-cache read as the
-// other session routes. A source failure is 503 so the console can show the
-// catalog as unknown instead of treating every row as having no transcript.
+// When the configured project source can read the Peasant database, that list
+// is the catalog and it is complete. Otherwise the route falls back to the
+// bounded Peasant CLI list. The revision and asOf come from the same certified
+// session-cache read as the other session routes. A source failure is 503 so
+// the console can show the catalog as unknown instead of treating every row as
+// having no transcript.
 func (h *handler) transcriptCatalog(w http.ResponseWriter, r *http.Request) {
-	if h.transcript == nil {
-		writeError(w, http.StatusServiceUnavailable, "transcript_unavailable", "this serve process has no transcript source; restart `pasture serve` with Peasant installed, then retry")
-		return
-	}
 	revision, asOf, err := h.catalogStamp(r.Context())
 	if err != nil {
 		writeServiceError(w, err)
+		return
+	}
+	if ids, used, err := h.databaseSessionCatalog(r.Context()); used {
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "transcript_catalog_unavailable", err.Error())
+			return
+		}
+		if ids == nil {
+			ids = []string{}
+		}
+		writeJSON(w, http.StatusOK, TranscriptCatalog{
+			Revision:  revision,
+			AsOf:      asOf,
+			Items:     ids,
+			Truncated: false,
+		})
+		return
+	}
+	if h.transcript == nil {
+		writeError(w, http.StatusServiceUnavailable, "transcript_unavailable", "this serve process has no transcript source and no Peasant database catalog; restart `pasture serve` with Peasant installed or pass --peasant-db, then retry")
 		return
 	}
 	ids, truncated, err := h.transcript.AvailableSessions(r.Context())
@@ -514,6 +534,24 @@ func (h *handler) transcriptCatalog(w http.ResponseWriter, r *http.Request) {
 		Items:     ids,
 		Truncated: truncated,
 	})
+}
+
+// databaseSessionCatalog prefers the Peasant database when the project source
+// implements SessionCatalog and can answer. A source that does not list ids,
+// or a switch that is off, is not a failure: the caller falls back to the CLI.
+func (h *handler) databaseSessionCatalog(ctx context.Context) ([]string, bool, error) {
+	if h.service == nil || h.service.ProjectSource == nil {
+		return nil, false, nil
+	}
+	catalog, ok := h.service.ProjectSource.(peasantproject.SessionCatalog)
+	if !ok {
+		return nil, false, nil
+	}
+	ids, err := catalog.SessionIDs(ctx)
+	if errors.Is(err, peasantproject.ErrSessionCatalogUnavailable) {
+		return nil, false, nil
+	}
+	return ids, true, err
 }
 
 // catalogStamp reads the certified session-cache revision and the response

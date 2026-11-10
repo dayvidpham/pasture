@@ -3,6 +3,7 @@ package peasantproject
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -54,6 +55,26 @@ func (s *Switch) Status() Status {
 	status := source.Status()
 	status.Enabled = true
 	return status
+}
+
+// SessionIDs lists ingested session ids only while enrichment is on and the
+// open source implements SessionCatalog. While off, or when the source is an
+// API that does not list ids, it returns ErrSessionCatalogUnavailable so the
+// transcript catalog can fall back to the Peasant CLI instead of reporting a
+// database failure.
+func (s *Switch) SessionIDs(ctx context.Context) ([]string, error) {
+	s.mu.Lock()
+	if !s.on || s.source == nil {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: Peasant project enrichment is off; turn it on from the web console or pass --peasant-db so the transcript catalog can read the Peasant database", ErrSessionCatalogUnavailable)
+	}
+	source := s.source
+	s.mu.Unlock()
+	catalog, ok := source.(SessionCatalog)
+	if !ok {
+		return nil, fmt.Errorf("%w: the configured Peasant project source does not list ingested session ids", ErrSessionCatalogUnavailable)
+	}
+	return catalog.SessionIDs(ctx)
 }
 
 // Lookup resolves projects only while the switch is on. While off it returns an

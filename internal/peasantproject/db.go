@@ -59,6 +59,10 @@ type dbSource struct {
 	closed    bool
 
 	status statusHolder
+
+	// sessionIDs reuses one successful id list. It is a process-local reuse
+	// window, not a write, and failures are not stored.
+	sessionIDs sessionIDCache
 }
 
 // NewDBSource opens path read-only and verifies the Peasant schema. A missing
