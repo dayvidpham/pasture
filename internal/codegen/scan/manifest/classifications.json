@@ -48,7 +48,7 @@
     {
       "owner": "skills/architect-handoff/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "1. Call `Skill(/pasture:supervisor)` FIRST — do not proceed without loading your role",
+      "content_window": "1. Call `Skill(/pasture:supervisor)` FIRST \u2014 do not proceed without loading your role",
       "section": "Example Prompt",
       "ordinal": 0,
       "classification": "orchestration",
@@ -102,7 +102,7 @@
     {
       "owner": "skills/architect/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation",
+      "content_window": "1. **Start with `Skill(/pasture:supervisor)`** \u2014 this loads the supervisor's role instructions, including leaf task creation",
       "section": "Supervisor Handoff",
       "ordinal": 0,
       "classification": "orchestration",
@@ -174,7 +174,7 @@
     {
       "owner": "skills/epoch/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- **Phase 2 (URE):** invoke `Skill(/pasture:user-elicit)` — skipping it produces low-quality elicitation.",
+      "content_window": "- **Phase 2 (URE):** invoke `Skill(/pasture:user-elicit)` \u2014 skipping it produces low-quality elicitation.",
       "section": "Skills to Invoke",
       "ordinal": 0,
       "classification": "orchestration",
@@ -183,7 +183,7 @@
     {
       "owner": "skills/epoch/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- **Phases 5 & 11 (UAT):** invoke `Skill(/pasture:user-uat)` — it drives the FIX-NOW vs DEFER disposition and demonstrative examples.",
+      "content_window": "- **Phases 5 & 11 (UAT):** invoke `Skill(/pasture:user-uat)` \u2014 it drives the FIX-NOW, DEFER, or WON'T-DO disposition and demonstrative examples.",
       "section": "Skills to Invoke",
       "ordinal": 0,
       "classification": "orchestration",
@@ -192,7 +192,7 @@
     {
       "owner": "skills/epoch/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "1. Start with `Skill(/pasture:supervisor)` — without this, the supervisor skips role-critical procedures",
+      "content_window": "1. Start with `Skill(/pasture:supervisor)` \u2014 without this, the supervisor skips role-critical procedures",
       "section": "Skills to Invoke",
       "ordinal": 0,
       "classification": "orchestration",
@@ -292,7 +292,7 @@
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
       "content_window": "- Then: use Agent tool with `subagent_type: \"general-purpose\"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start",
-      "section": "Ride the Wave — Coordinated Phase 8-10 Execution",
+      "section": "Ride the Wave \u2014 Coordinated Phase 8-10 Execution",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
@@ -301,7 +301,7 @@
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
       "content_window": "- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `\"${EPOCH_REC}\" show \"${TASK_ID_URI}\"` for full context, and (4) the handoff authored in the Pasture task body",
-      "section": "Ride the Wave — Coordinated Phase 8-10 Execution",
+      "section": "Ride the Wave \u2014 Coordinated Phase 8-10 Execution",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
