@@ -57,7 +57,7 @@ var supervisorBody = SkillBody{
 			Id:        "sup-autonomous-progression",
 			Given:     "non-user-gated phase completes",
 			When:      "transitioning to next phase",
-			Then:      "proceed autonomously without asking permission; the 5 user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 8 (implementation-effort / review-effort budget request), Phase 11 (Impl UAT); all other phase transitions (9 SLICES, 10 CODE REVIEW, 12 LANDING) progress automatically",
+			Then:      "proceed autonomously; " + renderUserGates(),
 			ShouldNot: "ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined; only pause for user-facing phases that require human input",
 		},
 		// R7/A1: code review gates each wave on open BLOCKERs and converges over

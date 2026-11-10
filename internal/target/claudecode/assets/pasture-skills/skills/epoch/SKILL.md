@@ -212,7 +212,7 @@ Agents coordinate through tracker tasks and comments:
 **[epoch-autonomous-progression]**
 - Given: non-user-gated phase completes
 - When: transitioning
-- Then: proceed autonomously; the 5 user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 8 (implementation-effort / review-effort budget request), Phase 11 (Impl UAT)
+- Then: proceed autonomously; User gates: [request (research depth); elicit (requirements interview); plan-review (plan UAT); impl-plan (implementation effort and review budget); impl-uat (implementation UAT)]
 - Should not: ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined
 
 **[epoch-uat-auto-ratify]**

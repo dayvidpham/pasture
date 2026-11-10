@@ -358,9 +358,7 @@ fi`,
 		Id:    "C-autonomous-progression",
 		Given: "supervisor orchestrating phases",
 		When:  "deciding whether to proceed",
-		Then: "5 user-gated phases only: (1) research depth decision, (2) URE survey, " +
-			"(3) Plan UAT, (4) Phase 8 implementation-effort / review-effort budget request, " +
-			"(5) Impl UAT; all other phase transitions are auto-ratified " +
+		Then: renderUserGates() + "; all other phase transitions are auto-ratified " +
 			"by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification " +
 			"without user gate",
 		ShouldNot: "add additional user gates beyond the 5 defined; " +

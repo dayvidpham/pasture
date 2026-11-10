@@ -242,3 +242,63 @@ func TestQuestionStimulusFields(t *testing.T) {
 		t.Error(finding)
 	}
 }
+
+// findUserGateList checks the bracketed enumeration wherever a body lists it.
+func findUserGateList(path, body string, gates []userGate) []string {
+	var entries []string
+	for _, gate := range gates {
+		entries = append(entries, string(gate.phase)+" ("+gate.purpose+")")
+	}
+	expected := strings.Join(entries, "; ")
+	var findings []string
+	for _, line := range strings.Split(body, "\n") {
+		if start := strings.Index(line, "User gates: ["); start >= 0 {
+			value := line[start+len("User gates: ["):]
+			end := strings.Index(value, "]")
+			if end < 0 || value[:end] != expected {
+				findings = append(findings, fmt.Sprintf("%s: user gate list differs; why: gate order or membership drifted; where: gate enumeration; fix: render the canonical list", path))
+			}
+		}
+		if strings.Contains(line, "user-gated phases are:") || strings.Contains(line, "user-gated phases only:") {
+			findings = append(findings, fmt.Sprintf("%s: duplicate gate list; why: it can drift; where: body; fix: render the canonical list", path))
+		}
+	}
+	return findings
+}
+
+func TestUserGateList(t *testing.T) {
+	good := renderUserGates()
+	bad := strings.Replace(good, "; ", "; extra-gate; ", 1)
+	if got := findUserGateList("defective", bad, userGates); len(got) == 0 {
+		t.Fatal("extra gate accepted")
+	}
+	if got := findUserGateList("clean", good, userGates); len(got) != 0 {
+		t.Fatal(got)
+	}
+	parts := strings.Split(strings.TrimSuffix(strings.TrimPrefix(good, "User gates: ["), "]"), "; ")
+	parts[0], parts[1] = parts[1], parts[0]
+	if got := findUserGateList("reordered", "User gates: ["+strings.Join(parts, "; ")+"]", userGates); len(got) == 0 {
+		t.Fatal("reordered gates accepted")
+	}
+	for _, root := range renderedSkillRoots {
+		err := filepath.WalkDir(filepath.Join("..", "..", root), func(path string, e fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if e.IsDir() || filepath.Ext(path) != ".md" {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, finding := range findUserGateList(path, string(data), userGates) {
+				t.Error(finding)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
