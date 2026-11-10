@@ -113,6 +113,17 @@ async function agrees(page: Page, theme: string) {
   await expect(page.locator('.transcript-host [data-theme]').first()).toHaveAttribute('data-theme', theme)
 }
 
+async function assertPageGutters(page: Page) {
+  const padding = await page.locator('.rs-main').evaluate(el => {
+    const style = getComputedStyle(el)
+    return { left: parseFloat(style.paddingLeft), right: parseFloat(style.paddingRight) }
+  })
+  expect(padding.left).toBeGreaterThanOrEqual(20)
+  expect(padding.right).toBeGreaterThanOrEqual(20)
+  expect(Math.abs(padding.left - padding.right)).toBeLessThanOrEqual(1)
+  return padding
+}
+
 for (const theme of ['light', 'dark'] as const) {
   test(`pre-paint System ${theme} and mounted viewer`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme })
@@ -234,19 +245,19 @@ for (const width of [1280, 420]) {
 
 test('desktop layout keeps a wide internally scrollable rail visible', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
-  const sessions = Array.from({ length: 40 }, (_, i) => ({ ...session, nativeSessionId: `synthetic-${i}` }))
+  const epoch = { id: 'https://github.com/dayvidpham/pasture/01a1b370-5462-70d1-a16d-cc8c3c6b7251', title: 'REQUEST: Pasture web light theme and dark readability' }
+  const sessions = Array.from({ length: 40 }, (_, i) => ({ ...session, nativeSessionId: `synthetic-${i}`, epoch }))
   await mockAPI(page, sessions)
   await page.goto(origin)
   await expect(page.getByText('no epochs are projected in this store; session rows still show their own epoch binding when one is recorded.').first()).toBeVisible()
-  const main = page.locator('.rs-main')
+  await expect(page.getByRole('row').filter({ has: page.getByRole('button', { name: 'synthetic-0' }) }).getByText(epoch.title)).toBeVisible()
   const rail = page.locator('.rs-rail')
   await expect(page.getByRole('button', { name: 'synthetic-0' })).toBeVisible()
   await page.getByRole('button', { name: 'synthetic-0' }).click()
   await expect(page.locator('.rs-rail .transcript-host')).toBeVisible()
   const before = await rail.boundingBox()
   expect(before!.width).toBeGreaterThanOrEqual(400)
-  const padding = await main.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))
-  expect(padding).toBeGreaterThanOrEqual(12)
+  const padding = await assertPageGutters(page)
   expect((await page.locator('.hero h1').boundingBox())!.width).toBeGreaterThan(100)
   await page.evaluate(() => window.scrollTo(0, 1000))
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(900)
@@ -274,8 +285,8 @@ test('mobile layout preserves the sheet without horizontal overflow', async ({ p
   const toggle = page.locator('.rs-sheet-toggle')
   await toggle.click()
   await expect(page.locator('.rs-sheet-body')).toBeVisible()
-  const dimensions = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth, padding: parseFloat(getComputedStyle(document.querySelector('.rs-main')!).paddingLeft) }))
-  console.log('mobile layout', dimensions)
-  expect(dimensions.padding).toBeGreaterThanOrEqual(12)
+  const padding = await assertPageGutters(page)
+  const dimensions = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth }))
+  console.log('mobile layout', { ...dimensions, padding })
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width)
 })
