@@ -229,9 +229,9 @@ func TestResolveBodyMarkersPerTarget(t *testing.T) {
 		{"[[op:request_user_decision]]", HarnessClaudeCode, "AskUserQuestion"},
 		{"[[op:request_user_decision]]", HarnessOpenCode, "question"},
 		{"[[op:request_user_decision]]", HarnessCodex, "request-input"},
-		{"[[rec]]", HarnessClaudeCode, "pasture task"},
-		{"[[rec]]", HarnessOpenCode, "pasture task"},
-		{"[[rec]]", HarnessCodex, "pasture task"},
+		{"[[rec]]", HarnessClaudeCode, trackerEntryPoint},
+		{"[[rec]]", HarnessOpenCode, trackerEntryPoint},
+		{"[[rec]]", HarnessCodex, trackerEntryPoint},
 	}
 	for _, testCase := range cases {
 		testCase := testCase
@@ -254,7 +254,7 @@ func TestResolveBodyMarkersNeutral(t *testing.T) {
 		"[[op:invoke_skill]]":          "invoke_skill",
 		"[[op:delegate_assignment]]":   "delegate_assignment",
 		"[[op:request_user_decision]]": "request_user_decision",
-		"[[rec]]":                      trackerEntryPoint,
+		"[[rec]]":                      neutralTrackerEntryPoint,
 	}
 	for marker, want := range cases {
 		marker, want := marker, want

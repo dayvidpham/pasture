@@ -29,7 +29,7 @@ You review from an end-user alignment perspective. See the project's protocol/CO
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: pasture task dep add parent --blocked-by child
+- Then: chain dependency: "${EPOCH_REC}" dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
 **[C-audit-never-delete]**
@@ -47,7 +47,7 @@ You review from an end-user alignment perspective. See the project's protocol/CO
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
+- Then: parent blocked-by child: "${EPOCH_REC}" dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 **[C-finding-lifecycle]**

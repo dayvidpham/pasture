@@ -45,7 +45,9 @@ var SharedFragmentSpecs = map[FragmentId]SharedFragment{
 		Prose: &ProseSection{
 			Id:    string(FragTaskRecovery),
 			Title: "Task Recovery",
-			Content: `Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+			Content: `The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. The pasture-specific steps below apply only when the header says backend: pasture; when it says ledger, use the Tracker Adapter section and the ledger path in the header. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+
+Recover from live Pasture state at session start and after compaction; never trust cached task rows.
 
 Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
@@ -69,6 +71,7 @@ Parent stays open and is blocked by child: [[rec]] dep add "$PARENT_URI" --block
 			Content: `Select the current registered author with [[rec]] agents list and [[rec]] agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.`,
 		},
 	},
+	FragTrackerAdapter: trackerAdapterFragment(),
 	FragRevVoteOptions: func() SharedFragment {
 		prose := ProseSection{
 			Id:    string(FragRevVoteOptions),

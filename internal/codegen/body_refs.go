@@ -44,13 +44,18 @@ const (
 	bodyMarkerClose = "]]"
 )
 
-// trackerEntryPoint is the one home of the tracker command prefix in generated
-// prose. Tracker backends are selected at run time (amendment A-3): the
-// closed tracker operation vocabulary and the runtime adapter that replaces
-// this prefix are owned by the tracker-contract wave. Until then the prefix is
-// rendered exactly as before, so this change renames the literal without
-// changing generated meaning.
-const trackerEntryPoint = "pasture task"
+// trackerEntryPoint is the one home of the tracker call in generated prose.
+// Tracker backends are selected at run time (amendment A-3): a body writes the
+// neutral [[rec]] marker, which resolves to this runtime adapter entry point.
+// The adapter reads the backend from EPOCH.md and owns every native recipe in
+// specs_data_tracker.go, so no generated body names a backend.
+const trackerEntryPoint = `"${EPOCH_REC}"`
+
+// neutralTrackerEntryPoint is the schema.xml spelling of the same entry point.
+// schema.xml is not a shell artifact: it is rendered after XML escaping, so a
+// replacement carrying quotes would break an attribute. The neutral spelling
+// omits the shell quotes; every harness skill body uses trackerEntryPoint.
+const neutralTrackerEntryPoint = "${EPOCH_REC}"
 
 // ResolveBodyMarkers replaces every body marker in content with the string the
 // generation target's pinned lowering table assigns to it.
@@ -191,7 +196,7 @@ func resolveBodyMarker(target roleTarget, payload string) (string, error) {
 func resolveNeutralMarker(payload string) (string, error) {
 	switch {
 	case payload == "rec":
-		return trackerEntryPoint, nil
+		return neutralTrackerEntryPoint, nil
 	case strings.HasPrefix(payload, "tool:"):
 		name := strings.TrimPrefix(payload, "tool:")
 		tool := ir.HarnessTool(name)

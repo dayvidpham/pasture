@@ -2610,3 +2610,19 @@ The preceding digest identifies the prior recovery revision; neither revision
 participated in the historical captures above, and no capture payload, capture
 kit, fixture identity, activation state or acceptance record changes. No new
 live session, capture or host capability is claimed.
+
+### Tracker adapter recovery transport — 2026-11-09
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`5df357427313fc48c03840209fd6677ea386e6062d5dd4ed9e4dcbe02c2ee40b`.
+This later generated revision changes the embedded recovery prose to read the
+tracker backend from `.agents.local/pasture/EPOCH.md` and route every tracker
+call through the runtime adapter entry point (`${EPOCH_REC}`); the native
+Pasture recipes live in the generator's tracker contract. Lifecycle transport,
+activation, version guards, decision handling and the injection contract are
+unchanged; no runtime task query, file read or cached task state is added. The
+generated plugin and embedded hook asset still have identical bytes. The
+preceding digest identifies the prior recovery revision; neither revision
+participated in the historical captures above, and no capture payload, capture
+kit, fixture identity, activation state or acceptance record changes. No new
+live session, capture or host capability is claimed.

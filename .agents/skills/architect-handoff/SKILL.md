@@ -37,23 +37,25 @@ description: Create handoff document and transfer to supervisor
 
 ## Task Recovery
 
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. The pasture-specific steps below apply only when the header says backend: pasture; when it says ledger, use the Tracker Adapter section and the ledger path in the header. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+
 Recover from live Pasture state at session start and after compaction; never trust cached task rows.
 
 Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
 Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Run pasture task ready, pasture task blocked, and pasture task list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+Run "${EPOCH_REC}" ready, "${EPOCH_REC}" blocked, and "${EPOCH_REC}" list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run "${EPOCH_REC}" show "$TASK_URI", "${EPOCH_REC}" comments "$TASK_URI", and "${EPOCH_REC}" timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
 Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+Assignment transfer is not initial allocation: before using "${EPOCH_REC}" assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
 
-Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+Parent stays open and is blocked by child: "${EPOCH_REC}" dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" agents list and "${EPOCH_REC}" agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## When to Use
 
@@ -69,13 +71,13 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 ## Supervisor Startup
 1. Call `invoke_skill(/pasture:supervisor)` to load your role instructions
 2. Spawn ephemeral Explore subagents with the delegate_assignment tool when codebase exploration is needed
-3. Read the RATIFIED PROPOSAL and URD with `pasture task show` commands below
+3. Read the RATIFIED PROPOSAL and URD with `"${EPOCH_REC}" show` commands below
 4. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1 types / L2 tests / L3 impl triple is only illustrative)
 
 ## References
 - REQUEST: "${REQUEST_ID_URI}"
-- URD: "${URD_ID_URI}" (read with `pasture task show "${URD_ID_URI}"`)
-- RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}" (read with `pasture task show "${RATIFIED_PROPOSAL_ID_URI}"`)
+- URD: "${URD_ID_URI}" (read with `"${EPOCH_REC}" show "${URD_ID_URI}"`)
+- RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}" (read with `"${EPOCH_REC}" show "${RATIFIED_PROPOSAL_ID_URI}"`)
 
 ## Summary
 <1-2 sentence summary of what needs to be implemented>
@@ -97,7 +99,7 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 
 1. Create the HANDOFF Pasture task — its body IS the handoff document (use the template above):
    ```bash
-   HANDOFF_ID_URI=$(pasture task create "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --namespace "$PASTURE_NAMESPACE" --format json --type=task --priority=2 \
+   HANDOFF_ID_URI=$("${EPOCH_REC}" create "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --namespace "$PASTURE_NAMESPACE" --format json --type=task --priority=2 \
      --description="---
    references:
      request: "${REQUEST_ID_URI}"
@@ -106,7 +108,7 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
    ---
    # Handoff: Architect → Supervisor
    <full handoff body per the template above>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-   pasture task label add "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
+   "${EPOCH_REC}" label add "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
 
    ```
 
@@ -118,7 +120,7 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 3. Monitor supervisor progress:
    ```bash
    # Check pasture status
-   pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress
+   "${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --status=in_progress
    ```
 
    A supervisor that looks idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.
@@ -134,9 +136,9 @@ Implement the ratified plan for <feature name>.
 
 ## Context
 - REQUEST: "${REQUEST_ID_URI}"
-- URD: "${URD_ID_URI}" (read with `pasture task show "${URD_ID_URI}"` for user requirements)
+- URD: "${URD_ID_URI}" (read with `"${EPOCH_REC}" show "${URD_ID_URI}"` for user requirements)
 - RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}"
-- HANDOFF: "${HANDOFF_ID_URI}" (the handoff body — read with `pasture task show "${HANDOFF_ID_URI}"`)
+- HANDOFF: "${HANDOFF_ID_URI}" (the handoff body — read with `"${EPOCH_REC}" show "${HANDOFF_ID_URI}"`)
 
 ## Summary
 <1-2 sentence summary of what needs to be implemented>
@@ -151,7 +153,7 @@ Implement the ratified plan for <feature name>.
 1. Call `invoke_skill(/pasture:supervisor)` FIRST — do not proceed without loading your role
 2. Spawn ephemeral Explore subagents with the delegate_assignment tool when codebase exploration is needed
 3. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1/L2/L3 triple is only illustrative); a slice without leaf tasks is undecomposed
-4. Read the ratified plan with `pasture task show "${RATIFIED_PROPOSAL_ID_URI}"` and the URD with `pasture task show "${URD_ID_URI}"`
+4. Read the ratified plan with `"${EPOCH_REC}" show "${RATIFIED_PROPOSAL_ID_URI}"` and the URD with `"${EPOCH_REC}" show "${URD_ID_URI}"`
 ```
 
 Deliver this assignment to the supervisor when you delegate it:
@@ -167,7 +169,7 @@ Implement the ratified plan for User Authentication.
 - REQUEST: ${REQUEST_ID_URI}
 - URD: "${URD_ID_URI}"
 - RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}"
-- HANDOFF: "${HANDOFF_ID_URI}" (read with pasture task show "${HANDOFF_ID_URI}")
+- HANDOFF: "${HANDOFF_ID_URI}" (read with "${EPOCH_REC}" show "${HANDOFF_ID_URI}")
 
 ## Summary
 Add JWT-based authentication with login/logout endpoints and middleware.
@@ -185,7 +187,7 @@ Given an expired token when accessing protected routes then return 401
 1. Call invoke_skill(/pasture:supervisor) FIRST
 2. Spawn ephemeral Explore subagents with the delegate_assignment tool when codebase exploration is needed
 3. Every slice MUST have leaf tasks (any number; L1/L2/L3 is only illustrative)
-4. Read ratified plan: pasture task show "${RATIFIED_PROPOSAL_ID_URI}" and URD: pasture task show "${URD_ID_URI}"`,
+4. Read ratified plan: "${EPOCH_REC}" show "${RATIFIED_PROPOSAL_ID_URI}" and URD: "${EPOCH_REC}" show "${URD_ID_URI}"`,
   summary: "IMPL_PLAN assignment with Pasture context"
 })
 ```
@@ -193,7 +195,7 @@ Given an expired token when accessing protected routes then return 401
 ## Delegation Notes
 
 - Delegate the supervisor (and the workers it will coordinate) as **Opus** assignments — the IMPL_PLAN phase benefits from the stronger model for decomposition and review.
-- A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call `invoke_skill(/pasture:supervisor)`, the Pasture task IDs, and `pasture task show` commands to fetch full requirements).
+- A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call `invoke_skill(/pasture:supervisor)`, the Pasture task IDs, and `"${EPOCH_REC}" show` commands to fetch full requirements).
 - Do not spawn the supervisor via `aura-swarm` for the IMPL_PLAN phase; the deprecated orchestrator must not be invoked.
 
 ## IMPORTANT

@@ -118,11 +118,17 @@ var AllFragmentIds = []FragmentId{
 	FragReviewCleanExit,
 	FragTaskRecovery,
 	FragTaskAuthor,
+	FragTrackerAdapter,
 }
 
 const (
 	FragTaskRecovery FragmentId = "frag--task-recovery"
 	FragTaskAuthor   FragmentId = "frag--task-author"
+
+	// FragTrackerAdapter is the one authored home of the tracker backend
+	// contract: the runtime entry point, the closed operation set, EPOCH.md,
+	// the probe and the write-failure rule (R21, amendment A-3).
+	FragTrackerAdapter FragmentId = "frag--tracker-adapter"
 
 	// FragRevVoteOptions is the canonical vote-options table shared between the
 	// reviewer and reviewer-vote skill bodies (D3-ratified ACCEPT row wording).

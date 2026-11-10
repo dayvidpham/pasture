@@ -79,6 +79,7 @@ var epochBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragTrackerAdapter),
 		{
 			Id:    "epoch-core-principles",
 			Title: "Core Principles",

@@ -46,7 +46,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: pasture task dep add parent --blocked-by child
+- Then: chain dependency: "${EPOCH_REC}" dep add parent --blocked-by child
 - Should not: skip dependency chaining or invert direction
 
 **[C-audit-never-delete]**
@@ -64,7 +64,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
+- Then: parent blocked-by child: "${EPOCH_REC}" dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 **[C-finding-lifecycle]**
@@ -124,13 +124,13 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[C-slice-leaf-tasks]**
 - Given: vertical slice created
 - When: decomposing slice into implementation units
-- Then: create one or more Pasture leaf tasks per slice, named after the real work units they represent, with pasture task dep add "${SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)
+- Then: create one or more Pasture leaf tasks per slice, named after the real work units they represent, with "${EPOCH_REC}" dep add "${SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)
 - Should not: create slices without leaf tasks — a slice with no children is undecomposed and cannot be tracked; force every slice into a fixed L1/L2/L3 triple when the real work units differ
 
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices
 - When: slice implementation is done
-- Then: workers notify supervisor with pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
+- Then: workers notify supervisor with "${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not "${EPOCH_REC}" close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
 - Should not: close slices immediately upon worker completion; allow workers to close their own slices
 
 **[C-supervisor-explore-ephemeral]**
@@ -194,7 +194,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - [ ] Eligible to close only after convergence finds no open pasture:finding across all waves
 
 **review-ready gates:**
-- [ ] All workers have notified completion via pasture task comment add
+- [ ] All workers have notified completion via "${EPOCH_REC}" comment add
 - [ ] Ephemeral reviewers spawned for all slices
 - [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per wave per axis per round
 
@@ -206,13 +206,13 @@ Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full c
 
 **Stage 1: Plan** _(sequential)_
 
-- Read RATIFIED_PLAN and URD via pasture task show (`pasture task show "${RATIFIED_PLAN_ID_URI}" && pasture task show "${URD_ID_URI}"`)
+- Read RATIFIED_PLAN and URD via "${EPOCH_REC}" show (`"${EPOCH_REC}" show "${RATIFIED_PLAN_ID_URI}" && "${EPOCH_REC}" show "${URD_ID_URI}"`)
 
 - Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams
 
 - Use Explore findings to decompose into vertical slices with integration points
 
-- Create leaf tasks (L1/L2/L3) for every slice (`pasture task dep add "${SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"`)
+- Create leaf tasks (L1/L2/L3) for every slice (`"${EPOCH_REC}" dep add "${SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"`)
 
 Exit conditions:
 - **proceed**: All slices created with leaf tasks, dependency-chained, assigned
@@ -221,12 +221,12 @@ Exit conditions:
 
 - Spawn workers via the task tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
 
-- Monitor worker progress via pasture task list --namespace "$PASTURE_NAMESPACE" and pasture task show (`pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress`)
+- Monitor worker progress via "${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" and "${EPOCH_REC}" show (`"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress`)
 
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 
 Exit conditions:
-- **proceed**: All workers have notified completion via pasture task comment add
+- **proceed**: All workers have notified completion via "${EPOCH_REC}" comment add
 
 **Stage 3: Review + Fix Cycles** _(conditional-loop)_
 

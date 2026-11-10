@@ -48,7 +48,7 @@
     {
       "owner": "skills/architect-handoff/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "1. Call `Skill(/pasture:supervisor)` FIRST \u2014 do not proceed without loading your role",
+      "content_window": "1. Call `Skill(/pasture:supervisor)` FIRST — do not proceed without loading your role",
       "section": "Example Prompt",
       "ordinal": 0,
       "classification": "orchestration",
@@ -84,7 +84,7 @@
     {
       "owner": "skills/architect-handoff/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call `Skill(/pasture:supervisor)`, the Pasture task IDs, and `pasture task show` commands to fetch full requirements).",
+      "content_window": "- A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call `Skill(/pasture:supervisor)`, the Pasture task IDs, and `\"${EPOCH_REC}\" show` commands to fetch full requirements).",
       "section": "Delegation Notes",
       "ordinal": 0,
       "classification": "orchestration",
@@ -102,7 +102,7 @@
     {
       "owner": "skills/architect/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "1. **Start with `Skill(/pasture:supervisor)`** \u2014 this loads the supervisor's role instructions, including leaf task creation",
+      "content_window": "1. **Start with `Skill(/pasture:supervisor)`** — this loads the supervisor's role instructions, including leaf task creation",
       "section": "Supervisor Handoff",
       "ordinal": 0,
       "classification": "orchestration",
@@ -174,7 +174,7 @@
     {
       "owner": "skills/epoch/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- **Phase 2 (URE):** invoke `Skill(/pasture:user-elicit)` \u2014 skipping it produces low-quality elicitation.",
+      "content_window": "- **Phase 2 (URE):** invoke `Skill(/pasture:user-elicit)` — skipping it produces low-quality elicitation.",
       "section": "Skills to Invoke",
       "ordinal": 0,
       "classification": "orchestration",
@@ -183,7 +183,7 @@
     {
       "owner": "skills/epoch/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- **Phases 5 & 11 (UAT):** invoke `Skill(/pasture:user-uat)` \u2014 it drives the FIX-NOW vs DEFER disposition and demonstrative examples.",
+      "content_window": "- **Phases 5 & 11 (UAT):** invoke `Skill(/pasture:user-uat)` — it drives the FIX-NOW vs DEFER disposition and demonstrative examples.",
       "section": "Skills to Invoke",
       "ordinal": 0,
       "classification": "orchestration",
@@ -192,7 +192,7 @@
     {
       "owner": "skills/epoch/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "1. Start with `Skill(/pasture:supervisor)` \u2014 without this, the supervisor skips role-critical procedures",
+      "content_window": "1. Start with `Skill(/pasture:supervisor)` — without this, the supervisor skips role-critical procedures",
       "section": "Skills to Invoke",
       "ordinal": 0,
       "classification": "orchestration",
@@ -219,7 +219,7 @@
     {
       "owner": "skills/protocol/CLAUDE.md",
       "pattern": "skill_invocation",
-      "content_window": "**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant full task URIs, (3) `pasture task show \"$TASK_URI\"` reads for each reference, and (4) the HANDOFF Pasture task URI if applicable (handoffs are authored in their task body, not a file path). **SHOULD NEVER** send bare instructions without tracker context \u2014 teammates have zero prior context and cannot see your conversation history or task tree.",
+      "content_window": "**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant full task URIs, (3) `pasture task show \"$TASK_URI\"` reads for each reference, and (4) the HANDOFF Pasture task URI if applicable (handoffs are authored in their task body, not a file path). **SHOULD NEVER** send bare instructions without tracker context — teammates have zero prior context and cannot see your conversation history or task tree.",
       "section": "Agent Orchestration",
       "ordinal": 0,
       "classification": "orchestration",
@@ -228,7 +228,7 @@
     {
       "owner": "skills/protocol/CLAUDE.md",
       "pattern": "skill_invocation",
-      "content_window": "**Given** a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT) **when** conducting the phase **then** the agent **MUST** invoke the matching interview skill (`Skill(/pasture:user-elicit)` for URE, `Skill(/pasture:user-uat)` for UAT) so the verbatim-capture and disposition procedures are loaded. **SHOULD NEVER** conduct an interview phase without invoking its skill \u2014 skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures and yields shallow questions.",
+      "content_window": "**Given** a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT) **when** conducting the phase **then** the agent **MUST** invoke the matching interview skill (`Skill(/pasture:user-elicit)` for URE, `Skill(/pasture:user-uat)` for UAT) so the verbatim-capture and disposition procedures are loaded. **SHOULD NEVER** conduct an interview phase without invoking its skill — skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures and yields shallow questions.",
       "section": "User Interviews (URE/UAT)",
       "ordinal": 0,
       "classification": "orchestration",
@@ -237,7 +237,7 @@
     {
       "owner": "skills/protocol/CLAUDE.md",
       "pattern": "skill_invocation",
-      "content_window": "**Given** a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT) **when** conducting the phase **then** the agent **MUST** invoke the matching interview skill (`Skill(/pasture:user-elicit)` for URE, `Skill(/pasture:user-uat)` for UAT) so the verbatim-capture and disposition procedures are loaded. **SHOULD NEVER** conduct an interview phase without invoking its skill \u2014 skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures and yields shallow questions.",
+      "content_window": "**Given** a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT) **when** conducting the phase **then** the agent **MUST** invoke the matching interview skill (`Skill(/pasture:user-elicit)` for URE, `Skill(/pasture:user-uat)` for UAT) so the verbatim-capture and disposition procedures are loaded. **SHOULD NEVER** conduct an interview phase without invoking its skill — skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures and yields shallow questions.",
       "section": "User Interviews (URE/UAT)",
       "ordinal": 1,
       "classification": "orchestration",
@@ -264,7 +264,7 @@
     {
       "owner": "skills/protocol/PROCESS.md",
       "pattern": "skill_invocation",
-      "content_window": "**The architect MUST invoke `Skill(/pasture:user-elicit)`** before conducting the URE (R2) \u2014 the skill loads the verbatim-capture and disposition procedures. Skipping it produces shallow, low-quality interview questions and loses the verbatim record.",
+      "content_window": "**The architect MUST invoke `Skill(/pasture:user-elicit)`** before conducting the URE (R2) — the skill loads the verbatim-capture and disposition procedures. Skipping it produces shallow, low-quality interview questions and loses the verbatim record.",
       "section": "URE Survey (s2_1)",
       "ordinal": 0,
       "classification": "orchestration",
@@ -273,7 +273,7 @@
     {
       "owner": "skills/protocol/PROCESS.md",
       "pattern": "skill_invocation",
-      "content_window": "**The architect MUST invoke `Skill(/pasture:user-uat)`** before running the UAT (R2) \u2014 the skill loads the verbatim-capture and FIX-NOW/DEFER disposition procedures.",
+      "content_window": "**The architect MUST invoke `Skill(/pasture:user-uat)`** before running the UAT (R2) — the skill loads the verbatim-capture and FIX-NOW/DEFER disposition procedures.",
       "section": "User Approval (Required!)",
       "ordinal": 0,
       "classification": "orchestration",
@@ -291,7 +291,7 @@
     {
       "owner": "skills/protocol/PROCESS.md",
       "pattern": "skill_invocation",
-      "content_window": "**The supervisor MUST invoke `Skill(/pasture:user-uat)`** before running the implementation UAT (R2) \u2014 the skill loads the verbatim-capture and FIX-NOW/DEFER disposition procedures.",
+      "content_window": "**The supervisor MUST invoke `Skill(/pasture:user-uat)`** before running the implementation UAT (R2) — the skill loads the verbatim-capture and FIX-NOW/DEFER disposition procedures.",
       "section": "User Approval",
       "ordinal": 0,
       "classification": "orchestration",
@@ -373,7 +373,7 @@
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
       "content_window": "- Then: use Agent tool with `subagent_type: \"general-purpose\"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start",
-      "section": "Ride the Wave \u2014 Coordinated Phase 8-10 Execution",
+      "section": "Ride the Wave — Coordinated Phase 8-10 Execution",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
@@ -381,8 +381,8 @@
     {
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `pasture task show \"${TASK_ID_URI}\"` for full context, and (4) the handoff authored in the Pasture task body",
-      "section": "Ride the Wave \u2014 Coordinated Phase 8-10 Execution",
+      "content_window": "- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `\"${EPOCH_REC}\" show \"${TASK_ID_URI}\"` for full context, and (4) the handoff authored in the Pasture task body",
+      "section": "Ride the Wave — Coordinated Phase 8-10 Execution",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"

@@ -16,7 +16,7 @@ func TestSchemaTaskStorageAndDependencyContract(t *testing.T) {
 	buildDependencyModel(&dependencies, 0)
 	resolved, err := ResolveBodyMarkersNeutral(dependencies.String())
 	require.NoError(t, err)
-	require.Contains(t, resolved, "pasture task dep add {parent-uri} --blocked-by {child-uri}")
+	require.Contains(t, resolved, neutralTrackerEntryPoint+" dep add {parent-uri} --blocked-by {child-uri}")
 	require.NotContains(t, resolved, "bd dep")
 	var followup bytes.Buffer
 	buildFollowupLifecycle(&followup, 0)

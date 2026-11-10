@@ -46,6 +46,11 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 		return GenerateResult{}, []error{err}
 	}
 
+	// ── 2b. Tracker contract gate (fail-closed, before any write) ────────────
+	if err := ValidateTrackerOps(); err != nil {
+		return GenerateResult{}, []error{err}
+	}
+
 	var result GenerateResult
 	var errs []error
 

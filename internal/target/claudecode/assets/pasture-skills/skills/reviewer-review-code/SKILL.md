@@ -49,23 +49,25 @@ description: Review implementation slices with EAGER severity tree
 
 ## Task Recovery
 
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. The pasture-specific steps below apply only when the header says backend: pasture; when it says ledger, use the Tracker Adapter section and the ledger path in the header. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+
 Recover from live Pasture state at session start and after compaction; never trust cached task rows.
 
 Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
 Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Run pasture task ready, pasture task blocked, and pasture task list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+Run "${EPOCH_REC}" ready, "${EPOCH_REC}" blocked, and "${EPOCH_REC}" list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run "${EPOCH_REC}" show "$TASK_URI", "${EPOCH_REC}" comments "$TASK_URI", and "${EPOCH_REC}" timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
 Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+Assignment transfer is not initial allocation: before using "${EPOCH_REC}" assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
 
-Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+Parent stays open and is blocked by child: "${EPOCH_REC}" dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" agents list and "${EPOCH_REC}" agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## When to Use
 
@@ -81,7 +83,7 @@ First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS c
 # One severity trio per wave, per axis, per round — not one per slice.
 # Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_GROUP_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_GROUP_ID_URI=$("${EPOCH_REC}" create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   wave: 1
@@ -92,10 +94,10 @@ references:
   review: \"${REVIEW_ID_URI}\"
 ---
 BLOCKER findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
+"${EPOCH_REC}" label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
+"${EPOCH_REC}" label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-IMPORTANT_GROUP_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_GROUP_ID_URI=$("${EPOCH_REC}" create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   wave: 1
@@ -106,10 +108,10 @@ references:
   review: \"${REVIEW_ID_URI}\"
 ---
 IMPORTANT findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
+"${EPOCH_REC}" label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
+"${EPOCH_REC}" label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-MINOR_GROUP_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_GROUP_ID_URI=$("${EPOCH_REC}" create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   wave: 1
@@ -120,13 +122,13 @@ references:
   review: \"${REVIEW_ID_URI}\"
 ---
 MINOR findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
+"${EPOCH_REC}" label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
+"${EPOCH_REC}" label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review task
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
+"${EPOCH_REC}" dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
+"${EPOCH_REC}" dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
+"${EPOCH_REC}" dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
 ```
 
 ### Adding Findings to Severity Groups
@@ -134,7 +136,7 @@ pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
 ```bash
 # Each finding carries slice: and wave: in references.
 # BLOCKER finding — dual-parent relationship
-BLOCKER_FINDING_ID_URI=$(pasture task create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_FINDING_ID_URI=$("${EPOCH_REC}" create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   wave: 1
@@ -143,12 +145,12 @@ references:
   round: 1
 ---
 <finding details with file:line references>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "${BLOCKER_FINDING_ID_URI}" pasture:finding
-pasture task dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
-pasture task dep add "${SLICE_1_1_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+"${EPOCH_REC}" label add "${BLOCKER_FINDING_ID_URI}" pasture:finding
+"${EPOCH_REC}" dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+"${EPOCH_REC}" dep add "${SLICE_1_1_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
 
 # IMPORTANT finding — single parent (severity group only)
-IMPORTANT_FINDING_ID_URI=$(pasture task create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_FINDING_ID_URI=$("${EPOCH_REC}" create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   wave: 1
@@ -157,11 +159,11 @@ references:
   round: 1
 ---
 <finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "${IMPORTANT_FINDING_ID_URI}" pasture:finding
-pasture task dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
+"${EPOCH_REC}" label add "${IMPORTANT_FINDING_ID_URI}" pasture:finding
+"${EPOCH_REC}" dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
 
 # MINOR finding — single parent (severity group only)
-MINOR_FINDING_ID_URI=$(pasture task create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_FINDING_ID_URI=$("${EPOCH_REC}" create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   wave: 1
@@ -170,8 +172,8 @@ references:
   round: 1
 ---
 <finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "${MINOR_FINDING_ID_URI}" pasture:finding
-pasture task dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
+"${EPOCH_REC}" label add "${MINOR_FINDING_ID_URI}" pasture:finding
+"${EPOCH_REC}" dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
 ```
 
 ### Closing Empty Groups
@@ -180,10 +182,10 @@ Empty severity groups (no findings) are closed immediately:
 
 ```bash
 # If no IMPORTANT findings were found:
-pasture task close "${IMPORTANT_GROUP_ID_URI}"
+"${EPOCH_REC}" close "${IMPORTANT_GROUP_ID_URI}"
 
 # If no MINOR findings were found:
-pasture task close "${MINOR_GROUP_ID_URI}"
+"${EPOCH_REC}" close "${MINOR_GROUP_ID_URI}"
 ```
 
 ### Dual-Parent BLOCKER Relationship
@@ -203,8 +205,8 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 ### Step 1: Read Code Changes and URD
 
 ```bash
-pasture task show "${SLICE_ID_URI}"
-pasture task show "${URD_ID_URI}"   # Read URD for requirements context
+"${EPOCH_REC}" show "${SLICE_ID_URI}"
+"${EPOCH_REC}" show "${URD_ID_URI}"   # Read URD for requirements context
 ```
 
 ### Step 2: Run Quality Gates
@@ -220,7 +222,7 @@ Apply end-user alignment criteria (see `pasture:reviewer`) and verify production
 ### Step 4: Create Review Task
 
 ```bash
-REVIEW_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+REVIEW_ID_URI=$("${EPOCH_REC}" create "WAVE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   wave: 1
@@ -231,11 +233,11 @@ references:
   urd: \"${URD_ID_URI}\"
 ---
 VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
+"${EPOCH_REC}" label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
 # One review covers the whole wave, so wire every slice in the wave to it.
-pasture task dep add "${SLICE_1_1_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
-pasture task dep add "${SLICE_1_2_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
-pasture task dep add "${SLICE_1_3_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+"${EPOCH_REC}" dep add "${SLICE_1_1_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+"${EPOCH_REC}" dep add "${SLICE_1_2_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+"${EPOCH_REC}" dep add "${SLICE_1_3_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 ```
 
 ### Steps 5–8: Severity Tree and Vote
@@ -243,7 +245,7 @@ pasture task dep add "${SLICE_1_3_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 5. Create severity tree (EAGER — all 3 groups immediately)
 6. Add findings to appropriate severity groups
 7. Close empty severity groups
-8. Cast vote via `pasture task comment add`
+8. Cast vote via `"${EPOCH_REC}" comment add`
 
 ## Verify Production Code Paths
 
@@ -327,9 +329,9 @@ When reviewing follow-up slices, use the same procedure:
 
 ```bash
 # Add vote comment to the review task
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
+"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
 
 # Or
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - BLOCKERs found, see severity tree for details"
+"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - BLOCKERs found, see severity tree for details"
 ```
 <!-- END GENERATED FROM pasture schema -->

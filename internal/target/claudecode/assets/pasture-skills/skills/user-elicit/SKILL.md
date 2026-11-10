@@ -45,7 +45,7 @@ description: User Requirements Elicitation survey (Phase 2)
 - Given: URD created
 - When: linking to other tasks
 - Then: include URD ID in description frontmatter of referencing tasks
-- Should not: use `pasture task dep add --blocked-by` for URD links (URD is a reference document, not a blocking dependency)
+- Should not: use `"${EPOCH_REC}" dep add --blocked-by` for URD links (URD is a reference document, not a blocking dependency)
 
 **[user-elicit-code-shown]**
 - Given: any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in the preview the AskUserQuestion call shows)
@@ -73,23 +73,25 @@ description: User Requirements Elicitation survey (Phase 2)
 
 ## Task Recovery
 
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. The pasture-specific steps below apply only when the header says backend: pasture; when it says ledger, use the Tracker Adapter section and the ledger path in the header. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+
 Recover from live Pasture state at session start and after compaction; never trust cached task rows.
 
 Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
 Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Run pasture task ready, pasture task blocked, and pasture task list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+Run "${EPOCH_REC}" ready, "${EPOCH_REC}" blocked, and "${EPOCH_REC}" list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run "${EPOCH_REC}" show "$TASK_URI", "${EPOCH_REC}" comments "$TASK_URI", and "${EPOCH_REC}" timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
 Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+Assignment transfer is not initial allocation: before using "${EPOCH_REC}" assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
 
-Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+Parent stays open and is blocked by child: "${EPOCH_REC}" dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" agents list and "${EPOCH_REC}" agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Sub-steps
 
@@ -153,7 +155,7 @@ These narrow the design space and reveal which boundaries are already clear vs
 which need user input.
 
 ```bash
-pasture task show "${REQUEST_ID_URI}"   # Read classification + research + explore findings
+"${EPOCH_REC}" show "${REQUEST_ID_URI}"   # Read classification + research + explore findings
 ```
 
 Use the Phase 1 findings to identify:
@@ -252,7 +254,7 @@ field (parity with UAT's 'Definition shown' / 'Command run' fields). For
 **every** request, also record the elicited validation cases verbatim.
 
 ```bash
-ELICIT_ID_URI=$(pasture task create "ELICIT: {{feature name}}" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
+ELICIT_ID_URI=$("${EPOCH_REC}" create "ELICIT: {{feature name}}" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   request: "${REQUEST_ID_URI}"
@@ -285,11 +287,11 @@ A: {{user's verbatim input}}
 - Must pass (correct behaviour): {{verbatim expected correct behavior}}
 - Must fail / out of scope (incorrect behaviour): {{verbatim — for fix-intent, the input/behavior that fails today}}
 - Repro / real data: {{verbatim commands, data, or steps — or 'none'}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
-pasture task update "$ELICIT_ID_URI" --notes "Requested role (not an assignment): architect"
+"${EPOCH_REC}" label add "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
+"${EPOCH_REC}" update "$ELICIT_ID_URI" --notes "Requested role (not an assignment): architect"
 
 # Chain dependency: REQUEST blocked by ELICIT
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
+"${EPOCH_REC}" dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
 ```
 
 ## Creating the URD (s2_2)
@@ -297,7 +299,7 @@ pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
 After the elicit task is created, create the URD as the single source of truth for user requirements:
 
 ```bash
-URD_ID_URI=$(pasture task create "URD: {{feature name}}" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
+URD_ID_URI=$("${EPOCH_REC}" create "URD: {{feature name}}" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   request: "${REQUEST_ID_URI}"
@@ -317,8 +319,8 @@ references:
 
 ## End-Vision Goals
 {{user's ultimate vision for the feature}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$URD_ID_URI" pasture:urd
-pasture task label add "$URD_ID_URI" pasture:p2-user:s2_2-urd
+"${EPOCH_REC}" label add "$URD_ID_URI" pasture:urd
+"${EPOCH_REC}" label add "$URD_ID_URI" pasture:p2-user:s2_2-urd
 ```
 
 The URD is a **reference document**, not a blocking dependency. Other tasks reference it via description frontmatter (`urd: "${URD_ID_URI}"`), not via blocking dependency commands.
@@ -331,6 +333,6 @@ After elicitation and URD creation, invoke `/pasture:architect` to begin proposa
 
 The proposal task will block the elicit task:
 ```bash
-pasture task dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+"${EPOCH_REC}" dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
 ```
 <!-- END GENERATED FROM pasture schema -->
