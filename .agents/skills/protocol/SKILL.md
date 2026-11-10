@@ -66,7 +66,7 @@ pasture:p{phase}-{domain}:s{step}-{type}
 
 ### Follow-up Lifecycle
 
-**Trigger:** UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items. Review severities never feed FOLLOWUP — all review findings reach 0 before wave close. Deferrals (user- or agent-proposed) are governed by `C-uat-feedback-disposition` — all deferred items are raised to the user at the next user gate for confirmation.
+**Trigger:** UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items. Review severities never feed FOLLOWUP — findings stay open until end-of-epoch convergence and close only per `C-finding-lifecycle` (`C-followup-timing`). Deferrals (user- or agent-proposed) are governed by `C-uat-feedback-disposition` — all deferred items are raised to the user at the next user gate for confirmation.
 
 **Owner:** Supervisor creates follow-up epic (label `pasture:epic-followup`).
 

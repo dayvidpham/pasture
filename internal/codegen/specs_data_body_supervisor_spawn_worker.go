@@ -172,7 +172,7 @@ Per [sup-spawn-workers], use ` + "`" + `subagent_type: "general-purpose"` + "`" 
 [[op:send_assignment_message]]({
   type: "message",
   recipient: "worker-1",
-  content: ` + "`" + `You are assigned SLICE-1. Start by calling [[op:invoke_skill]](/pasture:worker).
+  content: ` + "`" + `You are assigned SLICE-{W}-{N}. Start by calling [[op:invoke_skill]](/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
 Run this to get full requirements + handoff: [[rec]] show "${SLICE_TASK_ID_URI}"
@@ -188,7 +188,7 @@ Read the handoff doc and your Pasture task before starting implementation.
 IMPORTANT: Do NOT shut down after completing implementation. You will receive
 review feedback from ephemeral reviewers and may need to fix BLOCKERs and IMPORTANT
 findings. Stay alive for the full Ride the Wave cycle.` + "`" + `,
-  summary: "SLICE-1 assignment with Pasture context"
+  summary: "SLICE-{W}-{N} assignment with Pasture context"
 })
 ` + "```" + `
 
@@ -215,7 +215,7 @@ Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec]] show` 
 [[op:send_assignment_message]]({
   type: "message",
   recipient: "worker-1",
-  content: ` + "`" + `Review cycle <N> found issues in your slice (SLICE-1).
+  content: ` + "`" + `Review cycle <N> found issues in your slice (SLICE-{W}-{N}).
 
 BLOCKERs (must fix — blocks slice closure):
 - "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
@@ -230,7 +230,7 @@ After fixing all items:
   [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
 
 Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
-  summary: "Review cycle <N> fixes for SLICE-1"
+  summary: "Review cycle <N> fixes for SLICE-{W}-{N}"
 })
 ` + "```" + ``,
 				},

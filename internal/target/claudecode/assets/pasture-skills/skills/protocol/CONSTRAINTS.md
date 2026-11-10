@@ -28,9 +28,9 @@ Common constraints referenced by all agent and skill files.
 
 ## Workflow Constraints
 
-**Given** per-slice code review **when** evaluating review results **then** iterate review → fix → re-review **up to the chosen review-effort budget** until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without a clean round, surface the outstanding findings to the user at a gate **should never** close a wave on a fix-applying round, proceed with ANY finding outstanding without surfacing it, hardcode the budget, or proceed past the chosen budget without surfacing to the user
+**Given** per-wave code review **when** evaluating review results **then** gate each wave on open BLOCKER findings only — IMPORTANT and MINOR findings may stay open past a wave gate — and after the last wave converge every open `pasture:finding` across all waves to 0/0/0 within the gate declaration's `maxRounds`, iterating review → fix → re-review up to the review-effort budget chosen at Phase 8 (`C-clean-review-exit`) **should never** require a zeroed round at a wave boundary, close a finding outside `C-finding-lifecycle`, proceed past the chosen budget without surfacing outstanding findings, hardcode the budget, or batch one review across multiple waves
 
-**Given** the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate **when** deciding how much review-and-fix effort to spend per slice **then** request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review → fix → re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision **should never** hardcode the review-cycle budget, proceed past the chosen budget without surfacing, or loop forever when a finite budget was chosen
+**Given** the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate **when** deciding how much review-and-fix effort to spend per wave **then** request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review → fix → re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within `maxRounds`; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision **should never** hardcode the review-cycle budget, proceed past the chosen budget without surfacing, or loop forever when a finite budget was chosen
 
 **Given** UAT (Phase 5 or Phase 11) feedback or a proposed deferral (deferrals may be flagged by the user OR proposed by the architect/supervisor) **when** recording each item **then** assign an explicit, user-confirmed FIX-NOW or DEFER disposition — ALL deferred items, whoever proposed them, MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; DEFER'd items are the SOLE source feeding the FOLLOWUP epic **should never** leave a UAT item without a confirmed disposition, silently defer an item without raising it at the next gate, or route a review severity into FOLLOWUP
 
@@ -74,17 +74,17 @@ Binary only. No intermediate levels.
 
 ## Issue Severity
 
-| Severity | When to Use | Must reach 0 before wave close? |
-|----------|-------------|--------------------------------|
-| BLOCKER | Security, type errors, test failures, broken production code paths | Yes (also blocks the slice — dual-parent) |
-| IMPORTANT | Performance, missing validation, architectural concerns | Yes — fixed in-wave, NOT deferrable |
-| MINOR | Style, optional optimizations, naming improvements | Yes — fixed in-wave, NOT deferrable |
+| Severity | When to Use | Wave gate |
+|----------|-------------|-----------|
+| BLOCKER | Security, type errors, test failures, broken production code paths | Gates the wave while any finding is open (also blocks the slice — dual-parent) |
+| IMPORTANT | Performance, missing validation, architectural concerns | May stay open past a wave gate; converges at the end |
+| MINOR | Style, optional optimizations, naming improvements | May stay open past a wave gate; converges at the end |
 
-**Clean-review exit (within the chosen review-effort budget):** A code-review wave iterates review → fix → re-review **up to the configurable review-effort budget** chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom) until a **fix-free clean round** confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** from all reviewers within budget. A clean round applies no fixes and finds nothing across all three severities. On budget exhaustion without a clean round, the outstanding findings are surfaced to the user at a gate for a decision (never proceed-dirty, never loop forever, never hardcode the budget). The wave MUST end on a review wave or a surface-to-user gate (never proceed silently after a worker wave without a clean re-review). No review severity is deferrable to FOLLOWUP.
+**Two-phase review exit (`C-clean-review-exit`, `C-finding-lifecycle`, `C-review-effort-budget`):** Code review runs one review per wave. During a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate. After the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's `maxRounds`, iterating review → fix → re-review up to the configurable review-effort budget chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom). On budget exhaustion without convergence, the outstanding findings are surfaced to the user at a gate for a decision (never proceed dirty, never loop forever, never hardcode the budget). The wave MUST end on a review wave or a surface-to-user gate. No review severity is routed to FOLLOWUP.
 
-**EAGER severity group creation:** For every code review round (Phase 10), ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately. Empty groups have no children and are closed immediately. This is NOT lazy creation.
+**EAGER severity group creation:** For every code review round (Phase 10), ALWAYS create the three severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately. Empty groups have no children and are closed immediately. This is NOT lazy creation.
 
-**Follow-up epic:** Created at **UAT (Phase 5 or Phase 11)** when the user DEFERs one or more items. The FOLLOWUP epic is fed **ONLY** by user-DEFER'd UAT items — **never** by a review severity (BLOCKER/IMPORTANT/MINOR), since all review findings must reach 0 before wave close. FIX-NOW items are resolved in the current wave. Owner: Supervisor (label `pasture:epic-followup`).
+**Follow-up epic:** Created at **UAT (Phase 5 or Phase 11)** when the user DEFERs one or more items — the sole source (`C-followup-timing`). The FOLLOWUP epic is fed **ONLY** by user-DEFER'd UAT items — **never** by a review severity (BLOCKER/IMPORTANT/MINOR); review findings converge at the end and close only per `C-finding-lifecycle`. FIX-NOW items are resolved in the current wave. Owner: Supervisor (label `pasture:epic-followup`).
 
 **Follow-up lifecycle:** The follow-up epic runs the same protocol phases with FOLLOWUP_* prefixed task types: FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL → FOLLOWUP_IMPL_PLAN → FOLLOWUP_SLICE-N. The supervisor creates FOLLOWUP_URE and FOLLOWUP_URD, then hands off to architect via h6 for FOLLOWUP_PROPOSAL. User-DEFER'd UAT-item leaf tasks are adopted by FOLLOWUP_SLICE-N (dual-parent: original DEFER'd-items tracking group + follow-up slice).
 
@@ -136,7 +136,7 @@ Special labels:
 | Title Format | Label | Ownership |
 |---|---|---|
 | `IMPL_PLAN: Description` | `pasture:p8-impl:s8-plan` | Supervisor |
-| `SLICE-N: Description` | `pasture:p9-impl:s9-slice` | One worker per slice |
+| `SLICE-{W}-{N}: Description` | `pasture:p9-impl:s9-slice` | One worker per slice |
 
 **Vertical Slice Ownership Model:**
 - Each **production code path** is owned by exactly ONE worker

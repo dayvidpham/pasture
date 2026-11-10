@@ -84,16 +84,18 @@ See [PROCESS.md](PROCESS.md) for the full step-by-step workflow. See [SKILLS.md]
 
 ### Code Review (Phase 10)
 
-Same 3 axes, applied to implementation slices.
+Same 3 axes, applied to the whole wave.
 
-**Task title:** `SLICE-N-REVIEW-{axis}-{round}` (e.g., `SLICE-1-REVIEW-A-1`)
+**One review per wave.** Reviewers A, B, and C each review every slice in the wave (`SLICE-{W}-{N}`) and record its findings on one trio of severity groups.
 
-**Severity tree (EAGER creation):** Always create 3 severity groups per review round:
-- `pasture:severity:blocker` — Blocks the slice (dual-parent); must reach 0
-- `pasture:severity:important` — Fixed in-wave; must reach 0 (NOT deferrable)
-- `pasture:severity:minor` — Fixed in-wave; must reach 0 (NOT deferrable)
+**Task title:** `WAVE-{W}-REVIEW-{axis}-{round}` (e.g., `WAVE-1-REVIEW-A-1`) — a wave never produces one review title per reviewed slice.
 
-Empty groups are closed immediately. **Configurable review-effort budget:** iterate review → fix → re-review up to the budget chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface the outstanding findings to the user at a gate. No review severity is routed to FOLLOWUP — the FOLLOWUP epic is fed only by user-DEFER'd UAT items.
+**Severity tree (EAGER creation):** Always create the three severity groups per review round:
+- `pasture:severity:blocker` — gates the wave while any of its findings is open (dual-parent: also blocks the slice)
+- `pasture:severity:important` — may stay open past a wave gate; converges at the end
+- `pasture:severity:minor` — may stay open past a wave gate; converges at the end
+
+Empty groups are closed immediately. A finding is created as a child of its severity group labelled `pasture:finding` and closes only per `C-finding-lifecycle` (the reviewer who raised it verifies the fix; a wave boundary never closes it). Wave gating and end-of-epoch convergence follow `C-clean-review-exit`; the review-effort budget is per wave (`C-review-effort-budget`). No review severity is routed to FOLLOWUP — the FOLLOWUP epic is fed only by user-DEFER'd UAT items (`C-followup-timing`).
 
 **Skills:** `/pasture:reviewer-review-plan`, `/pasture:reviewer-review-code`, `/pasture:reviewer-comment`, `/pasture:reviewer-vote`
 
@@ -114,7 +116,7 @@ Empty groups are closed immediately. **Configurable review-effort budget:** iter
 | 8 | `pasture:p8-impl:s8-plan` | `/pasture:supervisor-plan-tasks` | Decompose ratified plan into vertical slices |
 | 9 | `pasture:p9-impl:s9-slice` | `/pasture:supervisor-spawn-worker` | Spawn workers, assign slices |
 | 9-10 | — | `/pasture:supervisor-track-progress` | Monitor worker status |
-| 10 | `pasture:p10-impl:s10-review` | `/pasture:impl-review` | Spawn 3 code reviewers per slice |
+| 10 | `pasture:p10-impl:s10-review` | `/pasture:impl-review` | One review per wave (3 axis reviewers over every slice in the wave) |
 | 11 | `pasture:p11-user:s11-uat` | `/pasture:user-uat` | Implementation UAT with user |
 | 12 | `pasture:p12-impl:s12-landing` | `/pasture:supervisor-commit` | Atomic commit, push, hand off |
 
@@ -125,7 +127,7 @@ Empty groups are closed immediately. **Configurable review-effort budget:** iter
 - Never implements code — always spawns workers
 - Each production code path owned by exactly ONE worker
 - Decomposes interface-first: prefers a FOUNDATION slice exporting shared identifiers before dependent slices (justifies any linear decomposition in the IMPL_PLAN)
-- Drives the code-review wave to a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR, up to the chosen review-effort budget; on exhaustion, surfaces to the user) before closing slices
+- Drives each wave to a BLOCKER-free gate (only an open BLOCKER finding gates a wave), then runs end-of-epoch convergence over open `pasture:finding` tasks within `maxRounds` and the chosen review-effort budget; on exhaustion, surfaces the outstanding findings to the user — per `C-clean-review-exit`
 - Requests the configurable review-effort budget from the user at Phase 8 (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom), like the Phase-1 research-depth gate
 - Enforces the validation-case contract workers' tests verify (tests-first, red→green) — per `C-validation-cases`
 - Creates the follow-up epic (`pasture:epic-followup`) at **UAT** when the user DEFERs items — fed ONLY by user-DEFER'd UAT items, never by review severities

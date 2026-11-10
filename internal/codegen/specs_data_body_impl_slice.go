@@ -43,7 +43,7 @@ var implSliceBody = SkillBody{
 			Id:    "impl-slice-structure",
 			Title: "Slice Structure",
 			Content: `Each vertical slice contains:
-- **slice_id**: Identifier (SLICE-1, SLICE-2, SLICE-3, ...)
+- **slice_id**: Identifier (SLICE-{W}-{N}, e.g. SLICE-1-1, SLICE-1-2, ...)
 - **slice_name**: Human-readable name
 - **slice_spec**: Detailed implementation specification
 - **slice_files**: Files owned by this slice`,
@@ -113,7 +113,7 @@ references:
 			Content: `Slices can have dependencies on each other (sync points):
 
 ` + "```" + `bash
-# SLICE-2 depends on SLICE-1 completing first
+# SLICE-1-2 depends on SLICE-1-1 completing first
 [[rec]] dep add "${SLICE_2_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
 ` + "```" + `
 

@@ -71,7 +71,7 @@ Special labels:
 - **Binary votes** — ACCEPT or REVISE only (no intermediate levels)
 - **EAGER severity tree** — Always create 3 severity groups per code review round
 - **Configurable review-effort budget** — Requested from the user at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom), like the Phase-1 research-depth gate
-- **Clean-review exit** — Iterate review → fix → re-review up to the chosen review-effort budget until a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR); all severities are fixed in-wave; on budget exhaustion without clean, surface the outstanding findings to the user
+- **Two-phase review** — during a wave only an open BLOCKER finding gates it; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence over open `pasture:finding` tasks targets 0/0/0 within `maxRounds`, and outstanding findings are surfaced to the user on budget exhaustion (`C-clean-review-exit`)
 - **Follow-up epic** — Created at UAT, fed ONLY by user-DEFER'd UAT items (never by review severities)
 - **Vertical slices** — Each worker owns one full production code path end-to-end; slices may have any number of leaf tasks
 

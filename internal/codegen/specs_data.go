@@ -347,7 +347,7 @@ fi`,
 	"C-review-effort-budget": {
 		Id:    "C-review-effort-budget",
 		Given: "the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate",
-		When:  "deciding how much review-and-fix effort to spend per slice",
+		When:  "deciding how much review-and-fix effort to spend per wave",
 		Then: "request a configurable review-effort budget from the user — defaults: " +
 			"(1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; " +
 			"the review->fix->re-review loop iterates up to the chosen budget; " +

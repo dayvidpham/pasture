@@ -124,12 +124,49 @@ func findPerWaveCleanRound(content string) []string {
 	return findings
 }
 
-// TestNoPerWaveCleanRound proves no rendered text requires a clean 0/0/0 round
-// at a wave boundary. It carries two pinned samples: the defective sample must
-// produce at least one finding, and the clean sample (the two-phase model) must
-// produce none. It then sweeps every rendering source, including role bodies,
-// supervisor checklists and workflow descriptions (tenets 8 and 9, amendment
-// A-4.1).
+// reviewModelShippedSources returns the shipped files the review-model guards
+// sweep in addition to renderedSources. renderedSources covers authored prose
+// that reaches generated output; G2ScopedFiles adds the hand-authored
+// skills/protocol/*.md corpus — shipped verbatim into every target tree but
+// never passed through the generator — plus the generated trees themselves.
+// Reusing it keeps one corpus list, not a second one (tenet 11: a rewritten
+// rule must not survive in the shipped docs).
+func reviewModelShippedSources(t *testing.T) []renderingSource {
+	t.Helper()
+
+	root, err := scan.ModuleRoot()
+	require.NoError(t, err)
+
+	files := G2ScopedFiles(t, root)
+	sources := make([]renderingSource, 0, len(files))
+	for _, file := range files {
+		data, err := os.ReadFile(file)
+		require.NoErrorf(t, err, "reading %q failed; run make generate", file)
+		rel, err := filepath.Rel(root, file)
+		require.NoErrorf(t, err, "relativizing %q failed", file)
+		sources = append(sources, renderingSource{Corpus: "shipped", Owner: rel, Text: string(data)})
+	}
+	return sources
+}
+
+// reviewModelGuardSources returns the full corpus every review-model guard
+// sweeps: authored rendering sources plus the shipped files from
+// reviewModelShippedSources.
+func reviewModelGuardSources(t *testing.T) []renderingSource {
+	t.Helper()
+
+	sources, err := renderedSources()
+	require.NoError(t, err)
+	require.NotEmpty(t, sources, "the rendering-source enumeration must not be empty")
+	return append(sources, reviewModelShippedSources(t)...)
+}
+
+// TestNoPerWaveCleanRound proves no rendered or shipped text requires a clean
+// 0/0/0 round at a wave boundary. It carries two pinned samples: the defective
+// sample must produce at least one finding, and the clean sample (the two-phase
+// model) must produce none. It then sweeps every rendering source and every
+// shipped file — including the hand-authored skills/protocol/*.md corpus
+// (tenets 8 and 9, amendment A-4.1).
 func TestNoPerWaveCleanRound(t *testing.T) {
 	t.Parallel()
 
@@ -159,9 +196,7 @@ func TestNoPerWaveCleanRound(t *testing.T) {
 	assert.Empty(t, findPerWaveCleanRound(clean),
 		"the clean two-phase sample must produce no finding")
 
-	sources, err := renderedSources()
-	require.NoError(t, err)
-	require.NotEmpty(t, sources, "the rendering-source enumeration must not be empty")
+	sources := reviewModelGuardSources(t)
 
 	for _, source := range sources {
 		findings := findPerWaveCleanRound(source.Text)
@@ -337,8 +372,7 @@ func TestWaveTitleConvention(t *testing.T) {
 	assert.Empty(t, findWaveTitleDefects(clean),
 		"the clean sample must produce no finding: one review per wave lists its slices and yields one title")
 
-	sources, err := renderedSources()
-	require.NoError(t, err)
+	sources := reviewModelGuardSources(t)
 	var sawSliceWave, sawReviewWave bool
 	for _, source := range sources {
 		for _, defect := range findWaveTitleDefects(source.Text) {
@@ -423,6 +457,51 @@ func TestFollowupEpicIsUATDeferred(t *testing.T) {
 		"the follow-up lifecycle trigger must name user-DEFER'd UAT items as its source")
 	assert.NotContains(t, lifecycle, "Code review completion",
 		"the follow-up lifecycle must not be triggered by code review completion")
+}
+
+// followupHandoffStartPattern catches the retired claim that the h5 reviewer
+// handoff starts the follow-up lifecycle. The lifecycle starts only from
+// user-DEFER'd UAT items (C-followup-timing); h5 closes the review wave.
+var followupHandoffStartPattern = regexp.MustCompile(`(?i)h5[^\n]{0,40}starts the follow-up lifecycle`)
+
+// findFollowupStartClaims returns one finding per retired h5-starts claim.
+func findFollowupStartClaims(content string) []string {
+	var findings []string
+	for _, line := range strings.Split(content, "\n") {
+		if loc := followupHandoffStartPattern.FindString(line); loc != "" {
+			findings = append(findings, loc)
+		}
+	}
+	return findings
+}
+
+// TestFollowupLifecycleStartsAtUAT proves no rendered or shipped text claims
+// the h5 reviewer handoff starts the follow-up lifecycle. Two samples prove the
+// guard fails on the retired claim and passes on the UAT-deferred wording.
+func TestFollowupLifecycleStartsAtUAT(t *testing.T) {
+	t.Parallel()
+
+	defective := strings.Join([]string{
+		"| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |",
+		"The h5 handoff starts the follow-up lifecycle.",
+	}, "\n")
+	require.NotEmpty(t, findFollowupStartClaims(defective),
+		"the defective sample must produce at least one finding")
+
+	clean := strings.Join([]string{
+		"| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |",
+		"The follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`).",
+		"The Reviewer → Supervisor h5 handoff closes the review wave; it never starts the follow-up lifecycle.",
+	}, "\n")
+	assert.Empty(t, findFollowupStartClaims(clean),
+		"the clean sample must produce no finding")
+
+	for _, source := range reviewModelGuardSources(t) {
+		claims := findFollowupStartClaims(source.Text)
+		assert.Emptyf(t, claims,
+			"%s %s still claims the h5 handoff starts the follow-up lifecycle: %v — the lifecycle starts only from user-DEFER'd UAT items (C-followup-timing); h5 closes the review wave",
+			source.Corpus, source.Owner, claims)
+	}
 }
 
 // TestSpecialLabelIDsMatchRegistry ties the schema's ordered special-label list

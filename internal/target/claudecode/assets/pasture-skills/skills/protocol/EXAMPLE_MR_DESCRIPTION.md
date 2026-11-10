@@ -517,18 +517,18 @@ Gap: No existing protobuf serializer. JsonSerializer exists as reference pattern
 
 ### Vertical Slices (3 slices, linear dependency)
 
-**SLICE-1: Proto Schema Extensions** — Extend analytics_log.proto with FieldZone enum, Robot fields 7-11, WorldState fields 7-9. Verify skynet_proto builds. Files owned: `src/network/protocol/proto/analytics_log.proto`. Integration point (outbound): Produces proto::FieldZone, proto::Robot (extended), proto::WorldState (extended), proto::AnalyticsEntry — consumed by SLICE-2.
+**SLICE-1-1: Proto Schema Extensions** — Extend analytics_log.proto with FieldZone enum, Robot fields 7-11, WorldState fields 7-9. Verify skynet_proto builds. Files owned: `src/network/protocol/proto/analytics_log.proto`. Integration point (outbound): Produces proto::FieldZone, proto::Robot (extended), proto::WorldState (extended), proto::AnalyticsEntry — consumed by SLICE-1-2.
 
-**SLICE-2: ProtobufSerializer Namespace** — Free functions: serializeRobot, serializeBall, serializeWorldState, serializeEntry. Test fixtures for all 13 RobotSchema + 8 BallSchema fields (including derived). Round-trip test asserting every field. Files owned: `src/serialization/ProtobufSerializer.h`, `src/serialization/ProtobufSerializer.cpp`, `src/serialization/CMakeLists.txt`, `test/serialization/test_protobuf_serializer.cpp`. Integration point (inbound): Depends on SLICE-1 proto types. Integration point (outbound): Produces `ProtobufSerializer::serializeEntry()` — consumed by SLICE-3.
+**SLICE-1-2: ProtobufSerializer Namespace** — Free functions: serializeRobot, serializeBall, serializeWorldState, serializeEntry. Test fixtures for all 13 RobotSchema + 8 BallSchema fields (including derived). Round-trip test asserting every field. Files owned: `src/serialization/ProtobufSerializer.h`, `src/serialization/ProtobufSerializer.cpp`, `src/serialization/CMakeLists.txt`, `test/serialization/test_protobuf_serializer.cpp`. Integration point (inbound): Depends on SLICE-1-1 proto types. Integration point (outbound): Produces `ProtobufSerializer::serializeEntry()` — consumed by SLICE-1-3.
 
-**SLICE-3: WorldStateRecorder QObject** — Qt6 slot onMetricProcessed, base64 append, UUID+timestamp file naming, isHealthy(). Integration test: AnalyticsCore → WorldStateRecorder end-to-end with QSignalSpy. Files owned: `src/analytics/WorldStateRecorder.h`, `src/analytics/WorldStateRecorder.cpp`, `src/analytics/CMakeLists.txt`, `test/analytics/test_world_state_recorder.cpp`. Integration point (inbound): Depends on SLICE-2 `ProtobufSerializer::serializeEntry()`.
+**SLICE-1-3: WorldStateRecorder QObject** — Qt6 slot onMetricProcessed, base64 append, UUID+timestamp file naming, isHealthy(). Integration test: AnalyticsCore → WorldStateRecorder end-to-end with QSignalSpy. Files owned: `src/analytics/WorldStateRecorder.h`, `src/analytics/WorldStateRecorder.cpp`, `src/analytics/CMakeLists.txt`, `test/analytics/test_world_state_recorder.cpp`. Integration point (inbound): Depends on SLICE-1-2 `ProtobufSerializer::serializeEntry()`.
 
 ### Horizontal Layer Integration Points
 
 | Integration Point | Owning Slice | Consuming Slices | Shared Contract | Merge Timing |
 |-------------------|-------------|-------------------|-----------------|--------------|
-| Proto types (FieldZone, Robot ext, WorldState ext) | SLICE-1 | SLICE-2, SLICE-3 | analytics_log.proto generated headers | SLICE-1 must merge before SLICE-2 starts |
-| ProtobufSerializer::serializeEntry() | SLICE-2 | SLICE-3 | ProtobufSerializer.h namespace API | SLICE-2 must merge before SLICE-3 starts |
+| Proto types (FieldZone, Robot ext, WorldState ext) | SLICE-1-1 | SLICE-1-2, SLICE-1-3 | analytics_log.proto generated headers | SLICE-1-1 must merge before SLICE-1-2 starts |
+| ProtobufSerializer::serializeEntry() | SLICE-1-2 | SLICE-1-3 | ProtobufSerializer.h namespace API | SLICE-1-2 must merge before SLICE-1-3 starts |
 
 ### Codebase Context
 

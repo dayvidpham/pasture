@@ -114,8 +114,8 @@ var supervisorBody = SkillBody{
    - Layer 4: integration_test.go (depends on L3)
 
    ## Tasks
-   - "${SLICE_1_ID_URI}": SLICE-1 ...
-   - "${SLICE_2_ID_URI}": SLICE-2 ...
+   - "${SLICE_1_ID_URI}": SLICE-{W}-{N} ...
+   - "${SLICE_2_ID_URI}": SLICE-{W}-{N} ...
    ...
    EOF
    )"
@@ -206,9 +206,9 @@ references:
 <list of files>
 
 ## Leaf Tasks
-- SLICE-1-L1: Types and interfaces
-- SLICE-1-L2: Tests (import production code)
-- SLICE-1-L3: Implementation + wiring
+- SLICE-1-1-L1: Types and interfaces
+- SLICE-1-1-L2: Tests (import production code)
+- SLICE-1-1-L3: Implementation + wiring
 
 ## Validation Checklist
 - [ ] Types defined
@@ -227,7 +227,7 @@ references:
 
 ` + "```" + `bash
 # L1: Types and interfaces for this slice
-LEAF_L1=$([[rec]] create "SLICE-1-L1: Types — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+LEAF_L1=$([[rec]] create "SLICE-1-1-L1: Types — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -247,7 +247,7 @@ Given <context> when <action> then <outcome> should never <anti-pattern>" | pyth
 [[rec]] dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L1"
 
 # L2: Tests (import production code, will fail until L3)
-LEAF_L2=$([[rec]] create "SLICE-1-L2: Tests — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+LEAF_L2=$([[rec]] create "SLICE-1-1-L2: Tests — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -267,7 +267,7 @@ Given <context> when <action> then <outcome> should never <anti-pattern>" | pyth
 [[rec]] dep add "$LEAF_L2" --blocked-by "$LEAF_L1"
 
 # L3: Implementation (makes tests pass)
-LEAF_L3=$([[rec]] create "SLICE-1-L3: Impl — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+LEAF_L3=$([[rec]] create "SLICE-1-1-L3: Impl — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -291,10 +291,10 @@ The resulting tree per slice:
 
 ` + "```" + `
 IMPL_PLAN
-  └── blocked by SLICE-1
-        ├── blocked by SLICE-1-L1: Types
-        ├── blocked by SLICE-1-L2: Tests (blocked by L1)
-        └── blocked by SLICE-1-L3: Impl  (blocked by L2)
+  └── blocked by SLICE-{W}-{N}
+        ├── blocked by SLICE-{W}-{N}-L1: Types
+        ├── blocked by SLICE-{W}-{N}-L2: Tests (blocked by L1)
+        └── blocked by SLICE-{W}-{N}-L3: Impl  (blocked by L2)
 ` + "```" + `
 
 Workers are assigned to leaf tasks, not slices. The slice closes when all its leaf tasks close.`,
@@ -330,7 +330,7 @@ Workers are assigned to leaf tasks, not slices. The slice closes when all its le
 [[op:send_assignment_message]]({
   type: "message",
   recipient: "worker-1",
-  content: ` + "`" + `You are assigned SLICE-1. Start by calling [[op:invoke_skill]](/pasture:worker).
+  content: ` + "`" + `You are assigned SLICE-{W}-{N}. Start by calling [[op:invoke_skill]](/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
 Run this to get full requirements + handoff: [[rec]] show "${SLICE_TASK_ID_URI}"
@@ -341,7 +341,7 @@ Key context:
 - IMPL_PLAN: "${IMPL_PLAN_ID_URI}" (run: [[rec]] show "${IMPL_PLAN_ID_URI}")
 
 Read the handoff doc and your Pasture task before starting implementation.` + "`" + `,
-  summary: "SLICE-1 assignment with Pasture context"
+  summary: "SLICE-{W}-{N} assignment with Pasture context"
 })
 ` + "```" + `
 
@@ -448,7 +448,7 @@ The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_S
 				{
 					Id:      "sup-followup-handoff-chain",
 					Title:   "Follow-up Handoff Chain",
-					Content: "Inside the follow-up lifecycle, the same handoff types (h1-h4) reapply:\n\n| Order | Handoff | Transition |\n|-------|---------|------------|\n| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |\n| 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |\n| 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |\n| 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |\n| 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |\n| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |\n| 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |\n| 8 | h4 | Worker → Reviewer: Follow-up slice completion |\n\nFollow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).\n\nSee `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples.",
+					Content: "Inside the follow-up lifecycle, the same handoff types (h1-h4) reapply:\n\nThe follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`); code review never starts it. The Supervisor creates the FOLLOWUP epic from those items (same actor), then:\n\n| Order | Handoff | Transition |\n|-------|---------|------------|\n| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |\n| 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |\n| 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |\n| 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |\n| 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |\n| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |\n| 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |\n| 8 | h4 | Worker → Reviewer: Follow-up slice completion |\n\nFollow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).\n\nSee `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples.",
 				},
 			},
 		},

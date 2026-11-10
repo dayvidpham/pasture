@@ -149,9 +149,9 @@ pasture task dep add "$URE_URI" --blocked-by "$REQUEST_URI"
 
 Only the supervisor closes tasks after review and acceptance gates; tests alone do not establish completion.
 
-### Slice Reviews
+### Code Review (Two-Phase)
 
-**Given** a slice implementation is complete (tests + typecheck pass) **when** the supervisor considers closing its task **then** launch code review and iterate review → fix → re-review **up to the configurable review-effort budget** chosen at Phase 8 (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget; on exhaustion without clean, surface outstanding findings to the user. Workers never close tasks. Never close on tests alone or a fix-applying round, hardcode the budget, or proceed past it silently.
+**Given** a wave's implementation is complete (tests + typecheck pass) **when** the supervisor moves to Phase 10 **then** run one code review per wave under `C-clean-review-exit`: only an open BLOCKER finding gates a wave, while IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's `maxRounds`; iterate review → fix → re-review up to the review-effort budget chosen at Phase 8 (`C-review-effort-budget`), and surface outstanding findings to the user on exhaustion. A finding closes only per `C-finding-lifecycle` — the reviewer who raised it verifies the fix, and a wave boundary never closes it. Workers never close tasks; tests alone, a fix-applying round, or a hardcoded budget never close a wave.
 
 ## Behavior
 
@@ -204,12 +204,14 @@ Phase 9:  SLICE-N (parallel workers, each owns one production code path)
             Each slice MUST have leaf tasks — ANY number, named after real work
             units (L1: types / L2: tests / L3: impl is one illustrative shape)
             Workers are assigned to leaf tasks, not slices
-Phase 10: Code review (3x reviewers, full severity tree with EAGER creation)
+Phase 10: Code review (one review per wave: 3 axis reviewers over every slice)
             Severity tree: BLOCKER / IMPORTANT / MINOR (always 3 groups)
-            ALL three severities must reach 0 — iterate review→fix→re-review up to
-            the chosen review-effort budget until a fix-free clean round (0/0/0);
-            on budget exhaustion without clean, surface to the user. Dual-parent
-            BLOCKER. FOLLOWUP is NOT fed by review severities.
+            During a wave only an open BLOCKER finding gates progress;
+            IMPORTANT and MINOR may stay open past a wave gate. After the last
+            wave, convergence over open pasture:finding tasks targets 0/0/0
+            within maxRounds, up to the Phase-8 review-effort budget
+            (C-review-effort-budget). Dual-parent BLOCKER. FOLLOWUP is NOT fed
+            by review severities.
 Phase 11: Implementation UAT (FIX-NOW / DEFER disposition; DEFER'd items feed FOLLOWUP)
 Phase 12: Landing (commit, push, hand off)
 ```
@@ -285,17 +287,17 @@ pasture task label add "$PROPOSAL_URI" pasture:p3-plan:s3-propose
 
 ### Review Severity Tree (Code Reviews Only)
 
-Code review rounds (Phase 10) use a severity tree with **EAGER creation**:
+Code review rounds (Phase 10) use a severity tree with **EAGER creation**. One review covers one whole wave: reviewers A/B/C each review every slice in the wave and list it on a single trio titled `WAVE-{W}-REVIEW-{axis}-{round}` (e.g. `WAVE-1-REVIEW-A-1`). A wave never produces one trio per reviewed slice.
 
-**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:
+**ALWAYS create the three severity group tasks per review round**, even if some groups have no findings:
 
 ```bash
-# Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+# Create the three severity groups immediately (EAGER, not lazy)
+BLOCKER_URI=$(pasture task create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$BLOCKER_URI" pasture:severity:blocker
-IMPORTANT_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+IMPORTANT_URI=$(pasture task create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$IMPORTANT_URI" pasture:severity:important
-MINOR_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+MINOR_URI=$(pasture task create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$MINOR_URI" pasture:severity:minor
 
 # Supervisor only: close groups verified to have no findings
@@ -305,11 +307,11 @@ pasture task close "$MINOR_URI" --reason "Review group has no findings"
 
 **Dual-parent BLOCKER relationship:** BLOCKER findings have two parents:
 1. The severity group task (`pasture:severity:blocker`)
-2. The proposal or slice they block (via `pasture task dep add "$SLICE_URI" --blocked-by "$FINDING_URI"`)
+2. The slice they block (via `pasture task dep add "$SLICE_URI" --blocked-by "$FINDING_URI"`)
 
-This ensures BLOCKERs both categorize under the severity tree AND block the artifact they apply to.
+This ensures BLOCKERs both categorize under the severity tree AND block the artifact they apply to. IMPORTANT and MINOR findings attach to their severity group only; they may stay open past a wave gate.
 
-**ALL three severities must reach 0 (within the chosen review-effort budget):** Under the clean-review-exit regime, IMPORTANT and MINOR findings are NOT deferrable — every finding (BLOCKER, IMPORTANT, and MINOR) is fixed in-wave, and the slice is re-reviewed (review → fix → re-review, up to the configurable review-effort budget chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers. On budget exhaustion without a clean round, the outstanding findings are surfaced to the user at a gate for a decision (never proceed-dirty, never loop forever). **No review severity is ever routed to the FOLLOWUP epic** — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (Phase 5 or 11).
+**Two-phase review (`C-clean-review-exit`):** During a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate. After the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's `maxRounds`, iterating review → fix → re-review up to the review-effort budget chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom; `C-review-effort-budget`). On budget exhaustion without convergence, the outstanding findings are surfaced to the user at a gate for a decision (never proceed dirty, never loop forever). A finding closes only per `C-finding-lifecycle` — the reviewer who raised it verifies the fix, and a wave boundary never closes it. **No review severity is ever routed to the FOLLOWUP epic** — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (Phase 5 or 11; `C-followup-timing`).
 
 **Plan reviews (Phase 4) do NOT use a severity tree.** Plan reviews use binary ACCEPT/REVISE votes only.
 
@@ -319,7 +321,7 @@ This ensures BLOCKERs both categorize under the severity tree AND block the arti
 
 **Owner:** Supervisor creates the follow-up epic (label `pasture:epic-followup`).
 
-**Content:** The user-DEFER'd UAT items only. **Never** a review severity (BLOCKER/IMPORTANT/MINOR) — all review findings must reach 0 before wave close, so none is deferrable from code review.
+**Content:** The user-DEFER'd UAT items only. **Never** a review severity (BLOCKER/IMPORTANT/MINOR) — review findings stay open until convergence and close only per `C-finding-lifecycle`, so none is deferrable from code review (`C-followup-timing`).
 
 **Timing:** Created at UAT, when user-DEFER'd items exist. FIX-NOW items are resolved in the current wave; only DEFER'd items land in the FOLLOWUP epic.
 

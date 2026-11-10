@@ -158,7 +158,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 
 **[C-review-effort-budget]**
 - Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
-- When: deciding how much review-and-fix effort to spend per slice
+- When: deciding how much review-and-fix effort to spend per wave
 - Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
@@ -546,8 +546,8 @@ The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it
    - Layer 4: integration_test.go (depends on L3)
 
    ## Tasks
-   - "${SLICE_1_ID_URI}": SLICE-1 ...
-   - "${SLICE_2_ID_URI}": SLICE-2 ...
+   - "${SLICE_1_ID_URI}": SLICE-{W}-{N} ...
+   - "${SLICE_2_ID_URI}": SLICE-{W}-{N} ...
    ...
    EOF
    )"
@@ -649,9 +649,9 @@ references:
 <list of files>
 
 ## Leaf Tasks
-- SLICE-1-L1: Types and interfaces
-- SLICE-1-L2: Tests (import production code)
-- SLICE-1-L3: Implementation + wiring
+- SLICE-1-1-L1: Types and interfaces
+- SLICE-1-1-L2: Tests (import production code)
+- SLICE-1-1-L3: Implementation + wiring
 
 ## Validation Checklist
 - [ ] Types defined
@@ -669,7 +669,7 @@ Per [C-slice-leaf-tasks], create Pasture tasks for each implementation unit with
 
 ```bash
 # L1: Types and interfaces for this slice
-LEAF_L1=$(pasture task create "SLICE-1-L1: Types — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+LEAF_L1=$(pasture task create "SLICE-1-1-L1: Types — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -689,7 +689,7 @@ pasture task label add "$LEAF_L1" pasture:p9-impl:s9-slice
 pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L1"
 
 # L2: Tests (import production code, will fail until L3)
-LEAF_L2=$(pasture task create "SLICE-1-L2: Tests — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+LEAF_L2=$(pasture task create "SLICE-1-1-L2: Tests — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -709,7 +709,7 @@ pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L2"
 pasture task dep add "$LEAF_L2" --blocked-by "$LEAF_L1"
 
 # L3: Implementation (makes tests pass)
-LEAF_L3=$(pasture task create "SLICE-1-L3: Impl — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+LEAF_L3=$(pasture task create "SLICE-1-1-L3: Impl — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -733,10 +733,10 @@ The resulting tree per slice:
 
 ```
 IMPL_PLAN
-  └── blocked by SLICE-1
-        ├── blocked by SLICE-1-L1: Types
-        ├── blocked by SLICE-1-L2: Tests (blocked by L1)
-        └── blocked by SLICE-1-L3: Impl  (blocked by L2)
+  └── blocked by SLICE-{W}-{N}
+        ├── blocked by SLICE-{W}-{N}-L1: Types
+        ├── blocked by SLICE-{W}-{N}-L2: Tests (blocked by L1)
+        └── blocked by SLICE-{W}-{N}-L3: Impl  (blocked by L2)
 ```
 
 Workers are assigned to leaf tasks, not slices. The slice closes when all its leaf tasks close.
@@ -802,7 +802,7 @@ A delegated assignment has **zero prior context**. Every send_assignment_message
 send_assignment_message({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-1. Start by calling skill(/pasture:worker).
+  content: `You are assigned SLICE-{W}-{N}. Start by calling skill(/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
 Run this to get full requirements + handoff: pasture task show "${SLICE_TASK_ID_URI}"
@@ -813,7 +813,7 @@ Key context:
 - IMPL_PLAN: "${IMPL_PLAN_ID_URI}" (run: pasture task show "${IMPL_PLAN_ID_URI}")
 
 Read the handoff doc and your Pasture task before starting implementation.`,
-  summary: "SLICE-1 assignment with Pasture context"
+  summary: "SLICE-{W}-{N} assignment with Pasture context"
 })
 ```
 
@@ -915,15 +915,17 @@ pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LE
 
 Inside the follow-up lifecycle, the same handoff types (h1-h4) reapply:
 
+The follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`); code review never starts it. The Supervisor creates the FOLLOWUP epic from those items (same actor), then:
+
 | Order | Handoff | Transition |
 |-------|---------|------------|
-| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |
+| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |
 | 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
 | 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
-| 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
+| 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
 Follow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).

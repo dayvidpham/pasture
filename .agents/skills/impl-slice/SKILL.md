@@ -58,7 +58,7 @@ Select the current registered author with pasture task agents list and pasture t
 ## Slice Structure
 
 Each vertical slice contains:
-- **slice_id**: Identifier (SLICE-1, SLICE-2, SLICE-3, ...)
+- **slice_id**: Identifier (SLICE-{W}-{N}, e.g. SLICE-1-1, SLICE-1-2, ...)
 - **slice_name**: Human-readable name
 - **slice_spec**: Detailed implementation specification
 - **slice_files**: Files owned by this slice
@@ -124,7 +124,7 @@ pasture task label add "${SLICE_ID_URI}" pasture:p9-impl:slice-complete
 Slices can have dependencies on each other (sync points):
 
 ```bash
-# SLICE-2 depends on SLICE-1 completing first
+# SLICE-1-2 depends on SLICE-1-1 completing first
 pasture task dep add "${SLICE_2_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
 ```
 

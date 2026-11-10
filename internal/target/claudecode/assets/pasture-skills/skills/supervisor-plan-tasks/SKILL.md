@@ -89,7 +89,7 @@ L2 Test File Requirements:
 
 **[sup-plan-review-effort-budget]**
 - Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate (per C-review-effort-budget)
-- When: deciding how much review-and-fix effort to spend per slice
+- When: deciding how much review-and-fix effort to spend per wave
 - Then: request a configurable review-effort budget from the user (defaults: 3 rounds, 1 round, 0 rounds, unlimited, custom); the Phase-10 review->fix->re-review loop iterates up to the chosen budget, only an open BLOCKER gates a wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
@@ -123,7 +123,7 @@ At the **start of Phase 8** — like the Phase-1 research-depth gate — request
 
 | Option | Meaning |
 |--------|---------|
-| **3 rounds** | Up to three review -> fix -> re-review cycles per slice |
+| **3 rounds** | Up to three review -> fix -> re-review cycles per wave |
 | **1 round** | A single review + one fix pass |
 | **0 rounds** | No review-fix iteration (review once, surface anything found) |
 | **unlimited** | Iterate until convergence (no upper bound) |

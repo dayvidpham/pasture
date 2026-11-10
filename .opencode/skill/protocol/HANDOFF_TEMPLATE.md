@@ -191,7 +191,7 @@ against the ratified plan and URD requirements.
 ## Acceptance Criteria
 - Review all slices for end-user alignment (6 review criteria).
 - Create severity groups (BLOCKER, IMPORTANT, MINOR) per EAGER creation rule.
-- Vote ACCEPT or REVISE per slice.
+- Vote ACCEPT or REVISE per wave.
 ```
 
 ### 4. Worker → Reviewer (Summary + full task URIs)
@@ -243,20 +243,22 @@ SLICE-1 implements the core logging infrastructure. All quality gates pass
 - **Proposal:** {{PROPOSAL_TASK_URI}}
 
 ## Context
-Code review reached a fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR
-across all reviewers (within the chosen review-effort budget; all findings were
-fixed in-wave and re-reviewed). Slice passes — handing results to the supervisor.
+Code review completed for the wave. No open BLOCKER finding remains, so the
+wave gate opens; any IMPORTANT or MINOR findings stay open and converge after
+the last wave (`C-clean-review-exit`). Each finding closes only per
+`C-finding-lifecycle` — the reviewer who raised it verifies the fix.
 
 ## Key Decisions
-1. All earlier IMPORTANT and MINOR findings were fixed in-wave, not deferred.
+1. Findings stay open past the wave gate; convergence runs after the last wave.
 2. The FOLLOWUP epic is NOT fed by review severities — it is created later, at
-   UAT (Phase 5 or 11), and only from user-DEFER'd items.
+   UAT (Phase 5 or 11), and only from user-DEFER'd items (`C-followup-timing`).
 
 ## Open Items
-- None from code review (clean exit). Any deferrals will originate at UAT.
+- The open IMPORTANT/MINOR finding task URIs (they converge after the last wave).
+- Any deferrals will originate at UAT.
 
 ## Acceptance Criteria
-- Slice passed on a fix-free clean re-review (0/0/0) from all reviewers.
+- No open BLOCKER finding at the wave gate.
 - No review severity routed to a FOLLOWUP epic.
 ```
 
@@ -272,13 +274,13 @@ The follow-up epic runs the same protocol phases using 6 handoff types (h1-h5 re
 
 | Order | Handoff | Description |
 |-------|---------|-------------|
-| 1 | **Reviewer → Followup (h5)** | Conveys code-review results to the supervisor (all severities reached 0 before wave close). The FOLLOWUP epic itself is created later, at UAT, from user-DEFER'd items — which **starts** the follow-up lifecycle. |
+| 1 | *(same actor — no handoff)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items. **The follow-up lifecycle starts here and ONLY here** — never from code review (`C-followup-timing`). |
 | 2 | *(same actor — no handoff)* | Supervisor creates FOLLOWUP_URE (scoping which user-DEFER'd UAT items to address). |
 | 3 | *(same actor — no handoff)* | Supervisor creates FOLLOWUP_URD (synthesizes follow-up requirements). |
 | 4 | **Supervisor → Architect (h6)** | Supervisor hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Follow-up specific handoff. |
 | 5 | **Architect → Supervisor (h1)** | After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. References original URD + FOLLOWUP_URD + outstanding findings. |
 | 6 | **Supervisor → Worker (h2)** | FOLLOWUP_SLICE-N assignment. Worker receives follow-up slice spec AND original leaf task IDs to resolve. |
-| 7 | **Supervisor → Reviewer (h3)** | Code review of follow-up slices. Reviewer receives follow-up context + original findings being addressed. |
+| 7 | **Supervisor → Reviewer (h3)** | One code review per follow-up wave. Reviewer receives follow-up context + original findings being addressed. |
 | 8 | **Worker → Reviewer (h4)** | Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved. |
 
 ### 6. Supervisor → Architect (Follow-up Lifecycle — h6)
@@ -329,7 +331,7 @@ for FOLLOWUP_PROPOSAL creation.
 
 ### Key Differences from Original Handoffs
 
-- **h5 conveys code-review results**: The Reviewer → Followup handoff reports the clean (0/0/0) code-review outcome to the supervisor. The follow-up lifecycle itself begins from user-DEFER'd UAT items, not from review findings.
+- **The follow-up lifecycle starts at UAT, not review**: The FOLLOWUP epic is created only from user-DEFER'd UAT items (`C-followup-timing`). The Reviewer → Supervisor (h5) handoff closes the review wave; it never starts the follow-up lifecycle.
 - **Follow-up handoffs reference both epics**: Task References section includes both the original request/URD and the follow-up epic/FOLLOWUP_URD.
 - **Worker handoff (h2) includes leaf task IDs**: The Supervisor → Worker handoff for FOLLOWUP_SLICE-N must list the specific user-DEFER'd UAT-item leaf tasks the worker is adopting.
 - **Worker completion (h4) reports resolution**: The Worker → Reviewer handoff for follow-up slices reports which DEFER'd-item leaf tasks were resolved.

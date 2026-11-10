@@ -441,15 +441,17 @@ The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review
 
 Inside the follow-up lifecycle, the same handoff types (h1-h4) apply but scoped to the follow-up epic:
 
+The follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`); code review never starts it. The Supervisor creates the FOLLOWUP epic from those items (same actor), then:
+
 | Order | Handoff | Transition |
 |-------|---------|------------|
-| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |
+| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |
 | 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
 | 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
-| 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
+| 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
 Follow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).

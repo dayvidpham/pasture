@@ -193,10 +193,10 @@ REQUEST
   └── blocked by ELICIT
         └── blocked by PROPOSAL-1
               └── blocked by IMPL_PLAN
-                    ├── blocked by SLICE-1
+                    ├── blocked by SLICE-1-1
                     │     ├── blocked by leaf-task-a
                     │     └── blocked by leaf-task-b
-                    └── blocked by SLICE-2
+                    └── blocked by SLICE-1-2
 
 URD ← referenced via frontmatter in (REQUEST, ELICIT, PROPOSAL, IMPL_PLAN, UAT)
 ```
@@ -457,7 +457,7 @@ Supervisor takes the ratified proposal and decomposes into **vertical slices** (
 
 **Key Principle:** Each worker owns a full vertical slice — types, tests, implementation, and wiring for one production code path.
 
-**Review-Effort Budget (R7 — Phase 8 user gate):** At the **start of Phase 8** — like the Phase-1 research-depth gate, and one of the 5 user-gated phases — request a **configurable review-effort budget** from the user. Present the default choices: **(1) three rounds**, **(2) one round**, **(3) zero rounds**, **(4) unlimited**, **(5) custom**. The Phase-10 review → fix → re-review loop iterates **up to the chosen budget** until a fix-free clean 0/0/0 round; on **budget exhaustion without a clean round**, surface the outstanding findings to the user for a decision (never proceed-dirty, never loop forever, never hardcode the budget). Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.
+**Review-Effort Budget (R7 — Phase 8 user gate; `C-review-effort-budget`):** At the **start of Phase 8** — like the Phase-1 research-depth gate, and one of the 5 user-gated phases — request a **configurable review-effort budget per wave** from the user. Present the default choices: **(1) three rounds**, **(2) one round**, **(3) zero rounds**, **(4) unlimited**, **(5) custom**. The Phase-10 review → fix → re-review loop iterates **up to the chosen budget**. Convergence over open `pasture:finding` tasks runs after the last wave and targets 0/0/0 within `maxRounds` (`C-clean-review-exit`); on **budget exhaustion without convergence**, surface the outstanding findings to the user for a decision (never proceed dirty, never loop forever, never hardcode the budget). Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.
 
 **Launch model (R1):** For the IMPL_PLAN phase prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** — not `aura-swarm`. A supervisor that has just spawned Explore subagents may *look* idle while those subagents do work; **do not shut it down pre-emptively.**
 
@@ -486,7 +486,7 @@ IMPLEMENTATION COMPLETE
 The supervisor spawns **ephemeral Explore subagents** via the Task tool for scoped codebase queries during Phase 8. Each subagent is short-lived and returns findings — no standing team overhead.
 
 - **Phase 8:** Spawn Explore subagents as needed for codebase mapping. Each handles a scoped query and terminates after returning results.
-- **Phase 10:** Spawn ephemeral reviewers via Task tool for per-slice code review. Each reviewer handles one or more slices and terminates after producing severity groups.
+- **Phase 10:** Spawn ephemeral reviewers via Task tool for one code review per wave. Each reviewer covers the whole wave (listing its slices) and terminates after producing the severity groups.
 
 There is no standing team that persists across phases. Each exploration or review need spawns fresh ephemeral agents.
 
@@ -494,14 +494,14 @@ There is no standing team that persists across phases. Each exploration or revie
 
 When slices share types, interfaces, or data flows, the supervisor MUST identify **horizontal Layer Integration Points** in the IMPL_PLAN. These are contracts where one slice exports something another slice imports.
 
-**Rule: merge sooner, not later.** Divergence grows with delay. If SLICE-1 defines a type that SLICE-2 and SLICE-3 consume, SLICE-1 must complete its L1 (types) layer before SLICE-2 and SLICE-3 begin their L1.
+**Rule: merge sooner, not later.** Divergence grows with delay. If SLICE-1-1 defines a type that SLICE-1-2 and SLICE-1-3 consume, SLICE-1-1 must complete its L1 (types) layer before SLICE-1-2 and SLICE-1-3 begin their L1.
 
 **Include an integration points table in the IMPL_PLAN description:**
 
 | ID | Contract | Owner (exports) | Consumer(s) (imports) | Merge Timing |
 |----|----------|-----------------|----------------------|--------------|
-| IP-1 | PhaseEnum type | SLICE-1 | SLICE-2, SLICE-3 | L1 (types) |
-| IP-2 | EpochService interface | SLICE-2 | SLICE-3, SLICE-4 | L2 (tests) |
+| IP-1 | PhaseEnum type | SLICE-1-1 | SLICE-1-2, SLICE-1-3 | L1 (types) |
+| IP-2 | EpochService interface | SLICE-1-2 | SLICE-1-3, SLICE-2-1 | L2 (tests) |
 
 If no integration points exist, include an empty table with a note: "No cross-slice contracts identified."
 
@@ -531,12 +531,12 @@ pasture task label add "$IMPL_PLAN_URI" pasture:p8-impl:s8-plan
 
 ## Phase 9: Worker Slices (`pasture:p9-impl`)
 
-### Creating SLICE-N Tasks
+### Creating SLICE-{W}-{N} Tasks
 
-**One task per production code path.** Each worker owns the full vertical:
+**One task per production code path, scoped to its wave.** Each worker owns the full vertical:
 
 ```bash
-SLICE_URI=$(pasture task create "SLICE-1: Implement logging infrastructure (full vertical)" --phase worker_slices --type task --priority medium \
+SLICE_URI=$(pasture task create "SLICE-{W}-{N}: Implement logging infrastructure (full vertical)" --phase worker_slices --type task --priority medium \
   --namespace "$PASTURE_NAMESPACE" --format json \
   --description="---
 references:
@@ -560,14 +560,14 @@ pasture task dep add "$IMPL_PLAN_URI" --blocked-by "$SLICE_URI"
 ```bash
 # Illustrative TDD-shaped leaves (use real work-unit names instead when they differ).
 # L1: Types for this slice
-LEAF_L1_URI=$(pasture task create "SLICE-1-L1: Types — <slice name>" --phase worker_slices --type task --priority medium \
+LEAF_L1_URI=$(pasture task create "SLICE-1-1-L1: Types — <slice name>" --phase worker_slices --type task --priority medium \
   --namespace "$PASTURE_NAMESPACE" --format json --description "..." \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$LEAF_L1_URI" pasture:p9-impl:s9-slice
 pasture task dep add "$SLICE_URI" --blocked-by "$LEAF_L1_URI"
 
 # L2: Tests (will fail until L3)
-LEAF_L2_URI=$(pasture task create "SLICE-1-L2: Tests — <slice name>" --phase worker_slices --type task --priority medium \
+LEAF_L2_URI=$(pasture task create "SLICE-1-1-L2: Tests — <slice name>" --phase worker_slices --type task --priority medium \
   --namespace "$PASTURE_NAMESPACE" --format json --description "..." \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$LEAF_L2_URI" pasture:p9-impl:s9-slice
@@ -575,7 +575,7 @@ pasture task dep add "$SLICE_URI" --blocked-by "$LEAF_L2_URI"
 pasture task dep add "$LEAF_L2_URI" --blocked-by "$LEAF_L1_URI"
 
 # L3: Implementation (makes tests pass)
-LEAF_L3_URI=$(pasture task create "SLICE-1-L3: Impl — <slice name>" --phase worker_slices --type task --priority medium \
+LEAF_L3_URI=$(pasture task create "SLICE-1-1-L3: Impl — <slice name>" --phase worker_slices --type task --priority medium \
   --namespace "$PASTURE_NAMESPACE" --format json --description "..." \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$LEAF_L3_URI" pasture:p9-impl:s9-slice
@@ -587,10 +587,10 @@ The resulting tree per slice:
 
 ```
 IMPL_PLAN
-  └── blocked by SLICE-1
-        ├── blocked by SLICE-1-L1: Types    (no deps)
-        ├── blocked by SLICE-1-L2: Tests    (blocked by L1)
-        └── blocked by SLICE-1-L3: Impl     (blocked by L2)
+  └── blocked by SLICE-1-1
+        ├── blocked by SLICE-1-1-L1: Types    (no deps)
+        ├── blocked by SLICE-1-1-L2: Tests    (blocked by L1)
+        └── blocked by SLICE-1-1-L3: Impl     (blocked by L2)
 ```
 
 Workers are assigned to leaf tasks. Only the supervisor closes leaves and slices after review gates pass.
@@ -686,7 +686,7 @@ mock out the system under test
 
 ### Ride the Wave — Worker Persistence
 
-**Ride the Wave** is the execution model for Phases 8-10: workers implement slices, ephemeral reviewers review them per-slice, workers fix findings — all in a coordinated cycle.
+**Ride the Wave** is the execution model for Phases 8-10: workers implement slices, ephemeral reviewers review each whole wave, workers fix findings — all in a coordinated cycle.
 
 **Worker persistence rules:**
 
@@ -696,15 +696,15 @@ mock out the system under test
   pasture task comment add "$SLICE_URI" "Implementation complete, awaiting review" --author "$AUTHOR"
   ```
 - Workers stay alive for the review-fix cycle — ephemeral reviewers will review their work and may send findings back
-- Workers wait for review feedback and fix any BLOCKERs or IMPORTANT findings assigned to them
+- Workers wait for review feedback and fix the findings assigned to them — BLOCKERs first (they gate the wave); IMPORTANT and MINOR may stay open past a wave gate and converge at the end
 - The supervisor receives completion notifications but does **NOT** close the slice
 
 ### Slice Closure Rules
 
 - Slices **MUST NOT** be closed by workers immediately upon implementation completion
-- A slice must be reviewed **at least once** by ephemeral reviewers before it can close
-- **Only the supervisor closes slices**, after a fix-free clean re-review passes (Phase 10): 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers
-- Workers who finish implementation stay alive and await review feedback before the session ends
+- A slice must be reviewed **at least once** on a review wave before it can close
+- **Only the supervisor closes slices.** A slice may close at a wave gate with IMPORTANT or MINOR findings still open, but never with an open BLOCKER finding. Each finding closes only per `C-finding-lifecycle` — the reviewer who raised it verifies the fix, and a wave boundary never closes it. End-of-epoch convergence handles the findings still open after the last wave (`C-clean-review-exit`).
+- Workers who finish implementation stay alive across review waves and fix findings in place
 
 ---
 
@@ -712,45 +712,46 @@ mock out the system under test
 
 ### Overview
 
-After all slices complete, the supervisor spawns **ephemeral reviewers** via the Task tool for per-slice code review. Each reviewer handles one or more slices, produces severity groups using the **full severity tree** with EAGER creation, and terminates. The supervisor then coordinates the review-fix cycle with workers.
+Code review runs **one review per wave**: after a wave's slices complete, the supervisor spawns **ephemeral reviewers** via the Task tool, and reviewers A, B, and C each review the whole wave — listing its slices (`SLICE-{W}-{N}`) — producing the three severity groups with EAGER creation, and recording each finding as a child of its severity group. One review yields one trio titled `WAVE-{W}-REVIEW-{axis}-{round}`; a wave never produces one title per reviewed slice. The supervisor then coordinates the review-fix cycle with the workers.
 
 ### Review-Fix Cycle (Within the Chosen Review-Effort Budget)
 
-Phase 10 iterates **review → fix → re-review up to the configurable review-effort budget** chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom — see "Review-Effort Budget" in Phase 8 below) until a **fix-free clean round** confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** across all reviewers within budget. A clean round is one where the re-review applies no fixes and finds nothing across all three severities. On **budget exhaustion without a clean round**, the outstanding findings are surfaced to the user at a gate for a decision (never proceed-dirty, never loop forever, never hardcode the budget). This epoch eats its own dogfood: the wave closes only when it is genuinely clean (or the user decides at the surface-to-user gate). Workers do not shut down — they await findings and fix them in-place.
+**During a wave**, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate. **After the last wave**, convergence queries every open `pasture:finding` across all waves and targets **0/0/0** within the gate declaration's `maxRounds`, iterating **review → fix → re-review** up to the configurable review-effort budget chosen at Phase 8 (3 rounds / 1 round / 0 rounds / unlimited / custom — see "Review-Effort Budget" in Phase 8 above). On **budget exhaustion without convergence**, the outstanding findings are surfaced to the user at a gate for a decision (never proceed dirty, never loop forever, never hardcode the budget). The gate rules have one home: `C-clean-review-exit` (wave gating and convergence) and `C-finding-lifecycle` (who closes a finding). Workers do not shut down — they await findings and fix them in place.
 
-**Cycle procedure (per slice):**
+**Cycle procedure (per wave):**
 
-1. **Ephemeral reviewers review the slice** — create severity groups (BLOCKER/IMPORTANT/MINOR) per the EAGER creation protocol
-2. **Supervisor collects findings** — aggregates ALL findings (BLOCKER, IMPORTANT, and MINOR); sends them to the relevant workers
-3. **Workers fix ALL findings** — BLOCKER, IMPORTANT, *and* MINOR — with atomic commits, and notify the supervisor when done
-4. **New ephemeral reviewers re-review the fixed slice** — create new severity groups for the new round (round suffix increments: `-1`, `-2`, `-3`, … up to the chosen budget)
-5. **Repeat** up to the chosen review-effort budget until a fix-free clean round (0/0/0); on budget exhaustion without clean, surface the outstanding findings to the user at a gate
+1. **Ephemeral reviewers review the whole wave** — each axis reviewer covers every slice in the wave, creates the severity groups (BLOCKER/IMPORTANT/MINOR) per the EAGER creation protocol, and records each finding as a child of its severity group labelled `pasture:finding`
+2. **Supervisor collects findings** — aggregates the open findings and sends each to the worker that owns its slice
+3. **Workers fix the findings** — BLOCKERs first (they gate the wave); IMPORTANT and MINOR may be fixed in the same pass or carried to end-of-epoch convergence
+4. **New ephemeral reviewers re-review the wave** — create new severity groups for the new round (round suffix increments: `-1`, `-2`, … up to the chosen budget)
+5. **Repeat** up to the chosen review-effort budget; after the last wave run convergence, and on exhaustion without convergence surface the outstanding findings to the user at a gate
 
 **Cycle exit conditions:**
 
 | Condition | Action |
 |-----------|--------|
-| Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all reviewers | Slice passes — proceed to Phase 11 (Implementation UAT) |
-| ANY finding (BLOCKER, IMPORTANT, or MINOR) remains within budget | Workers fix it, spawn new ephemeral reviewers (next round — up to the chosen review-effort budget) |
-| Budget exhausted without a clean round | Surface the outstanding findings to the user at a gate for a decision (never proceed-dirty, never loop forever) |
+| No open BLOCKER finding at a wave gate | The wave proceeds to the next wave or to Phase 11 |
+| No open `pasture:finding` after the last wave's convergence | Proceed to Phase 11 (Implementation UAT) |
+| Open findings remain within the budget | Workers fix them; reviewers open the next round |
+| Budget exhausted without convergence | Surface the outstanding findings to the user at a gate for a decision (never proceed dirty, never loop forever) |
 
-The wave **MUST end on a review wave or a surface-to-user gate** (cannot proceed silently after a worker wave without a clean re-review). The review loop runs up to the chosen review-effort budget; on exhaustion without a clean round, the outstanding findings are surfaced to the user rather than proceeding dirty or looping forever — and the budget is never hardcoded. **The FOLLOWUP epic is NOT fed by review severities** — it is created later, at UAT (Phase 5 or 11), and fed ONLY by user-DEFER'd items (see Follow-up Epic below).
+The wave **MUST end on a review wave or a surface-to-user gate** (it cannot proceed silently after a worker wave). **The FOLLOWUP epic is NOT fed by review severities** — it is created later, at UAT (Phase 5 or 11), and fed ONLY by user-DEFER'd items (`C-followup-timing`; see Follow-up Epic below).
 
 ### Severity Tree (EAGER Creation)
 
-**ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:
+**ALWAYS create the three severity group tasks per review round**, even if some groups have no findings:
 
 ```bash
-# Create all 3 severity groups immediately
-BLOCKER_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+# Create the three severity groups immediately
+BLOCKER_URI=$(pasture task create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$BLOCKER_URI" pasture:severity:blocker
 pasture task label add "$BLOCKER_URI" pasture:p10-impl:s10-review
-IMPORTANT_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_URI=$(pasture task create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$IMPORTANT_URI" pasture:severity:important
 pasture task label add "$IMPORTANT_URI" pasture:p10-impl:s10-review
-MINOR_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_URI=$(pasture task create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$MINOR_URI" pasture:severity:minor
 pasture task label add "$MINOR_URI" pasture:p10-impl:s10-review
@@ -774,20 +775,20 @@ pasture task dep add "$SLICE_URI" --blocked-by "$FINDING_URI"
 
 ### Severity Group Dependency Routing (CRITICAL)
 
-Under the no-cap clean-review regime, **ALL three severity groups must reach 0 before the slice passes review** — no severity is deferrable to FOLLOWUP. Each group blocks the slice it applies to:
+Under the two-phase model, only an open **BLOCKER** finding blocks the slice it applies to. IMPORTANT and MINOR findings attach to their severity group only — they may stay open past a wave gate and converge at the end. Each finding is a child of its severity group labelled `pasture:finding`:
 
 | Severity | Blocks | Command |
 |----------|--------|---------|
-| BLOCKER | The **slice** it applies to (dual-parent) | `pasture task dep add "$SLICE_URI" --blocked-by "$BLOCKER_URI"` |
-| IMPORTANT | The **slice** it applies to (must reach 0) | `pasture task dep add "$SLICE_URI" --blocked-by "$IMPORTANT_URI"` |
-| MINOR | The **slice** it applies to (must reach 0) | `pasture task dep add "$SLICE_URI" --blocked-by "$MINOR_URI"` |
+| BLOCKER | The **slice** it applies to (dual-parent: severity group + slice) | `pasture task dep add "$SLICE_URI" --blocked-by "$BLOCKER_URI"` |
+| IMPORTANT | Its **severity group** only (not the slice) | `pasture task dep add "$IMPORTANT_GROUP_URI" --blocked-by "$IMPORTANT_URI"` |
+| MINOR | Its **severity group** only (not the slice) | `pasture task dep add "$MINOR_GROUP_URI" --blocked-by "$MINOR_URI"` |
 
-**NEVER route a review severity (BLOCKER/IMPORTANT/MINOR) into the FOLLOWUP epic.** All review findings are fixed in-wave and re-reviewed until the slice is clean (0/0/0). The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (Phase 5 or 11), never by a review severity.
+**NEVER route a review severity (BLOCKER/IMPORTANT/MINOR) into the FOLLOWUP epic.** Findings close only per `C-finding-lifecycle`; convergence runs after the last wave (`C-clean-review-exit`). The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (Phase 5 or 11; `C-followup-timing`).
 
 ### Follow-up Epic
 
 **Trigger:** UAT (Phase 5 or Phase 11) produces one or more **user-DEFER'd** items.
-**Source:** The FOLLOWUP epic is fed **ONLY** by user-DEFER'd UAT items — **never** by a review severity (BLOCKER/IMPORTANT/MINOR). All review findings must reach 0 before wave close.
+**Source:** The FOLLOWUP epic is fed **ONLY** by user-DEFER'd UAT items — **never** by a review severity (BLOCKER/IMPORTANT/MINOR); review findings stay open until convergence and close only per `C-finding-lifecycle` (`C-followup-timing`).
 **Owner:** Supervisor creates it (at UAT, when DEFER'd items exist).
 
 ```bash
@@ -807,7 +808,7 @@ pasture task label add "$FOLLOWUP_URI" pasture:epic-followup
 pasture task dep add "$FOLLOWUP_URI" --blocked-by "$DEFERRED_GROUP_URI"
 ```
 
-The follow-up epic is created at UAT when user-DEFER'd items exist. Review severities are **not** a source: a slice cannot pass review with any finding outstanding, so there is nothing to defer from code review.
+The follow-up epic is created at UAT when user-DEFER'd items exist. Review severities are **not** a source: findings converge after the last wave and close only per `C-finding-lifecycle`, so none is deferred to FOLLOWUP (`C-followup-timing`).
 
 ### Follow-up Lifecycle (FOLLOWUP_* Phases)
 
@@ -827,14 +828,15 @@ FOLLOWUP_URD ← frontmatter reference in each follow-up task, never a blocker
 ```
 
 **Lifecycle steps:**
-1. **Supervisor** creates FOLLOWUP_URE (same actor — scoping URE with user to determine which DEFER'd UAT items to address)
-2. **Supervisor** creates FOLLOWUP_URD (same actor — requirements for follow-up scope)
-3. **Supervisor → Architect (h6):** Hands off FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation
-4. **Architect** creates FOLLOWUP_PROPOSAL-N (same review/ratify/UAT cycle applies)
-5. **Architect → Supervisor (h1):** After FOLLOWUP_PROPOSAL ratified, hands off for FOLLOWUP_IMPL_PLAN
-6. **Supervisor → Worker (h2):** FOLLOWUP_SLICE-N assignment with adopted leaf task IDs
-7. **Supervisor → Reviewer (h3):** Code review of follow-up slices
-8. **Worker → Reviewer (h4):** Follow-up slice completion, reports which DEFER'd-item leaf tasks resolved
+1. **Supervisor** creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) — the follow-up lifecycle starts ONLY from UAT deferrals, never from code review (`C-followup-timing`)
+2. **Supervisor** creates FOLLOWUP_URE (same actor — scoping URE with user to determine which DEFER'd UAT items to address)
+3. **Supervisor** creates FOLLOWUP_URD (same actor — requirements for follow-up scope)
+4. **Supervisor → Architect (h6):** Hands off FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation
+5. **Architect** creates FOLLOWUP_PROPOSAL-N (same review/ratify/UAT cycle applies)
+6. **Architect → Supervisor (h1):** After FOLLOWUP_PROPOSAL ratified, hands off for FOLLOWUP_IMPL_PLAN
+7. **Supervisor → Worker (h2):** FOLLOWUP_SLICE-N assignment with adopted leaf task IDs
+8. **Supervisor → Reviewer (h3):** One code review per follow-up wave
+9. **Worker → Reviewer (h4):** Follow-up slice completion, reports which DEFER'd-item leaf tasks resolved
 
 **Leaf task adoption (dual-parent):** When the supervisor creates FOLLOWUP_SLICE-N, the user-DEFER'd UAT-item leaf tasks gain a second parent — they are children of both the original DEFER'd-items tracking group AND the follow-up slice.
 
@@ -844,9 +846,9 @@ FOLLOWUP_URD ← frontmatter reference in each follow-up task, never a blocker
 
 Same binary voting as plan review: ACCEPT or REVISE.
 
-A slice passes only on a **fix-free clean re-review = 0 BLOCKER + 0 IMPORTANT + 0 MINOR** from all reviewers (iterate up to the chosen review-effort budget; on exhaustion without clean, surface to the user). No severity is deferrable.
+A wave completes when no open BLOCKER finding remains. After the last wave, convergence over open `pasture:finding` tasks targets 0/0/0 within `maxRounds` (`C-clean-review-exit`); remaining findings are surfaced to the user on budget exhaustion. No review severity is deferrable to FOLLOWUP.
 
-**Next (fix-free clean round 0/0/0, all reviewers ACCEPT):** Proceed to Phase 11 (Implementation UAT)
+**Next (no open BLOCKER at the wave gate; convergence complete after the last wave, all reviewers ACCEPT):** Proceed to Phase 11 (Implementation UAT)
 
 ---
 
