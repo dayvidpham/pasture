@@ -459,47 +459,94 @@ func TestFollowupEpicIsUATDeferred(t *testing.T) {
 		"the follow-up lifecycle must not be triggered by code review completion")
 }
 
-// followupHandoffStartPattern catches the retired claim that the h5 reviewer
-// handoff starts the follow-up lifecycle. The lifecycle starts only from
-// user-DEFER'd UAT items (C-followup-timing); h5 closes the review wave.
-var followupHandoffStartPattern = regexp.MustCompile(`(?i)h5[^\n]{0,40}starts the follow-up lifecycle`)
+// reviewerSourcePattern matches a handoff source that names a reviewer or a
+// review step.
+var reviewerSourcePattern = regexp.MustCompile(`(?i)\breview(?:er|ing)?\b`)
 
-// findFollowupStartClaims returns one finding per retired h5-starts claim.
-func findFollowupStartClaims(content string) []string {
+// followupTargetPattern matches a handoff target that names the follow-up role.
+var followupTargetPattern = regexp.MustCompile(`(?i)\bfollow-?up\b`)
+
+// bareFollowupRolePattern matches a matrix cell whose whole content is the
+// follow-up role. It is anchored so a prose cell such as "Worker completes
+// follow-up slice..." is not mistaken for a handoff target.
+var bareFollowupRolePattern = regexp.MustCompile(`(?i)^\s*follow-?up(?:\s*\([^)]*\))?\s*$`)
+
+// handoffArrowPattern splits one handoff cell into its source and target.
+var handoffArrowPattern = regexp.MustCompile(`\s*(?:→|->|»)\s*`)
+
+// findReviewerToFollowupHandoffRows returns one finding per handoff-matrix row
+// that sends a reviewer or review step INTO a follow-up target. There is no
+// handoff into Followup: h5 is Reviewer → Supervisor (it closes the review wave
+// and records findings), and the Supervisor creates the follow-up epic from
+// user-DEFER'd UAT items with no matrix row pointing at it (C-followup-timing).
+//
+// The check reads the table structure — the arrow inside one cell, or a
+// two-column From/To matrix row — rather than matching one remembered sentence.
+// That is why it catches the deleted transition in every wording: a row that
+// pairs a reviewer source with a follow-up target fails whatever the verb says.
+func findReviewerToFollowupHandoffRows(content string) []string {
 	var findings []string
 	for _, line := range strings.Split(content, "\n") {
-		if loc := followupHandoffStartPattern.FindString(line); loc != "" {
-			findings = append(findings, loc)
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "|") {
+			continue
+		}
+		cells := strings.Split(strings.Trim(trimmed, "|"), "|")
+		for i, cell := range cells {
+			cell = strings.TrimSpace(cell)
+			if cell == "" {
+				continue
+			}
+			// Form 1: one cell carries the transition, e.g. "Reviewer → Followup"
+			// or "h5: Reviewer→Followup".
+			if parts := handoffArrowPattern.Split(cell, -1); len(parts) >= 2 {
+				if reviewerSourcePattern.MatchString(parts[0]) && followupTargetPattern.MatchString(parts[1]) {
+					findings = append(findings, trimmed)
+					break
+				}
+			}
+			// Form 2: a From/To matrix row, e.g. "| 5 | Reviewer | Followup |".
+			if i+1 < len(cells) {
+				target := strings.TrimSpace(cells[i+1])
+				if reviewerSourcePattern.MatchString(cell) && bareFollowupRolePattern.MatchString(target) {
+					findings = append(findings, trimmed)
+					break
+				}
+			}
 		}
 	}
 	return findings
 }
 
-// TestFollowupLifecycleStartsAtUAT proves no rendered or shipped text claims
-// the h5 reviewer handoff starts the follow-up lifecycle. Two samples prove the
-// guard fails on the retired claim and passes on the UAT-deferred wording.
-func TestFollowupLifecycleStartsAtUAT(t *testing.T) {
+// TestNoReviewerToFollowupHandoffRow proves no rendered or shipped handoff
+// matrix row targets Followup. Two samples prove the guard fails on a defective
+// row that pairs a reviewer with Followup and passes on the retargeted h5 row
+// plus the UAT-deferred follow-up creation row.
+func TestNoReviewerToFollowupHandoffRow(t *testing.T) {
 	t.Parallel()
 
 	defective := strings.Join([]string{
-		"| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |",
-		"The h5 handoff starts the follow-up lifecycle.",
+		"| 5 | Reviewer | Followup | After Phase 10 | Summary + full task URIs |",
+		"| Reviewer → Followup | HANDOFF Pasture task body | Summary + full task URIs |",
+		"| Field | h1: Arch→Super | h5: Reviewer→Followup | h6: Super→Architect |",
 	}, "\n")
-	require.NotEmpty(t, findFollowupStartClaims(defective),
+	require.NotEmpty(t, findReviewerToFollowupHandoffRows(defective),
 		"the defective sample must produce at least one finding")
 
 	clean := strings.Join([]string{
+		"| 5 | Reviewer | Supervisor | After Phase 10 | Summary + full task URIs |",
+		"| Reviewer → Supervisor | HANDOFF Pasture task body | Summary + full task URIs |",
+		"| Field | h1: Arch→Super | h5: Reviewer→Supervisor | h6: Super→Architect |",
 		"| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |",
-		"The follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`).",
-		"The Reviewer → Supervisor h5 handoff closes the review wave; it never starts the follow-up lifecycle.",
+		"| 8 | **Worker → Reviewer (h4)** | Worker completes follow-up slice. |",
 	}, "\n")
-	assert.Empty(t, findFollowupStartClaims(clean),
+	assert.Empty(t, findReviewerToFollowupHandoffRows(clean),
 		"the clean sample must produce no finding")
 
 	for _, source := range reviewModelGuardSources(t) {
-		claims := findFollowupStartClaims(source.Text)
+		claims := findReviewerToFollowupHandoffRows(source.Text)
 		assert.Emptyf(t, claims,
-			"%s %s still claims the h5 handoff starts the follow-up lifecycle: %v — the lifecycle starts only from user-DEFER'd UAT items (C-followup-timing); h5 closes the review wave",
+			"%s %s still sends a reviewer into a Followup handoff: %v — h5 is Reviewer → Supervisor; the follow-up epic is created from user-DEFER'd UAT items with no matrix row pointing at it (C-followup-timing)",
 			source.Corpus, source.Owner, claims)
 	}
 }

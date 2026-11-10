@@ -100,7 +100,7 @@ Empty groups are closed immediately. A finding is created as a child of its seve
 **Skills:** `/pasture:reviewer-review-plan`, `/pasture:reviewer-review-code`, `/pasture:reviewer-comment`, `/pasture:reviewer-vote`
 
 **Receives from:** Architect (Phase 4, including FOLLOWUP_PROPOSAL review) or Supervisor (Phase 10, including FOLLOWUP_SLICE code review)
-**Hands off to:** Architect (Phase 4 results) or Supervisor/Followup (Phase 10 findings)
+**Hands off to:** Architect (Phase 4 results) or Supervisor (Phase 10 findings)
 
 ---
 
@@ -173,7 +173,7 @@ Every handoff is **authored inline in its own HANDOFF Pasture task body** (no fi
 | 2 | Supervisor | Worker | 9 | HANDOFF Pasture task body | Summary + full task URIs |
 | 3 | Supervisor | Reviewer | 10 | HANDOFF Pasture task body | Summary + full task URIs |
 | 4 | Worker | Reviewer | 10 | HANDOFF Pasture task body | Summary + full task URIs |
-| 5 | Reviewer | Followup | post-10 | HANDOFF Pasture task body | Summary + full task URIs |
+| 5 | Reviewer | Supervisor | post-10 | HANDOFF Pasture task body | Summary + full task URIs |
 | 6 | Supervisor | Architect | Follow-up lifecycle | HANDOFF Pasture task body | Summary + full task URIs |
 
 **Same-actor transitions** (no handoff needed): Plan UAT → Ratify (Phase 5→6), Ratify → Handoff (Phase 6→7) — both performed by the architect. In the follow-up lifecycle, Supervisor creating FOLLOWUP_URE and FOLLOWUP_URD are also same-actor transitions.

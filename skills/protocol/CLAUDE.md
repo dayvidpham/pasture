@@ -382,7 +382,7 @@ Check **end-user alignment**, not technical specializations:
 | Supervisor → Worker | HANDOFF Pasture task body | Summary + full task URIs |
 | Supervisor → Reviewer | HANDOFF Pasture task body | Summary + full task URIs |
 | Worker → Reviewer | HANDOFF Pasture task body | Summary + full task URIs |
-| Reviewer → Followup | HANDOFF Pasture task body | Summary + full task URIs |
+| Reviewer → Supervisor | HANDOFF Pasture task body | Summary + full task URIs |
 | Supervisor → Architect | HANDOFF Pasture task body | Summary + full task URIs |
 
 **Same-actor transitions do NOT need handoff:** UAT → Ratify and Ratify → Handoff are performed by the same actor (architect), so no handoff document is needed.

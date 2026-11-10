@@ -14,7 +14,7 @@ Standardized template for all 6 actor-change transitions in the Pasture protocol
 | 2 | Supervisor | Worker | Phase 9 (Slice assignment) | Summary + full task URIs |
 | 3 | Supervisor | Reviewer | Phase 10 (Code review) | Summary + full task URIs |
 | 4 | Worker | Reviewer | Phase 10 (Code review) | Summary + full task URIs |
-| 5 | Reviewer | Followup | After Phase 10 (code-review results to supervisor) | Summary + full task URIs |
+| 5 | Reviewer | Supervisor | After Phase 10 (closes the review wave, records findings) | Summary + full task URIs |
 | 6 | Supervisor | Architect | Follow-up lifecycle (FOLLOWUP_URE/URD → FOLLOWUP_PROPOSAL) | Summary + full task URIs |
 
 ### Same-Actor Transitions (NO Handoff Needed)
@@ -67,7 +67,7 @@ named URI placeholder to the corresponding task in your own namespace.
 
 ## Required Fields Per Transition
 
-| Field | h1: Arch→Super | h2: Super→Worker | h3: Super→Reviewer | h4: Worker→Reviewer | h5: Reviewer→Followup | h6: Super→Architect |
+| Field | h1: Arch→Super | h2: Super→Worker | h3: Super→Reviewer | h4: Worker→Reviewer | h5: Reviewer→Supervisor | h6: Super→Architect |
 |-------|----------------|-------------------|--------------------|--------------------|----------------------|---------------------|
 | Request | Required | Required | Required | Required | Required | Required |
 | URD | Required | Required | Required | Required | Required | Required |
@@ -75,7 +75,7 @@ named URI placeholder to the corresponding task in your own namespace.
 | Ratified Plan | Required | Required | Required | — | — | — |
 | Impl Plan | — | Required | Required | Required | — | — |
 | Slice | — | Required | — | Required | — | — |
-| Followup Epic | — | — | — | — | Required | Required |
+| Followup Epic | — | — | — | — | — | Required |
 | Followup URE | — | — | — | — | — | Required |
 | Followup URD | — | — | — | — | — | Required |
 | Findings Summary | — | — | — | — | Required | Required |
@@ -226,16 +226,16 @@ SLICE-1 implements the core logging infrastructure. All quality gates pass
 - See Pasture task {{SLICE_TASK_URI}} for validation_checklist completion status.
 ```
 
-### 5. Reviewer → Followup (Summary + full task URIs)
+### 5. Reviewer → Supervisor (Summary + full task URIs)
 
 ```markdown
-# Handoff: Reviewer → Followup
+# Handoff: Reviewer → Supervisor
 
 ## Metadata
 - **Request:** {{REQUEST_TASK_URI}} — REQUEST: Add structured logging
 - **Date:** 2026-02-20
 - **Source:** Reviewer (reviewer-A)
-- **Target:** Followup (Supervisor creates follow-up epic)
+- **Target:** Supervisor (closes the review wave and records findings; the follow-up epic is created later at UAT)
 
 ## Task References
 - **Request:** {{REQUEST_TASK_URI}}
@@ -266,7 +266,7 @@ the last wave (`C-clean-review-exit`). Each finding closes only per
 
 ## Follow-up Lifecycle Handoffs
 
-The follow-up epic runs the same protocol phases using 6 handoff types (h1-h5 reused from the main lifecycle, plus h6 unique to the follow-up lifecycle), scoped to the follow-up epic.
+The follow-up epic runs the same protocol phases using 5 handoff types (h1-h4 reused from the main lifecycle, plus h6 unique to the follow-up lifecycle), scoped to the follow-up epic.
 
 **Storage:** the HANDOFF Pasture task body (no filesystem path) — same convention as the main lifecycle; each follow-up handoff is authored inline in its own HANDOFF Pasture task and located by full task URI.
 

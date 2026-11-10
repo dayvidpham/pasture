@@ -418,7 +418,7 @@ pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LE
 # Leaf task already has: pasture task dep add "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"
 ```
 
-### Followup Handoff (h5)
+### Reviewer → Supervisor Handoff (h5)
 
 The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (open findings converge at the end; close rule: `C-finding-lifecycle`). Author this handoff in its Pasture task body (no filesystem path):
 

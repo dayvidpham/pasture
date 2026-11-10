@@ -807,7 +807,7 @@ var handoffFilePatterns = map[string]string{
 	"h2": "supervisor-to-worker.md",
 	"h3": "supervisor-to-reviewer.md",
 	"h4": "worker-to-reviewer.md",
-	"h5": "reviewer-to-followup.md",
+	"h5": "reviewer-to-supervisor.md",
 	"h6": "supervisor-to-architect.md",
 }
 

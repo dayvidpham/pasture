@@ -304,7 +304,7 @@ Scoping URE: determine which user-DEFER'd UAT items to address."
 				},
 				{
 					Id:    "impl-rev-followup-handoff",
-					Title: "Followup Handoff (h5)",
+					Title: "Reviewer → Supervisor Handoff (h5)",
 					Content: `The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (open findings converge at the end; close rule: ` + "`C-finding-lifecycle`" + `). Author this handoff in its Pasture task body (no filesystem path):
 
 ` + "```" + `markdown

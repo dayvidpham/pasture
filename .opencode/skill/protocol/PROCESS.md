@@ -437,7 +437,7 @@ pasture task label add "$HANDOFF_URI" pasture:p7-plan:s7-handoff
 | 2 | Supervisor | Worker | Phase 9 (slice assignment) | Summary + full task URIs |
 | 3 | Supervisor | Reviewer | Phase 10 (code review) | Summary + full task URIs |
 | 4 | Worker | Reviewer | Phase 10 (code review) | Summary + full task URIs |
-| 5 | Reviewer | Followup | After Phase 10 | Summary + full task URIs |
+| 5 | Reviewer | Supervisor | After Phase 10 | Summary + full task URIs |
 | 6 | Supervisor | Architect | Follow-up lifecycle (FOLLOWUP_URE/URD → FOLLOWUP_PROPOSAL) | Summary + full task URIs |
 
 Every handoff is authored inline in its own HANDOFF Pasture task body (no filesystem path) and located by full task URI.

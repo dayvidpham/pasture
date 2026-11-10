@@ -802,7 +802,7 @@
     <handoff id="h4" source-role="worker" target-role="reviewer" at-phase="p10" content-level="summary-with-ids" file-pattern="worker-to-reviewer.md">
       <required-fields>request, urd, impl-plan, slice, context, key-decisions, open-items</required-fields>
     </handoff>
-    <handoff id="h5" source-role="reviewer" target-role="supervisor" at-phase="p10" content-level="summary-with-ids" file-pattern="reviewer-to-followup.md" trigger="code-review findings exist (open BLOCKERs gate the wave; the rest converge at the end)">
+    <handoff id="h5" source-role="reviewer" target-role="supervisor" at-phase="p10" content-level="summary-with-ids" file-pattern="reviewer-to-supervisor.md" trigger="code-review findings exist (open BLOCKERs gate the wave; the rest converge at the end)">
       <required-fields>request, urd, proposal, context, key-decisions, open-items, acceptance-criteria</required-fields>
       <note>Reviewer hands code-review findings to supervisor; open BLOCKER findings gate the wave, while open IMPORTANT and MINOR findings converge at the end (the FOLLOWUP epic is created later at UAT from user-DEFER&#39;d items, never from review findings)</note>
     </handoff>
