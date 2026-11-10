@@ -20,7 +20,7 @@ content: |
 
   Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget)
     ├─ Cycle 1:
-    │   ├─ Spawn ephemeral reviewers (delegation operation, per-slice review)
+    │   ├─ Spawn ephemeral reviewers (delegation operation, whole-wave review)
     │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
     │   ├─ Reviewers label every finding pasture:finding under its severity group
     │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
@@ -36,5 +36,5 @@ content: |
   Cycle Exit Conditions:
     A wave gate: no open BLOCKER finding                        → the wave advances; open findings stay open
     After the last wave: convergence over open pasture:finding  → targets 0/0/0 within maxRounds; on exhaustion, surface to the user
-    A finding closes only when the reviewer who raised it verifies the fix
+    Finding close rule: see C-finding-lifecycle
     Genuinely stuck (cannot converge)                           → Escalate to architect for re-planning

@@ -53,7 +53,7 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 - Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
 - Then: during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -> fix -> re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: require a zeroed round at a wave boundary; close a finding before the reviewer who raised it verifies the fix; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
+- Should not: require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Pasture dependency

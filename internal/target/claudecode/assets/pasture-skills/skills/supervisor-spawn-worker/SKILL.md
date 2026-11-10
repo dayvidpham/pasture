@@ -30,7 +30,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (delegation operation, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (delegation operation, whole-wave review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Reviewers label every finding pasture:finding under its severity group
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
@@ -46,7 +46,7 @@ DONE → Phase 11 (UAT)
 Cycle Exit Conditions:
   A wave gate: no open BLOCKER finding                        → the wave advances; open findings stay open
   After the last wave: convergence over open pasture:finding  → targets 0/0/0 within maxRounds; on exhaustion, surface to the user
-  A finding closes only when the reviewer who raised it verifies the fix
+  Finding close rule: see C-finding-lifecycle
   Genuinely stuck (cannot converge)                           → Escalate to architect for re-planning
 
 ```
@@ -91,7 +91,7 @@ Cycle Exit Conditions:
 - Given: worker-reviewer cycle
 - When: counting iterations
 - Then: iterate review->fix->re-review up to the chosen review-effort budget; only an open BLOCKER gates a wave, IMPORTANT and MINOR findings stay open, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate
-- Should not: hardcode the budget, proceed past the chosen budget without surfacing to the user, require a zeroed round to close a wave, or close a finding before its raiser verifies the fix
+- Should not: hardcode the budget, proceed past the chosen budget without surfacing to the user, require a zeroed round to close a wave, or close a finding outside `C-finding-lifecycle`
 
 **[sup-spawn-important-after-cycles]**
 - Given: IMPORTANT or MINOR findings remain
@@ -102,8 +102,8 @@ Cycle Exit Conditions:
 **[frag--review-clean-exit]**
 - Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; close a finding only when the reviewer who raised it verifies the fix; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding before its raiser verifies the fix; loop forever when a finite budget was chosen
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; a finding closes only per `C-finding-lifecycle`; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; loop forever when a finite budget was chosen
 
 ## Task Recovery
 
@@ -127,7 +127,7 @@ Select the current registered author with pasture task agents list and pasture t
 
 ## When to Use
 
-Implementation tasks ready. Ephemeral reviewers will be spawned per-slice during review phase.
+Implementation tasks ready. Ephemeral reviewers will be spawned for the wave during review phase.
 
 ## Ride the Wave — Overview
 
@@ -137,11 +137,11 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 1. PLAN  → supervisor-plan-tasks: decompose into slices + integration points
 2. EXPLORE → Ephemeral Explore subagents (Agent tool): map codebase, short-lived
 3. BUILD → N Workers: implement slices in parallel
-4. REVIEW → Ephemeral reviewers (Agent tool): review per-slice
+4. REVIEW → Ephemeral reviewers (Agent tool): review the whole wave
 5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits
 6. RE-REVIEW → Spawn new ephemeral reviewers for re-review
 7. REPEAT → Steps 5-6 up to the chosen review-effort budget; only an open BLOCKER gates the wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface to the user
-8. TRACK → Open findings stay open until their raiser verifies the fix; none route to FOLLOWUP
+8. TRACK → Open findings converge at the end per `C-finding-lifecycle`; none route to FOLLOWUP
 9. NEXT  → When convergence finds no open `pasture:finding` → Phase 11 (UAT); escalate to architect only if genuinely stuck
 ```
 
@@ -269,10 +269,10 @@ SendMessage({
 BLOCKERs (must fix — blocks slice closure):
 - "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
-IMPORTANT (must fix — stays open until its raiser verifies the fix):
+IMPORTANT (must fix — closes only per C-finding-lifecycle):
 - "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
-MINOR (must fix — stays open until its raiser verifies the fix):
+MINOR (must fix — closes only per C-finding-lifecycle):
 - "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
 After fixing all items:

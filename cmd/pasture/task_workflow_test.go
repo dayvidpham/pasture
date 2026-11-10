@@ -517,6 +517,7 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 				"PASTURE_NAMESPACE="+namespace, "SLICE_1_ID_URI="+input.ID, "REVIEW_ROUND_ID_URI="+input.ID,
 				"SLICE_ID_URI="+input.ID, "REVIEW_ID_URI="+input.ID, "IMPL_PLAN_ID_URI="+input.ID,
 				"REQUEST_ID_URI="+input.ID, "URD_ID_URI="+input.ID, "RATIFIED_PROPOSAL_ID_URI="+input.ID,
+				"SLICE_1_1_ID_URI="+input.ID, "SLICE_1_2_ID_URI="+input.ID, "SLICE_1_3_ID_URI="+input.ID,
 				"SLICE_2_ID_URI="+input.ID, "SLICE_3_ID_URI="+input.ID, "SLICE_4_ID_URI="+input.ID,
 				"FOLLOWUP_EPIC_ID_URI="+input.ID, "ORIGINAL_URD_ID_URI="+originalURDID,
 				"REQUEST_URI="+input.ID, "URD_URI="+input.ID, "ELICIT_URI="+input.ID)

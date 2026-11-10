@@ -53,7 +53,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
 - Then: during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -> fix -> re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: require a zeroed round at a wave boundary; close a finding before the reviewer who raised it verifies the fix; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
+- Should not: require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
@@ -83,7 +83,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 - Given: UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items
 - When: creating the FOLLOWUP epic
 - Then: create the FOLLOWUP epic at UAT when user-DEFER'd items exist; the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items
-- Should not: trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — no review severity is deferrable to FOLLOWUP, and a finding stays open until its raiser verifies the fix
+- Should not: trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — no review severity is deferrable to FOLLOWUP (a finding's close rule is `C-finding-lifecycle`)
 
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
@@ -174,8 +174,8 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[B-sup-ride-the-wave]**
 - Given: Phase 8-10 execution
 - When: starting implementation
-- Then: follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for per-slice review (only an open BLOCKER finding gates the wave), workers fix per-slice with atomic commits, and iterate review -> fix -> re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate
-- Should not: skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; require a zeroed round to close a wave; close a finding before the reviewer who raised it verifies the fix
+- Then: follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for whole-wave review (only an open BLOCKER finding gates the wave), workers fix findings with atomic commits, and iterate review -> fix -> re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate
+- Should not: skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; require a zeroed round to close a wave; close a finding outside `C-finding-lifecycle`
 
 ## Completion Checklist
 
@@ -190,13 +190,13 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **review-ready gates:**
 - [ ] All workers have notified completion via pasture task comment add
 - [ ] Ephemeral reviewers spawned for all slices
-- [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice
+- [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per wave per axis per round
 
 ## Workflows
 
 ### Ride the Wave
 
-Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, where only an open BLOCKER finding gates the wave, workers fix, and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.
+Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for whole-wave review, where only an open BLOCKER finding gates the wave, workers fix, and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.
 
 **Stage 1: Plan** _(sequential)_
 
@@ -224,9 +224,9 @@ Exit conditions:
 
 **Stage 3: Review + Fix Cycles** _(conditional-loop)_
 
-- Spawn reviewers via Agent tool for per-slice code review
+- Spawn reviewers via Agent tool for whole-wave code review
 
-- Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
+- Reviewers create one severity trio (BLOCKER/IMPORTANT/MINOR) per wave, per axis, per round
 
 - Track findings as `pasture:finding` children of the 3 severity groups; only an open BLOCKER gates the wave, and open findings converge at the end (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)
 
@@ -255,7 +255,7 @@ Phase 9: BUILD
 
 Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (delegation operation, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (delegation operation, whole-wave review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
   │   ├─ Reviewers label every finding pasture:finding under its severity group
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
@@ -271,7 +271,7 @@ DONE → Phase 11 (UAT)
 Cycle Exit Conditions:
   A wave gate: no open BLOCKER finding                        → the wave advances; open findings stay open
   After the last wave: convergence over open pasture:finding  → targets 0/0/0 within maxRounds; on exhaustion, surface to the user
-  A finding closes only when the reviewer who raised it verifies the fix
+  Finding close rule: see C-finding-lifecycle
   Genuinely stuck (cannot converge)                           → Escalate to architect for re-planning
 
 ```

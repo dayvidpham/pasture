@@ -59,7 +59,6 @@ phase_checks:
   - phase_id: "p10"
     must_contain_elements:
       - "severity-tree"
-      - "followup-epic"
 
   - phase_id: "p1"
     must_contain_elements:

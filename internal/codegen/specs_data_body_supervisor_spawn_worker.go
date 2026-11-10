@@ -52,7 +52,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 			Given:     "worker-reviewer cycle",
 			When:      "counting iterations",
 			Then:      "iterate review->fix->re-review up to the chosen review-effort budget; only an open BLOCKER gates a wave, IMPORTANT and MINOR findings stay open, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate",
-			ShouldNot: "hardcode the budget, proceed past the chosen budget without surfacing to the user, require a zeroed round to close a wave, or close a finding before its raiser verifies the fix",
+			ShouldNot: "hardcode the budget, proceed past the chosen budget without surfacing to the user, require a zeroed round to close a wave, or close a finding outside `C-finding-lifecycle`",
 		},
 		{
 			Id:        "sup-spawn-important-after-cycles",
@@ -72,7 +72,7 @@ var supervisorSpawnWorkerBody = SkillBody{
 		{
 			Id:      "sup-spawn-when-to-use",
 			Title:   "When to Use",
-			Content: `Implementation tasks ready. Ephemeral reviewers will be spawned per-slice during review phase.`,
+			Content: `Implementation tasks ready. Ephemeral reviewers will be spawned for the wave during review phase.`,
 		},
 		{
 			Id:    "sup-spawn-ride-the-wave-overview",
@@ -83,11 +83,11 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"1. PLAN  → supervisor-plan-tasks: decompose into slices + integration points\n" +
 				"2. EXPLORE → Ephemeral Explore subagents ([[op:delegate_assignment]] tool): map codebase, short-lived\n" +
 				"3. BUILD → N Workers: implement slices in parallel\n" +
-				"4. REVIEW → Ephemeral reviewers ([[op:delegate_assignment]] tool): review per-slice\n" +
+				"4. REVIEW → Ephemeral reviewers ([[op:delegate_assignment]] tool): review the whole wave\n" +
 				"5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits\n" +
 				"6. RE-REVIEW → Spawn new ephemeral reviewers for re-review\n" +
 				"7. REPEAT → Steps 5-6 up to the chosen review-effort budget; only an open BLOCKER gates the wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface to the user\n" +
-				"8. TRACK → Open findings stay open until their raiser verifies the fix; none route to FOLLOWUP\n" +
+				"8. TRACK → Open findings converge at the end per `C-finding-lifecycle`; none route to FOLLOWUP\n" +
 				"9. NEXT  → When convergence finds no open `pasture:finding` → Phase 11 (UAT); escalate to architect only if genuinely stuck\n" +
 				"```\n" +
 				"\n" +
@@ -220,10 +220,10 @@ Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec]] show` 
 BLOCKERs (must fix — blocks slice closure):
 - "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
-IMPORTANT (must fix — stays open until its raiser verifies the fix):
+IMPORTANT (must fix — closes only per C-finding-lifecycle):
 - "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
-MINOR (must fix — stays open until its raiser verifies the fix):
+MINOR (must fix — closes only per C-finding-lifecycle):
 - "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
 After fixing all items:

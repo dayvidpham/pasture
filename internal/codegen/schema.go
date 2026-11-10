@@ -288,17 +288,22 @@ func buildEnums(buf *bytes.Buffer, depth int) {
 	marshalSection(buf, depth, section)
 }
 
+// specialLabelIDs is the ordered registry of special (non-phase) labels emitted
+// into schema.xml. It exists because LabelSpecs is a map and schema output is
+// ordered; the order is the authored one. TestSpecialLabelIDsMatchRegistry pins
+// this list to every LabelSpecs entry marked Special, so the two cannot drift.
+var specialLabelIDs = []string{
+	"L-urd", "L-superseded",
+	"L-sev-blocker", "L-sev-import", "L-sev-minor",
+	"L-finding", "L-followup",
+}
+
 func buildLabels(buf *bytes.Buffer, depth int) {
 	phaseLabelIDs := []string{
 		"L-p1s1_1", "L-p1s1_2", "L-p1s1_3",
 		"L-p2s2_1", "L-p2s2_2",
 		"L-p3s3", "L-p4s4", "L-p5s5", "L-p6s6", "L-p7s7",
 		"L-p8s8", "L-p9s9", "L-p10s10", "L-p11s11", "L-p12s12",
-	}
-	specialLabelIDs := []string{
-		"L-urd", "L-superseded",
-		"L-sev-blocker", "L-sev-import", "L-sev-minor",
-		"L-finding", "L-followup",
 	}
 
 	section := LabelsSection{}
@@ -546,12 +551,6 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 					{SeverityRef: "IMPORTANT", LabelRef: "L-sev-import"},
 					{SeverityRef: "MINOR", LabelRef: "L-sev-minor"},
 				},
-			}
-			phase.FollowupEpic = &FollowupEpicElem{
-				LabelRef:       "L-followup",
-				Trigger:        "review-completion AND (IMPORTANT OR MINOR findings exist)",
-				GatedOnBlocker: "false",
-				OwnerRole:      "supervisor",
 			}
 		}
 
@@ -1234,42 +1233,41 @@ func buildDependencyModel(buf *bytes.Buffer, depth int) {
 
 func buildFollowupLifecycle(buf *bytes.Buffer, depth int) {
 	section := FollowupLifecycleSection{
-		Trigger:        "Code review completion AND (IMPORTANT OR MINOR findings exist)",
+		Trigger:        "UAT (Phase 5 or Phase 11) produces user-DEFER'd items",
 		OwnerRole:      "supervisor",
 		GatedOnBlocker: "false",
 		DependencyChain: &DepChainElem{
 			Note: "Same protocol phases but with FOLLOWUP_ prefix",
 			Steps: []DepChainStepElem{
-				{TaskTitle: "FOLLOWUP: {description}", PhaseRef: "p10", Description: "Epic created by supervisor. References original URD and review tasks."},
-				{TaskTitle: "FOLLOWUP_URE: {description}", PhaseRef: "p2", Description: "Scoping URE with user to determine which findings to address."},
+				{TaskTitle: "FOLLOWUP: {description}", PhaseRef: "p11", Description: "Epic created by supervisor from user-DEFER'd UAT items. References original URD and UAT task."},
+				{TaskTitle: "FOLLOWUP_URE: {description}", PhaseRef: "p2", Description: "Scoping URE with user to determine which DEFER'd items to address."},
 				{TaskTitle: "FOLLOWUP_URD: {description}", PhaseRef: "p2", Description: "Requirements doc for follow-up scope. References original URD."},
-				{TaskTitle: "FOLLOWUP_PROPOSAL-{N}: {description}", PhaseRef: "p3", Description: "Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings."},
+				{TaskTitle: "FOLLOWUP_PROPOSAL-{N}: {description}", PhaseRef: "p3", Description: "Proposal accounting for original URD + FOLLOWUP_URD + DEFER'd items."},
 				{TaskTitle: "FOLLOWUP_IMPL_PLAN: {description}", PhaseRef: "p8", Description: "Supervisor decomposes follow-up into slices."},
-				{TaskTitle: "FOLLOWUP_SLICE-{N}: {description}", PhaseRef: "p9", Description: "Each slice adopts original IMPORTANT/MINOR leaf tasks as children."},
+				{TaskTitle: "FOLLOWUP_SLICE-{N}: {description}", PhaseRef: "p9", Description: "Each slice adopts user-DEFER'd UAT-item leaf tasks as children."},
 			},
 		},
 		LeafTaskAdoption: &LeafTaskAdoptElem{
-			Rule:    "When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.",
-			Command: "[[rec]] dep add {followup-slice-uri} --blocked-by {important-leaf-task-uri}\n[[rec]] dep add {followup-slice-uri} --blocked-by {minor-leaf-task-uri}",
-			Note:    "Leaf tasks retain their original parent (the severity group from the original review) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.",
+			Rule:    "When supervisor creates FOLLOWUP_SLICE-N, the user-DEFER'd UAT-item leaf tasks gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.",
+			Command: "[[rec]] dep add {followup-slice-uri} --blocked-by {defer-item-leaf-task-1-uri}\n[[rec]] dep add {followup-slice-uri} --blocked-by {defer-item-leaf-task-2-uri}",
+			Note:    "Leaf tasks retain their original parent (the DEFER'd-items tracking group) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.",
 		},
 		References: &FollowupRefsElem{
 			Refs: []FollowupRefElem{
 				{Type: "relates_to", Target: "original URD", Note: "Follow-up epic references original URD via frontmatter"},
-				{Type: "relates_to", Target: "original REVIEW tasks", Note: "Follow-up epic references review tasks via frontmatter"},
+				{Type: "relates_to", Target: "original UAT task", Note: "Follow-up epic references the UAT task via frontmatter"},
 			},
 		},
 		HandoffChain: &HandoffChainElem{
 			Note: "How handoffs flow through the follow-up lifecycle",
 			Transitions: []HandoffChainTransElem{
-				{Order: "1", HandoffRef: "h5", Description: "Reviewer \u2192 Followup: Bridge from original review to follow-up epic. Created by supervisor when IMPORTANT/MINOR findings exist. This handoff STARTS the follow-up lifecycle."},
-				{Order: "2", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URE (same actor \u2014 supervisor owns follow-up epic and initiates scoping)"},
-				{Order: "3", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URD (same actor within Phase 2 \u2014 supervisor synthesizes follow-up requirements)"},
-				{Order: "4", HandoffRef: "h6", Description: "Supervisor \u2192 Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped findings and requirements."},
-				{Order: "5", HandoffRef: "h1", Description: "Architect \u2192 Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and outstanding findings."},
-				{Order: "6", HandoffRef: "h2", Description: "Supervisor \u2192 Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."},
-				{Order: "7", HandoffRef: "h3", Description: "Supervisor \u2192 Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + original findings being addressed."},
-				{Order: "8", HandoffRef: "h4", Description: "Worker \u2192 Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."},
+				{Order: "1", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URE from the user-DEFER'd UAT items (same actor \u2014 supervisor owns the follow-up epic and initiates scoping)"},
+				{Order: "2", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URD (same actor within Phase 2 \u2014 supervisor synthesizes follow-up requirements)"},
+				{Order: "3", HandoffRef: "h6", Description: "Supervisor \u2192 Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped requirements and DEFER'd items."},
+				{Order: "4", HandoffRef: "h1", Description: "Architect \u2192 Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and the DEFER'd items."},
+				{Order: "5", HandoffRef: "h2", Description: "Supervisor \u2192 Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."},
+				{Order: "6", HandoffRef: "h3", Description: "Supervisor \u2192 Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + the DEFER'd items being addressed."},
+				{Order: "7", HandoffRef: "h4", Description: "Worker \u2192 Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."},
 			},
 		},
 	}
@@ -1592,7 +1590,7 @@ func generateSchemaContent() string {
 		{"TASK TITLE CONVENTIONS\n\n     Mapping from task titles to labels and creating roles.", buildTaskTitles},
 		{"DOCUMENTS\n\n     Mapping from protocol documentation files to the entities they cover.", buildDocuments},
 		{"DEPENDENCY DIRECTION (Pasture)\n\n     Canonical definition of how work flows through the dependency tree.", buildDependencyModel},
-		{"FOLLOW-UP LIFECYCLE (R6 from URD)\n\n     When code review produces IMPORTANT or MINOR findings, the supervisor\n     creates a follow-up epic that runs the same protocol phases with\n     FOLLOWUP_* prefixed task types. The IMPORTANT/MINOR leaf tasks from\n     the original review gain a second parent: the follow-up slice they\n     are assigned to (dual-parent).\n\n     Kind: Separate enum values (FOLLOWUP_URE, FOLLOWUP_SLICE, etc.).\n     Simple single-parent epic relationship — no followup-of-followup.", buildFollowupLifecycle},
+		{"FOLLOW-UP LIFECYCLE (R6 from URD)\n\n     When UAT (Phase 5 or Phase 11) produces user-DEFER'd items, the\n     supervisor creates a follow-up epic that runs the same protocol phases\n     with FOLLOWUP_* prefixed task types. The user-DEFER'd UAT-item leaf\n     tasks gain a second parent: the follow-up slice they are assigned to\n     (dual-parent).\n\n     Kind: Separate enum values (FOLLOWUP_URE, FOLLOWUP_SLICE, etc.).\n     Simple single-parent epic relationship — no followup-of-followup.", buildFollowupLifecycle},
 		{"PROCEDURE STEPS\n\n     Per-role ordered steps (startup sequence for supervisor,\n     TDD layers for worker). Only roles with non-empty steps are listed.", buildProcedureSteps},
 		{"CHECKLISTS\n\n     Per-role quality gate checklists for slice completion, review readiness,\n     and landing.", buildChecklists},
 		{"COORDINATION COMMANDS\n\n     Pasture coordination commands shared across roles and role-specific.", buildCoordinationCommands},

@@ -2,9 +2,11 @@ package codegen
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -74,12 +76,12 @@ var perWaveCleanPatterns = []perWaveCleanPattern{
 	},
 	{
 		"reach-zero-before-wave",
-		regexp.MustCompile(`(?i)reach 0[^\n]{0,30}before (?:the )?(?:review )?wave`),
+		regexp.MustCompile(`(?i)reach 0[^\n]{0,30}before (?:the )?(?:next |following |subsequent )?(?:review )?wave`),
 		"Must reach 0 before review wave closes",
 	},
 	{
 		"every-severity-before-wave",
-		regexp.MustCompile(`(?i)\bevery severit\w*[^\n]{0,60}before (?:the )?(?:review )?wave`),
+		regexp.MustCompile(`(?i)\bevery severit\w*[^\n]{0,60}before (?:the )?(?:next |following |subsequent )?(?:review )?wave`),
 		"Review findings of every severity must be resolved before the review wave closes",
 	},
 	{
@@ -89,13 +91,18 @@ var perWaveCleanPatterns = []perWaveCleanPattern{
 	},
 	{
 		"zero-before-wave",
-		regexp.MustCompile(`(?i)\b0/0/0\b[^\n]{0,50}(?:before (?:the )?(?:review )?wave|wave close|wave closes|per-wave|at the wave|wave gate)`),
+		regexp.MustCompile(`(?i)\b0/0/0\b[^\n]{0,50}(?:before (?:the )?(?:next |following |subsequent )?(?:review )?wave|wave close|wave closes|per-wave|at the wave|wave gate)`),
 		"0/0/0 at the wave gate",
 	},
 	{
 		"wave-before-zero",
-		regexp.MustCompile(`(?i)(?:wave close|before (?:the )?(?:review )?wave|per-wave|at the wave|wave gate)[^\n]{0,50}\b0/0/0\b`),
+		regexp.MustCompile(`(?i)(?:wave close|before (?:the )?(?:next |following |subsequent )?(?:review )?wave|per-wave|at the wave|wave gate)[^\n]{0,50}\b0/0/0\b`),
 		"per-wave 0/0/0",
+	},
+	{
+		"close-wave-all-zero",
+		regexp.MustCompile(`(?i)\bclose the wave[^\n]{0,80}\ball\b[^\n]{0,25}\b0\b`),
+		"close the wave only when BLOCKER, IMPORTANT and MINOR are all 0",
 	},
 }
 
@@ -140,6 +147,8 @@ func TestNoPerWaveCleanRound(t *testing.T) {
 		"All reviewers report 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free clean round.",
 		"CLEAN? YES (0/0/0) → slice passes, proceed",
 		"repeat until clean (0/0/0)",
+		"every wave must close at 0/0/0 before the next wave starts",
+		"close the wave only when BLOCKER, IMPORTANT and MINOR are all 0",
 	}, "\n")
 	require.NotEmpty(t, findPerWaveCleanRound(defective),
 		"the defective sample must produce at least one finding")
@@ -155,9 +164,10 @@ func TestNoPerWaveCleanRound(t *testing.T) {
 	require.NotEmpty(t, sources, "the rendering-source enumeration must not be empty")
 
 	for _, source := range sources {
-		assert.Emptyf(t, findPerWaveCleanRound(source.Text),
+		findings := findPerWaveCleanRound(source.Text)
+		assert.Emptyf(t, findings,
 			"%s %s still requires a clean round at a wave boundary: %v — the review model is two-phase: only an open BLOCKER gates a wave, and convergence over open pasture:finding tasks happens at the end within maxRounds",
-			source.Corpus, source.Owner)
+			source.Corpus, source.Owner, findings)
 	}
 }
 
@@ -207,18 +217,93 @@ func TestFindingLifecycle(t *testing.T) {
 	} {
 		body, err := os.ReadFile(filepath.Join(root, rel))
 		require.NoErrorf(t, err, "reading generated %q failed; run make generate", rel)
-		content := string(body)
-		assert.Containsf(t, content, "C-finding-lifecycle",
-			"generated %q must state the finding lifecycle constraint", rel)
-		assert.Containsf(t, content, "close it only when the reviewer who raised it verifies the fix",
-			"generated %q must state the raiser-verifies close rule in one sentence", rel)
+		// Pin the constraint marker, not a sentence: the close rule has one home
+		// (C-finding-lifecycle) and the generated skills must reference it. A
+		// sentence pin would re-create the duplicated wording tenet 7 forbids.
+		assert.Containsf(t, string(body), "C-finding-lifecycle",
+			"generated %q must reference the finding lifecycle constraint", rel)
 	}
+}
+
+// concreteSliceTitlePattern catches a concrete unqualified slice title: the
+// colon is what makes it a title. SLICE-{W}-{N}: is wave-qualified and does not
+// match because the character after the first number is a hyphen.
+var concreteSliceTitlePattern = regexp.MustCompile(`\bSLICE-\d+:`)
+
+// concreteSliceReviewPattern catches a concrete unqualified slice review title,
+// e.g. SLICE-1-REVIEW-A-1. The wave-scoped form is WAVE-{W}-REVIEW-...
+var concreteSliceReviewPattern = regexp.MustCompile(`\bSLICE-\d+-REVIEW\b`)
+
+// waveReviewTitlePattern matches one concrete wave review title and captures
+// its wave number, axis, and round. The review unit is (wave, axis, round).
+var waveReviewTitlePattern = regexp.MustCompile(`\bWAVE-(\d+)-REVIEW-([A-C])-(\d+)\b`)
+
+// followupSliceTokenPattern matches the distinct, non-wave follow-up slice form
+// so it is stripped before the unqualified-slice checks run.
+var followupSliceTokenPattern = regexp.MustCompile(`FOLLOWUP_SLICE-(?:\{N\}|\d+)`)
+
+// findWaveTitleDefects is the pure core of the wave-title guard. It flags:
+//
+//   - the retired unqualified slice title template (SLICE-{N}:) and its
+//     concrete form (SLICE-<n>:), and the unqualified slice review form;
+//   - a line that maps ONE review unit (axis, round) onto several wave
+//     numbers. One review covers one whole wave, so it yields one title for
+//     that (axis, round); the retired defect reviewed three slices of one wave
+//     and produced WAVE-1/2/3-REVIEW-A-1 for the same axis and round. A line
+//     lists the wave's slices instead.
+func findWaveTitleDefects(content string) []string {
+	var defects []string
+	for _, rawLine := range strings.Split(content, "\n") {
+		line := followupSliceTokenPattern.ReplaceAllString(rawLine, "FOLLOWUP_SLICE")
+
+		if strings.Contains(line, "SLICE-{N}:") {
+			defects = append(defects, "retired unqualified slice title template: SLICE-{N}:")
+		}
+		if strings.Contains(line, "SLICE-{N}-REVIEW") {
+			defects = append(defects, "retired unqualified slice review template: SLICE-{N}-REVIEW")
+		}
+		if loc := concreteSliceTitlePattern.FindString(line); loc != "" {
+			defects = append(defects, "concrete unqualified slice title: "+loc)
+		}
+		if loc := concreteSliceReviewPattern.FindString(line); loc != "" {
+			defects = append(defects, "concrete unqualified slice review: "+loc)
+		}
+
+		// A review is identified by (axis, round). Its wave number must be
+		// unique on a line: several wave numbers for one axis and round means
+		// one review was split by slice into several wave titles.
+		type axisRound struct{ axis, round string }
+		wavesByReview := map[axisRound]map[string]bool{}
+		for _, m := range waveReviewTitlePattern.FindAllStringSubmatch(line, -1) {
+			key := axisRound{axis: m[2], round: m[3]}
+			if wavesByReview[key] == nil {
+				wavesByReview[key] = map[string]bool{}
+			}
+			wavesByReview[key][m[1]] = true
+		}
+		for key, waves := range wavesByReview {
+			if len(waves) < 2 {
+				continue
+			}
+			numbers := make([]string, 0, len(waves))
+			for wave := range waves {
+				numbers = append(numbers, wave)
+			}
+			sort.Strings(numbers)
+			defects = append(defects, fmt.Sprintf(
+				"one review (axis %s, round %s) maps to %d wave titles (WAVE-%s); one review covers one wave, so list its slices instead",
+				key.axis, key.round, len(numbers), strings.Join(numbers, ", WAVE-")))
+		}
+	}
+	return defects
 }
 
 // TestWaveTitleConvention proves the title-convention registry names waves,
 // not unqualified slices: SLICE-{W}-{N} for a slice and
-// WAVE-{W}-REVIEW-{axis}-{round} for a review round. No rendered text keeps
-// the retired unqualified forms.
+// WAVE-{W}-REVIEW-{axis}-{round} for a review round. Two samples prove the
+// guard can fail (a concrete SLICE-<n>: title, and one review mapped onto three
+// wave titles) and can pass (one review per wave listing its slices). No
+// rendered text keeps the retired forms.
 func TestWaveTitleConvention(t *testing.T) {
 	t.Parallel()
 
@@ -236,17 +321,29 @@ func TestWaveTitleConvention(t *testing.T) {
 	require.True(t, sliceTitle, "the registry must declare SLICE-{W}-{N}: {description}")
 	require.True(t, reviewTitle, "the registry must declare WAVE-{W}-REVIEW-{axis}-{round}: {description}")
 
+	defective := strings.Join([]string{
+		"SLICE-1: Implement the command",
+		"Creates: SLICE-1-REVIEW-A-1 for the first slice",
+		"Reviews SLICE-1, SLICE-2, SLICE-3 -> Creates: WAVE-1-REVIEW-A-1, WAVE-2-REVIEW-A-1, WAVE-3-REVIEW-A-1",
+	}, "\n")
+	require.NotEmpty(t, findWaveTitleDefects(defective),
+		"the defective sample must produce at least one finding: a concrete SLICE-<n>: title and a one-review-to-many-wave-title mapping")
+
+	clean := strings.Join([]string{
+		"SLICE-{W}-{N}: <slice description>",
+		"Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3. Reviewer A reviews the whole wave and creates WAVE-1-REVIEW-A-1.",
+		"FOLLOWUP_SLICE-{N}: <description>",
+	}, "\n")
+	assert.Empty(t, findWaveTitleDefects(clean),
+		"the clean sample must produce no finding: one review per wave lists its slices and yields one title")
+
 	sources, err := renderedSources()
 	require.NoError(t, err)
 	var sawSliceWave, sawReviewWave bool
 	for _, source := range sources {
-		// FOLLOWUP_SLICE-{N} is a distinct, non-wave follow-up title; strip it
-		// before checking for the retired unqualified slice form.
-		text := strings.ReplaceAll(source.Text, "FOLLOWUP_SLICE-{N}:", "")
-		assert.NotContainsf(t, text, "SLICE-{N}:",
-			"%s %s still names an unqualified slice title; use SLICE-{W}-{N}", source.Corpus, source.Owner)
-		assert.NotContainsf(t, source.Text, "SLICE-{N}-REVIEW",
-			"%s %s still names an unqualified slice review; use WAVE-{W}-REVIEW-{axis}-{round}", source.Corpus, source.Owner)
+		for _, defect := range findWaveTitleDefects(source.Text) {
+			assert.Failf(t, "retired wave-title form", "%s %s: %s", source.Corpus, source.Owner, defect)
+		}
 		if strings.Contains(source.Text, "SLICE-{W}-{N}") {
 			sawSliceWave = true
 		}
@@ -274,10 +371,17 @@ func TestReviewPhaseGateAttribute(t *testing.T) {
 	require.NotEqual(t, -1, end, "the generated schema must contain the p11 phase after p10")
 	reviewPhase := rendered[start : start+end]
 
-	assert.Contains(t, reviewPhase, `maxRounds=`,
-		"the p10 gate declaration must carry the maxRounds attribute")
-	assert.Contains(t, reviewPhase, `<severity-tree`,
-		"the maxRounds attribute belongs on the severity-tree gate declaration")
+	// The attribute must sit INSIDE the <severity-tree ...> open tag. Two
+	// independent Contains checks would both pass when the attribute is deleted
+	// and a rule merely mentions it, which is not the property under test.
+	gateStart := strings.Index(reviewPhase, "<severity-tree")
+	require.NotEqual(t, -1, gateStart,
+		"the p10 gate declaration must carry a <severity-tree> element")
+	gateOpenEnd := strings.Index(reviewPhase[gateStart:], ">")
+	require.NotEqual(t, -1, gateOpenEnd, "the <severity-tree> element must have a closing '>'")
+	gateOpenTag := reviewPhase[gateStart : gateStart+gateOpenEnd+1]
+	assert.Contains(t, gateOpenTag, `maxRounds="3"`,
+		"the maxRounds attribute must be on the <severity-tree> open tag, not merely mentioned in the phase body; got %q", gateOpenTag)
 
 	convergence, ok := ConstraintSpecs["C-clean-review-exit"]
 	require.True(t, ok, "the convergence rule lives in C-clean-review-exit")
@@ -285,4 +389,110 @@ func TestReviewPhaseGateAttribute(t *testing.T) {
 		"the convergence rule must read maxRounds, not restate a count")
 	assert.Contains(t, WorkflowSpecs["ride-the-wave"].Description, "maxRounds",
 		"the ride-the-wave workflow description must read maxRounds")
+}
+
+// TestFollowupEpicIsUATDeferred proves the schema no longer creates a
+// FOLLOWUP epic from review completion. Only user-DEFER'd UAT items feed it.
+func TestFollowupEpicIsUATDeferred(t *testing.T) {
+	t.Parallel()
+
+	var schema bytes.Buffer
+	require.NoError(t, GenerateSchema(&schema))
+	rendered := schema.String()
+
+	start := strings.Index(rendered, `<phase id="p10"`)
+	require.NotEqual(t, -1, start, "the generated schema must contain the p10 phase")
+	end := strings.Index(rendered[start:], `<phase id="p11"`)
+	require.NotEqual(t, -1, end, "the generated schema must contain the p11 phase after p10")
+	p10 := rendered[start : start+end]
+
+	assert.NotContains(t, p10, "<followup-epic",
+		"the p10 review phase must not declare a follow-up epic; only user-DEFER'd UAT items create one")
+	assert.NotContains(t, strings.ToLower(rendered), "review-completion",
+		"no schema directive may trigger a follow-up epic from review completion")
+
+	lifecycleStart := strings.Index(rendered, "<followup-lifecycle>")
+	require.NotEqual(t, -1, lifecycleStart, "the schema must describe the follow-up lifecycle")
+	lifecycleEnd := strings.Index(rendered[lifecycleStart:], "</followup-lifecycle>")
+	require.NotEqual(t, -1, lifecycleEnd, "the follow-up lifecycle element must close")
+	lifecycle := rendered[lifecycleStart : lifecycleStart+lifecycleEnd]
+
+	assert.Contains(t, lifecycle, "UAT",
+		"the follow-up lifecycle trigger must name UAT as its source")
+	assert.Contains(t, lifecycle, "DEFER",
+		"the follow-up lifecycle trigger must name user-DEFER'd UAT items as its source")
+	assert.NotContains(t, lifecycle, "Code review completion",
+		"the follow-up lifecycle must not be triggered by code review completion")
+}
+
+// TestSpecialLabelIDsMatchRegistry ties the schema's ordered special-label list
+// to the label registry, so the two cannot drift: every LabelSpecs entry marked
+// Special must be emitted, and the schema must carry its value.
+func TestSpecialLabelIDsMatchRegistry(t *testing.T) {
+	t.Parallel()
+
+	registered := map[string]bool{}
+	for id, spec := range LabelSpecs {
+		if spec.Special {
+			registered[id] = true
+		}
+	}
+	require.NotEmpty(t, registered, "the label registry must mark at least one special label")
+
+	listed := map[string]bool{}
+	for _, id := range specialLabelIDs {
+		assert.Falsef(t, listed[id], "specialLabelIDs lists %q twice", id)
+		listed[id] = true
+		spec, ok := LabelSpecs[id]
+		require.Truef(t, ok, "specialLabelIDs names %q, which LabelSpecs does not register", id)
+		assert.Truef(t, spec.Special, "%q is in specialLabelIDs but not marked Special in LabelSpecs", id)
+	}
+	assert.ElementsMatch(t, keysOf(registered), keysOf(listed),
+		"specialLabelIDs and the Special label registry drifted; register the label or add it to specialLabelIDs")
+
+	var schema bytes.Buffer
+	require.NoError(t, GenerateSchema(&schema))
+	rendered := schema.String()
+	for id := range registered {
+		assert.Containsf(t, rendered, `id="`+id+`"`,
+			"special label %q is registered but absent from schema.xml", id)
+		assert.Containsf(t, rendered, `value="`+LabelSpecs[id].Value+`"`,
+			"special label %q renders without its registry value %q", id, LabelSpecs[id].Value)
+	}
+}
+
+// TestSchemaDirectiveProseIsSwept proves schema.go's non-marker directive prose
+// is in the shared rendering-source sweep. Before this change renderedSources
+// read only marker-bearing literals, so a directive such as a follow-up trigger
+// was invisible to every literal guard.
+func TestSchemaDirectiveProseIsSwept(t *testing.T) {
+	t.Parallel()
+
+	const directive = "UAT (Phase 5 or Phase 11) produces user-DEFER'd items"
+
+	sources, err := renderedSources()
+	require.NoError(t, err)
+	var found bool
+	for _, source := range sources {
+		if source.Corpus == schemaSourceFile && source.Text == directive {
+			found = true
+			break
+		}
+	}
+	require.Truef(t, found,
+		"schema directive prose %q is not in renderedSources; a directive without a body marker must still be swept", directive)
+
+	// The same sweep's guard catches the retired per-wave rule when it is
+	// written as directive prose, not only as registry prose.
+	defective := "When code review completes, every wave must close at 0/0/0 before the next wave starts"
+	require.NotEmpty(t, findPerWaveCleanRound(defective),
+		"the directive-prose corpus must feed the per-wave clean-round guard")
+}
+
+func keysOf(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for key := range set {
+		keys = append(keys, key)
+	}
+	return keys
 }

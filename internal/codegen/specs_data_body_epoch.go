@@ -163,7 +163,7 @@ Use the explicit task graph; no molecule subsystem is required.`,
 			Id:    "epoch-followup-epic",
 			Title: "Follow-up Epic",
 			Content: `**Trigger:** UAT (Phase 5 or 11) produces one or more **user-DEFER'd items**.
-The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (review findings stay open until their raiser verifies the fix and converge at the end).
+The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (review findings converge at the end; close rule: C-finding-lifecycle).
 **Owner:** Supervisor creates the follow-up epic.
 
 ` + "```" + `bash
@@ -196,7 +196,7 @@ See ` + "`" + `/pasture:supervisor` + "`" + ` and ` + "`" + `/pasture:impl-revie
 		{
 			Id:    "epoch-eager-severity",
 			Title: "EAGER Severity Tree (Phase 10)",
-			Content: `Code reviews ALWAYS create 3 severity group tasks per review round, even if empty:
+			Content: `Code reviews ALWAYS create ONE severity trio (3 group tasks) per wave, per axis, per round, even if empty:
 
 ` + "```" + `bash
 # Create all 3 severity groups immediately (EAGER, not lazy)

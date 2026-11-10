@@ -36,7 +36,8 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity def
 FINDING_ID=$([[rec]] create "BLOCKER: Missing error handling in auth flow" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slice: \"${SLICE_1_1_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
@@ -46,7 +47,7 @@ Missing error handling causes silent failure in auth flow." | python3 -c 'import
 
 # Wire dual-parent: finding blocks BOTH severity group AND slice
 [[rec]] dep add "$BLOCKER_GROUP_ID_URI" --blocked-by "$FINDING_ID"
-[[rec]] dep add "${SLICE_1_ID_URI}" --blocked-by "$FINDING_ID"
+[[rec]] dep add "${SLICE_1_1_ID_URI}" --blocked-by "$FINDING_ID"
 ` + "```" + `
 
 Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent). They stay open past the wave gate and converge at the end, and they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
@@ -56,7 +57,8 @@ Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their seve
 IMPORTANT_FINDING_ID=$([[rec]] create "IMPORTANT: Add request timeout" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slice: \"${SLICE_1_2_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
@@ -64,26 +66,29 @@ API calls should have configurable timeouts." | python3 -c 'import json,sys; pri
 [[rec]] label add "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
 [[rec]] label add "$IMPORTANT_FINDING_ID" pasture:finding
 
-# Attaches to the IMPORTANT severity group (NOT the slice); it stays open until its raiser verifies the fix
+# Attaches to the IMPORTANT severity group (NOT the slice); its close rule is C-finding-lifecycle
 [[rec]] dep add "$IMPORTANT_GROUP_ID_URI" --blocked-by "$IMPORTANT_FINDING_ID"
 ` + "```" + ``,
 		},
 		{
 			Id:    "impl-rev-review-structure",
 			Title: "Review Structure",
-			Content: `Each reviewer (A, B, C) reviews EVERY slice:
+			Content: `One review round covers one whole wave, never a single slice. Wave 1 holds SLICE-1-1, SLICE-1-2, and SLICE-1-3; each reviewer reviews all three together and creates ONE review title for the wave:
 
 ` + "```\n" +
-				`Reviewer A (Correctness): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: WAVE-1-REVIEW-A-1, WAVE-2-REVIEW-A-1, WAVE-3-REVIEW-A-1
-  Each review has 3 severity groups (BLOCKER/IMPORTANT/MINOR)
+				`Wave 1: SLICE-1-1, SLICE-1-2, SLICE-1-3
+  Reviewer A (Correctness): reviews the whole wave →
+    Creates: WAVE-1-REVIEW-A-1 (references: wave: 1, slices: SLICE-1-1, SLICE-1-2, SLICE-1-3)
+    Each review has 3 severity groups (BLOCKER/IMPORTANT/MINOR)
 
-Reviewer B (Test quality): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: WAVE-1-REVIEW-B-1, WAVE-2-REVIEW-B-1, WAVE-3-REVIEW-B-1
+  Reviewer B (Test quality): reviews the whole wave →
+    Creates: WAVE-1-REVIEW-B-1
 
-Reviewer C (Elegance): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: WAVE-1-REVIEW-C-1, WAVE-2-REVIEW-C-1, WAVE-3-REVIEW-C-1
-` + "```",
+  Reviewer C (Elegance): reviews the whole wave →
+    Creates: WAVE-1-REVIEW-C-1
+` + "```" + `
+
+A later wave gets its own review titles (for example, wave 2 → WAVE-2-REVIEW-A-1). A wave never produces one title per reviewed slice.`,
 		},
 		{
 			Id:    "impl-rev-spawning",
@@ -98,9 +103,9 @@ delegation: {
   prompt: ` + "`" + `You are Reviewer A (Correctness).
 URD: "${URD_ID_URI}" (read with [[rec]] show "${URD_ID_URI}" for user requirements context)
 Focus: Does implementation faithfully serve the user? Are technical decisions consistent with rationale?
-Review ALL slices: "${SLICE_1_ID_URI}", "${SLICE_2_ID_URI}", "${SLICE_3_ID_URI}"
+Review the whole wave: "${SLICE_1_1_ID_URI}", "${SLICE_1_2_ID_URI}", "${SLICE_1_3_ID_URI}"
 For each slice, run: [[rec]] show "${SLICE_ID_URI}"
-Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: WAVE-{W}-REVIEW-A-1
+Create ONE severity trio (BLOCKER/IMPORTANT/MINOR) for the wave, listing every slice in its references. Title: WAVE-{W}-REVIEW-A-1
 Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure.` + "`" + `
 }
 ` + "```" + `
@@ -122,16 +127,16 @@ Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure
 ## Slices to Review
 | Slice | Task ID | Description | Worker |
 |-------|---------|-------------|--------|
-| SLICE-1 | "${ID_URI}" | <description> | worker-1 |
-| SLICE-2 | "${ID_URI}" | <description> | worker-2 |
+| SLICE-1-1 | "${ID_URI}" | <description> | worker-1 |
+| SLICE-1-2 | "${ID_URI}" | <description> | worker-2 |
 
 ## Review Procedure
 1. For each slice: ` + "`" + `[[rec]] show "${SLICE_ID_URI}"` + "`" + `
-2. Create 3 severity groups per slice (EAGER)
+2. Create ONE severity trio for the wave (EAGER)
 3. Add findings as children of severity groups
 4. BLOCKER findings: dual-parent (severity group + slice)
 5. Close empty severity groups immediately
-6. Vote ACCEPT or REVISE per slice
+6. Vote ACCEPT or REVISE for the wave
 ` + "```" + ``,
 				},
 			},
@@ -139,7 +144,7 @@ Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure
 		{
 			Id:    "impl-rev-criteria",
 			Title: "Review Criteria",
-			Content: `Each reviewer checks each slice for:
+			Content: `Each reviewer checks every slice in the wave for:
 
 1. **Requirements Alignment (check URD)**
    - Does implementation match ratified plan?
@@ -169,11 +174,13 @@ Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure
 | **ACCEPT** | All 5 criteria satisfied; no BLOCKER items |
 | **REVISE** | BLOCKER issues found; must provide actionable feedback |
 
+One vote per wave on the wave review task (not one per slice):
+
 **Documentation (via Pasture comments):**
 ` + "```" + `bash
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: ACCEPT - [reason]"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - [reason]"
 # OR
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: REVISE - [specific issue]. Suggest: [fix]"
+[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - [specific issue]. Suggest: [fix]"
 ` + "```" + ``,
 		},
 		{
@@ -195,7 +202,7 @@ Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure
 		{
 			Id:    "impl-rev-handling-revise",
 			Title: "Handling REVISE",
-			Content: `If any reviewer votes REVISE on any slice:
+			Content: `If any reviewer votes REVISE on the wave:
 
 1. **Document issues** in the review task description
 2. **Return slice to worker** for fixes
@@ -298,7 +305,7 @@ Scoping URE: determine which user-DEFER'd UAT items to address."
 				{
 					Id:    "impl-rev-followup-handoff",
 					Title: "Followup Handoff (h5)",
-					Content: `The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (open findings stay open until their raiser verifies the fix and converge at the end). Author this handoff in its Pasture task body (no filesystem path):
+					Content: `The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (open findings converge at the end; close rule: ` + "`C-finding-lifecycle`" + `). Author this handoff in its Pasture task body (no filesystem path):
 
 ` + "```" + `markdown
 # Handoff: Reviewer → Supervisor (review wave complete)

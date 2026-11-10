@@ -160,9 +160,9 @@ var afkImplementBody = SkillBody{
 					Title: "Wave Gate and Convergence",
 					Content: "A wave advances on three ACCEPT votes with zero open blockers. Fix blockers in the same branch, " +
 						"commit atomically, push, and re-run the wave. IMPORTANT and MINOR findings stay open past the wave " +
-						"gate; fix a minor if trivial, otherwise record it for convergence. A finding closes only when the " +
-						"reviewer who raised it verifies the fix. Cap the loop at three rounds per PR.\n\n" +
-						"If a blocker survives three rounds, mark the PR draft, write the exact blocker and attempted " +
+						"gate; fix a minor if trivial, otherwise record it for convergence. A finding closes only per " +
+						"`C-finding-lifecycle`. Cap the loop at the gate declaration's `maxRounds` rounds per PR.\n\n" +
+						"If a blocker survives `maxRounds` rounds, mark the PR draft, write the exact blocker and attempted " +
 						"fixes, and move to independent work. Do not merge and do not report the work as done.\n\n" +
 						"After the final iteration, run one cross-stack convergence over all open PRs or the cumulative diff: " +
 						"conflicting assumptions, duplicated helpers, and merge-order breakage. That convergence must find " +
@@ -242,7 +242,7 @@ var afkImplementBody = SkillBody{
 			Content: "Stop the session when all of these are true:\n\n" +
 				"- Every scoped iteration has an open PR, or is a draft with a hard-stop reason.\n" +
 				"- The final cross-stack convergence has no open finding: three ACCEPT and no open blocker, or the " +
-				"three-round budget is exhausted and residual findings are recorded.\n" +
+				"`maxRounds` budget is exhausted and residual findings are recorded.\n" +
 				"- The morning handoff is written and names the merge order.\n" +
 				"- No merge occurred, the default branch is untouched, and no unrelated work was modified.\n\n" +
 				"Then stop and report. Do not start new scope, do not make one more small fix, and do not wait or " +

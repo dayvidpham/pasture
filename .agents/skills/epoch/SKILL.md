@@ -69,7 +69,7 @@ pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
 - Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
 - Then: during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -> fix -> re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: require a zeroed round at a wave boundary; close a finding before the reviewer who raised it verifies the fix; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
+- Should not: require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
@@ -206,8 +206,8 @@ Agents coordinate through **beads** tasks and comments:
 **[frag--review-clean-exit]**
 - Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; close a finding only when the reviewer who raised it verifies the fix; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding before its raiser verifies the fix; loop forever when a finite budget was chosen
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; a finding closes only per `C-finding-lifecycle`; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; loop forever when a finite budget was chosen
 
 **[epoch-autonomous-progression]**
 - Given: non-user-gated phase completes
@@ -326,7 +326,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 ## Follow-up Epic
 
 **Trigger:** UAT (Phase 5 or 11) produces one or more **user-DEFER'd items**.
-The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (review findings stay open until their raiser verifies the fix and converge at the end).
+The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (review findings converge at the end; close rule: C-finding-lifecycle).
 **Owner:** Supervisor creates the follow-up epic.
 
 ```bash
@@ -358,7 +358,7 @@ See `/pasture:supervisor` and `/pasture:impl-review` for full creation commands.
 
 ## EAGER Severity Tree (Phase 10)
 
-Code reviews ALWAYS create 3 severity group tasks per review round, even if empty:
+Code reviews ALWAYS create ONE severity trio (3 group tasks) per wave, per axis, per round, even if empty:
 
 ```bash
 # Create all 3 severity groups immediately (EAGER, not lazy)

@@ -118,9 +118,9 @@ Binary only. No intermediate levels.`,
 		Kind: FragmentKindBehavior,
 		Behavior: &BehaviorSpec{
 			Id:        string(FragSupReviewSeverityGroups),
-			Given:     "review round",
+			Given:     "a wave review round",
 			When:      "creating severity groups",
-			Then:      "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty",
+			Then:      "ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per wave, per axis, per round, even if empty",
 			ShouldNot: "lazily create groups only when findings exist",
 		},
 	},
@@ -145,7 +145,7 @@ Binary only. No intermediate levels.`,
 			Given:     "a review finding (BLOCKER, IMPORTANT, or MINOR)",
 			When:      "categorizing",
 			Then:      "track it in its severity group as an open finding; open findings do not block a wave unless they are BLOCKERs, and the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity",
-			ShouldNot: "route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a finding before its raiser verifies the fix",
+			ShouldNot: "route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a finding outside `C-finding-lifecycle`",
 		},
 	},
 
@@ -179,6 +179,8 @@ WAVE-{W}-REVIEW-{axis}-{round}
 
 Where axis = A (Correctness), B (Test quality), C (Elegance). Slice titles use ` + "`SLICE-{W}-{N}`" + `, where W is the wave and N is the slice within it.
 
+One review covers one whole wave. The review task lists every slice of that wave (for example, wave 1 holds ` + "`SLICE-1-1`" + `, ` + "`SLICE-1-2`" + `, and ` + "`SLICE-1-3`" + `), and one severity trio hangs under it — never one wave per reviewed slice.
+
 Examples:
 - ` + "`WAVE-1-REVIEW-A-1`" + ` — Reviewer A (Correctness), Round 1, wave 1
 - ` + "`WAVE-2-REVIEW-C-2`" + ` — Reviewer C (Elegance), Round 2, wave 2
@@ -191,41 +193,54 @@ Severity groups:
 		prose := ProseSection{
 			Id:    string(FragSupSeverityTree),
 			Title: "Severity Tree (EAGER Creation)",
-			Content: `Per [frag--sup-review-severity-groups], create all 3 severity groups immediately:
+			Content: `Per [frag--sup-review-severity-groups], create ONE severity trio per wave, per axis, per round — not one per slice:
 
 ` + "```" + `bash
+# Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
 # Step 1: Create all 3 severity groups immediately (EAGER)
 BLOCKER_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-BLOCKER findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+BLOCKER findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$BLOCKER_ID_URI" pasture:severity:blocker
 [[rec]] label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
 IMPORTANT_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-IMPORTANT findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+IMPORTANT findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$IMPORTANT_ID_URI" pasture:severity:important
 [[rec]] label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
 MINOR_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-MINOR findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+MINOR findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$MINOR_ID_URI" pasture:severity:minor
 [[rec]] label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
-# Step 2: Wire severity groups to the review round task
+# Step 2: Wire the one severity trio to the wave's review round task
 [[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$BLOCKER_ID_URI"
 [[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
 [[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
@@ -257,6 +272,8 @@ WAVE-{W}-REVIEW-{axis}-{round}
 ` + "```" + `
 
 Where axis = A (Correctness), B (Test quality), C (Elegance). Slice titles use ` + "`SLICE-{W}-{N}`" + `, where W is the wave and N is the slice within it.
+
+One review covers one whole wave. The review task lists every slice of that wave (for example, wave 1 holds ` + "`SLICE-1-1`" + `, ` + "`SLICE-1-2`" + `, and ` + "`SLICE-1-3`" + `), and one severity trio hangs under it — never one wave per reviewed slice.
 
 Examples:
 - ` + "`WAVE-1-REVIEW-A-1`" + ` — Reviewer A (Correctness), Round 1, wave 1
@@ -321,8 +338,8 @@ Binary only. No severity tree for plan reviews.`,
 			Id:        string(FragReviewCleanExit),
 			Given:     "per-wave code review and end-of-epoch convergence",
 			When:      "evaluating review results",
-			Then:      "iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; close a finding only when the reviewer who raised it verifies the fix; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision",
-			ShouldNot: "hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding before its raiser verifies the fix; loop forever when a finite budget was chosen",
+			Then:      "iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; a finding closes only per `C-finding-lifecycle`; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision",
+			ShouldNot: "hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; loop forever when a finite budget was chosen",
 		},
 	},
 }

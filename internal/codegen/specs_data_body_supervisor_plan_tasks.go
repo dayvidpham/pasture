@@ -100,13 +100,13 @@ var supervisorPlanTasksBody = SkillBody{
 				"\n" +
 				"**CORRECT PATTERN:**\n" +
 				"```\n" +
-				"SLICE-1: \"feature list command\" (Worker A owns full vertical)\n" +
+				"SLICE-1-1: \"feature list command\" (Worker A owns full vertical)\n" +
 				"  - ListOptions, ListEntry types (L1)\n" +
 				"  - Tests importing `cli-tool feature list` CLI (L2)\n" +
 				"  - service.ListItems() implementation (L3)\n" +
 				"  - listCmd (cobra) RunE handler wiring (L3)\n" +
 				"\n" +
-				"SLICE-2: \"feature detail command\" (Worker B owns full vertical)\n" +
+				"SLICE-1-2: \"feature detail command\" (Worker B owns full vertical)\n" +
 				"  - DetailView types (L1)\n" +
 				"  - Tests importing `cli-tool feature detail` CLI (L2)\n" +
 				"  - service.GetItemDetail() implementation (L3)\n" +
@@ -158,7 +158,7 @@ var supervisorPlanTasksBody = SkillBody{
 
 6. **Create vertical slice tasks:**
    ` + "```" + `bash
-   SLICE_1_ID_URI=$([[rec]] create "SLICE-1: Implement 'cli-tool feature list' command (full vertical)" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --type=task \
+   SLICE_1_ID_URI=$([[rec]] create "SLICE-1-1: Implement 'cli-tool feature list' command (full vertical)" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --type=task \
      --description="$(cat <<EOF
    ---
    references:
@@ -253,25 +253,25 @@ var supervisorPlanTasksBody = SkillBody{
 
    ### Vertical Slices (parallel, after Layer 0)
 
-   **SLICE-1: "cli-tool feature" (default command)**
+   **SLICE-2-1: "cli-tool feature" (default command)**
    - Worker: A
    - Production path: \` + "`" + `./bin/cli-tool feature\` + "`" + `
    - Owns: default action, recent items logic
     - Task: "${SLICE_1_ID_URI}"
 
-   **SLICE-2: "cli-tool feature list"**
+   **SLICE-2-2: "cli-tool feature list"**
    - Worker: B
    - Production path: \` + "`" + `./bin/cli-tool feature list\` + "`" + `
    - Owns: ListOptions types, list tests, listItems() method, list CLI wiring
     - Task: "${SLICE_2_ID_URI}"
 
-   **SLICE-3: "cli-tool feature detail"**
+   **SLICE-2-3: "cli-tool feature detail"**
    - Worker: C
     - Production path: \` + "`" + `./bin/cli-tool feature detail FEATURE_ID\` + "`" + `
    - Owns: DetailView types, detail tests, getItemDetail() method, detail CLI wiring
     - Task: ${SLICE_3_ID_URI}
 
-   **SLICE-4: "cli-tool feature search"**
+   **SLICE-2-4: "cli-tool feature search"**
    - Worker: D
    - Production path: \` + "`" + `./bin/cli-tool feature search\` + "`" + `
    - Owns: SearchQuery types, search tests, searchItems() method, search CLI wiring
@@ -283,13 +283,13 @@ var supervisorPlanTasksBody = SkillBody{
 
    | ID | Contract | Owner (exports) | Consumer(s) (imports) | Merge Timing |
    |----|----------|-----------------|-----------------------|--------------|
-   | IP-1 | FeatureError enum | SLICE-1 | SLICE-2, SLICE-3, SLICE-4 | L1 (types) |
-   | IP-2 | BaseService interface | SLICE-1 | SLICE-2, SLICE-3 | L1 (types) |
+   | IP-1 | FeatureError enum | SLICE-2-1 | SLICE-2-2, SLICE-2-3, SLICE-2-4 | L1 (types) |
+   | IP-2 | BaseService interface | SLICE-2-1 | SLICE-2-2, SLICE-2-3 | L1 (types) |
 
    ## Execution Order
 
    1. Layer 0 (if needed): Shared infrastructure (parallel)
-   2. SLICE-1 through SLICE-4: Each worker implements their vertical slice (parallel)
+   2. SLICE-2-1 through SLICE-2-4: Each worker implements their vertical slice (parallel)
       - Within each slice: Types (L1) → Tests (L2) → Impl+Wiring (L3)
    3. Integration points merge at documented timing (L1 contracts first, L3 wiring last)
 

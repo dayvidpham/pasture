@@ -345,7 +345,6 @@
         <group severity-ref="IMPORTANT" label-ref="L-sev-import"></group>
         <group severity-ref="MINOR" label-ref="L-sev-minor"></group>
       </severity-tree>
-      <followup-epic label-ref="L-followup" trigger="review-completion AND (IMPORTANT OR MINOR findings exist)" gated-on-blocker="false" owner-role="supervisor"></followup-epic>
     </phase>
     <phase id="p11" number="11" domain="user" name="Impl UAT">
       <description>User acceptance test on the implementation</description>
@@ -476,12 +475,12 @@
       <thinking>medium</thinking>
       <ownership-model></ownership-model>
       <introduction>You coordinate parallel task execution. See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
-      <ownership-narrative>You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation SLICE-{W}-{N} (p9), spawn reviewers for per-slice code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.</ownership-narrative>
+      <ownership-narrative>You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation SLICE-{W}-{N} (p9), spawn reviewers for whole-wave code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.</ownership-narrative>
       <behaviors>
         <behavior id="B-sup-read-context" given="handoff received" when="starting" then="read ratified plan, URD, UAT, and elicit tasks for full context" should-not="start without reading all four"></behavior>
         <behavior id="B-sup-model-trivial" given="trivial changes (single-file edits, config tweaks, typo fixes)" when="spawning a worker" then="use model: haiku to minimize cost and latency" should-not="use a heavyweight model for trivial work"></behavior>
         <behavior id="B-sup-model-nontrivial" given="non-trivial changes (multi-file, architectural, logic-heavy)" when="spawning a worker" then="prefer model: sonnet for the delegate_assignment tool to ensure quality" should-not="default to haiku for complex work"></behavior>
-        <behavior id="B-sup-ride-the-wave" given="Phase 8-10 execution" when="starting implementation" then="follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for per-slice review (only an open BLOCKER finding gates the wave), workers fix per-slice with atomic commits, and iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate" should-not="skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; require a zeroed round to close a wave; close a finding before the reviewer who raised it verifies the fix"></behavior>
+        <behavior id="B-sup-ride-the-wave" given="Phase 8-10 execution" when="starting implementation" then="follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for whole-wave review (only an open BLOCKER finding gates the wave), workers fix findings with atomic commits, and iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate" should-not="skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; require a zeroed round to close a wave; close a finding outside `C-finding-lifecycle`"></behavior>
       </behaviors>
     </role>
     <role id="worker" name="Worker" description="Vertical slice implementer (full production code path)">
@@ -838,7 +837,7 @@ pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"]]>
     <!-- Reviews -->
     <constraint id="C-review-consensus" given="review cycle (p4 or p10)" when="evaluating" then="all 3 reviewers must ACCEPT before proceeding" should-not="proceed with any REVISE vote outstanding" role-ref="epoch,reviewer,supervisor" phase-ref="p4,p10" />
     <constraint id="C-review-binary" given="a reviewer" when="voting" then="use ACCEPT or REVISE only" should-not="use APPROVE, APPROVE_WITH_COMMENTS, REQUEST_CHANGES, or REJECT" role-ref="reviewer" phase-ref="p4,p10" />
-    <constraint id="C-severity-eager" given="code review round (p10 only)" when="starting review" then="ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately" should-not="lazily create severity groups only when findings exist" role-ref="reviewer" phase-ref="p10">
+    <constraint id="C-severity-eager" given="code review round (p10 only)" when="starting review" then="ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately, one trio per wave per axis per round" should-not="lazily create severity groups only when findings exist" role-ref="reviewer" phase-ref="p10">
       <example id="C-severity-eager-create" lang="bash" label="correct">
         <code><![CDATA[# Create all 3 severity groups immediately (even if empty)
 BLOCKER_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
@@ -866,12 +865,12 @@ fi]]></code>
     <constraint id="C-severity-not-plan" given="plan review (p4)" when="reviewing" then="use binary ACCEPT/REVISE only" should-not="create severity tree for plan reviews" role-ref="reviewer" phase-ref="p4" />
     <constraint id="C-blocker-dual-parent" given="a BLOCKER finding in code review" when="recording" then="add as child of BOTH the severity group AND the slice it blocks" should-not="add to severity group only" role-ref="reviewer" phase-ref="p10" />
     <constraint id="C-finding-lifecycle" given="a code-review finding" when="recording or closing it" then="create it as a child of its severity group labelled `pasture:finding`, and close it only when the reviewer who raised it verifies the fix — a worker or supervisor cannot close it, and a wave boundary never closes it" should-not="close a finding from a worker or supervisor, close one at a wave boundary, or record severity in the finding label (severity lives on its parent group)" role-ref="reviewer,supervisor" />
-    <constraint id="C-followup-timing" given="UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items" when="creating the FOLLOWUP epic" then="create the FOLLOWUP epic at UAT when user-DEFER'd items exist; the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items" should-not="trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — no review severity is deferrable to FOLLOWUP, and a finding stays open until its raiser verifies the fix" role-ref="supervisor" phase-ref="p10" />
+    <constraint id="C-followup-timing" given="UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items" when="creating the FOLLOWUP epic" then="create the FOLLOWUP epic at UAT when user-DEFER'd items exist; the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items" should-not="trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — no review severity is deferrable to FOLLOWUP (a finding's close rule is `C-finding-lifecycle`)" role-ref="supervisor" phase-ref="p10" />
     <!-- Ownership -->
     <constraint id="C-vertical-slices" given="implementation decomposition" when="assigning work" then="each production code path owned by exactly ONE worker (full vertical)" should-not="assign horizontal layers or same path to multiple workers" role-ref="supervisor" phase-ref="p8,p9" />
     <constraint id="C-supervisor-no-impl" given="supervisor role" when="implementation phase" then="spawn workers for all code changes" should-not="implement code directly" role-ref="supervisor" phase-ref="p8,p9" />
     <constraint id="C-supervisor-explore-ephemeral" given="supervisor needs codebase exploration" when="starting Phase 8 (IMPL_PLAN)" then="spawn ephemeral Explore subagents via delegate_assignment tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead" should-not="explore the codebase directly as supervisor; maintain a standing explore team" role-ref="epoch,supervisor" phase-ref="p8,p9,p10" />
-    <constraint id="C-clean-review-exit" given="per-wave code review and end-of-epoch convergence" when="evaluating review results" then="during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision" should-not="require a zeroed round at a wave boundary; close a finding before the reviewer who raised it verifies the fix; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices" role-ref="epoch,supervisor" phase-ref="p10" />
+    <constraint id="C-clean-review-exit" given="per-wave code review and end-of-epoch convergence" when="evaluating review results" then="during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision" should-not="require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices" role-ref="epoch,supervisor" phase-ref="p10" />
     <constraint id="C-review-effort-budget" given="the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate" when="deciding how much review-and-fix effort to spend per slice" then="request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review-&gt;fix-&gt;re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision" should-not="hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen" role-ref="epoch,reviewer,supervisor" phase-ref="p10" />
     <constraint id="C-autonomous-progression" given="supervisor orchestrating phases" when="deciding whether to proceed" then="5 user-gated phases only: (1) research depth decision, (2) URE survey, (3) Plan UAT, (4) Phase 8 implementation-effort / review-effort budget request, (5) Impl UAT; all other phase transitions are auto-ratified by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification without user gate" should-not="add additional user gates beyond the 5 defined; require user approval for ratification after UAT ACCEPT" />
     <constraint id="C-integration-points" given="multiple vertical slices share types, interfaces, or data flows" when="decomposing IMPL_PLAN in Phase 8" then="identify horizontal Layer Integration Points and document them in IMPL_PLAN; each integration point specifies: owning slice, consuming slices, shared contract, merge timing; include integration points in slice descriptions so workers know what to export and import" should-not="leave cross-slice dependencies implicit; assume workers will discover contracts on their own" role-ref="epoch,supervisor" phase-ref="p8" />
@@ -948,7 +947,7 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
     <title-convention pattern="SLICE-{W}-{N}: {description}" label-ref="L-p9s9" created-by="supervisor" phase-ref="p9" note="W identifies the wave, N the slice within that wave"></title-convention>
     <title-convention pattern="WAVE-{W}-REVIEW-{axis}-{round}: {description}" label-ref="L-p10s10" created-by="reviewer" phase-ref="p10" note="axis=A|B|C, round starts at 1; findings hang under this wave review task"></title-convention>
     <title-convention pattern="IMPL-REVIEW-{axis}-{round}: {description}" label-ref="L-p10s10" created-by="supervisor" phase-ref="p10" note="When reviewing all slices collectively"></title-convention>
-    <title-convention pattern="FOLLOWUP: {description}" label-ref="L-followup" created-by="supervisor" note="Follow-up epic created at UAT when user-DEFER&#39;d items exist (never from review severities; review findings stay open until their raiser verifies the fix and converge at the end). Single-parent epic relationship — no followup-of-followup."></title-convention>
+    <title-convention pattern="FOLLOWUP: {description}" label-ref="L-followup" created-by="supervisor" note="Follow-up epic created at UAT when user-DEFER&#39;d items exist (never from review severities; review findings converge at the end — close rule: `C-finding-lifecycle`). Single-parent epic relationship — no followup-of-followup."></title-convention>
     <title-convention pattern="FOLLOWUP_URE: {description}" label-ref="L-p2s2_1" created-by="supervisor" phase-ref="p2" note="Scoping URE to determine which user-DEFER&#39;d UAT items to address"></title-convention>
     <title-convention pattern="FOLLOWUP_URD: {description}" label-ref="L-p2s2_2" created-by="supervisor" phase-ref="p2" extra-label-ref="L-urd" note="Requirements doc for follow-up scope. References original URD."></title-convention>
     <title-convention pattern="FOLLOWUP_PROPOSAL-{N}: {description}" label-ref="L-p3s3" created-by="architect" phase-ref="p3" note="Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings"></title-convention>
@@ -1076,45 +1075,44 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
   <!-- ═══════════════════════════════════════════════════════════════════════
        FOLLOW-UP LIFECYCLE (R6 from URD)
 
-     When code review produces IMPORTANT or MINOR findings, the supervisor
-     creates a follow-up epic that runs the same protocol phases with
-     FOLLOWUP_* prefixed task types. The IMPORTANT/MINOR leaf tasks from
-     the original review gain a second parent: the follow-up slice they
-     are assigned to (dual-parent).
+     When UAT (Phase 5 or Phase 11) produces user-DEFER'd items, the
+     supervisor creates a follow-up epic that runs the same protocol phases
+     with FOLLOWUP_* prefixed task types. The user-DEFER'd UAT-item leaf
+     tasks gain a second parent: the follow-up slice they are assigned to
+     (dual-parent).
 
      Kind: Separate enum values (FOLLOWUP_URE, FOLLOWUP_SLICE, etc.).
      Simple single-parent epic relationship — no followup-of-followup.
        ═══════════════════════════════════════════════════════════════════════ -->
   <followup-lifecycle>
-    <trigger>Code review completion AND (IMPORTANT OR MINOR findings exist)</trigger>
+    <trigger>UAT (Phase 5 or Phase 11) produces user-DEFER&#39;d items</trigger>
     <owner-role>supervisor</owner-role>
     <gated-on-blocker>false</gated-on-blocker>
     <dependency-chain note="Same protocol phases but with FOLLOWUP_ prefix">
-      <step task-title="FOLLOWUP: {description}" phase-ref="p10" description="Epic created by supervisor. References original URD and review tasks."></step>
-      <step task-title="FOLLOWUP_URE: {description}" phase-ref="p2" description="Scoping URE with user to determine which findings to address."></step>
+      <step task-title="FOLLOWUP: {description}" phase-ref="p11" description="Epic created by supervisor from user-DEFER&#39;d UAT items. References original URD and UAT task."></step>
+      <step task-title="FOLLOWUP_URE: {description}" phase-ref="p2" description="Scoping URE with user to determine which DEFER&#39;d items to address."></step>
       <step task-title="FOLLOWUP_URD: {description}" phase-ref="p2" description="Requirements doc for follow-up scope. References original URD."></step>
-      <step task-title="FOLLOWUP_PROPOSAL-{N}: {description}" phase-ref="p3" description="Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings."></step>
+      <step task-title="FOLLOWUP_PROPOSAL-{N}: {description}" phase-ref="p3" description="Proposal accounting for original URD + FOLLOWUP_URD + DEFER&#39;d items."></step>
       <step task-title="FOLLOWUP_IMPL_PLAN: {description}" phase-ref="p8" description="Supervisor decomposes follow-up into slices."></step>
-      <step task-title="FOLLOWUP_SLICE-{N}: {description}" phase-ref="p9" description="Each slice adopts original IMPORTANT/MINOR leaf tasks as children."></step>
+      <step task-title="FOLLOWUP_SLICE-{N}: {description}" phase-ref="p9" description="Each slice adopts user-DEFER&#39;d UAT-item leaf tasks as children."></step>
     </dependency-chain>
     <leaf-task-adoption>
-      <rule>When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.</rule>
-      <command>pasture task dep add {followup-slice-uri} --blocked-by {important-leaf-task-uri}&#xA;pasture task dep add {followup-slice-uri} --blocked-by {minor-leaf-task-uri}</command>
-      <note>Leaf tasks retain their original parent (the severity group from the original review) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.</note>
+      <rule>When supervisor creates FOLLOWUP_SLICE-N, the user-DEFER&#39;d UAT-item leaf tasks gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.</rule>
+      <command>pasture task dep add {followup-slice-uri} --blocked-by {defer-item-leaf-task-1-uri}&#xA;pasture task dep add {followup-slice-uri} --blocked-by {defer-item-leaf-task-2-uri}</command>
+      <note>Leaf tasks retain their original parent (the DEFER&#39;d-items tracking group) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.</note>
     </leaf-task-adoption>
     <references>
       <ref type="relates_to" target="original URD" note="Follow-up epic references original URD via frontmatter"></ref>
-      <ref type="relates_to" target="original REVIEW tasks" note="Follow-up epic references review tasks via frontmatter"></ref>
+      <ref type="relates_to" target="original UAT task" note="Follow-up epic references the UAT task via frontmatter"></ref>
     </references>
     <handoff-chain note="How handoffs flow through the follow-up lifecycle">
-      <transition order="1" handoff-ref="h5" description="Reviewer → Followup: Bridge from original review to follow-up epic. Created by supervisor when IMPORTANT/MINOR findings exist. This handoff STARTS the follow-up lifecycle."></transition>
-      <transition order="2" handoff-ref="none" description="Supervisor creates FOLLOWUP_URE (same actor — supervisor owns follow-up epic and initiates scoping)" same-actor="true"></transition>
-      <transition order="3" handoff-ref="none" description="Supervisor creates FOLLOWUP_URD (same actor within Phase 2 — supervisor synthesizes follow-up requirements)" same-actor="true"></transition>
-      <transition order="4" handoff-ref="h6" description="Supervisor → Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped findings and requirements."></transition>
-      <transition order="5" handoff-ref="h1" description="Architect → Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and outstanding findings."></transition>
-      <transition order="6" handoff-ref="h2" description="Supervisor → Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."></transition>
-      <transition order="7" handoff-ref="h3" description="Supervisor → Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + original findings being addressed."></transition>
-      <transition order="8" handoff-ref="h4" description="Worker → Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."></transition>
+      <transition order="1" handoff-ref="none" description="Supervisor creates FOLLOWUP_URE from the user-DEFER&#39;d UAT items (same actor — supervisor owns the follow-up epic and initiates scoping)" same-actor="true"></transition>
+      <transition order="2" handoff-ref="none" description="Supervisor creates FOLLOWUP_URD (same actor within Phase 2 — supervisor synthesizes follow-up requirements)" same-actor="true"></transition>
+      <transition order="3" handoff-ref="h6" description="Supervisor → Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped requirements and DEFER&#39;d items."></transition>
+      <transition order="4" handoff-ref="h1" description="Architect → Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and the DEFER&#39;d items."></transition>
+      <transition order="5" handoff-ref="h2" description="Supervisor → Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."></transition>
+      <transition order="6" handoff-ref="h3" description="Supervisor → Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + the DEFER&#39;d items being addressed."></transition>
+      <transition order="7" handoff-ref="h4" description="Worker → Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."></transition>
     </handoff-chain>
   </followup-lifecycle>
   <!-- ═══════════════════════════════════════════════════════════════════════
@@ -1191,7 +1189,7 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
     <checklist id="supervisor-review-ready" role-ref="supervisor" gate="review-ready">
       <item id="CL-sup-all-slices-notified" required="true">All workers have notified completion via pasture task comment add</item>
       <item id="CL-sup-reviewers-assigned" required="true">Ephemeral reviewers spawned for all slices</item>
-      <item id="CL-sup-severity-groups-created" required="true">Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice</item>
+      <item id="CL-sup-severity-groups-created" required="true">Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per wave per axis per round</item>
     </checklist>
     <checklist id="worker-completion" role-ref="worker" gate="completion">
       <item id="CL-worker-no-todos" required="true">No TODO placeholders in CLI/API actions</item>
@@ -1292,7 +1290,7 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
         <exit-condition type="escalate" condition="Blocker encountered — use /pasture:worker-blocked with details"></exit-condition>
       </stage>
     </workflow>
-    <workflow id="ride-the-wave" name="Ride the Wave" role-ref="supervisor" description="Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, where only an open BLOCKER finding gates the wave, workers fix, and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.">
+    <workflow id="ride-the-wave" name="Ride the Wave" role-ref="supervisor" description="Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for whole-wave review, where only an open BLOCKER finding gates the wave, workers fix, and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.">
       <stage id="rtw-plan" name="Plan" order="1" execution="sequential" phase-ref="p8">
         <action id="rtw-plan-read" instruction="Read RATIFIED_PLAN and URD via pasture task show" command="pasture task show &#34;${RATIFIED_PLAN_ID_URI}&#34; &amp;&amp; pasture task show &#34;${URD_ID_URI}&#34;"></action>
         <action id="rtw-plan-explore" instruction="Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams"></action>
@@ -1307,8 +1305,8 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
         <exit-condition type="proceed" condition="All workers have notified completion via pasture task comment add"></exit-condition>
       </stage>
       <stage id="rtw-review-fix" name="Review + Fix Cycles" order="3" execution="conditional-loop" phase-ref="p10">
-        <action id="rtw-review-spawn" instruction="Spawn reviewers via delegate_assignment tool for per-slice code review"></action>
-        <action id="rtw-review-severity" instruction="Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice"></action>
+        <action id="rtw-review-spawn" instruction="Spawn reviewers via delegate_assignment tool for whole-wave code review"></action>
+        <action id="rtw-review-severity" instruction="Reviewers create one severity trio (BLOCKER/IMPORTANT/MINOR) per wave, per axis, per round"></action>
         <action id="rtw-review-severity-track" instruction="Track findings as `pasture:finding` children of the 3 severity groups; only an open BLOCKER gates the wave, and open findings converge at the end (FOLLOWUP is created later at UAT, fed only by user-DEFER&#39;d items)"></action>
         <action id="rtw-review-fix" instruction="Workers fix ALL findings (BLOCKER, IMPORTANT, and MINOR)"></action>
         <exit-condition type="success" condition="Convergence finds no open pasture:finding across all waves — proceed to Phase 11 UAT"></exit-condition>

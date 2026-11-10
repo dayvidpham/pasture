@@ -300,6 +300,21 @@ var completeMarkerPattern = regexp.MustCompile(`\[\[(?:tool:[a-z_]+|op:[a-z_]+|r
 // second hand-maintained list. Test-only files are parsed the same way; callers
 // choose which files to hand it.
 func authoredMarkerLiterals(path string) ([]string, error) {
+	return authoredStringLiteralsMatching(path, completeMarkerPattern.MatchString)
+}
+
+// authoredStringLiterals returns every non-empty string-literal value in one Go
+// source file. schema.go authors directive prose (a trigger, a rule, a reason)
+// as ordinary string literals that carry no body marker, so a marker-only scan
+// cannot see it. Sweeping every literal makes that prose visible to the same
+// guards as the registry text (tenets 6 and 8).
+func authoredStringLiterals(path string) ([]string, error) {
+	return authoredStringLiteralsMatching(path, func(string) bool { return true })
+}
+
+// authoredStringLiteralsMatching is the one AST scan both literal collectors
+// share, so a change to how literals are read cannot affect only one corpus.
+func authoredStringLiteralsMatching(path string, keep func(string) bool) ([]string, error) {
 	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 	if err != nil {
 		return nil, err
@@ -311,10 +326,10 @@ func authoredMarkerLiterals(path string) ([]string, error) {
 			return true
 		}
 		value, unquoteErr := strconv.Unquote(lit.Value)
-		if unquoteErr != nil {
+		if unquoteErr != nil || value == "" {
 			return true
 		}
-		if completeMarkerPattern.MatchString(value) {
+		if keep(value) {
 			out = append(out, value)
 		}
 		return true
@@ -523,22 +538,23 @@ func renderedSources() ([]renderingSource, error) {
 	}
 
 	// schema.go builds schema.xml from inline section data and directives; its
-	// authored marker strings are not registry data, so read them from the
-	// source itself. ResolveBodyMarkersNeutral resolves them into schema.xml,
-	// which means they are rendering sources exactly like the registry text.
+	// authored prose is not registry data, so read it from the source itself.
+	// Every string literal is swept, not only marker-bearing ones: a trigger or
+	// rule string (e.g. a followup-epic trigger) never carries a marker, and a
+	// marker-only scan would leave that directive prose invisible to the guards.
 	schemaPath := filepath.Join(root, "internal", "codegen", schemaSourceFile)
-	schemaLiterals, err := authoredMarkerLiterals(schemaPath)
+	schemaLiterals, err := authoredStringLiterals(schemaPath)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"codegen.renderedSources: cannot read schema.go's authored marker prose — "+
+			"codegen.renderedSources: cannot read schema.go's authored prose — "+
 				"why: schema.go renders into schema.xml through ResolveBodyMarkersNeutral, so its "+
-				"marker strings must be swept by the literal guards; where: %s; "+
-				"fix: keep each marker in a string literal so the AST can find it: %w",
+				"directive and marker strings must be swept by the literal guards; where: %s; "+
+				"fix: keep each directive in a string literal so the AST can find it: %w",
 			schemaPath, err,
 		)
 	}
 	for i, literal := range schemaLiterals {
-		add(schemaSourceFile, fmt.Sprintf("MarkerLiteral[%d]", i), literal)
+		add(schemaSourceFile, fmt.Sprintf("DirectiveLiteral[%d]", i), literal)
 	}
 
 	sort.SliceStable(sources, func(i, j int) bool {

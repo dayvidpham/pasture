@@ -410,6 +410,11 @@ func g6ScopedFiles(t *testing.T, root string) []string {
 // TestG6_NoStaleCycleCapOrSeverityRoutingProse asserts no retired pre-R7/A1
 // regime prose (cycle cap, or review severity routed to a follow-up epic)
 // remains in any generated skill/agent output.
+//
+// Scope split (deduplicated): the per-wave 0/0/0 property has ONE home,
+// TestNoPerWaveCleanRound, which sweeps the authored rendering sources. G6 is
+// the generated-output recurrence check for the other retired forms, so the two
+// guards do not maintain duplicate pattern lists.
 func TestG6_NoStaleCycleCapOrSeverityRoutingProse(t *testing.T) {
 	root := repoRoot(t)
 
@@ -441,9 +446,10 @@ func TestG6_NoStaleCycleCapOrSeverityRoutingProse(t *testing.T) {
 				}
 				assert.Failf(t, "G6: stale pre-R7/A1 regime prose found",
 					"G6: generated file %q matches retired-regime pattern %q (matched text: %q) on line %q — "+
-						"R7/A1 retired the HARDCODED cycle-cap + severity-fed-FOLLOWUP regime. Fix: code review iterates "+
-						"review->fix->re-review up to the CONFIGURABLE review-effort budget until a fix-free clean round confirms 0/0/0 "+
-						"(on budget exhaustion without clean, surface to the user), and the FOLLOWUP epic is fed ONLY by "+
+						"R7/A1 retired the HARDCODED cycle-cap + severity-fed-FOLLOWUP regime. Fix: code review "+
+						"iterates review->fix->re-review up to the CONFIGURABLE review-effort budget; a wave is gated "+
+						"only by open BLOCKERs, convergence over open findings targets 0/0/0 within maxRounds "+
+						"(on budget exhaustion, surface to the user), and the FOLLOWUP epic is fed ONLY by "+
 						"user-DEFER'd UAT items (never review severities). A numeric cap is allowed only as a chosen budget value "+
 						"(state it alongside budget vocabulary). Update the source spec/figure (e.g. "+
 						"skills/protocol/figures/ride-the-wave.yaml or specs_data_body*.go) and regenerate.",
@@ -497,7 +503,7 @@ func TestG7_ReviewLoopReferencesConfigurableBudget(t *testing.T) {
 				"Re-add the budget vocabulary in the source body spec and regenerate.", rel)
 		assert.Truef(t, surfaceToUserRe.MatchString(content),
 			"G7: generated %q does not reference the surface-to-user-on-exhaustion fallback — "+
-				"on budget exhaustion without a clean 0/0/0 round, outstanding findings must be surfaced to the user "+
+				"when convergence has not reached 0/0/0 within maxRounds, outstanding findings must be surfaced to the user "+
 				"(never proceed-dirty, never loop forever). Re-add the surface-to-user prose and regenerate.", rel)
 	}
 }

@@ -123,7 +123,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-severity-eager]**
 - Given: code review round (p10 only)
 - When: starting review
-- Then: ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately
+- Then: ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately, one trio per wave per axis per round
 - Should not: lazily create severity groups only when findings exist
 
 _Example (correct)_

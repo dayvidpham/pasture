@@ -52,44 +52,58 @@ var reviewerReviewCodeBody = SkillBody{
 		{
 			Id:      "rev-code-severity-tree",
 			Title:   "Severity Tree: EAGER Creation",
-			Content: `First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:`,
+			Content: `First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS create 3 severity group tasks per wave, per axis, per round**, even if some groups have no findings:`,
 			Subsections: []ProseSection{
 				{
 					Id:    "rev-code-create-groups",
 					Title: "Step 1: Create All 3 Severity Groups Immediately",
 					Content: `` + "```" + `bash
+# One severity trio per wave, per axis, per round — not one per slice.
+# Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
 BLOCKER_GROUP_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_ID_URI}"
-  review: "${REVIEW_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
+  review: \"${REVIEW_ID_URI}\"
 ---
-BLOCKER findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+BLOCKER findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
 [[rec]] label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 IMPORTANT_GROUP_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_ID_URI}"
-  review: "${REVIEW_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
+  review: \"${REVIEW_ID_URI}\"
 ---
-IMPORTANT findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+IMPORTANT findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
 [[rec]] label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 MINOR_GROUP_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_ID_URI}"
-  review: "${REVIEW_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
+  review: \"${REVIEW_ID_URI}\"
 ---
-MINOR findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+MINOR findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
 [[rec]] label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-# Step 2: Wire severity groups to review task
+# Step 2: Wire the one severity trio to the wave's review task
 [[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
 [[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
 [[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
@@ -99,22 +113,44 @@ MINOR findings for this review round" | python3 -c 'import json,sys; print(json.
 					Id:    "rev-code-add-findings",
 					Title: "Adding Findings to Severity Groups",
 					Content: `` + "```" + `bash
+# Each finding carries slice: and wave: in references.
 # BLOCKER finding — dual-parent relationship
 BLOCKER_FINDING_ID_URI=$([[rec]] create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<finding details with file:line references>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+  --description "---
+references:
+  wave: 1
+  slice: \"${SLICE_1_1_ID_URI}\"
+  reviewer: reviewer-A
+  round: 1
+---
+<finding details with file:line references>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "${BLOCKER_FINDING_ID_URI}" pasture:finding
 [[rec]] dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
-[[rec]] dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+[[rec]] dep add "${SLICE_1_1_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
 
 # IMPORTANT finding — single parent (severity group only)
 IMPORTANT_FINDING_ID_URI=$([[rec]] create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+  --description "---
+references:
+  wave: 1
+  slice: \"${SLICE_1_2_ID_URI}\"
+  reviewer: reviewer-A
+  round: 1
+---
+<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "${IMPORTANT_FINDING_ID_URI}" pasture:finding
 [[rec]] dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
 
 # MINOR finding — single parent (severity group only)
 MINOR_FINDING_ID_URI=$([[rec]] create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+  --description "---
+references:
+  wave: 1
+  slice: \"${SLICE_1_3_ID_URI}\"
+  reviewer: reviewer-A
+  round: 1
+---
+<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "${MINOR_FINDING_ID_URI}" pasture:finding
 [[rec]] dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
 ` + "```" + ``,
@@ -177,12 +213,19 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 REVIEW_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
-  slice: "${SLICE_ID_URI}"
-  urd: "${URD_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
+  urd: \"${URD_ID_URI}\"
 ---
 VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
-[[rec]] dep add "${SLICE_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+# One review covers the whole wave, so wire every slice in the wave to it.
+[[rec]] dep add "${SLICE_1_1_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+[[rec]] dep add "${SLICE_1_2_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+[[rec]] dep add "${SLICE_1_3_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -267,19 +310,19 @@ An implementation that ships without validation-case fixtures is an IMPORTANT fi
 		{
 			Id:      "rev-code-clean-exit",
 			Title:   "Two-Phase Review (within the chosen review-effort budget)",
-			Content: `Per [` + "frag--review-clean-exit" + `] and ` + "`C-review-effort-budget`" + `, run the two-phase review. **During a wave**, only an open BLOCKER finding gates progress; IMPORTANT and MINOR findings stay open. **After the last wave**, convergence queries every open ` + "`pasture:finding`" + ` across all waves and targets **0/0/0** within the gate declaration's ` + "`maxRounds`" + `. Iterate **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom). A finding closes only when the reviewer who raised it verifies the fix — a worker or supervisor cannot close it, and a wave boundary never closes it. On **budget exhaustion without convergence**, SURFACE the outstanding findings to the user at a gate for a decision — do not proceed dirty and do not loop forever. The budget is never hardcoded.`,
+			Content: `Per [` + "frag--review-clean-exit" + `], ` + "`C-finding-lifecycle`" + `, and ` + "`C-review-effort-budget`" + `, run the two-phase review. **During a wave**, only an open BLOCKER finding gates progress; IMPORTANT and MINOR findings stay open. **After the last wave**, convergence queries every open ` + "`pasture:finding`" + ` across all waves and targets **0/0/0** within the gate declaration's ` + "`maxRounds`" + `. Iterate **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom). The close rule is owned by ` + "`C-finding-lifecycle`" + `. On **budget exhaustion without convergence**, SURFACE the outstanding findings to the user at a gate for a decision — do not proceed dirty and do not loop forever. The budget is never hardcoded.`,
 		},
 		{
 			Id:      "rev-code-followup-epic",
 			Title:   "Follow-up Epic",
-			Content: `The FOLLOWUP epic is **not** created from review findings. Open review findings stay open until their raiser verifies the fix and converge at the end (R7/A1). The FOLLOWUP epic is fed ONLY by **user-DEFER'd UAT items** (Phase 11), and the Supervisor creates it from those (label ` + "`pasture:epic-followup`" + `).`,
+			Content: `The FOLLOWUP epic is **not** created from review findings. Open review findings converge at the end; their close rule is ` + "`C-finding-lifecycle`" + ` (R7/A1). The FOLLOWUP epic is fed ONLY by **user-DEFER'd UAT items** (Phase 11), and the Supervisor creates it from those (label ` + "`pasture:epic-followup`" + `).`,
 		},
 		{
 			Id:    "rev-code-followup-slice",
 			Title: "Reviewing FOLLOWUP_SLICE-N (Follow-up Code Review)",
 			Content: `When reviewing follow-up slices, use the same procedure:
 - **Review task naming:** ` + "`FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`" + `
-- **Same EAGER severity tree** (BLOCKER/IMPORTANT/MINOR per review round)
+- **Same EAGER severity tree** (BLOCKER/IMPORTANT/MINOR per wave, per axis, per round)
 - **Open findings converge at the end:** findings (BLOCKER/IMPORTANT/MINOR) in a FOLLOWUP_SLICE review also stay open past the wave gate and converge at the end — they are **never** re-routed to a follow-up epic (no followup-of-followup; the FOLLOWUP epic is fed only by user-DEFER'd UAT items)
 - The worker's completion handoff (h4) reports which DEFER'd-item leaf tasks were resolved — verify these during review`,
 		},

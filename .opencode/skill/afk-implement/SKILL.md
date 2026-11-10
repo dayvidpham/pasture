@@ -152,9 +152,9 @@ Require findings as severity (blocker, important, minor), file and line, problem
 
 ### Wave Gate and Convergence
 
-A wave advances on three ACCEPT votes with zero open blockers. Fix blockers in the same branch, commit atomically, push, and re-run the wave. IMPORTANT and MINOR findings stay open past the wave gate; fix a minor if trivial, otherwise record it for convergence. A finding closes only when the reviewer who raised it verifies the fix. Cap the loop at three rounds per PR.
+A wave advances on three ACCEPT votes with zero open blockers. Fix blockers in the same branch, commit atomically, push, and re-run the wave. IMPORTANT and MINOR findings stay open past the wave gate; fix a minor if trivial, otherwise record it for convergence. A finding closes only per `C-finding-lifecycle`. Cap the loop at the gate declaration's `maxRounds` rounds per PR.
 
-If a blocker survives three rounds, mark the PR draft, write the exact blocker and attempted fixes, and move to independent work. Do not merge and do not report the work as done.
+If a blocker survives `maxRounds` rounds, mark the PR draft, write the exact blocker and attempted fixes, and move to independent work. Do not merge and do not report the work as done.
 
 After the final iteration, run one cross-stack convergence over all open PRs or the cumulative diff: conflicting assumptions, duplicated helpers, and merge-order breakage. That convergence must find no open finding before stopping.
 
@@ -213,7 +213,7 @@ Never describe unmerged work as done or shipped. Say open, convergence complete,
 Stop the session when all of these are true:
 
 - Every scoped iteration has an open PR, or is a draft with a hard-stop reason.
-- The final cross-stack convergence has no open finding: three ACCEPT and no open blocker, or the three-round budget is exhausted and residual findings are recorded.
+- The final cross-stack convergence has no open finding: three ACCEPT and no open blocker, or the `maxRounds` budget is exhausted and residual findings are recorded.
 - The morning handoff is written and names the merge order.
 - No merge occurred, the default branch is untouched, and no unrelated work was modified.
 

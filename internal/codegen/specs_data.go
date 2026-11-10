@@ -243,7 +243,7 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:        "C-severity-eager",
 		Given:     "code review round (p10 only)",
 		When:      "starting review",
-		Then:      "ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately",
+		Then:      "ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately, one trio per wave per axis per round",
 		ShouldNot: "lazily create severity groups only when findings exist",
 		Examples: []Example{
 			{
@@ -306,7 +306,7 @@ fi`,
 		Then: "create the FOLLOWUP epic at UAT when user-DEFER'd items exist; " +
 			"the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items",
 		ShouldNot: "trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — " +
-			"no review severity is deferrable to FOLLOWUP, and a finding stays open until its raiser verifies the fix",
+			"no review severity is deferrable to FOLLOWUP (a finding's close rule is `C-finding-lifecycle`)",
 	},
 	"C-vertical-slices": {
 		Id:        "C-vertical-slices",
@@ -340,7 +340,7 @@ fi`,
 			"iterate review -> fix -> re-review up to the chosen review-effort budget; " +
 			"on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision",
 		ShouldNot: "require a zeroed round at a wave boundary; " +
-			"close a finding before the reviewer who raised it verifies the fix; " +
+			"close a finding outside `C-finding-lifecycle`; " +
 			"proceed past the chosen budget without surfacing outstanding findings to the user; " +
 			"hardcode the budget; batch review across multiple slices",
 	},
@@ -762,7 +762,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 			"receive handoff from architect (p7), " +
 			"create vertical slice decomposition IMPL_PLAN (p8), " +
 			"spawn workers for parallel implementation SLICE-{W}-{N} (p9), " +
-			"spawn reviewers for per-slice code review with severity tree (p10), " +
+			"spawn reviewers for whole-wave code review with severity tree (p10), " +
 			"coordinate user acceptance test (p11), " +
 			"commit, push, and hand off (p12). " +
 			"You NEVER implement code directly — all implementation is delegated to workers.",
@@ -793,11 +793,11 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 				Given: "Phase 8-10 execution",
 				When:  "starting implementation",
 				Then: "follow the Ride the Wave cycle: plan tasks with integration points, " +
-					"launch the wave of workers, spawn reviewers for per-slice review " +
-					"(only an open BLOCKER finding gates the wave), workers fix per-slice with atomic commits, " +
+					"launch the wave of workers, spawn reviewers for whole-wave review " +
+					"(only an open BLOCKER finding gates the wave), workers fix findings with atomic commits, " +
 					"and iterate review -> fix -> re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate",
 				ShouldNot: "skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
-					"require a zeroed round to close a wave; close a finding before the reviewer who raised it verifies the fix",
+					"require a zeroed round to close a wave; close a finding outside `C-finding-lifecycle`",
 			},
 		},
 	},
@@ -1293,7 +1293,7 @@ var ChecklistSpecs = map[string]Checklist{
 		Items: []ChecklistItem{
 			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via [[rec]] comment add", Required: true},
 			{Id: "CL-sup-reviewers-assigned", Text: "Ephemeral reviewers spawned for all slices", Required: true},
-			{Id: "CL-sup-severity-groups-created", Text: "Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice", Required: true},
+			{Id: "CL-sup-severity-groups-created", Text: "Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per wave per axis per round", Required: true},
 		},
 	},
 	"supervisor-landing": {
@@ -1386,7 +1386,7 @@ var WorkflowSpecs = map[string]Workflow{
 		RoleRef: protocol.RoleSupervisor,
 		Description: "Coordinated Phase 8-10 execution pattern. The supervisor orchestrates " +
 			"the full cycle: plan slices, launch workers, " +
-			"spawn reviewers for per-slice review, where only an open BLOCKER finding gates the wave, workers fix, " +
+			"spawn reviewers for whole-wave review, where only an open BLOCKER finding gates the wave, workers fix, " +
 			"and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.",
 		Stages: []WorkflowStage{
 			{
@@ -1465,11 +1465,11 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						Id:          "rtw-review-spawn",
-						Instruction: "Spawn reviewers via [[op:delegate_assignment]] tool for per-slice code review",
+						Instruction: "Spawn reviewers via [[op:delegate_assignment]] tool for whole-wave code review",
 					},
 					{
 						Id:          "rtw-review-severity",
-						Instruction: "Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice",
+						Instruction: "Reviewers create one severity trio (BLOCKER/IMPORTANT/MINOR) per wave, per axis, per round",
 					},
 					{
 						Id:          "rtw-review-severity-track",
@@ -1480,15 +1480,15 @@ var WorkflowSpecs = map[string]Workflow{
 						Instruction: "Workers fix ALL findings (BLOCKER, IMPORTANT, and MINOR)",
 					},
 				},
-				OperationalDetail: "- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)\n" +
+				OperationalDetail: "- Spawn 3 ephemeral reviewer subagents per wave review round (same pattern as Phase 4 plan review)\n" +
 					"- **WAVE GATE** = only an open BLOCKER finding blocks the wave; IMPORTANT and MINOR findings stay open\n" +
-					"- Per-slice fix+review; iterate up to the chosen review-effort budget\n" +
+					"- Per-wave review, per-slice fix; iterate up to the chosen review-effort budget\n" +
 					"- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)\n" +
 					"- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review up to the budget; convergence targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate\n" +
 					"- **MUST end on a review wave** — cannot proceed after a worker wave without review\n" +
 					"\n" +
 					"```text\n" +
-					"Stage 3 Flow (per-slice):\n" +
+					"Stage 3 Flow (per-wave review):\n" +
 					"\n" +
 					"  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n" +
 					"  \u2502 Spawn 3 ephemeral reviewers             \u2502\n" +
@@ -1999,7 +1999,7 @@ var TitleConventions = []TitleConvention{
 	{
 		Pattern: "FOLLOWUP: {description}", LabelRef: "L-followup", CreatedBy: "supervisor",
 		Note: "Follow-up epic created at UAT when user-DEFER'd items exist (never from review severities; " +
-			"review findings stay open until their raiser verifies the fix and converge at the end). " +
+			"review findings converge at the end — close rule: `C-finding-lifecycle`). " +
 			"Single-parent epic relationship — no followup-of-followup.",
 	},
 	{

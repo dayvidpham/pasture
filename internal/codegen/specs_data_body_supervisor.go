@@ -102,8 +102,8 @@ var supervisorBody = SkillBody{
    ## Layer Structure (TDD)
 
    ### Vertical Slices (Preferred)
-   - SLICE-1: Feature X command (Worker A owns types → tests → impl → CLI wiring)
-   - SLICE-2: Feature Y endpoint (Worker B owns types → tests → impl → API wiring)
+   - SLICE-1-1: Feature X command (Worker A owns types → tests → impl → CLI wiring)
+   - SLICE-1-2: Feature Y endpoint (Worker B owns types → tests → impl → API wiring)
 
    OR
 
@@ -183,8 +183,8 @@ references:
 - L3: Implementation + wiring
 
 ## Vertical Slices
-- SLICE-1: <description> (files: ...)
-- SLICE-2: <description> (files: ...)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+- SLICE-1-1: <description> (files: ...)
+- SLICE-1-2: <description> (files: ...)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$IMPL_PLAN_ID_URI" pasture:p8-impl:s8-plan
 [[rec]] dep add "${REQUEST_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
 ` + "```" + ``,
@@ -193,7 +193,7 @@ references:
 					Id:    "sup-step2-create-slices",
 					Title: "Step 2: Create each slice",
 					Content: `` + "```" + `bash
-SLICE_1_ID_URI=$([[rec]] create "SLICE-1: <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+SLICE_1_ID_URI=$([[rec]] create "SLICE-1-1: <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   impl_plan: "${IMPL_PLAN_ID_URI}"
@@ -357,7 +357,7 @@ The worker skill provides:
 		{
 			Id:      "sup-epic-followup",
 			Title:   "EPIC_FOLLOWUP Creation (Phase 5/11)",
-			Content: `After UAT, if the user **DEFER'd** one or more items, create a follow-up epic from those DEFER'd items. Per [frag--sup-followup-epic-timing], create immediately after UAT completes. Review severities (BLOCKER/IMPORTANT/MINOR) are **never** routed here — they stay open until their raiser verifies the fix and converge at the end.`,
+			Content: `After UAT, if the user **DEFER'd** one or more items, create a follow-up epic from those DEFER'd items. Per [frag--sup-followup-epic-timing], create immediately after UAT completes. Review severities (BLOCKER/IMPORTANT/MINOR) are **never** routed here — they converge at the end; close rule: ` + "`C-finding-lifecycle`" + `.`,
 			Subsections: []ProseSection{
 				{
 					Id:    "sup-followup-step1",

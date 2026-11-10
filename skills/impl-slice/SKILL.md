@@ -68,8 +68,8 @@ Each vertical slice contains:
 After supervisor decomposes the ratified plan:
 
 ```bash
-# Create SLICE-1
-SLICE_1_ID_URI=$(pasture task create "SLICE-1: <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
+# Create SLICE-1-1
+SLICE_1_ID_URI=$(pasture task create "SLICE-1-1: <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   impl_plan: "${IMPL_PLAN_ID_URI}"
