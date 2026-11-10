@@ -53,25 +53,27 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 
 ## Task Recovery
 
-The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. The pasture-specific steps below apply only when the header says backend: pasture; when it says ledger, use the Tracker Adapter section and the ledger path in the header. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami.
 
-Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The adapter reads it when set, otherwise the header's `namespace:`, and passes `--namespace` itself. Queries are scoped to that namespace; pass `--all-namespaces` to opt out. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Run "${EPOCH_REC}" ready, "${EPOCH_REC}" blocked, and "${EPOCH_REC}" list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run "${EPOCH_REC}" show "$TASK_URI", "${EPOCH_REC}" comments "$TASK_URI", and "${EPOCH_REC}" timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
-Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Assignment transfer is not initial allocation: before using "${EPOCH_REC}" assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
 
-Parent stays open and is blocked by child: "${EPOCH_REC}" dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+Parent stays open and is blocked by child: `"${EPOCH_REC}" block "$PARENT_URI" --by "$CHILD_URI"`. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records `backend: error`, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
 
 ## Task Attribution
 
-Select the current registered author with "${EPOCH_REC}" agents list and "${EPOCH_REC}" agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami; when neither the header nor PASTURE_AUTHOR names one, it lists the registered agents. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Severity Tree (EAGER Creation)
 
@@ -80,8 +82,8 @@ Per [frag--sup-review-severity-groups], create ONE severity trio per wave, per a
 ```bash
 # Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
 # Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID_URI=$("${EPOCH_REC}" create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -90,12 +92,12 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-BLOCKER findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$BLOCKER_ID_URI" pasture:severity:blocker
-"${EPOCH_REC}" label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+BLOCKER findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:severity:blocker
+"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
-IMPORTANT_ID_URI=$("${EPOCH_REC}" create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -104,12 +106,12 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-IMPORTANT findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$IMPORTANT_ID_URI" pasture:severity:important
-"${EPOCH_REC}" label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:severity:important
+"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
-MINOR_ID_URI=$("${EPOCH_REC}" create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -118,14 +120,14 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-MINOR findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$MINOR_ID_URI" pasture:severity:minor
-"${EPOCH_REC}" label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+MINOR findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:severity:minor
+"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review round task
-"${EPOCH_REC}" dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$BLOCKER_ID_URI"
-"${EPOCH_REC}" dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
-"${EPOCH_REC}" dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$BLOCKER_ID_URI"
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$IMPORTANT_ID_URI"
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$MINOR_ID_URI"
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
 # Open findings converge at the end; only an open BLOCKER gates the wave. IMPORTANT/MINOR are NOT routed to FOLLOWUP.
@@ -164,41 +166,41 @@ BLOCKER findings have **two parents**:
 
 ```bash
 # Create a BLOCKER finding
-FINDING_ID=$("${EPOCH_REC}" create "BLOCKER: Missing error handling in auth flow" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+FINDING_ID=$("${EPOCH_REC}" create --kind task --title "BLOCKER: Missing error handling in auth flow" --phase code_review \
+  --body "---
 references:
   wave: 1
   slice: \"${SLICE_1_1_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-Missing error handling causes silent failure in auth flow." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$FINDING_ID" pasture:p10-impl:s10-review
-"${EPOCH_REC}" label add "$FINDING_ID" pasture:finding
+Missing error handling causes silent failure in auth flow.")
+"${EPOCH_REC}" label "$FINDING_ID" pasture:p10-impl:s10-review
+"${EPOCH_REC}" label "$FINDING_ID" pasture:finding
 
 # Wire dual-parent: finding blocks BOTH severity group AND slice
-"${EPOCH_REC}" dep add "$BLOCKER_GROUP_ID_URI" --blocked-by "$FINDING_ID"
-"${EPOCH_REC}" dep add "${SLICE_1_1_ID_URI}" --blocked-by "$FINDING_ID"
+"${EPOCH_REC}" block "$BLOCKER_GROUP_ID_URI" --by "$FINDING_ID"
+"${EPOCH_REC}" block "${SLICE_1_1_ID_URI}" --by "$FINDING_ID"
 ```
 
 Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent). They stay open past the wave gate and converge at the end, and they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
 
 ```bash
 # IMPORTANT finding — attaches to the IMPORTANT severity group (NOT the slice)
-IMPORTANT_FINDING_ID=$("${EPOCH_REC}" create "IMPORTANT: Add request timeout" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_FINDING_ID=$("${EPOCH_REC}" create --kind task --title "IMPORTANT: Add request timeout" --phase code_review \
+  --body "---
 references:
   wave: 1
   slice: \"${SLICE_1_2_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-API calls should have configurable timeouts." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
-"${EPOCH_REC}" label add "$IMPORTANT_FINDING_ID" pasture:finding
+API calls should have configurable timeouts.")
+"${EPOCH_REC}" label "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
+"${EPOCH_REC}" label "$IMPORTANT_FINDING_ID" pasture:finding
 
 # Attaches to the IMPORTANT severity group (NOT the slice); its close rule is C-finding-lifecycle
-"${EPOCH_REC}" dep add "$IMPORTANT_GROUP_ID_URI" --blocked-by "$IMPORTANT_FINDING_ID"
+"${EPOCH_REC}" block "$IMPORTANT_GROUP_ID_URI" --by "$IMPORTANT_FINDING_ID"
 ```
 
 ## Review Structure
@@ -302,9 +304,9 @@ One vote per wave on the wave review task (not one per slice):
 
 **Documentation (via Pasture comments):**
 ```bash
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - [reason]"
+"${EPOCH_REC}" note "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: ACCEPT - [reason]"
 # OR
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - [specific issue]. Suggest: [fix]"
+"${EPOCH_REC}" note "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: REVISE - [specific issue]. Suggest: [fix]"
 ```
 
 ## Consensus Check
@@ -313,10 +315,10 @@ All reviews across all slices must be ACCEPT:
 
 ```bash
 # Check for any REVISE votes
-"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:p10-impl:s10-review"
+"${EPOCH_REC}" query --label="pasture:p10-impl:s10-review"
 
 # Check for unresolved BLOCKERs
-"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
+"${EPOCH_REC}" query --label="pasture:severity:blocker" --status=open
 
 # If any REVISE or open BLOCKERs, return to implementation
 # If all ACCEPT and BLOCKERs resolved, proceed to Phase 11 (UAT)
@@ -332,7 +334,7 @@ If any reviewer votes REVISE on the wave:
 
 ```bash
 # Mark slice as needing revision
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "REVISION NEEDED: <specific issues>"
+"${EPOCH_REC}" note "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "REVISION NEEDED: <specific issues>"
 
 # After worker fixes, start new review round
 # New severity groups are created fresh for the new round
@@ -345,19 +347,19 @@ Per [frag--sup-followup-epic-timing], create only when UAT produces user-DEFER'd
 ### Step 1: Create the follow-up epic
 
 ```bash
-FOLLOWUP_EPIC_ID_URI=$("${EPOCH_REC}" create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
-  --description="---
+FOLLOWUP_EPIC_ID_URI=$("${EPOCH_REC}" create --kind epic --title "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --priority 3 \
+  --body="---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
   review_round: ${REVIEW_ROUND_ID_URI}
 ---
-User-DEFER'd UAT items only; no review findings." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
+User-DEFER'd UAT items only; no review findings.")
+"${EPOCH_REC}" label "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 
 # Link only the UAT-deferred item leaves
-"${EPOCH_REC}" dep add "$FOLLOWUP_EPIC_ID_URI" --blocked-by "$DEFERRED_ITEM_ID_1_URI"
-"${EPOCH_REC}" dep add "$FOLLOWUP_EPIC_ID_URI" --blocked-by "$DEFERRED_ITEM_ID_2_URI"
+"${EPOCH_REC}" block "$FOLLOWUP_EPIC_ID_URI" --by "$DEFERRED_ITEM_ID_1_URI"
+"${EPOCH_REC}" block "$FOLLOWUP_EPIC_ID_URI" --by "$DEFERRED_ITEM_ID_2_URI"
 ```
 
 ### Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
@@ -379,34 +381,27 @@ FOLLOWUP epic (pasture:epic-followup)
 ```
 
 ```bash
-# Create follow-up lifecycle tasks
-FOLLOWUP_URE_ID=$("${EPOCH_REC}" create "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+# Create follow-up lifecycle tasks. The URD lands first so the URE can record it.
+FOLLOWUP_URD_ID=$("${EPOCH_REC}" create --kind task --title "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit \
+  --body "---
 references:
   followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
   original_urd: "${ORIGINAL_URD_ID_URI}"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
-"${EPOCH_REC}" dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "$FOLLOWUP_URE_ID"
+Follow-up requirements. References original URD.")
+"${EPOCH_REC}" label "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
+"${EPOCH_REC}" label "$FOLLOWUP_URD_ID" pasture:urd
 
-FOLLOWUP_URD_ID=$("${EPOCH_REC}" create "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
-references:
-  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
-  original_urd: "${ORIGINAL_URD_ID_URI}"
----
-Follow-up requirements. References original URD." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
-"${EPOCH_REC}" label add "$FOLLOWUP_URD_ID" pasture:urd
-# Preserve the URE's references and scoping text; the living URD is not blocking work.
-"${EPOCH_REC}" update "$FOLLOWUP_URE_ID" --description "---
+FOLLOWUP_URE_ID=$("${EPOCH_REC}" create --kind task --title "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit \
+  --body "---
 references:
   followup_epic: \"${FOLLOWUP_EPIC_ID_URI}\"
   original_urd: \"${ORIGINAL_URD_ID_URI}\"
   followup_urd: \"${FOLLOWUP_URD_ID}\"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address."
+Scoping URE: determine which user-DEFER'd UAT items to address.")
+"${EPOCH_REC}" label "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
+"${EPOCH_REC}" block "${FOLLOWUP_EPIC_ID_URI}" --by "$FOLLOWUP_URE_ID"
 ```
 
 ### Step 3: DEFER'd-item leaf adoption (dual-parent)
@@ -415,9 +410,9 @@ When the supervisor creates FOLLOWUP_SLICE-N tasks, the user-DEFER'd UAT-item le
 
 ```bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
-"${EPOCH_REC}" dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
-"${EPOCH_REC}" dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
-# Leaf task already has: "${EPOCH_REC}" dep add "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"
+"${EPOCH_REC}" block "${FOLLOWUP_SLICE_ID_URI}" --by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
+"${EPOCH_REC}" block "${FOLLOWUP_SLICE_ID_URI}" --by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
+# Leaf task already has: "${EPOCH_REC}" block "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --by "${LEAF_TASK_ID_URI}"
 ```
 
 ### Reviewer → Supervisor Handoff (h5)
@@ -466,7 +461,7 @@ Only when ALL reviews are ACCEPT and all BLOCKERs are resolved:
 
 ```text
 # Verify consensus — no open BLOCKERs
-"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
+"${EPOCH_REC}" query --label="pasture:severity:blocker" --status=open
 # Should return 0 results
 
 # Proceed to Phase 11 (Implementation UAT)

@@ -65,18 +65,18 @@ git commit -m "feat: add login"
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: "${EPOCH_REC}" dep add parent --blocked-by child
+- Then: chain dependency: "${EPOCH_REC}" block parent --by child
 - Should not: skip dependency chaining or invert direction
 
 _Example (correct)_
 
 ```bash
 # Full dependency chain: work flows bottom-up, closure flows top-down
-"${EPOCH_REC}" dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
-"${EPOCH_REC}" dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
-"${EPOCH_REC}" dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
-"${EPOCH_REC}" dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
-"${EPOCH_REC}" dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
+"${EPOCH_REC}" block "${URE_ID_URI}" --by "${PROPOSAL_ID_URI}"
+"${EPOCH_REC}" block "${PROPOSAL_ID_URI}" --by "${IMPL_PLAN_ID_URI}"
+"${EPOCH_REC}" block "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
+"${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "${LEAF_TASK_A_ID_URI}"
 ```
 
 **[C-audit-never-delete]**
@@ -88,19 +88,19 @@ _Example (correct)_
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: "${EPOCH_REC}" dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
+- Then: parent blocked-by child: "${EPOCH_REC}" block "${STAYS_OPEN_URI}" --by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 _Example (correct)_ — also illustrates: C-audit-dep-chain
 
 ```bash
-"${EPOCH_REC}" dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
 ```
 
 _Example (anti-pattern)_
 
 ```bash
-"${EPOCH_REC}" dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
+"${EPOCH_REC}" block "${URE_ID_URI}" --by "${REQUEST_ID_URI}"
 ```
 
 **[C-frontmatter-refs]**
@@ -124,30 +124,30 @@ _Example (anti-pattern)_
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Pasture
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via "${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via "${EPOCH_REC}" note whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 _Example (correct)_
 
 ```bash
 # Full question, all options with descriptions, verbatim response
-UAT_ID_URI=$("${EPOCH_REC}" create "UAT: Plan acceptance for feature-X" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "## Component: Verbose fields
+UAT_ID_URI=$("${EPOCH_REC}" create --kind task --title "UAT: Plan acceptance for feature-X" --phase plan_uat \
+  --body "## Component: Verbose fields
 **Question:** Which verbose fields are useful?
 **Options:**
 - backupDir (full path): Shows where the backup landed
 - session ID: Enables log correlation across events
 - repo path + hash: Confirms which git repo was detected
 **User response:** backupDir (full path), session ID
-**Decision:** ACCEPT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+**Decision:** ACCEPT")
 ```
 
 _Example (anti-pattern)_
 
 ```bash
 # WRONG: options summarized as numbers, response paraphrased
-UAT_ID_URI=$("${EPOCH_REC}" create "UAT: Plan acceptance" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+UAT_ID_URI=$("${EPOCH_REC}" create --kind task --title "UAT: Plan acceptance" --phase plan_uat \
+  --body "Asked about verbose fields (1-4). User picked 1 and 2. Accepted.")
 ```
 
 ### Handoffs
@@ -207,11 +207,11 @@ Agents coordinate through **beads** tasks and comments:
 
 | Action | Command |
 |--------|---------|
-| List blocked | `"${EPOCH_REC}" blocked` |
-| Add progress note | `"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
-| List in-progress | `"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
+| List blocked | `"${EPOCH_REC}" query --blocked` |
+| Add progress note | `"${EPOCH_REC}" note "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Progress: ..."` |
+| List in-progress | `"${EPOCH_REC}" query --status=in_progress` |
 | Check task details | `"${EPOCH_REC}" show "${TASK_ID_URI}"` |
-| Update status | `"${EPOCH_REC}" update "${TASK_ID_URI}" --status=in_progress` |
+| Update status | `"${EPOCH_REC}" status "${TASK_ID_URI}" --set in_progress` |
 
 ## Workflows
 
@@ -320,25 +320,27 @@ Exit: Supervisor receives ratified plan + handoff document
 
 ## Task Recovery
 
-The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. The pasture-specific steps below apply only when the header says backend: pasture; when it says ledger, use the Tracker Adapter section and the ledger path in the header. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami.
 
-Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The adapter reads it when set, otherwise the header's `namespace:`, and passes `--namespace` itself. Queries are scoped to that namespace; pass `--all-namespaces` to opt out. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Run "${EPOCH_REC}" ready, "${EPOCH_REC}" blocked, and "${EPOCH_REC}" list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run "${EPOCH_REC}" show "$TASK_URI", "${EPOCH_REC}" comments "$TASK_URI", and "${EPOCH_REC}" timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
-Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Assignment transfer is not initial allocation: before using "${EPOCH_REC}" assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
 
-Parent stays open and is blocked by child: "${EPOCH_REC}" dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+Parent stays open and is blocked by child: `"${EPOCH_REC}" block "$PARENT_URI" --by "$CHILD_URI"`. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records `backend: error`, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
 
 ## Task Attribution
 
-Select the current registered author with "${EPOCH_REC}" agents list and "${EPOCH_REC}" agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami; when neither the header nor PASTURE_AUTHOR names one, it lists the registered agents. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## PROPOSAL-N Naming
 
@@ -346,8 +348,8 @@ Proposals are numbered incrementally: PROPOSAL-1, PROPOSAL-2, etc. When a revisi
 1. Create PROPOSAL-N+1 with fixes
 2. Mark PROPOSAL-N as superseded:
    ```bash
-   "${EPOCH_REC}" label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-   "${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
+   "${EPOCH_REC}" label "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+   "${EPOCH_REC}" note "${OLD_PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
    ```
 3. Re-spawn all 3 reviewers to assess PROPOSAL-N+1
 
@@ -363,109 +365,109 @@ Idle → Eliciting → Drafting → AwaitingReview → AwaitingUAT → Ratified 
 
 Captures the original user prompt verbatim:
 ```bash
-REQUEST_ID_URI=$("${EPOCH_REC}" create "REQUEST: <summary>" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<verbatim user prompt - do not paraphrase>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+REQUEST_ID_URI=$("${EPOCH_REC}" create --kind task --title "REQUEST: <summary>" --phase request \
+  --body "<verbatim user prompt - do not paraphrase>")
+"${EPOCH_REC}" label "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
 ```
 
 ### Phase 2: ELICIT Task
 
 Run `/pasture:user-elicit` first, then capture results:
 ```bash
-ELICIT_ID_URI=$("${EPOCH_REC}" create "ELICIT: <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<questions and user responses verbatim>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
-"${EPOCH_REC}" dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
+ELICIT_ID_URI=$("${EPOCH_REC}" create --kind task --title "ELICIT: <feature>" --phase elicit \
+  --body "<questions and user responses verbatim>")
+"${EPOCH_REC}" label "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"
 ```
 
 ### Phase 2.5: URD (User Requirements Document)
 
 Create the URD as the single source of truth after elicitation:
 ```bash
-URD_ID_URI=$("${EPOCH_REC}" create "URD: <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+URD_ID_URI=$("${EPOCH_REC}" create --kind task --title "URD: <feature>" --phase elicit \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   elicit: "${ELICIT_ID_URI}"
 ---
-<structured requirements, priorities, design choices, MVP goals, end-vision>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$URD_ID_URI" pasture:urd
-"${EPOCH_REC}" label add "$URD_ID_URI" pasture:p2-user:s2_2-urd
+<structured requirements, priorities, design choices, MVP goals, end-vision>")
+"${EPOCH_REC}" label "$URD_ID_URI" pasture:urd
+"${EPOCH_REC}" label "$URD_ID_URI" pasture:p2-user:s2_2-urd
 ```
 
 ### Phase 3: PROPOSAL-N Task
 
 Contains full plan with validation checklist and acceptance criteria:
 ```bash
-PROPOSAL_ID_URI=$("${EPOCH_REC}" create "PROPOSAL-1: <feature>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+PROPOSAL_ID_URI=$("${EPOCH_REC}" create --kind task --title "PROPOSAL-1: <feature>" --phase propose \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
-<plan content in markdown>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
-"${EPOCH_REC}" update "$PROPOSAL_ID_URI" --notes "Design: '{\"validation_checklist\":[\"item1\",\"item2\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"tradeoffs\":[{\"decision\":\"X\",\"rationale\":\"Y\"}]}'"
-"${EPOCH_REC}" dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+<plan content in markdown>")
+"${EPOCH_REC}" label "$PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
+"${EPOCH_REC}" note "$PROPOSAL_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Design: '{\"validation_checklist\":[\"item1\",\"item2\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"tradeoffs\":[{\"decision\":\"X\",\"rationale\":\"Y\"}]}'"
+"${EPOCH_REC}" block "${ELICIT_ID_URI}" --by "${PROPOSAL_ID_URI}"
 ```
 
 ### Phase 4: REVIEW Tasks
 
 Each reviewer creates their own task:
 ```bash
-REVIEW_ID_URI=$("${EPOCH_REC}" create "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$REVIEW_ID_URI" pasture:p4-plan:s4-review
-"${EPOCH_REC}" dep add "${PROPOSAL_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+REVIEW_ID_URI=$("${EPOCH_REC}" create --kind task --title "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review \
+  --body "VOTE: <ACCEPT|REVISE> - <justification>")
+"${EPOCH_REC}" label "$REVIEW_ID_URI" pasture:p4-plan:s4-review
+"${EPOCH_REC}" block "${PROPOSAL_ID_URI}" --by "${REVIEW_ID_URI}"
 ```
 
 ### Phase 5: UAT Task
 
 After all 3 reviewers ACCEPT, run `/pasture:user-uat`:
 ```bash
-UAT_ID_URI=$("${EPOCH_REC}" create "UAT-1: <feature>" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+UAT_ID_URI=$("${EPOCH_REC}" create --kind task --title "UAT-1: <feature>" --phase plan_uat \
+  --body "---
 references:
   proposal: "${PROPOSAL_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
-<demonstrative examples and user responses>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$UAT_ID_URI" pasture:p5-user:s5-uat
-"${EPOCH_REC}" dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
+<demonstrative examples and user responses>")
+"${EPOCH_REC}" label "$UAT_ID_URI" pasture:p5-user:s5-uat
+"${EPOCH_REC}" block "${PROPOSAL_ID_URI}" --by "${UAT_ID_URI}"
 
 # Update URD with UAT results
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: <summary of user acceptance/feedback>"
+"${EPOCH_REC}" note "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "UAT results: <summary of user acceptance/feedback>"
 ```
 
 ### Phase 6: RATIFY
 
 Add label to proposal (DO NOT close, delete, or create new task):
 ```bash
-"${EPOCH_REC}" label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
+"${EPOCH_REC}" label "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+"${EPOCH_REC}" note "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
 
 # Mark all previous proposals as superseded
-"${EPOCH_REC}" label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
+"${EPOCH_REC}" label "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+"${EPOCH_REC}" note "${OLD_PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
 
 # Update URD with ratification
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as <summary>"
+"${EPOCH_REC}" note "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Ratified: scope confirmed as <summary>"
 ```
 
 ### Phase 7: HANDOFF
 
 Create the HANDOFF task — its body IS the handoff document:
 ```bash
-HANDOFF_ID_URI=$("${EPOCH_REC}" create "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --namespace "$PASTURE_NAMESPACE" --format json --type=task --priority=2 \
-  --description "---
+HANDOFF_ID_URI=$("${EPOCH_REC}" create --kind task --title "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --priority 2 \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
   proposal: "${RATIFIED_PROPOSAL_ID_URI}"
 ---
 # Handoff: Architect → Supervisor
-<full handoff body — the task body IS the handoff>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
+<full handoff body — the task body IS the handoff>")
+"${EPOCH_REC}" label "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
 ```
 
 Storage: the handoff is authored in this HANDOFF Pasture task body (no filesystem path).
@@ -502,16 +504,16 @@ In the follow-up lifecycle, the architect receives a handoff (h6) from the super
 
 ```bash
 # After receiving h6 from supervisor:
-FOLLOWUP_PROPOSAL_ID_URI=$("${EPOCH_REC}" create "FOLLOWUP_PROPOSAL-1: <follow-up feature>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+FOLLOWUP_PROPOSAL_ID_URI=$("${EPOCH_REC}" create --kind task --title "FOLLOWUP_PROPOSAL-1: <follow-up feature>" --phase propose \
+  --body "---
 references:
   request: "${ORIGINAL_REQUEST_ID_URI}"
   original_urd: "${ORIGINAL_URD_ID_URI}"
   followup_urd: "${FOLLOWUP_URD_ID_URI}"
   followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
 ---
-<proposal content addressing the scoped user-DEFER'd UAT items>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$FOLLOWUP_PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
+<proposal content addressing the scoped user-DEFER'd UAT items>")
+"${EPOCH_REC}" label "$FOLLOWUP_PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
 ```
 
 The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PROPOSAL is ratified, hand off to supervisor via h1 for FOLLOWUP_IMPL_PLAN creation.

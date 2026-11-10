@@ -13,8 +13,8 @@ var architectBody = SkillBody{
 1. Create PROPOSAL-N+1 with fixes
 2. Mark PROPOSAL-N as superseded:
    ` + "```" + `bash
-   [[rec]] label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-   [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
+   [[rec:label]] "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+   [[rec:note]] "${OLD_PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Superseded by PROPOSAL-N+1 ("${NEW_PROPOSAL_ID_URI}")"
    ` + "```" + `
 3. Re-spawn all 3 reviewers to assess PROPOSAL-N+1`,
 		},
@@ -33,9 +33,9 @@ var architectBody = SkillBody{
 					Title: "Phase 1: REQUEST Task",
 					Content: `Captures the original user prompt verbatim:
 ` + "```" + `bash
-REQUEST_ID_URI=$([[rec]] create "REQUEST: <summary>" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<verbatim user prompt - do not paraphrase>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+REQUEST_ID_URI=$([[rec:create]] --kind task --title "REQUEST: <summary>" --phase request \
+  --body "<verbatim user prompt - do not paraphrase>")
+[[rec:label]] "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
 ` + "```" + ``,
 				},
 				{
@@ -43,10 +43,10 @@ REQUEST_ID_URI=$([[rec]] create "REQUEST: <summary>" --phase request --namespace
 					Title: "Phase 2: ELICIT Task",
 					Content: `Run ` + "`" + `/pasture:user-elicit` + "`" + ` first, then capture results:
 ` + "```" + `bash
-ELICIT_ID_URI=$([[rec]] create "ELICIT: <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<questions and user responses verbatim>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
-[[rec]] dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
+ELICIT_ID_URI=$([[rec:create]] --kind task --title "ELICIT: <feature>" --phase elicit \
+  --body "<questions and user responses verbatim>")
+[[rec:label]] "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
+[[rec:block]] "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -54,15 +54,15 @@ ELICIT_ID_URI=$([[rec]] create "ELICIT: <feature>" --phase elicit --namespace "$
 					Title: "Phase 2.5: URD (User Requirements Document)",
 					Content: `Create the URD as the single source of truth after elicitation:
 ` + "```" + `bash
-URD_ID_URI=$([[rec]] create "URD: <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+URD_ID_URI=$([[rec:create]] --kind task --title "URD: <feature>" --phase elicit \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   elicit: "${ELICIT_ID_URI}"
 ---
-<structured requirements, priorities, design choices, MVP goals, end-vision>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$URD_ID_URI" pasture:urd
-[[rec]] label add "$URD_ID_URI" pasture:p2-user:s2_2-urd
+<structured requirements, priorities, design choices, MVP goals, end-vision>")
+[[rec:label]] "$URD_ID_URI" pasture:urd
+[[rec:label]] "$URD_ID_URI" pasture:p2-user:s2_2-urd
 ` + "```" + ``,
 				},
 				{
@@ -70,16 +70,16 @@ references:
 					Title: "Phase 3: PROPOSAL-N Task",
 					Content: `Contains full plan with validation checklist and acceptance criteria:
 ` + "```" + `bash
-PROPOSAL_ID_URI=$([[rec]] create "PROPOSAL-1: <feature>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+PROPOSAL_ID_URI=$([[rec:create]] --kind task --title "PROPOSAL-1: <feature>" --phase propose \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
-<plan content in markdown>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
-[[rec]] update "$PROPOSAL_ID_URI" --notes "Design: '{\"validation_checklist\":[\"item1\",\"item2\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"tradeoffs\":[{\"decision\":\"X\",\"rationale\":\"Y\"}]}'"
-[[rec]] dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+<plan content in markdown>")
+[[rec:label]] "$PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
+[[rec:note]] "$PROPOSAL_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Design: '{\"validation_checklist\":[\"item1\",\"item2\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"tradeoffs\":[{\"decision\":\"X\",\"rationale\":\"Y\"}]}'"
+[[rec:block]] "${ELICIT_ID_URI}" --by "${PROPOSAL_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -87,10 +87,10 @@ references:
 					Title: "Phase 4: REVIEW Tasks",
 					Content: `Each reviewer creates their own task:
 ` + "```" + `bash
-REVIEW_ID_URI=$([[rec]] create "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$REVIEW_ID_URI" pasture:p4-plan:s4-review
-[[rec]] dep add "${PROPOSAL_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+REVIEW_ID_URI=$([[rec:create]] --kind task --title "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review \
+  --body "VOTE: <ACCEPT|REVISE> - <justification>")
+[[rec:label]] "$REVIEW_ID_URI" pasture:p4-plan:s4-review
+[[rec:block]] "${PROPOSAL_ID_URI}" --by "${REVIEW_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -98,18 +98,18 @@ REVIEW_ID_URI=$([[rec]] create "PROPOSAL-1-REVIEW-A-1: <feature>" --phase review
 					Title: "Phase 5: UAT Task",
 					Content: `After all 3 reviewers ACCEPT, run ` + "`" + `/pasture:user-uat` + "`" + `:
 ` + "```" + `bash
-UAT_ID_URI=$([[rec]] create "UAT-1: <feature>" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+UAT_ID_URI=$([[rec:create]] --kind task --title "UAT-1: <feature>" --phase plan_uat \
+  --body "---
 references:
   proposal: "${PROPOSAL_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
-<demonstrative examples and user responses>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$UAT_ID_URI" pasture:p5-user:s5-uat
-[[rec]] dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
+<demonstrative examples and user responses>")
+[[rec:label]] "$UAT_ID_URI" pasture:p5-user:s5-uat
+[[rec:block]] "${PROPOSAL_ID_URI}" --by "${UAT_ID_URI}"
 
 # Update URD with UAT results
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: <summary of user acceptance/feedback>"
+[[rec:note]] "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "UAT results: <summary of user acceptance/feedback>"
 ` + "```" + ``,
 				},
 				{
@@ -117,15 +117,15 @@ references:
 					Title: "Phase 6: RATIFY",
 					Content: `Add label to proposal (DO NOT close, delete, or create new task):
 ` + "```" + `bash
-[[rec]] label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
+[[rec:label]] "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+[[rec:note]] "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
 
 # Mark all previous proposals as superseded
-[[rec]] label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
+[[rec:label]] "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+[[rec:note]] "${OLD_PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
 
 # Update URD with ratification
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as <summary>"
+[[rec:note]] "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Ratified: scope confirmed as <summary>"
 ` + "```" + ``,
 				},
 				{
@@ -133,16 +133,16 @@ references:
 					Title: "Phase 7: HANDOFF",
 					Content: `Create the HANDOFF task — its body IS the handoff document:
 ` + "```" + `bash
-HANDOFF_ID_URI=$([[rec]] create "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --namespace "$PASTURE_NAMESPACE" --format json --type=task --priority=2 \
-  --description "---
+HANDOFF_ID_URI=$([[rec:create]] --kind task --title "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --priority 2 \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
   proposal: "${RATIFIED_PROPOSAL_ID_URI}"
 ---
 # Handoff: Architect → Supervisor
-<full handoff body — the task body IS the handoff>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
+<full handoff body — the task body IS the handoff>")
+[[rec:label]] "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
 ` + "```" + `
 
 Storage: the handoff is authored in this HANDOFF Pasture task body (no filesystem path).`,
@@ -161,16 +161,16 @@ Storage: the handoff is authored in this HANDOFF Pasture task body (no filesyste
 
 ` + "```" + `bash
 # After receiving h6 from supervisor:
-FOLLOWUP_PROPOSAL_ID_URI=$([[rec]] create "FOLLOWUP_PROPOSAL-1: <follow-up feature>" --phase propose --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+FOLLOWUP_PROPOSAL_ID_URI=$([[rec:create]] --kind task --title "FOLLOWUP_PROPOSAL-1: <follow-up feature>" --phase propose \
+  --body "---
 references:
   request: "${ORIGINAL_REQUEST_ID_URI}"
   original_urd: "${ORIGINAL_URD_ID_URI}"
   followup_urd: "${FOLLOWUP_URD_ID_URI}"
   followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
 ---
-<proposal content addressing the scoped user-DEFER'd UAT items>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$FOLLOWUP_PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
+<proposal content addressing the scoped user-DEFER'd UAT items>")
+[[rec:label]] "$FOLLOWUP_PROPOSAL_ID_URI" pasture:p3-plan:s3-propose
 ` + "```" + `
 
 The same review/ratify/UAT/handoff cycle (Phases 3-7) applies. After FOLLOWUP_PROPOSAL is ratified, hand off to supervisor via h1 for FOLLOWUP_IMPL_PLAN creation.`,

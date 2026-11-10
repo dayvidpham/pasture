@@ -1224,8 +1224,8 @@ func buildDependencyModel(buf *bytes.Buffer, depth int) {
 	section := DependencyModelSection{
 		Rule:           "Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.",
 		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-{W}-{N} \u2192 blocked-by leaf tasks",
-		Command:        "[[rec]] dep add {parent-uri} --blocked-by {child-uri}",
-		AntiPattern:    "[[rec]] dep add {child-uri} --blocked-by {parent-uri}",
+		Command:        "[[rec:block]] {parent-uri} --by {child-uri}",
+		AntiPattern:    "[[rec:block]] {child-uri} --by {parent-uri}",
 		ReferenceLinks: &ReferenceLinksElem{
 			Note:    "URD and other reference docs use frontmatter, not blocking deps",
 			Pattern: "description frontmatter:\n  references:\n    urd: {urd-task-uri}\n    request: {request-task-uri}",
@@ -1252,7 +1252,7 @@ func buildFollowupLifecycle(buf *bytes.Buffer, depth int) {
 		},
 		LeafTaskAdoption: &LeafTaskAdoptElem{
 			Rule:    "When supervisor creates FOLLOWUP_SLICE-N, the user-DEFER'd UAT-item leaf tasks gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.",
-			Command: "[[rec]] dep add {followup-slice-uri} --blocked-by {defer-item-leaf-task-1-uri}\n[[rec]] dep add {followup-slice-uri} --blocked-by {defer-item-leaf-task-2-uri}",
+			Command: "[[rec:block]] {followup-slice-uri} --by {defer-item-leaf-task-1-uri}\n[[rec:block]] {followup-slice-uri} --by {defer-item-leaf-task-2-uri}",
 			Note:    "Leaf tasks retain their original parent (the DEFER'd-items tracking group) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.",
 		},
 		References: &FollowupRefsElem{

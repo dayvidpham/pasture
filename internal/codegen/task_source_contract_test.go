@@ -70,7 +70,7 @@ func TestCanonicalTaskSourceContract(t *testing.T) {
 
 func TestWorkerRecipesNeverCloseTasks(t *testing.T) {
 	t.Parallel()
-	closePrefix := regexp.QuoteMeta(trackerEntryPoint) + `\s+(?:close|update[^\n]*--status(?:=|\s+)closed)\b`
+	closePrefix := regexp.QuoteMeta(trackerEntryPoint) + `\s+(?:close|status[^\n]*--set(?:=|\s+)closed)\b`
 	check := func(path, text string) {
 		require.NotRegexp(t, closePrefix, resolvedForClaude(t, text), path)
 	}

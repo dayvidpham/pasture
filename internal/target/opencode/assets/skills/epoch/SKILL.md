@@ -45,18 +45,18 @@ description: Master orchestrator for full 12-phase workflow
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: "${EPOCH_REC}" dep add parent --blocked-by child
+- Then: chain dependency: "${EPOCH_REC}" block parent --by child
 - Should not: skip dependency chaining or invert direction
 
 _Example (correct)_
 
 ```bash
 # Full dependency chain: work flows bottom-up, closure flows top-down
-"${EPOCH_REC}" dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
-"${EPOCH_REC}" dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
-"${EPOCH_REC}" dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
-"${EPOCH_REC}" dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
-"${EPOCH_REC}" dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
+"${EPOCH_REC}" block "${URE_ID_URI}" --by "${PROPOSAL_ID_URI}"
+"${EPOCH_REC}" block "${PROPOSAL_ID_URI}" --by "${IMPL_PLAN_ID_URI}"
+"${EPOCH_REC}" block "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
+"${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "${LEAF_TASK_A_ID_URI}"
 ```
 
 **[C-audit-never-delete]**
@@ -74,19 +74,19 @@ _Example (correct)_
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: "${EPOCH_REC}" dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
+- Then: parent blocked-by child: "${EPOCH_REC}" block "${STAYS_OPEN_URI}" --by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 _Example (correct)_ — also illustrates: C-audit-dep-chain
 
 ```bash
-"${EPOCH_REC}" dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
 ```
 
 _Example (anti-pattern)_
 
 ```bash
-"${EPOCH_REC}" dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
+"${EPOCH_REC}" block "${URE_ID_URI}" --by "${REQUEST_ID_URI}"
 ```
 
 **[C-frontmatter-refs]**
@@ -122,7 +122,7 @@ _Example (anti-pattern)_
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices
 - When: slice implementation is done
-- Then: workers notify supervisor with "${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not "${EPOCH_REC}" close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
+- Then: workers notify supervisor with "${EPOCH_REC}" note (not "${EPOCH_REC}" close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
 - Should not: close slices immediately upon worker completion; allow workers to close their own slices
 
 **[C-supervisor-explore-ephemeral]**
@@ -159,11 +159,11 @@ Agents coordinate through **beads** tasks and comments:
 
 | Action | Command |
 |--------|---------|
-| List blocked | `"${EPOCH_REC}" blocked` |
-| Add progress note | `"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
-| List in-progress | `"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
+| List blocked | `"${EPOCH_REC}" query --blocked` |
+| Add progress note | `"${EPOCH_REC}" note "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Progress: ..."` |
+| List in-progress | `"${EPOCH_REC}" query --status=in_progress` |
 | Check task details | `"${EPOCH_REC}" show "${TASK_ID_URI}"` |
-| Update status | `"${EPOCH_REC}" update "${TASK_ID_URI}" --status=in_progress` |
+| Update status | `"${EPOCH_REC}" status "${TASK_ID_URI}" --set in_progress` |
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md)** <- All 12 Phases
 
@@ -176,7 +176,7 @@ Agents coordinate through **beads** tasks and comments:
 **[epoch-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: add dependency to previous: "${EPOCH_REC}" dep add "${PARENT_URI}" --blocked-by "${CHILD_URI}"
+- Then: add dependency to previous: "${EPOCH_REC}" block "${PARENT_URI}" --by "${CHILD_URI}"
 - Should not: skip dependency chaining
 
 **[epoch-audit-never-delete]**
@@ -229,29 +229,31 @@ Agents coordinate through **beads** tasks and comments:
 
 ## Task Recovery
 
-The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. The pasture-specific steps below apply only when the header says backend: pasture; when it says ledger, use the Tracker Adapter section and the ledger path in the header. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami.
 
-Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The adapter reads it when set, otherwise the header's `namespace:`, and passes `--namespace` itself. Queries are scoped to that namespace; pass `--all-namespaces` to opt out. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Run "${EPOCH_REC}" ready, "${EPOCH_REC}" blocked, and "${EPOCH_REC}" list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run "${EPOCH_REC}" show "$TASK_URI", "${EPOCH_REC}" comments "$TASK_URI", and "${EPOCH_REC}" timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
-Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Assignment transfer is not initial allocation: before using "${EPOCH_REC}" assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
 
-Parent stays open and is blocked by child: "${EPOCH_REC}" dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+Parent stays open and is blocked by child: `"${EPOCH_REC}" block "$PARENT_URI" --by "$CHILD_URI"`. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records `backend: error`, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
 
 ## Task Attribution
 
-Select the current registered author with "${EPOCH_REC}" agents list and "${EPOCH_REC}" agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami; when neither the header nor PASTURE_AUTHOR names one, it lists the registered agents. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Tracker Adapter
 
-Tracker calls go through one entry point: `"${EPOCH_REC}" <op>`. The backend is chosen once, recorded in `.agents.local/pasture/EPOCH.md`, and read from there; no skill body names a backend.
+Tracker calls go through one entry point: `"${EPOCH_REC}" <op>`. The backend is chosen once, recorded in `.agents.local/pasture/EPOCH.md`, and read from there; no skill body names a backend recipe.
 
 Resolve the entry point from the header at the start of each shell session:
 
@@ -273,13 +275,13 @@ The operation set is closed. `relate` is `block --kind`; `assign` is `label ID o
 
 | Op | Canonical call | Action |
 |---|---|---|
-| `create` | `"${EPOCH_REC}" create --kind K --title T --phase P [--label L]... [--ref K=V]... [--body FILE|-] -> ID` | create an immutable record; the body is verbatim |
+| `create` | `"${EPOCH_REC}" create --kind K --title T --phase P [--priority N] [--label L]... [--ref K=V]... [--body TEXT|-] -> ID` | create an immutable record; the body is verbatim; print the new task URI |
 | `label` | `"${EPOCH_REC}" label ID L   (assignment: label ID owner:<role>)` | add a label; never remove one |
 | `block` | `"${EPOCH_REC}" block PARENT --by CHILD [--kind blocked_by|derived_from|supersedes|discovered_from]` | add an edge; a blocked_by edge keeps the parent open until the child closes; a typed edge uses --kind |
-| `note` | `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body FILE|-]` | append an attributed immutable note; --to makes it a message |
-| `show` | `"${EPOCH_REC}" show ID [--notes] [--history]` | read one record, optionally with its notes or history |
-| `query` | `"${EPOCH_REC}" query [--status S] [--label L] [--blocked]` | enumerate records by status, label, or blocked state |
-| `ready` | `"${EPOCH_REC}" ready [--label L]` | list non-closed records with no non-closed blocker |
+| `note` | `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body TEXT|-]` | append an attributed immutable note; --to makes it a message |
+| `show` | `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]` | read one record, optionally with its notes or history |
+| `query` | `"${EPOCH_REC}" query [--status S] [--label L] [--blocked] [--tree ID] [--all-namespaces] [--format text|json]` | enumerate records by status, label, blocked state, or dependency tree |
+| `ready` | `"${EPOCH_REC}" ready [--label L] [--format text|json]` | list non-closed records with no non-closed blocker |
 | `status` | `"${EPOCH_REC}" status ID --set open|in_progress|closed` | change state (start work); the store keeps the only status field |
 | `close` | `"${EPOCH_REC}" close ID --reason R` | close a record; policy reserves this for the supervisor |
 | `whoami` | `"${EPOCH_REC}" whoami` | resolve the acting author; never invent one |
@@ -292,17 +294,21 @@ backend: pasture|ledger|error
 probed_at: <UTC timestamp>
 namespace: <namespace URI>        # pasture only
 db: <absolute store path>         # pasture only
+author: <registered actor id>     # pasture only; what whoami prints
 ledger: <absolute ledger path>    # ledger only
 rec: <absolute adapter path>      # pasture and ledger
+reviewer_tier: T2|T3              # optional; the phase-8 review-effort choice
 degrades: assign=claim-only       # ledger only
 ---
 <the probe transcript and the user's one-line acknowledgement, verbatim>
 
-No mid-epoch switching: if the recorded backend fails mid-epoch, stop and report; a switch requires the user's explicit decision, recorded in EPOCH.md, plus a note on the last successful record.
+No mid-epoch switching: if the recorded backend fails mid-epoch, stop and report. Switching is never a repair; abandon the epoch and start a new one with a fresh probe, so the header and the records never describe different backends.
 
 A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
 
 The orchestrator runs the probe once. Subagents read EPOCH.md and never re-probe.
+
+Write this probe to `.agents.local/pasture/probe.sh` and run it before the first write:
 
 ~~~sh
 #!/bin/sh
@@ -394,11 +400,270 @@ Detection limits, by step:
 - Scope and author checks: detect that a namespace resolves and that the configured author is registered. They cannot detect an author registered in another namespace, nor prove the adapter will be allowed to write.
 - The probe cannot detect a store chosen by configuration outside the env/default precedence, and it does not prove that any later write will succeed.
 
+Write this adapter to the path the header records in `rec:` and make it executable; every tracker call goes through it:
+
+~~~sh
+#!/bin/sh
+# Epoch tracker adapter (rec). Serves the ten neutral tracker operations.
+# Backend: the one recorded in EPOCH_FILE. Never re-probes, never switches.
+set -u
+
+EPOCH_FILE="${EPOCH_FILE:-.agents.local/pasture/EPOCH.md}"
+PASTURE_BIN="${PASTURE_BIN:-pasture}"
+
+fail() {
+  printf 'rec: %s\n  why: %s\n  fix: %s\n' "$1" "$2" "$3" >&2
+  exit 3
+}
+
+[ -f "$EPOCH_FILE" ] || fail "no epoch header at $EPOCH_FILE" \
+  "the backend is chosen once and recorded before the first write" \
+  "run the Starting an Epoch detection step, or set EPOCH_FILE to the header"
+
+field() {
+  sed -n "s/^$1: //p" "$EPOCH_FILE" 2>/dev/null | tail -1
+}
+
+BACKEND="$(field backend)"
+DB="${PASTURE_DB_PATH:-$(field db)}"
+NS="${PASTURE_NAMESPACE:-$(field namespace)}"
+AUTHOR="${PASTURE_AUTHOR:-$(field author)}"
+
+case "$BACKEND" in
+  pasture) : ;;
+  error)
+    fail "the recorded backend is error" \
+      "the store exists but cannot be used, and falling back could lose earlier epochs" \
+      "repair the store named in $EPOCH_FILE, or start a new epoch with a working backend" ;;
+  ledger)
+    fail "the recorded backend is ledger" \
+      "this adapter build serves only the pasture backend; the ledger store lands in a later slice" \
+      "use a build that ships the ledger store, or re-probe with a working pasture" ;;
+  "")
+    fail "no backend recorded in $EPOCH_FILE" \
+      "the probe has not written the header yet" \
+      "run the Starting an Epoch detection step" ;;
+  *)
+    fail "unknown backend '$BACKEND' in $EPOCH_FILE" \
+      "the backend set is closed to pasture, ledger and error" \
+      "rewrite the backend line from the probe output" ;;
+esac
+
+OP="${1:-}"
+[ "$#" -gt 0 ] && shift
+
+pb() {
+  if [ -n "$DB" ]; then
+    "$PASTURE_BIN" --db "$DB" "$@"
+  else
+    "$PASTURE_BIN" "$@"
+  fi
+}
+
+need_id() {
+  [ -n "${1:-}" ] || fail "$OP needs a task ID" "the first operand was empty" "pass the full task URI as the first operand"
+}
+
+case "$OP" in
+  create)
+    kind=task title= phase= body= priority= labels=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --kind) kind="$2"; shift 2 ;;
+        --kind=*) kind="${1#*=}"; shift ;;
+        --title) title="$2"; shift 2 ;;
+        --title=*) title="${1#*=}"; shift ;;
+        --phase) phase="$2"; shift 2 ;;
+        --phase=*) phase="${1#*=}"; shift ;;
+        --priority) priority="$2"; shift 2 ;;
+        --priority=*) priority="${1#*=}"; shift ;;
+        --body) body="$2"; shift 2 ;;
+        --body=*) body="${1#*=}"; shift ;;
+        --label) labels="$labels $2"; shift 2 ;;
+        --label=*) labels="$labels ${1#*=}"; shift ;;
+        --ref) shift 2 ;;
+        --ref=*) shift ;;
+        *) shift ;;
+      esac
+    done
+    [ "$body" = "-" ] && body="$(cat)"
+    set -- task create "$title" --type "$kind" --phase "$phase"
+    [ -n "$NS" ] && set -- "$@" --namespace "$NS"
+    [ -n "$priority" ] && set -- "$@" --priority "$priority"
+    [ -n "$body" ] && set -- "$@" --description "$body"
+    out="$(pb "$@" --format text)" || exit $?
+    id="$(printf '%s\n' "$out" | sed -n 's/^ID: *//p' | head -1)"
+    [ -n "$id" ] || fail "create returned no task ID" "the backend text output had no ID line" "check the store named in $EPOCH_FILE and the backend help page"
+    printf '%s\n' "$id"
+    for label in $labels; do
+      pb task label add "$id" "$label" >/dev/null || exit $?
+    done
+    ;;
+  label)
+    id="${1:-}"; shift; need_id "$id"
+    [ "$#" -gt 0 ] || fail "label needs at least one label" "no label operand was given" "pass the label after the task URI"
+    for label in "$@"; do
+      pb task label add "$id" "$label" || exit $?
+    done
+    ;;
+  block)
+    parent="${1:-}"; shift; need_id "$parent"
+    child= kind=blocked_by
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --by) child="$2"; shift 2 ;;
+        --by=*) child="${1#*=}"; shift ;;
+        --kind) kind="$2"; shift 2 ;;
+        --kind=*) kind="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    [ -n "$child" ] || fail "block needs --by CHILD" "the child operand was empty" "pass block PARENT --by CHILD"
+    if [ "$kind" = blocked_by ]; then
+      pb task dep add "$parent" --blocked-by "$child" || exit $?
+    else
+      pb task dep add "$parent" --target "$child" --kind "$kind" || exit $?
+    fi
+    ;;
+  note)
+    id="${1:-}"; shift; need_id "$id"
+    note_body= note_kind= note_to= fmt=json
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --author) AUTHOR="$2"; shift 2 ;;
+        --author=*) AUTHOR="${1#*=}"; shift ;;
+        --body) note_body="$2"; shift 2 ;;
+        --body=*) note_body="${1#*=}"; shift ;;
+        --kind) note_kind="$2"; shift 2 ;;
+        --kind=*) note_kind="${1#*=}"; shift ;;
+        --to) note_to="$2"; shift 2 ;;
+        --to=*) note_to="${1#*=}"; shift ;;
+        --format) fmt="$2"; shift 2 ;;
+        --format=*) fmt="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    [ "$note_body" = "-" ] && note_body="$(cat)"
+    [ -n "$AUTHOR" ] || fail "note needs --author" "the tracker never invents an author" "pass the registered actor id"
+    [ -n "$note_kind" ] && note_body="[$note_kind] $note_body"
+    [ -n "$note_to" ] && note_body="to:$note_to $note_body"
+    # The body is the last positional argument and may begin with dashes; -- stops
+    # the CLI's flag parser so a body like "---" is text, not a malformed flag.
+    pb task comment add "$id" --author "$AUTHOR" -- "$note_body" || exit $?
+    ;;
+  show)
+    id="${1:-}"; shift; need_id "$id"
+    mode=show fmt=json
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --notes) mode=notes; shift ;;
+        --history) mode=history; shift ;;
+        --format) fmt="$2"; shift 2 ;;
+        --format=*) fmt="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    case "$mode" in
+      notes) pb task comments "$id" --format "$fmt" ;;
+      history) pb task timeline "$id" ;;
+      *) pb task show "$id" --format "$fmt" ;;
+    esac
+    ;;
+  query)
+    status= label= tree= fmt=json blocked=0 allns=0
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --status) status="$2"; shift 2 ;;
+        --status=*) status="${1#*=}"; shift ;;
+        --label) label="$2"; shift 2 ;;
+        --label=*) label="${1#*=}"; shift ;;
+        --tree) tree="$2"; shift 2 ;;
+        --tree=*) tree="${1#*=}"; shift ;;
+        --format) fmt="$2"; shift 2 ;;
+        --format=*) fmt="${1#*=}"; shift ;;
+        --blocked) blocked=1; shift ;;
+        --all-namespaces) allns=1; shift ;;
+        *) shift ;;
+      esac
+    done
+    if [ -n "$tree" ]; then
+      pb task dep tree "$tree"
+      exit $?
+    fi
+    if [ "$blocked" = 1 ]; then
+      set -- task blocked
+    else
+      set -- task list
+      [ -n "$NS" ] && set -- "$@" --namespace "$NS"
+    fi
+    [ -n "$status" ] && set -- "$@" --status "$status"
+    [ -n "$label" ] && set -- "$@" --label "$label"
+    [ "$allns" = 1 ] && set -- "$@" --all-namespaces
+    pb "$@" --format "$fmt"
+    ;;
+  ready)
+    label= fmt=json
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --label) label="$2"; shift 2 ;;
+        --label=*) label="${1#*=}"; shift ;;
+        --format) fmt="$2"; shift 2 ;;
+        --format=*) fmt="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    set -- task ready
+    [ -n "$label" ] && set -- "$@" --label "$label"
+    pb "$@" --format "$fmt"
+    ;;
+  status)
+    id="${1:-}"; shift; need_id "$id"
+    want=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --set) want="$2"; shift 2 ;;
+        --set=*) want="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    [ -n "$want" ] || fail "status needs --set" "no target status was given" "pass --set open, in_progress or closed"
+    pb task update "$id" --status "$want"
+    ;;
+  close)
+    id="${1:-}"; shift; need_id "$id"
+    reason=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --reason) reason="$2"; shift 2 ;;
+        --reason=*) reason="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    if [ -n "$reason" ]; then
+      pb task close "$id" --reason "$reason"
+    else
+      pb task close "$id"
+    fi
+    ;;
+  whoami)
+    if [ -n "$AUTHOR" ]; then
+      printf '%s\n' "$AUTHOR"
+    else
+      pb task agents list
+    fi
+    ;;
+  *)
+    fail "unknown operation '$OP'" "the operation set is closed to the ten neutral ops" \
+      "use create, label, block, note, show, query, ready, status, close or whoami; run the probe if the header is missing"
+    ;;
+esac
+~~~
+
 
 ## Core Principles
 
 1. **AUDIT TRAIL PRESERVATION** — Never delete or destroy information, labels, or tasks
-2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: `"${EPOCH_REC}" dep add "${PARENT_URI}" --blocked-by "${CHILD_URI}"`
+2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: `"${EPOCH_REC}" block "${PARENT_URI}" --by "${CHILD_URI}"`
 3. **USER ENGAGEMENT** — URE and UAT at multiple checkpoints
 4. **CONSENSUS REQUIRED** — All 3 reviewers must ACCEPT before proceeding
 5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. Only an open BLOCKER gates a review wave; open findings converge at the end
@@ -438,13 +703,31 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 
 ## Starting an Epoch
 
+**Step 0: detect the tracker backend before the first write.**
+
+Write the probe and the adapter from the Tracker Adapter section to `.agents.local/pasture/probe.sh` and the path you will record in `rec:`, make the adapter executable, and run the probe. Write `EPOCH.md` from its output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe.
+
+```bash
+mkdir -p .agents.local/pasture
+# Paste the two fenced blocks from the Tracker Adapter section:
+#   probe -> .agents.local/pasture/probe.sh
+#   rec   -> .agents.local/pasture/rec
+chmod +x .agents.local/pasture/rec
+sh .agents.local/pasture/probe.sh
+# Then write .agents.local/pasture/EPOCH.md from the KEY=VALUE output, and in
+# every shell session resolve the entry point:
+EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
+```
+
+If the probe prints `BACKEND=error`, stop and report before the first mutation: the store exists but cannot be used. If it prints `BACKEND=ledger`, this adapter build cannot record; install a build that ships the ledger store. If it prints `BACKEND=pasture`, record `namespace:`, `db:`, `author:`, `rec:` and `probed_at:` from the output.
+
 **Option 1: Manual Task Creation**
 ```bash
 # Phase 1: Capture user request
-REQUEST_ID_URI=$("${EPOCH_REC}" create "REQUEST: {{feature}}" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "{{verbatim user request}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-"${EPOCH_REC}" update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+REQUEST_ID_URI=$("${EPOCH_REC}" create --kind task --title "REQUEST: {{feature}}" --phase request \
+  --body "{{verbatim user request}}")
+"${EPOCH_REC}" label "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+"${EPOCH_REC}" note "$REQUEST_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
 
 # Then proceed through phases manually
 ```
@@ -457,18 +740,18 @@ Each phase creates a task and chains dependencies. Cross-references use descript
 
 ```bash
 # After Phase 1 creates "${REQUEST_ID_URI}"
-"${EPOCH_REC}" dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"    # REQUEST blocked by ELICIT
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"    # REQUEST blocked by ELICIT
 
 # After Phase 2 creates "${ELICIT_ID_URI}" and URD
-"${EPOCH_REC}" dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"   # ELICIT blocked by PROPOSAL
+"${EPOCH_REC}" block "${ELICIT_ID_URI}" --by "${PROPOSAL_ID_URI}"   # ELICIT blocked by PROPOSAL
 # URD linked via frontmatter in its description:
 #   references:
 #     request: "${REQUEST_ID_URI}"
 #     elicit: "${ELICIT_ID_URI}"
 
 # After Phase 5 (UAT) and Phase 6 (ratify), update URD
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: {{summary}}"
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as {{summary}}"
+"${EPOCH_REC}" note "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "UAT results: {{summary}}"
+"${EPOCH_REC}" note "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Ratified: scope confirmed as {{summary}}"
 ```
 
 ## Follow-up Epic
@@ -478,14 +761,14 @@ The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any re
 **Owner:** Supervisor creates the follow-up epic.
 
 ```bash
-FOLLOWUP_EPIC_ID_URI=$("${EPOCH_REC}" create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
-  --description "---
+FOLLOWUP_EPIC_ID_URI=$("${EPOCH_REC}" create --kind epic --title "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --priority 3 \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   uat: "${UAT_ID_URI}"
 ---
-Aggregated user-DEFER'd items from UAT (Phase 5/11)." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
+Aggregated user-DEFER'd items from UAT (Phase 5/11).")
+"${EPOCH_REC}" label "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 ```
 
 ### Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
@@ -510,18 +793,18 @@ Code reviews ALWAYS create ONE severity trio (3 group tasks) per wave, per axis,
 
 ```bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_ID_URI=$("${EPOCH_REC}" create "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-   --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$BLOCKER_ID_URI" pasture:severity:blocker
-"${EPOCH_REC}" label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$("${EPOCH_REC}" create "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-   --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$IMPORTANT_ID_URI" pasture:severity:important
-"${EPOCH_REC}" label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$("${EPOCH_REC}" create "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-   --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-"${EPOCH_REC}" label add "$MINOR_ID_URI" pasture:severity:minor
-"${EPOCH_REC}" label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review \
+   --body "Severity group for this review round; close only if empty")
+"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:severity:blocker
+"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review \
+   --body "Severity group for this review round; close only if empty")
+"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:severity:important
+"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review \
+   --body "Severity group for this review round; close only if empty")
+"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:severity:minor
+"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Empty groups are closed immediately
 "${EPOCH_REC}" close "${IMPORTANT_ID_URI}"
@@ -530,8 +813,8 @@ MINOR_ID_URI=$("${EPOCH_REC}" create "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --ph
 
 **Dual-parent BLOCKER:** Bind BLOCKER_FINDING_ID_URI from the finding task's create output before running this fence. BLOCKER findings block both the severity group AND the slice:
 ```bash
-"${EPOCH_REC}" dep add "${BLOCKER_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
-"${EPOCH_REC}" dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+"${EPOCH_REC}" block "${BLOCKER_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
+"${EPOCH_REC}" block "${SLICE_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
 ```
 
 See `../protocol/CONSTRAINTS.md` for full severity definitions.
@@ -540,16 +823,16 @@ See `../protocol/CONSTRAINTS.md` for full severity definitions.
 
 ```bash
 # View dependency chain
-"${EPOCH_REC}" dep tree "${LATEST_TASK_ID_URI}"
+"${EPOCH_REC}" query --tree "${LATEST_TASK_ID_URI}"
 
 # Check blocked work
-"${EPOCH_REC}" blocked
+"${EPOCH_REC}" query --blocked
 
 # See all epoch tasks by phase
-"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:p1-user:s1_1-classify"    # REQUEST tasks
-"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:p2-user:s2_1-elicit"      # ELICIT tasks
-"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose"        # PROPOSAL tasks
-"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice"          # Implementation slices
+"${EPOCH_REC}" query --label="pasture:p1-user:s1_1-classify"    # REQUEST tasks
+"${EPOCH_REC}" query --label="pasture:p2-user:s2_1-elicit"      # ELICIT tasks
+"${EPOCH_REC}" query --label="pasture:p3-plan:s3-propose"        # PROPOSAL tasks
+"${EPOCH_REC}" query --label="pasture:p9-impl:s9-slice"          # Implementation slices
 ```
 
 ## Skills to Invoke
@@ -582,8 +865,8 @@ Each phase transition MUST include an explicit `skill(...)` invocation directive
 
 ```bash
 # Correct: Add ratify label
-"${EPOCH_REC}" label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All reviewers ACCEPT"
+"${EPOCH_REC}" label "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+"${EPOCH_REC}" note "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "RATIFIED: All reviewers ACCEPT"
 
 # Wrong: Don't close
 # "${EPOCH_REC}" close "${PROPOSAL_ID_URI}"  # NEVER DO THIS

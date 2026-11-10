@@ -31,7 +31,7 @@ var supervisorTrackProgressBody = SkillBody{
 			Id:        "sup-track-urd-source-of-truth",
 			Given:     "requirements question arises",
 			When:      "resolving",
-			Then:      "consult the URD (`[[rec]] show \"${URD_ID_URI}\"`) as the single source of truth",
+			Then:      "consult the URD (`[[rec:show]] \"${URD_ID_URI}\"`) as the single source of truth",
 			ShouldNot: "guess at user intent without checking the URD first",
 		},
 		{
@@ -56,22 +56,22 @@ var supervisorTrackProgressBody = SkillBody{
 			Title: "Pasture Status Queries",
 			Content: `` + "```" + `bash
 # Check all implementation slices
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
+[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=in_progress
 
 # Check for blocked slices
-[[rec]] blocked --label="pasture:p9-impl:s9-slice"
+[[rec:query]] --blocked --label="pasture:p9-impl:s9-slice"
 
 # Check specific task
-[[rec]] show "${TASK_ID_URI}"
+[[rec:show]] "${TASK_ID_URI}"
 
 # Check completed slices
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
+[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=closed
 
 # Check BLOCKER severity groups (during/after review)
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
+[[rec:query]] --label="pasture:severity:blocker" --status=open
 
 # Check follow-up epic
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
+[[rec:query]] --label="pasture:epic-followup"
 ` + "```" + ``,
 		},
 		{
@@ -81,13 +81,13 @@ var supervisorTrackProgressBody = SkillBody{
 
 ` + "```" + `bash
 # Check for task updates
-[[rec]] show "${TASK_ID_URI}"
+[[rec:show]] "${TASK_ID_URI}"
 
 # Review comments for status updates
-[[rec]] comments "${TASK_ID_URI}"
+[[rec:show]] "${TASK_ID_URI}" --notes
 
 # Add coordination notes
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "All slices complete — proceeding to Phase 10 (code review)"
+[[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "All slices complete — proceeding to Phase 10 (code review)"
 ` + "```" + ``,
 		},
 		{
@@ -96,7 +96,7 @@ var supervisorTrackProgressBody = SkillBody{
 			Content: `| Status | Action |
 |--------|--------|
 | ` + "`" + `closed` + "`" + ` | Mark slice progress, check if all slices complete |
-| Open blocked_by child | Review ` + "`" + `[[rec]] show "${ID_URI}"` + "`" + ` for blocker details, resolve or reassign |
+| Open blocked_by child | Review ` + "`" + `[[rec:show]] "${ID_URI}"` + "`" + ` for blocker details, resolve or reassign |
 | ` + "`" + `in_progress` + "`" + ` | Worker is actively working |`,
 		},
 		{
@@ -115,10 +115,10 @@ var supervisorTrackProgressBody = SkillBody{
 			Title: "Follow-up Lifecycle Tracking",
 			Content: `` + "```" + `bash
 # Track follow-up lifecycle progress
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
+[[rec:query]] --label="pasture:epic-followup"
+[[rec:query]] --label="pasture:p2-user:s2_1-elicit" --status=open   # FOLLOWUP_URE
+[[rec:query]] --label="pasture:p3-plan:s3-propose" --status=open     # FOLLOWUP_PROPOSAL
+[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=in_progress  # FOLLOWUP_SLICE in progress
 ` + "```" + ``,
 		},
 	},

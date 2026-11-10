@@ -41,7 +41,7 @@ You own a vertical slice (full production code path from CLI/API entry point →
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: "${EPOCH_REC}" dep add parent --blocked-by child
+- Then: chain dependency: "${EPOCH_REC}" block parent --by child
 - Should not: skip dependency chaining or invert direction
 
 **[C-audit-never-delete]**
@@ -53,7 +53,7 @@ You own a vertical slice (full production code path from CLI/API entry point →
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: "${EPOCH_REC}" dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
+- Then: parent blocked-by child: "${EPOCH_REC}" block "${STAYS_OPEN_URI}" --by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 **[C-frontmatter-refs]**
@@ -111,7 +111,7 @@ You own a vertical slice (full production code path from CLI/API entry point →
 - [ ] Production code path verified end-to-end via code inspection
 
 **slice-closure gates:**
-- [ ] Supervisor notified via "${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not "${EPOCH_REC}" close)
+- [ ] Supervisor notified via "${EPOCH_REC}" note (not "${EPOCH_REC}" close)
 - [ ] All completion-gate items passed
 - [ ] Can only close on a review wave, not a worker wave
 - [ ] No open BLOCKER finding on this slice; IMPORTANT and MINOR findings stay open to convergence
@@ -150,7 +150,7 @@ Exit conditions:
 
 - Commit completed work (`git agent-commit -m ...`)
 
-- Notify supervisor of completion via "${EPOCH_REC}" comment add (`"${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Implementation complete"`)
+- Notify supervisor of completion via "${EPOCH_REC}" note (`"${EPOCH_REC}" note "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Implementation complete"`)
 
 Exit conditions:
 - **success**: All tests pass; no TODO placeholders; real deps wired; production code path verified via code inspection

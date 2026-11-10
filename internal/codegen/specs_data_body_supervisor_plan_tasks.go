@@ -119,8 +119,8 @@ var supervisorPlanTasksBody = SkillBody{
 			Title: "Steps",
 			Content: `1. **Read RATIFIED_PLAN and URD tasks:**
    ` + "```" + `bash
-   [[rec]] show "${RATIFIED_PLAN_ID_URI}"
-   [[rec]] show "${URD_ID_URI}"
+   [[rec:show]] "${RATIFIED_PLAN_ID_URI}"
+   [[rec:show]] "${URD_ID_URI}"
    ` + "```" + `
 
 2. **Identify production code paths** (what end users will actually run):
@@ -159,8 +159,8 @@ var supervisorPlanTasksBody = SkillBody{
 
 6. **Create vertical slice tasks:**
    ` + "```" + `bash
-   SLICE_1_ID_URI=$([[rec]] create "SLICE-1-1: Implement 'cli-tool feature list' command (full vertical)" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --type=task \
-     --description="$(cat <<EOF
+   SLICE_1_ID_URI=$([[rec:create]] --kind task --title "SLICE-1-1: Implement 'cli-tool feature list' command (full vertical)" --phase worker_slices \
+     --body="$(cat <<EOF
    ---
    references:
      impl_plan: "${IMPL_PLAN_ID_URI}"
@@ -211,9 +211,9 @@ var supervisorPlanTasksBody = SkillBody{
    - [ ] No TODO placeholders
    - [ ] Service wired with real dependencies
    EOF
-   )" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-   [[rec]] label add "$SLICE_1_ID_URI" pasture:p9-impl:s9-slice
-   [[rec]] update "$SLICE_1_ID_URI" --notes "Design: '{
+   )")
+   [[rec:label]] "$SLICE_1_ID_URI" pasture:p9-impl:s9-slice
+   [[rec:note]] "$SLICE_1_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Design: '{
        \"productionCodePath\": \"cli-tool feature list\",
        \"validation_checklist\": [
          \"Type checking passes\",
@@ -232,12 +232,12 @@ var supervisorPlanTasksBody = SkillBody{
        \"ratified_plan\": \"${RATIFIED_PLAN_ID_URI}\"
      }'"
 
-   [[rec]] dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+   [[rec:block]] "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
    ` + "```" + `
 
 7. **Update IMPL_PLAN with vertical slice breakdown + integration points:** First create each remaining slice using the Step 6 pattern and bind SLICE_2_ID_URI, SLICE_3_ID_URI and SLICE_4_ID_URI from their respective create outputs.
    ` + "```" + `bash
-   [[rec]] update "${IMPL_PLAN_ID_URI}" --description="$(cat <<EOF
+   [[rec:note]] "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="$(cat <<EOF
    ---
    references:
      request: "${REQUEST_ID_URI}"
@@ -299,7 +299,7 @@ var supervisorPlanTasksBody = SkillBody{
    All production code paths verified via code inspection:
    - ./bin/cli-tool feature
    - ./bin/cli-tool feature list
-   - ./bin/cli-tool feature detail "${ID_URI}"
+   - ./bin/cli-tool feature detail "${SLICE_1_ID_URI}"
    - ./bin/cli-tool feature search
    - All integration points verified: contracts match between owner and consumers
    EOF
@@ -401,8 +401,8 @@ var supervisorPlanTasksBody = SkillBody{
 
 ` + "```" + `bash
 # Create FOLLOWUP_IMPL_PLAN
-FOLLOWUP_IMPL_PLAN_ID_URI=$([[rec]] create "FOLLOWUP_IMPL_PLAN: <follow-up feature>" --phase impl_plan --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=2 \
-  --description="---
+FOLLOWUP_IMPL_PLAN_ID_URI=$([[rec:create]] --kind epic --title "FOLLOWUP_IMPL_PLAN: <follow-up feature>" --phase impl_plan --priority 2 \
+  --body="---
 references:
   followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
   original_request: "${REQUEST_ID_URI}"
@@ -410,12 +410,12 @@ references:
   followup_urd: "${FOLLOWUP_URD_ID_URI}"
   followup_proposal: "${FOLLOWUP_PROPOSAL_ID_URI}"
 ---
-Vertical slice decomposition for follow-up epic." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$FOLLOWUP_IMPL_PLAN_ID_URI" pasture:p8-impl:s8-plan
+Vertical slice decomposition for follow-up epic.")
+[[rec:label]] "$FOLLOWUP_IMPL_PLAN_ID_URI" pasture:p8-impl:s8-plan
 
 # Create FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks
-FOLLOWUP_SLICE_ID_URI=$([[rec]] create "FOLLOWUP_SLICE-1: <description>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --type=task \
-  --description="---
+FOLLOWUP_SLICE_ID_URI=$([[rec:create]] --kind task --title "FOLLOWUP_SLICE-1: <description>" --phase worker_slices \
+  --body="---
 references:
   followup_impl_plan: "${FOLLOWUP_IMPL_PLAN_ID_URI}"
   followup_urd: "${FOLLOWUP_URD_ID_URI}"
@@ -432,12 +432,12 @@ references:
 ## Validation Checklist
 - [ ] All DEFER'd-item leaf tasks resolved
 - [ ] Tests pass
-- [ ] Production code path verified" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$FOLLOWUP_SLICE_ID_URI" pasture:p9-impl:s9-slice
+- [ ] Production code path verified")
+[[rec:label]] "$FOLLOWUP_SLICE_ID_URI" pasture:p9-impl:s9-slice
 
 # Wire dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice
-[[rec]] dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_1_URI}"
-[[rec]] dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_2_URI}"
+[[rec:block]] "${FOLLOWUP_SLICE_ID_URI}" --by "${LEAF_TASK_ID_1_URI}"
+[[rec:block]] "${FOLLOWUP_SLICE_ID_URI}" --by "${LEAF_TASK_ID_2_URI}"
 ` + "```" + ``,
 		},
 	},

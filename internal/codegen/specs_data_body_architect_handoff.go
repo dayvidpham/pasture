@@ -55,13 +55,13 @@ var architectHandoffBody = SkillBody{
 ## Supervisor Startup
 1. Call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + ` to load your role instructions
 2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed
-3. Read the RATIFIED PROPOSAL and URD with ` + "`" + `[[rec]] show` + "`" + ` commands below
+3. Read the RATIFIED PROPOSAL and URD with ` + "`" + `[[rec:show]]` + "`" + ` commands below
 4. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1 types / L2 tests / L3 impl triple is only illustrative)
 
 ## References
 - REQUEST: "${REQUEST_ID_URI}"
-- URD: "${URD_ID_URI}" (read with ` + "`" + `[[rec]] show "${URD_ID_URI}"` + "`" + `)
-- RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}" (read with ` + "`" + `[[rec]] show "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + `)
+- URD: "${URD_ID_URI}" (read with ` + "`" + `[[rec:show]] "${URD_ID_URI}"` + "`" + `)
+- RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}" (read with ` + "`" + `[[rec:show]] "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + `)
 
 ## Summary
 <1-2 sentence summary of what needs to be implemented>
@@ -84,16 +84,16 @@ var architectHandoffBody = SkillBody{
 			Title: "Steps",
 			Content: `1. Create the HANDOFF Pasture task — its body IS the handoff document (use the template above):
    ` + "```" + `bash
-   HANDOFF_ID_URI=$([[rec]] create "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --namespace "$PASTURE_NAMESPACE" --format json --type=task --priority=2 \
-     --description="---
+   HANDOFF_ID_URI=$([[rec:create]] --kind task --title "HANDOFF: Architect → Supervisor for REQUEST" --phase handoff --priority 2 \
+     --body="---
    references:
      request: "${REQUEST_ID_URI}"
      urd: "${URD_ID_URI}"
      proposal: "${RATIFIED_PROPOSAL_ID_URI}"
    ---
    # Handoff: Architect → Supervisor
-   <full handoff body per the template above>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-   [[rec]] label add "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
+   <full handoff body per the template above>")
+   [[rec:label]] "$HANDOFF_ID_URI" pasture:p7-plan:s7-handoff
 
    ` + "```" + `
 
@@ -105,7 +105,7 @@ var architectHandoffBody = SkillBody{
 3. Monitor supervisor progress:
    ` + "```" + `bash
    # Check pasture status
-   [[rec]] list --namespace "$PASTURE_NAMESPACE" --status=in_progress
+   [[rec:query]] --status=in_progress
    ` + "```" + `
 
    A supervisor that looks idle right after spawn is usually running Explore subagents — do **not** shut it down pre-emptively.`,
@@ -122,9 +122,9 @@ Implement the ratified plan for <feature name>.
 
 ## Context
 - REQUEST: "${REQUEST_ID_URI}"
-- URD: "${URD_ID_URI}" (read with ` + "`" + `[[rec]] show "${URD_ID_URI}"` + "`" + ` for user requirements)
+- URD: "${URD_ID_URI}" (read with ` + "`" + `[[rec:show]] "${URD_ID_URI}"` + "`" + ` for user requirements)
 - RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}"
-- HANDOFF: "${HANDOFF_ID_URI}" (the handoff body — read with ` + "`" + `[[rec]] show "${HANDOFF_ID_URI}"` + "`" + `)
+- HANDOFF: "${HANDOFF_ID_URI}" (the handoff body — read with ` + "`" + `[[rec:show]] "${HANDOFF_ID_URI}"` + "`" + `)
 
 ## Summary
 <1-2 sentence summary of what needs to be implemented>
@@ -139,7 +139,7 @@ Implement the ratified plan for <feature name>.
 1. Call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + ` FIRST — do not proceed without loading your role
 2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed
 3. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1/L2/L3 triple is only illustrative); a slice without leaf tasks is undecomposed
-4. Read the ratified plan with ` + "`" + `[[rec]] show "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + ` and the URD with ` + "`" + `[[rec]] show "${URD_ID_URI}"` + "`" + `
+4. Read the ratified plan with ` + "`" + `[[rec:show]] "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + ` and the URD with ` + "`" + `[[rec:show]] "${URD_ID_URI}"` + "`" + `
 ` + "```" + `
 
 Deliver this assignment to the supervisor when you delegate it:
@@ -155,7 +155,7 @@ Implement the ratified plan for User Authentication.
 - REQUEST: ${REQUEST_ID_URI}
 - URD: "${URD_ID_URI}"
 - RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}"
-- HANDOFF: "${HANDOFF_ID_URI}" (read with [[rec]] show "${HANDOFF_ID_URI}")
+- HANDOFF: "${HANDOFF_ID_URI}" (read with [[rec:show]] "${HANDOFF_ID_URI}")
 
 ## Summary
 Add JWT-based authentication with login/logout endpoints and middleware.
@@ -173,7 +173,7 @@ Given an expired token when accessing protected routes then return 401
 1. Call [[op:invoke_skill]](/pasture:supervisor) FIRST
 2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed
 3. Every slice MUST have leaf tasks (any number; L1/L2/L3 is only illustrative)
-4. Read ratified plan: [[rec]] show "${RATIFIED_PROPOSAL_ID_URI}" and URD: [[rec]] show "${URD_ID_URI}"` + "`" + `,
+4. Read ratified plan: [[rec:show]] "${RATIFIED_PROPOSAL_ID_URI}" and URD: [[rec:show]] "${URD_ID_URI}"` + "`" + `,
   summary: "IMPL_PLAN assignment with Pasture context"
 })
 ` + "```" + ``,
@@ -182,7 +182,7 @@ Given an expired token when accessing protected routes then return 401
 			Id:    "arch-handoff-delegation-notes",
 			Title: "Delegation Notes",
 			Content: `- Delegate the supervisor (and the workers it will coordinate) as **T1 frontier** assignments — the IMPL_PLAN phase benefits from the frontier tier for decomposition and review.
-- A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + `, the Pasture task IDs, and ` + "`" + `[[rec]] show` + "`" + ` commands to fetch full requirements).
+- A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + `, the Pasture task IDs, and ` + "`" + `[[rec:show]]` + "`" + ` commands to fetch full requirements).
 - Do not spawn the supervisor via ` + "`" + `aura-swarm` + "`" + ` for the IMPL_PLAN phase; the deprecated orchestrator must not be invoked.`,
 		},
 		{

@@ -2626,3 +2626,21 @@ preceding digest identifies the prior recovery revision; neither revision
 participated in the historical captures above, and no capture payload, capture
 kit, fixture identity, activation state or acceptance record changes. No new
 live session, capture or host capability is claimed.
+
+### Neutral tracker vocabulary recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`9423f258751d0bf3ddd1244684b352e3e871481a75fa02c62674a111a1e0353d`.
+This later generated revision changes the embedded recovery prose from the
+native tracker verbs to the ten neutral operations (`create`, `label`, `block`,
+`note`, `show`, `query`, `ready`, `status`, `close`, `whoami`) and states the
+mid-epoch write-failure rule in the recovery text every role carries. The rec
+adapter owns the backend recipes, so no native verb remains after the entry
+point. Lifecycle transport, activation, version guards, decision handling and
+the injection contract are unchanged; no runtime task query, file read or
+cached task state is added. The generated plugin and embedded hook asset still
+have identical bytes. The preceding digest identifies the prior recovery
+revision; neither revision participated in the historical captures above, and
+no capture payload, capture kit, fixture identity, activation state or
+acceptance record changes. No new live session, capture or host capability is
+claimed.

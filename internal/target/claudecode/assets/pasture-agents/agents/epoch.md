@@ -40,7 +40,7 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: "${EPOCH_REC}" dep add parent --blocked-by child
+- Then: chain dependency: "${EPOCH_REC}" block parent --by child
 - Should not: skip dependency chaining or invert direction
 
 **[C-audit-never-delete]**
@@ -58,7 +58,7 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: "${EPOCH_REC}" dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
+- Then: parent blocked-by child: "${EPOCH_REC}" block "${STAYS_OPEN_URI}" --by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 **[C-frontmatter-refs]**
@@ -94,7 +94,7 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices
 - When: slice implementation is done
-- Then: workers notify supervisor with "${EPOCH_REC}" comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not "${EPOCH_REC}" close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
+- Then: workers notify supervisor with "${EPOCH_REC}" note (not "${EPOCH_REC}" close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
 - Should not: close slices immediately upon worker completion; allow workers to close their own slices
 
 **[C-supervisor-explore-ephemeral]**

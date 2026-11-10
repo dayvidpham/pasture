@@ -66,6 +66,10 @@ const (
 
 	// CodegenSchema is used by S5 codegen tests (schema.xml generation scenarios).
 	CodegenSchema FixtureName = "schema"
+
+	// CodegenModelCatalog is the committed allowlist of native model ids per
+	// harness. It keeps the tier table from being its own only witness.
+	CodegenModelCatalog FixtureName = "model_catalog"
 )
 
 // LoadFixtures reads testdata/<name>.yaml relative to the current working

@@ -76,10 +76,10 @@ var userRequestBody = SkillBody{
 
 2. **Create the request task:**
    ` + "```" + `bash
-   REQUEST_ID_URI=$([[rec]] create "REQUEST: {{short summary}}" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-     --description "{{VERBATIM user request - do not edit}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-   [[rec]] label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-   [[rec]] update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+   REQUEST_ID_URI=$([[rec:create]] --kind task --title "REQUEST: {{short summary}}" --phase request \
+     --body "{{VERBATIM user request - do not edit}}")
+   [[rec:label]] "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+   [[rec:note]] "$REQUEST_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
    ` + "```" + `
 
 3. **Classify along 4 axes:**
@@ -90,7 +90,7 @@ var userRequestBody = SkillBody{
 
 4. **Record classification** via comment on the request task:
    ` + "```" + `bash
-   [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+   [[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
      "Classification: scope={{scope}}, complexity={{complexity}}, risk={{risk}}, novelty={{novelty}}"
    ` + "```" + ``,
 				},
@@ -103,7 +103,7 @@ When the intent is to fix existing behavior, the **validation-case lifecycle** a
 
 Record the recognition in the same classification comment so downstream phases pick it up:
 ` + "```" + `bash
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Fix-intent: yes — validation-case lifecycle applies (elicit cases in URE, confirm in UAT, store as fixtures)"
 ` + "```" + ``,
 				},
@@ -138,7 +138,7 @@ Record the recognition in the same classification comment so downstream phases p
 					Content: `Record the user's depth choice, then spawn two parallel agents:
 
 ` + "```" + `bash
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Research depth: {{depth}} (user confirmed)"
 ` + "```" + `
 
@@ -172,7 +172,7 @@ See [skills/research/SKILL.md](../research/SKILL.md) for full procedure, output 
 
 **Record findings** as a comment on the REQUEST task:
 ` + "```" + `bash
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}
@@ -210,7 +210,7 @@ See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output fo
 
 **Record findings** as a comment on the REQUEST task:
 ` + "```" + `bash
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions}}
   - Related types: {{existing types/schemas}}
@@ -232,12 +232,12 @@ See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output fo
 			Content: `User says: "I want to add a logout button to the header that clears the session and redirects to the login page"
 
 ` + "```" + `bash
-REQUEST_ID_URI=$([[rec]] create "REQUEST: Add logout button to header" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "I want to add a logout button to the header that clears the session and redirects to the login page" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-[[rec]] update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+REQUEST_ID_URI=$([[rec:create]] --kind task --title "REQUEST: Add logout button to header" --phase request \
+  --body "I want to add a logout button to the header that clears the session and redirects to the login page")
+[[rec:label]] "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+[[rec:note]] "$REQUEST_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
 
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Classification: scope=module, complexity=low, risk=internal-only, novelty=familiar"
 ` + "```" + ``,
 		},
@@ -248,7 +248,7 @@ REQUEST_ID_URI=$([[rec]] create "REQUEST: Add logout button to header" --phase r
 
 The elicit task will block this request task:
 ` + "```" + `bash
-[[rec]] dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
+[[rec:block]] "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"
 ` + "```" + ``,
 		},
 	},

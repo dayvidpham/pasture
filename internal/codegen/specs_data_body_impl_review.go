@@ -33,41 +33,41 @@ See ` + "`../protocol/CONSTRAINTS.md`" + ` for coding standards and severity def
 
 ` + "```" + `bash
 # Create a BLOCKER finding
-FINDING_ID=$([[rec]] create "BLOCKER: Missing error handling in auth flow" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+FINDING_ID=$([[rec:create]] --kind task --title "BLOCKER: Missing error handling in auth flow" --phase code_review \
+  --body "---
 references:
   wave: 1
   slice: \"${SLICE_1_1_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-Missing error handling causes silent failure in auth flow." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$FINDING_ID" pasture:p10-impl:s10-review
-[[rec]] label add "$FINDING_ID" pasture:finding
+Missing error handling causes silent failure in auth flow.")
+[[rec:label]] "$FINDING_ID" pasture:p10-impl:s10-review
+[[rec:label]] "$FINDING_ID" pasture:finding
 
 # Wire dual-parent: finding blocks BOTH severity group AND slice
-[[rec]] dep add "$BLOCKER_GROUP_ID_URI" --blocked-by "$FINDING_ID"
-[[rec]] dep add "${SLICE_1_1_ID_URI}" --blocked-by "$FINDING_ID"
+[[rec:block]] "$BLOCKER_GROUP_ID_URI" --by "$FINDING_ID"
+[[rec:block]] "${SLICE_1_1_ID_URI}" --by "$FINDING_ID"
 ` + "```" + `
 
 Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent). They stay open past the wave gate and converge at the end, and they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
 
 ` + "```" + `bash
 # IMPORTANT finding — attaches to the IMPORTANT severity group (NOT the slice)
-IMPORTANT_FINDING_ID=$([[rec]] create "IMPORTANT: Add request timeout" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_FINDING_ID=$([[rec:create]] --kind task --title "IMPORTANT: Add request timeout" --phase code_review \
+  --body "---
 references:
   wave: 1
   slice: \"${SLICE_1_2_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-API calls should have configurable timeouts." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
-[[rec]] label add "$IMPORTANT_FINDING_ID" pasture:finding
+API calls should have configurable timeouts.")
+[[rec:label]] "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
+[[rec:label]] "$IMPORTANT_FINDING_ID" pasture:finding
 
 # Attaches to the IMPORTANT severity group (NOT the slice); its close rule is C-finding-lifecycle
-[[rec]] dep add "$IMPORTANT_GROUP_ID_URI" --blocked-by "$IMPORTANT_FINDING_ID"
+[[rec:block]] "$IMPORTANT_GROUP_ID_URI" --by "$IMPORTANT_FINDING_ID"
 ` + "```" + ``,
 		},
 		{
@@ -101,10 +101,10 @@ delegation: {
   subagent_type: "general-purpose",
   run_in_background: true,
   prompt: ` + "`" + `You are Reviewer A (Correctness).
-URD: "${URD_ID_URI}" (read with [[rec]] show "${URD_ID_URI}" for user requirements context)
+URD: "${URD_ID_URI}" (read with [[rec:show]] "${URD_ID_URI}" for user requirements context)
 Focus: Does implementation faithfully serve the user? Are technical decisions consistent with rationale?
 Review the whole wave: "${SLICE_1_1_ID_URI}", "${SLICE_1_2_ID_URI}", "${SLICE_1_3_ID_URI}"
-For each slice, run: [[rec]] show "${SLICE_ID_URI}"
+For each slice, run: [[rec:show]] "${SLICE_ID_URI}"
 Create ONE severity trio (BLOCKER/IMPORTANT/MINOR) for the wave, listing every slice in its references. Title: WAVE-{W}-REVIEW-A-1
 Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure.` + "`" + `
 }
@@ -131,7 +131,7 @@ Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure
 | SLICE-1-2 | "${ID_URI}" | <description> | worker-2 |
 
 ## Review Procedure
-1. For each slice: ` + "`" + `[[rec]] show "${SLICE_ID_URI}"` + "`" + `
+1. For each slice: ` + "`" + `[[rec:show]] "${SLICE_ID_URI}"` + "`" + `
 2. Create ONE severity trio for the wave (EAGER)
 3. Add findings as children of severity groups
 4. BLOCKER findings: dual-parent (severity group + slice)
@@ -149,7 +149,7 @@ Call [[op:invoke_skill]](/pasture:reviewer-review-code) for the review procedure
 1. **Requirements Alignment (check URD)**
    - Does implementation match ratified plan?
    - Are all acceptance criteria met?
-   - Read URD (` + "`" + `[[rec]] show "${URD_ID_URI}"` + "`" + `) for requirements traceability
+   - Read URD (` + "`" + `[[rec:show]] "${URD_ID_URI}"` + "`" + `) for requirements traceability
 
 2. **User Vision (check URD)**
    - Does it fulfill the user's original request (as documented in URD)?
@@ -178,9 +178,9 @@ One vote per wave on the wave review task (not one per slice):
 
 **Documentation (via Pasture comments):**
 ` + "```" + `bash
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - [reason]"
+[[rec:note]] "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: ACCEPT - [reason]"
 # OR
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - [specific issue]. Suggest: [fix]"
+[[rec:note]] "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: REVISE - [specific issue]. Suggest: [fix]"
 ` + "```" + ``,
 		},
 		{
@@ -190,10 +190,10 @@ One vote per wave on the wave review task (not one per slice):
 
 ` + "```" + `bash
 # Check for any REVISE votes
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p10-impl:s10-review"
+[[rec:query]] --label="pasture:p10-impl:s10-review"
 
 # Check for unresolved BLOCKERs
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
+[[rec:query]] --label="pasture:severity:blocker" --status=open
 
 # If any REVISE or open BLOCKERs, return to implementation
 # If all ACCEPT and BLOCKERs resolved, proceed to Phase 11 (UAT)
@@ -210,7 +210,7 @@ One vote per wave on the wave review task (not one per slice):
 
 ` + "```" + `bash
 # Mark slice as needing revision
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "REVISION NEEDED: <specific issues>"
+[[rec:note]] "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "REVISION NEEDED: <specific issues>"
 
 # After worker fixes, start new review round
 # New severity groups are created fresh for the new round
@@ -225,19 +225,19 @@ One vote per wave on the wave review task (not one per slice):
 					Id:    "impl-rev-followup-step1",
 					Title: "Step 1: Create the follow-up epic",
 					Content: `` + "```" + `bash
-FOLLOWUP_EPIC_ID_URI=$([[rec]] create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
-  --description="---
+FOLLOWUP_EPIC_ID_URI=$([[rec:create]] --kind epic --title "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --priority 3 \
+  --body="---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
   review_round: ${REVIEW_ROUND_ID_URI}
 ---
-User-DEFER'd UAT items only; no review findings." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
+User-DEFER'd UAT items only; no review findings.")
+[[rec:label]] "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 
 # Link only the UAT-deferred item leaves
-[[rec]] dep add "$FOLLOWUP_EPIC_ID_URI" --blocked-by "$DEFERRED_ITEM_ID_1_URI"
-[[rec]] dep add "$FOLLOWUP_EPIC_ID_URI" --blocked-by "$DEFERRED_ITEM_ID_2_URI"
+[[rec:block]] "$FOLLOWUP_EPIC_ID_URI" --by "$DEFERRED_ITEM_ID_1_URI"
+[[rec:block]] "$FOLLOWUP_EPIC_ID_URI" --by "$DEFERRED_ITEM_ID_2_URI"
 ` + "```" + ``,
 				},
 				{
@@ -260,34 +260,27 @@ FOLLOWUP epic (pasture:epic-followup)
 ` + "```" + `
 
 ` + "```" + `bash
-# Create follow-up lifecycle tasks
-FOLLOWUP_URE_ID=$([[rec]] create "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+# Create follow-up lifecycle tasks. The URD lands first so the URE can record it.
+FOLLOWUP_URD_ID=$([[rec:create]] --kind task --title "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit \
+  --body "---
 references:
   followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
   original_urd: "${ORIGINAL_URD_ID_URI}"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
-[[rec]] dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "$FOLLOWUP_URE_ID"
+Follow-up requirements. References original URD.")
+[[rec:label]] "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
+[[rec:label]] "$FOLLOWUP_URD_ID" pasture:urd
 
-FOLLOWUP_URD_ID=$([[rec]] create "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
-references:
-  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
-  original_urd: "${ORIGINAL_URD_ID_URI}"
----
-Follow-up requirements. References original URD." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
-[[rec]] label add "$FOLLOWUP_URD_ID" pasture:urd
-# Preserve the URE's references and scoping text; the living URD is not blocking work.
-[[rec]] update "$FOLLOWUP_URE_ID" --description "---
+FOLLOWUP_URE_ID=$([[rec:create]] --kind task --title "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit \
+  --body "---
 references:
   followup_epic: \"${FOLLOWUP_EPIC_ID_URI}\"
   original_urd: \"${ORIGINAL_URD_ID_URI}\"
   followup_urd: \"${FOLLOWUP_URD_ID}\"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address."
+Scoping URE: determine which user-DEFER'd UAT items to address.")
+[[rec:label]] "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
+[[rec:block]] "${FOLLOWUP_EPIC_ID_URI}" --by "$FOLLOWUP_URE_ID"
 ` + "```" + ``,
 				},
 				{
@@ -297,9 +290,9 @@ Scoping URE: determine which user-DEFER'd UAT items to address."
 
 ` + "```" + `bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
-[[rec]] dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
-[[rec]] dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
-# Leaf task already has: [[rec]] dep add "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"
+[[rec:block]] "${FOLLOWUP_SLICE_ID_URI}" --by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
+[[rec:block]] "${FOLLOWUP_SLICE_ID_URI}" --by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
+# Leaf task already has: [[rec:block]] "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --by "${LEAF_TASK_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -336,7 +329,7 @@ Scoping URE: determine which user-DEFER'd UAT items to address."
 
 ` + "```" + `text
 # Verify consensus — no open BLOCKERs
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
+[[rec:query]] --label="pasture:severity:blocker" --status=open
 # Should return 0 results
 
 # Proceed to Phase 11 (Implementation UAT)

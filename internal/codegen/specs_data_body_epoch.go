@@ -17,7 +17,7 @@ var epochBody = SkillBody{
 			Id:        "epoch-dep-chain",
 			Given:     "any phase transition",
 			When:      "creating new task",
-			Then:      "add dependency to previous: [[rec]] dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
+			Then:      "add dependency to previous: [[rec:block]] \"${PARENT_URI}\" --by \"${CHILD_URI}\"",
 			ShouldNot: "skip dependency chaining",
 		},
 		{
@@ -84,7 +84,7 @@ var epochBody = SkillBody{
 			Id:    "epoch-core-principles",
 			Title: "Core Principles",
 			Content: `1. **AUDIT TRAIL PRESERVATION** — Never delete or destroy information, labels, or tasks
-2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: ` + "`" + `[[rec]] dep add "${PARENT_URI}" --blocked-by "${CHILD_URI}"` + "`" + `
+2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: ` + "`" + `[[rec:block]] "${PARENT_URI}" --by "${CHILD_URI}"` + "`" + `
 3. **USER ENGAGEMENT** — URE and UAT at multiple checkpoints
 4. **CONSENSUS REQUIRED** — All 3 reviewers must ACCEPT before proceeding
 5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. Only an open BLOCKER gates a review wave; open findings converge at the end
@@ -126,13 +126,31 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 		{
 			Id:    "epoch-starting",
 			Title: "Starting an Epoch",
-			Content: `**Option 1: Manual Task Creation**
+			Content: `**Step 0: detect the tracker backend before the first write.**
+
+Write the probe and the adapter from the Tracker Adapter section to ` + "`" + `.agents.local/pasture/probe.sh` + "`" + ` and the path you will record in ` + "`rec:`" + `, make the adapter executable, and run the probe. Write ` + "`EPOCH.md`" + ` from its output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe.
+
+` + "```" + `bash
+mkdir -p .agents.local/pasture
+# Paste the two fenced blocks from the Tracker Adapter section:
+#   probe -> .agents.local/pasture/probe.sh
+#   rec   -> .agents.local/pasture/rec
+chmod +x .agents.local/pasture/rec
+sh .agents.local/pasture/probe.sh
+# Then write .agents.local/pasture/EPOCH.md from the KEY=VALUE output, and in
+# every shell session resolve the entry point:
+EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
+` + "```" + `
+
+If the probe prints ` + "`BACKEND=error`" + `, stop and report before the first mutation: the store exists but cannot be used. If it prints ` + "`BACKEND=ledger`" + `, this adapter build cannot record; install a build that ships the ledger store. If it prints ` + "`BACKEND=pasture`" + `, record ` + "`namespace:`" + `, ` + "`db:`" + `, ` + "`author:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output.
+
+**Option 1: Manual Task Creation**
 ` + "```" + `bash
 # Phase 1: Capture user request
-REQUEST_ID_URI=$([[rec]] create "REQUEST: {{feature}}" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "{{verbatim user request}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-[[rec]] update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+REQUEST_ID_URI=$([[rec:create]] --kind task --title "REQUEST: {{feature}}" --phase request \
+  --body "{{verbatim user request}}")
+[[rec:label]] "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+[[rec:note]] "$REQUEST_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
 
 # Then proceed through phases manually
 ` + "```" + `
@@ -146,18 +164,18 @@ Use the explicit task graph; no molecule subsystem is required.`,
 
 ` + "```" + `bash
 # After Phase 1 creates "${REQUEST_ID_URI}"
-[[rec]] dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"    # REQUEST blocked by ELICIT
+[[rec:block]] "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"    # REQUEST blocked by ELICIT
 
 # After Phase 2 creates "${ELICIT_ID_URI}" and URD
-[[rec]] dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"   # ELICIT blocked by PROPOSAL
+[[rec:block]] "${ELICIT_ID_URI}" --by "${PROPOSAL_ID_URI}"   # ELICIT blocked by PROPOSAL
 # URD linked via frontmatter in its description:
 #   references:
 #     request: "${REQUEST_ID_URI}"
 #     elicit: "${ELICIT_ID_URI}"
 
 # After Phase 5 (UAT) and Phase 6 (ratify), update URD
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "UAT results: {{summary}}"
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed as {{summary}}"
+[[rec:note]] "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "UAT results: {{summary}}"
+[[rec:note]] "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Ratified: scope confirmed as {{summary}}"
 ` + "```" + ``,
 		},
 		{
@@ -168,14 +186,14 @@ The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any re
 **Owner:** Supervisor creates the follow-up epic.
 
 ` + "```" + `bash
-FOLLOWUP_EPIC_ID_URI=$([[rec]] create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
-  --description "---
+FOLLOWUP_EPIC_ID_URI=$([[rec:create]] --kind epic --title "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --priority 3 \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   uat: "${UAT_ID_URI}"
 ---
-Aggregated user-DEFER'd items from UAT (Phase 5/11)." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
+Aggregated user-DEFER'd items from UAT (Phase 5/11).")
+[[rec:label]] "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 ` + "```" + `
 
 ### Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
@@ -201,28 +219,28 @@ See ` + "`" + `/pasture:supervisor` + "`" + ` and ` + "`" + `/pasture:impl-revie
 
 ` + "```" + `bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_ID_URI=$([[rec]] create "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-   --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$BLOCKER_ID_URI" pasture:severity:blocker
-[[rec]] label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$([[rec]] create "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-   --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$IMPORTANT_ID_URI" pasture:severity:important
-[[rec]] label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$([[rec]] create "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-   --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$MINOR_ID_URI" pasture:severity:minor
-[[rec]] label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+BLOCKER_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review \
+   --body "Severity group for this review round; close only if empty")
+[[rec:label]] "$BLOCKER_ID_URI" pasture:severity:blocker
+[[rec:label]] "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review \
+   --body "Severity group for this review round; close only if empty")
+[[rec:label]] "$IMPORTANT_ID_URI" pasture:severity:important
+[[rec:label]] "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+MINOR_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review \
+   --body "Severity group for this review round; close only if empty")
+[[rec:label]] "$MINOR_ID_URI" pasture:severity:minor
+[[rec:label]] "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Empty groups are closed immediately
-[[rec]] close "${IMPORTANT_ID_URI}"
-[[rec]] close "${MINOR_ID_URI}"
+[[rec:close]] "${IMPORTANT_ID_URI}"
+[[rec:close]] "${MINOR_ID_URI}"
 ` + "```" + `
 
 **Dual-parent BLOCKER:** Bind BLOCKER_FINDING_ID_URI from the finding task's create output before running this fence. BLOCKER findings block both the severity group AND the slice:
 ` + "```" + `bash
-[[rec]] dep add "${BLOCKER_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
-[[rec]] dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+[[rec:block]] "${BLOCKER_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
+[[rec:block]] "${SLICE_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
 ` + "```" + `
 
 See ` + "`" + `../protocol/CONSTRAINTS.md` + "`" + ` for full severity definitions.`,
@@ -232,16 +250,16 @@ See ` + "`" + `../protocol/CONSTRAINTS.md` + "`" + ` for full severity definitio
 			Title: "Tracking Progress",
 			Content: `` + "```" + `bash
 # View dependency chain
-[[rec]] dep tree "${LATEST_TASK_ID_URI}"
+[[rec:query]] --tree "${LATEST_TASK_ID_URI}"
 
 # Check blocked work
-[[rec]] blocked
+[[rec:query]] --blocked
 
 # See all epoch tasks by phase
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p1-user:s1_1-classify"    # REQUEST tasks
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p2-user:s2_1-elicit"      # ELICIT tasks
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose"        # PROPOSAL tasks
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice"          # Implementation slices
+[[rec:query]] --label="pasture:p1-user:s1_1-classify"    # REQUEST tasks
+[[rec:query]] --label="pasture:p2-user:s2_1-elicit"      # ELICIT tasks
+[[rec:query]] --label="pasture:p3-plan:s3-propose"        # PROPOSAL tasks
+[[rec:query]] --label="pasture:p9-impl:s9-slice"          # Implementation slices
 ` + "```" + ``,
 		},
 		{
@@ -257,11 +275,11 @@ See ` + "`" + `../protocol/CONSTRAINTS.md` + "`" + ` for full severity definitio
 
 ` + "```" + `bash
 # Correct: Add ratify label
-[[rec]] label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All reviewers ACCEPT"
+[[rec:label]] "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+[[rec:note]] "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "RATIFIED: All reviewers ACCEPT"
 
 # Wrong: Don't close
-# [[rec]] close "${PROPOSAL_ID_URI}"  # NEVER DO THIS
+# [[rec:close]] "${PROPOSAL_ID_URI}"  # NEVER DO THIS
 ` + "```" + ``,
 		},
 	},

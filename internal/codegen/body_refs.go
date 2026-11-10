@@ -31,22 +31,32 @@ import (
 //
 //	[[tool:<ir.HarnessTool>]]   a native file or shell capability
 //	[[op:<ir.OperationKind>]]   an orchestration intent
-//	[[rec]]                     the tracker entry point
+//	[[rec:<TrackerOpId>]]       the tracker adapter and one neutral operation
 //
 // An unknown marker payload fails generation. Every authored string that
 // reaches generated output must carry a typed marker instead of a native call
 // prefix or the tracker command prefix; renderedSources enumerates that corpus
-// and the literal guards iterate it.
+// and the literal guards iterate it. There is no bare [[rec]] form: naming the
+// operation in the marker is what keeps the rendered call site inside the ten
+// neutral ops.
 const (
-	bodyRecMarker = "[[rec]]"
+	bodyRecMarkerPrefix = "[[rec:"
 
 	bodyMarkerOpen  = "[["
 	bodyMarkerClose = "]]"
 )
 
+// recMarker is the authored marker for one neutral tracker operation. It is the
+// only marker form the tracker contract accepts, so a body cannot write a
+// native verb after the entry point.
+func recMarker(id TrackerOpId) string {
+	return bodyRecMarkerPrefix + string(id) + bodyMarkerClose
+}
+
 // trackerEntryPoint is the one home of the tracker call in generated prose.
-// Tracker backends are selected at run time (amendment A-3): a body writes the
-// neutral [[rec]] marker, which resolves to this runtime adapter entry point.
+// Tracker backends are selected at run time (amendment A-3): a body writes a
+// neutral [[rec:<op>]] marker, which resolves to this runtime adapter entry point
+// followed by the operation.
 // The adapter reads the backend from EPOCH.md and owns every native recipe in
 // specs_data_tracker.go, so no generated body names a backend.
 const trackerEntryPoint = `"${EPOCH_REC}"`
@@ -91,10 +101,10 @@ func ResolveBodyMarkers(content string, target HarnessName) (string, error) {
 }
 
 // neutralMarkerPattern matches one well-formed marker. schema.xml wraps code in
-// CDATA, whose closing "[" can sit directly before a marker ("<![CDATA[[[rec]]"),
+// CDATA, whose closing "[" can sit directly before a marker ("<![CDATA[[[rec:show]]"),
 // so the neutral resolver matches the marker token instead of scanning for the
 // first "[[".
-var neutralMarkerPattern = regexp.MustCompile(`\[\[(?:rec|tool:[A-Za-z0-9_]+|op:[A-Za-z0-9_]+)\]\]`)
+var neutralMarkerPattern = regexp.MustCompile(`\[\[(?:rec:[a-z_]+|tool:[A-Za-z0-9_]+|op:[A-Za-z0-9_]+)\]\]`)
 
 // ResolveBodyMarkersNeutral replaces every marker with the target-neutral
 // spelling. It is the rendering rule for a generated artifact that names no
@@ -177,7 +187,14 @@ func walkBodyMarkers(content string, resolve func(payload string) (string, error
 func resolveBodyMarker(target roleTarget, payload string) (string, error) {
 	switch {
 	case payload == "rec":
-		return trackerEntryPoint, nil
+		return "", fmt.Errorf(
+			"codegen.ResolveBodyMarkers: bare [[rec]] marker — " +
+				"why: the tracker entry point is followed by exactly one neutral operation, and the marker names it; " +
+				"where: an authored rendering source in internal/codegen/specs_data*.go; " +
+				"fix: write [[rec:<op>]] with one of create, label, block, note, show, query, ready, status, close, whoami",
+		)
+	case strings.HasPrefix(payload, "rec:"):
+		return resolveTrackerMarker(strings.TrimPrefix(payload, "rec:"), trackerEntryPoint)
 	case strings.HasPrefix(payload, "tool:"):
 		return resolveToolMarker(target, strings.TrimPrefix(payload, "tool:"))
 	case strings.HasPrefix(payload, "op:"):
@@ -187,7 +204,7 @@ func resolveBodyMarker(target roleTarget, payload string) (string, error) {
 			"codegen.ResolveBodyMarkers: unknown body marker %q — "+
 				"why: the body-marker grammar is closed to tool, op and the tracker entry point; "+
 				"where: an authored rendering source in internal/codegen/specs_data*.go; "+
-				"fix: use [[tool:<ir.HarnessTool>]], [[op:<ir.OperationKind>]] or [[rec]]",
+				"fix: use [[tool:<ir.HarnessTool>]], [[op:<ir.OperationKind>]] or [[rec:<op>]]",
 			bodyMarkerOpen+payload+bodyMarkerClose,
 		)
 	}
@@ -196,7 +213,14 @@ func resolveBodyMarker(target roleTarget, payload string) (string, error) {
 func resolveNeutralMarker(payload string) (string, error) {
 	switch {
 	case payload == "rec":
-		return neutralTrackerEntryPoint, nil
+		return "", fmt.Errorf(
+			"codegen.ResolveBodyMarkersNeutral: bare [[rec]] marker — " +
+				"why: the tracker entry point is followed by exactly one neutral operation, and the marker names it; " +
+				"where: an authored rendering source in internal/codegen/specs_data*.go; " +
+				"fix: write [[rec:<op>]] with one of create, label, block, note, show, query, ready, status, close, whoami",
+		)
+	case strings.HasPrefix(payload, "rec:"):
+		return resolveTrackerMarker(strings.TrimPrefix(payload, "rec:"), neutralTrackerEntryPoint)
 	case strings.HasPrefix(payload, "tool:"):
 		name := strings.TrimPrefix(payload, "tool:")
 		tool := ir.HarnessTool(name)
@@ -227,10 +251,27 @@ func resolveNeutralMarker(payload string) (string, error) {
 			"codegen.ResolveBodyMarkersNeutral: unknown body marker %q — "+
 				"why: the body-marker grammar is closed to tool, op and the tracker entry point; "+
 				"where: an authored rendering source in internal/codegen/specs_data*.go; "+
-				"fix: use [[tool:<ir.HarnessTool>]], [[op:<ir.OperationKind>]] or [[rec]]",
+				"fix: use [[tool:<ir.HarnessTool>]], [[op:<ir.OperationKind>]] or [[rec:<op>]]",
 			bodyMarkerOpen+payload+bodyMarkerClose,
 		)
 	}
+}
+
+// resolveTrackerMarker lowers one [[rec:<op>]] payload to the adapter entry
+// point followed by the registered neutral operation. An unregistered op fails
+// closed, so a rendered call cannot leave the closed vocabulary.
+func resolveTrackerMarker(name, entryPoint string) (string, error) {
+	id := TrackerOpId(name)
+	if !id.isRegistered() {
+		return "", fmt.Errorf(
+			"codegen.ResolveBodyMarkers: unregistered tracker operation %q — "+
+				"why: the tracker vocabulary is closed, so a rendered call must name one of the ten neutral ops; "+
+				"where: a rendering-source [[rec:<op>]] marker; "+
+				"fix: use one of create, label, block, note, show, query, ready, status, close, whoami",
+			name,
+		)
+	}
+	return entryPoint + " " + string(id), nil
 }
 
 func resolveToolMarker(target roleTarget, name string) (string, error) {
@@ -297,7 +338,7 @@ const schemaSourceFile = "schema.go"
 // completeMarkerPattern matches a whole body marker. A bare "[[ " or "]]"
 // fragment (the grammar constants in this file) is not authored prose and does
 // not match.
-var completeMarkerPattern = regexp.MustCompile(`\[\[(?:tool:[a-z_]+|op:[a-z_]+|rec)\]\]`)
+var completeMarkerPattern = regexp.MustCompile(`\[\[(?:tool:[a-z_]+|op:[a-z_]+|rec:[a-z_]+)\]\]`)
 
 // authoredMarkerLiterals returns every string-literal value in one Go source
 // file that contains a complete body marker. Reading the source keeps one home

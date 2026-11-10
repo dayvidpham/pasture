@@ -90,9 +90,9 @@ func AllTrackerOpIds() []TrackerOpId {
 }
 
 // TrackerOp is one operation: its canonical signature and its recipe on each
-// backend. The canonical signature is what a skill body writes after the
-// [[rec]] marker. The Pasture and Ledger fields are adapter recipes and live
-// only in this table; no authored skill prose copies them.
+// backend. The canonical signature is what a skill body writes after the op
+// marker. The Pasture and Ledger fields are adapter recipes and live only in
+// this table; no authored skill prose copies them.
 type TrackerOp struct {
 	Id        TrackerOpId
 	Action    string
@@ -103,14 +103,16 @@ type TrackerOp struct {
 
 // TrackerOps is the closed operation vocabulary. relate is not an operation:
 // a typed edge is block --kind. assign is not an operation: an owner is
-// recorded with label ID owner:<role>.
+// recorded with label ID owner:<role>. The Pasture recipe in each row documents
+// what the shipped rec asset (TrackerRecScript) executes; TestRecAssetServesTheTenOps
+// binds the two so the table and the asset cannot drift apart.
 var TrackerOps = map[TrackerOpId]TrackerOp{
 	TrackerOpCreate: {
 		Id:        TrackerOpCreate,
-		Action:    "create an immutable record; the body is verbatim",
-		Signature: `"${EPOCH_REC}" create --kind K --title T --phase P [--label L]... [--ref K=V]... [--body FILE|-] -> ID`,
-		Pasture:   `pasture task create "$TITLE" --description "$BODY" --phase "$PHASE" --namespace "$NS" --format json`,
-		Ledger:    `mkdir -p "$LEDGER/records" "$LEDGER/events/$ID"; write records/$ID.md with frontmatter id,title,kind,phase,labels,refs,created_by,created_at,sha256 and the body; append events/$ID/<ts>-created.md`,
+		Action:    "create an immutable record; the body is verbatim; print the new task URI",
+		Signature: `"${EPOCH_REC}" create --kind K --title T --phase P [--priority N] [--label L]... [--ref K=V]... [--body TEXT|-] -> ID`,
+		Pasture:   `pasture task create "$TITLE" --type "$KIND" --description "$BODY" --phase "$PHASE" --priority "$PRIORITY" --namespace "$NS" --format text; print the ID; then pasture task label add "$ID" "$LABEL" for each label`,
+		Ledger:    `mkdir -p "$LEDGER/records" "$LEDGER/events/$ID"; write records/$ID.md with frontmatter id,title,kind,phase,labels,refs,created_by,created_at,sha256 and the body; append events/$ID/<ts>-created.md; print $ID`,
 	},
 	TrackerOpLabel: {
 		Id:        TrackerOpLabel,
@@ -129,29 +131,29 @@ var TrackerOps = map[TrackerOpId]TrackerOp{
 	TrackerOpNote: {
 		Id:        TrackerOpNote,
 		Action:    "append an attributed immutable note; --to makes it a message",
-		Signature: `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body FILE|-]`,
+		Signature: `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body TEXT|-]`,
 		Pasture:   `pasture task comment add "$ID" "$BODY" --author "$AUTHOR"`,
 		Ledger:    `append events/$ID/<ts>-<actor>.md with op: note, author, kind, optional to, and the body`,
 	},
 	TrackerOpShow: {
 		Id:        TrackerOpShow,
 		Action:    "read one record, optionally with its notes or history",
-		Signature: `"${EPOCH_REC}" show ID [--notes] [--history]`,
+		Signature: `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]`,
 		Pasture:   `pasture task show "$ID"   (notes: pasture task comments "$ID"; history: pasture task timeline "$ID")`,
 		Ledger:    `concatenate records/$ID.md and its sorted events/$ID/*.md`,
 	},
 	TrackerOpQuery: {
 		Id:        TrackerOpQuery,
-		Action:    "enumerate records by status, label, or blocked state",
-		Signature: `"${EPOCH_REC}" query [--status S] [--label L] [--blocked]`,
-		Pasture:   `pasture task list --status "$STATUS" --label "$LABEL" --namespace "$NS"   (blocked: pasture task blocked)`,
+		Action:    "enumerate records by status, label, blocked state, or dependency tree",
+		Signature: `"${EPOCH_REC}" query [--status S] [--label L] [--blocked] [--tree ID] [--all-namespaces] [--format text|json]`,
+		Pasture:   `pasture task list --status "$STATUS" --label "$LABEL" --namespace "$NS"   (blocked: pasture task blocked; tree: pasture task dep tree "$ID")`,
 		Ledger:    `scan record frontmatter and events; --blocked keeps records with a non-closed blocked_by target`,
 	},
 	TrackerOpReady: {
 		Id:        TrackerOpReady,
 		Action:    "list non-closed records with no non-closed blocker",
-		Signature: `"${EPOCH_REC}" ready [--label L]`,
-		Pasture:   `pasture task ready --namespace "$NS"`,
+		Signature: `"${EPOCH_REC}" ready [--label L] [--format text|json]`,
+		Pasture:   `pasture task ready`,
 		Ledger:    `derived scan: non-closed records whose blocked_by targets are all closed`,
 	},
 	TrackerOpStatus: {
@@ -340,6 +342,273 @@ fi
 emit pasture "" "$DB" "$NS" "$ACT" "$VER"
 `
 
+// TrackerRecScript is the epoch tracker adapter ("rec"). It resolves the one
+// recorded backend and serves the ten neutral operations.
+//
+// This is the minimal, mergeable asset: the pasture backend is complete. The
+// ledger store is a later slice; until it lands, a ledger epoch is told plainly
+// that this adapter build cannot record for it instead of silently dropping the
+// record. The error backend always stops before the first mutation.
+//
+// The script reads EPOCH_FILE (default .agents.local/pasture/EPOCH.md) and never
+// probes. It is authored once here, rendered into the Tracker Adapter section,
+// and executed by the generated-recipe harness through this constant.
+const TrackerRecScript = `#!/bin/sh
+# Epoch tracker adapter (rec). Serves the ten neutral tracker operations.
+# Backend: the one recorded in EPOCH_FILE. Never re-probes, never switches.
+set -u
+
+EPOCH_FILE="${EPOCH_FILE:-.agents.local/pasture/EPOCH.md}"
+PASTURE_BIN="${PASTURE_BIN:-pasture}"
+
+fail() {
+  printf 'rec: %s\n  why: %s\n  fix: %s\n' "$1" "$2" "$3" >&2
+  exit 3
+}
+
+[ -f "$EPOCH_FILE" ] || fail "no epoch header at $EPOCH_FILE" \
+  "the backend is chosen once and recorded before the first write" \
+  "run the Starting an Epoch detection step, or set EPOCH_FILE to the header"
+
+field() {
+  sed -n "s/^$1: //p" "$EPOCH_FILE" 2>/dev/null | tail -1
+}
+
+BACKEND="$(field backend)"
+DB="${PASTURE_DB_PATH:-$(field db)}"
+NS="${PASTURE_NAMESPACE:-$(field namespace)}"
+AUTHOR="${PASTURE_AUTHOR:-$(field author)}"
+
+case "$BACKEND" in
+  pasture) : ;;
+  error)
+    fail "the recorded backend is error" \
+      "the store exists but cannot be used, and falling back could lose earlier epochs" \
+      "repair the store named in $EPOCH_FILE, or start a new epoch with a working backend" ;;
+  ledger)
+    fail "the recorded backend is ledger" \
+      "this adapter build serves only the pasture backend; the ledger store lands in a later slice" \
+      "use a build that ships the ledger store, or re-probe with a working pasture" ;;
+  "")
+    fail "no backend recorded in $EPOCH_FILE" \
+      "the probe has not written the header yet" \
+      "run the Starting an Epoch detection step" ;;
+  *)
+    fail "unknown backend '$BACKEND' in $EPOCH_FILE" \
+      "the backend set is closed to pasture, ledger and error" \
+      "rewrite the backend line from the probe output" ;;
+esac
+
+OP="${1:-}"
+[ "$#" -gt 0 ] && shift
+
+pb() {
+  if [ -n "$DB" ]; then
+    "$PASTURE_BIN" --db "$DB" "$@"
+  else
+    "$PASTURE_BIN" "$@"
+  fi
+}
+
+need_id() {
+  [ -n "${1:-}" ] || fail "$OP needs a task ID" "the first operand was empty" "pass the full task URI as the first operand"
+}
+
+case "$OP" in
+  create)
+    kind=task title= phase= body= priority= labels=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --kind) kind="$2"; shift 2 ;;
+        --kind=*) kind="${1#*=}"; shift ;;
+        --title) title="$2"; shift 2 ;;
+        --title=*) title="${1#*=}"; shift ;;
+        --phase) phase="$2"; shift 2 ;;
+        --phase=*) phase="${1#*=}"; shift ;;
+        --priority) priority="$2"; shift 2 ;;
+        --priority=*) priority="${1#*=}"; shift ;;
+        --body) body="$2"; shift 2 ;;
+        --body=*) body="${1#*=}"; shift ;;
+        --label) labels="$labels $2"; shift 2 ;;
+        --label=*) labels="$labels ${1#*=}"; shift ;;
+        --ref) shift 2 ;;
+        --ref=*) shift ;;
+        *) shift ;;
+      esac
+    done
+    [ "$body" = "-" ] && body="$(cat)"
+    set -- task create "$title" --type "$kind" --phase "$phase"
+    [ -n "$NS" ] && set -- "$@" --namespace "$NS"
+    [ -n "$priority" ] && set -- "$@" --priority "$priority"
+    [ -n "$body" ] && set -- "$@" --description "$body"
+    out="$(pb "$@" --format text)" || exit $?
+    id="$(printf '%s\n' "$out" | sed -n 's/^ID: *//p' | head -1)"
+    [ -n "$id" ] || fail "create returned no task ID" "the backend text output had no ID line" "check the store named in $EPOCH_FILE and the backend help page"
+    printf '%s\n' "$id"
+    for label in $labels; do
+      pb task label add "$id" "$label" >/dev/null || exit $?
+    done
+    ;;
+  label)
+    id="${1:-}"; shift; need_id "$id"
+    [ "$#" -gt 0 ] || fail "label needs at least one label" "no label operand was given" "pass the label after the task URI"
+    for label in "$@"; do
+      pb task label add "$id" "$label" || exit $?
+    done
+    ;;
+  block)
+    parent="${1:-}"; shift; need_id "$parent"
+    child= kind=blocked_by
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --by) child="$2"; shift 2 ;;
+        --by=*) child="${1#*=}"; shift ;;
+        --kind) kind="$2"; shift 2 ;;
+        --kind=*) kind="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    [ -n "$child" ] || fail "block needs --by CHILD" "the child operand was empty" "pass block PARENT --by CHILD"
+    if [ "$kind" = blocked_by ]; then
+      pb task dep add "$parent" --blocked-by "$child" || exit $?
+    else
+      pb task dep add "$parent" --target "$child" --kind "$kind" || exit $?
+    fi
+    ;;
+  note)
+    id="${1:-}"; shift; need_id "$id"
+    note_body= note_kind= note_to= fmt=json
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --author) AUTHOR="$2"; shift 2 ;;
+        --author=*) AUTHOR="${1#*=}"; shift ;;
+        --body) note_body="$2"; shift 2 ;;
+        --body=*) note_body="${1#*=}"; shift ;;
+        --kind) note_kind="$2"; shift 2 ;;
+        --kind=*) note_kind="${1#*=}"; shift ;;
+        --to) note_to="$2"; shift 2 ;;
+        --to=*) note_to="${1#*=}"; shift ;;
+        --format) fmt="$2"; shift 2 ;;
+        --format=*) fmt="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    [ "$note_body" = "-" ] && note_body="$(cat)"
+    [ -n "$AUTHOR" ] || fail "note needs --author" "the tracker never invents an author" "pass the registered actor id"
+    [ -n "$note_kind" ] && note_body="[$note_kind] $note_body"
+    [ -n "$note_to" ] && note_body="to:$note_to $note_body"
+    # The body is the last positional argument and may begin with dashes; -- stops
+    # the CLI's flag parser so a body like "---" is text, not a malformed flag.
+    pb task comment add "$id" --author "$AUTHOR" -- "$note_body" || exit $?
+    ;;
+  show)
+    id="${1:-}"; shift; need_id "$id"
+    mode=show fmt=json
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --notes) mode=notes; shift ;;
+        --history) mode=history; shift ;;
+        --format) fmt="$2"; shift 2 ;;
+        --format=*) fmt="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    case "$mode" in
+      notes) pb task comments "$id" --format "$fmt" ;;
+      history) pb task timeline "$id" ;;
+      *) pb task show "$id" --format "$fmt" ;;
+    esac
+    ;;
+  query)
+    status= label= tree= fmt=json blocked=0 allns=0
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --status) status="$2"; shift 2 ;;
+        --status=*) status="${1#*=}"; shift ;;
+        --label) label="$2"; shift 2 ;;
+        --label=*) label="${1#*=}"; shift ;;
+        --tree) tree="$2"; shift 2 ;;
+        --tree=*) tree="${1#*=}"; shift ;;
+        --format) fmt="$2"; shift 2 ;;
+        --format=*) fmt="${1#*=}"; shift ;;
+        --blocked) blocked=1; shift ;;
+        --all-namespaces) allns=1; shift ;;
+        *) shift ;;
+      esac
+    done
+    if [ -n "$tree" ]; then
+      pb task dep tree "$tree"
+      exit $?
+    fi
+    if [ "$blocked" = 1 ]; then
+      set -- task blocked
+    else
+      set -- task list
+      [ -n "$NS" ] && set -- "$@" --namespace "$NS"
+    fi
+    [ -n "$status" ] && set -- "$@" --status "$status"
+    [ -n "$label" ] && set -- "$@" --label "$label"
+    [ "$allns" = 1 ] && set -- "$@" --all-namespaces
+    pb "$@" --format "$fmt"
+    ;;
+  ready)
+    label= fmt=json
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --label) label="$2"; shift 2 ;;
+        --label=*) label="${1#*=}"; shift ;;
+        --format) fmt="$2"; shift 2 ;;
+        --format=*) fmt="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    set -- task ready
+    [ -n "$label" ] && set -- "$@" --label "$label"
+    pb "$@" --format "$fmt"
+    ;;
+  status)
+    id="${1:-}"; shift; need_id "$id"
+    want=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --set) want="$2"; shift 2 ;;
+        --set=*) want="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    [ -n "$want" ] || fail "status needs --set" "no target status was given" "pass --set open, in_progress or closed"
+    pb task update "$id" --status "$want"
+    ;;
+  close)
+    id="${1:-}"; shift; need_id "$id"
+    reason=
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --reason) reason="$2"; shift 2 ;;
+        --reason=*) reason="${1#*=}"; shift ;;
+        *) shift ;;
+      esac
+    done
+    if [ -n "$reason" ]; then
+      pb task close "$id" --reason "$reason"
+    else
+      pb task close "$id"
+    fi
+    ;;
+  whoami)
+    if [ -n "$AUTHOR" ]; then
+      printf '%s\n' "$AUTHOR"
+    else
+      pb task agents list
+    fi
+    ;;
+  *)
+    fail "unknown operation '$OP'" "the operation set is closed to the ten neutral ops" \
+      "use create, label, block, note, show, query, ready, status, close or whoami; run the probe if the header is missing"
+    ;;
+esac
+`
+
 // TrackerProbeLimits states what each probe step can and cannot detect. The
 // limits are normative: a probe result is evidence about the three checked
 // facts, not proof that a later write will succeed.
@@ -361,8 +630,10 @@ backend: pasture|ledger|error
 probed_at: <UTC timestamp>
 namespace: <namespace URI>        # pasture only
 db: <absolute store path>         # pasture only
+author: <registered actor id>     # pasture only; what whoami prints
 ledger: <absolute ledger path>    # ledger only
 rec: <absolute adapter path>      # pasture and ledger
+reviewer_tier: T2|T3              # optional; the phase-8 review-effort choice
 degrades: assign=claim-only       # ledger only
 ---
 <the probe transcript and the user's one-line acknowledgement, verbatim>`
@@ -372,8 +643,9 @@ degrades: assign=claim-only       # ledger only
 const TrackerWriteRetryLimit = 3
 
 // TrackerWriteFailureRule is the mid-epoch write-failure rule. It never allows
-// a backend switch and never allows a record to be dropped.
-const TrackerWriteFailureRule = `A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.`
+// a backend switch and never allows a record to be dropped. The retry count is
+// rendered from TrackerWriteRetryLimit, its one home.
+var TrackerWriteFailureRule = fmt.Sprintf(`A mid-epoch write failure retries %d times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.`, TrackerWriteRetryLimit)
 
 // trackerAdapterFragment builds the shared appendix that carries the adapter
 // contract into generated skill prose. It is rendered once and referenced by
@@ -396,7 +668,7 @@ func trackerAdapterFragment() SharedFragment {
 // table, so the generated text cannot drift from the closed set.
 func buildTrackerAdapterContent() string {
 	var b strings.Builder
-	b.WriteString("Tracker calls go through one entry point: `\"${EPOCH_REC}\" <op>`. The backend is chosen once, recorded in `.agents.local/pasture/EPOCH.md`, and read from there; no skill body names a backend.\n\n")
+	b.WriteString("Tracker calls go through one entry point: `\"${EPOCH_REC}\" <op>`. The backend is chosen once, recorded in `.agents.local/pasture/EPOCH.md`, and read from there; no skill body names a backend recipe.\n\n")
 	b.WriteString("Resolve the entry point from the header at the start of each shell session:\n\n")
 	b.WriteString("~~~bash\n")
 	b.WriteString("EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md 2>/dev/null | tail -1)\n")
@@ -419,14 +691,18 @@ func buildTrackerAdapterContent() string {
 	}
 	b.WriteString("\n")
 	b.WriteString(TrackerEpochHeaderTemplate)
-	b.WriteString("\n\nNo mid-epoch switching: if the recorded backend fails mid-epoch, stop and report; a switch requires the user's explicit decision, recorded in EPOCH.md, plus a note on the last successful record.\n\n")
+	b.WriteString("\n\nNo mid-epoch switching: if the recorded backend fails mid-epoch, stop and report. Switching is never a repair; abandon the epoch and start a new one with a fresh probe, so the header and the records never describe different backends.\n\n")
 	b.WriteString(TrackerWriteFailureRule)
 	b.WriteString("\n\nThe orchestrator runs the probe once. Subagents read EPOCH.md and never re-probe.\n\n")
+	b.WriteString("Write this probe to `.agents.local/pasture/probe.sh` and run it before the first write:\n\n")
 	b.WriteString("~~~sh\n")
 	b.WriteString(TrackerProbeScript)
 	b.WriteString("~~~\n\n")
 	b.WriteString(TrackerProbeLimits)
-	b.WriteString("\n")
+	b.WriteString("\n\nWrite this adapter to the path the header records in `rec:` and make it executable; every tracker call goes through it:\n\n")
+	b.WriteString("~~~sh\n")
+	b.WriteString(TrackerRecScript)
+	b.WriteString("~~~\n")
 	return b.String()
 }
 

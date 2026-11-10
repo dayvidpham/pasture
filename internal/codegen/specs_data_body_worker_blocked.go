@@ -37,15 +37,15 @@ var workerBlockedBody = SkillBody{
 
 2. Update Pasture task:
    ` + "```" + `bash
-   [[rec]] update "${TASK_ID_URI}" --notes="Blocked: <reason>. Missing: <dependency or clarification needed>"
+   [[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="Blocked: <reason>. Missing: <dependency or clarification needed>"
    ` + "```" + `
 
 3. Document the blocker in the task:
    ` + "```" + `bash
-   [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "BLOCKED: <reason>. Need: <dependency or clarification>"
+   [[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "BLOCKED: <reason>. Need: <dependency or clarification>"
    ` + "```" + `
 
-4. Wait for supervisor or dependency resolution — check with ` + "`" + `[[rec]] show "${TASK_ID_URI}"` + "`" + ``,
+4. Wait for supervisor or dependency resolution — check with ` + "`" + `[[rec:show]] "${TASK_ID_URI}"` + "`" + ``,
 		},
 		{
 			Id:    "wblk-common-blockers",

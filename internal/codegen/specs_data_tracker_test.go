@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -162,6 +163,7 @@ func TestProbeSubprocess(t *testing.T) {
 		invocations, err := os.ReadFile(log)
 		require.NoError(t, err)
 		require.NotContains(t, string(invocations), "migrate", "a missing store must not reach migrate --dry-run")
+		require.NotContains(t, string(invocations), " task ", "a missing store must not be opened by a task command")
 	})
 
 	t.Run("usable-store-is-pasture", func(t *testing.T) {
@@ -278,8 +280,14 @@ func TestProbeSubprocess(t *testing.T) {
 // supplied environment (plus PATH) and parses its KEY=VALUE output.
 func runTrackerProbe(t *testing.T, dir string, env map[string]string) map[string]string {
 	t.Helper()
+	return runProbeScript(t, dir, env, TrackerProbeScript)
+}
 
-	cmd := exec.Command("sh", "-c", TrackerProbeScript)
+// runProbeScript executes one probe variant and parses its KEY=VALUE output.
+func runProbeScript(t *testing.T, dir string, env map[string]string, script string) map[string]string {
+	t.Helper()
+
+	cmd := exec.Command("sh", "-c", script)
 	cmd.Dir = dir
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
 	for key, value := range env {
@@ -301,6 +309,11 @@ func runTrackerProbe(t *testing.T, dir string, env map[string]string) map[string
 // writeFakePasture writes a controllable fake Pasture binary and its invocation
 // log. The fake answers --help and --version, and exits per PROBE_FAKE_MODE for
 // the store and author checks.
+//
+// The fake CREATES the store on any real task call, exactly as the real CLI
+// does on open. That is what makes the probe's "must never create a store"
+// assertion live: a probe that runs a task command before the store-existence
+// check creates the file here, and the assertion turns red.
 func writeFakePasture(t *testing.T, dir string) (binPath, logPath string) {
 	t.Helper()
 
@@ -315,6 +328,16 @@ case "$1" in
     [ "$mode" = "help-failed" ] && exit 1
     exit 0 ;;
 esac
+# A real task command opens (and so creates) the selected store. --help never
+# does, so the capability sweep is exempt.
+case " $* " in
+  *" --help "*) : ;;
+  *" task "*)
+    s="${PASTURE_DB_PATH:-${XDG_DATA_HOME:-$HOME/.local/share}/pasture/pasture.db}"
+    mkdir -p "$(dirname "$s")"
+    [ -f "$s" ] || : > "$s"
+    ;;
+esac
 if [ "$1" = "--db" ]; then shift 2; fi
 if [ "$1" = "migrate" ]; then
   [ "$mode" = "store-unusable" ] && exit 2
@@ -326,10 +349,213 @@ if [ "$1" = "task" ]; then
     exit 0
   fi
   if [ "$mode" = "missing-verb" ] && [ "$2" = "label" ] && [ "$3" = "--help" ]; then exit 1; fi
+  if [ "$2" = "create" ]; then
+    printf 'ID:        fake/00000000-0000-0000-0000-000000000001\n'
+  fi
   exit 0
 fi
 exit 0
 `
 	require.NoError(t, os.WriteFile(binPath, []byte(script), 0o755))
 	return binPath, logPath
+}
+
+// TestProbeStoreGuardIsLive is the tenet-9 two-sample guard for the
+// store-existence step. The fake now creates the store on any real task call,
+// so a probe that opens a missing store turns this test red instead of passing
+// the "must never create a store" assertion.
+func TestProbeStoreGuardIsLive(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	bin, log := writeFakePasture(t, dir)
+	env := map[string]string{
+		"HOME":            dir,
+		"PASTURE_BIN":     bin,
+		"PROBE_FAKE_LOG":  log,
+		"PROBE_FAKE_MODE": "ok",
+	}
+	storePath := filepath.Join(dir, ".local", "share", "pasture", "pasture.db")
+
+	// Clean sample: the production probe never opens the missing store.
+	result := runTrackerProbe(t, dir, env)
+	require.Equal(t, "ledger", result["BACKEND"])
+	require.Equal(t, "no-store", result["REASON"])
+	_, err := os.Stat(storePath)
+	require.True(t, os.IsNotExist(err), "the clean probe must not create the store")
+	invocations, err := os.ReadFile(log)
+	require.NoError(t, err)
+	require.NotContains(t, string(invocations), " task ", "the clean probe must not run a task command")
+
+	// Defective sample: one real task command before the existence check. The
+	// fake creates the store, so the production assertion would now fail.
+	mutated := strings.Replace(TrackerProbeScript,
+		`if [ ! -f "$DB" ]; then`,
+		"\"$PASTURE_BIN\" --db \"$DB\" task list >/dev/null 2>&1\nif [ ! -f \"$DB\" ]; then",
+		1)
+	require.NotEqual(t, TrackerProbeScript, mutated, "the defective sample must actually change the probe")
+	runProbeScript(t, dir, env, mutated)
+	_, err = os.Stat(storePath)
+	require.NoError(t, err, "the fake must create the store on a task call, so the no-create assertion can fail")
+}
+
+// TestRecAssetServesTheTenOps runs the shipped rec asset against a fake Pasture
+// binary and proves every neutral op lowers to its backend recipe. It exercises
+// the production constant, not a hand-written imitation.
+func TestRecAssetServesTheTenOps(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"create", []string{"create", "--kind", "task", "--title", "T", "--phase", "request", "--body", "B"}, "task create T --type task --phase request --namespace https://example.test/repo --description B"},
+		{"label", []string{"label", "ID", "pasture:urd"}, "task label add ID pasture:urd"},
+		{"block", []string{"block", "P", "--by", "C"}, "task dep add P --blocked-by C"},
+		{"block-typed", []string{"block", "P", "--by", "C", "--kind", "supersedes"}, "task dep add P --target C --kind supersedes"},
+		{"note", []string{"note", "ID", "--author", "actor/x", "--body", "hello"}, "task comment add ID --author actor/x -- hello"},
+		{"show", []string{"show", "ID"}, "task show ID"},
+		{"show-notes", []string{"show", "ID", "--notes"}, "task comments ID"},
+		{"show-history", []string{"show", "ID", "--history"}, "task timeline ID"},
+		{"query", []string{"query", "--label", "pasture:urd", "--status", "open"}, "task list --namespace https://example.test/repo --status open --label pasture:urd"},
+		{"query-blocked", []string{"query", "--blocked", "--label", "x"}, "task blocked --label x"},
+		{"query-tree", []string{"query", "--tree", "ID"}, "task dep tree ID"},
+		{"ready", []string{"ready", "--label", "x"}, "task ready --label x"},
+		{"status", []string{"status", "ID", "--set", "in_progress"}, "task update ID --status in_progress"},
+		{"close", []string{"close", "ID", "--reason", "done"}, "task close ID --reason done"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			bin, log := writeFakePasture(t, dir)
+			header := filepath.Join(dir, "EPOCH.md")
+			require.NoError(t, os.WriteFile(header, []byte("backend: pasture\ndb: "+filepath.Join(dir, "store.db")+"\nnamespace: https://example.test/repo\nauthor: actor/x\nrec: "+header+"\n"), 0o600))
+			out, code := runRec(t, dir, map[string]string{
+				"HOME":            dir,
+				"PASTURE_BIN":     bin,
+				"PASTURE_DB_PATH": filepath.Join(dir, "store.db"),
+				"EPOCH_FILE":      header,
+				"PROBE_FAKE_LOG":  log,
+			}, tc.args...)
+			require.Zero(t, code, out)
+			invocations, err := os.ReadFile(log)
+			require.NoError(t, err)
+			require.Contains(t, string(invocations), tc.want)
+		})
+	}
+}
+
+// TestRecAssetStopsOnErrorBackend proves the adapter's error backend prints an
+// actionable message and exits 3 before any backend call.
+func TestRecAssetStopsOnErrorBackend(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	bin, log := writeFakePasture(t, dir)
+	header := filepath.Join(dir, "EPOCH.md")
+	require.NoError(t, os.WriteFile(header, []byte("backend: error\ndb: "+filepath.Join(dir, "store.db")+"\n"), 0o600))
+	out, code := runRec(t, dir, map[string]string{
+		"PASTURE_BIN":    bin,
+		"EPOCH_FILE":     header,
+		"PROBE_FAKE_LOG": log,
+	}, "create", "--kind", "task", "--title", "T", "--phase", "request")
+	require.Equal(t, 3, code)
+	require.Contains(t, out, "backend is error")
+	require.Contains(t, out, "why:")
+	require.Contains(t, out, "fix:")
+	_, err := os.Stat(log)
+	require.True(t, os.IsNotExist(err), "the error backend must stop before any backend call")
+}
+
+// TestRecAssetRequiresAHeader proves a missing EPOCH.md is an actionable stop,
+// not a silent pass-through.
+func TestRecAssetRequiresAHeader(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	out, code := runRec(t, dir, map[string]string{"EPOCH_FILE": filepath.Join(dir, "absent.md")}, "whoami")
+	require.Equal(t, 3, code)
+	require.Contains(t, out, "no epoch header")
+	require.Contains(t, out, "Starting an Epoch")
+}
+
+// runRec runs the production rec asset with the supplied environment.
+func runRec(t *testing.T, dir string, env map[string]string, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command("sh", append([]string{"-c", TrackerRecScript, "rec"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return string(out), 0
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return string(out), exitErr.ExitCode()
+	}
+	t.Fatalf("run rec: %v", err)
+	return "", -1
+}
+
+// TestRenderedTrackerCallsUseRegisteredOps is the vocabulary guard: every
+// authored [[rec:...]] marker names a registered op, and after resolution the
+// token after the entry point is a registered op too. A body that writes a
+// native verb after the entry point fails here instead of shipping a second
+// vocabulary.
+func TestRenderedTrackerCallsUseRegisteredOps(t *testing.T) {
+	t.Parallel()
+
+	sources, err := renderedSources()
+	require.NoError(t, err)
+	marker := regexp.MustCompile(`\[\[rec([^\]]*)\]\]`)
+	callOp := regexp.MustCompile(`^\s*([a-z_]+)`)
+
+	for _, source := range sources {
+		for _, match := range marker.FindAllStringSubmatch(source.Text, -1) {
+			payload := match[1]
+			require.True(t, strings.HasPrefix(payload, ":"),
+				"%s %s writes a bare [[rec]] marker; name the operation: [[rec:<op>]]", source.Corpus, source.Owner)
+			id := TrackerOpId(strings.TrimPrefix(payload, ":"))
+			require.True(t, id.isRegistered(),
+				"%s %s writes unregistered tracker op %q; the vocabulary is closed", source.Corpus, source.Owner, id)
+		}
+
+		for _, target := range []HarnessName{HarnessClaudeCode, HarnessOpenCode, HarnessCodex} {
+			resolved, err := ResolveBodyMarkers(source.Text, target)
+			require.NoError(t, err, "%s %s must resolve for %s", source.Corpus, source.Owner, target)
+			require.Equalf(t, 0, countUnregisteredTrackerCalls(resolved, trackerEntryPoint, callOp),
+				"%s %s resolves a native verb after the entry point for %s", source.Corpus, source.Owner, target)
+		}
+		neutral, err := ResolveBodyMarkersNeutral(source.Text)
+		require.NoError(t, err, "%s %s must resolve for schema.xml", source.Corpus, source.Owner)
+		require.Equalf(t, 0, countUnregisteredTrackerCalls(neutral, neutralTrackerEntryPoint, callOp),
+			"%s %s resolves a native verb after the entry point for schema.xml", source.Corpus, source.Owner)
+	}
+}
+
+// countUnregisteredTrackerCalls counts entry-point occurrences whose next
+// token is not a registered neutral op. A placeholder or a prose continuation
+// (no leading word) is not a call and is skipped.
+func countUnregisteredTrackerCalls(text, entryPoint string, callOp *regexp.Regexp) int {
+	bad := 0
+	rest := text
+	for {
+		idx := strings.Index(rest, entryPoint)
+		if idx < 0 {
+			return bad
+		}
+		rest = rest[idx+len(entryPoint):]
+		match := callOp.FindStringSubmatch(rest)
+		if match == nil {
+			continue
+		}
+		if !TrackerOpId(match[1]).isRegistered() {
+			bad++
+		}
+	}
 }

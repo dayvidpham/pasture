@@ -46,7 +46,7 @@ var exploreBody = SkillBody{
 			Id:        "explore-phase1-recording",
 			Given:     "Phase 1 context",
 			When:      "recording findings",
-			Then:      "add a structured comment on the REQUEST task via `[[rec]] comment add`",
+			Then:      "add a structured comment on the REQUEST task via `[[rec:note]]`",
 			ShouldNot: "only produce output without updating the REQUEST task",
 		},
 	},
@@ -195,7 +195,7 @@ User input → CLI parser (src/cli/parse.ts:30)
 			Content: `When invoked as part of Phase 1 (s1_3-explore), record findings on the REQUEST task:
 
 ` + "```" + `bash
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions with line numbers}}
   - Related types: {{existing types/schemas with locations}}

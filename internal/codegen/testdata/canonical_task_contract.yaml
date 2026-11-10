@@ -28,10 +28,10 @@ forbidden:
 fragments:
   - id: frag--task-recovery
     every_body: true
-    contains: [PASTURE_DB_PATH, XDG_DATA_HOME, '--namespace', '"${EPOCH_REC}" ready', '"${EPOCH_REC}" blocked', '"${EPOCH_REC}" list', '--status in_progress', '"${EPOCH_REC}" show', '"${EPOCH_REC}" comments', '"${EPOCH_REC}" timeline', '--blocked-by', 'references:', non-atomic, supervisor, 'git agent-commit', 'explicit user approval']
+    contains: [PASTURE_DB_PATH, XDG_DATA_HOME, '--namespace', '"${EPOCH_REC}" ready', '"${EPOCH_REC}" query --blocked', '"${EPOCH_REC}" query --status in_progress', '"${EPOCH_REC}" show', '--notes', '--history', '"${EPOCH_REC}" block', '--by', 'references:', non-atomic, supervisor, 'git agent-commit', 'explicit user approval', 'retries 3 times', 'pending/']
   - id: frag--task-author
     every_body: true
-    contains: ['"${EPOCH_REC}" agents list', '--author', 'pasture-system/00000000-0000-0000-0000-000000000000', verbatim]
+    contains: ['"${EPOCH_REC}" whoami', '--author', 'pasture-system/00000000-0000-0000-0000-000000000000', verbatim]
 historical:
   - owner: skills/protocol/UAT_EXAMPLE.md
     banner: "# Historical UAT record — non-operational quotation"

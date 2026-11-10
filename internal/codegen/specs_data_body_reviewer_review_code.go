@@ -61,8 +61,8 @@ var reviewerReviewCodeBody = SkillBody{
 # One severity trio per wave, per axis, per round — not one per slice.
 # Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_GROUP_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+BLOCKER_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -71,12 +71,12 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review: \"${REVIEW_ID_URI}\"
 ---
-BLOCKER findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
-[[rec]] label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
+BLOCKER findings for this wave review round")
+[[rec:label]] "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
+[[rec:label]] "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-IMPORTANT_GROUP_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -85,12 +85,12 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review: \"${REVIEW_ID_URI}\"
 ---
-IMPORTANT findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
-[[rec]] label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT findings for this wave review round")
+[[rec:label]] "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
+[[rec:label]] "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
 
-MINOR_GROUP_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+MINOR_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -99,14 +99,14 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review: \"${REVIEW_ID_URI}\"
 ---
-MINOR findings for this wave review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
-[[rec]] label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
+MINOR findings for this wave review round")
+[[rec:label]] "$MINOR_GROUP_ID_URI" pasture:severity:minor
+[[rec:label]] "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review task
-[[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
-[[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
-[[rec]] dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
+[[rec:block]] "${REVIEW_ID_URI}" --by "${BLOCKER_GROUP_ID_URI}"
+[[rec:block]] "${REVIEW_ID_URI}" --by "${IMPORTANT_GROUP_ID_URI}"
+[[rec:block]] "${REVIEW_ID_URI}" --by "${MINOR_GROUP_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -115,44 +115,44 @@ MINOR findings for this wave review round" | python3 -c 'import json,sys; print(
 					Content: `` + "```" + `bash
 # Each finding carries slice: and wave: in references.
 # BLOCKER finding — dual-parent relationship
-BLOCKER_FINDING_ID_URI=$([[rec]] create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+BLOCKER_FINDING_ID_URI=$([[rec:create]] --kind task --title "BLOCKER: <finding title>" --phase code_review \
+  --body "---
 references:
   wave: 1
   slice: \"${SLICE_1_1_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-<finding details with file:line references>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "${BLOCKER_FINDING_ID_URI}" pasture:finding
-[[rec]] dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
-[[rec]] dep add "${SLICE_1_1_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+<finding details with file:line references>")
+[[rec:label]] "${BLOCKER_FINDING_ID_URI}" pasture:finding
+[[rec:block]] "${BLOCKER_GROUP_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
+[[rec:block]] "${SLICE_1_1_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
 
 # IMPORTANT finding — single parent (severity group only)
-IMPORTANT_FINDING_ID_URI=$([[rec]] create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_FINDING_ID_URI=$([[rec:create]] --kind task --title "IMPORTANT: <finding title>" --phase code_review \
+  --body "---
 references:
   wave: 1
   slice: \"${SLICE_1_2_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "${IMPORTANT_FINDING_ID_URI}" pasture:finding
-[[rec]] dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
+<finding details>")
+[[rec:label]] "${IMPORTANT_FINDING_ID_URI}" pasture:finding
+[[rec:block]] "${IMPORTANT_GROUP_ID_URI}" --by "${IMPORTANT_FINDING_ID_URI}"
 
 # MINOR finding — single parent (severity group only)
-MINOR_FINDING_ID_URI=$([[rec]] create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+MINOR_FINDING_ID_URI=$([[rec:create]] --kind task --title "MINOR: <finding title>" --phase code_review \
+  --body "---
 references:
   wave: 1
   slice: \"${SLICE_1_3_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "${MINOR_FINDING_ID_URI}" pasture:finding
-[[rec]] dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
+<finding details>")
+[[rec:label]] "${MINOR_FINDING_ID_URI}" pasture:finding
+[[rec:block]] "${MINOR_GROUP_ID_URI}" --by "${MINOR_FINDING_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -162,10 +162,10 @@ references:
 
 ` + "```" + `bash
 # If no IMPORTANT findings were found:
-[[rec]] close "${IMPORTANT_GROUP_ID_URI}"
+[[rec:close]] "${IMPORTANT_GROUP_ID_URI}"
 
 # If no MINOR findings were found:
-[[rec]] close "${MINOR_GROUP_ID_URI}"
+[[rec:close]] "${MINOR_GROUP_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -190,8 +190,8 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 					Id:    "rev-code-step1-read",
 					Title: "Step 1: Read Code Changes and URD",
 					Content: `` + "```" + `bash
-[[rec]] show "${SLICE_ID_URI}"
-[[rec]] show "${URD_ID_URI}"   # Read URD for requirements context
+[[rec:show]] "${SLICE_ID_URI}"
+[[rec:show]] "${URD_ID_URI}"   # Read URD for requirements context
 ` + "```" + ``,
 				},
 				{
@@ -210,8 +210,8 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 					Id:    "rev-code-step4-create",
 					Title: "Step 4: Create Review Task",
 					Content: `` + "```" + `bash
-REVIEW_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+REVIEW_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1: <feature>" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -220,12 +220,12 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   urd: \"${URD_ID_URI}\"
 ---
-VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
+VOTE: <ACCEPT|REVISE> - <justification>")
+[[rec:label]] "$REVIEW_ID_URI" pasture:p10-impl:s10-review
 # One review covers the whole wave, so wire every slice in the wave to it.
-[[rec]] dep add "${SLICE_1_1_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
-[[rec]] dep add "${SLICE_1_2_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
-[[rec]] dep add "${SLICE_1_3_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+[[rec:block]] "${SLICE_1_1_ID_URI}" --by "${REVIEW_ID_URI}"
+[[rec:block]] "${SLICE_1_2_ID_URI}" --by "${REVIEW_ID_URI}"
+[[rec:block]] "${SLICE_1_3_ID_URI}" --by "${REVIEW_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -234,7 +234,7 @@ VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(js
 					Content: `5. Create severity tree (EAGER — all 3 groups immediately)
 6. Add findings to appropriate severity groups
 7. Close empty severity groups
-8. Cast vote via ` + "`" + `[[rec]] comment add` + "`" + ``,
+8. Cast vote via ` + "`" + `[[rec:note]]` + "`" + ``,
 				},
 			},
 		},
@@ -331,10 +331,10 @@ An implementation that ships without validation-case fixtures is an IMPORTANT fi
 			Title: "Report Results",
 			Content: `` + "```" + `bash
 # Add vote comment to the review task
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
+[[rec:note]] "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
 
 # Or
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - BLOCKERs found, see severity tree for details"
+[[rec:note]] "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: REVISE - BLOCKERs found, see severity tree for details"
 ` + "```" + ``,
 		},
 	},

@@ -3,6 +3,7 @@ package main_test
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/dayvidpham/pasture/internal/codegen"
 	"github.com/dayvidpham/pasture/internal/tasks"
 	"github.com/dayvidpham/pasture/internal/testutil"
 	"github.com/stretchr/testify/require"
@@ -511,13 +512,25 @@ func TestCLI_GeneratedTaskRecipes(t *testing.T) {
 			for _, line := range strings.Split(block[2], "\n") {
 				lines = append(lines, strings.TrimPrefix(line, block[1]))
 			}
-			// The emitted blocks call the tracker adapter entry point
-			// ("${EPOCH_REC}" <verb>). The production adapter is the rec asset
-			// owned by the ledger slice; this harness supplies the pasture
-			// backend's pass-through so the emitted bytes are executed as-is.
-			script := "set -euo pipefail\npasture() { \"$PASTURE_BINARY\" --db \"$RECIPE_DB\" \"$@\"; }\nrec() { pasture task \"$@\"; }\n" + strings.Join(lines, "\n")
+			// The emitted blocks call the shipped rec asset through
+			// ("${EPOCH_REC}" <op>). Write the production asset out and point the
+			// entry point at it, so the harness exercises the real adapter
+			// instead of a test-only pass-through. The pasture() shim remains for
+			// the hand-authored protocol documents, whose fenced blocks still
+			// call the CLI directly.
+			recPath := filepath.Join(t.TempDir(), "rec")
+			require.NoError(t, os.WriteFile(recPath, []byte(codegen.TrackerRecScript), 0o755))
+			epochFile := filepath.Join(t.TempDir(), "EPOCH.md")
+			header := "backend: pasture\n" +
+				"db: " + db + "\n" +
+				"namespace: " + namespace + "\n" +
+				"author: pasture-system/00000000-0000-0000-0000-000000000000\n" +
+				"rec: " + recPath + "\n"
+			require.NoError(t, os.WriteFile(epochFile, []byte(header), 0o600))
+			script := "set -euo pipefail\npasture() { \"$PASTURE_BINARY\" --db \"$RECIPE_DB\" \"$@\"; }\n" + strings.Join(lines, "\n")
 			cmd := exec.Command("bash", "-c", script)
-			cmd.Env = append(os.Environ(), "PASTURE_BINARY="+binaryPath, "RECIPE_DB="+db, "EPOCH_REC=rec",
+			cmd.Env = append(os.Environ(), "PASTURE_BINARY="+binaryPath, "PASTURE_BIN="+binaryPath,
+				"RECIPE_DB="+db, "EPOCH_REC="+recPath, "EPOCH_FILE="+epochFile,
 				"PASTURE_NAMESPACE="+namespace, "SLICE_1_ID_URI="+input.ID, "REVIEW_ROUND_ID_URI="+input.ID,
 				"SLICE_ID_URI="+input.ID, "REVIEW_ID_URI="+input.ID, "IMPL_PLAN_ID_URI="+input.ID,
 				"REQUEST_ID_URI="+input.ID, "URD_ID_URI="+input.ID, "RATIFIED_PROPOSAL_ID_URI="+input.ID,

@@ -64,7 +64,7 @@ func TestBodyLiteralGuardHasTwoSamples(t *testing.T) {
 		require.NotEmpty(t, findings, "defective sample must produce at least one finding: %q", sample)
 	}
 
-	clean := "Run `[[rec]] show \"${ID}\"` and call `[[op:invoke_skill]](/pasture:worker)` with the [[op:delegate_assignment]] operation."
+	clean := "Run `[[rec:show]] \"${ID}\"` and call `[[op:invoke_skill]](/pasture:worker)` with the [[op:delegate_assignment]] operation."
 	assert.Empty(t, findRawHarnessLiterals(clean), "clean sample must produce no finding")
 }
 
@@ -81,7 +81,7 @@ func TestRenderingSourcesCarryNoRawHarnessLiterals(t *testing.T) {
 	for _, source := range sources {
 		findings := findRawHarnessLiterals(source.Text)
 		assert.Emptyf(t, findings,
-			"rendering-source literal in %s %s: %v — use [[tool:...]], [[op:...]] or [[rec]]",
+			"rendering-source literal in %s %s: %v — use [[tool:...]], [[op:...]] or [[rec:<op>]]",
 			source.Corpus, source.Owner, findings,
 		)
 	}
@@ -229,9 +229,9 @@ func TestResolveBodyMarkersPerTarget(t *testing.T) {
 		{"[[op:request_user_decision]]", HarnessClaudeCode, "AskUserQuestion"},
 		{"[[op:request_user_decision]]", HarnessOpenCode, "question"},
 		{"[[op:request_user_decision]]", HarnessCodex, "request-input"},
-		{"[[rec]]", HarnessClaudeCode, trackerEntryPoint},
-		{"[[rec]]", HarnessOpenCode, trackerEntryPoint},
-		{"[[rec]]", HarnessCodex, trackerEntryPoint},
+		{"[[rec:show]]", HarnessClaudeCode, trackerEntryPoint + " show"},
+		{"[[rec:show]]", HarnessOpenCode, trackerEntryPoint + " show"},
+		{"[[rec:show]]", HarnessCodex, trackerEntryPoint + " show"},
 	}
 	for _, testCase := range cases {
 		testCase := testCase
@@ -254,7 +254,7 @@ func TestResolveBodyMarkersNeutral(t *testing.T) {
 		"[[op:invoke_skill]]":          "invoke_skill",
 		"[[op:delegate_assignment]]":   "delegate_assignment",
 		"[[op:request_user_decision]]": "request_user_decision",
-		"[[rec]]":                      neutralTrackerEntryPoint,
+		"[[rec:show]]":                 neutralTrackerEntryPoint + " show",
 	}
 	for marker, want := range cases {
 		marker, want := marker, want
@@ -275,6 +275,8 @@ func TestResolveBodyMarkersRejectsUnknownPayloads(t *testing.T) {
 	for _, marker := range []string{
 		"[[tool:telepathy]]",
 		"[[op:telepathy]]",
+		"[[rec]]",
+		"[[rec:telepathy]]",
 		"[[nonsense]]",
 		"[[tool:read",
 	} {
@@ -328,7 +330,7 @@ func TestTrackerEntryPointIsNamedOnce(t *testing.T) {
 	require.NotEmpty(t, commandPattern.FindAllString(defective, -1),
 		"defective sample must produce at least one finding: %q", defective)
 
-	clean := "Run `[[rec]] close \"$X\"` and cite the pasture task ID as prose."
+	clean := "Run `[[rec:close]] \"$X\"` and cite the pasture task ID as prose."
 	assert.Empty(t, commandPattern.FindAllString(clean, -1),
 		"clean sample must produce no finding")
 
@@ -336,14 +338,14 @@ func TestTrackerEntryPointIsNamedOnce(t *testing.T) {
 	require.NoError(t, err)
 	for _, source := range sources {
 		assert.Emptyf(t, commandPattern.FindAllString(source.Text, -1),
-			"%s %s copies the tracker command prefix; use the [[rec]] marker",
+			"%s %s copies the tracker command prefix; use the [[rec:<op>]] marker",
 			source.Corpus, source.Owner)
 	}
 
 	// The marker must actually resolve to the entry point on every target.
 	for _, target := range []HarnessName{HarnessClaudeCode, HarnessOpenCode, HarnessCodex} {
-		resolved, err := ResolveBodyMarkers(bodyRecMarker, target)
+		resolved, err := ResolveBodyMarkers(recMarker(TrackerOpShow), target)
 		require.NoError(t, err)
-		assert.Equal(t, trackerEntryPoint, resolved, "[[rec]] must resolve to the one tracker entry point on %s", target)
+		assert.Equal(t, trackerEntryPoint+" show", resolved, "[[rec:<op>]] must resolve to the entry point and the op on %s", target)
 	}
 }

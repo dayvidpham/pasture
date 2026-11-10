@@ -13,6 +13,7 @@ package codegen
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // SharedFragmentSpecs is the canonical registry of reusable shared fragments.
@@ -39,36 +40,14 @@ import (
 // severities no longer feed FOLLOWUP; the FOLLOWUP epic is fed solely by
 // user-DEFER'd UAT items.
 var SharedFragmentSpecs = map[FragmentId]SharedFragment{
-	FragTaskRecovery: {
-		Id:   FragTaskRecovery,
-		Kind: FragmentKindProse,
-		Prose: &ProseSection{
-			Id:    string(FragTaskRecovery),
-			Title: "Task Recovery",
-			Content: `The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. The pasture-specific steps below apply only when the header says backend: pasture; when it says ledger, use the Tracker Adapter section and the ledger path in the header. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
-
-Recover from live Pasture state at session start and after compaction; never trust cached task rows.
-
-Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
-
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
-
-Run [[rec]] ready, [[rec]] blocked, and [[rec]] list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run [[rec]] show "$TASK_URI", [[rec]] comments "$TASK_URI", and [[rec]] timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
-
-Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
-
-Assignment transfer is not initial allocation: before using [[rec]] assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
-
-Parent stays open and is blocked by child: [[rec]] dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.`,
-		},
-	},
+	FragTaskRecovery: taskRecoveryFragment(),
 	FragTaskAuthor: {
 		Id:   FragTaskAuthor,
 		Kind: FragmentKindProse,
 		Prose: &ProseSection{
 			Id:      string(FragTaskAuthor),
 			Title:   "Task Attribution",
-			Content: `Select the current registered author with [[rec]] agents list and [[rec]] agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.`,
+			Content: `Select the current registered author with [[rec:whoami]]; when neither the header nor PASTURE_AUTHOR names one, it lists the registered agents. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.`,
 		},
 	},
 	FragTrackerAdapter: trackerAdapterFragment(),
@@ -201,8 +180,8 @@ Severity groups:
 ` + "```" + `bash
 # Wave 1 contains SLICE-1-1, SLICE-1-2, and SLICE-1-3.
 # Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+BLOCKER_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -211,12 +190,12 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-BLOCKER findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$BLOCKER_ID_URI" pasture:severity:blocker
-[[rec]] label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+BLOCKER findings from Reviewer A (Correctness) on wave 1.")
+[[rec:label]] "$BLOCKER_ID_URI" pasture:severity:blocker
+[[rec:label]] "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
-IMPORTANT_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -225,12 +204,12 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-IMPORTANT findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$IMPORTANT_ID_URI" pasture:severity:important
-[[rec]] label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT findings from Reviewer A (Correctness) on wave 1.")
+[[rec:label]] "$IMPORTANT_ID_URI" pasture:severity:important
+[[rec:label]] "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
-MINOR_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+MINOR_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review \
+  --body "---
 references:
   wave: 1
   slices:
@@ -239,14 +218,14 @@ references:
     - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-MINOR findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$MINOR_ID_URI" pasture:severity:minor
-[[rec]] label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+MINOR findings from Reviewer A (Correctness) on wave 1.")
+[[rec:label]] "$MINOR_ID_URI" pasture:severity:minor
+[[rec:label]] "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Step 2: Wire the one severity trio to the wave's review round task
-[[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$BLOCKER_ID_URI"
-[[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
-[[rec]] dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
+[[rec:block]] "${REVIEW_ROUND_ID_URI}" --by "$BLOCKER_ID_URI"
+[[rec:block]] "${REVIEW_ROUND_ID_URI}" --by "$IMPORTANT_ID_URI"
+[[rec:block]] "${REVIEW_ROUND_ID_URI}" --by "$MINOR_ID_URI"
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
 # Open findings converge at the end; only an open BLOCKER gates the wave. IMPORTANT/MINOR are NOT routed to FOLLOWUP.
@@ -254,8 +233,8 @@ MINOR findings from Reviewer A (Correctness) on wave 1." | python3 -c 'import js
 
 # Step 3: Close empty groups immediately
 # If a group has no findings, close it right away
-[[rec]] close "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
-[[rec]] close "$MINOR_ID_URI"        # if no MINOR findings
+[[rec:close]] "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
+[[rec:close]] "$MINOR_ID_URI"        # if no MINOR findings
 ` + "```" + ``,
 			Subsections: []ProseSection{namingConvention},
 		}
@@ -346,27 +325,93 @@ Binary only. No severity tree for plan reviews.`,
 		},
 	},
 
-	FragModelPolicy: {
-		Id:   FragModelPolicy,
-		Kind: FragmentKindProse,
-		Prose: &ProseSection{
-			Id:    string(FragModelPolicy),
-			Title: "Model Policy and Fallback Chain",
-			Content: `A role names a capability tier. A tier carries a neutral default model nickname, an effort level, and its default roles.
+	FragModelPolicy: modelPolicyFragment(),
+}
 
-| Tier | Name | Default model | Effort | Default roles |
-|------|------|---------------|--------|---------------|
-| T1 | frontier | frontier | high | epoch, architect, supervisor |
-| T2 | standard | standard | medium | worker |
-| T3 | mini | mini | low | reviewer (overridden to T2 standard by default) |
+// modelPolicyAskMarker is the structural signal that a rendered document
+// carries the model-chain ask. A test keys on this marker instead of a
+// sentence, so appending a paraphrase of the ask elsewhere cannot pass for a
+// second gate and rewording the ask cannot hide the real ones.
+const modelPolicyAskMarker = "<!-- pasture:model-chain-ask -->"
 
-**Ask here, and at the matching gate in the other phase.** At phase 1 and again at phase 8, ask the user for three models: a primary, a secondary, and a tertiary. One gate, two asks, not five. The three form one fallback chain: when a provider is exhausted, use the next model in the chain; never fail the epoch. Record the chain on the request or IMPL_PLAN task and repeat it in every handoff.
+// modelPolicyFragment builds the model-policy prose from the capability-tier
+// registry. The table is rendered from CapabilityTierSpecs rather than
+// hand-maintained, so the shipped table cannot disagree with the tiers the
+// emitters use (tenet 4: name it once).
+func modelPolicyFragment() SharedFragment {
+	var table strings.Builder
+	table.WriteString("| Tier | Name | Default model | Effort | Default roles |\n")
+	table.WriteString("|------|------|---------------|--------|---------------|\n")
+	for _, tier := range AllCapabilityTiers() {
+		spec := mustCapabilityTierSpec(tier)
+		roles := make([]string, 0, len(spec.Roles))
+		for _, role := range spec.Roles {
+			roles = append(roles, string(role))
+		}
+		fmt.Fprintf(&table, "| %s | %s | %s | %s | %s |\n",
+			tier, spec.Name, spec.DefaultModel, spec.Effort, strings.Join(roles, ", "))
+	}
 
-**Reviewer override.** The reviewer tier is the reviewer role's TierOverride, not a separate review-budget type. The phase-8 gate may set it to T2 standard (full review) or T3 mini (cheap review).
+	prose := ProseSection{
+		Id:    string(FragModelPolicy),
+		Title: "Model Policy and Fallback Chain",
+		Content: `A role names a capability tier. A tier carries a neutral default model nickname, an effort level, and its default roles.
 
-**Concurrency cap.** Run at most 4 delegated agents at once in one stage. The cap bounds concurrency only; maxRounds remains the only bound on review rounds.`,
-		},
-	},
+` + modelPolicyAskMarker + `
+
+` + table.String() + `
+The reviewer's tier is its role override: the emitted reviewer agent defaults to T2 standard. The phase-8 gate may choose T3 mini for a cheap review; record the choice as ` + "`reviewer_tier: T3`" + ` in ` + "`.agents.local/pasture/EPOCH.md`" + ` and pass that tier's native model id when reviewers are spawned. The field stays the default; the header carries the runtime choice.
+
+**Ask here, and at the matching gate in the other phase.** At phase 1 and again at phase 8, ask the user for three models: a primary, a secondary, and a tertiary. One gate, two asks, not five. The three form one fallback chain: when a provider is exhausted, use the next model in the chain; never fail the epoch. Record the chain on the request or IMPL_PLAN task and repeat it in every handoff. Advance the chain in the architect and supervisor surfaces too: they spawn the reviewers and workers, so a provider exhaustion reaches them first.
+
+**Reviewer override.** The reviewer tier is the reviewer role's TierOverride, not a separate review-budget type. The default is T2 standard (full review); treat T3 mini as an epoch-recorded runtime choice, never a compile-time one.
+
+**Concurrency cap.** Run at most ` + fmt.Sprintf("%d", MaxConcurrentAgents) + ` delegated agents at once in one stage. The cap bounds concurrency only; maxRounds remains the only bound on review rounds.`,
+	}
+	return SharedFragment{
+		Id:    FragModelPolicy,
+		Kind:  FragmentKindProse,
+		Prose: &prose,
+	}
+}
+
+// taskRecoveryFragment builds the task-recovery prose from the tracker
+// contract. The closed operation set and the mid-epoch write-failure rule are
+// rendered from their one authored home (AllTrackerOpIds and
+// TrackerWriteFailureRule), so every role that carries recovery instructions
+// also carries the rule that applies when a write fails.
+func taskRecoveryFragment() SharedFragment {
+	ids := AllTrackerOpIds()
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		names = append(names, string(id))
+	}
+	prose := ProseSection{
+		Id:    string(FragTaskRecovery),
+		Title: "Task Recovery",
+		Content: `The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the ` + "`rec:`" + ` path from the header and use it as the one entry point: ` + "`\"${EPOCH_REC}\" <op>`" + `. The operation set is closed: ` + strings.Join(names, ", ") + `.
+
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's ` + "`db:`" + `; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The adapter reads it when set, otherwise the header's ` + "`namespace:`" + `, and passes ` + "`--namespace`" + ` itself. Queries are scoped to that namespace; pass ` + "`--all-namespaces`" + ` to opt out. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run ` + "`[[rec:ready]]`" + `, ` + "`[[rec:query]] --blocked`" + `, and ` + "`[[rec:query]] --status in_progress`" + `. For each referenced active task, run ` + "`[[rec:show]] \"$TASK_URI\"`" + `, ` + "`[[rec:show]] \"$TASK_URI\" --notes`" + `, and ` + "`[[rec:show]] \"$TASK_URI\" --history`" + `. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+An owner is recorded with ` + "`[[rec:label]] \"$TASK_URI\" owner:<role>`" + `. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
+
+Parent stays open and is blocked by child: ` + "`[[rec:block]] \"$PARENT_URI\" --by \"$CHILD_URI\"`" + `. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records ` + "`backend: error`" + `, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. ` + TrackerWriteFailureRule,
+	}
+	return SharedFragment{
+		Id:    FragTaskRecovery,
+		Kind:  FragmentKindProse,
+		Prose: &prose,
+	}
 }
 
 // fragRef returns a ProseSection placement marker that references the given

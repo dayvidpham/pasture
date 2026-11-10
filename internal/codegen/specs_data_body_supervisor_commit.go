@@ -52,15 +52,15 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 			Id:    "sup-commit-close-task",
 			Title: "Close Pasture Tasks",
 			Content: `` + "```" + `bash
-[[rec]] close "${TASK_A_URI}" --reason="Committed in <commit-hash>"
-[[rec]] close "${TASK_B_URI}" --reason="Committed in <commit-hash>"
+[[rec:close]] "${TASK_A_URI}" --reason="Committed in <commit-hash>"
+[[rec:close]] "${TASK_B_URI}" --reason="Committed in <commit-hash>"
 ` + "```" + ``,
 		},
 		{
 			Id:    "sup-commit-update-impl-plan",
 			Title: "Update IMPL_PLAN",
 			Content: `` + "```" + `bash
-[[rec]] update "${IMPL_PLAN_ID_URI}" --notes="SLICE-{W}-{N} complete: "${TASK_A_URI}", ${TASK_B_URI}"
+[[rec:note]] "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="SLICE-{W}-{N} complete: "${TASK_A_URI}", ${TASK_B_URI}"
 ` + "```" + ``,
 		},
 		{

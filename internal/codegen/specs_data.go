@@ -208,20 +208,20 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:        "C-audit-dep-chain",
 		Given:     "any phase transition",
 		When:      "creating new task",
-		Then:      "chain dependency: [[rec]] dep add parent --blocked-by child",
+		Then:      "chain dependency: [[rec:block]] parent --by child",
 		ShouldNot: "skip dependency chaining or invert direction",
-		Command:   "[[rec]] dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
+		Command:   "[[rec:block]] \"${PARENT_URI}\" --by \"${CHILD_URI}\"",
 		Examples: []Example{
 			{
 				Id:    "C-audit-dep-chain-full",
 				Lang:  "bash",
 				Label: "correct",
 				Code: `# Full dependency chain: work flows bottom-up, closure flows top-down
-[[rec]] dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
-[[rec]] dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
-[[rec]] dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
-[[rec]] dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
-[[rec]] dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"`,
+[[rec:block]] "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
+[[rec:block]] "${URE_ID_URI}" --by "${PROPOSAL_ID_URI}"
+[[rec:block]] "${PROPOSAL_ID_URI}" --by "${IMPL_PLAN_ID_URI}"
+[[rec:block]] "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
+[[rec:block]] "${SLICE_1_ID_URI}" --by "${LEAF_TASK_A_ID_URI}"`,
 			},
 		},
 	},
@@ -251,19 +251,19 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 				Lang:  "bash",
 				Label: "correct",
 				Code: `# Create all 3 severity groups immediately (even if empty)
-BLOCKER_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$BLOCKER_ID_URI" pasture:severity:blocker
-[[rec]] label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$IMPORTANT_ID_URI" pasture:severity:important
-[[rec]] label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$MINOR_ID_URI" pasture:severity:minor
-[[rec]] label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+BLOCKER_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review)
+[[rec:label]] "$BLOCKER_ID_URI" pasture:severity:blocker
+[[rec:label]] "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review)
+[[rec:label]] "$IMPORTANT_ID_URI" pasture:severity:important
+[[rec:label]] "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+MINOR_ID_URI=$([[rec:create]] --kind task --title "WAVE-1-REVIEW-A-1 MINOR" --phase code_review)
+[[rec:label]] "$MINOR_ID_URI" pasture:severity:minor
+[[rec:label]] "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
 # Close empty groups immediately
-[[rec]] close "${IMPORTANT_ID_URI}"
-[[rec]] close "${MINOR_ID_URI}"`,
+[[rec:close]] "${IMPORTANT_ID_URI}"
+[[rec:close]] "${MINOR_ID_URI}"`,
 			},
 			{
 				Id:    "C-severity-eager-anti",
@@ -272,7 +272,7 @@ MINOR_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --na
 				Code: `# WRONG: only creating groups when findings exist
 # This skips empty groups and breaks the audit trail
 if [ -n "$BLOCKER_FINDINGS" ]; then
-    BLOCKER_ID_URI=$([[rec]] create "BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+    BLOCKER_ID_URI=$([[rec:create]] --kind task --title "BLOCKER" --phase code_review --body "Describe the specific work and reference full task URIs")
 fi`,
 			},
 		},
@@ -383,7 +383,7 @@ fi`,
 		Id:    "C-slice-review-before-close",
 		Given: "workers complete their implementation slices",
 		When:  "slice implementation is done",
-		Then:  "workers notify supervisor with [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not [[rec]] close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes",
+		Then:  "workers notify supervisor with [[rec:note]] (not [[rec:close]]); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes",
 		ShouldNot: "close slices immediately upon worker completion; " +
 			"allow workers to close their own slices",
 	},
@@ -391,11 +391,11 @@ fi`,
 		Id:    "C-slice-leaf-tasks",
 		Given: "vertical slice created",
 		When:  "decomposing slice into implementation units",
-		Then:  "create one or more Pasture leaf tasks per slice, named after the real work units they represent, with [[rec]] dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)",
+		Then:  "create one or more Pasture leaf tasks per slice, named after the real work units they represent, with [[rec:block]] \"${SLICE_ID_URI}\" --by \"${LEAF_TASK_ID_URI}\"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)",
 		ShouldNot: "create slices without leaf tasks — " +
 			"a slice with no children is undecomposed and cannot be tracked; " +
 			"force every slice into a fixed L1/L2/L3 triple when the real work units differ",
-		Command: "[[rec]] dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"",
+		Command: "[[rec:block]] \"${SLICE_ID_URI}\" --by \"${LEAF_TASK_ID_URI}\"",
 	},
 	"C-handoff-skill-invocation": {
 		Id:    "C-handoff-skill-invocation",
@@ -410,22 +410,22 @@ fi`,
 		Id:        "C-dep-direction",
 		Given:     "adding a Pasture dependency",
 		When:      "determining direction",
-		Then:      "parent blocked-by child: [[rec]] dep add \"${STAYS_OPEN_URI}\" --blocked-by \"${MUST_FINISH_FIRST_URI}\"",
+		Then:      "parent blocked-by child: [[rec:block]] \"${STAYS_OPEN_URI}\" --by \"${MUST_FINISH_FIRST_URI}\"",
 		ShouldNot: "invert (child blocked-by parent)",
-		Command:   "[[rec]] dep add \"${STAYS_OPEN_URI}\" --blocked-by \"${MUST_FINISH_FIRST_URI}\"",
+		Command:   "[[rec:block]] \"${STAYS_OPEN_URI}\" --by \"${MUST_FINISH_FIRST_URI}\"",
 		Examples: []Example{
 			{
 				Id:              "C-dep-direction-correct",
 				Lang:            "bash",
 				Label:           "correct",
-				Code:            "[[rec]] dep add \"${REQUEST_ID_URI}\" --blocked-by \"${URE_ID_URI}\"",
+				Code:            "[[rec:block]] \"${REQUEST_ID_URI}\" --by \"${URE_ID_URI}\"",
 				AlsoIllustrates: "C-audit-dep-chain",
 			},
 			{
 				Id:    "C-dep-direction-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
-				Code:  "[[rec]] dep add \"${URE_ID_URI}\" --blocked-by \"${REQUEST_ID_URI}\"",
+				Code:  "[[rec:block]] \"${URE_ID_URI}\" --by \"${REQUEST_ID_URI}\"",
 			},
 		},
 	},
@@ -476,7 +476,7 @@ fi`,
 		Id:    "C-ure-verbatim",
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
 		When:  "recording in Pasture",
-		Then:  "capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside [[op:request_user_decision]] option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured",
+		Then:  "capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside [[op:request_user_decision]] option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via [[rec:note]] whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured",
 		ShouldNot: "summarize options as (1)/(2)/(3) without option text, paraphrase user responses, " +
 			"or omit code/snippets shown inside option previews",
 		Examples: []Example{
@@ -485,23 +485,23 @@ fi`,
 				Lang:  "bash",
 				Label: "correct",
 				Code: `# Full question, all options with descriptions, verbatim response
-UAT_ID_URI=$([[rec]] create "UAT: Plan acceptance for feature-X" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "## Component: Verbose fields
+UAT_ID_URI=$([[rec:create]] --kind task --title "UAT: Plan acceptance for feature-X" --phase plan_uat \
+  --body "## Component: Verbose fields
 **Question:** Which verbose fields are useful?
 **Options:**
 - backupDir (full path): Shows where the backup landed
 - session ID: Enables log correlation across events
 - repo path + hash: Confirms which git repo was detected
 **User response:** backupDir (full path), session ID
-**Decision:** ACCEPT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')`,
+**Decision:** ACCEPT")`,
 			},
 			{
 				Id:    "C-ure-verbatim-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
 				Code: `# WRONG: options summarized as numbers, response paraphrased
-UAT_ID_URI=$([[rec]] create "UAT: Plan acceptance" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')`,
+UAT_ID_URI=$([[rec:create]] --kind task --title "UAT: Plan acceptance" --phase plan_uat \
+  --body "Asked about verbose fields (1-4). User picked 1 and 2. Accepted.")`,
 			},
 		},
 	},
@@ -1279,7 +1279,7 @@ var ChecklistSpecs = map[string]Checklist{
 		RoleRef: protocol.RoleWorker,
 		Gate:    "slice-closure",
 		Items: []ChecklistItem{
-			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not [[rec]] close)", Required: true},
+			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via [[rec:note]] (not [[rec:close]])", Required: true},
 			{Id: "CL-worker-completion-done", Text: "All completion-gate items passed", Required: true},
 			{Id: "CL-worker-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
 			{Id: "CL-worker-review-eligible", Text: "No open BLOCKER finding on this slice; IMPORTANT and MINOR findings stay open to convergence", Required: true},
@@ -1289,7 +1289,7 @@ var ChecklistSpecs = map[string]Checklist{
 		RoleRef: protocol.RoleSupervisor,
 		Gate:    "review-ready",
 		Items: []ChecklistItem{
-			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via [[rec]] comment add", Required: true},
+			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via [[rec:note]]", Required: true},
 			{Id: "CL-sup-reviewers-assigned", Text: "Ephemeral reviewers spawned for all slices", Required: true},
 			{Id: "CL-sup-severity-groups-created", Text: "Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per wave per axis per round", Required: true},
 		},
@@ -1315,61 +1315,61 @@ var CoordinationCommands = map[string]CoordinationCommand{
 	"cmd-coord-show": {
 		Id:       "cmd-coord-show",
 		Action:   "Check task details",
-		Template: "[[rec]] show \"${TASK_ID_URI}\"",
+		Template: "[[rec:show]] \"${TASK_ID_URI}\"",
 		Shared:   true,
 	},
 	"cmd-coord-status": {
 		Id:       "cmd-coord-status",
 		Action:   "Update status",
-		Template: "[[rec]] update \"${TASK_ID_URI}\" --status=in_progress",
+		Template: "[[rec:status]] \"${TASK_ID_URI}\" --set in_progress",
 		Shared:   true,
 	},
 	"cmd-coord-comment": {
 		Id:       "cmd-coord-comment",
 		Action:   "Add progress note",
-		Template: "[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Progress: ...\"",
+		Template: "[[rec:note]] \"${TASK_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"Progress: ...\"",
 		Shared:   true,
 	},
 	"cmd-coord-list": {
 		Id:       "cmd-coord-list",
 		Action:   "List in-progress",
-		Template: "[[rec]] list --namespace \"$PASTURE_NAMESPACE\" --status=in_progress",
+		Template: "[[rec:query]] --status=in_progress",
 		Shared:   true,
 	},
 	"cmd-coord-blocked": {
 		Id:       "cmd-coord-blocked",
 		Action:   "List blocked",
-		Template: "[[rec]] blocked",
+		Template: "[[rec:query]] --blocked",
 		Shared:   true,
 	},
 	"cmd-coord-assign": {
 		Id:       "cmd-coord-assign",
 		Action:   "Transfer existing assignment (supervisor only)",
-		Template: "[[rec]] assignment transfer \"${TASK_ID_URI}\" --slot owner-responsibility --assignment \"${SUCCESSOR_ASSIGNMENT_ID}\" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant \"${REGISTERED_WORKER_ACTOR}\"",
+		Template: "[[rec:label]] \"${TASK_ID_URI}\" owner:\"${REGISTERED_WORKER_ACTOR}\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-label": {
 		Id:       "cmd-coord-label",
 		Action:   "Label completed slice",
-		Template: "[[rec]] label add \"${SLICE_ID_URI}\" pasture:p9-impl:slice-complete",
+		Template: "[[rec:label]] \"${SLICE_ID_URI}\" pasture:p9-impl:slice-complete",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-dep-add": {
 		Id:       "cmd-coord-dep-add",
 		Action:   "Chain dependency",
-		Template: "[[rec]] dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
+		Template: "[[rec:block]] \"${PARENT_URI}\" --by \"${CHILD_URI}\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-close": {
 		Id:       "cmd-coord-close",
 		Action:   "Report completion without closing",
-		Template: "[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Implementation complete; awaiting independent review and supervisor closure.\"",
+		Template: "[[rec:note]] \"${TASK_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"Implementation complete; awaiting independent review and supervisor closure.\"",
 		RoleRef:  protocol.RoleWorker,
 	},
 	"cmd-coord-worker-notes": {
 		Id:       "cmd-coord-worker-notes",
 		Action:   "Add completion notes",
-		Template: "[[rec]] update \"${TASK_ID_URI}\" --notes=\"Implementation complete. Production code verified.\"",
+		Template: "[[rec:note]] \"${TASK_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body=\"Implementation complete. Production code verified.\"",
 		RoleRef:  protocol.RoleWorker,
 	},
 }
@@ -1396,8 +1396,8 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						Id:          "rtw-plan-read",
-						Instruction: "Read RATIFIED_PLAN and URD via [[rec]] show",
-						Command:     "[[rec]] show \"${RATIFIED_PLAN_ID_URI}\" && [[rec]] show \"${URD_ID_URI}\"",
+						Instruction: "Read RATIFIED_PLAN and URD via [[rec:show]]",
+						Command:     "[[rec:show]] \"${RATIFIED_PLAN_ID_URI}\" && [[rec:show]] \"${URD_ID_URI}\"",
 					},
 					{
 						Id:          "rtw-plan-explore",
@@ -1410,7 +1410,7 @@ var WorkflowSpecs = map[string]Workflow{
 					{
 						Id:          "rtw-plan-leaf-tasks",
 						Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
-						Command:     "[[rec]] dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"",
+						Command:     "[[rec:block]] \"${SLICE_ID_URI}\" --by \"${LEAF_TASK_ID_URI}\"",
 					},
 				},
 				OperationalDetail: "",
@@ -1434,12 +1434,12 @@ var WorkflowSpecs = map[string]Workflow{
 							"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
 							"(NOT aura-swarm). " +
 							"Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. " +
-							"Pass the tier-mapped native model id and respect the concurrency cap of 4.",
+							"Pass the tier-mapped native model id and " + concurrencyCapSentence(),
 					},
 					{
 						Id:          "rtw-build-monitor",
-						Instruction: "Monitor worker progress via [[rec]] list --namespace \"$PASTURE_NAMESPACE\" and [[rec]] show",
-						Command:     "[[rec]] list --namespace \"$PASTURE_NAMESPACE\" --label=\"pasture:p9-impl:s9-slice\" --status=in_progress",
+						Instruction: "Monitor worker progress via [[rec:query]] and [[rec:show]]",
+						Command:     "[[rec:query]] --label=\"pasture:p9-impl:s9-slice\" --status=in_progress",
 					},
 					{
 						Id:          "rtw-build-integrate",
@@ -1450,7 +1450,7 @@ var WorkflowSpecs = map[string]Workflow{
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "proceed",
-						Condition: "All workers have notified completion via [[rec]] comment add",
+						Condition: "All workers have notified completion via [[rec:note]]",
 					},
 				},
 			},
@@ -1546,7 +1546,7 @@ var WorkflowSpecs = map[string]Workflow{
 					{
 						Id:          "lc-types-read",
 						Instruction: "Read slice task and identify required types",
-						Command:     "[[rec]] show \"${SLICE_TASK_ID_URI}\"",
+						Command:     "[[rec:show]] \"${SLICE_TASK_ID_URI}\"",
 					},
 					{
 						Id:          "lc-types-define",
@@ -1609,8 +1609,8 @@ var WorkflowSpecs = map[string]Workflow{
 					},
 					{
 						Id:          "lc-impl-notify",
-						Instruction: "Notify supervisor of completion via [[rec]] comment add",
-						Command:     "[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${SLICE_ID_URI}\" \"Implementation complete\"",
+						Instruction: "Notify supervisor of completion via [[rec:note]]",
+						Command:     "[[rec:note]] \"${SLICE_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"Implementation complete\"",
 					},
 				},
 				ExitConditions: []ExitCondition{
@@ -1865,8 +1865,8 @@ var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 		{
 			Id:          "S-supervisor-read-plan",
 			Order:       2,
-			Instruction: "Read RATIFIED_PLAN, URD, UAT, and elicit tasks via [[rec]] show for full context",
-			Command:     "[[rec]] show \"${RATIFIED_PLAN_ID_URI}\" && [[rec]] show \"${URD_ID_URI}\" && [[rec]] show \"${UAT_ID_URI}\" && [[rec]] show \"${ELICIT_ID_URI}\"",
+			Instruction: "Read RATIFIED_PLAN, URD, UAT, and elicit tasks via [[rec:show]] for full context",
+			Command:     "[[rec:show]] \"${RATIFIED_PLAN_ID_URI}\" && [[rec:show]] \"${URD_ID_URI}\" && [[rec:show]] \"${UAT_ID_URI}\" && [[rec:show]] \"${ELICIT_ID_URI}\"",
 		},
 		{
 			Id:          "S-supervisor-explore-ephemeral",
@@ -1886,22 +1886,22 @@ var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 			Id:          "S-supervisor-create-leaf-tasks",
 			Order:       5,
 			Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
-			Command: `CREATED_URI=$([[rec]] create "SLICE-{K}-L{1,2,3}: <description>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$CREATED_URI" pasture:p9-impl:s9-slice`,
+			Command: `CREATED_URI=$([[rec:create]] --kind task --title "SLICE-{K}-L{1,2,3}: <description>" --phase worker_slices --body "Describe the specific work and reference full task URIs")
+[[rec:label]] "$CREATED_URI" pasture:p9-impl:s9-slice`,
 			Examples: []Example{
 				{
 					Id:    "S-supervisor-create-leaf-tasks-frontmatter",
 					Lang:  "bash",
 					Label: "template",
-					Code: `CREATED_URI=$([[rec]] create "SLICE-1-L1: Types -- <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+					Code: `CREATED_URI=$([[rec:create]] --kind task --title "SLICE-1-L1: Types -- <slice name>" --phase worker_slices \
+  --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
   impl_plan: "${IMPL_PLAN_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
-Layer 1: types and interfaces for <slice name>." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$CREATED_URI" pasture:p9-impl:s9-slice`,
+Layer 1: types and interfaces for <slice name>.")
+[[rec:label]] "$CREATED_URI" pasture:p9-impl:s9-slice`,
 					AlsoIllustrates: "C-frontmatter-refs",
 				},
 			},
@@ -1913,7 +1913,7 @@ Layer 1: types and interfaces for <slice name>." | python3 -c 'import json,sys; 
 				"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
 				"(NOT aura-swarm). " +
 				"Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. " +
-				"Pass the tier-mapped native model id and respect the concurrency cap of 4.",
+				"Pass the tier-mapped native model id and " + concurrencyCapSentence(),
 			NextState: protocol.PhaseWorkerSlices,
 		},
 	},

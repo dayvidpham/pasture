@@ -59,7 +59,7 @@ var userUatBody = SkillBody{
 			Id:        "uat-update-urd",
 			Given:     "UAT completes",
 			When:      "results are captured",
-			Then:      "update the URD with UAT results via `[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${URD_ID_URI}\" \"UAT: <summary>\"`",
+			Then:      "update the URD with UAT results via `[[rec:note]] \"${URD_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"UAT: <summary>\"`",
 			ShouldNot: "leave the URD out of date after UAT",
 		},
 		{
@@ -157,9 +157,9 @@ The user needs to see the actual thing — definition, behavior, example — and
 			Content: `UAT is the **second time** the user evaluates this feature. Before designing UAT questions, cross-reference the URE responses and URD against the proposal:
 
 ` + "```" + `bash
-[[rec]] show "${ELICIT_ID_URI}"     # Re-read the user's original URE responses
-[[rec]] show "${URD_ID_URI}"        # The structured requirements document
-[[rec]] show "${PROPOSAL_ID_URI}"   # The architect's proposal and tradeoffs
+[[rec:show]] "${ELICIT_ID_URI}"     # Re-read the user's original URE responses
+[[rec:show]] "${URD_ID_URI}"        # The structured requirements document
+[[rec:show]] "${PROPOSAL_ID_URI}"   # The architect's proposal and tradeoffs
 ` + "```" + `
 
 Look for:
@@ -313,8 +313,8 @@ One open-ended question — "Is there anything from your original requirements t
 					Id:    "uat-plan-task",
 					Title: "Plan UAT Task (Phase 5)",
 					Content: `` + "```" + `bash
-UAT_ID_URI=$([[rec]] create "UAT: Plan acceptance for <feature>" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+UAT_ID_URI=$([[rec:create]] --kind task --title "UAT: Plan acceptance for <feature>" --phase plan_uat \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
@@ -331,21 +331,21 @@ references:
 **Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>
 
 ## Final Decision
-<ACCEPT or REVISE with verbatim reason>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$UAT_ID_URI" pasture:p5-user:s5-uat
+<ACCEPT or REVISE with verbatim reason>")
+[[rec:label]] "$UAT_ID_URI" pasture:p5-user:s5-uat
 
-[[rec]] dep add "${PROPOSAL_ID_URI}" --blocked-by "${UAT_ID_URI}"
+[[rec:block]] "${PROPOSAL_ID_URI}" --by "${UAT_ID_URI}"
 
 # Update URD with plan UAT results
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
+[[rec:note]] "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Plan UAT: <ACCEPT or REVISE> - <summary of key decisions>"
 ` + "```" + ``,
 				},
 				{
 					Id:    "uat-impl-task",
 					Title: "Implementation UAT Task (Phase 11)",
 					Content: `` + "```" + `bash
-IMPL_UAT_ID_URI=$([[rec]] create "UAT: Implementation acceptance for <feature>" --phase impl_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPL_UAT_ID_URI=$([[rec:create]] --kind task --title "UAT: Implementation acceptance for <feature>" --phase impl_uat \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
@@ -360,13 +360,13 @@ references:
 **Disposition:** <FIX-NOW or DEFER — user-confirmed, echoed back>
 
 ## Final Decision
-<ACCEPT or REVISE>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$IMPL_UAT_ID_URI" pasture:p11-user:s11-uat
+<ACCEPT or REVISE>")
+[[rec:label]] "$IMPL_UAT_ID_URI" pasture:p11-user:s11-uat
 
-[[rec]] dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${IMPL_UAT_ID_URI}"
+[[rec:block]] "${IMPL_PLAN_ID_URI}" --by "${IMPL_UAT_ID_URI}"
 
 # Update URD with implementation UAT results
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
+[[rec:note]] "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Impl UAT: <ACCEPT or REVISE> - <summary of findings>"
 ` + "```" + ``,
 				},
 			},

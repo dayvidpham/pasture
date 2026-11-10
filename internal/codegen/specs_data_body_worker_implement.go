@@ -74,7 +74,7 @@ var workerImplementBody = SkillBody{
 					Content: `**Given** Pasture task **when** starting **then** identify production code path first
 
 ` + "```" + `bash
-[[rec]] show "${TASK_ID_URI}"
+[[rec:show]] "${TASK_ID_URI}" --notes
 # Look for: "productionCodePath": "cli-command subcommand" or "api-endpoint"
 ` + "```" + `
 
@@ -95,14 +95,14 @@ End: User runs production command
 					Id:    "wimpl-step1-read",
 					Title: "Step 1: Read Pasture task for full context",
 					Content: `` + "```" + `bash
-[[rec]] show "${TASK_ID_URI}"
+[[rec:show]] "${TASK_ID_URI}" --notes
 ` + "```" + ``,
 				},
 				{
 					Id:    "wimpl-step2-status",
 					Title: "Step 2: Update status",
 					Content: `` + "```" + `bash
-[[rec]] update "${TASK_ID_URI}" --status=in_progress
+[[rec:status]] "${TASK_ID_URI}" --set in_progress
 ` + "```" + ``,
 				},
 				{
@@ -164,7 +164,7 @@ they sweep peer-worker WIP into your commit.
 ` + "`" + `git checkout HEAD -- <path>` + "`" + `, ` + "`" + `git stash pop` + "`" + `, ` + "`" + `git stash apply` + "`" + `,
 ` + "`" + `git clean -fd` + "`" + `, ` + "`" + `git branch -D` + "`" + `) on the shared worktree. A
 PreToolUse hook blocks these for worker agents; if you find peer
-work in your way, post ` + "`" + `[[rec]] comment add` + "`" + ` and wait for supervisor
+work in your way, post ` + "`" + `[[rec:note]]` + "`" + ` and wait for supervisor
 coordination instead. See **Shared-Worktree Git Discipline** in
 ` + "`" + `/pasture:worker` + "`" + ` for the full rationale and the escape hatch.`,
 				},
@@ -179,7 +179,7 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 			Id:    "wimpl-followup-slices",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
 			Content: `If your Pasture task is a ` + "`" + `FOLLOWUP_SLICE-N` + "`" + `, the implementation procedure is identical. Additionally:
-- Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`" + `[[rec]] show "${TASK_ID_URI}"` + "`" + ` — these are user-DEFER'd UAT items you must resolve
+- Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`" + `[[rec:show]] "${TASK_ID_URI}"` + "`" + ` — these are user-DEFER'd UAT items you must resolve
 - Your implementation must address each DEFER'd-item leaf task's acceptance criteria
 - On completion, report which DEFER'd-item leaf tasks were resolved`,
 		},

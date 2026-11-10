@@ -17,7 +17,7 @@ var reviewerCommentBody = SkillBody{
 			Id:        "rev-comment-task",
 			Given:     "comment to create",
 			When:      "creating",
-			Then:      "add via `[[rec]] comment add`",
+			Then:      "add via `[[rec:note]]`",
 			ShouldNot: "create standalone files for review comments",
 		},
 	},
@@ -33,7 +33,7 @@ var reviewerCommentBody = SkillBody{
 		{
 			Id:    "rev-comment-steps",
 			Title: "Steps",
-			Content: `1. Identify the task to comment on (` + "`" + `[[rec]] show "${TASK_ID_URI}"` + "`" + `)
+			Content: `1. Identify the task to comment on (` + "`" + `[[rec:show]] "${TASK_ID_URI}"` + "`" + `)
 2. Categorize findings by severity
 3. Add structured comment via Pasture`,
 		},
@@ -42,10 +42,10 @@ var reviewerCommentBody = SkillBody{
 			Title: "Comment via Pasture",
 			Content: `` + "```" + `bash
 # Plan review comment (no severity tree)
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "VOTE: ACCEPT - End-user alignment confirmed. MVP scope achievable."
+[[rec:note]] "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: ACCEPT - End-user alignment confirmed. MVP scope achievable."
 
 # Code review comment (with severity references)
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - 1 BLOCKER found (see severity tree). Suggestion: fix type error in auth middleware."
+[[rec:note]] "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: REVISE - 1 BLOCKER found (see severity tree). Suggestion: fix type error in auth middleware."
 ` + "```" + ``,
 		},
 		{

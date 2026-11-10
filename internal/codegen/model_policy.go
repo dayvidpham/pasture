@@ -117,7 +117,20 @@ var CapabilityTierSpecs = map[CapabilityTier]CapabilityTierSpec{
 // MaxConcurrentAgents is the concurrency cap for one stage of a workflow. It
 // bounds how many delegated agents run at once, independent of the review
 // round bound (maxRounds).
+//
+// Four is the widest concurrent delegation the protocol creates: one wave
+// dispatches three standing reviewers plus the supervisor that sends fixes, so
+// a lower cap would serialize review and a higher one would admit a fifth
+// writer to the same store for no phase the protocol defines. The number lives
+// here only; rendered prose interpolates it instead of repeating the literal.
 const MaxConcurrentAgents = 4
+
+// concurrencyCapSentence is the one rendered sentence for the cap. Callers
+// concatenate it rather than repeating the number, so the constant is the only
+// home for the literal.
+func concurrencyCapSentence() string {
+	return fmt.Sprintf("respect the concurrency cap of %d.", MaxConcurrentAgents)
+}
 
 // mustCapabilityTierSpec returns a registered tier row or panics. It is for
 // render/build paths that run after ValidateCapabilityTiers has accepted the
@@ -230,9 +243,15 @@ func EffortForTier(tier CapabilityTier) (EffortLevel, error) {
 // ValidateCapabilityTiers proves the tier registry and role mapping are closed,
 // complete, and free of duplicate role ownership.
 func ValidateCapabilityTiers() error {
-	seenRoles := make(map[protocol.RoleId]CapabilityTier, len(RoleSpecs))
-	for _, tier := range canonicalCapabilityTiers {
-		spec, ok := CapabilityTierSpecs[tier]
+	return validateCapabilityTiers(canonicalCapabilityTiers, CapabilityTierSpecs, RoleSpecs)
+}
+
+// validateCapabilityTiers is the pure core of the registry guard. It accepts
+// the three registries so a two-sample test can prove a defective copy fails.
+func validateCapabilityTiers(tiers []CapabilityTier, tierSpecs map[CapabilityTier]CapabilityTierSpec, roleSpecs map[protocol.RoleId]RoleSpec) error {
+	seenRoles := make(map[protocol.RoleId]CapabilityTier, len(roleSpecs))
+	for _, tier := range tiers {
+		spec, ok := tierSpecs[tier]
 		if !ok {
 			return fmt.Errorf(
 				"codegen.ValidateCapabilityTiers: tier %q is in the closed set but has no CapabilityTierSpecs row — "+
@@ -270,7 +289,7 @@ func ValidateCapabilityTiers() error {
 				)
 			}
 			seenRoles[roleID] = tier
-			roleSpec, ok := RoleSpecs[roleID]
+			roleSpec, ok := roleSpecs[roleID]
 			if !ok {
 				return fmt.Errorf(
 					"codegen.ValidateCapabilityTiers: tier %q maps unknown role %q — "+
@@ -287,7 +306,7 @@ func ValidateCapabilityTiers() error {
 			}
 		}
 	}
-	for roleID, spec := range RoleSpecs {
+	for roleID, spec := range roleSpecs {
 		effective := spec.EffectiveTier()
 		if !effective.IsValid() {
 			return fmt.Errorf(
@@ -303,6 +322,35 @@ func ValidateCapabilityTiers() error {
 				roleID, spec.TierOverride, roleID,
 			)
 		}
+		// Both directions: the tiers->roles loop above proves every listed role
+		// agrees with its RoleSpec. This proves every role's DEFAULT tier lists
+		// it, so deleting a role from TierFrontier.Roles cannot leave the role
+		// mapped by a tier that no longer advertises it.
+		tierSpec, ok := tierSpecs[spec.Tier]
+		if !ok {
+			return fmt.Errorf(
+				"codegen.ValidateCapabilityTiers: role %q maps to tier %q with no CapabilityTierSpecs row — "+
+					"where: internal/codegen/model_policy.go — fix: register the tier",
+				roleID, spec.Tier,
+			)
+		}
+		if !roleListed(tierSpec.Roles, roleID) {
+			return fmt.Errorf(
+				"codegen.ValidateCapabilityTiers: role %q defaults to tier %q but that tier's Roles does not list it — "+
+					"where: internal/codegen/model_policy.go CapabilityTierSpecs[%q].Roles — fix: add %q to the tier's role list or change RoleSpecs[%q].Tier",
+				roleID, spec.Tier, spec.Tier, roleID, roleID,
+			)
+		}
 	}
 	return nil
+}
+
+// roleListed reports whether roles contains roleID.
+func roleListed(roles []protocol.RoleId, roleID protocol.RoleId) bool {
+	for _, candidate := range roles {
+		if candidate == roleID {
+			return true
+		}
+	}
+	return false
 }

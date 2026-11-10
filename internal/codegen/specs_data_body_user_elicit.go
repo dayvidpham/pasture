@@ -46,7 +46,7 @@ var userElicitBody = SkillBody{
 			Given:     "URD created",
 			When:      "linking to other tasks",
 			Then:      "include URD ID in description frontmatter of referencing tasks",
-			ShouldNot: "use `[[rec]] dep add --blocked-by` for URD links (URD is a reference document, not a blocking dependency)",
+			ShouldNot: "use `[[rec:block]] --blocked-by` for URD links (URD is a reference document, not a blocking dependency)",
 		},
 		{
 			Id:        "user-elicit-code-shown",
@@ -150,7 +150,7 @@ These narrow the design space and reveal which boundaries are already clear vs
 which need user input.
 
 ` + "```" + `bash
-[[rec]] show "${REQUEST_ID_URI}"   # Read classification + research + explore findings
+[[rec:show]] "${REQUEST_ID_URI}"   # Read classification + research + explore findings
 ` + "```" + `
 
 Use the Phase 1 findings to identify:
@@ -254,8 +254,8 @@ field (parity with UAT's 'Definition shown' / 'Command run' fields). For
 **every** request, also record the elicited validation cases verbatim.
 
 ` + "```" + `bash
-ELICIT_ID_URI=$([[rec]] create "ELICIT: {{feature name}}" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+ELICIT_ID_URI=$([[rec:create]] --kind task --title "ELICIT: {{feature name}}" --phase elicit \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
 ---
@@ -286,12 +286,12 @@ A: {{user's verbatim input}}
 - Definition of done: {{verbatim observable outcome that means the request is satisfied}}
 - Must pass (correct behaviour): {{verbatim expected correct behavior}}
 - Must fail / out of scope (incorrect behaviour): {{verbatim — for fix-intent, the input/behavior that fails today}}
-- Repro / real data: {{verbatim commands, data, or steps — or 'none'}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
-[[rec]] update "$ELICIT_ID_URI" --notes "Requested role (not an assignment): architect"
+- Repro / real data: {{verbatim commands, data, or steps — or 'none'}}")
+[[rec:label]] "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
+[[rec:note]] "$ELICIT_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
 
 # Chain dependency: REQUEST blocked by ELICIT
-[[rec]] dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
+[[rec:block]] "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"
 ` + "```" + ``,
 		},
 		{
@@ -300,8 +300,8 @@ A: {{user's verbatim input}}
 			Content: `After the elicit task is created, create the URD as the single source of truth for user requirements:
 
 ` + "```" + `bash
-URD_ID_URI=$([[rec]] create "URD: {{feature name}}" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+URD_ID_URI=$([[rec:create]] --kind task --title "URD: {{feature name}}" --phase elicit \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   elicit: "${ELICIT_ID_URI}"
@@ -319,9 +319,9 @@ references:
 {{minimum viable scope identified}}
 
 ## End-Vision Goals
-{{user's ultimate vision for the feature}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-[[rec]] label add "$URD_ID_URI" pasture:urd
-[[rec]] label add "$URD_ID_URI" pasture:p2-user:s2_2-urd
+{{user's ultimate vision for the feature}}")
+[[rec:label]] "$URD_ID_URI" pasture:urd
+[[rec:label]] "$URD_ID_URI" pasture:p2-user:s2_2-urd
 ` + "```" + `
 
 The URD is a **reference document**, not a blocking dependency. Other tasks reference it via description frontmatter (` + "`" + `urd: "${URD_ID_URI}"` + "`" + `), not via blocking dependency commands.
@@ -335,7 +335,7 @@ Record the URD task ID — pass it to the architect for Phase 3.`,
 
 The proposal task will block the elicit task:
 ` + "```" + `bash
-[[rec]] dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+[[rec:block]] "${ELICIT_ID_URI}" --by "${PROPOSAL_ID_URI}"
 ` + "```" + ``,
 		},
 	},

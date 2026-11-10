@@ -63,8 +63,8 @@ var architectRequestReviewBody = SkillBody{
 			Id:    "arch-review-checking",
 			Title: "Checking Reviews",
 			Content: `` + "```" + `bash
-[[rec]] show "${PROPOSAL_ID_URI}"
-[[rec]] comments "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}" --notes
 ` + "```" + ``,
 		},
 		{
@@ -72,10 +72,10 @@ var architectRequestReviewBody = SkillBody{
 			Title: "Coordination",
 			Content: `` + "```" + `bash
 # Add comment to notify that review is ready
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "Review requested — 3 reviewers spawned"
+[[rec:note]] "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Review requested — 3 reviewers spawned"
 
 # Check for review votes
-[[rec]] comments "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}" --notes
 ` + "```" + ``,
 		},
 		{

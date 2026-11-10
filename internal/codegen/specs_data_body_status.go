@@ -16,25 +16,25 @@ var statusBody = SkillBody{
 					Id:    "status-step1-plans",
 					Title: "1. Check for active plans",
 					Content: `` + "```" + `bash
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose" --status=open
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p6-plan:s6-ratify" --status=open
+[[rec:query]] --label="pasture:p3-plan:s3-propose" --status=open
+[[rec:query]] --label="pasture:p6-plan:s6-ratify" --status=open
 ` + "```" + ``,
 				},
 				{
 					Id:    "status-step2-impl",
 					Title: "2. Check implementation progress",
 					Content: `` + "```" + `bash
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p8-impl:s8-plan" --status=open
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
-[[rec]] blocked --label="pasture:p9-impl:s9-slice"
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
+[[rec:query]] --label="pasture:p8-impl:s8-plan" --status=open
+[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=in_progress
+[[rec:query]] --blocked --label="pasture:p9-impl:s9-slice"
+[[rec:query]] --label="pasture:p9-impl:s9-slice" --status=closed
 ` + "```" + ``,
 				},
 				{
 					Id:    "status-step3-stats",
 					Title: "3. Get project stats",
 					Content: `` + "```" + `bash
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
+[[rec:query]] | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
 ` + "```" + ``,
 				},
 				{
@@ -66,16 +66,16 @@ var statusBody = SkillBody{
 - {task-id}: {blocker reason}
 
 ### Recent Activity
-[[rec]] list --namespace "$PASTURE_NAMESPACE"
+[[rec:query]]
 ` + "```" + ``,
 		},
 		{
 			Id:    "status-quick-status",
 			Title: "Quick Status",
 			Content: `` + "```" + `bash
-[[rec]] list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
-[[rec]] ready
-[[rec]] blocked
+[[rec:query]] | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
+[[rec:ready]]
+[[rec:query]] --blocked
 ` + "```" + ``,
 		},
 	},

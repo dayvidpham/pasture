@@ -153,7 +153,7 @@ delegation: {
   prompt: ` + "`" + `Call [[op:invoke_skill]](/pasture:worker) and implement the assigned slice.
 
 Pasture Task ID: "${TASK_ID_URI}"
-Read full requirements + handoff: [[rec]] show "${TASK_ID_URI}"
+Read full requirements + handoff: [[rec:show]] "${TASK_ID_URI}"
 
 Do NOT shut down after implementation. You will receive review feedback and may need to fix issues.` + "`" + `,
   subagent_type: "general-purpose",
@@ -175,9 +175,9 @@ Per [sup-spawn-workers], use ` + "`" + `subagent_type: "general-purpose"` + "`" 
   content: ` + "`" + `You are assigned SLICE-{W}-{N}. Start by calling [[op:invoke_skill]](/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
-Run this to get full requirements + handoff: [[rec]] show "${SLICE_TASK_ID_URI}"
+Run this to get full requirements + handoff: [[rec:show]] "${SLICE_TASK_ID_URI}"
 
-Key references (run [[rec]] show on each for full context):
+Key references (run [[rec:show]] on each for full context):
 - Request: "${REQUEST_ID_URI}"
 - URD: "${URD_ID_URI}"
 - IMPL_PLAN: "${IMPL_PLAN_ID_URI}"
@@ -192,7 +192,7 @@ findings. Stay alive for the full Ride the Wave cycle.` + "`" + `,
 })
 ` + "```" + `
 
-Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec]] show` + "`" + ` commands in every assignment. Teammates cannot see your conversation or task tree.`,
+Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec:show]]` + "`" + ` commands in every assignment. Teammates cannot see your conversation or task tree.`,
 		},
 		{
 			Id:    "sup-spawn-worker-persistence",
@@ -218,16 +218,16 @@ Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec]] show` 
   content: ` + "`" + `Review cycle <N> found issues in your slice (SLICE-{W}-{N}).
 
 BLOCKERs (must fix — blocks slice closure):
-- "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
+- "${FINDING_ID_URI}": <description> ([[rec:show]] "${FINDING_ID_URI}")
 
 IMPORTANT (must fix — closes only per C-finding-lifecycle):
-- "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
+- "${FINDING_ID_URI}": <description> ([[rec:show]] "${FINDING_ID_URI}")
 
 MINOR (must fix — closes only per C-finding-lifecycle):
-- "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
+- "${FINDING_ID_URI}": <description> ([[rec:show]] "${FINDING_ID_URI}")
 
 After fixing all items:
-  [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
+  [[rec:note]] "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Fixes applied for review cycle <N>"
 
 Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
   summary: "Review cycle <N> fixes for SLICE-{W}-{N}"
@@ -239,17 +239,17 @@ Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
 		{
 			Id:    "sup-spawn-task-status",
 			Title: "Worker Should Update Pasture Status",
-			Content: `- On start: ` + "`" + `[[rec]] update "${TASK_ID_URI}" --status=in_progress` + "`" + `
-- On implementation complete (NOT slice close): ` + "`" + `[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"` + "`" + `
-- On blocked: ` + "`" + `[[rec]] update "${TASK_ID_URI}" --notes="Blocked: <reason>"` + "`" + `
+			Content: `- On start: ` + "`" + `[[rec:status]] "${TASK_ID_URI}" --set in_progress` + "`" + `
+- On implementation complete (NOT slice close): ` + "`" + `[[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Implementation complete, awaiting review"` + "`" + `
+- On blocked: ` + "`" + `[[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="Blocked: <reason>"` + "`" + `
 - Slice closure: **only the supervisor** closes slices after review passes`,
 		},
 		{
 			Id:    "sup-spawn-assign-via-task",
 			Title: "Assign via Pasture",
 			Content: `` + "```" + `bash
-[[rec]] assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
-[[rec]] update "${TASK_ID_URI}" --status=in_progress
+[[rec:label]] "${TASK_ID_URI}" owner:"${REGISTERED_WORKER_ACTOR}"
+[[rec:status]] "${TASK_ID_URI}" --set in_progress
 ` + "```" + ``,
 		},
 		{
@@ -278,7 +278,7 @@ Do NOT shut down. Ephemeral reviewers will re-review.` + "`" + `,
 
 ## Acceptance Criteria
 - All DEFER'd items in this slice resolved (tests pass, production code path verified)
-- See [[rec]] show "${SLICE_TASK_ID_URI}" for full validation_checklist
+- See [[rec:show]] "${SLICE_TASK_ID_URI}" for full validation_checklist
 ` + "```" + ``,
 		},
 	},

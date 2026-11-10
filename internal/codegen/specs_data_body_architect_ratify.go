@@ -54,8 +54,8 @@ var architectRatifyBody = SkillBody{
 					Id:    "arch-ratify-step1-check",
 					Title: "Step 1: Check all reviews",
 					Content: `` + "```" + `bash
-[[rec]] show "${PROPOSAL_ID_URI}"
-[[rec]] comments "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}" --notes
 ` + "```" + ``,
 				},
 				{
@@ -68,23 +68,23 @@ var architectRatifyBody = SkillBody{
 					Title: "Step 3: Add ratify label to PROPOSAL-N",
 					Content: `Do NOT create a new task — add label to the existing proposal:
 ` + "```" + `bash
-[[rec]] label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
+[[rec:label]] "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+[[rec:note]] "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
 ` + "```" + ``,
 				},
 				{
 					Id:    "arch-ratify-step4-supersede",
 					Title: "Step 4: Mark all previous proposals as superseded",
 					Content: `` + "```" + `bash
-[[rec]] label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
+[[rec:label]] "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+[[rec:note]] "${OLD_PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
 ` + "```" + ``,
 				},
 				{
 					Id:    "arch-ratify-step5-urd",
 					Title: "Step 5: Update URD with ratification",
 					Content: `` + "```" + `bash
-[[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed. Ratified proposal: ${RATIFIED_PROPOSAL_ID_URI}"
+[[rec:note]] "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Ratified: scope confirmed. Ratified proposal: ${RATIFIED_PROPOSAL_ID_URI}"
 ` + "```" + ``,
 				},
 			},
