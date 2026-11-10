@@ -25,23 +25,28 @@ type stubTranscriptSource struct {
 	closed       *bool
 	export       *TranscriptExport
 	sessions     []string
+	subagents    []string
 	truncated    bool
 	catalogErr   error
 	catalogCalls int
 }
 
-func (s *stubTranscriptSource) AvailableSessions(context.Context) ([]string, bool, error) {
+func (s *stubTranscriptSource) AvailableSessions(context.Context) ([]string, []string, bool, error) {
 	if s == nil {
-		return nil, false, fmt.Errorf("%w: nil transcript source", ErrTranscriptSourceUnavailable)
+		return nil, nil, false, fmt.Errorf("%w: nil transcript source", ErrTranscriptSourceUnavailable)
 	}
 	s.catalogCalls++
 	if s.catalogErr != nil {
-		return nil, false, s.catalogErr
+		return nil, nil, false, s.catalogErr
+	}
+	subagents := s.subagents
+	if subagents == nil {
+		subagents = []string{}
 	}
 	if s.sessions == nil {
-		return []string{}, s.truncated, nil
+		return []string{}, subagents, s.truncated, nil
 	}
-	return s.sessions, s.truncated, nil
+	return s.sessions, subagents, s.truncated, nil
 }
 
 func (s *stubTranscriptSource) ExportTranscript(context.Context, string, string) (*TranscriptExport, error) {

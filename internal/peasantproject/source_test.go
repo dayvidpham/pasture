@@ -48,6 +48,7 @@ func createPeasantSchema(t *testing.T, db *sql.DB) {
 			session_id    TEXT PRIMARY KEY,
 			model_harness TEXT NOT NULL,
 			project_hash  TEXT NOT NULL,
+			parent_id     TEXT,
 			started_at    INTEGER
 		)`)
 	require.NoError(t, err)
@@ -298,6 +299,14 @@ func TestDBSourceRejectsIncompatibleSchema(t *testing.T) {
 				CREATE TABLE sessions (
 					session_id TEXT PRIMARY KEY, model_harness TEXT NOT NULL, project_hash TEXT NOT NULL)`,
 			wantContains: []string{"projects", "canonical_remote"},
+		},
+		{
+			name: "sessions missing parent_id",
+			ddl: `CREATE TABLE projects (
+				project_hash TEXT PRIMARY KEY, canonical_cwd TEXT, canonical_remote TEXT);
+				CREATE TABLE sessions (
+					session_id TEXT PRIMARY KEY, model_harness TEXT NOT NULL, project_hash TEXT NOT NULL)`,
+			wantContains: []string{"sessions", "parent_id"},
 		},
 	}
 	for _, testCase := range cases {

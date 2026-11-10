@@ -26,9 +26,11 @@ import (
 type TranscriptSource interface {
 	ExportTranscript(ctx context.Context, harness, sessionID string) (*TranscriptExport, error)
 	// AvailableSessions returns Peasant session ids that have a durable
-	// transcript. truncated is true when the list filled its page: an id that
-	// is absent is then not evidence of no transcript.
-	AvailableSessions(ctx context.Context) (ids []string, truncated bool, err error)
+	// transcript and the subset whose parentSessionId is set. truncated is
+	// true when the list filled its page: an id that is absent is then not
+	// evidence of no transcript, and subagents is only the parented ids on
+	// that page.
+	AvailableSessions(ctx context.Context) (ids []string, subagents []string, truncated bool, err error)
 }
 
 // TranscriptExport is a validated durable transcript ready to stream. Content
@@ -92,18 +94,21 @@ func newPeasantTranscriptSource() TranscriptSource {
 	return &peasantSource{source: peasantexport.NewSource()}
 }
 
-func (s *peasantSource) AvailableSessions(ctx context.Context) ([]string, bool, error) {
+func (s *peasantSource) AvailableSessions(ctx context.Context) ([]string, []string, bool, error) {
 	if s == nil || s.source == nil {
-		return nil, false, fmt.Errorf("%w: the transcript source has no Peasant CLI adapter; restart `pasture serve`, then retry", ErrTranscriptSourceUnavailable)
+		return nil, nil, false, fmt.Errorf("%w: the transcript source has no Peasant CLI adapter; restart `pasture serve`, then retry", ErrTranscriptSourceUnavailable)
 	}
 	listed, err := s.source.ListSessions(ctx)
 	if err != nil {
-		return nil, false, mapPeasantExportError(err)
+		return nil, nil, false, mapPeasantExportError(err)
 	}
 	if listed.IDs == nil {
 		listed.IDs = []string{}
 	}
-	return listed.IDs, listed.Truncated, nil
+	if listed.Subagents == nil {
+		listed.Subagents = []string{}
+	}
+	return listed.IDs, listed.Subagents, listed.Truncated, nil
 }
 
 func (s *peasantSource) ExportTranscript(ctx context.Context, harness, sessionID string) (*TranscriptExport, error) {

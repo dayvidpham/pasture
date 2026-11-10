@@ -346,12 +346,12 @@ func TestServeDefaultPeasantSourceEnablesTheConfiguredDatabase(t *testing.T) {
 	require.NoError(t, err)
 	_, err = db.Exec(`
 		CREATE TABLE projects (project_hash TEXT PRIMARY KEY, canonical_cwd TEXT, canonical_remote TEXT);
-		CREATE TABLE sessions (session_id TEXT PRIMARY KEY, model_harness TEXT NOT NULL, project_hash TEXT NOT NULL, started_at INTEGER)`)
+		CREATE TABLE sessions (session_id TEXT PRIMARY KEY, model_harness TEXT NOT NULL, project_hash TEXT NOT NULL, parent_id TEXT, started_at INTEGER)`)
 	require.NoError(t, err)
 	hash := strings.Repeat("a", 64)
 	_, err = db.Exec(`INSERT INTO projects VALUES (?, '/work/repo', 'github.com/org/repo')`, hash)
 	require.NoError(t, err)
-	_, err = db.Exec(`INSERT INTO sessions VALUES ('default-session', 'claude-code', ?, 1)`, hash)
+	_, err = db.Exec(`INSERT INTO sessions (session_id, model_harness, project_hash, started_at) VALUES ('default-session', 'claude-code', ?, 1)`, hash)
 	require.NoError(t, err)
 	require.NoError(t, db.Close())
 

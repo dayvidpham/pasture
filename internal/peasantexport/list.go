@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -38,17 +39,22 @@ const maxSessionListBytes = 4 << 20
 type sessionListCache struct {
 	mu        sync.Mutex
 	ids       []string
+	subagents []string
 	truncated bool
 	at        time.Time
 	valid     bool
 }
 
 // SessionList is one bounded Peasant session-id catalog. IDs are the durable
-// transcript ids Peasant printed. Truncated is true when that print filled the
-// requested page, so an id that is absent is not evidence that Peasant has no
-// transcript for it.
+// transcript ids Peasant printed. Subagents is the subset of those ids whose
+// parentSessionId is non-empty; a missing or blank parent is a root. On a
+// truncated page, Subagents contains only the parented ids that page printed,
+// not every subagent in the store. Truncated is true when that print filled
+// the requested page, so an id that is absent is not evidence that Peasant
+// has no transcript for it.
 type SessionList struct {
 	IDs       []string
+	Subagents []string
 	Truncated bool
 }
 
@@ -88,13 +94,14 @@ func (c *sessionListCache) get(now time.Time) (SessionList, bool) {
 	if !c.valid || now.Sub(c.at) >= sessionListCacheTTL {
 		return SessionList{}, false
 	}
-	return SessionList{IDs: cloneIDs(c.ids), Truncated: c.truncated}, true
+	return SessionList{IDs: cloneIDs(c.ids), Subagents: cloneIDs(c.subagents), Truncated: c.truncated}, true
 }
 
 func (c *sessionListCache) put(listed SessionList, at time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.ids = cloneIDs(listed.IDs)
+	c.subagents = cloneIDs(listed.Subagents)
 	c.truncated = listed.Truncated
 	c.at = at
 	c.valid = true
@@ -176,7 +183,8 @@ func classifySessionListFailure(stderr string, runErr error) *Fault {
 }
 
 type sessionListRow struct {
-	ID string `json:"id"`
+	ID              string `json:"id"`
+	ParentSessionID string `json:"parentSessionId"`
 }
 
 // parseSessionListIDs reads one JSON array and keeps each object's id. A full
@@ -210,6 +218,7 @@ func parseSessionListIDs(data []byte, limit int) (SessionList, error) {
 	}
 	seen := make(map[string]struct{}, len(rows))
 	ids := make([]string, 0, len(rows))
+	subagents := make([]string, 0)
 	for i, row := range rows {
 		if row.ID == "" {
 			return SessionList{}, fault(KindMalformed, nil,
@@ -220,6 +229,9 @@ func parseSessionListIDs(data []byte, limit int) (SessionList, error) {
 		}
 		seen[row.ID] = struct{}{}
 		ids = append(ids, row.ID)
+		if strings.TrimSpace(row.ParentSessionID) != "" {
+			subagents = append(subagents, row.ID)
+		}
 	}
-	return SessionList{IDs: ids, Truncated: limit > 0 && len(rows) == limit}, nil
+	return SessionList{IDs: ids, Subagents: subagents, Truncated: limit > 0 && len(rows) == limit}, nil
 }

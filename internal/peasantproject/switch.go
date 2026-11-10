@@ -62,17 +62,17 @@ func (s *Switch) Status() Status {
 // API that does not list ids, it returns ErrSessionCatalogUnavailable so the
 // transcript catalog can fall back to the Peasant CLI instead of reporting a
 // database failure.
-func (s *Switch) SessionIDs(ctx context.Context) ([]string, error) {
+func (s *Switch) SessionIDs(ctx context.Context) (SessionCatalogList, error) {
 	s.mu.Lock()
 	if !s.on || s.source == nil {
 		s.mu.Unlock()
-		return nil, fmt.Errorf("%w: Peasant project enrichment is off; turn it on from the web console or pass --peasant-db so the transcript catalog can read the Peasant database", ErrSessionCatalogUnavailable)
+		return SessionCatalogList{}, fmt.Errorf("%w: Peasant project enrichment is off; turn it on from the web console or pass --peasant-db so the transcript catalog can read the Peasant database", ErrSessionCatalogUnavailable)
 	}
 	source := s.source
 	s.mu.Unlock()
 	catalog, ok := source.(SessionCatalog)
 	if !ok {
-		return nil, fmt.Errorf("%w: the configured Peasant project source does not list ingested session ids", ErrSessionCatalogUnavailable)
+		return SessionCatalogList{}, fmt.Errorf("%w: the configured Peasant project source does not list ingested session ids", ErrSessionCatalogUnavailable)
 	}
 	return catalog.SessionIDs(ctx)
 }

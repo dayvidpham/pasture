@@ -72,6 +72,27 @@ func TestListSessionsParsesIDs(t *testing.T) {
 	require.Equal(t, 1, readCount(t, countPath), "a second read inside the reuse window must not spawn Peasant")
 }
 
+func TestListSessionsParsesParentSessionIDsAsSubagents(t *testing.T) {
+	t.Parallel()
+	binary, _ := listPeasant(t, `[
+		{"id":"ses_root","turns":1},
+		{"id":"ses_child","parentSessionId":"ses_root"},
+		{"id":"ses_blank","parentSessionId":"  "}
+	]`)
+	source := &Source{Binary: binary, Timeout: 5 * time.Second}
+
+	listed, err := source.ListSessions(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"ses_root", "ses_child", "ses_blank"}, listed.IDs)
+	require.Equal(t, []string{"ses_child"}, listed.Subagents)
+	require.False(t, listed.Truncated)
+
+	listed.Subagents[0] = "mutated"
+	again, err := source.ListSessions(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"ses_child"}, again.Subagents)
+}
+
 func TestListSessionsEmptyPageIsCompleteAndCached(t *testing.T) {
 	t.Parallel()
 	binary, countPath := listPeasant(t, `[]`)

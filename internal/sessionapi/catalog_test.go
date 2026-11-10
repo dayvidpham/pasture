@@ -92,6 +92,7 @@ func TestTranscriptCatalogHandler(t *testing.T) {
 			var catalog TranscriptCatalog
 			require.NoError(t, json.NewDecoder(response.Body).Decode(&catalog))
 			require.Equal(t, tc.wantItems, catalog.Items)
+			require.NotNil(t, catalog.Subagents)
 			require.Equal(t, tc.truncated, catalog.Truncated)
 			require.Equal(t, int64(0), catalog.Revision, "a handler with no session store has no certified revision")
 			require.False(t, catalog.AsOf.IsZero())
@@ -100,9 +101,10 @@ func TestTranscriptCatalogHandler(t *testing.T) {
 }
 
 type catalogProjectSource struct {
-	ids   []string
-	err   error
-	calls int
+	ids       []string
+	subagents []string
+	err       error
+	calls     int
 }
 
 func (s *catalogProjectSource) Lookup(context.Context, []peasantproject.Key) (map[peasantproject.Key]peasantproject.Project, error) {
@@ -113,12 +115,12 @@ func (s *catalogProjectSource) Status() peasantproject.Status {
 	return peasantproject.Status{Enabled: true, Source: peasantproject.SourceDB, State: peasantproject.StateOK}
 }
 
-func (s *catalogProjectSource) SessionIDs(context.Context) ([]string, error) {
+func (s *catalogProjectSource) SessionIDs(context.Context) (peasantproject.SessionCatalogList, error) {
 	s.calls++
 	if s.err != nil {
-		return nil, s.err
+		return peasantproject.SessionCatalogList{}, s.err
 	}
-	return s.ids, nil
+	return peasantproject.SessionCatalogList{IDs: s.ids, Subagents: s.subagents}, nil
 }
 
 type plainProjectSource struct{}
@@ -137,7 +139,7 @@ func TestTranscriptCatalogPrefersTheDatabaseAndFallsBackToTheCLI(t *testing.T) {
 	t.Run("database ids win and are complete", func(t *testing.T) {
 		t.Parallel()
 		cli := &stubTranscriptSource{sessions: []string{"cli-only"}}
-		db := &catalogProjectSource{ids: []string{"db-a", "db-b"}}
+		db := &catalogProjectSource{ids: []string{"db-a", "db-b", "db-child"}, subagents: []string{"db-child"}}
 		service := &Service{ProjectSource: db}
 		server := httptest.NewServer(newHandlerWithProject(service, nil, nil, cli))
 		t.Cleanup(server.Close)
@@ -148,7 +150,8 @@ func TestTranscriptCatalogPrefersTheDatabaseAndFallsBackToTheCLI(t *testing.T) {
 		require.Equal(t, http.StatusOK, response.StatusCode)
 		var catalog TranscriptCatalog
 		require.NoError(t, json.NewDecoder(response.Body).Decode(&catalog))
-		require.Equal(t, []string{"db-a", "db-b"}, catalog.Items)
+		require.Equal(t, []string{"db-a", "db-b", "db-child"}, catalog.Items)
+		require.Equal(t, []string{"db-child"}, catalog.Subagents)
 		require.False(t, catalog.Truncated)
 		require.Equal(t, 1, db.calls)
 		require.Equal(t, 0, cli.catalogCalls, "a database catalog must not also spawn the CLI list")
@@ -156,7 +159,7 @@ func TestTranscriptCatalogPrefersTheDatabaseAndFallsBackToTheCLI(t *testing.T) {
 
 	t.Run("a source that cannot list ids uses the CLI", func(t *testing.T) {
 		t.Parallel()
-		cli := &stubTranscriptSource{sessions: []string{"cli-only"}, truncated: true}
+		cli := &stubTranscriptSource{sessions: []string{"cli-only", "cli-child"}, subagents: []string{"cli-child"}, truncated: true}
 		service := &Service{ProjectSource: plainProjectSource{}}
 		server := httptest.NewServer(newHandlerWithProject(service, nil, nil, cli))
 		t.Cleanup(server.Close)
@@ -167,7 +170,8 @@ func TestTranscriptCatalogPrefersTheDatabaseAndFallsBackToTheCLI(t *testing.T) {
 		require.Equal(t, http.StatusOK, response.StatusCode)
 		var catalog TranscriptCatalog
 		require.NoError(t, json.NewDecoder(response.Body).Decode(&catalog))
-		require.Equal(t, []string{"cli-only"}, catalog.Items)
+		require.Equal(t, []string{"cli-only", "cli-child"}, catalog.Items)
+		require.Equal(t, []string{"cli-child"}, catalog.Subagents)
 		require.True(t, catalog.Truncated)
 		require.Equal(t, 1, cli.catalogCalls)
 	})

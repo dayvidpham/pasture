@@ -45,7 +45,7 @@ var dbTableContract = []struct {
 	columns []string
 }{
 	{table: "projects", columns: []string{"project_hash", "canonical_cwd", "canonical_remote"}},
-	{table: "sessions", columns: []string{"session_id", "model_harness", "project_hash"}},
+	{table: "sessions", columns: []string{"session_id", "model_harness", "project_hash", "parent_id"}},
 }
 
 // dbSource reads project mappings from a Peasant SQLite database over a

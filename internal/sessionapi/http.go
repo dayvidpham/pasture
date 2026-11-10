@@ -500,18 +500,16 @@ func (h *handler) transcriptCatalog(w http.ResponseWriter, r *http.Request) {
 		writeServiceError(w, err)
 		return
 	}
-	if ids, used, err := h.databaseSessionCatalog(r.Context()); used {
+	if listed, used, err := h.databaseSessionCatalog(r.Context()); used {
 		if err != nil {
 			writeError(w, http.StatusServiceUnavailable, "transcript_catalog_unavailable", err.Error())
 			return
 		}
-		if ids == nil {
-			ids = []string{}
-		}
 		writeJSON(w, http.StatusOK, TranscriptCatalog{
 			Revision:  revision,
 			AsOf:      asOf,
-			Items:     ids,
+			Items:     nonNilIDs(listed.IDs),
+			Subagents: nonNilIDs(listed.Subagents),
 			Truncated: false,
 		})
 		return
@@ -520,38 +518,43 @@ func (h *handler) transcriptCatalog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "transcript_unavailable", "this serve process has no transcript source and no Peasant database catalog; restart `pasture serve` with Peasant installed or pass --peasant-db, then retry")
 		return
 	}
-	ids, truncated, err := h.transcript.AvailableSessions(r.Context())
+	ids, subagents, truncated, err := h.transcript.AvailableSessions(r.Context())
 	if err != nil {
 		writeTranscriptCatalogError(w, err)
 		return
 	}
-	if ids == nil {
-		ids = []string{}
-	}
 	writeJSON(w, http.StatusOK, TranscriptCatalog{
 		Revision:  revision,
 		AsOf:      asOf,
-		Items:     ids,
+		Items:     nonNilIDs(ids),
+		Subagents: nonNilIDs(subagents),
 		Truncated: truncated,
 	})
+}
+
+func nonNilIDs(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
 }
 
 // databaseSessionCatalog prefers the Peasant database when the project source
 // implements SessionCatalog and can answer. A source that does not list ids,
 // or a switch that is off, is not a failure: the caller falls back to the CLI.
-func (h *handler) databaseSessionCatalog(ctx context.Context) ([]string, bool, error) {
+func (h *handler) databaseSessionCatalog(ctx context.Context) (peasantproject.SessionCatalogList, bool, error) {
 	if h.service == nil || h.service.ProjectSource == nil {
-		return nil, false, nil
+		return peasantproject.SessionCatalogList{}, false, nil
 	}
 	catalog, ok := h.service.ProjectSource.(peasantproject.SessionCatalog)
 	if !ok {
-		return nil, false, nil
+		return peasantproject.SessionCatalogList{}, false, nil
 	}
-	ids, err := catalog.SessionIDs(ctx)
+	listed, err := catalog.SessionIDs(ctx)
 	if errors.Is(err, peasantproject.ErrSessionCatalogUnavailable) {
-		return nil, false, nil
+		return peasantproject.SessionCatalogList{}, false, nil
 	}
-	return ids, true, err
+	return listed, true, err
 }
 
 // catalogStamp reads the certified session-cache revision and the response

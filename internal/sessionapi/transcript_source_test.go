@@ -53,8 +53,9 @@ func TestPeasantSourceAvailableSessionsMapsAMissingBinary(t *testing.T) {
 		Timeout: time.Second,
 	}}
 
-	ids, truncated, err := source.AvailableSessions(context.Background())
+	ids, subagents, truncated, err := source.AvailableSessions(context.Background())
 	require.Nil(t, ids)
+	require.Nil(t, subagents)
 	require.False(t, truncated)
 	require.ErrorIs(t, err, ErrTranscriptSourceUnavailable)
 	require.Contains(t, err.Error(), "install Peasant")

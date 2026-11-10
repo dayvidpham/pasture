@@ -83,14 +83,22 @@ type Source interface {
 	Status() Status
 }
 
+// SessionCatalogList is one complete ingested-id read. IDs is every session id,
+// not roots only. Subagents is the subset whose parent_id is non-empty. Both
+// slices are sorted. A database catalog is complete; neither list is a page.
+type SessionCatalogList struct {
+	IDs       []string
+	Subagents []string
+}
+
 // SessionCatalog is the optional transcript-catalog read. It is not part of
 // Source: an API-backed project source does not list ingested session ids, and
 // callers must type-assert rather than assume every Source can.
 type SessionCatalog interface {
-	// SessionIDs returns the Peasant session ids that have been ingested. The
-	// list is complete for the store the source opened; a caller must not treat
-	// a shorter page as the whole store.
-	SessionIDs(ctx context.Context) ([]string, error)
+	// SessionIDs returns every ingested Peasant session id and the subset that
+	// has a parent. The lists are complete for the store the source opened; a
+	// caller must not treat a shorter page as the whole store.
+	SessionIDs(ctx context.Context) (SessionCatalogList, error)
 }
 
 // ErrSessionCatalogUnavailable means this source cannot list ingested session
@@ -217,10 +225,10 @@ func (c *CachedSource) Status() Status { return c.inner.Status() }
 // SessionIDs delegates to the inner source when it lists ingested session ids.
 // The project cache is per session key and is not a catalog; the database
 // source owns the catalog reuse window.
-func (c *CachedSource) SessionIDs(ctx context.Context) ([]string, error) {
+func (c *CachedSource) SessionIDs(ctx context.Context) (SessionCatalogList, error) {
 	catalog, ok := c.inner.(SessionCatalog)
 	if !ok {
-		return nil, fmt.Errorf("%w: the cached Peasant project source does not list ingested session ids", ErrSessionCatalogUnavailable)
+		return SessionCatalogList{}, fmt.Errorf("%w: the cached Peasant project source does not list ingested session ids", ErrSessionCatalogUnavailable)
 	}
 	return catalog.SessionIDs(ctx)
 }

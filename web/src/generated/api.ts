@@ -280,7 +280,7 @@ export interface paths {
         };
         /**
          * List Peasant session ids that have a durable transcript
-         * @description Prefers a read-only list of ingested session ids from the Peasant database when project enrichment has opened that database. That list is complete, so an id absent from items has no durable transcript and truncated is false. When no database catalog is available, the route falls back to a bounded, read-only `peasant sessions list --json` and reuses a successful result briefly so repeated reads do not spawn a process each time. On that fallback, truncated is true when the list filled its page: an id absent from items is then not evidence that Peasant has no transcript. Items are native session ids. The revision and asOf use the same certified session-cache read as the other session routes. A source failure is 503, which the console treats as unknown rather than none.
+         * @description Prefers a read-only list of ingested session ids from the Peasant database when project enrichment has opened that database. That list is complete, so an id absent from items has no durable transcript and truncated is false. subagents is the subset of items whose Peasant parent_id is set. When no database catalog is available, the route falls back to a bounded, read-only `peasant sessions list --json` and reuses a successful result briefly so repeated reads do not spawn a process each time. On that fallback, truncated is true when the list filled its page: an id absent from items is then not evidence that Peasant has no transcript, and subagents contains only the parented ids on that page (parentSessionId). Items and subagents are native session ids. The revision and asOf use the same certified session-cache read as the other session routes. A source failure is 503, which the console treats as unknown rather than none.
          */
         get: operations["listTranscripts"];
         put?: never;
@@ -601,6 +601,8 @@ export interface components {
             items: string[];
             /** Format: int64 */
             revision: number;
+            /** @description Native session ids in items whose Peasant parent is set. On a truncated CLI page this is only the parented ids that page printed. */
+            subagents: string[];
             /** @description True when the backing list filled its page. The console must not treat an absent id as having no transcript while this is true. */
             truncated: boolean;
         };

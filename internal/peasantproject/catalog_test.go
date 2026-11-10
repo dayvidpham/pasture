@@ -23,16 +23,19 @@ func TestDBSourceListsSessionIDs(t *testing.T) {
 	require.NoError(t, db.Close())
 
 	source := NewDBSource(path).(*dbSource)
-	ids, err := source.SessionIDs(context.Background())
+	listed, err := source.SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"ses_a", "ses_b"}, ids)
+	require.Equal(t, []string{"ses_a", "ses_b"}, listed.IDs)
+	require.Empty(t, listed.Subagents)
 	require.Equal(t, StateOK, source.Status().State)
 
 	// A caller must not be able to mutate the cached catalog.
-	ids[0] = "mutated"
+	listed.IDs[0] = "mutated"
+	listed.Subagents = append(listed.Subagents, "extra")
 	again, err := source.SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"ses_a", "ses_b"}, again)
+	require.Equal(t, []string{"ses_a", "ses_b"}, again.IDs)
+	require.Empty(t, again.Subagents)
 }
 
 func TestDBSourceSessionCatalogIsEmptyWhenTheStoreHasNoSessions(t *testing.T) {
@@ -41,18 +44,21 @@ func TestDBSourceSessionCatalogIsEmptyWhenTheStoreHasNoSessions(t *testing.T) {
 	createPeasantSchema(t, db)
 	require.NoError(t, db.Close())
 
-	ids, err := NewDBSource(path).(*dbSource).SessionIDs(context.Background())
+	listed, err := NewDBSource(path).(*dbSource).SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.Empty(t, ids)
-	require.NotNil(t, ids)
+	require.Empty(t, listed.IDs)
+	require.NotNil(t, listed.IDs)
+	require.Empty(t, listed.Subagents)
+	require.NotNil(t, listed.Subagents)
 }
 
 func TestDBSourceSessionCatalogReportsAnUnavailableDatabase(t *testing.T) {
 	t.Parallel()
 	source := NewDBSource(t.TempDir() + "/missing-peasant.db").(*dbSource)
-	ids, err := source.SessionIDs(context.Background())
+	listed, err := source.SessionIDs(context.Background())
 	require.Error(t, err)
-	require.Nil(t, ids)
+	require.Nil(t, listed.IDs)
+	require.Nil(t, listed.Subagents)
 	require.Contains(t, err.Error(), "could not be opened")
 	require.Equal(t, StateUnavailable, source.Status().State)
 	require.NotEmpty(t, source.Status().Message)
@@ -68,12 +74,12 @@ func TestDBSourceSessionCatalogReusesASuccessfulRead(t *testing.T) {
 	source := NewDBSource(path).(*dbSource)
 	first, err := source.SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"ses_a"}, first)
+	require.Equal(t, []string{"ses_a"}, first.IDs)
 
 	seedPeasantSession(t, db, "ses_new", "claude-code", validHash('a'))
 	cached, err := source.SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"ses_a"}, cached, "a read inside the reuse window must not see a later insert")
+	require.Equal(t, []string{"ses_a"}, cached.IDs, "a read inside the reuse window must not see a later insert")
 
 	source.sessionIDs.mu.Lock()
 	source.sessionIDs.at = time.Now().Add(-sessionCatalogCacheTTL - time.Second)
@@ -81,7 +87,7 @@ func TestDBSourceSessionCatalogReusesASuccessfulRead(t *testing.T) {
 
 	refreshed, err := source.SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"ses_a", "ses_new"}, refreshed)
+	require.ElementsMatch(t, []string{"ses_a", "ses_new"}, refreshed.IDs)
 }
 
 func TestDBSourceSessionCatalogDoesNotWriteOrMigrate(t *testing.T) {
@@ -97,9 +103,9 @@ func TestDBSourceSessionCatalogDoesNotWriteOrMigrate(t *testing.T) {
 	beforeHash := sha256.Sum256(before)
 
 	source := NewDBSource(path).(*dbSource)
-	ids, err := source.SessionIDs(context.Background())
+	listed, err := source.SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"ses_a"}, ids)
+	require.Equal(t, []string{"ses_a"}, listed.IDs)
 
 	after, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -122,9 +128,9 @@ func TestDBSourceSessionCatalogRefusesAnOversizeStoreAndDoesNotCacheIt(t *testin
 	seedSessionCatalog(t, db, hash, sessionCatalogLimit+1)
 
 	source := NewDBSource(path).(*dbSource)
-	ids, err := source.SessionIDs(context.Background())
+	listed, err := source.SessionIDs(context.Background())
 	require.Error(t, err)
-	require.Nil(t, ids)
+	require.Nil(t, listed.IDs)
 	require.NotErrorIs(t, err, ErrSessionCatalogUnavailable)
 	require.Contains(t, err.Error(), fmt.Sprintf("more than %d", sessionCatalogLimit))
 	require.Equal(t, StateUnavailable, source.Status().State)
@@ -137,7 +143,8 @@ func TestDBSourceSessionCatalogRefusesAnOversizeStoreAndDoesNotCacheIt(t *testin
 
 	remaining, err := source.SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"s000000"}, remaining)
+	require.Equal(t, []string{"s000000"}, remaining.IDs)
+	require.Empty(t, remaining.Subagents)
 	require.Equal(t, StateOK, source.Status().State)
 }
 
@@ -155,6 +162,25 @@ func seedSessionCatalog(t *testing.T, db *sql.DB, hash string, count int) {
 	require.NoError(t, tx.Commit())
 }
 
+func TestDBSourceSeparatesSubagentsFromRoots(t *testing.T) {
+	t.Parallel()
+	db, path := openTestDB(t)
+	createPeasantSchema(t, db)
+	hash := validHash('a')
+	seedPeasantProject(t, db, hash, "/work/repo", "")
+	seedPeasantSession(t, db, "ses_root", "claude-code", hash)
+	_, err := db.Exec(`INSERT INTO sessions (session_id, model_harness, project_hash, parent_id, started_at) VALUES (?, 'claude-code', ?, ?, 1)`, "ses_child", hash, "ses_root")
+	require.NoError(t, err)
+	_, err = db.Exec(`INSERT INTO sessions (session_id, model_harness, project_hash, parent_id, started_at) VALUES (?, 'claude-code', ?, ?, 1)`, "ses_blank_parent", hash, "   ")
+	require.NoError(t, err)
+	require.NoError(t, db.Close())
+
+	listed, err := NewDBSource(path).(*dbSource).SessionIDs(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"ses_blank_parent", "ses_child", "ses_root"}, listed.IDs)
+	require.Equal(t, []string{"ses_child"}, listed.Subagents, "only a non-empty parent_id is a subagent; blank and null parents stay roots")
+}
+
 func TestSwitchAndCacheDelegateTheSessionCatalog(t *testing.T) {
 	t.Parallel()
 	db, path := openTestDB(t)
@@ -167,9 +193,10 @@ func TestSwitchAndCacheDelegateTheSessionCatalog(t *testing.T) {
 	cached := NewCached(raw)
 	sw := NewSwitch(nil, cached)
 
-	ids, err := sw.SessionIDs(context.Background())
+	listed, err := sw.SessionIDs(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"ses_a"}, ids)
+	require.Equal(t, []string{"ses_a"}, listed.IDs)
+	require.Empty(t, listed.Subagents)
 
 	off := NewSwitch(nil, nil)
 	_, err = off.SessionIDs(context.Background())
