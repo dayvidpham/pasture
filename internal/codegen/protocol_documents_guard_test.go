@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -497,7 +498,7 @@ func agentRoleRows() []string {
 	return rows
 }
 
-var phaseHeading = regexp.MustCompile(`(?m)^## Phase [0-9]+: (.+)$`)
+var phaseHeading = regexp.MustCompile(`(?m)^## Phase [0-9]+:(.*)$`)
 
 // phaseHeadings returns the phase name from every phase heading that names one
 // and an empty string for a heading that does not.
@@ -553,7 +554,7 @@ func TestProtocolGuardRejectsEachStub(t *testing.T) {
 		{
 			name: "role row names no role",
 			doc:  "AGENTS.md",
-			body: "# Roles\n\n- [x](../epoch/SKILL.md)\n- [y](../architect/SKILL.md)\n",
+			body: "# Roles\n\n" + roleLinkLines(),
 			want: "no row names",
 		},
 		{
@@ -591,6 +592,12 @@ func TestProtocolGuardRejectsEachStub(t *testing.T) {
 			doc:  "PROCESS.md",
 			body: "# Workflow\n\n<a id=\"phase-1\"></a>\n",
 			want: "headings",
+		},
+		{
+			name: "phase heading names no phase",
+			doc:  "PROCESS.md",
+			body: phaseDocumentWithUnnamedHeading(),
+			want: "names no phase",
 		},
 	}
 	for _, testCase := range cases {
@@ -770,5 +777,48 @@ func TestHandoffBindingsNameRequiredFields(t *testing.T) {
 	}
 	if _, ok := required[defective.Bindings[0].Field]; ok {
 		t.Fatal("the defective sample must bind a field the spec does not require")
+	}
+}
+
+// roleLinkLines emits one bullet per registered role, each linking correctly and
+// naming no role, so a failure can only come from the name branch.
+func roleLinkLines() string {
+	var b strings.Builder
+	for _, spec := range RoleSpecs {
+		b.WriteString("- [x](../" + strings.ToLower(spec.Name) + "/SKILL.md)\n")
+	}
+	return b.String()
+}
+
+// phaseDocumentWithUnnamedHeading has the right anchor and heading counts and
+// one heading with no name, so a failure can only come from the unnamed-heading
+// branch.
+func phaseDocumentWithUnnamedHeading() string {
+	want := requiredPhaseAnchors()
+	var b strings.Builder
+	b.WriteString("# Workflow\n\n")
+	for i := 1; i <= want; i++ {
+		b.WriteString("<a id=\"phase-" + strconv.Itoa(i) + "\"></a>\n\n")
+		if i == want {
+			b.WriteString("## Phase " + strconv.Itoa(i) + ": \n")
+			continue
+		}
+		b.WriteString("## Phase " + strconv.Itoa(i) + ": Placeholder\n")
+	}
+	return b.String()
+}
+
+// TestProtocolGuardRejectsAnEmptyIndex proves the empty-index branch: with no
+// skill directories to map, the skill index must report rather than pass.
+func TestProtocolGuardRejectsAnEmptyIndex(t *testing.T) {
+	root := t.TempDir()
+	empty := filepath.Join(root, "skills", "protocol")
+	if err := os.MkdirAll(empty, 0755); err != nil {
+		t.Fatal(err)
+	}
+	findings := protocolDocumentFindings(root, "skills", "SKILLS.md", []byte("# Skills\n\n- See the skills.\n"))
+	joined := strings.Join(findings, "\n")
+	if !strings.Contains(joined, "no entries") {
+		t.Fatalf("an index with no entries was accepted: %q", joined)
 	}
 }
