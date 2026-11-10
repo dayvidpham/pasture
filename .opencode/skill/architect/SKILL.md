@@ -123,7 +123,7 @@ _Example (anti-pattern)_
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Pasture
-- Then: capture the question header and full question text, every option label and description, the multi-select flag, the preview when the harness showed one, and the user's verbatim response, INCLUDING any code, snippets, or examples shown inside question option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via "${EPOCH_REC}" note whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured
+- Then: capture the header, the exact question text, every option label and description, the multi-select flag, the preview when the harness showed one, the user's verbatim response, INCLUDING any code, snippets, or examples shown inside question option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via "${EPOCH_REC}" note whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 _Example (correct)_

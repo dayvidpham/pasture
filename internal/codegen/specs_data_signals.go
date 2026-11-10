@@ -430,3 +430,13 @@ func questionRecordSentence() string {
 	}
 	return "Each question must\ninclude " + strings.Join(phrases[:len(phrases)-1], ", ") + ", and " + phrases[len(phrases)-1] + "."
 }
+
+// questionRecordFieldsPhrase renders the field phrases as a comma list, so a
+// constraint that names them reads from the registry rather than copying it.
+func questionRecordFieldsPhrase() string {
+	phrases := make([]string, 0, len(QuestionRecordFields))
+	for _, field := range QuestionRecordFields {
+		phrases = append(phrases, field.Phrase)
+	}
+	return strings.Join(phrases, ", ")
+}

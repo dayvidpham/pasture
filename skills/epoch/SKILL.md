@@ -134,7 +134,7 @@ _Example (anti-pattern)_
 **[C-uat-feedback-disposition]**
 - Given: any UAT feedback item (Phase 5 or Phase 11) — flagged by the user OR a deferral proposed by the architect/supervisor
 - When: recording each item
-- Then: assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER; deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic
+- Then: assign every item an explicit, user-confirmed disposition of FIX-NOW, DEFER, or WON'T-DO; deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic
 - Should not: leave a feedback item without a confirmed disposition; silently defer any item without raising it to the user at the next gate; route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it
 
 ### Handoffs
@@ -212,8 +212,8 @@ Agents coordinate through tracker tasks and comments:
 **[epoch-autonomous-progression]**
 - Given: non-user-gated phase completes
 - When: transitioning
-- Then: proceed autonomously; User gates: [request (research depth); elicit (requirements interview); plan-review (plan UAT); impl-plan (implementation effort and review budget); impl-uat (implementation UAT)]
-- Should not: ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined
+- Then: proceed autonomously; User gates: [request (p1 research depth); elicit (p2 requirements interview); plan-review (p5 plan UAT); impl-plan (p8 implementation effort and review budget); impl-uat (p11 implementation UAT)]
+- Should not: ask 'Should I proceed?' for autonomous phases; add user gates beyond the defined list
 
 **[epoch-uat-auto-ratify]**
 - Given: Phase 5 UAT ACCEPT

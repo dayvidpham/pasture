@@ -58,7 +58,7 @@ var supervisorBody = SkillBody{
 			Given:     "non-user-gated phase completes",
 			When:      "transitioning to next phase",
 			Then:      "proceed autonomously; " + renderUserGates(),
-			ShouldNot: "ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined; only pause for user-facing phases that require human input",
+			ShouldNot: "ask 'Should I proceed?' for autonomous phases; add user gates beyond the defined list; only pause for user-facing phases that require human input",
 		},
 		// R7/A1: code review gates each wave on open BLOCKERs and converges over
 		// open findings at the end; on exhaustion, surface outstanding findings to

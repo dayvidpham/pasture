@@ -143,7 +143,7 @@ Received handoff from architect with RATIFIED_PLAN task ID and placeholder IMPL_
 
 ## Request the Review-Effort Budget (Phase 8 user gate)
 
-At the **start of Phase 8** — like the Phase-1 research-depth gate — request a **configurable review-effort budget** from the user (per `C-review-effort-budget`). This is one of the 5 user-gated phases. Present the default choices:
+At the **start of Phase 8** — like the Phase-1 research-depth gate — request a **configurable review-effort budget** from the user (per `C-review-effort-budget`). This is one of the user-gated phases. Present the default choices:
 
 | Option | Meaning |
 |--------|---------|

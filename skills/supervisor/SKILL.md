@@ -473,8 +473,8 @@ Cycle Exit Conditions:
 **[sup-autonomous-progression]**
 - Given: non-user-gated phase completes
 - When: transitioning to next phase
-- Then: proceed autonomously; User gates: [request (research depth); elicit (requirements interview); plan-review (plan UAT); impl-plan (implementation effort and review budget); impl-uat (implementation UAT)]
-- Should not: ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined; only pause for user-facing phases that require human input
+- Then: proceed autonomously; User gates: [request (p1 research depth); elicit (p2 requirements interview); plan-review (p5 plan UAT); impl-plan (p8 implementation effort and review budget); impl-uat (p11 implementation UAT)]
+- Should not: ask 'Should I proceed?' for autonomous phases; add user gates beyond the defined list; only pause for user-facing phases that require human input
 
 **[frag--review-clean-exit]**
 - Given: per-wave code review and end-of-epoch convergence

@@ -361,7 +361,7 @@ fi`,
 		Then: renderUserGates() + "; all other phase transitions are auto-ratified " +
 			"by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification " +
 			"without user gate",
-		ShouldNot: "add additional user gates beyond the 5 defined; " +
+		ShouldNot: "add additional user gates beyond the defined list; " +
 			"require user approval for ratification after UAT ACCEPT",
 	},
 	"C-integration-points": {
@@ -471,7 +471,7 @@ fi`,
 		Id:    "C-ure-verbatim",
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
 		When:  "recording in Pasture",
-		Then:  "capture the question header and full question text, every option label and description, the multi-select flag, the preview when the harness showed one, and the user's verbatim response, INCLUDING any code, snippets, or examples shown inside [[op:request_user_decision]] option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via [[rec:note]] whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured",
+		Then:  "capture " + questionRecordFieldsPhrase() + ", INCLUDING any code, snippets, or examples shown inside [[op:request_user_decision]] option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via [[rec:note]] whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured",
 		ShouldNot: "summarize options as (1)/(2)/(3) without option text, paraphrase user responses, " +
 			"or omit code/snippets shown inside option previews",
 		Examples: []Example{
@@ -553,13 +553,13 @@ UAT_ID_URI=$([[rec:create]] --kind task --title "UAT: Plan acceptance" --phase p
 		Then: "the agent MUST invoke the matching interview skill ([[op:invoke_skill]](/pasture:user-elicit) for URE, " +
 			"[[op:invoke_skill]](/pasture:user-uat) for UAT) so the verbatim-capture and disposition procedures are loaded",
 		ShouldNot: "conduct an interview phase without invoking its skill — " +
-			"skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures",
+			"skipping it loses the verbatim-capture and FIX-NOW/DEFER/WON'T-DO disposition procedures",
 	},
 	"C-uat-feedback-disposition": {
 		Id:    "C-uat-feedback-disposition",
 		Given: "any UAT feedback item (Phase 5 or Phase 11) — flagged by the user OR a deferral proposed by the architect/supervisor",
 		When:  "recording each item",
-		Then: "assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER; " +
+		Then: "assign every item an explicit, user-confirmed disposition of FIX-NOW, DEFER, or WON'T-DO; " +
 			"deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user " +
 			"at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; " +
 			"FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic",

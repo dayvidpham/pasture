@@ -8,6 +8,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var retiredMechanism = regexp.MustCompile(`(aura-swarm|\bTeamCreate\b|\bbeads\b|\.git/\.aura|\.beads/)`)
@@ -175,9 +178,13 @@ func findDispositionEnumIncludesWontDo(values []disposition, guidance string) []
 			findings = append(findings, fmt.Sprintf("disposition %q is unregistered; why: feedback must have a closed disposition; where: UAT; fix: use a registered disposition", value))
 		}
 	}
-	for _, value := range []disposition{fixNow, deferItem, wontDo} {
-		if !value.valid() || !strings.Contains(guidance, string(value)) {
-			findings = append(findings, fmt.Sprintf("disposition %q missing; why: users need all decisions; where: UAT guidance; fix: register and render it", value))
+	// Only a body that discusses dispositions is held to the full set: a body
+	// that merely says "deferred" is not describing the disposition model.
+	if lower := strings.ToLower(guidance); strings.Contains(lower, "fix-now") || strings.Contains(lower, "won't-do") || strings.Contains(lower, "disposition") {
+		for _, value := range []disposition{fixNow, deferItem, wontDo} {
+			if !value.valid() || !strings.Contains(guidance, string(value)) {
+				findings = append(findings, fmt.Sprintf("disposition %q missing; why: a body that names a disposition must name the closed set; where: %s; fix: render all three from the registry", value, guidanceSource(guidance)))
+			}
 		}
 	}
 	return findings
@@ -200,35 +207,54 @@ func TestDispositionEnumIncludesWontDo(t *testing.T) {
 			}
 		})
 	}
-	for _, root := range []string{"skills", ".agents/skills", ".opencode/skill", "internal/target/opencode/assets/skills", "internal/target/claudecode/assets/pasture-skills/skills"} {
-		path := filepath.Join("..", "..", root, "user-uat", "SKILL.md")
-		data, err := os.ReadFile(path)
+	for _, root := range wave8Roots {
+		dir := filepath.Join("..", "..", root)
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || filepath.Ext(path) != ".md" {
+				return err
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			for _, finding := range findDispositionEnumIncludesWontDo(nil, string(data)) {
+				t.Error(path, finding)
+			}
+			return nil
+		})
 		if err != nil {
 			t.Fatal(err)
-		}
-		for _, finding := range findDispositionEnumIncludesWontDo(nil, string(data)) {
-			t.Error(path, finding)
 		}
 	}
 }
 
 func findQuestionStimulusFields(where, guidance string) []string {
 	var findings []string
-	for _, field := range []string{"header", "question text", "option label", "description", "multi-select", "preview"} {
-		if !strings.Contains(strings.ToLower(guidance), field) {
-			findings = append(findings, fmt.Sprintf("%s: missing %s; why: the user's stimulus cannot be reconstructed; fix: record this field", where, field))
+	lower := strings.ToLower(guidance)
+	// The fields come from the one registry, so this guard cannot drift from the
+	// guidance that renders it.
+	for _, field := range QuestionRecordFields {
+		if !strings.Contains(lower, strings.ToLower(field.Phrase)) {
+			findings = append(findings, fmt.Sprintf("%s: missing %q (%s); why: the user's stimulus cannot be reconstructed; fix: record this field", where, field.Phrase, field.Name))
 		}
 	}
 	return findings
 }
 
+// wave8Roots are the rendered trees a shipped instruction can reach.
+var wave8Roots = []string{"skills", ".agents/skills", ".opencode/skill", "internal/target/opencode/assets/skills", "internal/target/claudecode/assets/pasture-skills/skills"}
+
 func TestQuestionStimulusFields(t *testing.T) {
-	clean := "header question text option label description multi-select preview"
+	var parts []string
+	for _, field := range QuestionRecordFields {
+		parts = append(parts, field.Phrase)
+	}
+	clean := strings.Join(parts, " ")
 	for _, sample := range []struct {
 		name, text string
 		bad        bool
 	}{
-		{"missing preview", strings.TrimSuffix(clean, " preview"), true},
+		{"missing preview", strings.Join(parts[:len(parts)-1], " "), true},
 		{"complete", clean, false},
 	} {
 		t.Run(sample.name, func(t *testing.T) {
@@ -340,4 +366,38 @@ func TestHandoffExportStep(t *testing.T) {
 			t.Error(root, finding)
 		}
 	}
+}
+
+// wantUserGates is written independently of the registry: the phase a gate
+// stops at is a workflow fact, and a guard that reads it from the same list it
+// checks cannot see the list change.
+var wantUserGates = []struct {
+	Phase   string
+	Purpose string
+}{
+	{"request", "p1 research depth"},
+	{"elicit", "p2 requirements interview"},
+	{"plan-review", "p5 plan UAT"},
+	{"impl-plan", "p8 implementation effort and review budget"},
+	{"impl-uat", "p11 implementation UAT"},
+}
+
+// TestUserGateListMatchesTheWorkflow pins the gate set and its order, so a gate
+// moved to a neighbouring phase fails even though the registry renders whatever
+// it is told.
+func TestUserGateListMatchesTheWorkflow(t *testing.T) {
+	require.Len(t, userGates, len(wantUserGates), "the gate count must match the pinned workflow")
+	for i, want := range wantUserGates {
+		assert.Equal(t, want.Phase, string(userGates[i].phase), "gate %d phase", i)
+		assert.Equal(t, want.Purpose, userGates[i].purpose, "gate %d purpose", i)
+	}
+}
+
+// guidanceSource names the input for a finding message without threading a path
+// through the pure core.
+func guidanceSource(guidance string) string {
+	if len(guidance) > 60 {
+		return guidance[:60] + "..."
+	}
+	return guidance
 }

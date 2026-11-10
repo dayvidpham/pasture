@@ -62,7 +62,6 @@ func guardFindings(guard string, files map[string]*ast.File, fset *token.FileSet
 	var findings []string
 	asserted := false
 	skipped := false
-	returns := 0
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		switch node := n.(type) {
 		case *ast.CallExpr:
@@ -83,8 +82,6 @@ func guardFindings(guard string, files map[string]*ast.File, fset *token.FileSet
 					asserted = true
 				}
 			}
-		case *ast.ReturnStmt:
-			returns++
 		}
 		return true
 	})
@@ -93,13 +90,6 @@ func guardFindings(guard string, files map[string]*ast.File, fset *token.FileSet
 	}
 	if !asserted {
 		findings = append(findings, "guard "+guard+" contains no assertion call — why: a body that compares and returns cannot fail; where: the guard body; fix: assert the finding, do not just compute it")
-	} else if returns > 1 {
-		// A guard may return early only when it has already asserted.
-		for _, stmt := range fn.Body.List {
-			if ret, ok := stmt.(*ast.ReturnStmt); ok && len(ret.Results) > 0 {
-				_ = ret
-			}
-		}
 	}
 	return findings
 }
@@ -144,6 +134,9 @@ func TestGuardInventory(t *testing.T) {
 	for _, entry := range guardInventory {
 		if entry.Requirement == "" {
 			t.Errorf("guard %s records no requirement — fix: say what it proves", entry.Guard)
+		}
+		if entry.NoPureCore != "" && len(strings.Fields(entry.NoPureCore)) < 4 {
+			t.Errorf("guard %s records NoPureCore %q — why: the field exists to explain a missing pure core, not to wave a sample away; fix: state the reason in a sentence", entry.Guard, entry.NoPureCore)
 		}
 		for _, finding := range guardFindings(entry.Guard, files, fset) {
 			t.Error(finding)

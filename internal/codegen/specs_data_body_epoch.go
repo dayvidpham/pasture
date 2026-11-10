@@ -58,7 +58,7 @@ var epochBody = SkillBody{
 			Given:     "non-user-gated phase completes",
 			When:      "transitioning",
 			Then:      "proceed autonomously; " + renderUserGates(),
-			ShouldNot: "ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined",
+			ShouldNot: "ask 'Should I proceed?' for autonomous phases; add user gates beyond the defined list",
 		},
 		{
 			Id:        "epoch-uat-auto-ratify",

@@ -74,6 +74,21 @@ func TestQuestionRecordShapeIsStable(t *testing.T) {
 	if _, err := json.Marshal(seen); err != nil {
 		t.Fatalf("the question record shape is not serialisable: %v", err)
 	}
+
+	defective := []QuestionRecordField{{Name: "header", Phrase: "the header"}}
+	defectiveSeen := map[string]struct{}{}
+	for _, field := range defective {
+		defectiveSeen[field.Name] = struct{}{}
+	}
+	missing := 0
+	for _, required := range []string{"header", "question", "options", "multi"} {
+		if _, ok := defectiveSeen[required]; !ok {
+			missing++
+		}
+	}
+	if missing == 0 {
+		t.Fatal("the defective sample must omit at least one required field")
+	}
 }
 
 // TestSignalRecordShapeIsStable proves the signal line's declared field order is
@@ -92,5 +107,20 @@ func TestSignalRecordShapeIsStable(t *testing.T) {
 	}
 	if len(decoded) != len(SignalLineFields) {
 		t.Errorf("the writer emits %d fields but the registry declares %d", len(decoded), len(SignalLineFields))
+	}
+	// Defective sample: a line built without the registry's fields must not
+	// satisfy the same check.
+	var sparse map[string]any
+	if err := json.Unmarshal([]byte(`{"kind":"confusion"}`), &sparse); err != nil {
+		t.Fatal(err)
+	}
+	sparseMissing := 0
+	for _, field := range SignalLineFields {
+		if _, ok := sparse[field.Field]; !ok {
+			sparseMissing++
+		}
+	}
+	if sparseMissing != len(SignalLineFields)-1 {
+		t.Fatalf("the defective sample must omit all but one declared field, omitted %d", sparseMissing)
 	}
 }
