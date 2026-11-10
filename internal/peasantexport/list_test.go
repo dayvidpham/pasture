@@ -20,9 +20,16 @@ func listPeasant(t *testing.T, payload string) (binary, countPath string) {
 	src := fakePeasantBinary(t)
 	dir := t.TempDir()
 	binary = filepath.Join(dir, "peasant")
-	data, err := os.ReadFile(src)
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(binary, data, 0o700))
+	// Hard-link the already-built fake instead of writing a fresh executable.
+	// CI runs on overlayfs, where exec'ing a just-written file can transiently
+	// fail with ETXTBSY; a hard link shares the original inode, so only the
+	// JSON fixture beside it is new. Fall back to a copy on filesystems that
+	// cannot link across the two temporary directories.
+	if err := os.Link(src, binary); err != nil {
+		data, readErr := os.ReadFile(src)
+		require.NoError(t, readErr)
+		require.NoError(t, os.WriteFile(binary, data, 0o700))
+	}
 	require.NoError(t, os.WriteFile(binary+".list.json", []byte(payload), 0o600))
 	return binary, binary + ".count"
 }
