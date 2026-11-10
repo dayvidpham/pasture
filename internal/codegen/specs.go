@@ -136,15 +136,17 @@ const (
 
 	// FragWritingStandard is the wording half of the user-facing writing
 	// standard: plain terms, short sentences, active voice, no invented labels,
-	// the STE-aligned claim, and the pre-send check. Question and option design
-	// is FragWritingQuestions. Consumers reference each fragment through
-	// fragRef; the reference set is derived by FragmentToOwnerRefs.
+	// the STE-aligned claim, the status template, and the pre-send check.
+	// Question and option design is FragWritingQuestions. Consumers reference
+	// each fragment through fragRef; the reference set is derived by
+	// FragmentToOwnerRefs.
 	FragWritingStandard FragmentId = "frag--writing-standard"
 
 	// FragWritingQuestions is the question half of the writing standard:
 	// grounding before asking, one decision, option shape, recommendation
-	// placement, both templates, and the weak-tool degrade. Status does not
-	// carry it. The union of the two fragments is the full rule set.
+	// placement, the present template, and the weak-tool degrade. Status does
+	// not carry it. The status template is in FragWritingStandard. The union
+	// of the two fragments is the full rule set.
 	FragWritingQuestions FragmentId = "frag--writing-questions"
 
 	// FragSignalCapture is the one authored home of the signal-capture

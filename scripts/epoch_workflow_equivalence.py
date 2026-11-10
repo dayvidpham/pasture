@@ -2,9 +2,10 @@
 """Reproduce the W2 rendering-source equivalence record.
 
 Compares two generations of the committed generated trees and classifies every
-changed line pair. The fix pass under audit is base 5ab7cb7e -> c1950bc3; later
-commits in this branch change only guards and docs, so that generated tree is
-the branch's tree.
+changed line pair. The audited pair is 5ab7cb7e..c1950bc3. Later commits on
+this branch changed generated skill prose, so that pair is not the branch
+tree. The listing's first line names the pair it was built from. Do not read
+the listing as the current tree.
 
 Usage:
     python3 scripts/epoch_workflow_equivalence.py [BASE] [HEAD] [--listing PATH]
@@ -172,8 +173,16 @@ def collect(base, head):
     return rows
 
 
-def write_listing(rows, path):
+def provenance_line(base, head):
+    return (
+        f"# provenance: compared {base}..{head}; "
+        "this listing is that pair only, not the branch tree\n"
+    )
+
+
+def write_listing(rows, path, base, head):
     with open(path, "w", encoding="utf-8") as handle:
+        handle.write(provenance_line(base, head))
         handle.write(
             "path\told_line\tnew_line\tclassification\told\tnew\n"
         )
@@ -209,7 +218,7 @@ def main():
     required = len(pairs) - token_only
 
     if args.listing:
-        write_listing(rows, args.listing)
+        write_listing(rows, args.listing, args.base, args.head)
 
     print(f"base {args.base} -> head {args.head}")
     print(f"text files changed: {len(set(row['path'] for row in rows))}")

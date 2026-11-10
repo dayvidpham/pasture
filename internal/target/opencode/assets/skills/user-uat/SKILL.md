@@ -103,7 +103,7 @@ Select the current registered author with "${EPOCH_REC}" whoami. It prints the a
 
 ## Writing to the User
 
-These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. This fragment covers wording: plain terms, short sentences, active voice, and no invented labels, plus the pre-send check. Question and option design is in Question and Option Design; this fragment does not repeat it. Five skills carry these wording rules: architect-handoff, status, supervisor, user-elicit, user-uat.
+These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. This fragment covers wording: plain terms, short sentences, active voice, and no invented labels, plus the pre-send check and the status template. Question rules 2, 22, 23 and 24 ship in architect-handoff, supervisor, user-elicit, user-uat. This fragment does not repeat them. Five skills carry these wording rules: architect-handoff, status, supervisor, user-elicit, user-uat.
 
 ### The rules
 
@@ -157,11 +157,34 @@ Format: number, requirement, the STE rule it adapts, then a compact bad-to-good 
 
 ### Wording house rule
 
-No self-praise is the wording house rule. The question house rules are in Question and Option Design.
+No self-praise is the wording house rule.
 
 | Rule | Requirement |
 |---|---|
 | No self-praise | No self-congratulation. State the next step in one line instead. |
+
+### Template: status update
+
+~~~markdown
+**Status:** <the result or the state, max 25 words>.
+
+**Done**
+- <artifact or outcome, past tense, actor named> (`<path>`, pull request #N, or task title).
+
+**Next**
+- <what happens next, and who does it>.
+
+**Needs you** (omit if empty)
+- <the decision>, needed for <what it unblocks>.
+
+**Risk** (omit if empty)
+- WARNING or CAUTION: <condition>. <result>.
+
+**Terms** (new terms only)
+- **<term>**: <max 20 words>.
+~~~
+
+Budget: 120 words. Every Done item names an artefact. Do not restate the plan. One status per message, not one per thought.
 
 ### Exempt material
 
@@ -180,21 +203,19 @@ The caps stay live for everything else. Rule 3 sets paragraph length, rule 14 se
 Run this list on every user-facing message. A clean pass is not a gate.
 
 1. Does sentence one give the result, the decision, or the blocker?
-2. Before a question: did the reader already see what the thing is, its definition, and one example, in an earlier turn or an earlier block?
-3. Does every term the reader did not introduce appear in Terms before first use?
-4. Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit. Is each one defined, or replaced by its substance?
-5. Does one item have two names, or one word have two senses?
-6. Any sentence over 20 words (instruction or question) or 25 (description)?
-7. Any noun cluster over 3 words? Any slang verb, noun-as-verb, or phrasal verb?
-8. Any semicolon or em-dash?
-9. Any passive verb with no actor?
-10. Can the reader choose from the options alone, with no other document? Is the recommendation outside the options?
-11. Does an irreversible action carry WARNING or CAUTION?
-12. Delete one sentence. If nothing is lost, keep it deleted.
+2. Does every term the reader did not introduce appear in Terms before first use?
+3. Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit. Is each one defined, or replaced by its substance?
+4. Does one item have two names, or one word have two senses?
+5. Any sentence over 20 words (instruction or question) or 25 (description)?
+6. Any noun cluster over 3 words? Any slang verb, noun-as-verb, or phrasal verb?
+7. Any semicolon or em-dash?
+8. Any passive verb with no actor?
+9. Does an irreversible action carry WARNING or CAUTION?
+10. Delete one sentence. If nothing is lost, keep it deleted.
 
 ## Question and Option Design
 
-This fragment covers question and option design: grounding before asking, one decision, option shape, recommendation placement, the two templates, and the weak-tool degrade. Wording rules, the STE-aligned claim, and the pre-send check are in Writing to the User. Four skills carry these question rules: architect-handoff, supervisor, user-elicit, user-uat. The status skill asks no question, so it does not carry this fragment. Ask through the `request_user_decision` operation, never by launching a subagent. That launch is `delegate_assignment`, a different operation. The role-tool binding in `internal/runtime/profiles.go` lowers `request_user_decision` to the harness question tool and lowers `delegate_assignment` to the subagent tool.
+This fragment covers question and option design: grounding before asking, one decision, option shape, recommendation placement, the present template, and the weak-tool degrade. Wording rules, the STE-aligned claim, the status template, and the pre-send check are in Writing to the User. Four skills carry these question rules: architect-handoff, supervisor, user-elicit, user-uat. The status skill asks no question, so it does not carry this fragment. Ask through the `request_user_decision` operation, never by launching a subagent. That launch is `delegate_assignment`, a different operation. The role-tool binding in `internal/runtime/profiles.go` lowers `request_user_decision` to the harness question tool and lowers `delegate_assignment` to the subagent tool.
 
 ### The rules
 
@@ -206,9 +227,9 @@ Format: number, requirement, the STE rule it adapts, then a compact bad-to-good 
 |---|---|---|---|
 | 2 | Ground before you ask. Show what the thing is, where it lives, and one example. Never put the only explanation in the options. | 6.1, 4.4 | 'Which order: the types to the gate in parallel, or the gate first?' to 'Three parts share one type. The gate reads it. The fixtures copy it. Code: `ir.Event`.' |
 
-**Questions, options, risk**
+**Questions and options**
 
-Rules 22 to 24 are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule.
+Rules 22, 23 and 24 are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule.
 
 | # | Rule | Adapts | Bad to good |
 |---|---|---|---|
@@ -218,7 +239,7 @@ Rules 22 to 24 are house rules. The house-rule table names them by number. Do no
 
 ### House rules for questions, options and recommendations
 
-ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding, one decision, option design and recommendation placement. Four rows in this table are pointers to those rules. Question shape and Text-before-question turn add only what those rules do not. No self-praise is a wording rule; it is in Writing to the User. Never cite an STE number for a house rule.
+ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding before asking, one decision per question, option design and recommendation placement. Four rows in this table are pointers to those rules. Question shape and Text-before-question turn add only what those rules do not. No self-praise is a wording rule; it is in Writing to the User. Never cite an STE number for a house rule.
 
 | Rule | Requirement |
 |---|---|
@@ -279,29 +300,6 @@ options: the same labels, with the 'what happens' and 'cost' text repeated in ea
 
 One component per call. Use multi-select only when the options combine. Always add one open-ended feedback question.
 
-### Template: status update
-
-~~~markdown
-**Status:** <the result or the state, max 25 words>.
-
-**Done**
-- <artifact or outcome, past tense, actor named> (`<path>`, pull request #N, or task title).
-
-**Next**
-- <what happens next, and who does it>.
-
-**Needs you** (omit if empty)
-- <the decision>, needed for <what it unblocks>.
-
-**Risk** (omit if empty)
-- WARNING or CAUTION: <condition>. <result>.
-
-**Terms** (new terms only)
-- **<term>**: <max 20 words>.
-~~~
-
-Budget: 120 words. Every Done item names an artefact. Do not restate the plan. One status per message, not one per thought.
-
 ### Degrade when the question tool is weak
 
 Some hosts expose a weak question tool: it takes one question per call, it has no multi-select, or its picker hides option descriptions. Degrade in this order:
@@ -311,6 +309,13 @@ Some hosts expose a weak question tool: it takes one question per call, it has n
 3. State the assumption you will use if the answer is unavailable.
 
 Put the assumption in the text turn that grounds the question, not inside the options. An assumption never satisfies a user gate: a gated phase waits for the user's answer. The question still asks for one decision, and the recommendation names the cost of the assumption.
+
+### Pre-send check for a question
+
+Run this list before you send a question. It tests the question rules in this fragment. The wording pre-send check is in Writing to the User.
+
+1. Before a question: did the reader already see what the thing is, its definition, and one example, in an earlier turn or an earlier block?
+2. Can the reader choose from the options alone, with no other document? Is the recommendation outside the options?
 
 ## UAT Phases
 

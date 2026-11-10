@@ -214,7 +214,9 @@ python3 scripts/epoch_workflow_equivalence.py --listing docs/epoch-workflow-equi
 
 Per-line listing: `docs/epoch-workflow-equivalence-listing.tsv` (one row per
 `replace` pair or deletion, with path, old/new line numbers, classification, and
-both line texts).
+both line texts). The file's first line names the commit pair
+`5ab7cb7e..c1950bc3`. That line is the provenance pin: the listing is that
+pair, not the branch tree.
 
 Result over this fix pass:
 

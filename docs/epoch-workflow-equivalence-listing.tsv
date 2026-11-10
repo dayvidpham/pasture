@@ -1,3 +1,4 @@
+# provenance: compared 5ab7cb7e..c1950bc3; this listing is that pair only, not the branch tree
 path	old_line	new_line	classification	old	new
 .agents/skills/architect-handoff/SKILL.md	23	23	required-rewrite:retired-mechanism	"- Then: use TeamCreate to spawn the supervisor as an Opus teammate (workers also Opus), then assign work via send_assignment_message"	"- Then: delegate the supervisor as the implementation-plan owner (workers also Opus), then give it a self-contained assignment"
 .agents/skills/architect-handoff/SKILL.md	24	24	required-rewrite:retired-mechanism	"- Should not: spawn the supervisor with the delegate_assignment tool or via aura-swarm for the IMPL_PLAN phase"	"- Should not: spawn the supervisor without a self-contained assignment, or via aura-swarm, for the IMPL_PLAN phase"

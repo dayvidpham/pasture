@@ -37,7 +37,7 @@ Select the current registered author with "${EPOCH_REC}" whoami. It prints the a
 
 ## Writing to the User
 
-These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. This fragment covers wording: plain terms, short sentences, active voice, and no invented labels, plus the pre-send check. Question and option design is in Question and Option Design; this fragment does not repeat it. Five skills carry these wording rules: architect-handoff, status, supervisor, user-elicit, user-uat.
+These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. This fragment covers wording: plain terms, short sentences, active voice, and no invented labels, plus the pre-send check and the status template. Question rules 2, 22, 23 and 24 ship in architect-handoff, supervisor, user-elicit, user-uat. This fragment does not repeat them. Five skills carry these wording rules: architect-handoff, status, supervisor, user-elicit, user-uat.
 
 ### The rules
 
@@ -91,11 +91,34 @@ Format: number, requirement, the STE rule it adapts, then a compact bad-to-good 
 
 ### Wording house rule
 
-No self-praise is the wording house rule. The question house rules are in Question and Option Design.
+No self-praise is the wording house rule.
 
 | Rule | Requirement |
 |---|---|
 | No self-praise | No self-congratulation. State the next step in one line instead. |
+
+### Template: status update
+
+~~~markdown
+**Status:** <the result or the state, max 25 words>.
+
+**Done**
+- <artifact or outcome, past tense, actor named> (`<path>`, pull request #N, or task title).
+
+**Next**
+- <what happens next, and who does it>.
+
+**Needs you** (omit if empty)
+- <the decision>, needed for <what it unblocks>.
+
+**Risk** (omit if empty)
+- WARNING or CAUTION: <condition>. <result>.
+
+**Terms** (new terms only)
+- **<term>**: <max 20 words>.
+~~~
+
+Budget: 120 words. Every Done item names an artefact. Do not restate the plan. One status per message, not one per thought.
 
 ### Exempt material
 
@@ -114,17 +137,15 @@ The caps stay live for everything else. Rule 3 sets paragraph length, rule 14 se
 Run this list on every user-facing message. A clean pass is not a gate.
 
 1. Does sentence one give the result, the decision, or the blocker?
-2. Before a question: did the reader already see what the thing is, its definition, and one example, in an earlier turn or an earlier block?
-3. Does every term the reader did not introduce appear in Terms before first use?
-4. Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit. Is each one defined, or replaced by its substance?
-5. Does one item have two names, or one word have two senses?
-6. Any sentence over 20 words (instruction or question) or 25 (description)?
-7. Any noun cluster over 3 words? Any slang verb, noun-as-verb, or phrasal verb?
-8. Any semicolon or em-dash?
-9. Any passive verb with no actor?
-10. Can the reader choose from the options alone, with no other document? Is the recommendation outside the options?
-11. Does an irreversible action carry WARNING or CAUTION?
-12. Delete one sentence. If nothing is lost, keep it deleted.
+2. Does every term the reader did not introduce appear in Terms before first use?
+3. Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit. Is each one defined, or replaced by its substance?
+4. Does one item have two names, or one word have two senses?
+5. Any sentence over 20 words (instruction or question) or 25 (description)?
+6. Any noun cluster over 3 words? Any slang verb, noun-as-verb, or phrasal verb?
+7. Any semicolon or em-dash?
+8. Any passive verb with no actor?
+9. Does an irreversible action carry WARNING or CAUTION?
+10. Delete one sentence. If nothing is lost, keep it deleted.
 
 ## Steps
 

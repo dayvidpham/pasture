@@ -1,29 +1,44 @@
 // The authored home of the user-facing writing standard, split into two
 // fragments so a reporting skill does not ship a questionnaire guide.
-// FragWritingStandard covers wording. FragWritingQuestions covers question
-// and option design. The union is the STE-aligned rules, the house rules,
-// both templates, the degrade clause, the exempt material, and the pre-send
-// check.
+// FragWritingStandard covers wording, the status template, and the wording
+// pre-send check. FragWritingQuestions covers question and option design.
+// The union is the STE-aligned rules, the house rules, both templates, the
+// degrade clause, the exempt material, and the pre-send checks.
 //
-// The rule tables are rendered from typed registries, not hand-written rows, so
-// a guard can read each rule and prove it is authored once. Which skills
-// reference the fragment is derived from their fragRef markers by
-// FragmentToOwnerRefs; this file does not restate that set.
+// Which fragment a rule ships in is the Fragment field on that rule. Which
+// skills carry each fragment is writingCarrierRegistry. Tables, intros,
+// headings, and carrier numerals are rendered from those two declarations.
+// FragmentToOwnerRefs must equal the carrier registry; this file does not
+// restate the fragRef set.
 package codegen
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
+)
+
+// WritingFragment is which authored fragment a rule ships in. The zero value
+// is wording, so a rule that forgets the field stays in the fragment every
+// carrier reads.
+type WritingFragment int
+
+const (
+	WritingFragmentWording WritingFragment = iota
+	WritingFragmentQuestion
 )
 
 // WritingRule is one row of the STE-aligned rule table. Requirement is the
 // rule in imperative form, Adapts names the STE rule it adapts or "house" where
-// STE has no equivalent, and BadToGood is one compact rewrite.
+// STE has no equivalent, and BadToGood is one compact rewrite. Fragment is the
+// one declaration of which fragment the rule ships in.
 type WritingRule struct {
 	Number      int
 	Requirement string
 	Adapts      string
 	BadToGood   string
+	Fragment    WritingFragment
 }
 
 // WritingRuleGroup is one titled table of rules. Note, when set, is the line
@@ -42,76 +57,80 @@ var WritingRuleGroups = []WritingRuleGroup{
 		Heading: "Shape",
 		Rules: []WritingRule{
 			{1, "Lead with the result, the decision, or the blocker.", "6.1, 6.2",
-				"'This pins both the edge and the core case per branch, so a same-count swap fails.' to 'Result: the test now fails if a real case is replaced with a filler case.'"},
+				"'This pins both the edge and the core case per branch, so a same-count swap fails.' to 'Result: the test now fails if a real case is replaced with a filler case.'", WritingFragmentWording},
 			{2, "Ground before you ask. Show what the thing is, where it lives, and one example. Never put the only explanation in the options.", "6.1, 4.4",
-				"'Which order: the types to the gate in parallel, or the gate first?' to 'Three parts share one type. The gate reads it. The fixtures copy it. Code: `ir.Event`.'"},
+				"'Which order: the types to the gate in parallel, or the gate first?' to 'Three parts share one type. The gate reads it. The fixtures copy it. Code: `ir.Event`.'", WritingFragmentQuestion},
 			{3, "One topic per paragraph. Max 3 sentences.", "6.5, 6.6",
-				"One 25-word sentence with four stacked ideas, to three sentences with one idea each."},
+				"One 25-word sentence with four stacked ideas, to three sentences with one idea each.", WritingFragmentWording},
 			{4, "For 3 or more items, a flow, or a comparison, use a list, a table, or an ASCII diagram.", "4.3",
-				"'Adopt the first option, then the second, then both' to a three-row table: option, what happens, cost."},
+				"'Adopt the first option, then the second, then both' to a three-row table: option, what happens, cost.", WritingFragmentWording},
 			{5, "Cut filler, self-narration, hedging, praise, and closing offers.", "house",
-				"'It is important to note that this change effectively serves to ensure the test can detect' to 'The test detects a removed case.'"},
+				"'It is important to note that this change effectively serves to ensure the test can detect' to 'The test detects a removed case.'", WritingFragmentWording},
 		},
 	},
 	{
 		Heading: "Terms",
 		Rules: []WritingRule{
 			{6, "Put every term the user did not introduce in a Terms block before first use. Max 20 words per definition. Include the code name.", "1.1, 1.6",
-				"'per arm' to 'Arm: one of the 5 branches of the skip gate. Code: `arm`.'"},
+				"'per arm' to 'Arm: one of the 5 branches of the skip gate. Code: `arm`.'", WritingFragmentWording},
 			{7, "Use the industry term for the concept. Do not invent a term.", "1.8, 1.10",
-				"'a same-count swap' to 'a replacement that keeps the test count the same'."},
+				"'a same-count swap' to 'a replacement that keeps the test count the same'.", WritingFragmentWording},
 			{8, "One name per item, in the message and across the session.", "1.11, 9.4",
-				"'the gate', then 'the event types', then 'the IR', to 'the event types' each time."},
+				"'the gate', then 'the event types', then 'the IR', to 'the event types' each time.", WritingFragmentWording},
 			{9, "One meaning per word. Do not use one word in two senses.", "1.2, 1.3",
-				"'pins' for a version lock and 'pins' for a test assertion, to 'locks the version' and 'the test checks'."},
+				"'pins' for a version lock and 'pins' for a test assertion, to 'locks the version' and 'the test checks'.", WritingFragmentWording},
 			{10, "No internal shorthand in prose. Write the substance first, then the reference in parentheses.", "1.10, 2.2, 8.6",
-				"'Adopt the option code and skip the explanation' to 'Adopt the retry limit (task: Importer retry limit, round 6).'"},
+				"'Adopt the option code and skip the explanation' to 'Adopt the retry limit (task: Importer retry limit, round 6).'", WritingFragmentWording},
 			{11, "Max 3 words in a noun cluster, and no stack of hidden ideas. A hyphenated stack still hides several. Break it with 'of', 'that', or a clause.", "2.1, 1.9",
-				"'mutation-load-bearing core case' to 'the core case (the one case per branch that fails when the branch breaks)'."},
+				"'mutation-load-bearing core case' to 'the core case (the one case per branch that fails when the branch breaks)'.", WritingFragmentWording},
 			{12, "Write each abbreviation in full once, then the short form in parentheses.", "2.2, 8.3",
-				"'the continuous integration job, then the CI job, with no first full form' to 'the continuous integration (CI) job, then the CI job.'"},
+				"'the continuous integration job, then the CI job, with no first full form' to 'the continuous integration (CI) job, then the CI job.'", WritingFragmentWording},
 			{13, "Use plain verbs. No slang, no noun-as-verb, no phrasal verb.", "1.7, 1.10, 9.3",
-				"'reddens' to 'fails'."},
+				"'reddens' to 'fails'.", WritingFragmentWording},
 		},
 	},
 	{
 		Heading: "Sentences",
 		Rules: []WritingRule{
 			{14, "Max 20 words for an instruction or a question. Max 25 for a description. An identifier or a quote counts as one word. The cap is necessary, not sufficient.", "5.1, 6.3, 8.6",
-				"'The test checks ten cases, and because each branch needs two named cases and the count is no longer enough, a replacement can pass.' to 'The test checks 10 cases. A filler case can no longer pass.'"},
+				"'The test checks ten cases, and because each branch needs two named cases and the count is no longer enough, a replacement can pass.' to 'The test checks 10 cases. A filler case can no longer pass.'", WritingFragmentWording},
 			{15, "Active voice. Name the actor: the test, CI, the agent, the merge. Simple tenses only.", "3.2, 3.6",
-				"'The gate will be rebased on the types.' to 'The agent rebases the gate on the event types.'"},
+				"'The gate will be rebased on the types.' to 'The agent rebases the gate on the event types.'", WritingFragmentWording},
 			{16, "One instruction per sentence. Imperative. Condition first.", "5.2, 5.3, 5.4",
-				"'All three at once, then check.' to 'If the types change, rebase the gate. Then run the tests.'"},
+				"'All three at once, then check.' to 'If the types change, rebase the gate. Then run the tests.'", WritingFragmentWording},
 			{17, "Full sentences keep articles and verbs. Fragments only in lists, tables, and labels.", "4.2, 4.3, 4.5",
-				"'Defer the timeout, keep the retry limit fix' to 'Keep the retry limit. Defer the timeout change. The correctness review is round 3 and the test-quality review is round 2.'"},
+				"'Defer the timeout, keep the retry limit fix' to 'Keep the retry limit. Defer the timeout change. The correctness review is round 3 and the test-quality review is round 2.'", WritingFragmentWording},
 			{18, "No semicolons. No em-dashes. Use a period or a list.", "8.1 + house",
-				"'per arm, so a swap fails' with an em-dash, to 'per arm. That is 10 checks, so a swap fails.'"},
+				"'per arm, so a swap fails' with an em-dash, to 'per arm. That is 10 checks, so a swap fails.'", WritingFragmentWording},
 			{19, "Show the logic with because, so, but, if, then.", "4.4",
-				"'10 predicates. A same-count swap fails.' to 'The test checks 10 cases, so a replacement that keeps the count cannot pass.'"},
+				"'10 predicates. A same-count swap fails.' to 'The test checks 10 cases, so a replacement that keeps the count cannot pass.'", WritingFragmentWording},
 		},
 	},
 	{
 		Heading: "Exempt material",
 		Rules: []WritingRule{
 			{20, "Backtick each identifier. Max 2 per sentence. Give a plain gloss on first use.", "8.6 + house",
-				"Four bare references in one line, to one task, one design decision, and two reviews, each written in substance first."},
+				"Four bare references in one line, to one task, one design decision, and two reviews, each written in substance first.", WritingFragmentWording},
 			{21, "Quote user text, code, paths, and logs exactly. Explain them outside the quote.", "8.6",
-				"A quote silently edited, to the blockquote verbatim with a plain reading on the next line."},
+				"A quote silently edited, to the blockquote verbatim with a plain reading on the next line.", WritingFragmentWording},
 		},
 	},
 	{
-		Heading: "Questions, options, risk",
-		Note:    "Rules 22 to 24 are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule.",
+		Heading: "Questions and options",
 		Rules: []WritingRule{
 			{22, "One question, one decision. Say what the answer changes.", "house",
-				"'Which order do you want, and are the labels clear?' to 'Which part merges first? The answer sets the order for the next 3 days.'"},
+				"'Which order do you want, and are the labels clear?' to 'Which part merges first? The answer sets the order for the next 3 days.'", WritingFragmentQuestion},
 			{23, "Each option is self-contained: a label of max 6 words, what happens, and the cost. Use only Terms words.", "house",
-				"'Both' to 'Both limits. The import stops at the first limit it reaches. Cost: one more setting to test.'"},
+				"'Both' to 'Both limits. The import stops at the first limit it reaches. Cost: one more setting to test.'", WritingFragmentQuestion},
 			{24, "Put the recommendation outside the options, with one reason. You may also mark the label '(recommended)'.", "house",
-				"An option labelled 'recommended' with no reason, to 'Recommendation: merge the event types first, because a later change costs rework in two places.'"},
+				"An option labelled 'recommended' with no reason, to 'Recommendation: merge the event types first, because a later change costs rework in two places.'", WritingFragmentQuestion},
+		},
+	},
+	{
+		Heading: "Risk",
+		Rules: []WritingRule{
 			{25, "Mark an irreversible action with WARNING or CAUTION, then the condition, then the result.", "7.1, 7.2, 7.3",
-				"'Removing the core case will fail the suite.' to 'CAUTION: if you remove the core case, the test passes and a broken branch ships.'"},
+				"'Removing the core case will fail the suite.' to 'CAUTION: if you remove the core case, the test passes and a broken branch ships.'", WritingFragmentWording},
 		},
 	},
 }
@@ -160,6 +179,95 @@ func validateWritingRules(groups []WritingRuleGroup) error {
 	if err := validateWritingHouseRules(WritingHouseRules, rules); err != nil {
 		return err
 	}
+	if err := validateWritingQuestionHeadings(groups); err != nil {
+		return err
+	}
+	if err := validateWritingCarrierNumerals(); err != nil {
+		return err
+	}
+	if err := validateWordingFragmentResolves(writingStandardFragment()); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateWordingFragmentResolves rejects a wording fragment that names the
+// question section. Status carries this fragment and does not contain that
+// section, so the name would be a dangling pointer.
+func validateWordingFragmentResolves(fragment SharedFragment) error {
+	if fragment.Prose == nil {
+		return fmt.Errorf("codegen.ValidateWritingRules: the wording fragment has no prose — why: status would ship without its writing rules; where: internal/codegen/specs_data_writing.go writingStandardFragment; fix: build the prose fragment")
+	}
+	if proseTreeContains(*fragment.Prose, questionSectionTitle) {
+		return fmt.Errorf("codegen.ValidateWritingRules: the wording fragment names %q — why: status carries this fragment and does not contain that section; where: internal/codegen/specs_data_writing.go writingStandardFragment; fix: name the skills that carry question design, not the section title", questionSectionTitle)
+	}
+	check, ok := proseSubsectionByID(*fragment.Prose, "frag-writing-standard-check")
+	if !ok {
+		return fmt.Errorf("codegen.ValidateWritingRules: the wording fragment has no pre-send check — why: a reader would send without the list; where: internal/codegen/specs_data_writing.go writingCheckContent; fix: keep the pre-send subsection")
+	}
+	for _, phrase := range writingQuestionCheckPhrases() {
+		if strings.Contains(check.Content, phrase) {
+			return fmt.Errorf("codegen.ValidateWritingRules: the wording pre-send check tests %q — why: that check belongs to question rules, which status does not carry; where: internal/codegen/specs_data_writing.go writingCheckContent; fix: move the check to the question fragment", phrase)
+		}
+	}
+	return nil
+}
+
+func proseTreeContains(section ProseSection, needle string) bool {
+	if strings.Contains(section.Title, needle) || strings.Contains(section.Content, needle) {
+		return true
+	}
+	for _, sub := range section.Subsections {
+		if proseTreeContains(sub, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func proseSubsectionByID(section ProseSection, id string) (ProseSection, bool) {
+	for _, sub := range section.Subsections {
+		if sub.Id == id {
+			return sub, true
+		}
+		if found, ok := proseSubsectionByID(sub, id); ok {
+			return found, true
+		}
+	}
+	return ProseSection{}, false
+}
+
+// validateWritingQuestionHeadings rejects a question-fragment heading that
+// claims risk when no risk rule is in that rendered group. The live registry
+// splits risk into its own wording group, so the old combined heading fails.
+func validateWritingQuestionHeadings(groups []WritingRuleGroup) error {
+	for _, group := range writingRuleGroupsForFrom(groups, WritingFragmentQuestion) {
+		if !strings.Contains(strings.ToLower(group.Heading), "risk") {
+			continue
+		}
+		hasRisk := false
+		for _, rule := range group.Rules {
+			if rule.Number == 25 {
+				hasRisk = true
+			}
+		}
+		if hasRisk {
+			continue
+		}
+		return fmt.Errorf("codegen.ValidateWritingRules: question group %q claims risk — why: the risk rule is not in that group, so the heading names a rule the reader cannot find; where: internal/codegen/specs_data_writing.go WritingRuleGroups; fix: drop risk from the heading, or move the risk rule into the group", group.Heading)
+	}
+	return nil
+}
+
+// validateWritingCarrierNumerals fails when a carrier count has no word, so a
+// sentence cannot fall back to a hardcoded numeral.
+func validateWritingCarrierNumerals() error {
+	if _, err := writingTitleCount(len(WritingStandardCarriers)); err != nil {
+		return err
+	}
+	if _, err := writingTitleCount(len(WritingQuestionCarriers)); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -206,11 +314,16 @@ func validateWritingHouseRules(house []WritingHouseRule, rules []WritingRule) er
 			return fmt.Errorf("codegen.ValidateWritingRules: group %q note says \"below\" — why: the cited rules are not in a following house table; where: internal/codegen/specs_data_writing.go WritingRuleGroups; fix: name the house-rule table, and drop \"below\"", group.Heading)
 		}
 	}
-	if strings.Contains(writingHouseIntro, "below") {
-		return fmt.Errorf("codegen.ValidateWritingRules: the house intro says \"below\" — why: that word is a dangling cross-reference; where: internal/codegen/specs_data_writing.go writingHouseIntro; fix: name the table in this section")
+	questionIntro := writingQuestionHouseIntro()
+	if strings.Contains(questionIntro, "below") {
+		return fmt.Errorf("codegen.ValidateWritingRules: the house intro says \"below\" — why: that word is a dangling cross-reference; where: internal/codegen/specs_data_writing.go writingQuestionHouseIntro; fix: name the table in this section")
 	}
-	if strings.Contains(writingWordingHouseIntro, "below") {
-		return fmt.Errorf("codegen.ValidateWritingRules: the wording house intro says \"below\" — why: that word is a dangling cross-reference; where: internal/codegen/specs_data_writing.go writingWordingHouseIntro; fix: name the question fragment, and drop \"below\"")
+	wordingIntro := writingWordingHouseIntro()
+	if strings.Contains(wordingIntro, "below") {
+		return fmt.Errorf("codegen.ValidateWritingRules: the wording house intro says \"below\" — why: that word is a dangling cross-reference; where: internal/codegen/specs_data_writing.go writingWordingHouseIntro; fix: name the rule, and drop \"below\"")
+	}
+	if strings.Contains(wordingIntro, questionSectionTitle) {
+		return fmt.Errorf("codegen.ValidateWritingRules: the wording house intro names %q — why: status carries the wording fragment and does not contain that section; where: internal/codegen/specs_data_writing.go writingWordingHouseIntro; fix: name the skills that carry question design, not the section title", questionSectionTitle)
 	}
 	return nil
 }
@@ -229,6 +342,7 @@ func writingBodyTexts() []string {
 		writingWordingCarrierSentence(),
 		writingQuestionCarrierSentence(),
 		writingAskBindingSentence,
+		writingQuestionLivesSentence(),
 	}
 }
 
@@ -255,23 +369,87 @@ func RenderWritingRules(groups []WritingRuleGroup) string {
 }
 
 // WritingHouseRule is one row of the house-rule table. A house rule never
-// carries an STE number, so there is no Adapts field.
+// carries an STE number, so there is no Adapts field. Fragment is the same
+// declaration the STE rules use.
 type WritingHouseRule struct {
 	Name        string
 	Requirement string
+	Fragment    WritingFragment
 }
 
 // writingTurnSplitReason is the one home of the turn-split reason. The
 // present template points at the house rule by name and does not repeat it.
 const writingTurnSplitReason = "a question tool can hide prose sent in the same turn"
 
-// writingHouseIntro precedes the question house-rule table. It names the four
-// pointer rows in that table and does not say they sit "below".
-const writingHouseIntro = "ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding, one decision, option design and recommendation placement. Four rows in this table are pointers to those rules. Question shape and Text-before-question turn add only what those rules do not. No self-praise is a wording rule; it is in Writing to the User. Never cite an STE number for a house rule."
+// questionSectionTitle is the question fragment's own heading. The wording
+// fragment must not use it: status carries wording and does not contain the
+// section.
+const questionSectionTitle = "Question and Option Design"
 
-// writingWordingHouseIntro precedes the one wording house rule. The question
-// house rules live in the other fragment.
-const writingWordingHouseIntro = "No self-praise is the wording house rule. The question house rules are in Question and Option Design."
+// writingQuestionHouseIntro precedes the question house-rule table. The rule
+// numbers, the pointer count, and the full-text names come from the Fragment
+// field, not from a second list.
+func writingQuestionHouseIntro() string {
+	var pointers, full []string
+	var numbered []struct {
+		n    int
+		name string
+	}
+	for _, rule := range writingHouseRulesFor(WritingFragmentQuestion) {
+		if n, ok := writingPointerNumber(rule.Requirement); ok {
+			pointers = append(pointers, rule.Name)
+			numbered = append(numbered, struct {
+				n    int
+				name string
+			}{n, rule.Name})
+			continue
+		}
+		full = append(full, rule.Name)
+	}
+	sort.Slice(numbered, func(i, j int) bool { return numbered[i].n < numbered[j].n })
+	numbers := make([]int, len(numbered))
+	duties := make([]string, len(numbered))
+	for i, row := range numbered {
+		numbers[i] = row.n
+		duties[i] = writingLowerFirst(row.name)
+	}
+	var wording []string
+	for _, rule := range writingHouseRulesFor(WritingFragmentWording) {
+		wording = append(wording, rule.Name)
+	}
+	return strings.Join([]string{
+		"ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool.",
+		"Rules " + writingJoinNumbers(numbers) + " already carry " + writingJoinList(duties) + ".",
+		writingPointerCountSentence(len(pointers)),
+		writingFullTextSentence(full),
+		writingWordingHousePointer(wording),
+		"Never cite an STE number for a house rule.",
+	}, " ")
+}
+
+func writingLowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToLower(s[:1]) + s[1:]
+}
+
+// writingWordingHouseIntro precedes the wording house rules. It names those
+// rules and does not point at a section status does not contain.
+func writingWordingHouseIntro() string {
+	var names []string
+	for _, rule := range writingHouseRulesFor(WritingFragmentWording) {
+		names = append(names, rule.Name)
+	}
+	switch len(names) {
+	case 0:
+		return "This fragment has no wording house rule."
+	case 1:
+		return names[0] + " is the wording house rule."
+	default:
+		return writingJoinList(names) + " are the wording house rules."
+	}
+}
 
 // writingHousePointer is an explicit pointer. It names the rule and does not
 // restate that rule's sentence.
@@ -282,42 +460,72 @@ func writingHousePointer(number int) string {
 // WritingHouseRules is the one authored registry of the seven house rules.
 // Three rows carry full text. Four are pointers to the rules they extend.
 var WritingHouseRules = []WritingHouseRule{
-	{"Question shape", "A short header, max 4 words."},
-	{"Option design", writingHousePointer(23)},
-	{"Recommendation placement", writingHousePointer(24)},
-	{"Grounding before asking", writingHousePointer(2)},
-	{"One decision per question", writingHousePointer(22)},
-	{"Text-before-question turn", "Send the grounding as text and end the turn. Ask through the `request_user_decision` operation in the next turn, because " + writingTurnSplitReason + "."},
-	{"No self-praise", "No self-congratulation. State the next step in one line instead."},
+	{"Question shape", "A short header, max 4 words.", WritingFragmentQuestion},
+	{"Option design", writingHousePointer(23), WritingFragmentQuestion},
+	{"Recommendation placement", writingHousePointer(24), WritingFragmentQuestion},
+	{"Grounding before asking", writingHousePointer(2), WritingFragmentQuestion},
+	{"One decision per question", writingHousePointer(22), WritingFragmentQuestion},
+	{"Text-before-question turn", "Send the grounding as text and end the turn. Ask through the `request_user_decision` operation in the next turn, because " + writingTurnSplitReason + ".", WritingFragmentQuestion},
+	{"No self-praise", "No self-congratulation. State the next step in one line instead.", WritingFragmentWording},
 }
 
-// WritingStandardCarriers names the five skills that carry the wording
-// fragment. FragmentToOwnerRefs is the registry; this list is the declaration
-// an agent and a guard both read.
-var WritingStandardCarriers = []string{
-	"architect-handoff",
-	"status",
-	"supervisor",
-	"user-elicit",
-	"user-uat",
+// writingCarrier is one skill and whether it also carries question design.
+// writingCarrierRegistry is the one declaration of which skills carry each
+// fragment. The two exported slices are derived from it.
+type writingCarrier struct {
+	Skill    string
+	Question bool
 }
 
-// WritingQuestionCarriers names the four skills that carry question and option
-// design. Status asks no question, so it is not in this list. The union of the
-// two carrier lists is what satisfies the writing requirement.
-var WritingQuestionCarriers = []string{
-	"architect-handoff",
-	"supervisor",
-	"user-elicit",
-	"user-uat",
+var writingCarrierRegistry = []writingCarrier{
+	{Skill: "architect-handoff", Question: true},
+	{Skill: "status"},
+	{Skill: "supervisor", Question: true},
+	{Skill: "user-elicit", Question: true},
+	{Skill: "user-uat", Question: true},
 }
+
+func writingCarriers(question bool) []string {
+	var out []string
+	for _, row := range writingCarrierRegistry {
+		if question && !row.Question {
+			continue
+		}
+		out = append(out, row.Skill)
+	}
+	return out
+}
+
+// WritingStandardCarriers names the skills that carry the wording fragment.
+// It is derived from writingCarrierRegistry. FragmentToOwnerRefs must match it.
+var WritingStandardCarriers = writingCarriers(false)
+
+// WritingQuestionCarriers names the skills that carry question and option
+// design. Status asks no question, so its row leaves Question false.
+var WritingQuestionCarriers = writingCarriers(true)
 
 func writingWordingCarrierSentence() string {
-	return "Five skills carry these wording rules: " + strings.Join(WritingStandardCarriers, ", ") + "."
+	return writingTitleCountOrDecimal(len(WritingStandardCarriers)) + " skills carry these wording rules: " + strings.Join(WritingStandardCarriers, ", ") + "."
 }
 
 func writingQuestionCarrierSentence() string {
-	return "Four skills carry these question rules: " + strings.Join(WritingQuestionCarriers, ", ") + ". The status skill asks no question, so it does not carry this fragment."
+	sentence := writingTitleCountOrDecimal(len(WritingQuestionCarriers)) + " skills carry these question rules: " + strings.Join(WritingQuestionCarriers, ", ") + "."
+	omitted := writingSkillsOnlyIn(WritingStandardCarriers, WritingQuestionCarriers)
+	switch len(omitted) {
+	case 0:
+		return sentence
+	case 1:
+		return sentence + " The " + omitted[0] + " skill asks no question, so it does not carry this fragment."
+	default:
+		return sentence + " These skills ask no question, so they do not carry this fragment: " + strings.Join(omitted, ", ") + "."
+	}
+}
+
+// writingQuestionLivesSentence tells a wording reader where question design
+// ships. It names skills, not a section title, so it resolves in status.
+func writingQuestionLivesSentence() string {
+	numbers := writingRuleNumbers(WritingFragmentQuestion)
+	return "Question rules " + writingJoinNumbers(numbers) + " ship in " + strings.Join(WritingQuestionCarriers, ", ") + ". This fragment does not repeat them."
 }
 
 // writingAskBindingSentence points at the role-tool binding that enforces
@@ -339,21 +547,19 @@ func RenderWritingHouseRules(intro string, rules []WritingHouseRule) string {
 	return b.String()
 }
 
-// writingQuestionRuleNumbers are the rules that belong to question design.
-// Every other rule is wording. The registry stays one ordered list.
-func writingQuestionRuleNumbers() map[int]bool {
-	return map[int]bool{2: true, 22: true, 23: true, 24: true}
+// writingRuleGroupsFor returns the rule groups for one fragment. Membership
+// is the Fragment field. A question-only remainder of Shape is labelled
+// Grounding, which is a display name for that one rule, not a second list.
+func writingRuleGroupsFor(home WritingFragment) []WritingRuleGroup {
+	return writingRuleGroupsForFrom(WritingRuleGroups, home)
 }
 
-// writingRuleGroupsFor returns the rule groups for one fragment. Question
-// groups keep their note. The leftover risk rule is not a question rule.
-func writingRuleGroupsFor(question bool) []WritingRuleGroup {
-	want := writingQuestionRuleNumbers()
+func writingRuleGroupsForFrom(groups []WritingRuleGroup, home WritingFragment) []WritingRuleGroup {
 	var out []WritingRuleGroup
-	for _, group := range WritingRuleGroups {
+	for _, group := range groups {
 		var rules []WritingRule
 		for _, rule := range group.Rules {
-			if want[rule.Number] == question {
+			if rule.Fragment == home {
 				rules = append(rules, rule)
 			}
 		}
@@ -361,38 +567,26 @@ func writingRuleGroupsFor(question bool) []WritingRuleGroup {
 			continue
 		}
 		rendered := WritingRuleGroup{Heading: group.Heading, Rules: rules}
-		if question {
-			rendered.Note = group.Note
-		}
-		if question && group.Heading == "Shape" {
+		if home == WritingFragmentQuestion && group.Heading == "Shape" && len(rules) == 1 {
 			rendered.Heading = "Grounding"
 		}
-		if !question && group.Heading == "Questions, options, risk" {
-			rendered.Heading = "Risk"
+		if home == WritingFragmentQuestion && writingRulesAreHouse(rules) {
+			rendered.Note = "Rules " + writingJoinNumbers(writingNumbers(rules)) + " are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule."
 		}
 		out = append(out, rendered)
 	}
 	return out
 }
 
-// writingQuestionHouseNames are the house rules that belong to question design.
-func writingQuestionHouseNames() map[string]bool {
-	return map[string]bool{
-		"Question shape":            true,
-		"Option design":             true,
-		"Recommendation placement":  true,
-		"Grounding before asking":   true,
-		"One decision per question": true,
-		"Text-before-question turn": true,
-	}
+// writingHouseRulesFor returns the house rows whose Fragment field matches.
+func writingHouseRulesFor(home WritingFragment) []WritingHouseRule {
+	return writingHouseRulesForFrom(WritingHouseRules, home)
 }
 
-// writingHouseRulesFor returns the house rows for one fragment.
-func writingHouseRulesFor(question bool) []WritingHouseRule {
-	want := writingQuestionHouseNames()
+func writingHouseRulesForFrom(rules []WritingHouseRule, home WritingFragment) []WritingHouseRule {
 	var out []WritingHouseRule
-	for _, rule := range WritingHouseRules {
-		if want[rule.Name] == question {
+	for _, rule := range rules {
+		if rule.Fragment == home {
 			out = append(out, rule)
 		}
 	}
@@ -409,19 +603,24 @@ func writingStandardFragment() SharedFragment {
 		Content: "These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are " +
 			"STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can " +
 			"claim full compliance. This fragment covers wording: plain terms, short sentences, " +
-			"active voice, and no invented labels, plus the pre-send check. Question and option " +
-			"design is in Question and Option Design; this fragment does not repeat it. " +
+			"active voice, and no invented labels, plus the pre-send check and the status template. " +
+			writingQuestionLivesSentence() + " " +
 			writingWordingCarrierSentence(),
 		Subsections: []ProseSection{
 			{
 				Id:      "frag-writing-standard-rules",
 				Title:   "The rules",
-				Content: RenderWritingRules(writingRuleGroupsFor(false)),
+				Content: RenderWritingRules(writingRuleGroupsFor(WritingFragmentWording)),
 			},
 			{
 				Id:      "frag-writing-standard-house-rules",
 				Title:   "Wording house rule",
-				Content: RenderWritingHouseRules(writingWordingHouseIntro, writingHouseRulesFor(false)),
+				Content: RenderWritingHouseRules(writingWordingHouseIntro(), writingHouseRulesFor(WritingFragmentWording)),
+			},
+			{
+				Id:      "frag-writing-standard-status-template",
+				Title:   "Template: status update",
+				Content: writingStatusTemplateContent(),
 			},
 			{
 				Id:      "frag-writing-standard-exempt",
@@ -450,20 +649,20 @@ func writingQuestionFragment() SharedFragment {
 		Id:    string(FragWritingQuestions),
 		Title: "Question and Option Design",
 		Content: "This fragment covers question and option design: grounding before asking, one " +
-			"decision, option shape, recommendation placement, the two templates, and the " +
-			"weak-tool degrade. Wording rules, the STE-aligned claim, and the pre-send check " +
-			"are in Writing to the User. " + writingQuestionCarrierSentence() + " " +
+			"decision, option shape, recommendation placement, the present template, and the " +
+			"weak-tool degrade. Wording rules, the STE-aligned claim, the status template, and the " +
+			"pre-send check are in Writing to the User. " + writingQuestionCarrierSentence() + " " +
 			writingAskBindingSentence,
 		Subsections: []ProseSection{
 			{
 				Id:      "frag-writing-questions-rules",
 				Title:   "The rules",
-				Content: RenderWritingRules(writingRuleGroupsFor(true)),
+				Content: RenderWritingRules(writingRuleGroupsFor(WritingFragmentQuestion)),
 			},
 			{
 				Id:      "frag-writing-questions-house-rules",
 				Title:   "House rules for questions, options and recommendations",
-				Content: RenderWritingHouseRules(writingHouseIntro, writingHouseRulesFor(true)),
+				Content: RenderWritingHouseRules(writingQuestionHouseIntro(), writingHouseRulesFor(WritingFragmentQuestion)),
 			},
 			{
 				Id:      "frag-writing-standard-present-template",
@@ -471,14 +670,14 @@ func writingQuestionFragment() SharedFragment {
 				Content: writingPresentTemplateContent(),
 			},
 			{
-				Id:      "frag-writing-standard-status-template",
-				Title:   "Template: status update",
-				Content: writingStatusTemplateContent(),
-			},
-			{
 				Id:      "frag-writing-standard-degrade",
 				Title:   "Degrade when the question tool is weak",
 				Content: writingDegradeContent(),
+			},
+			{
+				Id:      "frag-writing-questions-check",
+				Title:   "Pre-send check for a question",
+				Content: writingQuestionCheckContent(),
 			},
 		},
 	}
@@ -601,22 +800,160 @@ func writingExemptContent() string {
 	}, "\n")
 }
 
-// writingCheckContent is the pre-send check.
+// writingCheckContent is the wording pre-send check. It tests rules this
+// fragment carries. Question checks live in writingQuestionCheckContent, so
+// status does not test rules it does not carry.
 func writingCheckContent() string {
 	return strings.Join([]string{
 		"Run this list on every user-facing message. A clean pass is not a gate.",
 		"",
 		"1. Does sentence one give the result, the decision, or the blocker?",
-		"2. Before a question: did the reader already see what the thing is, its definition, and one example, in an earlier turn or an earlier block?",
-		"3. Does every term the reader did not introduce appear in Terms before first use?",
-		"4. Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit. Is each one defined, or replaced by its substance?",
-		"5. Does one item have two names, or one word have two senses?",
-		"6. Any sentence over 20 words (instruction or question) or 25 (description)?",
-		"7. Any noun cluster over 3 words? Any slang verb, noun-as-verb, or phrasal verb?",
-		"8. Any semicolon or em-dash?",
-		"9. Any passive verb with no actor?",
-		"10. Can the reader choose from the options alone, with no other document? Is the recommendation outside the options?",
-		"11. Does an irreversible action carry WARNING or CAUTION?",
-		"12. Delete one sentence. If nothing is lost, keep it deleted.",
+		"2. Does every term the reader did not introduce appear in Terms before first use?",
+		"3. Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit. Is each one defined, or replaced by its substance?",
+		"4. Does one item have two names, or one word have two senses?",
+		"5. Any sentence over 20 words (instruction or question) or 25 (description)?",
+		"6. Any noun cluster over 3 words? Any slang verb, noun-as-verb, or phrasal verb?",
+		"7. Any semicolon or em-dash?",
+		"8. Any passive verb with no actor?",
+		"9. Does an irreversible action carry WARNING or CAUTION?",
+		"10. Delete one sentence. If nothing is lost, keep it deleted.",
 	}, "\n")
+}
+
+// writingQuestionCheckPhrases are the pre-send items that test question rules.
+// They ship in the question fragment only.
+func writingQuestionCheckPhrases() []string {
+	return []string{
+		"Before a question: did the reader already see what the thing is, its definition, and one example, in an earlier turn or an earlier block?",
+		"Can the reader choose from the options alone, with no other document? Is the recommendation outside the options?",
+	}
+}
+
+// writingQuestionCheckContent is the pre-send list for a question. It names
+// Writing to the User, which every question carrier also contains.
+func writingQuestionCheckContent() string {
+	lines := []string{
+		"Run this list before you send a question. It tests the question rules in this fragment. The wording pre-send check is in Writing to the User.",
+		"",
+	}
+	for i, phrase := range writingQuestionCheckPhrases() {
+		lines = append(lines, strconv.Itoa(i+1)+". "+phrase)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func writingTitleCount(n int) (string, error) {
+	words := []string{"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"}
+	if n < 0 || n >= len(words) {
+		return "", fmt.Errorf("codegen.writingTitleCount: count %d has no word — why: a carrier sentence would need a hardcoded numeral; where: internal/codegen/specs_data_writing.go writingTitleCount; fix: extend the word list or shorten the carrier registry", n)
+	}
+	word := words[n]
+	return strings.ToUpper(word[:1]) + word[1:], nil
+}
+
+func writingTitleCountOrDecimal(n int) string {
+	word, err := writingTitleCount(n)
+	if err != nil {
+		return strconv.Itoa(n)
+	}
+	return word
+}
+
+func writingSkillsOnlyIn(all, subset []string) []string {
+	have := make(map[string]bool, len(subset))
+	for _, name := range subset {
+		have[name] = true
+	}
+	var out []string
+	for _, name := range all {
+		if !have[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func writingRuleNumbers(home WritingFragment) []int {
+	var numbers []int
+	for _, rule := range AllWritingRules() {
+		if rule.Fragment == home {
+			numbers = append(numbers, rule.Number)
+		}
+	}
+	return numbers
+}
+
+func writingNumbers(rules []WritingRule) []int {
+	numbers := make([]int, len(rules))
+	for i, rule := range rules {
+		numbers[i] = rule.Number
+	}
+	return numbers
+}
+
+func writingRulesAreHouse(rules []WritingRule) bool {
+	if len(rules) == 0 {
+		return false
+	}
+	for _, rule := range rules {
+		if rule.Adapts != "house" {
+			return false
+		}
+	}
+	return true
+}
+
+func writingJoinNumbers(numbers []int) string {
+	parts := make([]string, len(numbers))
+	for i, n := range numbers {
+		parts[i] = strconv.Itoa(n)
+	}
+	return writingJoinList(parts)
+}
+
+func writingJoinList(parts []string) string {
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return parts[0]
+	case 2:
+		return parts[0] + " and " + parts[1]
+	default:
+		return strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
+	}
+}
+
+func writingPointerNumber(requirement string) (int, bool) {
+	var number int
+	if _, err := fmt.Sscanf(requirement, "Extends rule %d.", &number); err != nil {
+		return 0, false
+	}
+	return number, true
+}
+
+func writingPointerCountSentence(n int) string {
+	word := writingTitleCountOrDecimal(n)
+	if n == 1 {
+		return word + " row in this table is a pointer to those rules."
+	}
+	return word + " rows in this table are pointers to those rules."
+}
+
+func writingFullTextSentence(names []string) string {
+	if len(names) == 1 {
+		return names[0] + " adds only what those rules do not."
+	}
+	return writingJoinList(names) + " add only what those rules do not."
+}
+
+func writingWordingHousePointer(names []string) string {
+	switch len(names) {
+	case 0:
+		return "No wording house rule is named here."
+	case 1:
+		return names[0] + " is a wording rule; it is in Writing to the User."
+	default:
+		return writingJoinList(names) + " are wording rules; they are in Writing to the User."
+	}
 }

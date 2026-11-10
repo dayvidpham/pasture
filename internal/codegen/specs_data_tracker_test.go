@@ -1127,6 +1127,73 @@ func TestLedgerEpochCreatesNoFeedbackTask(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 1, strings.Count(string(again), "feedback:"), "a second run must not append another feedback line")
 	})
+
+	t.Run("no-backend", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		log := runFeedbackSnippet(t, dir, "probed_at: 2026-01-01T00:00:00Z\n", snippet)
+		_, err := os.Stat(log)
+		require.True(t, os.IsNotExist(err), "a header with no backend: line must not create a feedback task")
+		raw, err := os.ReadFile(filepath.Join(dir, ".agents.local", "pasture", "EPOCH.md"))
+		require.NoError(t, err)
+		require.NotContains(t, string(raw), "backend:")
+		require.NotContains(t, string(raw), "feedback:")
+		require.NotContains(t, string(raw), "FEEDBACK:")
+	})
+}
+
+// epochBackendRecordLists are the two key lists Step 0 reads. Both must name
+// backend:, because Step 0b gates on that line.
+var epochBackendRecordLists = []string{
+	"record `backend:`, `ledger:`",
+	"record `backend:`, `db:`",
+}
+
+// findMissingBackendRecordKeys reports a key list that omits backend:.
+func findMissingBackendRecordKeys(content string) []string {
+	var missing []string
+	for _, list := range epochBackendRecordLists {
+		if !strings.Contains(content, list) {
+			missing = append(missing, list)
+		}
+	}
+	return missing
+}
+
+// TestEpochStartRecordsTheBackendKey proves both record lists name backend:.
+// A header written from a list that omits it makes Step 0b skip the pasture gate.
+func TestEpochStartRecordsTheBackendKey(t *testing.T) {
+	t.Parallel()
+
+	content := epochStartingContent(t)
+	require.Empty(t, findMissingBackendRecordKeys(content),
+		"both record lists must name backend:, the key Step 0b reads")
+
+	stripped := strings.ReplaceAll(content, "`backend:`, ", "")
+	require.NotEqual(t, content, stripped, "the defective sample must remove backend: from the lists")
+	require.NotEmpty(t, findMissingBackendRecordKeys(stripped),
+		"a record list that omits backend: must fail")
+}
+
+func epochStartingContent(t *testing.T) string {
+	t.Helper()
+	body, ok := SkillBodySpecs["epoch"]
+	require.True(t, ok)
+	var content string
+	var walk func(ProseSection)
+	walk = func(section ProseSection) {
+		if section.Id == "epoch-starting" {
+			content = section.Content
+		}
+		for _, sub := range section.Subsections {
+			walk(sub)
+		}
+	}
+	for _, section := range body.Sections {
+		walk(section)
+	}
+	require.NotEmpty(t, content, "the epoch start step must exist")
+	return content
 }
 
 func step0bSnippet(t *testing.T) string {

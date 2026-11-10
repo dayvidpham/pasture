@@ -10,6 +10,7 @@ package codegen
 
 import (
 	"encoding/json"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -68,6 +69,7 @@ type writingRequiredPart struct {
 var writingWordingParts = []writingRequiredPart{
 	{"frag-writing-standard-rules", []string{"| # | Rule | Adapts | Bad to good |", "Lead with the result, the decision, or the blocker."}},
 	{"frag-writing-standard-house-rules", []string{"| Rule | Requirement |", "No self-praise is the wording house rule."}},
+	{"frag-writing-standard-status-template", []string{"**Status:**", "**Done**", "**Needs you**"}},
 	{"frag-writing-standard-exempt", []string{"Quoted user text", "Code, logs, diffs, test output"}},
 	{"frag-writing-standard-check", []string{"Delete one sentence.", "[A-Z]{1,3}-?[0-9]"}},
 }
@@ -76,24 +78,23 @@ var writingQuestionParts = []writingRequiredPart{
 	{"frag-writing-questions-rules", []string{"Ground before you ask.", "One question, one decision."}},
 	{"frag-writing-questions-house-rules", []string{"| Rule | Requirement |", "Never cite an STE number for a house rule."}},
 	{"frag-writing-standard-present-template", []string{"**Decision needed:**", "| Option | What happens | Cost |", "**Recommendation:**"}},
-	{"frag-writing-standard-status-template", []string{"**Status:**", "**Done**", "**Needs you**"}},
 	{"frag-writing-standard-degrade", []string{"Ask one question.", "An assumption never satisfies a user gate"}},
+	{"frag-writing-questions-check", []string{"Before a question:", "choose from the options alone"}},
 }
 
 // writingWordingTopLevel is the fragment intro the subsection walk does not
-// read: the STE-aligned claim and the five-skill carrier numeral.
+// read: the STE-aligned claim and the derived carrier sentence.
 var writingWordingTopLevel = []string{
 	"These rules adapt ASD-STE100",
 	"They are STE-aligned.",
-	"Five skills carry these wording rules:",
-	"architect-handoff, status, supervisor, user-elicit, user-uat.",
+	writingWordingCarrierSentence(),
+	writingQuestionLivesSentence(),
 }
 
-// writingQuestionTopLevel is the question fragment intro: the four-skill
-// numeral and the ask-binding sentence.
+// writingQuestionTopLevel is the question fragment intro: the derived carrier
+// sentence and the ask-binding sentence.
 var writingQuestionTopLevel = []string{
-	"Four skills carry these question rules:",
-	"architect-handoff, supervisor, user-elicit, user-uat.",
+	writingQuestionCarrierSentence(),
 	writingAskBindingSentence,
 }
 
@@ -269,8 +270,8 @@ func TestWritingRuleRegistryIsClosed(t *testing.T) {
 	require.NoError(t, ValidateWritingRules())
 
 	duplicate := []WritingRuleGroup{
-		{Heading: "Shape", Rules: []WritingRule{{1, "a", "house", "b"}, {2, "c", "house", "d"}}},
-		{Heading: "Terms", Rules: []WritingRule{{2, "e", "house", "f"}}},
+		{Heading: "Shape", Rules: []WritingRule{{1, "a", "house", "b", WritingFragmentWording}, {2, "c", "house", "d", WritingFragmentWording}}},
+		{Heading: "Terms", Rules: []WritingRule{{2, "e", "house", "f", WritingFragmentWording}}},
 	}
 	require.Error(t, validateWritingRules(duplicate), "a duplicated rule number must fail")
 
@@ -291,6 +292,155 @@ func TestWritingHouseRulesRejectADefectiveSample(t *testing.T) {
 	err := validateWritingHouseRules(bad, AllWritingRules())
 	require.Error(t, err, "a house row that says below must fail")
 	assert.Contains(t, err.Error(), "below")
+}
+
+// TestWritingPartitionFollowsTheFragmentField proves membership is the
+// Fragment field. Flipping a rule's field moves it; a parallel number list
+// cannot.
+func TestWritingPartitionFollowsTheFragmentField(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []int{2, 22, 23, 24}, writingRuleNumbers(WritingFragmentQuestion))
+	wording := writingRuleNumbers(WritingFragmentWording)
+	assert.NotContains(t, wording, 2)
+	assert.Contains(t, wording, 25)
+	assert.NotContains(t, houseNames(writingHouseRulesFor(WritingFragmentWording)), "Question shape")
+	assert.Contains(t, houseNames(writingHouseRulesFor(WritingFragmentWording)), "No self-praise")
+
+	groups := append([]WritingRuleGroup(nil), WritingRuleGroups...)
+	shape := groups[0]
+	shape.Rules = append([]WritingRule(nil), groups[0].Rules...)
+	for i := range shape.Rules {
+		if shape.Rules[i].Number == 2 {
+			shape.Rules[i].Fragment = WritingFragmentWording
+		}
+	}
+	groups[0] = shape
+	assert.NotContains(t, ruleNumbersIn(writingRuleGroupsForFrom(groups, WritingFragmentQuestion)), 2,
+		"flipping rule 2's Fragment field must remove it from the question fragment")
+
+	house := append([]WritingHouseRule(nil), WritingHouseRules...)
+	house[len(house)-1].Fragment = WritingFragmentQuestion
+	assert.Contains(t, houseNames(writingHouseRulesForFrom(house, WritingFragmentQuestion)), "No self-praise",
+		"flipping a house rule's Fragment field must move it")
+}
+
+// TestWritingCarrierNumeralIsDerived proves the carrier sentence uses the
+// registry length. A stale numeral fails the same guard the live fragment passes.
+func TestWritingCarrierNumeralIsDerived(t *testing.T) {
+	t.Parallel()
+
+	word, err := writingTitleCount(len(WritingStandardCarriers))
+	require.NoError(t, err)
+	_, err = writingTitleCount(len(WritingQuestionCarriers))
+	require.NoError(t, err)
+
+	fragment := SharedFragmentSpecs[FragWritingStandard]
+	require.NotNil(t, fragment.Prose)
+	want := writingWordingCarrierSentence()
+	require.Contains(t, fragment.Prose.Content, want)
+	staleWord, err := writingTitleCount(len(WritingStandardCarriers) - 1)
+	require.NoError(t, err)
+	stale := strings.Replace(want, word, staleWord, 1)
+	require.NotEqual(t, want, stale)
+	bad := strings.Replace(fragment.Prose.Content, want, stale, 1)
+	assert.NotEmpty(t, findWritingStandardGaps(ProseSection{Content: bad}, nil, []string{want}),
+		"a carrier numeral that disagrees with the registry must fail")
+
+	src, err := os.ReadFile("specs_data_writing.go")
+	require.NoError(t, err)
+	assert.NotContains(t, string(src), `"Five skills carry`)
+	assert.NotContains(t, string(src), `"Four skills carry`)
+	assert.NotContains(t, string(src), "writingQuestionRuleNumbers")
+	assert.NotContains(t, string(src), "writingQuestionHouseNames")
+	assert.NotContains(t, string(src), "Questions, options, risk")
+}
+
+// TestQuestionFragmentDoesNotClaimRisk proves a heading that says risk with
+// no risk rule fails, and the live question fragment does not use that heading.
+func TestQuestionFragmentDoesNotClaimRisk(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateWritingQuestionHeadings(WritingRuleGroups))
+	for _, group := range writingRuleGroupsFor(WritingFragmentQuestion) {
+		assert.NotContains(t, strings.ToLower(group.Heading), "risk")
+	}
+	var sawRisk bool
+	for _, group := range writingRuleGroupsFor(WritingFragmentWording) {
+		if group.Heading == "Risk" {
+			sawRisk = true
+			require.Len(t, group.Rules, 1)
+			assert.Equal(t, 25, group.Rules[0].Number)
+		}
+	}
+	assert.True(t, sawRisk, "the wording fragment must keep the risk rule under Risk")
+
+	bad := append([]WritingRuleGroup(nil), WritingRuleGroups...)
+	for i := range bad {
+		if bad[i].Heading == "Questions and options" {
+			bad[i].Heading = "Questions, options, risk"
+		}
+	}
+	err := validateWritingQuestionHeadings(bad)
+	require.Error(t, err, "a question heading that claims risk must fail")
+	assert.Contains(t, err.Error(), "risk")
+}
+
+// TestStatusPreSendDoesNotTestQuestionRules proves the wording check drops
+// the question items, and the question fragment is where those items resolve.
+func TestStatusPreSendDoesNotTestQuestionRules(t *testing.T) {
+	t.Parallel()
+
+	wording := SharedFragmentSpecs[FragWritingStandard]
+	require.NotNil(t, wording.Prose)
+	check, ok := subsectionByID(*wording.Prose, "frag-writing-standard-check")
+	require.True(t, ok)
+	assert.Empty(t, findQuestionChecksInWording(check.Content),
+		"the wording pre-send check must not test question rules")
+	assert.NotContains(t, fragmentAllText(*wording.Prose), questionSectionTitle,
+		"the wording fragment must not point at a section status does not contain")
+	_, ok = subsectionByID(*wording.Prose, "frag-writing-standard-status-template")
+	assert.True(t, ok, "status must carry its own template")
+
+	question := SharedFragmentSpecs[FragWritingQuestions]
+	require.NotNil(t, question.Prose)
+	qcheck, ok := subsectionByID(*question.Prose, "frag-writing-questions-check")
+	require.True(t, ok)
+	for _, phrase := range writingQuestionCheckPhrases() {
+		assert.Contains(t, qcheck.Content, phrase)
+	}
+	_, ok = subsectionByID(*question.Prose, "frag-writing-standard-status-template")
+	assert.False(t, ok, "the question fragment must not keep the status template")
+
+	pasted := check.Content + "\n" + writingQuestionCheckPhrases()[0]
+	assert.NotEmpty(t, findQuestionChecksInWording(pasted),
+		"pasting a question check back into the wording list must fail")
+}
+
+func findQuestionChecksInWording(check string) []string {
+	var hits []string
+	for _, phrase := range writingQuestionCheckPhrases() {
+		if strings.Contains(check, phrase) {
+			hits = append(hits, phrase)
+		}
+	}
+	return hits
+}
+
+func ruleNumbersIn(groups []WritingRuleGroup) []int {
+	var numbers []int
+	for _, group := range groups {
+		numbers = append(numbers, writingNumbers(group.Rules)...)
+	}
+	return numbers
+}
+
+func houseNames(rules []WritingHouseRule) []string {
+	names := make([]string, len(rules))
+	for i, rule := range rules {
+		names[i] = rule.Name
+	}
+	return names
 }
 
 // signalKindBulletPattern matches one closed-kind bullet in fragment prose.
