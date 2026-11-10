@@ -31,8 +31,8 @@ agent_checks:
     must_have_figure_blocks: true
     must_contain:
       - "name: supervisor"
-      - "model: opus"
-      - "thinking: medium"
+      - "model: claude-opus-4-8"
+      - "thinking: high"
       - "tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage"
       - "# Supervisor Agent"
       - "You are a **Supervisor** agent in the Pasture Protocol."
@@ -50,7 +50,7 @@ agent_checks:
     must_have_figure_blocks: true
     must_contain:
       - "name: worker"
-      - "model: sonnet"
+      - "model: claude-sonnet-4-6"
       - "tools: Read, Glob, Grep, Bash, Skill, Edit, Write, SendMessage"
       - "# Worker Agent"
       - "You are a **Worker** agent in the Pasture Protocol."
@@ -68,7 +68,7 @@ agent_checks:
   - role: reviewer
     must_contain:
       - "name: reviewer"
-      - "model: sonnet"
+      - "model: claude-sonnet-4-6"
       - "tools: Read, Glob, Grep, Bash, Skill, SendMessage"
       - "# Reviewer Agent"
       - "You are a **Reviewer** agent in the Pasture Protocol."

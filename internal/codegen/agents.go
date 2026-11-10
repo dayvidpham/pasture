@@ -32,6 +32,12 @@ type agentTemplateData struct {
 	// agent; OpenCode reuses its body with the frontmatter stripped.
 	ToolNames []string
 
+	// Model is the harness-native model id resolved from the role's effective
+	// capability tier. Effort is the tier's effort level. Both are emitted in
+	// frontmatter; neither is authored as prose in the role spec.
+	Model  string
+	Effort string
+
 	// PhasesDetail holds PhaseSpec entries for the role's owned phases,
 	// sorted by phase number ascending.
 	PhasesDetail []PhaseSpec
@@ -124,9 +130,24 @@ func renderAgentForTarget(roleId protocol.RoleId, figuresDir string, target Harn
 		)
 	}
 
+	tier, err := TierForRole(roleId)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderAgent: resolving model tier for role %q failed: %w", roleId, err)
+	}
+	model, err := ModelForTier(target, tier)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderAgent: resolving model id for role %q failed: %w", roleId, err)
+	}
+	effort, err := EffortForTier(tier)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderAgent: resolving effort for role %q failed: %w", roleId, err)
+	}
+
 	data := agentTemplateData{
 		Role:         roleSpec,
 		ToolNames:    toolNames,
+		Model:        model,
+		Effort:       string(effort),
 		PhasesDetail: ownedPhaseDetails(roleSpec),
 		PhaseSlug:    buildPhaseSlug(),
 		Constraints:  roleCtx.Constraints,

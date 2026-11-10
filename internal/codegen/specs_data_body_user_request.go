@@ -51,6 +51,7 @@ var userRequestBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragModelPolicy),
 		{
 			Id:    "user-req-substeps",
 			Title: "Phase 1 Sub-steps",

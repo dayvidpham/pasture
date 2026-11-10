@@ -168,14 +168,14 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 **[B-sup-model-trivial]**
 - Given: trivial changes (single-file edits, config tweaks, typo fixes)
 - When: spawning a worker
-- Then: use model: haiku to minimize cost and latency
-- Should not: use a heavyweight model for trivial work
+- Then: keep the worker at its mapped capability tier (T2 standard), with the tier's effort, to minimize cost and latency
+- Should not: raise a worker's tier for trivial work
 
 **[B-sup-model-nontrivial]**
 - Given: non-trivial changes (multi-file, architectural, logic-heavy)
 - When: spawning a worker
-- Then: prefer model: sonnet for the task tool to ensure quality
-- Should not: default to haiku for complex work
+- Then: override the worker to T1 frontier for the delegate_assignment tool to ensure quality
+- Should not: leave a high-complexity slice at the default tier
 
 **[B-sup-ride-the-wave]**
 - Given: Phase 8-10 execution
@@ -219,7 +219,7 @@ Exit conditions:
 
 **Stage 2: Build** _(parallel)_
 
-- Spawn workers via the task tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
+- Spawn workers via the task tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.
 
 - Monitor worker progress via "${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" and "${EPOCH_REC}" show (`"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress`)
 

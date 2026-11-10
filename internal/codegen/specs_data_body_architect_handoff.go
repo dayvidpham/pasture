@@ -17,7 +17,7 @@ var architectHandoffBody = SkillBody{
 			Id:        "arch-handoff-spawn-supervisor",
 			Given:     "handoff for the IMPL_PLAN phase",
 			When:      "spawning the supervisor",
-			Then:      "delegate the supervisor as the implementation-plan owner (workers also Opus), then give it a self-contained assignment",
+			Then:      "delegate the supervisor as the implementation-plan owner (workers also on the frontier tier), then give it a self-contained assignment",
 			ShouldNot: "spawn the supervisor without a self-contained assignment, or via aura-swarm, for the IMPL_PLAN phase",
 		},
 		{
@@ -181,7 +181,7 @@ Given an expired token when accessing protected routes then return 401
 		{
 			Id:    "arch-handoff-delegation-notes",
 			Title: "Delegation Notes",
-			Content: `- Delegate the supervisor (and the workers it will coordinate) as **Opus** assignments — the IMPL_PLAN phase benefits from the stronger model for decomposition and review.
+			Content: `- Delegate the supervisor (and the workers it will coordinate) as **T1 frontier** assignments — the IMPL_PLAN phase benefits from the frontier tier for decomposition and review.
 - A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + `, the Pasture task IDs, and ` + "`" + `[[rec]] show` + "`" + ` commands to fetch full requirements).
 - Do not spawn the supervisor via ` + "`" + `aura-swarm` + "`" + ` for the IMPL_PLAN phase; the deprecated orchestrator must not be invoked.`,
 		},

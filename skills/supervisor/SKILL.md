@@ -222,7 +222,7 @@ _Example (anti-pattern)_
 **Step 5:** Create leaf tasks (L1/L2/L3) for every slice (`CREATED_URI=$("${EPOCH_REC}" create "SLICE-{K}-L{1,2,3}: <description>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 "${EPOCH_REC}" label add "$CREATED_URI" pasture:p9-impl:s9-slice`)
 
-**Step 6:** Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity. → `worker-slices`
+**Step 6:** Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4. → `worker-slices`
 
 ### Introduction
 
@@ -243,14 +243,14 @@ You own Phases 7-12 of the epoch: receive handoff from architect (p7), create ve
 **[B-sup-model-trivial]**
 - Given: trivial changes (single-file edits, config tweaks, typo fixes)
 - When: spawning a worker
-- Then: use model: haiku to minimize cost and latency
-- Should not: use a heavyweight model for trivial work
+- Then: keep the worker at its mapped capability tier (T2 standard), with the tier's effort, to minimize cost and latency
+- Should not: raise a worker's tier for trivial work
 
 **[B-sup-model-nontrivial]**
 - Given: non-trivial changes (multi-file, architectural, logic-heavy)
 - When: spawning a worker
-- Then: prefer model: sonnet for the Agent tool to ensure quality
-- Should not: default to haiku for complex work
+- Then: override the worker to T1 frontier for the delegate_assignment tool to ensure quality
+- Should not: leave a high-complexity slice at the default tier
 
 **[B-sup-ride-the-wave]**
 - Given: Phase 8-10 execution
@@ -304,7 +304,7 @@ Exit conditions:
 - **proceed**: All slices created with leaf tasks, dependency-chained, assigned
 
 ### Stage 2: Build _(parallel)_
-- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
+- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.
 - Monitor worker progress via "${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" and "${EPOCH_REC}" show (`"${EPOCH_REC}" list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress`)
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 
@@ -757,21 +757,21 @@ Workers are assigned to leaf tasks, not slices. The slice closes when all its le
 
 Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
 
-Workers are **general-purpose agents** that call `/pasture:worker` at the start. Select the model based on task complexity:
+Workers are **general-purpose agents** that call `/pasture:worker` at the start. Select the worker's capability tier from the model policy: T2 standard for ordinary work, T1 frontier for non-trivial slices. Resolve the tier's native model id for the target harness, pass it on the assignment, and respect the concurrency cap of 4.
 
 ```
-// Non-trivial work → sonnet model
+// Non-trivial work -> T1 frontier
 delegation: {
   subagent_type: "general-purpose",
-  model: "sonnet",
+  model: "<T1 frontier native model id for this harness>",
   run_in_background: true,
   prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\n\nPasture Task ID: ${taskId}...`
 }
 
-// Trivial work (config tweak, typo fix, single-file edit) → haiku model
+// Ordinary work (config tweak, typo fix, single-file edit) -> T2 standard
 delegation: {
   subagent_type: "general-purpose",
-  model: "haiku",
+  model: "<T2 standard native model id for this harness>",
   run_in_background: true,
   prompt: `Call Skill(/pasture:worker) and fix the typo in...\n\nPasture Task ID: ${taskId}...`
 }
@@ -786,12 +786,12 @@ delegation: {
 }
 ```
 
-### Model Selection Guide
+### Capability Tier Guide
 
-| Complexity | Model | Examples |
-|------------|-------|----------|
-| Trivial | `haiku` | Single-file edit, config change, typo fix, renaming, adding a label |
-| Non-trivial | `sonnet` | Multi-file changes, new features, architectural work, complex logic, test suites |
+| Complexity | Tier | Examples |
+|------------|------|----------|
+| Trivial | T2 standard | Single-file edit, config change, typo fix, renaming, adding a label |
+| Non-trivial | T1 frontier | Multi-file changes, new features, architectural work, complex logic, test suites |
 
 **Handoff:** Before spawning each worker, author its handoff in the slice (or a dedicated handoff) Pasture task body — the task body IS the handoff (no filesystem path).
 

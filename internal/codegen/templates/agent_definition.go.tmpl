@@ -2,9 +2,9 @@
 name: {{ .Role.Id }}
 description: {{ .Role.Description }}
 tools: {{ join .ToolNames ", " }}
-model: {{ .Role.Model }}
-{{- if .Role.Thinking }}
-thinking: {{ .Role.Thinking }}
+model: {{ .Model }}
+{{- if .Effort }}
+thinking: {{ .Effort }}
 {{- end }}
 ---
 

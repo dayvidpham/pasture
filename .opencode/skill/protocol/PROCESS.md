@@ -459,7 +459,7 @@ Supervisor takes the ratified proposal and decomposes into **vertical slices** (
 
 **Review-Effort Budget (R7 — Phase 8 user gate; `C-review-effort-budget`):** At the **start of Phase 8** — like the Phase-1 research-depth gate, and one of the 5 user-gated phases — request a **configurable review-effort budget per wave** from the user. Present the default choices: **(1) three rounds**, **(2) one round**, **(3) zero rounds**, **(4) unlimited**, **(5) custom**. The Phase-10 review → fix → re-review loop iterates **up to the chosen budget**. Convergence over open `pasture:finding` tasks runs after the last wave and targets 0/0/0 within `maxRounds` (`C-clean-review-exit`); on **budget exhaustion without convergence**, surface the outstanding findings to the user for a decision (never proceed dirty, never loop forever, never hardcode the budget). Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.
 
-**Launch model (R1):** For the IMPL_PLAN phase prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** — not `aura-swarm`. A supervisor that has just spawned Explore subagents may *look* idle while those subagents do work; **do not shut it down pre-emptively.**
+**Launch model (R1):** For the IMPL_PLAN phase prefer **TeamCreate with the supervisor and workers on the frontier tier** — not `aura-swarm`. A supervisor that has just spawned Explore subagents may *look* idle while those subagents do work; **do not shut it down pre-emptively.**
 
 **Supervisor startup sequence:**
 1. Call `Skill(/pasture:supervisor)` to load role instructions
@@ -1251,10 +1251,10 @@ Create handoff document if actor transition occurs (see [HANDOFF_TEMPLATE.md](HA
 
 **Agent launching:**
 
-For the **IMPL_PLAN phase (R1)**, prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** — not `aura-swarm`. A supervisor that has just dispatched Explore subagents may *appear* idle while they work; **do not shut it down pre-emptively.**
+For the **IMPL_PLAN phase (R1)**, prefer **TeamCreate with the supervisor and workers on the frontier tier** — not `aura-swarm`. A supervisor that has just dispatched Explore subagents may *appear* idle while they work; **do not shut it down pre-emptively.**
 
 ```bash
-# Preferred for IMPL_PLAN: TeamCreate — supervisor (Opus) + workers (Opus), in-session
+# Preferred for IMPL_PLAN: TeamCreate — supervisor (T1 frontier) + workers (T1 frontier), in-session
 
 # Use the available native agent tooling and an isolated worktree per worker.
 # The deprecated orchestration launcher is not an operational alternative.

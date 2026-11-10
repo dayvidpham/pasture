@@ -894,7 +894,7 @@ is saved at /home/user/.local/state/aura/web:8690.pid
 
 ## Test Results
 
-All UAT fixes verified by automated test agent (Sonnet):
+All UAT fixes verified by automated test agent (standard tier):
 
 | Test | Result | Notes |
 |------|--------|-------|

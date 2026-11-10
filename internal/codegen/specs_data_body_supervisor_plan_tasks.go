@@ -65,6 +65,7 @@ var supervisorPlanTasksBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragModelPolicy),
 		{
 			Id:      "sup-plan-when-to-use",
 			Title:   "When to Use",

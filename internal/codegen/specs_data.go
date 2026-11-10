@@ -592,8 +592,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Id:          protocol.RoleEpoch,
 		Name:        "Epoch",
 		Description: "Master orchestrator for full 12-phase workflow",
-		Model:       "opus",
-		Thinking:    "medium",
+		Tier:        TierFrontier,
 		Tools: []ir.HarnessTool{
 			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
 			ir.HarnessToolBash, ir.HarnessToolTask,
@@ -620,8 +619,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Id:          protocol.RoleArchitect,
 		Name:        "Architect",
 		Description: "Specification writer and implementation designer",
-		Model:       "opus",
-		Thinking:    "medium",
+		Tier:        TierFrontier,
 		Tools: []ir.HarnessTool{
 			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
 			ir.HarnessToolBash, ir.HarnessToolTask,
@@ -685,10 +683,11 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		},
 	},
 	protocol.RoleReviewer: {
-		Id:          protocol.RoleReviewer,
-		Name:        "Reviewer",
-		Description: "End-user alignment reviewer for plans and code",
-		Model:       "sonnet",
+		Id:           protocol.RoleReviewer,
+		Name:         "Reviewer",
+		Description:  "End-user alignment reviewer for plans and code",
+		Tier:         TierMini,
+		TierOverride: TierStandard,
 		Tools: []ir.HarnessTool{
 			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep, ir.HarnessToolBash,
 		},
@@ -741,8 +740,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Id:          protocol.RoleSupervisor,
 		Name:        "Supervisor",
 		Description: "Task coordinator, spawns workers, manages parallel execution",
-		Model:       "opus",
-		Thinking:    "medium",
+		Tier:        TierFrontier,
 		Tools: []ir.HarnessTool{
 			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
 			ir.HarnessToolBash, ir.HarnessToolTask,
@@ -778,15 +776,15 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 				Id:        "B-sup-model-trivial",
 				Given:     "trivial changes (single-file edits, config tweaks, typo fixes)",
 				When:      "spawning a worker",
-				Then:      "use model: haiku to minimize cost and latency",
-				ShouldNot: "use a heavyweight model for trivial work",
+				Then:      "keep the worker at its mapped capability tier (T2 standard), with the tier's effort, to minimize cost and latency",
+				ShouldNot: "raise a worker's tier for trivial work",
 			},
 			{
 				Id:        "B-sup-model-nontrivial",
 				Given:     "non-trivial changes (multi-file, architectural, logic-heavy)",
 				When:      "spawning a worker",
-				Then:      "prefer model: sonnet for the [[op:delegate_assignment]] tool to ensure quality",
-				ShouldNot: "default to haiku for complex work",
+				Then:      "override the worker to T1 frontier for the delegate_assignment tool to ensure quality",
+				ShouldNot: "leave a high-complexity slice at the default tier",
 			},
 			{
 				Id:    "B-sup-ride-the-wave",
@@ -805,7 +803,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Id:          protocol.RoleWorker,
 		Name:        "Worker",
 		Description: "Vertical slice implementer (full production code path)",
-		Model:       "sonnet",
+		Tier:        TierStandard,
 		Tools: []ir.HarnessTool{
 			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
 			ir.HarnessToolBash, ir.HarnessToolEdit, ir.HarnessToolWrite,
@@ -1435,8 +1433,8 @@ var WorkflowSpecs = map[string]Workflow{
 						Instruction: "Spawn workers via the [[op:delegate_assignment]] tool — " +
 							"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
 							"(NOT aura-swarm). " +
-							"Choose model: sonnet for non-trivial slices, haiku for trivial changes. " +
-							"Set thinking effort to match slice complexity.",
+							"Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. " +
+							"Pass the tier-mapped native model id and respect the concurrency cap of 4.",
 					},
 					{
 						Id:          "rtw-build-monitor",
@@ -1914,8 +1912,8 @@ Layer 1: types and interfaces for <slice name>." | python3 -c 'import json,sys; 
 			Instruction: "Spawn workers via the [[op:delegate_assignment]] tool — " +
 				"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
 				"(NOT aura-swarm). " +
-				"Choose model: sonnet for non-trivial slices, haiku for trivial changes. " +
-				"Set thinking effort to match slice complexity.",
+				"Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. " +
+				"Pass the tier-mapped native model id and respect the concurrency cap of 4.",
 			NextState: protocol.PhaseWorkerSlices,
 		},
 	},

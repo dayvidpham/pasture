@@ -215,8 +215,8 @@ func TestGenerateAgent_SupervisorContainsSections(t *testing.T) {
 
 	// Frontmatter fields.
 	assert.True(t, strings.Contains(got, "name: supervisor"), "must have name: supervisor")
-	assert.True(t, strings.Contains(got, "model: opus"), "must have model: opus")
-	assert.True(t, strings.Contains(got, "thinking: medium"), "must have thinking: medium")
+	assert.True(t, strings.Contains(got, "model: claude-opus-4-8"), "must have the T1 frontier model id")
+	assert.True(t, strings.Contains(got, "thinking: high"), "must have the T1 frontier effort")
 	assert.True(t, strings.Contains(got, "tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage"),
 		"must have correct tools list including SendMessage (R10)")
 

@@ -71,10 +71,11 @@ func catalogHas(snap modelsDevSnapshot, qualifiedID string) bool {
 }
 
 // TestOpenCodeModelsExistInCatalogSnapshot asserts every model id the generator
-// maps to (openCodeModel values) EXISTS in the committed models.dev catalog
-// snapshot — catalog-existence, not merely that the lookup map has the key. This
-// guards against drift between the generator's hardcoded model ids and the real
-// models.dev catalog (e.g. a typo or a model that was renamed/removed).
+// maps to for OpenCode (tierModels[HarnessOpenCode] values) EXISTS in the
+// committed models.dev catalog snapshot — catalog-existence, not merely that
+// the lookup map has the key. This guards against drift between the generator's
+// hardcoded model ids and the real models.dev catalog (e.g. a typo or a model
+// that was renamed/removed).
 func TestOpenCodeModelsExistInCatalogSnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -83,15 +84,16 @@ func TestOpenCodeModelsExistInCatalogSnapshot(t *testing.T) {
 		t.Fatalf("models.dev snapshot fixture decoded to zero provider nodes")
 	}
 
-	if len(openCodeModel) == 0 {
-		t.Fatalf("openCodeModel lookup table is empty — nothing to validate")
+	byTier := tierModels[HarnessOpenCode]
+	if len(byTier) == 0 {
+		t.Fatalf("OpenCode tier model table is empty — nothing to validate")
 	}
 
-	for nickname, qualifiedID := range openCodeModel {
+	for tier, qualifiedID := range byTier {
 		if !catalogHas(snap, qualifiedID) {
-			t.Errorf("model %q (nickname %q) is NOT present in the models.dev snapshot catalog "+
+			t.Errorf("model %q (tier %q) is NOT present in the models.dev snapshot catalog "+
 				"(testdata/opencode_models.json) — either the id is wrong/stale or the snapshot "+
-				"is out of date; refresh from https://models.dev/api.json", qualifiedID, nickname)
+				"is out of date; refresh from https://models.dev/api.json", qualifiedID, tier)
 		}
 	}
 }

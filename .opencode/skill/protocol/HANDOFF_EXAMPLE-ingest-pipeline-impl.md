@@ -265,7 +265,7 @@ Missing config triggers a suggestion to run `aura kickstart` (FTUE, separate epi
 ~/.claude/projects/
 └── {projectHash}/
     └── {sessionUUID}.jsonl           # One JSON object per line
-        # First line: {"type":"summary","model":"claude-opus-4-6",...}
+        # First line: {"type":"summary","model":"frontier-tier-model",...}
         # Subsequent: {"type":"human"|"assistant"|"tool_result",...}
     └── subagents/
         └── agent-{hex}.jsonl         # Same format, linked via parentUUID
@@ -276,7 +276,7 @@ Missing config triggers a suggestion to run `aura kickstart` (FTUE, separate epi
 ```
 ~/.local/share/opencode/
 ├── project/{sha256}.json             # {"path":"/repo","name":"my-project"}
-├── session/{sha256}/ses_{id}.json    # {"model":"claude-opus-4-6","parentID":"..."}
+├── session/{sha256}/ses_{id}.json    # {"model":"frontier-tier-model","parentID":"..."}
 └── message/ses_{id}/msg_{id}.json    # Individual messages
 ```
 
@@ -337,7 +337,7 @@ make vet      # go vet ./...
 
 > unified-schema-t9d (verbatim)
 
-Take in the @initial-collaboration-protocol.md . We need the data ingestion pipeline to take in the Claude and OpenCode transcripts for our MVP. Right now, we just need to copy them to `~/.local/state/aura/aura-sync/{gitlab.com,github.com--{user}--{repo-name}}/{claude,opencode}/{uuid}/{uuid}--transcript.md`. Should occur in the `aura ingest` command. This should have a `~/.local/state/aura/aura-sync/{claude,opencode}/{uuid}/{uuid}--metadata.json` file that contains the path to repo on the user system, and the git branch, remote, or worktree. It will also contain the `modelHarness: "opencode"`, `model: claude-sonnet-<some year or ID>`. {user} is just their email, e.g. 'dayvidpham@gmail.com'
+Take in the @initial-collaboration-protocol.md . We need the data ingestion pipeline to take in the Claude and OpenCode transcripts for our MVP. Right now, we just need to copy them to `~/.local/state/aura/aura-sync/{gitlab.com,github.com--{user}--{repo-name}}/{claude,opencode}/{uuid}/{uuid}--transcript.md`. Should occur in the `aura ingest` command. This should have a `~/.local/state/aura/aura-sync/{claude,opencode}/{uuid}/{uuid}--metadata.json` file that contains the path to repo on the user system, and the git branch, remote, or worktree. It will also contain the `modelHarness: "opencode"`, `model: standard-tier-model`. {user} is just their email, e.g. 'dayvidpham@gmail.com'
 
 Each `{uuid}--transcript.md` should have a integer ISO timestamp for sortable usage. Also want the `debug/`, tool call outputs stored under the `{uuid}/`. Metadata on the subagents should be the same, just need a parentUuid that maps child to parent.
 

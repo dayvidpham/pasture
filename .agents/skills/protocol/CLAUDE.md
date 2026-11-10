@@ -102,7 +102,7 @@ pasture task dep add "$URE_URI" --blocked-by "$REQUEST_URI"
 
 ### Agent Orchestration
 
-**Given** the **IMPL_PLAN phase** **then** **SHOULD** prefer **TeamCreate with the supervisor as an Opus model and workers also as Opus** (not `aura-swarm`). A supervisor that has just dispatched Explore subagents may *appear* idle while they work — **SHOULD NOT** shut it down pre-emptively.
+**Given** the **IMPL_PLAN phase** **then** **SHOULD** prefer **TeamCreate with the supervisor and workers on the frontier tier** (not `aura-swarm`). A supervisor that has just dispatched Explore subagents may *appear* idle while they work — **SHOULD NOT** shut it down pre-emptively.
 
 **Given** you need to launch parallel agents **then** use available native agent tooling with isolated worktrees and explicit file ownership. The deprecated orchestration launcher is not an operational alternative.
 

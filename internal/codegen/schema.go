@@ -680,13 +680,16 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 		}
 
 		// Tools, model, thinking. The schema shows the canonical Claude Code
-		// spelling: it is the harness-neutral document, and every target
-		// resolves its own spelling from the same typed capability sets.
+		// spelling for tools, and the harness-neutral capability tier's default
+		// model nickname and effort for the model policy. Every target resolves
+		// its own native model id from the same tier registry.
 		if roleHasToolSurface(spec) {
 			role.Tools = strings.Join(mustRoleToolNames(HarnessClaudeCode, spec), ", ")
 		}
-		role.Model = spec.Model
-		role.Thinking = spec.Thinking
+		tier := spec.EffectiveTier()
+		tierSpec := mustCapabilityTierSpec(tier)
+		role.Model = tierSpec.DefaultModel
+		role.Thinking = string(tierSpec.Effort)
 
 		// Ownership model (worker)
 		if om, ok := roleOwnershipModel[rid]; ok {

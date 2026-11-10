@@ -116,6 +116,7 @@ var AllFragmentIds = []FragmentId{
 	FragRevPlanVoteOptions,
 	FragValidationCases,
 	FragReviewCleanExit,
+	FragModelPolicy,
 	FragTaskRecovery,
 	FragTaskAuthor,
 	FragTrackerAdapter,
@@ -129,6 +130,13 @@ const (
 	// contract: the runtime entry point, the closed operation set, EPOCH.md,
 	// the probe and the write-failure rule (R21, amendment A-3).
 	FragTrackerAdapter FragmentId = "frag--tracker-adapter"
+
+	// FragModelPolicy is the one authored home of the capability-tier model
+	// policy: the tier table, the primary/secondary/tertiary fallback-chain
+	// ask, the reviewer role's tier override, and the concurrency cap. It is
+	// referenced from the phase-1 and phase-8 gate bodies only, so the policy
+	// is asked once at each gate and nowhere else.
+	FragModelPolicy FragmentId = "frag--model-policy"
 
 	// FragRevVoteOptions is the canonical vote-options table shared between the
 	// reviewer and reviewer-vote skill bodies (D3-ratified ACCEPT row wording).
@@ -286,12 +294,17 @@ func (p RolePolicy) IsValid() bool {
 // closed sets: a raw string tool name cannot be stored in either field without
 // an explicit conversion, so a harness-specific name cannot leak into a role by
 // accident. The emitter resolves both through internal/runtime/profiles.go.
+//
+// Tier is the role's mapped capability tier. TierOverride is the per-role
+// override: when set it wins, so the reviewer tier is the reviewer role's
+// override and no separate review-budget type exists. Neither field accepts a
+// vendor model name; the emitters resolve a tier to a native id per harness.
 type RoleSpec struct {
 	Id                 protocol.RoleId
 	Name               string
 	Description        string
-	Model              string // e.g. "opus", "sonnet", "haiku"
-	Thinking           string // e.g. "medium"
+	Tier               CapabilityTier
+	TierOverride       CapabilityTier
 	Tools              []ir.HarnessTool
 	Operations         []ir.OperationKind
 	Policies           []RolePolicy

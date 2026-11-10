@@ -345,6 +345,28 @@ Binary only. No severity tree for plan reviews.`,
 			ShouldNot: "hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; loop forever when a finite budget was chosen",
 		},
 	},
+
+	FragModelPolicy: {
+		Id:   FragModelPolicy,
+		Kind: FragmentKindProse,
+		Prose: &ProseSection{
+			Id:    string(FragModelPolicy),
+			Title: "Model Policy and Fallback Chain",
+			Content: `A role names a capability tier. A tier carries a neutral default model nickname, an effort level, and its default roles.
+
+| Tier | Name | Default model | Effort | Default roles |
+|------|------|---------------|--------|---------------|
+| T1 | frontier | frontier | high | epoch, architect, supervisor |
+| T2 | standard | standard | medium | worker |
+| T3 | mini | mini | low | reviewer (overridden to T2 standard by default) |
+
+**Ask here, and at the matching gate in the other phase.** At phase 1 and again at phase 8, ask the user for three models: a primary, a secondary, and a tertiary. One gate, two asks, not five. The three form one fallback chain: when a provider is exhausted, use the next model in the chain; never fail the epoch. Record the chain on the request or IMPL_PLAN task and repeat it in every handoff.
+
+**Reviewer override.** The reviewer tier is the reviewer role's TierOverride, not a separate review-budget type. The phase-8 gate may set it to T2 standard (full review) or T3 mini (cheap review).
+
+**Concurrency cap.** Run at most 4 delegated agents at once in one stage. The cap bounds concurrency only; maxRounds remains the only bound on review rounds.`,
+		},
+	},
 }
 
 // fragRef returns a ProseSection placement marker that references the given

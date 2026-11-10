@@ -144,9 +144,9 @@ func TestCodexAgentRenderIsDeterministic(t *testing.T) {
 	}
 }
 
-// TestCodexModelCoversEveryToolRole proves the Codex model map has an entry for
-// every model nickname a tool-bearing role uses, so emission can never fail on
-// an unmapped model at generation time.
+// TestCodexModelCoversEveryToolRole proves the Codex tier table resolves an id
+// for every tool-bearing role, so emission can never fail on an unmapped tier
+// at generation time.
 func TestCodexModelCoversEveryToolRole(t *testing.T) {
 	t.Parallel()
 
@@ -154,8 +154,12 @@ func TestCodexModelCoversEveryToolRole(t *testing.T) {
 		if len(spec.Tools) == 0 {
 			continue
 		}
-		if _, ok := codexModel[spec.Model]; !ok {
-			t.Fatalf("role %q model nickname %q is missing from codexModel", roleID, spec.Model)
+		tier, err := TierForRole(roleID)
+		if err != nil {
+			t.Fatalf("role %q has no effective tier: %v", roleID, err)
+		}
+		if _, err := ModelForTier(HarnessCodex, tier); err != nil {
+			t.Fatalf("role %q tier %q is missing from the Codex model table: %v", roleID, tier, err)
 		}
 		if _, ok := codexRoleClasses[roleID]; !ok {
 			t.Fatalf("role %q is missing from codexRoleClasses", roleID)

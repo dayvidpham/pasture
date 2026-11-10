@@ -2,8 +2,8 @@
 name: epoch
 description: Master orchestrator for full 12-phase workflow
 tools: Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage
-model: opus
-thinking: medium
+model: claude-opus-4-8
+thinking: high
 ---
 
 # Epoch Agent

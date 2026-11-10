@@ -69,6 +69,22 @@ Parent stays open and is blocked by child: "${EPOCH_REC}" dep add "$PARENT_URI" 
 
 Select the current registered author with "${EPOCH_REC}" agents list and "${EPOCH_REC}" agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
+## Model Policy and Fallback Chain
+
+A role names a capability tier. A tier carries a neutral default model nickname, an effort level, and its default roles.
+
+| Tier | Name | Default model | Effort | Default roles |
+|------|------|---------------|--------|---------------|
+| T1 | frontier | frontier | high | epoch, architect, supervisor |
+| T2 | standard | standard | medium | worker |
+| T3 | mini | mini | low | reviewer (overridden to T2 standard by default) |
+
+**Ask here, and at the matching gate in the other phase.** At phase 1 and again at phase 8, ask the user for three models: a primary, a secondary, and a tertiary. One gate, two asks, not five. The three form one fallback chain: when a provider is exhausted, use the next model in the chain; never fail the epoch. Record the chain on the request or IMPL_PLAN task and repeat it in every handoff.
+
+**Reviewer override.** The reviewer tier is the reviewer role's TierOverride, not a separate review-budget type. The phase-8 gate may set it to T2 standard (full review) or T3 mini (cheap review).
+
+**Concurrency cap.** Run at most 4 delegated agents at once in one stage. The cap bounds concurrency only; maxRounds remains the only bound on review rounds.
+
 ## Phase 1 Sub-steps
 
 | Sub-step | Label | Description | Parallel? |

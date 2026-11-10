@@ -41,19 +41,6 @@ var openCodeMode = map[protocol.RoleId]string{
 	protocol.RoleReviewer:   "subagent",
 }
 
-// openCodeModel maps the harness-neutral RoleSpec.Model nickname to the fully
-// qualified OpenCode model id ("<provider>/<model-id>").
-//
-// Source: the LIVE models.dev catalog (https://models.dev/api.json), anthropic
-// provider entries. A committed snapshot of the relevant entries lives at
-// internal/codegen/testdata/opencode_models.json; opencode_models_test.go
-// asserts each id below EXISTS in that snapshot (catalog-existence, not merely
-// map-key presence). Refresh both together when the catalog changes.
-var openCodeModel = map[string]string{
-	"opus":   "anthropic/claude-opus-4-8",
-	"sonnet": "anthropic/claude-sonnet-4-6",
-}
-
 // openCodeToolPermission maps each native OpenCode tool name to the permission
 // key it grants. The native names come from the runtime lowerings, so this
 // table is keyed by the resolved name, not by a Claude-side spelling. Tools
@@ -148,14 +135,13 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 		)
 	}
 
-	model, ok := openCodeModel[roleSpec.Model]
-	if !ok {
-		return "", fmt.Errorf(
-			"codegen.renderOpenCodeAgent: role %q model nickname %q has no OpenCode model "+
-				"mapping — add it to openCodeModel in internal/codegen/opencode_agent.go and to "+
-				"the testdata/opencode_models.json snapshot",
-			roleID, roleSpec.Model,
-		)
+	tier, err := TierForRole(roleID)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderOpenCodeAgent: resolving model tier for role %q failed: %w", roleID, err)
+	}
+	model, err := ModelForTier(HarnessOpenCode, tier)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderOpenCodeAgent: resolving model id for role %q failed: %w", roleID, err)
 	}
 
 	toolNames, err := RoleToolNames(HarnessOpenCode, roleSpec)

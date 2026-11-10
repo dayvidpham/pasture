@@ -280,7 +280,7 @@
               <command>CREATED_URI=$(${EPOCH_REC} create &#34;SLICE-{K}-L{1,2,3}: &lt;description&gt;&#34; --phase worker_slices --namespace &#34;$PASTURE_NAMESPACE&#34; --format json --description &#34;Describe the specific work and reference full task URIs&#34; | python3 -c &#39;import json,sys; print(json.load(sys.stdin)[&#34;id&#34;])&#39;)&#xA;${EPOCH_REC} label add &#34;$CREATED_URI&#34; pasture:p9-impl:s9-slice</command>
             </step>
             <step order="6" id="S-supervisor-spawn-workers" next-state="p9">
-              <instruction>Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.</instruction>
+              <instruction>Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.</instruction>
             </step>
           </startup-sequence>
         </substep>
@@ -399,8 +399,8 @@
       </delegates>
       <label-awareness></label-awareness>
       <tools>Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage</tools>
-      <model>opus</model>
-      <thinking>medium</thinking>
+      <model>frontier</model>
+      <thinking>high</thinking>
       <ownership-model></ownership-model>
       <introduction>You are the master orchestrator for the full 12-phase epoch lifecycle. You delegate planning phases (1-7) to the architect and implementation phases (7-12) to the supervisor.</introduction>
       <ownership-narrative>You own the full 12-phase lifecycle from Request to Landing. You delegate phases 1-7 to the architect and phases 7-12 to the supervisor. The epoch role coordinates the complete workflow end-to-end and is the only role that spans all phases.</ownership-narrative>
@@ -417,8 +417,8 @@
       </owns-phases>
       <label-awareness>pasture:p1-user, pasture:p2-user, pasture:p3-plan, pasture:p4-plan, pasture:p5-user, pasture:p6-plan, pasture:p7-plan</label-awareness>
       <tools>Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage</tools>
-      <model>opus</model>
-      <thinking>medium</thinking>
+      <model>frontier</model>
+      <thinking>high</thinking>
       <ownership-model></ownership-model>
       <introduction>You design specifications and coordinate the planning phases of epochs. See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
       <ownership-narrative>You own Phases 1-7 of the epoch: capture and classify user request (p1), run requirements elicitation URE survey (p2), create PROPOSAL-N with full technical plan (p3), spawn 3 axis-specific reviewers and loop until consensus (p4), present plan to user for acceptance test (p5), add ratify label to accepted PROPOSAL-N (p6), create handoff document and transfer to supervisor (p7).</ownership-narrative>
@@ -442,8 +442,8 @@
         <axis-ref ref="axis-elegance"></axis-ref>
       </uses-axes>
       <tools>Read, Glob, Grep, Bash, Skill, SendMessage</tools>
-      <model>sonnet</model>
-      <thinking></thinking>
+      <model>standard</model>
+      <thinking>medium</thinking>
       <ownership-model></ownership-model>
       <introduction>You review from an end-user alignment perspective. See the project&#39;s protocol/CONSTRAINTS.md for coding standards.</introduction>
       <ownership-narrative>You participate in two phases: Phase 4 (plan review) — evaluate PROPOSAL-N against one axis using binary ACCEPT/REVISE, NO severity tree; Phase 10 (code review) — review ALL implementation slices against your axis using full severity tree (BLOCKER/IMPORTANT/MINOR), EAGER creation of all 3 severity groups.</ownership-narrative>
@@ -471,15 +471,15 @@
         <invariant>Creates follow-up epic when code review has IMPORTANT or MINOR findings</invariant>
       </invariants>
       <tools>Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage</tools>
-      <model>opus</model>
-      <thinking>medium</thinking>
+      <model>frontier</model>
+      <thinking>high</thinking>
       <ownership-model></ownership-model>
       <introduction>You coordinate parallel task execution. See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
       <ownership-narrative>You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation SLICE-{W}-{N} (p9), spawn reviewers for whole-wave code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.</ownership-narrative>
       <behaviors>
         <behavior id="B-sup-read-context" given="handoff received" when="starting" then="read ratified plan, URD, UAT, and elicit tasks for full context" should-not="start without reading all four"></behavior>
-        <behavior id="B-sup-model-trivial" given="trivial changes (single-file edits, config tweaks, typo fixes)" when="spawning a worker" then="use model: haiku to minimize cost and latency" should-not="use a heavyweight model for trivial work"></behavior>
-        <behavior id="B-sup-model-nontrivial" given="non-trivial changes (multi-file, architectural, logic-heavy)" when="spawning a worker" then="prefer model: sonnet for the delegate_assignment tool to ensure quality" should-not="default to haiku for complex work"></behavior>
+        <behavior id="B-sup-model-trivial" given="trivial changes (single-file edits, config tweaks, typo fixes)" when="spawning a worker" then="keep the worker at its mapped capability tier (T2 standard), with the tier&#39;s effort, to minimize cost and latency" should-not="raise a worker&#39;s tier for trivial work"></behavior>
+        <behavior id="B-sup-model-nontrivial" given="non-trivial changes (multi-file, architectural, logic-heavy)" when="spawning a worker" then="override the worker to T1 frontier for the delegate_assignment tool to ensure quality" should-not="leave a high-complexity slice at the default tier"></behavior>
         <behavior id="B-sup-ride-the-wave" given="Phase 8-10 execution" when="starting implementation" then="follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for whole-wave review (only an open BLOCKER finding gates the wave), workers fix findings with atomic commits, and iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate" should-not="skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; require a zeroed round to close a wave; close a finding outside `C-finding-lifecycle`"></behavior>
       </behaviors>
     </role>
@@ -489,8 +489,8 @@
       </owns-phases>
       <label-awareness>pasture:p9-impl:s9-slice</label-awareness>
       <tools>Read, Glob, Grep, Bash, Skill, Edit, Write, SendMessage</tools>
-      <model>sonnet</model>
-      <thinking></thinking>
+      <model>standard</model>
+      <thinking>medium</thinking>
       <ownership-model>One worker per production code path. Owns full vertical&#xA;      (types → tests → implementation → wiring).</ownership-model>
       <introduction>You own a vertical slice (full production code path from CLI/API entry point → service → types). See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
       <ownership-narrative>NOT: A single file or horizontal layer (e.g., &#39;all types&#39; or &#39;all tests&#39;). YES: A full vertical slice (complete production code path end-to-end). You own the FEATURE end-to-end, not a layer or file. Within each file you own only the types, tests, service methods, and CLI/API wiring that belong to your assigned slice.</ownership-narrative>
@@ -1156,7 +1156,7 @@ ${EPOCH_REC} label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
         </example>
       </step>
       <step order="6" id="S-supervisor-spawn-workers" next-state="p9">
-        <instruction>Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.</instruction>
+        <instruction>Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.</instruction>
       </step>
     </role>
     <role ref="worker">
@@ -1299,7 +1299,7 @@ ${EPOCH_REC} label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
         <exit-condition type="proceed" condition="All slices created with leaf tasks, dependency-chained, assigned"></exit-condition>
       </stage>
       <stage id="rtw-build" name="Build" order="2" execution="parallel" phase-ref="p9">
-        <action id="rtw-build-spawn" instruction="Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity."></action>
+        <action id="rtw-build-spawn" instruction="Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4."></action>
         <action id="rtw-build-monitor" instruction="Monitor worker progress via ${EPOCH_REC} list --namespace &#34;$PASTURE_NAMESPACE&#34; and ${EPOCH_REC} show" command="${EPOCH_REC} list --namespace &#34;$PASTURE_NAMESPACE&#34; --label=&#34;pasture:p9-impl:s9-slice&#34; --status=in_progress"></action>
         <action id="rtw-build-integrate" instruction="Supervisor commits at integration points (atomic commits) — commit small, integrate early and often"></action>
         <exit-condition type="proceed" condition="All workers have notified completion via ${EPOCH_REC} comment add"></exit-condition>
