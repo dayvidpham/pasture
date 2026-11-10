@@ -403,3 +403,30 @@ func ValidateSignalCaptureHasNoBackendRecipe() error {
 	}
 	return fmt.Errorf("codegen.ValidateSignalCaptureHasNoBackendRecipe: the rendered Signal Capture section names a backend recipe (%s) — why: the tracker clause forbids a skill body from naming a backend recipe, and TrackerOpSignal already declares both recipes; where: internal/codegen/specs_data_signals.go signalLineContent; fix: ship one signal call through the tracker entry point and leave the recipes on TrackerOpSignal", strings.Join(found, ", "))
 }
+
+// QuestionRecordField is one field a recorded question carries.
+type QuestionRecordField struct {
+	Name   string
+	Phrase string
+}
+
+// QuestionRecordFields is the one declaration of what a recorded question
+// carries. The guidance renders it, so a dataset can be derived from what the
+// skills capture without changing the skills.
+var QuestionRecordFields = []QuestionRecordField{
+	{Name: "header", Phrase: "the header"},
+	{Name: "question", Phrase: "the exact question text"},
+	{Name: "options", Phrase: "every option label and description"},
+	{Name: "multi", Phrase: "the multi-select flag"},
+	{Name: "preview", Phrase: "the preview when the harness showed one"},
+	{Name: "response", Phrase: "the user's verbatim response"},
+}
+
+// questionRecordSentence renders the recorded-field list from the registry.
+func questionRecordSentence() string {
+	phrases := make([]string, 0, len(QuestionRecordFields))
+	for _, field := range QuestionRecordFields {
+		phrases = append(phrases, field.Phrase)
+	}
+	return "Each question must\ninclude " + strings.Join(phrases[:len(phrases)-1], ", ") + ", and " + phrases[len(phrases)-1] + "."
+}

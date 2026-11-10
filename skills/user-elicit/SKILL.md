@@ -484,8 +484,7 @@ AskUserQuestion({
 
 After survey completion, capture the full Q&A record using the same structured
 format in [user-uat](../user-uat/SKILL.md). Each question must
-include the header, exact question text, every option label and description, the
-multi-select flag, the preview when the harness showed one, and the user's verbatim response. When a definition, code snippet, or example was shown
+include the header, the exact question text, every option label and description, the multi-select flag, the preview when the harness showed one, and the user's verbatim response. When a definition, code snippet, or example was shown
 to the user before a question, capture it verbatim in a **Definition/code shown:**
 field (parity with UAT's 'Definition shown' / 'Command run' fields). For
 **every** request, also record the elicited validation cases verbatim.
