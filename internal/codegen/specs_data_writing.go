@@ -100,7 +100,7 @@ var WritingRuleGroups = []WritingRuleGroup{
 	},
 	{
 		Heading: "Questions, options, risk",
-		Note:    "Rules 22 to 24 have no STE equivalent. They come from the house rules below. Do not attach an STE number to a house rule.",
+		Note:    "Rules 22 to 24 are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule.",
 		Rules: []WritingRule{
 			{22, "One question, one decision. Say what the answer changes.", "house",
 				"'Which order do you want, and are the labels clear?' to 'Which part merges first? The answer sets the order for the next 3 days.'"},
@@ -155,7 +155,73 @@ func validateWritingRules(groups []WritingRuleGroup) error {
 			return fmt.Errorf("codegen.ValidateWritingRules: rule %d has an empty requirement, adapts or bad-to-good field — why: a partial row teaches nothing; where: internal/codegen/specs_data_writing.go WritingRuleGroups; fix: fill every field", rule.Number)
 		}
 	}
+	if err := validateWritingHouseRules(WritingHouseRules, rules); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateWritingHouseRules proves the house table has seven rows: three with
+// full text and four explicit pointers. A dangling "below" and a copied rule
+// sentence both fail.
+func validateWritingHouseRules(house []WritingHouseRule, rules []WritingRule) error {
+	if len(house) != 7 {
+		return fmt.Errorf("codegen.ValidateWritingRules: the house table has %d rows, want 7 — why: the writing standard requires seven house rules; where: internal/codegen/specs_data_writing.go WritingHouseRules; fix: keep three full-text rows and four pointers", len(house))
+	}
+	byNumber := map[int]string{}
+	for _, rule := range rules {
+		byNumber[rule.Number] = rule.Requirement
+	}
+	pointers := 0
+	full := 0
+	for _, row := range house {
+		if strings.Contains(row.Requirement, "below") {
+			return fmt.Errorf("codegen.ValidateWritingRules: house rule %q says \"below\" — why: that word pointed at a table that does not hold the cited rules; where: internal/codegen/specs_data_writing.go WritingHouseRules; fix: name the rule by number, or drop the word", row.Name)
+		}
+		if strings.HasPrefix(row.Requirement, "Extends rule ") {
+			pointers++
+			var number int
+			if _, err := fmt.Sscanf(row.Requirement, "Extends rule %d.", &number); err != nil {
+				return fmt.Errorf("codegen.ValidateWritingRules: house rule %q is not an explicit pointer — why: a pointer must name the rule number; where: internal/codegen/specs_data_writing.go WritingHouseRules; fix: write \"Extends rule N.\"", row.Name)
+			}
+			if _, ok := byNumber[number]; !ok {
+				return fmt.Errorf("codegen.ValidateWritingRules: house rule %q points at rule %d — why: that rule is not in the rule table; where: internal/codegen/specs_data_writing.go WritingHouseRules; fix: point at a rule that exists", row.Name, number)
+			}
+			continue
+		}
+		full++
+		for _, rule := range rules {
+			if strings.Contains(row.Requirement, rule.Requirement) {
+				return fmt.Errorf("codegen.ValidateWritingRules: house rule %q repeats rule %d — why: a sentence may appear once; where: internal/codegen/specs_data_writing.go WritingHouseRules; fix: keep the sentence in the rule table and point at it", row.Name, rule.Number)
+			}
+		}
+	}
+	if pointers != 4 || full != 3 {
+		return fmt.Errorf("codegen.ValidateWritingRules: house table has %d pointers and %d full-text rows — why: the contract is 4 pointers and 3 full-text rows; where: internal/codegen/specs_data_writing.go WritingHouseRules; fix: restore that split", pointers, full)
+	}
+	for _, group := range WritingRuleGroups {
+		if strings.Contains(group.Note, "below") {
+			return fmt.Errorf("codegen.ValidateWritingRules: group %q note says \"below\" — why: the cited rules are not in a following house table; where: internal/codegen/specs_data_writing.go WritingRuleGroups; fix: name the house-rule table, and drop \"below\"", group.Heading)
+		}
+	}
+	if strings.Contains(writingHouseIntro, "below") {
+		return fmt.Errorf("codegen.ValidateWritingRules: the house intro says \"below\" — why: that word is a dangling cross-reference; where: internal/codegen/specs_data_writing.go writingHouseIntro; fix: name the table in this section")
+	}
+	return nil
+}
+
+// writingBodyTexts returns the template rows, the degrade clause, the pre-send
+// check, the turn-split reason and the closing-offer phrase. Each must appear
+// once, so pasting one into another skill fails.
+func writingBodyTexts() []string {
+	return []string{
+		"| <label, max 6 words> | <one sentence> | <one sentence> |",
+		"**Status:** <the result or the state, max 25 words>.",
+		"An assumption never satisfies a user gate: a gated phase waits for the user's answer.",
+		"Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit.",
+		writingTurnSplitReason,
+		"closing offer",
+	}
 }
 
 // RenderWritingRules renders the authored rule registry. The table shape and
@@ -187,20 +253,55 @@ type WritingHouseRule struct {
 	Requirement string
 }
 
-// WritingHouseRules is the one authored registry of the house rules. The rows
-// add only what rules 2, 22 and 24 do not carry; the intro references those
-// rules instead of restating them.
+// writingTurnSplitReason is the one home of the turn-split reason. The
+// present template points at the house rule by name and does not repeat it.
+const writingTurnSplitReason = "a question tool can hide prose sent in the same turn"
+
+// writingHouseIntro precedes the house-rule table. It names the four pointer
+// rows and does not say they sit "below" a section that does not exist.
+const writingHouseIntro = "ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding, one decision, option design and recommendation placement. Four rows in this table are pointers to those rules. The other three rows add only what those rules do not. Never cite an STE number for a house rule."
+
+// writingHousePointer is an explicit pointer. It names the rule and does not
+// restate that rule's sentence.
+func writingHousePointer(number int) string {
+	return fmt.Sprintf("Extends rule %d. Do not restate it.", number)
+}
+
+// WritingHouseRules is the one authored registry of the seven house rules.
+// Three rows carry full text. Four are pointers to the rules they extend.
 var WritingHouseRules = []WritingHouseRule{
 	{"Question shape", "A short header, max 4 words."},
-	{"Option design", "Never use approval levels such as 'exactly matches', 'mostly matches', or 'requires revisions' as an option label."},
-	{"Text-before-question turn", "Send the grounding as text and end the turn. Ask through the `request_user_decision` operation in the next turn, because a question tool can hide prose sent in the same turn."},
-	{"No self-praise", "No self-congratulation, no praise of the question or the user, and no closing offers such as 'let me know if you have questions'. State the next step in one line instead."},
+	{"Option design", writingHousePointer(23)},
+	{"Recommendation placement", writingHousePointer(24)},
+	{"Grounding before asking", writingHousePointer(2)},
+	{"One decision per question", writingHousePointer(22)},
+	{"Text-before-question turn", "Send the grounding as text and end the turn. Ask through the `request_user_decision` operation in the next turn, because " + writingTurnSplitReason + "."},
+	{"No self-praise", "No self-congratulation. State the next step in one line instead."},
 }
+
+// WritingStandardCarriers names the five skills that carry the writing
+// standard. FragmentToOwnerRefs is the registry; this list is the declaration
+// an agent and a guard both read.
+var WritingStandardCarriers = []string{
+	"architect-handoff",
+	"status",
+	"supervisor",
+	"user-elicit",
+	"user-uat",
+}
+
+func writingCarrierSentence() string {
+	return "Five skills carry these rules: " + strings.Join(WritingStandardCarriers, ", ") + "."
+}
+
+// writingAskBindingSentence points at the role-tool binding that enforces
+// asking through the question tool rather than a subagent.
+const writingAskBindingSentence = "Ask through the `request_user_decision` operation, never by launching a subagent. That launch is `delegate_assignment`, a different operation. The role-tool binding in `internal/runtime/profiles.go` lowers `request_user_decision` to the harness question tool and lowers `delegate_assignment` to the subagent tool."
 
 // RenderWritingHouseRules renders the house-rule table from its registry.
 func RenderWritingHouseRules(rules []WritingHouseRule) string {
 	var b strings.Builder
-	b.WriteString("ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22 and 24 already carry grounding, one-decision shape and recommendation placement, so the rows below add only what those rules do not. Never cite an STE number for a house rule.")
+	b.WriteString(writingHouseIntro)
 	b.WriteString("\n\n| Rule | Requirement |\n|---|---|")
 	for _, rule := range rules {
 		fmt.Fprintf(&b, "\n| %s | %s |", rule.Name, rule.Requirement)
@@ -215,7 +316,7 @@ func writingStandardFragment() SharedFragment {
 		Title: "Writing to the User",
 		Content: "These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are " +
 			"STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can " +
-			"claim full compliance.",
+			"claim full compliance. " + writingCarrierSentence() + " " + writingAskBindingSentence,
 		Subsections: []ProseSection{
 			{
 				Id:      "frag-writing-standard-rules",
@@ -266,7 +367,7 @@ func writingStandardFragment() SharedFragment {
 // hide the grounding.
 func writingPresentTemplateContent() string {
 	return strings.Join([]string{
-		"Send the block below as text only, then end the turn. In the next turn, ask through the `request_user_decision` operation with the same options. The split exists because a question tool can hide prose sent in the same turn.",
+		"Send the block below as text only, then end the turn. In the next turn, ask through the `request_user_decision` operation with the same options. The split is the Text-before-question turn house rule.",
 		"",
 		"~~~~markdown",
 		"## <Part name>: <what it does for the user, max 10 words>",
@@ -338,7 +439,7 @@ func writingStatusTemplateContent() string {
 		"- **<term>**: <max 20 words>.",
 		"~~~",
 		"",
-		"Budget: 120 words. Every Done item names an artefact. Do not restate the plan. Do not add a closing offer. One status per message, not one per thought.",
+		"Budget: 120 words. Every Done item names an artefact. Do not restate the plan. One status per message, not one per thought.",
 	}, "\n")
 }
 
@@ -367,7 +468,7 @@ func writingExemptContent() string {
 		"- **Code, logs, diffs, test output.** Exempt. Explain them in prose around the block.",
 		"- **Industry terms of art.** Fixture, golden test, mutation testing, schema migration, fail-safe default, backfill, and closed enum are allowed as technical nouns. Define one in Terms if the user did not use it first.",
 		"",
-		"Two more rows are relaxations, not exemptions. **Spelling** keeps one spelling per message and does not enforce American spelling. **Identifiers** are not exempt from a gloss: backtick each one, keep max 2 per sentence, and give one plain gloss on first use, as rule 20 says.",
+		"Two more rows are relaxations, not exemptions. **Spelling** keeps one spelling per message and does not enforce American spelling. **Identifiers** are not exempt from a gloss, as rule 20 says.",
 		"",
 		"The caps stay live for everything else. Rule 3 sets paragraph length, rule 14 sets the word caps, and rule 17 sets where a fragment is allowed; none of those three is an exemption.",
 	}, "\n")

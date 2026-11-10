@@ -61,7 +61,7 @@ The authored body is identical for every target. Only the resolved token differs
 | `[[op:invoke_skill]]` | `Skill` | `skill` | `invoke_skill` (semantic) |
 | `[[op:delegate_assignment]]` | `Agent` | `task` | `delegate_assignment` (parent-mediated) |
 | `[[op:send_assignment_message]]` | `SendMessage` | `send_assignment_message` (semantic) | `send_assignment_message` (parent-mediated) |
-| `[[op:request_user_decision]]` | `AskUserQuestion` | `question` | `request-input` |
+| `[[op:request_user_decision]]` | `AskUserQuestion` | `question` | `request_user_decision` (neutral; the contract binding id `request-input` stays in the profile, not in skill prose) |
 | `[[rec]]` | `pasture task` | `pasture task` | `pasture task` |
 
 A non-native operation resolves to the neutral kind spelling. That names the

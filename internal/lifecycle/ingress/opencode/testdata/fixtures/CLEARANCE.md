@@ -2692,3 +2692,19 @@ SHA-256). The preceding digest identifies the prior recovery revision; neither
 revision participated in the historical captures above, and no capture payload,
 capture kit, fixture identity, activation state or acceptance record changes.
 No new live session, capture or host capability is claimed.
+
+### Signal operation recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`4885e46b63a6dd2f80207385fac7c91a269f268c85e21cbf26879475b62ed67b`.
+This later generated revision adds `signal` to the closed tracker operation
+list in the embedded recovery prose. The adapter owns that operation's pasture
+and ledger recipes; the recovery text still names no backend recipe. Lifecycle
+transport, activation, version guards, decision handling and the injection
+contract are unchanged; no runtime task query, file read or cached task state
+is added. The generated plugin and embedded hook asset still have identical
+bytes (`internal/target/opencode/assets/hooks/pasture-hooks.ts` has the same
+SHA-256). The preceding digest identifies the prior recovery revision; neither
+revision participated in the historical captures above, and no capture payload,
+capture kit, fixture identity, activation state or acceptance record changes.
+No new live session, capture or host capability is claimed.

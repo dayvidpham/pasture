@@ -68,6 +68,9 @@ const (
 	TrackerOpStatus TrackerOpId = "status"
 	TrackerOpClose  TrackerOpId = "close"
 	TrackerOpWhoami TrackerOpId = "whoami"
+	// TrackerOpSignal records one user signal. The ten operations above are
+	// unchanged; signal is the one added operation, and it is not an IR kind.
+	TrackerOpSignal TrackerOpId = "signal"
 )
 
 var canonicalTrackerOpIds = [...]TrackerOpId{
@@ -81,12 +84,24 @@ var canonicalTrackerOpIds = [...]TrackerOpId{
 	TrackerOpStatus,
 	TrackerOpClose,
 	TrackerOpWhoami,
+	TrackerOpSignal,
 }
 
 // AllTrackerOpIds returns a fresh defensive copy of the closed operation set,
 // in canonical order.
 func AllTrackerOpIds() []TrackerOpId {
 	return append([]TrackerOpId(nil), canonicalTrackerOpIds[:]...)
+}
+
+// trackerOpNames is the closed operation list, rendered from the registry so
+// an error cannot name a different set than the one the adapter serves.
+func trackerOpNames() string {
+	ids := AllTrackerOpIds()
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = string(id)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // TrackerOp is one operation: its canonical signature and its recipe on each
@@ -146,7 +161,7 @@ func ValidateTrackerOps() error {
 // with a defective fixture.
 func validateTrackerOps(ops []TrackerOp) error {
 	if len(ops) != len(canonicalTrackerOpIds) {
-		return fmt.Errorf("tracker contract: got %d operations, want %d — why: the operation set is closed to the ten canonical ops; where: internal/codegen/specs_data_tracker.go; fix: supply exactly one entry per canonical id", len(ops), len(canonicalTrackerOpIds))
+		return fmt.Errorf("tracker contract: got %d operations, want %d — why: the operation set is closed to the registered ops; where: internal/codegen/specs_data_tracker.go; fix: supply exactly one entry per canonical id (%s)", len(ops), len(canonicalTrackerOpIds), trackerOpNames())
 	}
 	seen := make(map[TrackerOpId]bool, len(ops))
 	for _, op := range ops {
@@ -175,7 +190,7 @@ func validateTrackerOps(ops []TrackerOp) error {
 	}
 	for _, id := range canonicalTrackerOpIds {
 		if !seen[id] {
-			return fmt.Errorf("tracker contract: operation %q is missing — why: the closed set requires all ten operations; where: internal/codegen/specs_data_tracker.go; fix: add the missing entry", id)
+			return fmt.Errorf("tracker contract: operation %q is missing — why: the closed set requires every registered operation; where: internal/codegen/specs_data_tracker.go; fix: add the missing entry", id)
 		}
 	}
 	return nil

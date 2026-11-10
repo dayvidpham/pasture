@@ -37,8 +37,8 @@ import (
 // reaches generated output must carry a typed marker instead of a native call
 // prefix or the tracker command prefix; renderedSources enumerates that corpus
 // and the literal guards iterate it. There is no bare [[rec]] form: naming the
-// operation in the marker is what keeps the rendered call site inside the ten
-// neutral ops.
+// operation in the marker is what keeps the rendered call site inside the
+// closed tracker operations.
 const (
 	bodyRecMarkerPrefix = "[[rec:"
 
@@ -188,10 +188,11 @@ func resolveBodyMarker(target roleTarget, payload string) (string, error) {
 	switch {
 	case payload == "rec":
 		return "", fmt.Errorf(
-			"codegen.ResolveBodyMarkers: bare [[rec]] marker — " +
-				"why: the tracker entry point is followed by exactly one neutral operation, and the marker names it; " +
-				"where: an authored rendering source in internal/codegen/specs_data*.go; " +
-				"fix: write [[rec:<op>]] with one of create, label, block, note, show, query, ready, status, close, whoami",
+			"codegen.ResolveBodyMarkers: bare [[rec]] marker — "+
+				"why: the tracker entry point is followed by exactly one neutral operation, and the marker names it; "+
+				"where: an authored rendering source in internal/codegen/specs_data*.go; "+
+				"fix: write [[rec:<op>]] with one of %s",
+			trackerOpNames(),
 		)
 	case strings.HasPrefix(payload, "rec:"):
 		return resolveTrackerMarker(strings.TrimPrefix(payload, "rec:"), trackerEntryPoint)
@@ -214,10 +215,11 @@ func resolveNeutralMarker(payload string) (string, error) {
 	switch {
 	case payload == "rec":
 		return "", fmt.Errorf(
-			"codegen.ResolveBodyMarkersNeutral: bare [[rec]] marker — " +
-				"why: the tracker entry point is followed by exactly one neutral operation, and the marker names it; " +
-				"where: an authored rendering source in internal/codegen/specs_data*.go; " +
-				"fix: write [[rec:<op>]] with one of create, label, block, note, show, query, ready, status, close, whoami",
+			"codegen.ResolveBodyMarkersNeutral: bare [[rec]] marker — "+
+				"why: the tracker entry point is followed by exactly one neutral operation, and the marker names it; "+
+				"where: an authored rendering source in internal/codegen/specs_data*.go; "+
+				"fix: write [[rec:<op>]] with one of %s",
+			trackerOpNames(),
 		)
 	case strings.HasPrefix(payload, "rec:"):
 		return resolveTrackerMarker(strings.TrimPrefix(payload, "rec:"), neutralTrackerEntryPoint)
@@ -265,10 +267,10 @@ func resolveTrackerMarker(name, entryPoint string) (string, error) {
 	if !id.isRegistered() {
 		return "", fmt.Errorf(
 			"codegen.ResolveBodyMarkers: unregistered tracker operation %q — "+
-				"why: the tracker vocabulary is closed, so a rendered call must name one of the ten neutral ops; "+
+				"why: the tracker vocabulary is closed, so a rendered call must name one registered operation; "+
 				"where: a rendering-source [[rec:<op>]] marker; "+
-				"fix: use one of create, label, block, note, show, query, ready, status, close, whoami",
-			name,
+				"fix: use one of %s",
+			name, trackerOpNames(),
 		)
 	}
 	return entryPoint + " " + string(id), nil
@@ -314,6 +316,12 @@ func resolveOperationMarker(target roleTarget, name string) (string, error) {
 		)
 	}
 	if ok {
+		// Codex records request-input as an internal binding id, not the name
+		// skill prose should teach. Render the neutral operation (tenet 3).
+		// The contract binding is unchanged; agent profiles still list it.
+		if target.harness == ir.HarnessCodex && kind == ir.OperationRequestUserDecision {
+			return string(kind), nil
+		}
 		return native, nil
 	}
 	// Unsupported on this contract: the operation has no native call. Render

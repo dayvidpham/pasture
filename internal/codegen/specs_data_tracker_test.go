@@ -17,8 +17,8 @@ import (
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
-// TestTrackerOpsContract proves the closed operation set is exactly the ten
-// canonical ops, every op carries both backend recipes, and the two folded
+// TestTrackerOpsContract proves the closed operation set is the ten original
+// ops plus signal, every op carries both backend recipes, and the two folded
 // legacy verbs (relate, assign) do not appear as operations.
 func TestTrackerOpsContract(t *testing.T) {
 	t.Parallel()
@@ -28,7 +28,7 @@ func TestTrackerOpsContract(t *testing.T) {
 	want := []TrackerOpId{
 		TrackerOpCreate, TrackerOpLabel, TrackerOpBlock, TrackerOpNote,
 		TrackerOpShow, TrackerOpQuery, TrackerOpReady, TrackerOpStatus,
-		TrackerOpClose, TrackerOpWhoami,
+		TrackerOpClose, TrackerOpWhoami, TrackerOpSignal,
 	}
 	require.Len(t, AllTrackerOpIds(), len(want))
 	require.ElementsMatch(t, want, AllTrackerOpIds())
@@ -888,6 +888,43 @@ func firstTaskArgv(t *testing.T, argvLog string) []string {
 		fields = fields[2:]
 	}
 	return fields
+}
+
+// TestSignalLedgerLineIsJSON proves every line the signal operation appends
+// parses as one JSON object with the five registered fields.
+func TestSignalLedgerLineIsJSON(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	header := filepath.Join(dir, "EPOCH.md")
+	require.NoError(t, os.WriteFile(header, []byte("backend: ledger\nnamespace: https://example.test/repo\n"), 0o600))
+	env := map[string]string{"EPOCH_FILE": header}
+	calls := [][]string{
+		{"signal", "--kind", "confusion", "--phase", "elicit", "--skill", "user-elicit", "--entry", "<task URI>#end-vision", "--quote", "what does arm mean here"},
+		{"signal", "--kind", "correction", "--phase", "elicit", "--skill", "user-elicit", "--entry", "ref", "--quote", `say "arm" \ now`},
+	}
+	for _, args := range calls {
+		out, code := runRec(t, dir, env, args...)
+		require.Zero(t, code, out)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "signals.jsonl"))
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	require.Len(t, lines, len(calls), "one JSON object per signal")
+	for i, line := range lines {
+		var parsed map[string]string
+		require.NoErrorf(t, json.Unmarshal([]byte(line), &parsed), "line %d must parse: %s", i+1, line)
+		for _, field := range SignalLineFields {
+			require.NotEmptyf(t, parsed[field.Field], "line %d missing %s", i+1, field.Field)
+		}
+		require.Equal(t, calls[i][2], parsed["kind"])
+		require.Equal(t, calls[i][len(calls[i])-1], parsed["quote"])
+	}
+	var example map[string]string
+	require.NoError(t, json.Unmarshal([]byte(SignalLineExample()), &example))
+	var first map[string]string
+	require.NoError(t, json.Unmarshal([]byte(lines[0]), &first))
+	require.Equal(t, example, first, "the first appended line must match SignalLineExample()")
 }
 
 // TestRecAssetStopsOnErrorBackend proves the adapter's error backend prints an

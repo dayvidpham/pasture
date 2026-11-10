@@ -81,7 +81,7 @@ description: User Acceptance Testing with demonstrative examples
 
 The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami, signal.
 
 Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
@@ -103,7 +103,7 @@ Select the current registered author with "${EPOCH_REC}" whoami. It prints the a
 
 ## Writing to the User
 
-These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance.
+These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. Five skills carry these rules: architect-handoff, status, supervisor, user-elicit, user-uat. Ask through the `request_user_decision` operation, never by launching a subagent. That launch is `delegate_assignment`, a different operation. The role-tool binding in `internal/runtime/profiles.go` lowers `request_user_decision` to the harness question tool and lowers `delegate_assignment` to the subagent tool.
 
 ### The rules
 
@@ -152,7 +152,7 @@ Format: number, requirement, the STE rule it adapts, then a compact bad-to-good 
 
 **Questions, options, risk**
 
-Rules 22 to 24 have no STE equivalent. They come from the house rules below. Do not attach an STE number to a house rule.
+Rules 22 to 24 are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule.
 
 | # | Rule | Adapts | Bad to good |
 |---|---|---|---|
@@ -163,18 +163,21 @@ Rules 22 to 24 have no STE equivalent. They come from the house rules below. Do 
 
 ### House rules for questions, options and recommendations
 
-ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22 and 24 already carry grounding, one-decision shape and recommendation placement, so the rows below add only what those rules do not. Never cite an STE number for a house rule.
+ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding, one decision, option design and recommendation placement. Four rows in this table are pointers to those rules. The other three rows add only what those rules do not. Never cite an STE number for a house rule.
 
 | Rule | Requirement |
 |---|---|
 | Question shape | A short header, max 4 words. |
-| Option design | Never use approval levels such as 'exactly matches', 'mostly matches', or 'requires revisions' as an option label. |
+| Option design | Extends rule 23. Do not restate it. |
+| Recommendation placement | Extends rule 24. Do not restate it. |
+| Grounding before asking | Extends rule 2. Do not restate it. |
+| One decision per question | Extends rule 22. Do not restate it. |
 | Text-before-question turn | Send the grounding as text and end the turn. Ask through the `request_user_decision` operation in the next turn, because a question tool can hide prose sent in the same turn. |
-| No self-praise | No self-congratulation, no praise of the question or the user, and no closing offers such as 'let me know if you have questions'. State the next step in one line instead. |
+| No self-praise | No self-congratulation. State the next step in one line instead. |
 
 ### Template: present a component, then ask
 
-Send the block below as text only, then end the turn. In the next turn, ask through the `request_user_decision` operation with the same options. The split exists because a question tool can hide prose sent in the same turn.
+Send the block below as text only, then end the turn. In the next turn, ask through the `request_user_decision` operation with the same options. The split is the Text-before-question turn house rule.
 
 ~~~~markdown
 ## <Part name>: <what it does for the user, max 10 words>
@@ -243,7 +246,7 @@ One component per call. Use multi-select only when the options combine. Always a
 - **<term>**: <max 20 words>.
 ~~~
 
-Budget: 120 words. Every Done item names an artefact. Do not restate the plan. Do not add a closing offer. One status per message, not one per thought.
+Budget: 120 words. Every Done item names an artefact. Do not restate the plan. One status per message, not one per thought.
 
 ### Degrade when the question tool is weak
 
@@ -263,7 +266,7 @@ Two material classes are exempt from the word and sentence caps: quoted text and
 - **Code, logs, diffs, test output.** Exempt. Explain them in prose around the block.
 - **Industry terms of art.** Fixture, golden test, mutation testing, schema migration, fail-safe default, backfill, and closed enum are allowed as technical nouns. Define one in Terms if the user did not use it first.
 
-Two more rows are relaxations, not exemptions. **Spelling** keeps one spelling per message and does not enforce American spelling. **Identifiers** are not exempt from a gloss: backtick each one, keep max 2 per sentence, and give one plain gloss on first use, as rule 20 says.
+Two more rows are relaxations, not exemptions. **Spelling** keeps one spelling per message and does not enforce American spelling. **Identifiers** are not exempt from a gloss, as rule 20 says.
 
 The caps stay live for everything else. Rule 3 sets paragraph length, rule 14 sets the word caps, and rule 17 sets where a fragment is allowed; none of those three is an exemption.
 
@@ -314,7 +317,7 @@ The user needs to see the actual thing — definition, behavior, example — and
 2. **Options describe competing tradeoffs, not approval levels.** Each option is a real engineering alternative with its own pros/cons.
 3. **Later questions depend on earlier answers.** Structure the survey as a decision tree — Round 1 settles the highest-leverage boundaries, Round 2 addresses dependent decisions informed by Round 1 answers, etc.
 4. **Show context before asking.** The user MUST see a code snippet, interface definition, or motivating before/after example before being asked to evaluate.
-5. **One component per request-input call.** Never batch all components into one survey.
+5. **One component per request_user_decision call.** Never batch all components into one survey.
 
 ## Wrong vs Right Question Patterns
 
@@ -366,7 +369,7 @@ Look for:
 
 Structure questions to progressively validate the proposal against the user's original requirements.
 
-**Round 1: Highest-leverage tradeoffs** (1-2 questions per request-input call)
+**Round 1: Highest-leverage tradeoffs** (one decision per request_user_decision call)
 
 Start with the 2-3 architectural decisions where the proposal made the biggest choices. For each, show the user:
 1. What they originally said in URE (their stated requirement/preference)
@@ -428,10 +431,10 @@ Design-space questions to ask per component type:
 
 ## UAT Survey Template
 
-Use one request-input call per component — do NOT batch all components into one survey.
+Use one request_user_decision call per decision. One call asks one question. Do not put two decisions in one call, and do not batch every component into one survey.
 
 ```
-request-input({
+request_user_decision({
   questions: [
     {
       question: `The verbose flag shows the following extra lines for backup events:
@@ -444,7 +447,12 @@ Which of these verbose fields are useful?`,
         { label: "backupDir (full path)", description: "Shows where the backup actually landed" },
         { label: "session ID", description: "Enables log correlation across events" },
       ]
-    },
+    }
+  ]
+})
+
+request_user_decision({
+  questions: [
     {
       question: "Any related feedback, concerns, or gaps not covered above?",
       header: "Feedback",
@@ -453,7 +461,12 @@ Which of these verbose fields are useful?`,
         { label: "No additional feedback", description: "All concerns addressed" },
         { label: "Related concern", description: "I have feedback on something adjacent" },
       ]
-    },
+    }
+  ]
+})
+
+request_user_decision({
+  questions: [
     {
       question: "Do you ACCEPT this component to proceed?",
       header: "Decision",
@@ -578,22 +591,14 @@ The kind is a closed list. Use exactly one of:
 
 ### One feedback task per epoch
 
-Use one feedback task per epoch, and create it once. The epoch creates it at epoch start with:
-
-~~~bash
-FEEDBACK_ID_URI=$("${EPOCH_REC}" create --kind task --title 'FEEDBACK: epoch signals' --phase unscoped)
-~~~
-
-Write `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md` in the same step. That line is how a second run finds the task: every skill reads it before it records, and no skill creates a second task when the line is present. If the line is absent, treat the epoch as one that started before this rule: create the task once with exactly this title, write the line, then continue. Never create a second feedback task in the same epoch.
-
-This subsection applies to the pasture backend. A ledger epoch has no feedback task: use the ledger recording target below.
+The epoch creates one feedback task at epoch start and writes `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md`. A second run finds that task by reading the `feedback:` line. No other skill creates a feedback task. If the line is absent, the signal operation fails and records nothing; do not create a task to fill the gap.
 
 ### Line format and recording
 
-Write one line per signal. The same fields and order apply on both backends:
+Write one JSON object per signal. The fields, in this order, are kind, phase, skill, entry and quote.
 
 ~~~
-signal: kind=<kind> phase=<phase> skill=<skill> entry=<entry-ref> quote="<short verbatim quote>"
+{"kind":"<kind>","phase":"<phase>","skill":"<skill>","entry":"<entry-ref>","quote":"<short verbatim quote>"}
 ~~~
 
 - `kind`: one of the registered kinds above, exactly.
@@ -602,25 +607,13 @@ signal: kind=<kind> phase=<phase> skill=<skill> entry=<entry-ref> quote="<short 
 - `entry`: the record that holds the interaction, such as a task URI plus the question or section.
 - `quote`: a short verbatim fragment, max 20 words. Never paraphrase or tidy it.
 
-Recording target, by backend:
-
-- `backend: pasture`: one note on the feedback task that the `feedback:` line names. The note body is the whole line and nothing else. Never run the note with an empty id: an empty id fails with `need_id` and records nothing.
-- `backend: ledger`: no task and no note. Append the line to `.agents.local/pasture/signals.jsonl`, one line per signal.
-
-Pasture target:
+Record the signal with one call. Do not name a backend command in this section.
 
 ~~~bash
-FEEDBACK_ID_URI=$(sed -n 's/^feedback: //p' .agents.local/pasture/EPOCH.md | tail -1)
-"${EPOCH_REC}" note "$FEEDBACK_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body 'signal: kind=confusion phase=elicit skill=user-elicit entry=<task URI>#end-vision quote="what does arm mean here"'
+"${EPOCH_REC}" signal --kind confusion --phase elicit --skill user-elicit --entry '<task URI>#end-vision' --quote 'what does arm mean here'
 ~~~
 
-Ledger target:
-
-~~~bash
-printf '%s\n' 'signal: kind=confusion phase=elicit skill=user-elicit entry=<task URI>#end-vision quote="what does arm mean here"' >> .agents.local/pasture/signals.jsonl
-~~~
-
-The recorded text is identical on both backends. Only the destination differs: a note body on pasture, one appended line on the ledger. Write it in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.
+The adapter records that JSON object. An empty feedback id fails in the adapter and records nothing. Write the call in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.
 
 If the write fails, follow the tracker write-failure rule: retry, keep the recorded backend, and surface the pending line at the next gate. A failed record never blocks the phase and never prompts the user.
 <!-- END GENERATED FROM pasture schema -->

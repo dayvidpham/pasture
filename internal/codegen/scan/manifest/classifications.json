@@ -467,6 +467,24 @@
       "ordinal": 0,
       "classification": "user_decision",
       "notes": "native AskUserQuestion(...) call; maps to #38's RequestUserDecision (SelectOne/SelectMany/FreeText)"
+    },
+    {
+      "owner": "skills/user-uat/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "UAT Survey Template",
+      "ordinal": 1,
+      "classification": "user_decision",
+      "notes": "second one-decision call in the UAT survey template; maps to #38's RequestUserDecision"
+    },
+    {
+      "owner": "skills/user-uat/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "UAT Survey Template",
+      "ordinal": 2,
+      "classification": "user_decision",
+      "notes": "third one-decision call in the UAT survey template; maps to #38's RequestUserDecision"
     }
   ]
 }

@@ -50,6 +50,9 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 	if err := ValidateTrackerOps(); err != nil {
 		return GenerateResult{}, []error{err}
 	}
+	if err := ValidateSignalCaptureHasNoBackendRecipe(); err != nil {
+		return GenerateResult{}, []error{err}
+	}
 
 	var result GenerateResult
 	var errs []error

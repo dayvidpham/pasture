@@ -165,7 +165,7 @@ Use the Phase 1 findings to identify:
 					Content: "Structure questions as a decision tree that progressively narrows the design\n" +
 						"space. Each question should depend on the answers to previous questions.\n" +
 						"\n" +
-						"**Round 1: Highest-leverage boundaries** (1-2 questions per [[op:request_user_decision]] call)\n" +
+						"**Round 1: Highest-leverage boundaries** (one decision per [[op:request_user_decision]] call)\n" +
 						"\n" +
 						"Identify the 2-3 dimensions that most constrain the design. These are the axes\n" +
 						"where different choices lead to fundamentally different architectures.\n" +

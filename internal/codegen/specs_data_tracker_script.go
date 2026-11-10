@@ -302,6 +302,33 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 				ThenPrint: "AUTHOR",
 			}},
 		},
+		TrackerOpSignal: {
+			Id:        TrackerOpSignal,
+			Action:    "record one user signal; pasture notes the feedback task, ledger appends one JSON object",
+			Signature: `"${EPOCH_REC}" signal --kind K --phase P --skill S --entry E --quote Q`,
+			Flags: []trackerFlag{
+				{Name: "kind"},
+				{Name: "phase"},
+				{Name: "skill"},
+				{Name: "entry"},
+				{Name: "quote"},
+			},
+			Prelude: `[ -n "$kind" ] || fail "signal needs --kind" "the kind operand was empty" "pass --kind with one registered signal kind"
+    [ -n "$phase" ] || fail "signal needs --phase" "the phase operand was empty" "pass --phase with one registered phase name"
+    [ -n "$skill" ] || fail "signal needs --skill" "the skill operand was empty" "pass --skill with the skill directory name"
+    [ -n "$entry" ] || fail "signal needs --entry" "the entry operand was empty" "pass --entry with the record that holds the interaction"
+    [ -n "$quote" ] || fail "signal needs --quote" "the quote operand was empty" "pass --quote with a short verbatim fragment"
+    signal_line=$(signal_json)
+    if [ "$BACKEND" != ledger ]; then
+      FEEDBACK_ID=$(field feedback)
+      [ -n "$FEEDBACK_ID" ] || fail "signal has no feedback task" "EPOCH.md has no feedback: line, so a note would run with an empty id and record nothing" "the epoch creates the feedback task once at start and writes feedback:; a second run reads that line and does not create another task"
+      [ -n "$AUTHOR" ] || fail "signal needs a recorded author" "the header author: line and PASTURE_AUTHOR are both empty" "set author: in $EPOCH_FILE or export PASTURE_AUTHOR to a registered actor id"
+    fi`,
+			PastureCalls: []pastureCall{{
+				Name: "note",
+				Argv: []string{"task", "comment", "add", `"$FEEDBACK_ID"`, "--author", `"$AUTHOR"`, "--", `"$signal_line"`},
+			}},
+		},
 	}
 	for id, op := range ops {
 		op.Pasture = renderPastureDoc(op)
@@ -312,6 +339,9 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 }
 
 func renderPastureDoc(op TrackerOp) string {
+	if op.Id == TrackerOpSignal {
+		return `read feedback: from EPOCH.md; refuse an empty id; pasture task comment add "$FEEDBACK_ID" --author "$AUTHOR" -- "$signal_json"`
+	}
 	if op.Id == TrackerOpWhoami {
 		return `pasture task agents show "$AUTHOR"; print "$AUTHOR"`
 	}
@@ -328,6 +358,8 @@ func renderPastureDoc(op TrackerOp) string {
 
 func renderLedgerDoc(op TrackerOp) string {
 	switch op.Id {
+	case TrackerOpSignal:
+		return "append one JSON object to the signals.jsonl beside EPOCH.md; fields kind, phase, skill, entry, quote"
 	case TrackerOpShow, TrackerOpQuery, TrackerOpReady, TrackerOpWhoami:
 		return "read .agents.local/pasture/ledger/<task>.jsonl; no mutation"
 	default:
@@ -606,12 +638,12 @@ func renderTrackerRecScript(ops map[TrackerOpId]TrackerOp) string {
 	for _, id := range canonicalTrackerOpIds {
 		b.WriteString(renderOpArm(ops[id]))
 	}
-	b.WriteString(`  *)
-    fail "unknown operation '$OP'" "the operation set is closed to the ten neutral ops" \
-      "use create, label, block, note, show, query, ready, status, close or whoami; run the probe if the header is missing"
+	fmt.Fprintf(&b, `  *)
+    fail "unknown operation '$OP'" "the operation set is closed" \
+      "use one of %s; run the probe if the header is missing"
     ;;
 esac
-`)
+`, trackerOpNames())
 	return b.String()
 }
 
@@ -1077,6 +1109,19 @@ ledger_append() {
 `
 
 const ledgerRuntime = `
+signal_json() {
+  printf '{"kind":"%s","phase":"%s","skill":"%s","entry":"%s","quote":"%s"}' \
+    "$(json_escape "$kind")" "$(json_escape "$phase")" "$(json_escape "$skill")" \
+    "$(json_escape "$entry")" "$(json_escape "$quote")"
+}
+
+ledger_signal() {
+  dir=$(dirname "$EPOCH_FILE")
+  file="$dir/signals.jsonl"
+  mkdir -p "$dir" || fail "cannot create signal directory $dir" "the parent of EPOCH.md is not writable" "choose a writable EPOCH_FILE directory and retry the same signal"
+  printf '%s\n' "$signal_line" >> "$file" || fail "signal append failed for $file" "the signal file was not writable" "make $dir writable and retry the same signal"
+}
+
 ledger_create() {
   id=$(mint_id)
   # Empty priority matches the pasture create flag default so show agrees.

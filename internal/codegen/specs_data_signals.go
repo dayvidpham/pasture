@@ -9,6 +9,8 @@
 package codegen
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -163,33 +165,59 @@ var SignalLineFields = []SignalLineField{
 	{"phase", "<phase>"},
 	{"skill", "<skill>"},
 	{"entry", "<entry-ref>"},
-	{"quote", `"<short verbatim quote>"`},
+	{"quote", "<short verbatim quote>"},
 }
 
-func renderSignalLine(value func(SignalLineField) string) string {
-	parts := []string{"signal:"}
-	for _, field := range SignalLineFields {
-		parts = append(parts, field.Field+"="+value(field))
+// signalLine is one JSON object. Field order is the struct order, which is
+// SignalLineFields order, so a reader can parse and count later.
+type signalLine struct {
+	Kind  string `json:"kind"`
+	Phase string `json:"phase"`
+	Skill string `json:"skill"`
+	Entry string `json:"entry"`
+	Quote string `json:"quote"`
+}
+
+func marshalSignalLine(line signalLine) string {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(line); err != nil {
+		panic("codegen.marshalSignalLine: " + err.Error())
 	}
-	return strings.Join(parts, " ")
+	return strings.TrimRight(buf.String(), "\n")
 }
 
-// SignalLineTemplate is the authored line shape shared by both backends.
+func signalLineFromValues(values map[string]string) signalLine {
+	return signalLine{
+		Kind:  values["kind"],
+		Phase: values["phase"],
+		Skill: values["skill"],
+		Entry: values["entry"],
+		Quote: values["quote"],
+	}
+}
+
+// SignalLineTemplate is the authored JSON object. Both backends record this
+// shape: one object, one line, fields in registry order.
 func SignalLineTemplate() string {
-	return renderSignalLine(func(field SignalLineField) string { return field.Placeholder })
+	values := map[string]string{}
+	for _, field := range SignalLineFields {
+		values[field.Field] = field.Placeholder
+	}
+	return marshalSignalLine(signalLineFromValues(values))
 }
 
-// SignalLineExample is one filled line. The same text is the note body on
-// pasture and the appended line on the ledger.
+// SignalLineExample is one filled JSON object. The adapter writes this shape;
+// a test parses every appended line against it.
 func SignalLineExample() string {
-	values := map[string]string{
+	return marshalSignalLine(signalLineFromValues(map[string]string{
 		"kind":  "confusion",
 		"phase": "elicit",
 		"skill": "user-elicit",
 		"entry": "<task URI>#end-vision",
-		"quote": `"what does arm mean here"`,
-	}
-	return renderSignalLine(func(field SignalLineField) string { return values[field.Field] })
+		"quote": "what does arm mean here",
+	}))
 }
 
 // signalPhaseVocabulary is the registered phase list, rendered from the
@@ -238,27 +266,20 @@ func signalCaptureFragment() SharedFragment {
 	}
 }
 
-// signalTaskContent pins one feedback task per epoch and how a second run finds
-// it. Creation is epoch-only, so two skills cannot both create it.
+// signalTaskContent names the one creator and how a second run finds the task.
+// The create command lives in the epoch start step, not here, so a consumer
+// skill cannot create a second task.
 func signalTaskContent() string {
 	return strings.Join([]string{
-		"Use one feedback task per epoch, and create it once. The epoch creates it at epoch start with:",
-		"",
-		"~~~bash",
-		"FEEDBACK_ID_URI=$([[rec:create]] --kind task --title 'FEEDBACK: epoch signals' --phase unscoped)",
-		"~~~",
-		"",
-		"Write `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md` in the same step. That line is how a second run finds the task: every skill reads it before it records, and no skill creates a second task when the line is present. If the line is absent, treat the epoch as one that started before this rule: create the task once with exactly this title, write the line, then continue. Never create a second feedback task in the same epoch.",
-		"",
-		"This subsection applies to the pasture backend. A ledger epoch has no feedback task: use the ledger recording target below.",
+		"The epoch creates one feedback task at epoch start and writes `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md`. A second run finds that task by reading the `feedback:` line. No other skill creates a feedback task. If the line is absent, the signal operation fails and records nothing; do not create a task to fill the gap.",
 	}, "\n")
 }
 
-// signalLineContent defines the stable line and the two recording targets. The
-// line is identical on both backends; only its destination differs.
+// signalLineContent is the one call a skill body ships. Both backend recipes
+// live on the signal operation, not in this section.
 func signalLineContent() string {
 	return strings.Join([]string{
-		"Write one line per signal. The same fields and order apply on both backends:",
+		"Write one JSON object per signal. The fields, in this order, are kind, phase, skill, entry and quote.",
 		"",
 		"~~~",
 		SignalLineTemplate(),
@@ -270,26 +291,93 @@ func signalLineContent() string {
 		"- `entry`: the record that holds the interaction, such as a task URI plus the question or section.",
 		"- `quote`: a short verbatim fragment, max 20 words. Never paraphrase or tidy it.",
 		"",
-		"Recording target, by backend:",
-		"",
-		"- `backend: pasture`: one note on the feedback task that the `feedback:` line names. The note body is the whole line and nothing else. Never run the note with an empty id: an empty id fails with `need_id` and records nothing.",
-		"- `backend: ledger`: no task and no note. Append the line to `.agents.local/pasture/signals.jsonl`, one line per signal.",
-		"",
-		"Pasture target:",
+		"Record the signal with one call. Do not name a backend command in this section.",
 		"",
 		"~~~bash",
-		"FEEDBACK_ID_URI=$(sed -n 's/^feedback: //p' .agents.local/pasture/EPOCH.md | tail -1)",
-		"[[rec:note]] \"$FEEDBACK_ID_URI\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body '" + SignalLineExample() + "'",
+		"[[rec:signal]] --kind confusion --phase elicit --skill user-elicit --entry '<task URI>#end-vision' --quote 'what does arm mean here'",
 		"~~~",
 		"",
-		"Ledger target:",
-		"",
-		"~~~bash",
-		"printf '%s\\n' '" + SignalLineExample() + "' >> .agents.local/pasture/signals.jsonl",
-		"~~~",
-		"",
-		"The recorded text is identical on both backends. Only the destination differs: a note body on pasture, one appended line on the ledger. Write it in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.",
+		"The adapter records that JSON object. An empty feedback id fails in the adapter and records nothing. Write the call in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.",
 		"",
 		"If the write fails, follow the tracker write-failure rule: retry, keep the recorded backend, and surface the pending line at the next gate. A failed record never blocks the phase and never prompts the user.",
 	}, "\n")
+}
+
+// signalBackendRecipeMarkers are executable backend recipes. A skill body that
+// carries one of them has named a recipe the tracker clause forbids.
+var signalBackendRecipeMarkers = []string{
+	"Pasture target",
+	"Ledger target",
+	"printf ",
+	"signals.jsonl",
+	"pasture task",
+	"backend: pasture",
+	"backend: ledger",
+	"sed -n",
+	">> ",
+}
+
+// trackerClauseForbidsBackendRecipe is the sentence the tracker adapter uses
+// to forbid a skill body from naming a backend recipe.
+const trackerClauseForbidsBackendRecipe = "no skill body names a backend recipe"
+
+func proseTreeText(section ProseSection) string {
+	parts := []string{section.Title, section.Content}
+	for _, sub := range section.Subsections {
+		parts = append(parts, proseTreeText(sub))
+	}
+	return strings.Join(parts, "\n")
+}
+
+// SignalCaptureSection extracts one rendered Signal Capture section. Recipes
+// in a later or earlier section, including the tracker adapter, are not part
+// of it.
+func SignalCaptureSection(rendered string) (string, bool) {
+	const heading = "## Signal Capture"
+	start := strings.Index(rendered, heading)
+	if start < 0 {
+		return "", false
+	}
+	rest := rendered[start+len(heading):]
+	if next := strings.Index(rest, "\n## "); next >= 0 {
+		return rendered[start : start+len(heading)+next], true
+	}
+	return rendered[start:], true
+}
+
+// findSignalBackendRecipes reports backend recipes inside a Signal Capture
+// section while the tracker clause still forbids them. An amended clause that
+// no longer forbids recipes produces no finding.
+func findSignalBackendRecipes(section, clause string) []string {
+	if !strings.Contains(clause, trackerClauseForbidsBackendRecipe) {
+		return nil
+	}
+	var found []string
+	for _, marker := range signalBackendRecipeMarkers {
+		if strings.Contains(section, marker) {
+			found = append(found, marker)
+		}
+	}
+	return found
+}
+
+// ValidateSignalCaptureHasNoBackendRecipe fails generation when a rendered
+// Signal Capture section names a backend recipe while the tracker clause
+// forbids one.
+func ValidateSignalCaptureHasNoBackendRecipe() error {
+	clause := buildTrackerAdapterContent()
+	if !strings.Contains(clause, trackerClauseForbidsBackendRecipe) {
+		return nil
+	}
+	fragment := signalCaptureFragment()
+	rendered, err := ResolveBodyMarkers(proseTreeText(*fragment.Prose), HarnessClaudeCode)
+	if err != nil {
+		return fmt.Errorf("codegen.ValidateSignalCaptureHasNoBackendRecipe: cannot render the signal section — why: %s; where: internal/codegen/specs_data_signals.go signalCaptureFragment; fix: close every marker and use a registered payload", err.Error())
+	}
+	section := "## Signal Capture\n" + rendered
+	found := findSignalBackendRecipes(section, clause)
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("codegen.ValidateSignalCaptureHasNoBackendRecipe: the rendered Signal Capture section names a backend recipe (%s) — why: the tracker clause forbids a skill body from naming a backend recipe, and TrackerOpSignal already declares both recipes; where: internal/codegen/specs_data_signals.go signalLineContent; fix: ship one signal call through the tracker entry point and leave the recipes on TrackerOpSignal", strings.Join(found, ", "))
 }

@@ -123,7 +123,7 @@ _Example (anti-pattern)_
 **[C-ure-verbatim]**
 - Given: user interview (Request, URE, or UAT), URD update, or mid-implementation design decision
 - When: recording in Pasture
-- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside request-input option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via "${EPOCH_REC}" note whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured
+- Then: capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside request_user_decision option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via "${EPOCH_REC}" note whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured
 - Should not: summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews
 
 _Example (correct)_
@@ -321,7 +321,7 @@ Exit: Supervisor receives ratified plan + handoff document
 
 The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami, signal.
 
 Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
@@ -357,22 +357,14 @@ The kind is a closed list. Use exactly one of:
 
 ### One feedback task per epoch
 
-Use one feedback task per epoch, and create it once. The epoch creates it at epoch start with:
-
-~~~bash
-FEEDBACK_ID_URI=$("${EPOCH_REC}" create --kind task --title 'FEEDBACK: epoch signals' --phase unscoped)
-~~~
-
-Write `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md` in the same step. That line is how a second run finds the task: every skill reads it before it records, and no skill creates a second task when the line is present. If the line is absent, treat the epoch as one that started before this rule: create the task once with exactly this title, write the line, then continue. Never create a second feedback task in the same epoch.
-
-This subsection applies to the pasture backend. A ledger epoch has no feedback task: use the ledger recording target below.
+The epoch creates one feedback task at epoch start and writes `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md`. A second run finds that task by reading the `feedback:` line. No other skill creates a feedback task. If the line is absent, the signal operation fails and records nothing; do not create a task to fill the gap.
 
 ### Line format and recording
 
-Write one line per signal. The same fields and order apply on both backends:
+Write one JSON object per signal. The fields, in this order, are kind, phase, skill, entry and quote.
 
 ~~~
-signal: kind=<kind> phase=<phase> skill=<skill> entry=<entry-ref> quote="<short verbatim quote>"
+{"kind":"<kind>","phase":"<phase>","skill":"<skill>","entry":"<entry-ref>","quote":"<short verbatim quote>"}
 ~~~
 
 - `kind`: one of the registered kinds above, exactly.
@@ -381,25 +373,13 @@ signal: kind=<kind> phase=<phase> skill=<skill> entry=<entry-ref> quote="<short 
 - `entry`: the record that holds the interaction, such as a task URI plus the question or section.
 - `quote`: a short verbatim fragment, max 20 words. Never paraphrase or tidy it.
 
-Recording target, by backend:
-
-- `backend: pasture`: one note on the feedback task that the `feedback:` line names. The note body is the whole line and nothing else. Never run the note with an empty id: an empty id fails with `need_id` and records nothing.
-- `backend: ledger`: no task and no note. Append the line to `.agents.local/pasture/signals.jsonl`, one line per signal.
-
-Pasture target:
+Record the signal with one call. Do not name a backend command in this section.
 
 ~~~bash
-FEEDBACK_ID_URI=$(sed -n 's/^feedback: //p' .agents.local/pasture/EPOCH.md | tail -1)
-"${EPOCH_REC}" note "$FEEDBACK_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body 'signal: kind=confusion phase=elicit skill=user-elicit entry=<task URI>#end-vision quote="what does arm mean here"'
+"${EPOCH_REC}" signal --kind confusion --phase elicit --skill user-elicit --entry '<task URI>#end-vision' --quote 'what does arm mean here'
 ~~~
 
-Ledger target:
-
-~~~bash
-printf '%s\n' 'signal: kind=confusion phase=elicit skill=user-elicit entry=<task URI>#end-vision quote="what does arm mean here"' >> .agents.local/pasture/signals.jsonl
-~~~
-
-The recorded text is identical on both backends. Only the destination differs: a note body on pasture, one appended line on the ledger. Write it in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.
+The adapter records that JSON object. An empty feedback id fails in the adapter and records nothing. Write the call in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.
 
 If the write fails, follow the tracker write-failure rule: retry, keep the recorded backend, and surface the pending line at the next gate. A failed record never blocks the phase and never prompts the user.
 

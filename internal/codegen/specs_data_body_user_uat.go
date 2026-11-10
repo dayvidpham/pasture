@@ -174,7 +174,7 @@ Look for:
 			Title: "Question Sequence (Decision Tree)",
 			Content: `Structure questions to progressively validate the proposal against the user's original requirements.
 
-**Round 1: Highest-leverage tradeoffs** (1-2 questions per [[op:request_user_decision]] call)
+**Round 1: Highest-leverage tradeoffs** (one decision per [[op:request_user_decision]] call)
 
 Start with the 2-3 architectural decisions where the proposal made the biggest choices. For each, show the user:
 1. What they originally said in URE (their stated requirement/preference)
@@ -240,7 +240,7 @@ One open-ended question — "Is there anything from your original requirements t
 		{
 			Id:    "uat-survey-template",
 			Title: "UAT Survey Template",
-			Content: "Use one [[op:request_user_decision]] call per component — do NOT batch all components into one survey.\n\n" +
+			Content: "Use one [[op:request_user_decision]] call per decision. One call asks one question. Do not put two decisions in one call, and do not batch every component into one survey.\n\n" +
 				"```\n" +
 				"[[op:request_user_decision]]({\n" +
 				"  questions: [\n" +
@@ -255,7 +255,12 @@ One open-ended question — "Is there anything from your original requirements t
 				"        { label: \"backupDir (full path)\", description: \"Shows where the backup actually landed\" },\n" +
 				"        { label: \"session ID\", description: \"Enables log correlation across events\" },\n" +
 				"      ]\n" +
-				"    },\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
+				"\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
 				"    {\n" +
 				"      question: \"Any related feedback, concerns, or gaps not covered above?\",\n" +
 				"      header: \"Feedback\",\n" +
@@ -264,7 +269,12 @@ One open-ended question — "Is there anything from your original requirements t
 				"        { label: \"No additional feedback\", description: \"All concerns addressed\" },\n" +
 				"        { label: \"Related concern\", description: \"I have feedback on something adjacent\" },\n" +
 				"      ]\n" +
-				"    },\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
+				"\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
 				"    {\n" +
 				"      question: \"Do you ACCEPT this component to proceed?\",\n" +
 				"      header: \"Decision\",\n" +

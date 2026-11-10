@@ -9,6 +9,7 @@
 package codegen
 
 import (
+	"encoding/json"
 	"regexp"
 	"strconv"
 	"strings"
@@ -139,9 +140,8 @@ func TestWritingStandardDeclaredOnce(t *testing.T) {
 	require.NotNil(t, fragment.Prose, "the writing standard must be a prose fragment")
 
 	owners := FragmentToOwnerRefs()[FragWritingStandard]
-	assert.Subset(t, owners,
-		[]string{"architect-handoff", "status", "user-elicit", "user-uat"},
-		"the R1 named skills must reference the writing standard")
+	assert.Equal(t, WritingStandardCarriers, owners,
+		"the writing standard must ship in the five declared skills, no more and no fewer")
 
 	const marker = "These rules adapt ASD-STE100"
 	sources, err := renderedSources()
@@ -197,6 +197,25 @@ func TestWritingRulesAreAuthoredOnce(t *testing.T) {
 		renderingSource{Corpus: `SkillBodySpecs["epoch"]`, Owner: "pasted rule", Text: needles[0]})
 	assert.NotEmpty(t, findNonSingleNeedles(needles, pasted),
 		"a rule pasted into a second body must fail")
+}
+
+// TestWritingBodyTextsAreAuthoredOnce proves a pasted template row, degrade
+// clause or pre-send check fails. The turn-split reason and closing-offer
+// phrase are in the same needle list so a second home fails too.
+func TestWritingBodyTextsAreAuthoredOnce(t *testing.T) {
+	t.Parallel()
+
+	sources, err := renderedSources()
+	require.NoError(t, err)
+	needles := writingBodyTexts()
+	require.NotEmpty(t, needles)
+	assert.Empty(t, findNonSingleNeedles(needles, sources),
+		"each template row, degrade clause and pre-send check must appear once")
+
+	pasted := append(append([]renderingSource(nil), sources...),
+		renderingSource{Corpus: `SkillBodySpecs["status"]`, Owner: "pasted row", Text: needles[0]})
+	assert.NotEmpty(t, findNonSingleNeedles(needles, pasted),
+		"a template row pasted into another skill must fail")
 }
 
 // TestWritingRuleRegistryIsClosed proves the rule registry rejects a gap or a
@@ -296,19 +315,19 @@ func TestSignalKindsAreClosed(t *testing.T) {
 		"a sixth kind pasted into the fragment must fail the closed-set guard")
 }
 
-// TestSignalLineIsOneRegistry proves the template and both recorded examples
-// share one field order, and that the two recording targets are distinct.
+// TestSignalLineIsOneRegistry proves the template is one JSON object and the
+// skill body ships one signal call, not a backend recipe.
 func TestSignalLineIsOneRegistry(t *testing.T) {
 	t.Parallel()
 
 	template := SignalLineTemplate()
 	example := SignalLineExample()
 	for _, line := range []string{template, example} {
-		rest := line
+		var parsed map[string]string
+		require.NoError(t, json.Unmarshal([]byte(line), &parsed), "line %q must be one JSON object", line)
 		for _, field := range SignalLineFields {
-			idx := strings.Index(rest, field.Field+"=")
-			require.GreaterOrEqualf(t, idx, 0, "line %q must carry field %q", line, field.Field)
-			rest = rest[idx+len(field.Field)+1:]
+			_, ok := parsed[field.Field]
+			assert.Truef(t, ok, "line %q must carry field %q", line, field.Field)
 		}
 	}
 
@@ -316,16 +335,97 @@ func TestSignalLineIsOneRegistry(t *testing.T) {
 	require.NotNil(t, fragment.Prose)
 	text := fragmentAllText(*fragment.Prose)
 	require.Equal(t, 1, strings.Count(text, template), "the line template must render once")
+	assert.Contains(t, text, "[[rec:signal]]", "the skill body must ship one signal call")
+	assert.NotContains(t, text, "[[rec:create]]", "the signal section must not create the feedback task")
+	assert.NotContains(t, text, "Pasture target")
+	assert.NotContains(t, text, "Ledger target")
+	assert.NotContains(t, text, "printf ")
+}
 
-	assert.Contains(t, text, "- `backend: pasture`:")
-	assert.Contains(t, text, "- `backend: ledger`:")
-	assert.Contains(t, text, ".agents.local/pasture/signals.jsonl",
-		"the ledger target must name its destination")
+// TestSignalCaptureSectionRejectsABackendRecipe is the two-sample guard for
+// the tracker clause. A clean Signal Capture section produces no finding. A
+// section that pastes a backend recipe does, while the clause still forbids one.
+func TestSignalCaptureSectionRejectsABackendRecipe(t *testing.T) {
+	t.Parallel()
 
-	sed := strings.Index(text, "sed -n 's/^feedback: //p'")
-	note := strings.Index(text, "[[rec:note]]")
-	require.GreaterOrEqualf(t, sed, 0, "the pasture target must read the feedback id from the header")
-	require.GreaterOrEqualf(t, note, sed, "the pasture note must follow the id read, so note never runs without an id")
-	assert.Contains(t, text[note:], `"$FEEDBACK_ID_URI"`,
-		"the pasture note must pass the id the header read produced")
+	require.NoError(t, ValidateSignalCaptureHasNoBackendRecipe())
+
+	clause := buildTrackerAdapterContent()
+	require.Contains(t, clause, trackerClauseForbidsBackendRecipe)
+
+	fragment := SharedFragmentSpecs[FragSignalCapture]
+	require.NotNil(t, fragment.Prose)
+	rendered, err := ResolveBodyMarkers(proseTreeText(*fragment.Prose), HarnessClaudeCode)
+	require.NoError(t, err)
+	clean := "## Tracker Adapter\n" + clause + "\n\n## Signal Capture\n" + rendered + "\n\n## Next\n"
+	section, ok := SignalCaptureSection(clean)
+	require.True(t, ok, "the rendered skill must contain a Signal Capture section")
+	assert.Empty(t, findSignalBackendRecipes(section, clause),
+		"a rendered Signal Capture section must not name a backend recipe")
+	assert.NotContains(t, section, "printf ", "the adapter recipes must stay outside the section")
+
+	defective := strings.Replace(clean, "## Next", "printf '%s\\n' 'x' >> .agents.local/pasture/signals.jsonl\n\n## Next", 1)
+	require.NotEqual(t, clean, defective, "the defective sample must actually paste a recipe")
+	bad, ok := SignalCaptureSection(defective)
+	require.True(t, ok)
+	assert.NotEmpty(t, findSignalBackendRecipes(bad, clause),
+		"a pasted backend recipe must fail while the tracker clause forbids one")
+}
+
+// TestFeedbackTaskHasOneCreator proves the epoch start step is the only place
+// that creates the feedback task, and that the signal section says how a
+// second run finds it.
+func TestFeedbackTaskHasOneCreator(t *testing.T) {
+	t.Parallel()
+
+	const title = "FEEDBACK: epoch signals"
+	sources, err := renderedSources()
+	require.NoError(t, err)
+	var homes []string
+	for _, source := range sources {
+		if strings.Contains(source.Text, title) {
+			homes = append(homes, source.Corpus+" "+source.Owner)
+		}
+	}
+	require.Len(t, homes, 1, "only one skill body may create the feedback task, got %v", homes)
+	assert.Contains(t, homes[0], `SkillBodySpecs["epoch"]`, "the creator must be the epoch skill")
+	assert.Contains(t, homes[0], "epoch-starting", "the creator must be the epoch start step")
+
+	fragment := SharedFragmentSpecs[FragSignalCapture]
+	text := fragmentAllText(*fragment.Prose)
+	assert.Contains(t, text, "A second run finds that task by reading the `feedback:` line.")
+	assert.NotContains(t, text, title, "the signal section must not carry a second create")
+}
+
+// TestUATTemplateIsOneDecisionPerCall proves each survey call asks one question.
+func TestUATTemplateIsOneDecisionPerCall(t *testing.T) {
+	t.Parallel()
+
+	body, ok := SkillBodySpecs["user-uat"]
+	require.True(t, ok)
+	var template string
+	var walk func(ProseSection)
+	walk = func(section ProseSection) {
+		if section.Id == "uat-survey-template" {
+			template = section.Content
+		}
+		for _, sub := range section.Subsections {
+			walk(sub)
+		}
+	}
+	for _, section := range body.Sections {
+		walk(section)
+	}
+	require.NotEmpty(t, template, "the UAT survey template must exist")
+	calls := strings.Split(template, "[[op:request_user_decision]]")
+	var decisions int
+	for _, call := range calls[1:] {
+		if !strings.Contains(call, "questions:") {
+			continue
+		}
+		decisions++
+		assert.Equal(t, 1, strings.Count(call, "question:"),
+			"call %d must ask one question", decisions)
+	}
+	assert.GreaterOrEqual(t, decisions, 3, "the template must split its questions into separate calls")
 }

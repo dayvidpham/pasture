@@ -167,7 +167,12 @@ EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
 
 If the probe prints ` + "`BACKEND=error`" + `, stop and report before the first mutation: the store exists but cannot be used. If it prints ` + "`BACKEND=ledger`" + `, record ` + "`ledger:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output and continue; the adapter writes one JSONL line per mutation under that ledger and derives the namespace with the same function that printed NS. Offer a gitignore entry; never require one. If it prints ` + "`BACKEND=pasture`" + `, record ` + "`db:`" + `, ` + "`author:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output. Record ` + "`namespace:`" + ` only to pin one; the adapter then passes ` + "`--namespace`" + `, and that pin wins over Pasture's derivation.
 
-**Step 0b: create the epoch feedback task.** On the pasture backend, create one task titled ` + "`FEEDBACK: epoch signals`" + ` and write ` + "`feedback: <task URI>`" + ` into ` + "`.agents.local/pasture/EPOCH.md`" + ` before the first signal. A ledger epoch has no feedback task. The Signal Capture section owns the recipe and the second-run lookup; create the task here so no later skill creates a duplicate.
+**Step 0b: create the epoch feedback task once.** This is the only create. A second run finds the task by reading the ` + "`feedback:`" + ` line from the header. If that line is already present, do not create another. No other skill creates a feedback task.
+
+` + "```" + `bash
+FEEDBACK_ID_URI=$([[rec:create]] --kind task --title "FEEDBACK: epoch signals" --phase unscoped)
+printf 'feedback: %s\n' "$FEEDBACK_ID_URI" >> .agents.local/pasture/EPOCH.md
+` + "```" + `
 
 **Option 1: Manual Task Creation**
 ` + "```" + `bash

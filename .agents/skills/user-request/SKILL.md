@@ -51,7 +51,7 @@ description: Capture user feature request verbatim (Phase 1)
 
 The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami, signal.
 
 Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
@@ -107,7 +107,7 @@ The reviewer's effective default is T2 standard, so the table lists reviewer und
 
 1. **Get the user's request verbatim:**
    ```
-   request-input: "What feature or change would you like to request?"
+   request_user_decision: "What feature or change would you like to request?"
    ```
 
 2. **Create the request task:**
@@ -147,7 +147,7 @@ Record the recognition in the same classification comment so downstream phases p
 After classification, confirm research depth with the user:
 
 ```
-request-input:
+request_user_decision:
   question: "Based on classification ({{scope}}, {{complexity}}, {{risk}}, {{novelty}}), how deep should research go?"
   header: "Research Depth"
   options:

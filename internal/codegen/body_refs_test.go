@@ -228,7 +228,7 @@ func TestResolveBodyMarkersPerTarget(t *testing.T) {
 		{"[[op:delegate_assignment]]", HarnessCodex, "delegate_assignment"},
 		{"[[op:request_user_decision]]", HarnessClaudeCode, "AskUserQuestion"},
 		{"[[op:request_user_decision]]", HarnessOpenCode, "question"},
-		{"[[op:request_user_decision]]", HarnessCodex, "request-input"},
+		{"[[op:request_user_decision]]", HarnessCodex, "request_user_decision"},
 		{"[[rec:show]]", HarnessClaudeCode, trackerEntryPoint + " show"},
 		{"[[rec:show]]", HarnessOpenCode, trackerEntryPoint + " show"},
 		{"[[rec:show]]", HarnessCodex, trackerEntryPoint + " show"},
