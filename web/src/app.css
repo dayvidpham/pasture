@@ -817,3 +817,19 @@ body {
 }
 
 .detail-list dd.muted { color: var(--ink-3); }
+
+/* A transcript is a destination, not a sidebar: constrain the viewer's own
+   scroller while allowing the page header to wrap on narrow screens. */
+.transcript-page {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-5);
+}
+
+.transcript-identity { overflow-wrap: anywhere; }
+.transcript-page .transcript-host {
+  width: 100%;
+  box-sizing: border-box;
+  height: max(28rem, calc(100vh - 14rem));
+}

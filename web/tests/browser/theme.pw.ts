@@ -103,9 +103,7 @@ async function open(page: Page) {
   await mockAPI(page)
   await page.goto(origin)
   await page.getByRole('button', { name: transcript.id }).click()
-  await expect(page.getByText('Synthetic user asks for a greeting.').first()).toBeVisible()
-  await expect(page.locator('.execution-summary:visible').getByText('synthetic-model')).toBeVisible()
-  await expect(page.locator('.execution-history:visible').getByText('synthetic-provider · synthetic-model')).toBeVisible()
+  await expect(page.locator('.transcript-host').getByText('Synthetic user asks for a greeting.', { exact: true }).locator('visible=true').first()).toBeVisible()
 }
 
 async function agrees(page: Page, theme: string) {
@@ -141,7 +139,7 @@ for (const theme of ['light', 'dark'] as const) {
     } finally { release() }
     await navigation
     await page.getByRole('button', { name: transcript.id }).click()
-    await expect(page.getByText('Synthetic user asks for a greeting.').first()).toBeVisible()
+    await expect(page.locator('.transcript-host').getByText('Synthetic user asks for a greeting.', { exact: true }).locator('visible=true').first()).toBeVisible()
     await agrees(page, theme)
     await expect(page.getByLabel('Theme')).toHaveValue('system')
   })
@@ -160,13 +158,18 @@ for (const theme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: theme === 'light' ? 'dark' : 'light' })
     await agrees(page, theme)
     await page.reload()
-    await page.getByRole('button', { name: transcript.id }).click()
     await agrees(page, theme)
   })
 
   test(`axe shell and transcript ${theme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme: theme })
-    await open(page)
+    await mockAPI(page)
+    await page.goto(origin)
+    const shell = await new AxeBuilder({ page }).include('body').withRules(['color-contrast']).analyze()
+    expect(shell.violations).toEqual([])
+    expect(shell.incomplete.filter(rule => rule.id === 'color-contrast')).toEqual([])
+    await page.getByRole('button', { name: transcript.id }).click()
+    await expect(page.locator('.transcript-host')).toBeVisible()
     for (const selector of ['body', '.transcript-host']) {
       const result = await new AxeBuilder({ page }).include(selector).withRules(['color-contrast']).analyze()
       console.log(`${theme} ${selector}: ${result.violations.length} violations, ${result.incomplete.length} incomplete`)
@@ -205,7 +208,6 @@ test('system tracks device and resumes following it after explicit override', as
   await agrees(page, 'light')
   await page.reload()
   await expect(page.getByLabel('Theme')).toHaveValue('light')
-  await page.getByRole('button', { name: transcript.id }).click()
   await agrees(page, 'light')
   await page.getByLabel('Theme').selectOption('system')
   await agrees(page, 'dark')
@@ -254,7 +256,8 @@ test('desktop layout keeps a wide internally scrollable rail visible', async ({ 
   const rail = page.locator('.rs-rail')
   await expect(page.getByRole('button', { name: 'synthetic-0' })).toBeVisible()
   await page.getByRole('button', { name: 'synthetic-0' }).click()
-  await expect(page.locator('.rs-rail .transcript-host')).toBeVisible()
+  await page.getByRole('link', { name: '← back to sessions' }).click()
+  await expect(page.locator('.rs-rail .transcript-host')).toHaveCount(0)
   const before = await rail.boundingBox()
   expect(before!.width).toBeGreaterThanOrEqual(400)
   const padding = await assertPageGutters(page)
@@ -290,3 +293,32 @@ test('mobile layout preserves the sheet without horizontal overflow', async ({ p
   console.log('mobile layout', { ...dimensions, padding })
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.width)
 })
+
+for (const width of [1280, 420]) {
+  test(`full-page transcript navigation and responsive width at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 })
+    await open(page)
+    await expect(page).toHaveURL(new RegExp(`#/sessions/claude-code/${encodeURIComponent(transcript.id)}$`))
+    const measure = async () => page.evaluate(() => {
+      const main = document.querySelector('.transcript-page')!.getBoundingClientRect()
+      const host = document.querySelector('.transcript-host')!.getBoundingClientRect()
+      return { main: main.width, host: host.width, viewport: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }
+    })
+    const dimensions = await measure()
+    console.log(`transcript ${width}`, dimensions)
+    expect(dimensions.host).toBeGreaterThanOrEqual(dimensions.main * (width === 1280 ? 0.9 : 0.85))
+    expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.viewport)
+    await page.getByLabel('Theme').selectOption('light')
+    await agrees(page, 'light')
+    await page.reload()
+    await expect(page.locator('.transcript-host').getByText('Synthetic user asks for a greeting.', { exact: true }).locator('visible=true').first()).toBeVisible()
+    await agrees(page, 'light')
+    await page.goBack()
+    await expect(page.getByRole('heading', { name: 'sessions', exact: true })).toBeVisible()
+    await page.goForward()
+    await expect(page.locator('.transcript-host').getByText('Synthetic user asks for a greeting.', { exact: true }).locator('visible=true').first()).toBeVisible()
+    await page.getByRole('link', { name: '← back to sessions' }).click()
+    await expect(page.getByRole('heading', { name: 'sessions', exact: true })).toBeVisible()
+    await expect(page.locator('.rs-rail .transcript-host')).toHaveCount(0)
+  })
+}
