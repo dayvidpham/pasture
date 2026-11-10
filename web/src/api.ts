@@ -120,8 +120,9 @@ export function setPeasantEnrichment(
  * boundary in transcript.ts before any component sees it.
  */
 /**
- * List Peasant session ids that have a durable transcript. `truncated` means
- * the list filled its page: an id that is absent is then not evidence of none.
+ * List Peasant session ids that have a durable transcript. `items` is every
+ * ingested id. `subagents` is the subset with a Peasant parent. `truncated`
+ * means the list filled its page: an id that is absent is then not evidence of none.
  */
 export function fetchTranscriptCatalog(signal?: AbortSignal): Promise<TranscriptCatalog> {
   return requestJSON<TranscriptCatalog>('/api/v1/transcripts', signal)

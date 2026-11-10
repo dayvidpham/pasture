@@ -36,6 +36,49 @@ body {
   .rs-rail { width: 560px; flex: 0 0 560px; }
 }
 
+/* Slide the desktop rail out instead of unmounting it. The mobile sheet is a
+   sibling, so this does not change the sheet. The motion matches the transcript
+   viewer's rail: transform over the shared duration and ease. */
+@media (prefers-reduced-motion: no-preference) {
+  .rs-rail {
+    transition:
+      transform var(--dur-3) var(--ease-in-out),
+      opacity var(--dur-3) var(--ease-in-out),
+      flex-basis var(--dur-3) var(--ease-in-out),
+      width var(--dur-3) var(--ease-in-out);
+  }
+}
+
+.rs.rs--rail-collapsed .rs-frame {
+  gap: 0;
+}
+
+.rs.rs--rail-collapsed .rs-rail {
+  transform: translateX(100%);
+  opacity: 0;
+  width: 0;
+  flex: 0 0 0;
+  min-width: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.rail-toggle {
+  min-height: var(--target-min);
+  padding: 0 var(--sp-2);
+  border: var(--bd);
+  background: transparent;
+  color: var(--ink-2);
+  font: var(--fs-label) / var(--lh-mono) var(--font-mono);
+  text-transform: lowercase;
+  cursor: pointer;
+}
+
+.rail-toggle:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .toolbar {
   display: flex;
   align-items: center;

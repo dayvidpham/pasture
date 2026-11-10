@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  missingTranscriptMessage,
+  sessionVisible,
   shouldRefetchTranscriptCatalog,
   transcriptAvailability,
   transcriptMark,
   type TranscriptCatalogView,
 } from './transcriptCatalog'
 
-const ready = (ids: string[], truncated = false): TranscriptCatalogView => ({
+const ready = (ids: string[], truncated = false, subagents: string[] = []): TranscriptCatalogView => ({
   status: 'ready',
   ids: new Set(ids),
+  subagents: new Set(subagents),
   truncated,
 })
 
@@ -38,5 +41,27 @@ describe('transcriptAvailability', () => {
     expect(transcriptAvailability('ses_fixture', { status: 'loading' })).toBe('unknown')
     expect(transcriptAvailability('ses_fixture', { status: 'error' })).toBe('unknown')
     expect(transcriptMark('unknown')).toBe('unknown')
+  })
+})
+
+describe('sessionVisible', () => {
+  const catalog = ready(['root', 'child'], false, ['child'])
+
+  it('hides a subagent from the roots list and treats an unknown id as a root', () => {
+    expect(sessionVisible('child', catalog, 'roots')).toBe(false)
+    expect(sessionVisible('root', catalog, 'roots')).toBe(true)
+    expect(sessionVisible('not-in-peasant', catalog, 'roots')).toBe(true)
+  })
+
+  it('shows every row when the scope is all, including before the catalog is ready', () => {
+    expect(sessionVisible('child', catalog, 'all')).toBe(true)
+    expect(sessionVisible('child', { status: 'loading' }, 'roots')).toBe(true)
+    expect(sessionVisible('child', { status: 'error' }, 'roots')).toBe(true)
+  })
+
+  it('names the refused session in the none-click toast', () => {
+    expect(missingTranscriptMessage('ses_missing')).toBe(
+      'no ingested transcript for ses_missing; nothing was opened',
+    )
   })
 })

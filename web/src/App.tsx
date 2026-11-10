@@ -65,9 +65,13 @@ import {
   type TranscriptViewModel,
 } from './transcript'
 import {
+  missingTranscriptMessage,
+  sessionVisible,
   shouldRefetchTranscriptCatalog,
   transcriptAvailability,
   transcriptMark,
+  transcriptToastDurationMs,
+  type SessionScope,
   type TranscriptCatalogView,
 } from './transcriptCatalog'
 import {
@@ -738,6 +742,8 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [truncated, setTruncated] = useState(false)
   const [stateFilter, setStateFilter] = useState<StateFilter>('all')
+  const [sessionScope, setSessionScope] = useState<SessionScope>('roots')
+  const [railOpen, setRailOpen] = useState(true)
   const [epochFilter, setEpochFilter] = useState<string | null>(null)
   const [projectFilter, setProjectFilter] = useState<string | null>(null)
   const [peasantIntegration, setPeasantIntegration] = useState<PeasantIntegration | null>(null)
@@ -805,6 +811,7 @@ export default function App() {
       setTranscriptCatalog({
         status: 'ready',
         ids: new Set(catalog.items),
+        subagents: new Set(catalog.subagents),
         truncated: catalog.truncated,
       })
     } catch {
@@ -953,6 +960,7 @@ export default function App() {
     const filtered = sessions.filter((session) => {
       if (stateFilter !== 'all' && session.activity.state !== stateFilter) return false
       if (epochFilter && session.epoch?.id !== epochFilter) return false
+      if (!sessionVisible(session.nativeSessionId, transcriptCatalog, sessionScope)) return false
       return true
     })
     return filterSessionsByProject(filtered, activeProject).map((session) => ({
@@ -973,7 +981,7 @@ export default function App() {
       lastSeen: formatTime(session.activity.lastSeen),
       lastSeenSort: session.activity.lastSeen ? Date.parse(session.activity.lastSeen) || 0 : 0,
     }))
-  }, [sessions, stateFilter, epochFilter, activeProject])
+  }, [sessions, stateFilter, epochFilter, activeProject, transcriptCatalog, sessionScope])
 
   const selectedSession = useMemo(
     () => sessions.find((session) => sessionKey(session) === selectedId) ?? null,
@@ -1014,7 +1022,7 @@ export default function App() {
         setTranscript({ status: 'error', key: transcriptKey, failure })
         // err(message, opts): the first argument is the toast body, not a
         // title bag. The inline retry state stays; the toast is the same message.
-        toast.err(failure.message, { title: failure.title, duration: 8000 })
+        toast.err(failure.message, { title: failure.title, duration: transcriptToastDurationMs })
       })
     return () => controller.abort()
   }, [route.kind, selectedHarness, selectedNativeId, transcriptKey, transcriptRetry, toast])
@@ -1175,7 +1183,17 @@ export default function App() {
             <button
               type="button"
               className="session-link"
-              onClick={() => { setSelectedId(row.id); window.location.hash = sessionRoute(row.harness, row.nativeSessionId) }}
+              onClick={() => {
+                if (transcriptAvailability(row.nativeSessionId, transcriptCatalog) === 'none') {
+                  toast.err(missingTranscriptMessage(row.nativeSessionId), {
+                    title: 'no transcript',
+                    duration: transcriptToastDurationMs,
+                  })
+                  return
+                }
+                setSelectedId(row.id)
+                window.location.hash = sessionRoute(row.harness, row.nativeSessionId)
+              }}
             >
               {row.nativeSessionId}
             </button>
@@ -1248,7 +1266,7 @@ export default function App() {
         ),
       },
     ],
-    [transcriptCatalog],
+    [transcriptCatalog, toast],
   )
 
   const retry = () => {
@@ -1319,6 +1337,7 @@ export default function App() {
 
   return (
     <RailShell
+      className={railOpen ? undefined : 'rs--rail-collapsed'}
       sheetMeta={null}
       toolbar={
         <div className="toolbar">
@@ -1333,6 +1352,13 @@ export default function App() {
                 {state}
               </FilterChip>
             ))}
+            <span className="eyebrow">scope</span>
+            <FilterChip pressed={sessionScope === 'roots'} onChange={() => setSessionScope('roots')}>
+              roots
+            </FilterChip>
+            <FilterChip pressed={sessionScope === 'all'} onChange={() => setSessionScope('all')}>
+              all sessions
+            </FilterChip>
           </div>
           <ProjectFilter
             options={projects}
@@ -1340,15 +1366,26 @@ export default function App() {
             onChange={setProjectFilter}
             disabled={projects.length === 0}
           />
-          <Button
-            variant="ghost"
-            size="sm"
-            icon={RefreshCw}
-            loading={loading}
-            {...({ onClick: retry } as object)}
-          >
-            refresh
-          </Button>
+          <div className="toolbar-group">
+            <button
+              type="button"
+              className="rail-toggle"
+              aria-expanded={railOpen}
+              aria-label="session details"
+              onClick={() => setRailOpen((open) => !open)}
+            >
+              {railOpen ? 'hide details' : 'show details'}
+            </button>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={RefreshCw}
+              loading={loading}
+              {...({ onClick: retry } as object)}
+            >
+              refresh
+            </Button>
+          </div>
         </div>
       }
       rail={
@@ -1489,8 +1526,7 @@ export default function App() {
           <p className="eyebrow">pasture / local console</p>
           <h1>session epochs</h1>
           <p className="lede">
-            Which harness sessions are active, idle, ended, or waiting for an epoch binding.
-            Everything here comes from the local Pasture store.
+            Active, idle, ended, and unbound harness sessions from the local Pasture store.
           </p>
         </div>
         <div className="hero-meta">
@@ -1546,6 +1582,8 @@ export default function App() {
             message={
               sessions.length === 0
                 ? 'The local store has no claimed or bound sessions yet. Start a harness session; inventory refreshes on reads. Use --backfill to force a full rebuild.'
+                : sessionScope === 'roots'
+                ? 'Adjust the state, epoch, or project filter, or show all sessions to include subagents.'
                 : 'Adjust the state, epoch, or project filter to widen the inventory.'
             }
           />

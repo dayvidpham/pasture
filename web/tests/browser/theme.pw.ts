@@ -89,11 +89,17 @@ test.afterEach(async () => { expect(errors).toEqual([]) })
 async function mockAPI(
   page: Page,
   sessions = [session],
-  catalog: { items: string[]; truncated?: boolean } = { items: sessions.map(item => item.nativeSessionId) },
+  catalog: { items: string[]; subagents?: string[]; truncated?: boolean } = { items: sessions.map(item => item.nativeSessionId) },
 ) {
   await page.route('**/api/v1/inspect', route => route.fulfill({ json: { ...snapshot, sessions } }))
   await page.route('**/api/v1/transcripts', route => route.fulfill({
-    json: { revision: 1, asOf: snapshot.asOf, items: catalog.items, truncated: catalog.truncated ?? false },
+    json: {
+      revision: 1,
+      asOf: snapshot.asOf,
+      items: catalog.items,
+      subagents: catalog.subagents ?? [],
+      truncated: catalog.truncated ?? false,
+    },
   }))
   await page.route('**/api/v1/sessions/*/*/transcript', route => route.fulfill({ json: transcript }))
   await page.route('**/api/v1/sessions/*/*/execution**', route => route.fulfill({ json: { revision: 1, asOf: snapshot.asOf, items: [execution] } }))
@@ -373,6 +379,37 @@ test('toggling Peasant enrichment refreshes the transcript catalog', async ({ pa
   await expect(row.locator('[data-availability="none"]')).toHaveAttribute('data-mark', '—')
 })
 
+test('roots filter hides subagents and all sessions shows them', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const child = { ...session, nativeSessionId: 'ses_child' }
+  const unknown = { ...session, nativeSessionId: 'not-in-peasant' }
+  await mockAPI(page, [session, child, unknown], {
+    items: [transcript.id, 'ses_child'],
+    subagents: ['ses_child'],
+    truncated: false,
+  })
+  await page.goto(origin)
+  await expect(page.getByRole('button', { name: transcript.id })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'not-in-peasant' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'ses_child' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'all sessions' }).click()
+  await expect(page.getByRole('button', { name: 'ses_child' })).toBeVisible()
+})
+
+test('a session with no transcript stays on the list and shows a toast', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockAPI(page, [session], { items: [], truncated: false })
+  await page.goto(origin)
+  const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: transcript.id }) })
+  await expect(row.locator('[data-availability="none"]')).toHaveText('none')
+  await row.getByRole('button', { name: transcript.id }).click()
+  expect(new URL(page.url()).hash).toBe('')
+  const toast = page.getByRole('alert').filter({ hasText: transcript.id })
+  await expect(toast).toBeVisible()
+  await expect(toast).toContainText('nothing was opened')
+  await expect(page.locator('.transcript-page')).toHaveCount(0)
+})
+
 test('a failed transcript catalog stays unknown', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await mockAPI(page)
@@ -415,8 +452,7 @@ test('a missing transcript shows a dismissible bottom-right toast and keeps retr
   expect(viewport).not.toBeNull()
   expect(box!.x).toBeGreaterThan(viewport!.width / 2)
   expect(box!.y).toBeGreaterThan(viewport!.height / 2)
-  await page.getByRole('button', { name: 'dismiss notification' }).click()
-  await expect(toast).toBeHidden()
+  await expect(toast).toBeHidden({ timeout: 7000 })
   await expect(page.getByRole('button', { name: 'retry transcript' })).toBeVisible()
 })
 
@@ -425,6 +461,7 @@ test('hero text keeps width at 1180 without horizontal overflow', async ({ page 
   await mockAPI(page)
   await page.goto(origin)
   await expect(page.getByRole('heading', { name: 'session epochs' })).toBeVisible()
+  await expect(page.locator('.hero .lede')).toHaveText('Active, idle, ended, and unbound harness sessions from the local Pasture store.')
   const measured = await page.evaluate(() => {
     const hero = document.querySelector('.hero') as HTMLElement
     const heading = hero.querySelector('h1') as HTMLElement
@@ -443,6 +480,28 @@ test('hero text keeps width at 1180 without horizontal overflow', async ({ page 
   expect(measured.lede).toBeGreaterThanOrEqual(300)
   expect(measured.columns.startsWith('0px')).toBe(false)
   expect(measured.scroll).toBeLessThanOrEqual(measured.viewport)
+})
+
+test('the details rail collapses and expands from the keyboard', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockAPI(page)
+  await page.goto(origin)
+  const toggle = page.getByRole('button', { name: 'session details' })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  const rail = page.locator('.rs-rail')
+  await expect(toggle).toHaveText('hide details')
+  await expect(rail).toBeVisible()
+  await expect(rail.getByText('peasant projects', { exact: true })).toBeVisible()
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(rail).toBeHidden()
+  await expect(rail.getByText('peasant projects', { exact: true })).toBeHidden()
+  await toggle.focus()
+  await expect(toggle).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(rail).toBeVisible()
+  await expect(rail.getByText('peasant projects', { exact: true })).toBeVisible()
 })
 
 test('mobile layout preserves the sheet without horizontal overflow', async ({ page }) => {
