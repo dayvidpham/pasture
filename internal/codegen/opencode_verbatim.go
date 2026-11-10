@@ -8,7 +8,7 @@ package codegen
 //
 // Why these two:
 //   - "protocol" is the shared documentation skill (PROCESS.md, AGENTS.md,
-//     CONSTRAINTS.md, CLAUDE.md, SKILLS.md, README.md, the HANDOFF_*/MR_*/UAT_*
+//     CONSTRAINTS.md, CLAUDE.md, SKILLS.md, the MR_* template,
 //     templates, and figures/). The generated per-role OpenCode skills under
 //     .opencode/skill/<role>/SKILL.md link to siblings under ../protocol/
 //     (e.g. ../protocol/PROCESS.md, ../protocol/CONSTRAINTS.md), so emitting

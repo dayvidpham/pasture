@@ -15,3 +15,5 @@ The generated skills own the procedure. The documents here point at those skills
 | [CONSTRAINTS.md](CONSTRAINTS.md) | The role skill that renders the constraint |
 | [CLAUDE.md](CLAUDE.md) | The epoch skill |
 | [MR_TEMPLATE.md](MR_TEMPLATE.md) | supervisor-commit |
+
+To hand off, accept, or open a merge request, read [architect-handoff](../architect-handoff/SKILL.md), [user-uat](../user-uat/SKILL.md), or [MR_TEMPLATE.md](MR_TEMPLATE.md). Start an epoch with [epoch](../epoch/SKILL.md).

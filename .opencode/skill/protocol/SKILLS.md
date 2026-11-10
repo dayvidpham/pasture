@@ -32,5 +32,7 @@ Each command's procedure is the generated skill with that name. This list does n
 | [worker-complete](../worker-complete/SKILL.md) | Completion |
 | [worker-blocked](../worker-blocked/SKILL.md) | Blocker |
 | [status](../status/SKILL.md) | Status |
+| [afk-implement](../afk-implement/SKILL.md) | Unattended implementation session |
+| [install-cli](../install-cli/SKILL.md) | Install the CLI and its harness assets |
 
 Do not invoke [swarm](../swarm/SKILL.md). The epoch skill owns orchestration.
