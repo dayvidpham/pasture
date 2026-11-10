@@ -2,6 +2,8 @@
 // Ported from aura-plugins/skills/architect-handoff/SKILL.md.
 package codegen
 
+import "strings"
+
 var architectHandoffBody = SkillBody{
 	Preamble: "**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-7-handoff)** <- Phase 7",
 
@@ -49,39 +51,7 @@ var architectHandoffBody = SkillBody{
 		{
 			Id:    "arch-handoff-template",
 			Title: "Handoff Template",
-			Content: `Use the required handoff fields in [architect](../architect/SKILL.md).
-
-Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (no filesystem path; the task body IS the handoff).
-
-` + "```" + `markdown
-# Handoff: Architect → Supervisor
-
-## Supervisor Startup
-1. Call ` + "`" + `[[op:invoke_skill]](/pasture:supervisor)` + "`" + ` to load your role instructions
-2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed
-3. Read the RATIFIED PROPOSAL and URD with ` + "`" + `[[rec:show]]` + "`" + ` commands below
-4. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1 types / L2 tests / L3 impl triple is only illustrative)
-
-## References
-- REQUEST: "${REQUEST_ID_URI}"
-- URD: "${URD_ID_URI}" (read with ` + "`" + `[[rec:show]] "${URD_ID_URI}"` + "`" + `)
-- RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}" (read with ` + "`" + `[[rec:show]] "${RATIFIED_PROPOSAL_ID_URI}"` + "`" + `)
-
-## Summary
-<1-2 sentence summary of what needs to be implemented>
-
-## Key Files
-<list main files to be created/modified from the ratified plan>
-
-## Validation Checklist
-<validation checklist from the ratified proposal>
-
-## BDD Acceptance Criteria
-<Given/When/Then criteria from the ratified plan>
-
-## Implementation Notes
-<any special considerations, known risks, or constraints>
-` + "```" + ``,
+			Content: archHandoffTemplate(),
 		},
 		{
 			Id:    "arch-handoff-steps",
@@ -207,4 +177,42 @@ Given an expired token when accessing protected routes then return 401
 	},
 
 	Recipes: []RecipeBlock{},
+}
+
+// archHandoffTemplate renders the handoff body's sections from the h1
+// HandoffSpec, so the required-field list has one home (the registry that the
+// architect skill's handoff table also renders) and the template cannot drift
+// from it.
+func archHandoffTemplate() string {
+	spec := HandoffSpecs["h1"]
+	var b strings.Builder
+	b.WriteString("Use the required handoff fields in [architect](../architect/SKILL.md). ")
+	b.WriteString("That skill renders the list from the handoff registry; this template's sections are rendered from the same registry.\n\n")
+	b.WriteString("Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (no filesystem path; the task body IS the handoff).\n\n")
+	b.WriteString("```markdown\n# Handoff: Architect → Supervisor\n\n")
+	b.WriteString("## Supervisor Startup\n")
+	b.WriteString("1. Call `[[op:invoke_skill]](/pasture:supervisor)` to load your role instructions\n")
+	b.WriteString("2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed\n")
+	b.WriteString("3. Read the RATIFIED PROPOSAL and URD with `[[rec:show]]` commands below\n")
+	b.WriteString("4. Every vertical slice MUST have leaf tasks — any number, named after the real work units\n")
+	for _, field := range spec.RequiredFields {
+		b.WriteString("\n## " + handoffFieldHeading(field) + "\n<" + field + ">\n")
+	}
+	b.WriteString("```\n")
+	return b.String()
+}
+
+// handoffFieldHeading turns a registry field name into a section heading.
+func handoffFieldHeading(field string) string {
+	if field == "urd" {
+		return "URD"
+	}
+	words := strings.Split(field, "-")
+	for i, word := range words {
+		if word == "" {
+			continue
+		}
+		words[i] = strings.ToUpper(word[:1]) + word[1:]
+	}
+	return strings.Join(words, " ")
 }

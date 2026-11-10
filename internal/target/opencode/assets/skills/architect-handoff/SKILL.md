@@ -281,7 +281,7 @@ Plan ratified and user has approved proceeding with implementation.
 
 ## Handoff Template
 
-Use the required handoff fields in [architect](../architect/SKILL.md).
+Use the required handoff fields in [architect](../architect/SKILL.md). That skill renders the list from the handoff registry; this template's sections are rendered from the same registry.
 
 Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (no filesystem path; the task body IS the handoff).
 
@@ -292,28 +292,33 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 1. Call `skill(/pasture:supervisor)` to load your role instructions
 2. Spawn ephemeral Explore subagents with the task tool when codebase exploration is needed
 3. Read the RATIFIED PROPOSAL and URD with `"${EPOCH_REC}" show` commands below
-4. Every vertical slice MUST have leaf tasks — any number, named after the real work units (the L1 types / L2 tests / L3 impl triple is only illustrative)
+4. Every vertical slice MUST have leaf tasks — any number, named after the real work units
 
-## References
-- REQUEST: "${REQUEST_ID_URI}"
-- URD: "${URD_ID_URI}" (read with `"${EPOCH_REC}" show "${URD_ID_URI}"`)
-- RATIFIED PROPOSAL: "${RATIFIED_PROPOSAL_ID_URI}" (read with `"${EPOCH_REC}" show "${RATIFIED_PROPOSAL_ID_URI}"`)
+## Request
+<request>
 
-## Summary
-<1-2 sentence summary of what needs to be implemented>
+## URD
+<urd>
 
-## Key Files
-<list main files to be created/modified from the ratified plan>
+## Proposal
+<proposal>
 
-## Validation Checklist
-<validation checklist from the ratified proposal>
+## Ratified Plan
+<ratified-plan>
 
-## BDD Acceptance Criteria
-<Given/When/Then criteria from the ratified plan>
+## Context
+<context>
 
-## Implementation Notes
-<any special considerations, known risks, or constraints>
+## Key Decisions
+<key-decisions>
+
+## Open Items
+<open-items>
+
+## Acceptance Criteria
+<acceptance-criteria>
 ```
+
 
 ## Steps
 

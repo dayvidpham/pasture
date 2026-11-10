@@ -19,6 +19,7 @@ import (
 
 var renderedSkillRoots = []string{"skills", ".agents/skills", ".opencode/skill", "internal/target/opencode/assets/skills", "internal/target/claudecode/assets/pasture-skills/skills", "agents", ".opencode/agent", "internal/target/opencode/assets/agents", "internal/target/claudecode/assets/pasture-agents/agents"}
 var explicitAnchor = regexp.MustCompile(`<a\s+id=["']([^"']+)["']`)
+var markdownLink = regexp.MustCompile(`\]\(([^)]+)\)`)
 
 func headingSlug(s string) string {
 	var b strings.Builder
@@ -147,22 +148,40 @@ func requiredProtocolLinks(root, tree, name string) []string {
 		}
 		return links
 	case "CLAUDE.md":
-		return []string{"../epoch/SKILL.md"}
+		// The directive points at the orchestrator role. The name comes from the
+		// role registry, so a renamed role cannot leave a stale link here.
+		for _, spec := range RoleSpecs {
+			if len(spec.OwnedPhases) == len(requiredPhases()) {
+				return []string{"../" + strings.ToLower(spec.Name) + "/SKILL.md"}
+			}
+		}
+		return nil
 	}
 	return nil
+}
+
+// requiredPhases is the phase set the role registry declares.
+func requiredPhases() []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, spec := range RoleSpecs {
+		for _, phase := range spec.OwnedPhases {
+			if _, ok := seen[string(phase)]; ok {
+				continue
+			}
+			seen[string(phase)] = struct{}{}
+			out = append(out, string(phase))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // requiredPhaseAnchors is the number of phases the role registry declares. The
 // phase document keeps one anchor per phase so an inbound link has a landing
 // place; the number comes from the registry, never from a literal.
 func requiredPhaseAnchors() int {
-	seen := map[string]struct{}{}
-	for _, spec := range RoleSpecs {
-		for _, phase := range spec.OwnedPhases {
-			seen[string(phase)] = struct{}{}
-		}
-	}
-	return len(seen)
+	return len(requiredPhases())
 }
 
 // protocolDocumentFindings reports a surviving document that lacks the
@@ -179,6 +198,9 @@ func protocolDocumentFindings(root, tree, name string, data []byte) []string {
 					"fix: add the row, or remove the entry from the registry if the skill is gone",
 				tree, name, want))
 		}
+	}
+	if name == "CONSTRAINTS.md" {
+		findings = append(findings, constraintRowFindings(text, tree)...)
 	}
 	switch name {
 	case "PROCESS.md":
@@ -209,10 +231,10 @@ func checkBacktickedCitations(source string, data []byte, root string) []string 
 		if !strings.Contains(target, "/") {
 			continue
 		}
-		// A path under a dotted directory that is not ".." is a runtime
-		// artefact the epoch writes into the user's project (.agents.local),
-		// not a file this tree ships.
-		if head := strings.SplitN(target, "/", 2)[0]; strings.HasPrefix(head, ".") && head != ".." {
+		// .agents.local is the one directory the epoch writes into the user's
+		// project. Every other dotted root here is a shipped tree
+		// (.agents/, .opencode/, .codex/), so its citations are checked.
+		if head := strings.SplitN(target, "/", 2)[0]; head == ".agents.local" {
 			continue
 		}
 		resolved := ""
@@ -409,4 +431,41 @@ func TestRenderedBacktickedCitationsResolve(t *testing.T) {
 			}
 		})
 	}
+}
+
+
+// constraintRowFindings checks that the writing row maps to exactly the skills
+// that carry the writing fragment. Presence alone would let a wrong owner return
+// beside the right ones.
+func constraintRowFindings(text, tree string) []string {
+	var row string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "Writing to the user") {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		return []string{tree + "/CONSTRAINTS.md: no row maps 'Writing to the user' to an owner"}
+	}
+	got := map[string]struct{}{}
+	for _, match := range markdownLink.FindAllStringSubmatch(row, -1) {
+		got[match[1]] = struct{}{}
+	}
+	want := map[string]struct{}{}
+	for _, skill := range WritingStandardCarriers {
+		want["../"+skill+"/SKILL.md"] = struct{}{}
+	}
+	var findings []string
+	for link := range want {
+		if _, ok := got[link]; !ok {
+			findings = append(findings, tree+"/CONSTRAINTS.md: writing row omits "+link)
+		}
+	}
+	for link := range got {
+		if _, ok := want[link]; !ok {
+			findings = append(findings, tree+"/CONSTRAINTS.md: writing row names "+link+", which carries no writing section; fix: remove it, because a reader sent there finds no rule")
+		}
+	}
+	return findings
 }

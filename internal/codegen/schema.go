@@ -1052,7 +1052,7 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 
 	docs := []docEntry{
 		{
-			id: "doc-readme", path: "protocol/README.md", purpose: "Protocol index",
+			id: "doc-skill", path: "protocol/SKILL.md", purpose: "Protocol index",
 			covers: []map[string]string{{"type": "phase", "refs": "all", "depth": "index"}},
 		},
 		{

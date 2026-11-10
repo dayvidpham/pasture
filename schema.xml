@@ -957,7 +957,7 @@ UAT_ID_URI=$(${EPOCH_REC} create --kind task --title "UAT: Plan acceptance" --ph
      Mapping from protocol documentation files to the entities they cover.
        ═══════════════════════════════════════════════════════════════════════ -->
   <documents>
-    <document id="doc-readme" path="protocol/README.md" purpose="Protocol index">
+    <document id="doc-skill" path="protocol/SKILL.md" purpose="Protocol index">
       <covers>
         <entity type="phase" depth="index" refs="all"></entity>
       </covers>
