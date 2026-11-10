@@ -3,6 +3,8 @@ package peasantproject
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -109,6 +111,48 @@ func TestDBSourceSessionCatalogDoesNotWriteOrMigrate(t *testing.T) {
 	var tables int
 	require.NoError(t, source.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name NOT IN ('projects', 'sessions') AND type = 'table'`).Scan(&tables))
 	require.Equal(t, 0, tables, "the catalog read must not create or migrate tables")
+}
+
+func TestDBSourceSessionCatalogRefusesAnOversizeStoreAndDoesNotCacheIt(t *testing.T) {
+	t.Parallel()
+	db, path := openTestDB(t)
+	createPeasantSchema(t, db)
+	hash := validHash('a')
+	seedPeasantProject(t, db, hash, "/work/repo", "")
+	seedSessionCatalog(t, db, hash, sessionCatalogLimit+1)
+
+	source := NewDBSource(path).(*dbSource)
+	ids, err := source.SessionIDs(context.Background())
+	require.Error(t, err)
+	require.Nil(t, ids)
+	require.NotErrorIs(t, err, ErrSessionCatalogUnavailable)
+	require.Contains(t, err.Error(), fmt.Sprintf("more than %d", sessionCatalogLimit))
+	require.Equal(t, StateUnavailable, source.Status().State)
+	source.sessionIDs.mu.Lock()
+	require.False(t, source.sessionIDs.valid, "an oversize catalog must not be reused")
+	source.sessionIDs.mu.Unlock()
+
+	_, err = db.Exec(`DELETE FROM sessions WHERE session_id <> 's000000'`)
+	require.NoError(t, err)
+
+	remaining, err := source.SessionIDs(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"s000000"}, remaining)
+	require.Equal(t, StateOK, source.Status().State)
+}
+
+func seedSessionCatalog(t *testing.T, db *sql.DB, hash string, count int) {
+	t.Helper()
+	tx, err := db.Begin()
+	require.NoError(t, err)
+	stmt, err := tx.Prepare(`INSERT INTO sessions (session_id, model_harness, project_hash, started_at) VALUES (?, 'claude-code', ?, 1)`)
+	require.NoError(t, err)
+	for i := 0; i < count; i++ {
+		_, err = stmt.Exec(fmt.Sprintf("s%06d", i), hash)
+		require.NoError(t, err)
+	}
+	require.NoError(t, stmt.Close())
+	require.NoError(t, tx.Commit())
 }
 
 func TestSwitchAndCacheDelegateTheSessionCatalog(t *testing.T) {

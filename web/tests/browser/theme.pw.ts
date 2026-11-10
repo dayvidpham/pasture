@@ -299,6 +299,80 @@ test('transcript column shows available and none', async ({ page }) => {
   await expect(none.locator('[data-availability="none"]')).toHaveAttribute('data-mark', '—')
 })
 
+test('toggling Peasant enrichment refreshes the transcript catalog', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const off = { enabled: false, source: 'none', status: 'disabled', message: '' }
+  const on = { enabled: true, source: 'db', status: 'ok', message: '' }
+  let phase: 'initial' | 'on' | 'off' = 'initial'
+  const integration = () => (phase === 'on' ? on : off)
+  await mockAPI(page)
+  await page.route('**/api/v1/inspect', route => route.fulfill({
+    json: { ...snapshot, sessions: [session], peasantIntegration: integration() },
+  }))
+  await page.route('**/api/v1/settings/peasant', async route => {
+    const body = route.request().postDataJSON() as { enabled: boolean }
+    phase = body.enabled ? 'on' : 'off'
+    await route.fulfill({ json: integration() })
+  })
+  await page.route('**/api/v1/transcripts', route => {
+    if (phase === 'initial') {
+      return route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'transcript_catalog_unavailable', message: 'the Peasant CLI catalog is unavailable' } }),
+      })
+    }
+    const items = phase === 'on' ? [transcript.id] : []
+    return route.fulfill({
+      json: { revision: 1, asOf: snapshot.asOf, items, truncated: false },
+    })
+  })
+  await page.routeWebSocket('**/api/v1/ws', ws => {
+    ws.send(JSON.stringify({ type: 'ready', topics: [] }))
+    ws.onMessage(message => {
+      const { topic } = JSON.parse(String(message))
+      ws.send(JSON.stringify({
+        type: topic,
+        revision: 1,
+        asOf: snapshot.asOf,
+        payload: {
+          items: topic === 'sessions' ? [session] : [],
+          ...(topic === 'sessions' ? { peasantIntegration: integration() } : {}),
+        },
+      }))
+    })
+  })
+
+  const catalogGet = (response: { url: () => string; request: () => { method: () => string } }) => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/v1/transcripts' && response.request().method() === 'GET'
+  }
+  const first = page.waitForResponse(catalogGet)
+  await page.goto(origin)
+  expect((await first).status()).toBe(503)
+  const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: transcript.id }) })
+  await expect(row.locator('[data-availability="unknown"]')).toHaveText('unknown')
+
+  const toggle = page.getByRole('switch', { name: 'Peasant project enrichment' })
+  await expect(toggle).toBeEnabled()
+  const second = page.waitForResponse(catalogGet)
+  await toggle.click()
+  const enabledCatalog = await second
+  expect(enabledCatalog.status()).toBe(200)
+  expect((await enabledCatalog.json()).items).toEqual([transcript.id])
+  await expect(row.locator('[data-availability="available"]')).toHaveText('available')
+  await expect(row.locator('[data-availability="available"]')).toHaveAttribute('data-mark', '✓')
+
+  await expect(toggle).toBeEnabled()
+  const third = page.waitForResponse(catalogGet)
+  await toggle.click()
+  const disabledCatalog = await third
+  expect(disabledCatalog.status()).toBe(200)
+  expect((await disabledCatalog.json()).items).toEqual([])
+  await expect(row.locator('[data-availability="none"]')).toHaveText('none')
+  await expect(row.locator('[data-availability="none"]')).toHaveAttribute('data-mark', '—')
+})
+
 test('a failed transcript catalog stays unknown', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await mockAPI(page)

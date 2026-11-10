@@ -88,7 +88,10 @@ func (s *dbSource) querySessionIDs(ctx context.Context) ([]string, error) {
 		if err := queryCtx.Err(); err != nil && ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		s.status.markFailure(queryCtx, problem)
+		// markFailure treats a done context as caller cancellation and leaves
+		// status unchanged. Pass the caller context, not the 5s query deadline:
+		// a timeout is a source fault, and the integration pill must show it.
+		s.status.markFailure(ctx, problem)
 		return nil, fmt.Errorf("the Peasant database catalog could not be opened: %s; check that the Peasant database exists and is readable, then retry", problem)
 	}
 
@@ -97,7 +100,7 @@ func (s *dbSource) querySessionIDs(ctx context.Context) ([]string, error) {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		s.status.markFailure(queryCtx, "the Peasant session catalog could not be read: "+err.Error())
+		s.status.markFailure(ctx, "the Peasant session catalog could not be read: "+err.Error())
 		return nil, fmt.Errorf("reading session ids from the Peasant database at %q: %w; the catalog was not served, retry or check that the file is readable and still has a sessions table", s.path, err)
 	}
 	defer rows.Close()
@@ -110,7 +113,7 @@ func (s *dbSource) querySessionIDs(ctx context.Context) ([]string, error) {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
-			s.status.markFailure(queryCtx, "a Peasant session id could not be decoded: "+err.Error())
+			s.status.markFailure(ctx, "a Peasant session id could not be decoded: "+err.Error())
 			return nil, fmt.Errorf("decoding a session id from the Peasant database at %q: %w; the catalog was not served", s.path, err)
 		}
 		if !id.Valid || id.String == "" {
@@ -120,7 +123,7 @@ func (s *dbSource) querySessionIDs(ctx context.Context) ([]string, error) {
 			continue
 		}
 		if len(ids) == sessionCatalogLimit {
-			s.status.markFailure(queryCtx, fmt.Sprintf("the Peasant session catalog has more than %d sessions", sessionCatalogLimit))
+			s.status.markFailure(ctx, fmt.Sprintf("the Peasant session catalog has more than %d sessions", sessionCatalogLimit))
 			return nil, fmt.Errorf("the Peasant database at %q has more than %d ingested sessions; Pasture refuses a partial catalog so later sessions are not marked as having no transcript", s.path, sessionCatalogLimit)
 		}
 		seen[id.String] = struct{}{}
@@ -130,7 +133,7 @@ func (s *dbSource) querySessionIDs(ctx context.Context) ([]string, error) {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, ctxErr
 		}
-		s.status.markFailure(queryCtx, "iterating Peasant session ids failed: "+err.Error())
+		s.status.markFailure(ctx, "iterating Peasant session ids failed: "+err.Error())
 		return nil, fmt.Errorf("iterating session ids from the Peasant database at %q: %w; the catalog was not served, retry", s.path, err)
 	}
 	sort.Strings(ids)

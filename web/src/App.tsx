@@ -798,40 +798,6 @@ export default function App() {
     }
   }, [])
 
-  const togglePeasant = useCallback(
-    async (enabled: boolean) => {
-      peasantBusyRef.current = true
-      setPeasantBusy(true)
-      setPeasantError(null)
-      try {
-        const updated = await setPeasantEnrichment(enabled)
-        setPeasantIntegration(updated)
-        // Project fields live on the session views, so reload the inspect
-        // snapshot after the switch changes.
-        await load()
-      } catch (error) {
-        setPeasantError(
-          error instanceof Error ? error.message : 'the local API did not answer',
-        )
-      } finally {
-        peasantBusyRef.current = false
-        setPeasantBusy(false)
-      }
-    },
-    [load],
-  )
-
-  useEffect(() => {
-    const controller = new AbortController()
-    void load(controller.signal)
-    return () => controller.abort()
-  }, [load])
-
-  // The mount effect owns the first catalog read. A later read runs only when
-  // the socket leaves `disconnected` — the initial connecting -> live is not a
-  // reconnect. shouldRefetchTranscriptCatalog is that rule. A failed refresh
-  // keeps the last complete catalog; only the first failure leaves every row
-  // unknown.
   const loadCatalog = useCallback(async (signal?: AbortSignal) => {
     try {
       const catalog = await fetchTranscriptCatalog(signal)
@@ -847,6 +813,47 @@ export default function App() {
     }
   }, [])
 
+  const togglePeasant = useCallback(
+    async (enabled: boolean) => {
+      peasantBusyRef.current = true
+      setPeasantBusy(true)
+      setPeasantError(null)
+      let settingsChanged = false
+      try {
+        const updated = await setPeasantEnrichment(enabled)
+        settingsChanged = true
+        setPeasantIntegration(updated)
+        // Project fields live on the session views, so reload the inspect
+        // snapshot after the switch changes.
+        await load()
+      } catch (error) {
+        setPeasantError(
+          error instanceof Error ? error.message : 'the local API did not answer',
+        )
+      } finally {
+        // Enable and disable both change which catalog the server can answer.
+        // Refresh after the settings call succeeds, even when the inspect
+        // reload failed, so a first CLI 503 does not stay painted as unknown.
+        if (settingsChanged) await loadCatalog()
+        peasantBusyRef.current = false
+        setPeasantBusy(false)
+      }
+    },
+    [load, loadCatalog],
+  )
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void load(controller.signal)
+    return () => controller.abort()
+  }, [load])
+
+  // The mount effect owns the first catalog read. A later read runs when the
+  // socket leaves `disconnected`, and after a successful enrichment toggle.
+  // The initial connecting -> live is not a reconnect.
+  // shouldRefetchTranscriptCatalog is the reconnect rule. A failed refresh
+  // keeps the last complete catalog; only the first failure leaves every row
+  // unknown.
   useEffect(() => {
     const controller = new AbortController()
     void loadCatalog(controller.signal)
