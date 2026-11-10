@@ -2716,3 +2716,15 @@ The embedded recovery text now references the ledger's remote normalization
 and describes its no-origin work-tree root. This is the current transport
 identity, not the historical build-kit digest or evidence of a new capture.
 No historical fixture bytes or clearance decisions change.
+# Recovery namespace parity transport addendum
+
+The generated `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`3cae1b161aa853ec4134f6326288a4540aa92db8b99902f473acf8657b431ecf`.
+The embedded recovery text now states that both backends use `file://` of the
+working directory when there is no origin remote, so an invocation from a
+different subdirectory uses a different namespace. That corrects the prior
+revision, which claimed the ledger used the work-tree root while Pasture used
+the working directory. Only the recovery prose changed. Lifecycle transport,
+activation, version guards, decision handling and the injection contract are
+unchanged, and no capture payload, fixture identity or acceptance record moves.
+No new live session, capture or host capability is claimed.
