@@ -61,9 +61,9 @@ Select the current registered author with "${EPOCH_REC}" whoami. It prints the a
 
 ## Writing to the User
 
-These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. The rules are authored here once; the user-elicit, user-uat, architect-handoff and supervisor skills reference them.
+These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance.
 
-### The 25 rules
+### The rules
 
 Format: number, requirement, the STE rule it adapts, then a compact bad-to-good pair.
 
@@ -98,14 +98,14 @@ Format: number, requirement, the STE rule it adapts, then a compact bad-to-good 
 | 15 | Active voice. Name the actor: the test, CI, the agent, the merge. Simple tenses only. | 3.2, 3.6 | 'The gate will be rebased on the types.' to 'The agent rebases the gate on the event types.' |
 | 16 | One instruction per sentence. Imperative. Condition first. | 5.2, 5.3, 5.4 | 'All three at once, then check.' to 'If the types change, rebase the gate. Then run the tests.' |
 | 17 | Full sentences keep articles and verbs. Fragments only in lists, tables, and labels. | 4.2, 4.3, 4.5 | 'Defer the timeout, keep the retry limit fix' to 'Keep the retry limit. Defer the timeout change. The correctness review is round 3 and the test-quality review is round 2.' |
-| 18 | No semicolons. No em-dashes. Use a period or a list. | 8.1 | 'per arm, so a swap fails' with an em-dash, to 'per arm. That is 10 checks, so a swap fails.' |
+| 18 | No semicolons. No em-dashes. Use a period or a list. | 8.1 + house | 'per arm, so a swap fails' with an em-dash, to 'per arm. That is 10 checks, so a swap fails.' |
 | 19 | Show the logic with because, so, but, if, then. | 4.4 | '10 predicates. A same-count swap fails.' to 'The test checks 10 cases, so a replacement that keeps the count cannot pass.' |
 
 **Exempt material**
 
 | # | Rule | Adapts | Bad to good |
 |---|---|---|---|
-| 20 | Backtick each identifier. Max 2 per sentence. Give a plain gloss on first use. | 8.6 | Four bare references in one line, to one task, one design decision, and two reviews, each written in substance first. |
+| 20 | Backtick each identifier. Max 2 per sentence. Give a plain gloss on first use. | 8.6 + house | Four bare references in one line, to one task, one design decision, and two reviews, each written in substance first. |
 | 21 | Quote user text, code, paths, and logs exactly. Explain them outside the quote. | 8.6 | A quote silently edited, to the blockquote verbatim with a plain reading on the next line. |
 
 **Questions, options, risk**
@@ -119,25 +119,20 @@ Rules 22 to 24 have no STE equivalent. They come from the house rules below. Do 
 | 24 | Put the recommendation outside the options, with one reason. You may also mark the label '(recommended)'. | house | An option labelled 'recommended' with no reason, to 'Recommendation: merge the event types first, because a later change costs rework in two places.' |
 | 25 | Mark an irreversible action with WARNING or CAUTION, then the condition, then the result. | 7.1, 7.2, 7.3 | 'Removing the core case will fail the suite.' to 'CAUTION: if you remove the core case, the test passes and a broken branch ships.' |
 
-Rules 1.9, 1.10, 2.1 and 2.2 carry most of the value. If you keep four rules, keep those four.
-
 ### House rules for questions, options and recommendations
 
-ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Write these seven rules yourself, and never cite an STE number for them.
+ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22 and 24 already carry grounding, one-decision shape and recommendation placement, so the rows below add only what those rules do not. Never cite an STE number for a house rule.
 
 | Rule | Requirement |
 |---|---|
-| Question shape | Each question asks for one decision, names the component, and states what the answer changes. Use a short header, max 4 words. |
-| Option design | Each option is a self-contained engineering alternative: a label of max 6 words, what happens, and the cost. Never use approval levels such as 'exactly matches', 'mostly matches', or 'requires revisions'. Never put a bare reference in an option. |
-| Recommendation placement | Put the recommendation outside the options, with one reason and the tradeoff you accept. You may also mark one label '(recommended)'. |
-| Grounding before asking | Show the definition, one concrete example, and the decision's consequence in normal message text before the question. Never put the only explanation in the options. |
-| One decision per question | Never bundle two decisions. If the answer needs two choices, split the question. |
-| Text-before-question turn | Send the grounding as text and end the turn. Ask through the AskUserQuestion tool in the next turn, because a question tool can hide prose sent in the same turn. |
+| Question shape | A short header, max 4 words. |
+| Option design | Never use approval levels such as 'exactly matches', 'mostly matches', or 'requires revisions' as an option label. |
+| Text-before-question turn | Send the grounding as text and end the turn. Ask through the `request_user_decision` operation in the next turn, because a question tool can hide prose sent in the same turn. |
 | No self-praise | No self-congratulation, no praise of the question or the user, and no closing offers such as 'let me know if you have questions'. State the next step in one line instead. |
 
 ### Template: present a component, then ask
 
-Send the block below as text only, then end the turn. In the next turn, call the AskUserQuestion tool with the same options. The split exists because a question tool can hide prose sent in the same turn.
+Send the block below as text only, then end the turn. In the next turn, ask through the `request_user_decision` operation with the same options. The split exists because a question tool can hide prose sent in the same turn.
 
 ~~~~markdown
 ## <Part name>: <what it does for the user, max 10 words>
@@ -179,7 +174,7 @@ Send the block below as text only, then end the turn. In the next turn, call the
 Then, in the next turn:
 
 ~~~
-AskUserQuestion: '<question, max 20 words>'
+`request_user_decision`: '<question, max 20 words>'
 options: the same labels, with the 'what happens' and 'cost' text repeated in each description, because the picker can hide the table.
 ~~~
 
@@ -216,27 +211,28 @@ Some hosts expose a weak question tool: it takes one question per call, it has n
 2. Phrase the options as a single-select choice.
 3. State the assumption you will use if the answer is unavailable.
 
-Put the assumption in the text turn that grounds the question, not inside the options. The question still asks for one decision, and the recommendation names the cost of the assumption.
+Put the assumption in the text turn that grounds the question, not inside the options. An assumption never satisfies a user gate: a gated phase waits for the user's answer. The question still asks for one decision, and the recommendation names the cost of the assumption.
 
 ### Exempt material
 
-- **Identifiers.** Code identifiers, paths, commands, flags, URIs, commit IDs, and task references: write them verbatim in backticks. Max 2 per sentence. Give one plain gloss on first use. A backticked identifier still needs a gloss; the word-count rule is not a permission slip.
+Two material classes are exempt from the word and sentence caps: quoted text and code blocks. A third is allowed as technical nouns. Everything else obeys the caps.
+
 - **Quoted user text.** Verbatim in a blockquote. Never rewrite it into the house style. Put the plain reading after the quote.
 - **Code, logs, diffs, test output.** Exempt. Explain them in prose around the block.
 - **Industry terms of art.** Fixture, golden test, mutation testing, schema migration, fail-safe default, backfill, and closed enum are allowed as technical nouns. Define one in Terms if the user did not use it first.
-- **Spelling.** Keep one spelling per message. Do not enforce American spelling.
-- **Paragraphs.** Max 3 sentences in chat, stricter than the STE limit of 6.
-- **Fragments.** Allowed in list items, table cells, and diagram labels. A full sentence keeps its articles and verbs.
-- **Word caps.** Max 20 words for an instruction or a question, max 25 for a description. An identifier or a quote counts as one word. The cap is necessary, not sufficient.
+
+Two more rows are relaxations, not exemptions. **Spelling** keeps one spelling per message and does not enforce American spelling. **Identifiers** are not exempt from a gloss: backtick each one, keep max 2 per sentence, and give one plain gloss on first use, as rule 20 says.
+
+The caps stay live for everything else. Rule 3 sets paragraph length, rule 14 sets the word caps, and rule 17 sets where a fragment is allowed; none of those three is an exemption.
 
 ### Pre-send check
 
-Run this list on every user-facing message. Items 1, 2, 10 and 12 need judgment; the rest are mechanical. A clean pass is not a gate.
+Run this list on every user-facing message. A clean pass is not a gate.
 
 1. Does sentence one give the result, the decision, or the blocker?
 2. Before a question: did the reader already see what the thing is, its definition, and one example, in an earlier turn or an earlier block?
 3. Does every term the reader did not introduce appear in Terms before first use?
-4. Search the draft for label-like tokens (one to three capital letters with a number), the section sign, and mixed five- or six-character tokens. Is each one defined, or replaced by its substance?
+4. Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit. Is each one defined, or replaced by its substance?
 5. Does one item have two names, or one word have two senses?
 6. Any sentence over 20 words (instruction or question) or 25 (description)?
 7. Any noun cluster over 3 words? Any slang verb, noun-as-verb, or phrasal verb?

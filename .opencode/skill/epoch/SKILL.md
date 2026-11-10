@@ -297,6 +297,7 @@ db: <absolute store path>         # pasture only
 author: <registered actor id>     # pasture only; what whoami prints
 ledger: <absolute ledger path>    # ledger only
 rec: <absolute adapter path>      # pasture and ledger
+feedback: <task URI>              # pasture only; the epoch feedback task for signals
 reviewer_tier: T2|T3              # optional; the phase-8 review-effort choice
 degrades: assign=claim-only       # ledger only
 ---
@@ -1493,38 +1494,49 @@ The kind is a closed list. Use exactly one of:
 
 ### One feedback task per epoch
 
-Use one feedback task per epoch. The epoch skill creates it once:
+Use one feedback task per epoch, and create it once. The epoch creates it at epoch start with:
 
 ~~~bash
 FEEDBACK_ID_URI=$("${EPOCH_REC}" create --kind task --title 'FEEDBACK: epoch signals' --phase unscoped)
 ~~~
 
-Then write `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md`. Every skill reads that line before it records a signal. If the line is absent, create the task, write the line, and continue. Never create a second feedback task in the same epoch.
+Write `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md` in the same step. That line is how a second run finds the task: every skill reads it before it records, and no skill creates a second task when the line is present. If the line is absent, treat the epoch as one that started before this rule: create the task once with exactly this title, write the line, then continue. Never create a second feedback task in the same epoch.
 
-On the ledger backend there is no task. Append the same line to `.agents.local/pasture/signals.jsonl` instead.
+This subsection applies to the pasture backend. A ledger epoch has no feedback task: use the ledger recording target below.
 
 ### Line format and recording
 
-Write one line per signal. Field order is fixed: kind, phase, skill, entry, quote.
+Write one line per signal. The same fields and order apply on both backends:
 
 ~~~
 signal: kind=<kind> phase=<phase> skill=<skill> entry=<entry-ref> quote="<short verbatim quote>"
 ~~~
 
-- `kind`: one of the five kinds, exactly.
-- `phase`: the phase where the signal appeared.
-- `skill`: the skill that recorded it: epoch, architect, supervisor, user-elicit, or user-uat.
+- `kind`: one of the registered kinds above, exactly.
+- `phase`: one of request, elicit, propose, review, plan-review, ratify, handoff, impl-plan, worker-slices, code-review, impl-uat, landing.
+- `skill`: the skill that recorded it, named exactly as the skill directory.
 - `entry`: the record that holds the interaction, such as a task URI plus the question or section.
 - `quote`: a short verbatim fragment, max 20 words. Never paraphrase or tidy it.
 
-Record a signal with one note on the feedback task:
+Recording target, by backend:
+
+- `backend: pasture`: one note on the feedback task that the `feedback:` line names. The note body is the whole line and nothing else. Never run the note with an empty id: an empty id fails with `need_id` and records nothing.
+- `backend: ledger`: no task and no note. Append the line to `.agents.local/pasture/signals.jsonl`, one line per signal.
+
+Pasture target:
 
 ~~~bash
 FEEDBACK_ID_URI=$(sed -n 's/^feedback: //p' .agents.local/pasture/EPOCH.md | tail -1)
 "${EPOCH_REC}" note "$FEEDBACK_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body 'signal: kind=confusion phase=elicit skill=user-elicit entry=<task URI>#end-vision quote="what does arm mean here"'
 ~~~
 
-The note body is the one line and nothing else. Write it in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.
+Ledger target:
+
+~~~bash
+printf '%s\n' 'signal: kind=confusion phase=elicit skill=user-elicit entry=<task URI>#end-vision quote="what does arm mean here"' >> .agents.local/pasture/signals.jsonl
+~~~
+
+The recorded text is identical on both backends. Only the destination differs: a note body on pasture, one appended line on the ledger. Write it in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.
 
 If the write fails, follow the tracker write-failure rule: retry, keep the recorded backend, and surface the pending line at the next gate. A failed record never blocks the phase and never prompts the user.
 
@@ -1610,6 +1622,8 @@ EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
 ```
 
 If the probe prints `BACKEND=error`, stop and report before the first mutation: the store exists but cannot be used. If it prints `BACKEND=ledger`, record `ledger:`, `rec:` and `probed_at:` from the output and continue; the adapter writes one JSONL line per mutation under that ledger and derives the namespace with the same function that printed NS. Offer a gitignore entry; never require one. If it prints `BACKEND=pasture`, record `db:`, `author:`, `rec:` and `probed_at:` from the output. Record `namespace:` only to pin one; the adapter then passes `--namespace`, and that pin wins over Pasture's derivation.
+
+**Step 0b: create the epoch feedback task.** On the pasture backend, create one task titled `FEEDBACK: epoch signals` and write `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md` before the first signal. A ledger epoch has no feedback task. The Signal Capture section owns the recipe and the second-run lookup; create the task here so no later skill creates a duplicate.
 
 **Option 1: Manual Task Creation**
 ```bash

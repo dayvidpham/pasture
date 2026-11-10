@@ -330,11 +330,11 @@ Binary only. No severity tree for plan reviews.`,
 	// ── SLICE-6: writing standard and signal capture ───────────────────────────
 
 	// FragWritingStandard is the one authored home of the user-facing writing
-	// rules. Four skills reference it; none copies the text.
+	// rules. Consumers reference it through fragRef; none copies the text.
 	FragWritingStandard: writingStandardFragment(),
 
-	// FragSignalCapture is the one authored home of the five-kind signal
-	// capture. Five skills reference it; none copies the text.
+	// FragSignalCapture is the one authored home of the signal capture.
+	// Consumers reference it through fragRef; none copies the text.
 	FragSignalCapture: signalCaptureFragment(),
 }
 

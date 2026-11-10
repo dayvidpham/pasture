@@ -134,18 +134,18 @@ const (
 	FragTrackerAdapter FragmentId = "frag--tracker-adapter"
 
 	// FragWritingStandard is the one authored home of the user-facing writing
-	// standard: the 25 rules adapted from ASD-STE100 Issue 9 Part 1, the seven
-	// house rules for questions and options, the two message templates, the
+	// standard: the STE-aligned rules adapted from ASD-STE100 Issue 9 Part 1,
+	// the house rules for questions and options, the two message templates, the
 	// weak-question-tool degrade clause, the exempt material, and the pre-send
-	// check. Referenced through fragRef by exactly four skills: user-elicit,
-	// user-uat, architect-handoff and supervisor.
+	// check. Its consumers reference it through fragRef; the reference set is
+	// derived from their bodies by FragmentToOwnerRefs and is not restated here.
 	FragWritingStandard FragmentId = "frag--writing-standard"
 
 	// FragSignalCapture is the one authored home of the signal-capture
-	// component: the closed five-kind list, the one feedback task per epoch,
-	// the stable one-line record format, and the non-blocking recording rule.
-	// Referenced through fragRef by the epoch, architect, supervisor,
-	// user-elicit and user-uat skills.
+	// component: the typed closed kind set, the one feedback task per epoch,
+	// the stable one-line record and its two recording targets, and the
+	// non-blocking recording rule. Its consumers reference it through fragRef;
+	// the reference set is derived from their bodies by FragmentToOwnerRefs.
 	FragSignalCapture FragmentId = "frag--signal-capture"
 
 	// FragModelPolicy is the one authored home of the capability-tier model

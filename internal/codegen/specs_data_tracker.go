@@ -231,6 +231,7 @@ db: <absolute store path>         # pasture only
 author: <registered actor id>     # pasture only; what whoami prints
 ledger: <absolute ledger path>    # ledger only
 rec: <absolute adapter path>      # pasture and ledger
+feedback: <task URI>              # pasture only; the epoch feedback task for signals
 reviewer_tier: T2|T3              # optional; the phase-8 review-effort choice
 degrades: assign=claim-only       # ledger only
 ---

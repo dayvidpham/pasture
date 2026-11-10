@@ -8,6 +8,7 @@ var statusBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragWritingStandard),
 		{
 			Id:    "status-steps",
 			Title: "Steps",

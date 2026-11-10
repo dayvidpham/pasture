@@ -20,6 +20,12 @@ func RequireOperationalSource(root string) error {
 	if err := ValidateCapabilityTiers(); err != nil {
 		return err
 	}
+	if err := ValidateSignalKinds(); err != nil {
+		return err
+	}
+	if err := ValidateWritingRules(); err != nil {
+		return err
+	}
 	registries := map[string]any{
 		"SkillBodySpecs": SkillBodySpecs, "SharedFragmentSpecs": SharedFragmentSpecs,
 		"RoleSpecs": RoleSpecs, "ConstraintSpecs": ConstraintSpecs, "CommandSpecs": CommandSpecs,
