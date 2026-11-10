@@ -2,7 +2,6 @@ import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, u
 import {
   Activity,
   Clock3,
-  Database,
   Folder,
   Radio,
   RefreshCw,
@@ -21,6 +20,7 @@ import {
   StatGrid,
   StatusDot,
 } from '@peasant-labs/fairtrade/ui'
+import { listRoute, parseRoute, sessionRoute } from './route'
 import { ReadOnlyTranscriptViewer } from './ReadOnlyTranscriptViewer'
 import { createThemeController, parseThemePreference, type ThemeSnapshot } from './theme'
 
@@ -730,6 +730,12 @@ export default function App() {
   const [peasantIntegration, setPeasantIntegration] = useState<PeasantIntegration | null>(null)
   const [peasantBusy, setPeasantBusy] = useState(false)
   const [peasantError, setPeasantError] = useState<string | null>(null)
+  const [route, setRoute] = useState(() => parseRoute(typeof window === 'undefined' ? '' : window.location.hash))
+  useEffect(() => {
+    const onHashChange = () => setRoute(parseRoute(window.location.hash))
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [transcript, setTranscript] = useState<TranscriptState>({ status: 'idle' })
   const [transcriptRetry, setTranscriptRetry] = useState(0)
@@ -919,15 +925,15 @@ export default function App() {
   const selectedProjectHash = selectedSession?.projectHash ?? null
   const selectedMapping = projectMappingForSelection(projectMapping, selectedProjectHash)
 
-  const selectedHarness = selectedSession?.harness
-  const selectedNativeId = selectedSession?.nativeSessionId
-  const transcriptKey = selectedSession ? sessionKey(selectedSession) : null
+  const selectedHarness = route.kind === 'session' ? route.harness : selectedSession?.harness
+  const selectedNativeId = route.kind === 'session' ? route.nativeSessionId : selectedSession?.nativeSessionId
+  const transcriptKey = selectedHarness && selectedNativeId ? JSON.stringify([selectedHarness, selectedNativeId]) : null
 
   // Fetch once per selected session, not on every WebSocket snapshot: the
   // stable identity strings are the dependencies, so live revision updates
   // never restart the Peasant export.
   useEffect(() => {
-    if (!selectedHarness || !selectedNativeId || !transcriptKey) {
+    if (route.kind !== 'session' || !selectedHarness || !selectedNativeId || !transcriptKey) {
       setTranscript({ status: 'idle' })
       return
     }
@@ -947,7 +953,7 @@ export default function App() {
         setTranscript({ status: 'error', key: transcriptKey, failure: describeTranscriptError(error) })
       })
     return () => controller.abort()
-  }, [selectedHarness, selectedNativeId, transcriptKey, transcriptRetry])
+  }, [route.kind, selectedHarness, selectedNativeId, transcriptKey, transcriptRetry])
 
   // Execution history is fetched once per selected session and then extended
   // through its opaque cursor. Live WebSocket snapshots never restart it,
@@ -1105,7 +1111,7 @@ export default function App() {
             <button
               type="button"
               className="session-link"
-              onClick={() => setSelectedId(row.id)}
+              onClick={() => { setSelectedId(row.id); window.location.hash = sessionRoute(row.harness, row.nativeSessionId) }}
             >
               {row.nativeSessionId}
             </button>
@@ -1167,6 +1173,67 @@ export default function App() {
   const retry = () => {
     void load()
     socketRef.current?.close()
+  }
+
+  if (route.kind === 'session') {
+    const session = sessions.find((item) => item.harness === route.harness && item.nativeSessionId === route.nativeSessionId)
+    return (
+      <main className="transcript-page">
+        <header className="hero">
+          <div>
+            <a className="session-link" href={listRoute()}>← back to sessions</a>
+            <p className="eyebrow">{route.harness} / transcript</p>
+            <h1 className="transcript-identity">{route.nativeSessionId}</h1>
+            {session?.project && <p className="lede">project: {session.project}</p>}
+            {session?.epoch && <p className="lede">epoch: {epochLabel(session.epoch)}</p>}
+          </div>
+          <div className="hero-meta">
+            <div className="theme-control">
+              <label className="eyebrow" htmlFor={themeId}>Theme</label>
+              <Select id={themeId} value={preference} onChange={(event) => { setThemeSelected(true); themeController.setPreference(parseThemePreference(event.currentTarget.value)) }}
+                options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'system', label: 'System' }]} />
+              {themeSelected && persistence === 'unavailable' && <span role="status">Theme choice was not saved. Allow site storage in your browser.</span>}
+            </div>
+          </div>
+        </header>
+            {!transcriptKey ? (
+              <p className="rail-copy muted">
+                choose a session in the table to read its Peasant transcript.
+              </p>
+            ) : transcript.status === 'error' && transcript.key === transcriptKey ? (
+              <div className="transcript-state">
+                <EmptyState
+                  title={transcript.failure.title}
+                  message={transcript.failure.message}
+                  action={
+                    transcript.failure.retry ? (
+                      <button
+                        type="button"
+                        className="clear-filter"
+                        onClick={() => setTranscriptRetry((attempt) => attempt + 1)}
+                      >
+                        retry transcript
+                      </button>
+                    ) : undefined
+                  }
+                />
+              </div>
+            ) : transcript.status === 'ready' && transcript.key === transcriptKey ? (
+              <div className="transcript-host">
+                <ReadOnlyTranscriptViewer
+                  viewModel={transcript.viewModel}
+                  theme={resolvedTheme}
+                  leftRailOpen={transcriptLeftRail}
+                  onLeftRailOpenChange={setTranscriptLeftRail}
+                  rightRailOpen={transcriptRightRail}
+                  onRightRailOpenChange={setTranscriptRightRail}
+                />
+              </div>
+            ) : (
+              <p className="rail-copy muted">exporting the Peasant transcript for this session…</p>
+            )}
+      </main>
+    )
   }
 
   return (
@@ -1289,18 +1356,18 @@ export default function App() {
 
                 <ExecutionHistoryList
                   items={
-                    executionHistory.key === sessionKey(selectedSession)
+                    executionHistory.key === JSON.stringify([selectedSession.harness, selectedSession.nativeSessionId])
                       ? executionHistory.items
                       : []
                   }
                   next={
-                    executionHistory.key === sessionKey(selectedSession)
+                    executionHistory.key === JSON.stringify([selectedSession.harness, selectedSession.nativeSessionId])
                       ? executionHistory.next
                       : undefined
                   }
                   busy={executionBusy}
                   error={
-                    executionHistory.key === sessionKey(selectedSession)
+                    executionHistory.key === JSON.stringify([selectedSession.harness, selectedSession.nativeSessionId])
                       ? executionHistory.error
                       : null
                   }
@@ -1332,48 +1399,7 @@ export default function App() {
             </RailSection>
           )}
 
-          <RailSection
-            title="transcript"
-            icon={Database}
-            meta={transcript.status === 'ready' && transcript.key === transcriptKey ? 'peasant' : null}
-          >
-            {!selectedSession || !transcriptKey ? (
-              <p className="rail-copy muted">
-                choose a session in the table to read its Peasant transcript.
-              </p>
-            ) : transcript.status === 'error' && transcript.key === transcriptKey ? (
-              <div className="transcript-state">
-                <EmptyState
-                  title={transcript.failure.title}
-                  message={transcript.failure.message}
-                  action={
-                    transcript.failure.retry ? (
-                      <button
-                        type="button"
-                        className="clear-filter"
-                        onClick={() => setTranscriptRetry((attempt) => attempt + 1)}
-                      >
-                        retry transcript
-                      </button>
-                    ) : undefined
-                  }
-                />
-              </div>
-            ) : transcript.status === 'ready' && transcript.key === transcriptKey ? (
-              <div className="transcript-host">
-                <ReadOnlyTranscriptViewer
-                  viewModel={transcript.viewModel}
-                  theme={resolvedTheme}
-                  leftRailOpen={transcriptLeftRail}
-                  onLeftRailOpenChange={setTranscriptLeftRail}
-                  rightRailOpen={transcriptRightRail}
-                  onRightRailOpenChange={setTranscriptRightRail}
-                />
-              </div>
-            ) : (
-              <p className="rail-copy muted">exporting the Peasant transcript for this session…</p>
-            )}
-          </RailSection>
+
         </>
       }
     >
