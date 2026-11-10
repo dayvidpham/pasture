@@ -65,6 +65,7 @@ import {
   type TranscriptViewModel,
 } from './transcript'
 import {
+  shouldRefetchTranscriptCatalog,
   transcriptAvailability,
   transcriptMark,
   type TranscriptCatalogView,
@@ -826,10 +827,11 @@ export default function App() {
     return () => controller.abort()
   }, [load])
 
-  // The catalog is one cached read. Load it with the page, and again when the
-  // socket reconnects, so a Peasant outage can recover without a reload. A
-  // failed refresh keeps the last complete catalog; only the first failure
-  // leaves every row unknown.
+  // The mount effect owns the first catalog read. A later read runs only when
+  // the socket leaves `disconnected` — the initial connecting -> live is not a
+  // reconnect. shouldRefetchTranscriptCatalog is that rule. A failed refresh
+  // keeps the last complete catalog; only the first failure leaves every row
+  // unknown.
   const loadCatalog = useCallback(async (signal?: AbortSignal) => {
     try {
       const catalog = await fetchTranscriptCatalog(signal)
@@ -851,12 +853,18 @@ export default function App() {
     return () => controller.abort()
   }, [loadCatalog])
 
+  const previousConnection = useRef<Connection>(connection)
+  const catalogReconnect = useRef<AbortController | null>(null)
   useEffect(() => {
-    if (connection !== 'live') return
+    const previous = previousConnection.current
+    previousConnection.current = connection
+    if (!shouldRefetchTranscriptCatalog(previous, connection)) return
+    catalogReconnect.current?.abort()
     const controller = new AbortController()
+    catalogReconnect.current = controller
     void loadCatalog(controller.signal)
-    return () => controller.abort()
   }, [connection, loadCatalog])
+  useEffect(() => () => catalogReconnect.current?.abort(), [])
 
   useEffect(() => {
     let closed = false

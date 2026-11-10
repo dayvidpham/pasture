@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  shouldRefetchTranscriptCatalog,
   transcriptAvailability,
   transcriptMark,
   type TranscriptCatalogView,
@@ -10,6 +11,16 @@ const ready = (ids: string[], truncated = false): TranscriptCatalogView => ({
   status: 'ready',
   ids: new Set(ids),
   truncated,
+})
+
+describe('shouldRefetchTranscriptCatalog', () => {
+  it('refetches only on a transition out of disconnected', () => {
+    expect(shouldRefetchTranscriptCatalog('connecting', 'live')).toBe(false)
+    expect(shouldRefetchTranscriptCatalog('live', 'disconnected')).toBe(false)
+    expect(shouldRefetchTranscriptCatalog('disconnected', 'disconnected')).toBe(false)
+    expect(shouldRefetchTranscriptCatalog('disconnected', 'connecting')).toBe(true)
+    expect(shouldRefetchTranscriptCatalog('disconnected', 'live')).toBe(true)
+  })
 })
 
 describe('transcriptAvailability', () => {

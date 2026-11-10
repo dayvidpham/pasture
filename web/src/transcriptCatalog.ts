@@ -1,5 +1,18 @@
 export type TranscriptAvailability = 'available' | 'none' | 'unknown'
 
+export type CatalogConnection = 'connecting' | 'live' | 'disconnected'
+
+/**
+ * The mount effect owns the first catalog read. Refetch only when the socket
+ * leaves `disconnected`. The initial connecting -> live is not a reconnect.
+ */
+export function shouldRefetchTranscriptCatalog(
+  previous: CatalogConnection,
+  next: CatalogConnection,
+): boolean {
+  return previous === 'disconnected' && next !== 'disconnected'
+}
+
 /** A catalog the session table can paint. Loading and error are both unknown:
  *  absence is "none" only after a complete catalog has loaded. */
 export type TranscriptCatalogView =

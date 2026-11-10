@@ -307,9 +307,16 @@ test('a failed transcript catalog stays unknown', async ({ page }) => {
     contentType: 'application/json',
     body: JSON.stringify({ error: { code: 'peasant_unavailable', message: 'Peasant is unavailable: install Peasant and retry' } }),
   }))
+  const catalogResponse = page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/v1/transcripts' && response.request().method() === 'GET'
+  })
   await page.goto(origin)
-  await expect(page.locator('[data-availability="unknown"]').first()).toHaveText('unknown')
+  expect((await catalogResponse).status()).toBe(503)
+  const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: transcript.id }) })
+  await expect(row.locator('[data-availability="unknown"]')).toHaveText('unknown')
   await expect(page.locator('[data-availability="none"]')).toHaveCount(0)
+  await expect(page.locator('[data-availability="available"]')).toHaveCount(0)
 })
 
 test('a missing transcript shows a dismissible bottom-right toast and keeps retry', async ({ page }) => {
