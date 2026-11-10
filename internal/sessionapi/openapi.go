@@ -47,7 +47,8 @@ func openAPIDocument() map[string]any {
 				"epoch bindings. It also records explicit project-to-epoch mappings: a project hash " +
 				"is Peasant-owned, the mapped epoch is a Pasture task, and the relationship is " +
 				"independent of per-session bindings. The transcript route proxies one durable Peasant " +
-				"SessionDetailPayload; Pasture does not reshape transcript content.",
+				"SessionDetailPayload; Pasture does not reshape transcript content. The transcript catalog " +
+				"lists Peasant session ids that have a durable transcript and does not write the Peasant store.",
 		},
 		"paths": map[string]any{
 			"/api/v1/epochs": map[string]any{
@@ -206,6 +207,19 @@ func openAPIDocument() map[string]any {
 						"101": map[string]any{"description": "Switching Protocols; subsequent frames are JSON text messages."},
 						"400": errorResponse("The request is not a valid WebSocket upgrade"),
 						"403": errorResponse("Non-loopback Host or Origin"),
+					},
+				},
+			},
+			"/api/v1/transcripts": map[string]any{
+				"get": map[string]any{
+					"operationId": "listTranscripts",
+					"summary":     "List Peasant session ids that have a durable transcript",
+					"description": "Runs a bounded, read-only `peasant sessions list --json` beside the API and reuses a successful result briefly so repeated reads do not spawn a process each time. Items are native session ids. truncated is true when the list filled its page: an id absent from items is then not evidence that Peasant has no transcript. The revision and asOf use the same certified session-cache read as the other session routes. A source failure is 503, which the console treats as unknown rather than none.",
+					"responses": map[string]any{
+						"200": jsonResponse(ref("TranscriptCatalog")),
+						"403": errorResponse("Non-loopback Host or Origin"),
+						"503": errorResponse("The peasant executable is absent, the catalog could not be read, or the session cache is stale"),
+						"500": errorResponse("The session store could not be read"),
 					},
 				},
 			},
@@ -745,6 +759,22 @@ func openAPIDocument() map[string]any {
 							"description": "Only close the mapping when this binding ID is still active.",
 						},
 					},
+				),
+				"TranscriptCatalog": objectSchema(
+					map[string]any{
+						"revision": map[string]any{"type": "integer", "format": "int64"},
+						"asOf":     map[string]any{"type": "string", "format": "date-time"},
+						"items": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Peasant session ids that have a durable transcript. When truncated is false, an id absent from this list has no durable transcript. When truncated is true, absence is not that evidence.",
+						},
+						"truncated": map[string]any{
+							"type":        "boolean",
+							"description": "True when the backing list filled its page. The console must not treat an absent id as having no transcript while this is true.",
+						},
+					},
+					"revision", "asOf", "items", "truncated",
 				),
 				"TranscriptPayload": map[string]any{
 					"type": "object",

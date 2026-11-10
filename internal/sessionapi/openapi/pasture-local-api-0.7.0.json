@@ -850,6 +850,36 @@
         ],
         "type": "string"
       },
+      "TranscriptCatalog": {
+        "properties": {
+          "asOf": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "description": "Peasant session ids that have a durable transcript. When truncated is false, an id absent from this list has no durable transcript. When truncated is true, absence is not that evidence.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "revision": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "truncated": {
+            "description": "True when the backing list filled its page. The console must not treat an absent id as having no transcript while this is true.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "revision",
+          "asOf",
+          "items",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "TranscriptPayload": {
         "additionalProperties": true,
         "description": "The durable Peasant SessionDetailPayload document, proxied unchanged. Pasture guarantees only the identity fields; every other field belongs to the shared @peasant-labs/schema session contract and is validated by the browser.",
@@ -985,7 +1015,7 @@
     }
   },
   "info": {
-    "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. It also records explicit project-to-epoch mappings: a project hash is Peasant-owned, the mapped epoch is a Pasture task, and the relationship is independent of per-session bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content.",
+    "description": "Loopback-only session and epoch API for active harness sessions mapped to epoch bindings. It also records explicit project-to-epoch mappings: a project hash is Peasant-owned, the mapped epoch is a Pasture task, and the relationship is independent of per-session bindings. The transcript route proxies one durable Peasant SessionDetailPayload; Pasture does not reshape transcript content. The transcript catalog lists Peasant session ids that have a durable transcript and does not write the Peasant store.",
     "title": "Pasture Local Session API",
     "version": "0.7.0"
   },
@@ -2311,6 +2341,55 @@
           }
         },
         "summary": "Turn Peasant project enrichment on or off"
+      }
+    },
+    "/api/v1/transcripts": {
+      "get": {
+        "description": "Runs a bounded, read-only `peasant sessions list --json` beside the API and reuses a successful result briefly so repeated reads do not spawn a process each time. Items are native session ids. truncated is true when the list filled its page: an id absent from items is then not evidence that Peasant has no transcript. The revision and asOf use the same certified session-cache read as the other session routes. A source failure is 503, which the console treats as unknown rather than none.",
+        "operationId": "listTranscripts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptCatalog"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Non-loopback Host or Origin"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The session store could not be read"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The peasant executable is absent, the catalog could not be read, or the session cache is stale"
+          }
+        },
+        "summary": "List Peasant session ids that have a durable transcript"
       }
     },
     "/api/v1/ws": {

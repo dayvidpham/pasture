@@ -1,7 +1,8 @@
 // Package peasantexport runs the Peasant CLI to export one durable session
-// transcript. It owns the subprocess boundary, the export-file lifecycle, and
-// the refusal vocabulary. The session API owns routing, the shared-contract
-// identity check, and the HTTP status mapping.
+// transcript and to list the session ids that have one. It owns the subprocess
+// boundary, the export-file lifecycle, and the refusal vocabulary. The session
+// API owns routing, the shared-contract identity check, and the HTTP status
+// mapping.
 package peasantexport
 
 import (
@@ -105,12 +106,17 @@ func fault(kind Kind, cause error, format string, args ...any) *Fault {
 }
 
 // Source runs the Peasant CLI. Binary is the executable to invoke (empty means
-// "peasant" on PATH). Timeout bounds one export even when the caller supplies
-// no deadline; a caller deadline that is sooner still wins. Empty uses the
-// shared timeout profile's outermost whole-operation tier.
+// "peasant" on PATH). Timeout bounds one export or session list even when the
+// caller supplies no deadline; a caller deadline that is sooner still wins.
+// Empty uses the shared timeout profile's outermost whole-operation tier.
+// listLimit, when positive, overrides the measured session-list page size.
+// Production leaves it zero. listCache reuses one successful catalog; it is
+// not a timeout tier.
 type Source struct {
-	Binary  string
-	Timeout time.Duration
+	Binary    string
+	Timeout   time.Duration
+	listLimit int
+	listCache sessionListCache
 }
 
 // NewSource returns the production source: `peasant` on PATH under the
