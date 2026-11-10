@@ -103,16 +103,7 @@ func checkMarkdownLinks(source string, data []byte) []string {
 func requiredProtocolLinks(root, tree, name string) []string {
 	switch name {
 	case "AGENTS.md":
-		roles := make([]string, 0, len(RoleSpecs))
-		for _, spec := range RoleSpecs {
-			roles = append(roles, strings.ToLower(spec.Name))
-		}
-		sort.Strings(roles)
-		links := make([]string, 0, len(roles))
-		for _, role := range roles {
-			links = append(links, "../"+role+"/SKILL.md")
-		}
-		return links
+		return agentRoleRows()
 	case "SKILLS.md":
 		entries, err := os.ReadDir(filepath.Join(root, tree))
 		if err != nil {
@@ -148,12 +139,11 @@ func requiredProtocolLinks(root, tree, name string) []string {
 		}
 		return links
 	case "CLAUDE.md":
-		// The directive points at the orchestrator role. The name comes from the
-		// role registry, so a renamed role cannot leave a stale link here.
-		for _, spec := range RoleSpecs {
-			if len(spec.OwnedPhases) == len(requiredPhases()) {
-				return []string{"../" + strings.ToLower(spec.Name) + "/SKILL.md"}
-			}
+		// The directive points at the orchestrator role: the role that owns the
+		// most phases, chosen deterministically so a phase moving between roles
+		// cannot silently drop this requirement.
+		if orchestrator := orchestratorRole(); orchestrator != "" {
+			return []string{"../" + orchestrator + "/SKILL.md"}
 		}
 		return nil
 	}
@@ -189,7 +179,24 @@ func requiredPhaseAnchors() int {
 func protocolDocumentFindings(root, tree, name string, data []byte) []string {
 	text := string(data)
 	var findings []string
-	for _, want := range requiredProtocolLinks(root, tree, name) {
+	required := requiredProtocolLinks(root, tree, name)
+	if len(required) == 0 && (name == "SKILL.md" || name == "SKILLS.md" || name == "AGENTS.md" || name == "CONSTRAINTS.md") {
+		findings = append(findings, fmt.Sprintf(
+			"%s/%s: the index has no entries — why: its registry-derived link set is empty, so nothing is mapped; "+
+				"where: internal/codegen/protocol_documents_guard_test.go requiredProtocolLinks; "+
+				"fix: restore the documents or skills the index maps", tree, name))
+	}
+	for _, want := range required {
+		if roleName, link, ok := strings.Cut(want, "\x00"); ok {
+			if !strings.Contains(text, "]("+link+")") || !strings.Contains(text, roleName) {
+				findings = append(findings, fmt.Sprintf(
+					"%s/%s: no row names %q with link %q — a role index must say which role it maps, not only where it points; "+
+						"where: internal/codegen/protocol_documents_guard_test.go agentRoleRows; "+
+						"fix: add the row, or remove the role from the registry if it is gone",
+					tree, name, roleName, link))
+			}
+			continue
+		}
 		if !strings.Contains(text, "]("+want+")") {
 			findings = append(findings, fmt.Sprintf(
 				"%s/%s: missing link %q — the document must map its registry entry to the owning skill; "+
@@ -210,10 +217,16 @@ func protocolDocumentFindings(root, tree, name string, data []byte) []string {
 				"%s/PROCESS.md: %d phase anchors, the phase registry declares %d — a phase without an anchor has no landing place for an inbound link",
 				tree, got, want))
 		}
-	case "MR_TEMPLATE.md":
-		if !strings.Contains(text, "\n- ") {
+		if got := len(phaseHeadings(text)); got != want {
 			findings = append(findings, fmt.Sprintf(
-				"%s/MR_TEMPLATE.md: no field list — a template must name the fields it asks the author to fill", tree))
+				"%s/PROCESS.md: %d '## Phase N: <name>' headings, the phase registry declares %d — an anchor with no heading names a phase the reader cannot read",
+				tree, got, want))
+		}
+		for _, heading := range phaseHeadings(text) {
+			if strings.TrimSpace(heading) == "" {
+				findings = append(findings, fmt.Sprintf(
+					"%s/PROCESS.md: a phase heading names no phase — fix: write '## Phase N: <name>'", tree))
+			}
 		}
 	}
 	return findings
@@ -433,7 +446,6 @@ func TestRenderedBacktickedCitationsResolve(t *testing.T) {
 	}
 }
 
-
 // constraintRowFindings checks that the writing row maps to exactly the skills
 // that carry the writing fragment. Presence alone would let a wrong owner return
 // beside the right ones.
@@ -468,4 +480,137 @@ func constraintRowFindings(text, tree string) []string {
 		}
 	}
 	return findings
+}
+
+// agentRoleRows names, for each registered role, the link its row must carry and
+// the role name the row must show. The name check is what stops five bare
+// bullets from passing as a role index.
+func agentRoleRows() []string {
+	rows := make([]string, 0, len(RoleSpecs))
+	for _, spec := range RoleSpecs {
+		rows = append(rows, spec.Name+"\x00../"+strings.ToLower(spec.Name)+"/SKILL.md")
+	}
+	sort.Strings(rows)
+	return rows
+}
+
+var phaseHeading = regexp.MustCompile(`(?m)^## Phase [0-9]+: (.+)$`)
+
+// phaseHeadings returns the phase name from every phase heading that names one
+// and an empty string for a heading that does not.
+func phaseHeadings(text string) []string {
+	var names []string
+	for _, match := range phaseHeading.FindAllStringSubmatch(text, -1) {
+		names = append(names, strings.TrimSpace(match[1]))
+	}
+	return names
+}
+
+// orchestratorRole is the role that owns the most phases, with the name as the
+// tie-break so the choice never depends on map order.
+func orchestratorRole() string {
+	best, bestCount := "", -1
+	for _, spec := range RoleSpecs {
+		name := strings.ToLower(spec.Name)
+		count := len(spec.OwnedPhases)
+		if count > bestCount || (count == bestCount && name < best) {
+			best, bestCount = name, count
+		}
+	}
+	return best
+}
+
+// TestProtocolGuardRejectsEachStub gives every branch of the structural guard a
+// defective sample, so no branch can be reverted to a check that always passes.
+func TestProtocolGuardRejectsEachStub(t *testing.T) {
+	root := t.TempDir()
+	tree := "skills"
+	for _, dir := range []string{"epoch", "architect"} {
+		if err := os.MkdirAll(filepath.Join(root, tree, dir), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, tree, dir, "SKILL.md"), []byte("# Skill\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	allowed := []string{
+		filepath.Join(root, tree, "protocol"),
+		filepath.Join(root, tree, "protocol", "figures"),
+		filepath.Join(root, tree, "architect-handoff"),
+	}
+	for _, dir := range allowed {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cases := []struct {
+		name string
+		doc  string
+		body string
+	}{
+		{
+			name: "AGENTS with links but no role names",
+			doc:  "AGENTS.md",
+			body: "# Roles\n\n- [x](../epoch/SKILL.md)\n- [y](../architect/SKILL.md)\n",
+		},
+		{
+			name: "SKILLS with one bullet",
+			doc:  "SKILLS.md",
+			body: "# Skills\n\n- See the skills.\n",
+		},
+		{
+			name: "SKILL with one bullet",
+			doc:  "SKILL.md",
+			body: "# Protocol\n\n- See the documents.\n",
+		},
+		{
+			name: "CLAUDE with no link",
+			doc:  "CLAUDE.md",
+			body: "# Directive\n\nRead the skill.\n",
+		},
+		{
+			name: "PROCESS with headings but no anchors",
+			doc:  "PROCESS.md",
+			body: "# Workflow\n\n## Phase 1: Request\n",
+		},
+		{
+			name: "PROCESS with anchors but unnamed phases",
+			doc:  "PROCESS.md",
+			body: "# Workflow\n\n<a id=\"phase-1\"></a>\n\n## Phase 1:\n",
+		},
+	}
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			findings := protocolDocumentFindings(root, tree, testCase.doc, []byte(testCase.body))
+			if len(findings) == 0 {
+				t.Fatalf("the stub was accepted: %s", testCase.body)
+			}
+		})
+	}
+}
+
+// TestCitationGuardAllowsOnlyRuntimeArtefacts pins the skip rule: a shipped
+// dotted tree is checked, a bare name and .agents.local are not.
+func TestCitationGuardAllowsOnlyRuntimeArtefacts(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "skills", "epoch", "SKILL.md")
+	cases := []struct {
+		text string
+		want int
+	}{
+		{"See `../.opencode/gone/SKILL.md`.", 1},
+		{".agents/skills/gone/SKILL.md is missing here.", 0},
+		{"See `.agents/gone/SKILL.md`.", 1},
+		{"Write `EPOCH.md` first.", 0},
+		{"Read `.agents.local/pasture/EPOCH.md`.", 0},
+	}
+	for _, testCase := range cases {
+		got := len(checkBacktickedCitations(source, []byte(testCase.text), root))
+		if got != testCase.want {
+			t.Errorf("%q produced %d findings, want %d", testCase.text, got, testCase.want)
+		}
+	}
 }

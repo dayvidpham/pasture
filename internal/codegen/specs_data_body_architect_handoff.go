@@ -49,8 +49,8 @@ var architectHandoffBody = SkillBody{
 			Content: "Plan ratified and user has approved proceeding with implementation.",
 		},
 		{
-			Id:    "arch-handoff-template",
-			Title: "Handoff Template",
+			Id:      "arch-handoff-template",
+			Title:   "Handoff Template",
 			Content: archHandoffTemplate(),
 		},
 		{
@@ -193,7 +193,7 @@ func archHandoffTemplate() string {
 	b.WriteString("## Supervisor Startup\n")
 	b.WriteString("1. Call `[[op:invoke_skill]](/pasture:supervisor)` to load your role instructions\n")
 	b.WriteString("2. Spawn ephemeral Explore subagents with the [[op:delegate_assignment]] tool when codebase exploration is needed\n")
-	b.WriteString("3. Read the RATIFIED PROPOSAL and URD with `[[rec:show]]` commands below\n")
+	b.WriteString("3. Read the RATIFIED PROPOSAL and URD before you fill the body; the Steps section shows the commands\n")
 	b.WriteString("4. Every vertical slice MUST have leaf tasks — any number, named after the real work units\n")
 	for _, field := range spec.RequiredFields {
 		b.WriteString("\n## " + handoffFieldHeading(field) + "\n<" + field + ">\n")

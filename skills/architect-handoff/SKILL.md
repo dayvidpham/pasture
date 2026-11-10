@@ -291,7 +291,7 @@ Storage: the handoff is authored directly in the **HANDOFF Pasture task body** (
 ## Supervisor Startup
 1. Call `Skill(/pasture:supervisor)` to load your role instructions
 2. Spawn ephemeral Explore subagents with the Agent tool when codebase exploration is needed
-3. Read the RATIFIED PROPOSAL and URD with `"${EPOCH_REC}" show` commands below
+3. Read the RATIFIED PROPOSAL and URD before you fill the body; the Steps section shows the commands
 4. Every vertical slice MUST have leaf tasks — any number, named after the real work units
 
 ## Request

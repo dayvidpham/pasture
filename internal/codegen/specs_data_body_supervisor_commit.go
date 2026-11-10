@@ -81,6 +81,16 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 		},
 		{
 			Id:    "sup-commit-commands",
+			Title: "Merge Request Description",
+			Content: `A merge request description states three things, and nothing else belongs in it:
+
+- What changed, in one sentence.
+- How it was verified, naming the command.
+- What was not done, if anything remains.
+
+Do not put an internal task code in the title or the body.`,
+		},
+		{
 			Title: "Commands",
 			Content: `` + "```" + `bash
 # Set these to the reviewed canonical source and direct test paths for this slice.
