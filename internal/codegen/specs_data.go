@@ -251,13 +251,13 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 				Lang:  "bash",
 				Label: "correct",
 				Code: `# Create all 3 severity groups immediately (even if empty)
-BLOCKER_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+BLOCKER_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$BLOCKER_ID_URI" pasture:severity:blocker
 [[rec]] label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+IMPORTANT_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$IMPORTANT_ID_URI" pasture:severity:important
 [[rec]] label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$([[rec]] create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+MINOR_ID_URI=$([[rec]] create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$MINOR_ID_URI" pasture:severity:minor
 [[rec]] label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
@@ -291,6 +291,14 @@ fi`,
 		Then:      "add as child of BOTH the severity group AND the slice it blocks",
 		ShouldNot: "add to severity group only",
 	},
+	"C-finding-lifecycle": {
+		Id:    "C-finding-lifecycle",
+		Given: "a code-review finding",
+		When:  "recording or closing it",
+		Then:  "create it as a child of its severity group labelled `pasture:finding`, and close it only when the reviewer who raised it verifies the fix — a worker or supervisor cannot close it, and a wave boundary never closes it",
+		ShouldNot: "close a finding from a worker or supervisor, close one at a wave boundary, " +
+			"or record severity in the finding label (severity lives on its parent group)",
+	},
 	"C-followup-timing": {
 		Id:    "C-followup-timing",
 		Given: "UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items",
@@ -298,7 +306,7 @@ fi`,
 		Then: "create the FOLLOWUP epic at UAT when user-DEFER'd items exist; " +
 			"the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items",
 		ShouldNot: "trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — " +
-			"all review findings must reach 0 before wave close, no severity is deferrable to FOLLOWUP",
+			"no review severity is deferrable to FOLLOWUP, and a finding stays open until its raiser verifies the fix",
 	},
 	"C-vertical-slices": {
 		Id:        "C-vertical-slices",
@@ -325,16 +333,16 @@ fi`,
 	},
 	"C-clean-review-exit": {
 		Id:    "C-clean-review-exit",
-		Given: "per-slice code review",
+		Given: "per-wave code review and end-of-epoch convergence",
 		When:  "evaluating review results",
-		Then: "iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round " +
-			"confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; " +
-			"a clean round is one where the re-review applies no fixes and finds nothing across all three severities; " +
-			"on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision",
-		ShouldNot: "close a wave on a fix-applying round; " +
-			"proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; " +
-			"hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
-			"batch review across multiple slices",
+		Then: "during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; " +
+			"after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; " +
+			"iterate review -> fix -> re-review up to the chosen review-effort budget; " +
+			"on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision",
+		ShouldNot: "require a zeroed round at a wave boundary; " +
+			"close a finding before the reviewer who raised it verifies the fix; " +
+			"proceed past the chosen budget without surfacing outstanding findings to the user; " +
+			"hardcode the budget; batch review across multiple slices",
 	},
 	"C-review-effort-budget": {
 		Id:    "C-review-effort-budget",
@@ -343,7 +351,8 @@ fi`,
 		Then: "request a configurable review-effort budget from the user — defaults: " +
 			"(1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; " +
 			"the review->fix->re-review loop iterates up to the chosen budget; " +
-			"on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision",
+			"convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; " +
+			"on budget exhaustion without convergence, surface the outstanding findings to the user for a decision",
 		ShouldNot: "hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); " +
 			"proceed past the chosen budget without surfacing outstanding findings to the user; " +
 			"loop forever when a finite budget was chosen",
@@ -752,7 +761,7 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		OwnershipNarrative: "You own Phases 7-12 of the epoch: " +
 			"receive handoff from architect (p7), " +
 			"create vertical slice decomposition IMPL_PLAN (p8), " +
-			"spawn workers for parallel implementation SLICE-N (p9), " +
+			"spawn workers for parallel implementation SLICE-{W}-{N} (p9), " +
 			"spawn reviewers for per-slice code review with severity tree (p10), " +
 			"coordinate user acceptance test (p11), " +
 			"commit, push, and hand off (p12). " +
@@ -785,10 +794,10 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 				When:  "starting implementation",
 				Then: "follow the Ride the Wave cycle: plan tasks with integration points, " +
 					"launch the wave of workers, spawn reviewers for per-slice review " +
-					"(clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, " +
-					"and iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate",
+					"(only an open BLOCKER finding gates the wave), workers fix per-slice with atomic commits, " +
+					"and iterate review -> fix -> re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate",
 				ShouldNot: "skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
-					"close a wave with any finding silently outstanding",
+					"require a zeroed round to close a wave; close a finding before the reviewer who raised it verifies the fix",
 			},
 		},
 	},
@@ -880,7 +889,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-afk-implement": {
 		Id:          "cmd-afk-implement",
 		Name:        "pasture:afk-implement",
-		Description: "Run an unattended implementation session with small PRs and a clean review wave, never merging",
+		Description: "Run an unattended implementation session with small PRs and a review wave that ends in convergence, never merging",
 		Title:       "AFK Implement",
 		RoleRef:     protocol.RoleSupervisor,
 		Phases: []protocol.PhaseId{
@@ -983,7 +992,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-sup-plan": {
 		Id:            "cmd-sup-plan",
 		Name:          "pasture:supervisor:plan-tasks",
-		Description:   "Decompose ratified plan into vertical slices (SLICE-N)",
+		Description:   "Decompose ratified plan into vertical slices (SLICE-{W}-{N})",
 		Title:         "Supervisor Plan Tasks",
 		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseImplPlan},
@@ -1081,7 +1090,7 @@ var CommandSpecs = map[string]CommandSpec{
 		RoleRef:       protocol.RoleReviewer,
 		Phases:        []protocol.PhaseId{protocol.PhaseCodeReview},
 		File:          "skills/reviewer-review-code/SKILL.md",
-		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
+		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor", "L-finding"},
 	},
 	"cmd-rev-comment": {
 		Id:          "cmd-rev-comment",
@@ -1119,7 +1128,7 @@ var CommandSpecs = map[string]CommandSpec{
 		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseCodeReview},
 		File:          "skills/impl-review/SKILL.md",
-		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
+		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor", "L-finding"},
 	},
 	"cmd-explore": {
 		Id:            "cmd-explore",
@@ -1275,7 +1284,7 @@ var ChecklistSpecs = map[string]Checklist{
 			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via [[rec]] comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not [[rec]] close)", Required: true},
 			{Id: "CL-worker-completion-done", Text: "All completion-gate items passed", Required: true},
 			{Id: "CL-worker-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
-			{Id: "CL-worker-review-eligible", Text: "Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings", Required: true},
+			{Id: "CL-worker-review-eligible", Text: "No open BLOCKER finding on this slice; IMPORTANT and MINOR findings stay open to convergence", Required: true},
 		},
 	},
 	"supervisor-review-ready": {
@@ -1291,12 +1300,12 @@ var ChecklistSpecs = map[string]Checklist{
 		RoleRef: protocol.RoleSupervisor,
 		Gate:    "landing",
 		Items: []ChecklistItem{
-			{Id: "CL-sup-all-accept", Text: "Fix-free clean re-review: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all 3 reviewers", Required: true},
+			{Id: "CL-sup-all-accept", Text: "All 3 reviewers ACCEPT at convergence and no open pasture:finding remains", Required: true},
 			{Id: "CL-sup-followup-created", Text: "FOLLOWUP epic created at UAT only if user-DEFER'd items exist (never from review severities)", Required: true},
 			{Id: "CL-sup-agent-commit", Text: "git agent-commit used (not git commit -m)", Required: true},
 			{Id: "CL-sup-tasks-closed", Text: "All upstream tasks closed or dependency-resolved", Required: true},
 			{Id: "CL-sup-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
-			{Id: "CL-sup-review-eligible", Text: "Eligible to close only after review by independent agents with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings", Required: true},
+			{Id: "CL-sup-review-eligible", Text: "Eligible to close only after convergence finds no open pasture:finding across all waves", Required: true},
 		},
 	},
 }
@@ -1377,8 +1386,8 @@ var WorkflowSpecs = map[string]Workflow{
 		RoleRef: protocol.RoleSupervisor,
 		Description: "Coordinated Phase 8-10 execution pattern. The supervisor orchestrates " +
 			"the full cycle: plan slices, launch workers, " +
-			"spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget " +
-			"until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate.",
+			"spawn reviewers for per-slice review, where only an open BLOCKER finding gates the wave, workers fix, " +
+			"and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.",
 		Stages: []WorkflowStage{
 			{
 				Id:        "rtw-plan",
@@ -1464,7 +1473,7 @@ var WorkflowSpecs = map[string]Workflow{
 					},
 					{
 						Id:          "rtw-review-severity-track",
-						Instruction: "Track findings in the 3 severity groups; ALL groups must reach 0 before wave close (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)",
+						Instruction: "Track findings as `pasture:finding` children of the 3 severity groups; only an open BLOCKER gates the wave, and open findings converge at the end (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)",
 					},
 					{
 						Id:          "rtw-review-fix",
@@ -1472,10 +1481,10 @@ var WorkflowSpecs = map[string]Workflow{
 					},
 				},
 				OperationalDetail: "- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)\n" +
-					"- **CLEAN REVIEW** = 0 BLOCKER + 0 IMPORTANT + 0 MINOR from ALL reviewers on a fix-free round\n" +
+					"- **WAVE GATE** = only an open BLOCKER finding blocks the wave; IMPORTANT and MINOR findings stay open\n" +
 					"- Per-slice fix+review; iterate up to the chosen review-effort budget\n" +
 					"- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)\n" +
-					"- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review until the slice is clean (0/0/0); on budget exhaustion without clean, surface outstanding findings to the user at a gate\n" +
+					"- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review up to the budget; convergence targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate\n" +
 					"- **MUST end on a review wave** — cannot proceed after a worker wave without review\n" +
 					"\n" +
 					"```text\n" +
@@ -1486,9 +1495,9 @@ var WorkflowSpecs = map[string]Workflow{
 					"  \u2502 Review slice (severity: BLOCKER/IMP/MIN)\u2502\n" +
 					"  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n" +
 					"                 \u2502\n" +
-					"          CLEAN? \u251c\u2500\u2500 YES (0/0/0) \u2192 slice passes, proceed\n" +
+					"          BLOCKER? \u251c\u2500\u2500 NO \u2192 wave advances, findings stay open\n" +
 					"                 \u2502\n" +
-					"                 \u2514\u2500\u2500 NO (any finding remains)\n" +
+					"                 \u2514\u2500\u2500 YES (an open BLOCKER)\n" +
 					"                       \u2502\n" +
 					"                       \u25bc\n" +
 					"              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n" +
@@ -1506,16 +1515,16 @@ var WorkflowSpecs = map[string]Workflow{
 					"                       \u2502\n" +
 					"                 loop (re-review)\n" +
 					"                       \u2502\n" +
-					"          repeat until clean (0/0/0) \u2014 up to the chosen budget, else surface to user\n" +
+					"          repeat to the budget \u2014 convergence at the end, else surface to user\n" +
 					"```",
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "success",
-						Condition: "All reviewers report 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free clean round — proceed to Phase 11 UAT",
+						Condition: "Convergence finds no open pasture:finding across all waves — proceed to Phase 11 UAT",
 					},
 					{
 						Type:      "continue",
-						Condition: "Any finding (BLOCKER, IMPORTANT, or MINOR) remains within budget — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)",
+						Condition: "An open BLOCKER gates the current wave, or convergence has not reached 0/0/0 within maxRounds — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)",
 					},
 				},
 			},
@@ -1954,6 +1963,7 @@ var LabelSpecs = map[string]LabelSpec{
 	"L-sev-blocker": {Id: "L-sev-blocker", Value: "pasture:severity:blocker", Special: true, SeverityRef: "BLOCKER"},
 	"L-sev-import":  {Id: "L-sev-import", Value: "pasture:severity:important", Special: true, SeverityRef: "IMPORTANT"},
 	"L-sev-minor":   {Id: "L-sev-minor", Value: "pasture:severity:minor", Special: true, SeverityRef: "MINOR"},
+	"L-finding":     {Id: "L-finding", Value: "pasture:finding", Special: true, Description: "A single review finding; child of a severity group"},
 	"L-followup":    {Id: "L-followup", Value: "pasture:epic-followup", Special: true, Description: "Follow-up epic for user-DEFER'd UAT items only"},
 }
 
@@ -1975,12 +1985,12 @@ var TitleConventions = []TitleConvention{
 	{Pattern: "UAT-{N}: {description}", LabelRef: "L-p5s5", CreatedBy: "architect", PhaseRef: "p5"},
 	{Pattern: "IMPL_PLAN: {description}", LabelRef: "L-p8s8", CreatedBy: "supervisor", PhaseRef: "p8"},
 	{
-		Pattern: "SLICE-{N}: {description}", LabelRef: "L-p9s9", CreatedBy: "supervisor", PhaseRef: "p9",
-		Note: "N identifies slice within the implementation plan",
+		Pattern: "SLICE-{W}-{N}: {description}", LabelRef: "L-p9s9", CreatedBy: "supervisor", PhaseRef: "p9",
+		Note: "W identifies the wave, N the slice within that wave",
 	},
 	{
-		Pattern: "SLICE-{N}-REVIEW-{axis}-{round}: {description}", LabelRef: "L-p10s10", CreatedBy: "reviewer", PhaseRef: "p10",
-		Note: "axis=A|B|C, round starts at 1",
+		Pattern: "WAVE-{W}-REVIEW-{axis}-{round}: {description}", LabelRef: "L-p10s10", CreatedBy: "reviewer", PhaseRef: "p10",
+		Note: "axis=A|B|C, round starts at 1; findings hang under this wave review task",
 	},
 	{
 		Pattern: "IMPL-REVIEW-{axis}-{round}: {description}", LabelRef: "L-p10s10", CreatedBy: "supervisor", PhaseRef: "p10",
@@ -1989,7 +1999,7 @@ var TitleConventions = []TitleConvention{
 	{
 		Pattern: "FOLLOWUP: {description}", LabelRef: "L-followup", CreatedBy: "supervisor",
 		Note: "Follow-up epic created at UAT when user-DEFER'd items exist (never from review severities; " +
-			"all review findings must reach 0 before wave close). " +
+			"review findings stay open until their raiser verifies the fix and converge at the end). " +
 			"Single-parent epic relationship — no followup-of-followup.",
 	},
 	{
@@ -2090,7 +2100,7 @@ var SubstepDataMap = map[string][]SubstepData{
 		{
 			Id: "s8", Type: "plan", Execution: "sequential", Order: 1,
 			LabelRef:        "L-p8s8",
-			Description:     "Identify production code paths. Create SLICE-N tasks with leaf tasks. Assign workers.",
+			Description:     "Identify production code paths. Create SLICE-{W}-{N} tasks with leaf tasks. Assign workers.",
 			StartupSequence: true,
 		},
 	},

@@ -28,24 +28,26 @@ Phase 9: BUILD
   ├─ Workers implement their slices in parallel
   └─ Workers do NOT shut down when finished
 
-Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
+Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget)
   ├─ Cycle 1:
   │   ├─ Spawn ephemeral reviewers (delegation operation, per-slice review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
+  │   ├─ Reviewers label every finding pasture:finding under its severity group
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review
   ├─ Cycle 2 (if needed): same pattern
   ├─ Cycle N (as many as needed): same pattern
-  └─ Continue until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
+  └─ Each wave advances when no BLOCKER is open; IMPORTANT and MINOR findings stay open
 
 DONE → Phase 11 (UAT)
   ├─ Shut down Workers
   └─ FOLLOWUP epic (if any) is created at UAT from user-DEFER'd items only
 
 Cycle Exit Conditions:
-  Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR   → Proceed to Phase 11 (UAT)
-  ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (up to chosen budget; on exhaustion, surface to user)
-  Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning
+  A wave gate: no open BLOCKER finding                        → the wave advances; open findings stay open
+  After the last wave: convergence over open pasture:finding  → targets 0/0/0 within maxRounds; on exhaustion, surface to the user
+  A finding closes only when the reviewer who raised it verifies the fix
+  Genuinely stuck (cannot converge)                           → Escalate to architect for re-planning
 
 ```
 
@@ -88,20 +90,20 @@ Cycle Exit Conditions:
 **[sup-spawn-max-cycles]**
 - Given: worker-reviewer cycle
 - When: counting iterations
-- Then: iterate review->fix->re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, surface outstanding findings to the user at a gate
-- Should not: hardcode the budget, proceed past the chosen budget without surfacing to the user, close a wave on a fix-applying round, or proceed with any finding silently outstanding
+- Then: iterate review->fix->re-review up to the chosen review-effort budget; only an open BLOCKER gates a wave, IMPORTANT and MINOR findings stay open, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate
+- Should not: hardcode the budget, proceed past the chosen budget without surfacing to the user, require a zeroed round to close a wave, or close a finding before its raiser verifies the fix
 
 **[sup-spawn-important-after-cycles]**
 - Given: IMPORTANT or MINOR findings remain
 - When: deciding next step
-- Then: keep iterating review->fix->re-review until ALL severity groups reach 0 — every severity must be resolved before the wave closes
-- Should not: proceed to UAT with non-zero findings or route any review severity (IMPORTANT/MINOR) to the FOLLOWUP epic
+- Then: keep them open past the wave gate and converge over every open `pasture:finding` at the end — only an open BLOCKER blocks the wave
+- Should not: proceed to UAT with an open BLOCKER or route any review severity (IMPORTANT/MINOR) to the FOLLOWUP epic
 
 **[frag--review-clean-exit]**
-- Given: per-slice code review
+- Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; close a finding only when the reviewer who raised it verifies the fix; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding before its raiser verifies the fix; loop forever when a finite budget was chosen
 
 ## Task Recovery
 
@@ -138,15 +140,15 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 4. REVIEW → Ephemeral reviewers (task tool): review per-slice
 5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits
 6. RE-REVIEW → Spawn new ephemeral reviewers for re-review
-7. REPEAT → Steps 5-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface to the user
-8. TRACK → ALL severities (BLOCKER/IMPORTANT/MINOR) must reach 0 — none route to FOLLOWUP
-9. NEXT  → When fix-free clean (0 BLOCKER + 0 IMPORTANT + 0 MINOR) → Phase 11 (UAT); escalate to architect only if genuinely stuck
+7. REPEAT → Steps 5-6 up to the chosen review-effort budget; only an open BLOCKER gates the wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface to the user
+8. TRACK → Open findings stay open until their raiser verifies the fix; none route to FOLLOWUP
+9. NEXT  → When convergence finds no open `pasture:finding` → Phase 11 (UAT); escalate to architect only if genuinely stuck
 ```
 
 **Key rules:**
 - Reviewers are ephemeral (spawned per review cycle with the task tool)
 - Slices are **never closed** until reviewed at least once
-- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; on budget exhaustion without clean, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck
+- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget; only an open BLOCKER gates a wave, and convergence at the end queries open `pasture:finding` toward 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck
 - The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities
 
 ## Handoff Template (Supervisor → Worker)
@@ -199,7 +201,7 @@ full Ride the Wave cycle.
 
 ```
 delegation: {
-  description: "Worker: implement SLICE-N",
+  description: "Worker: implement SLICE-{W}-{N}",
   prompt: `Call skill(/pasture:worker) and implement the assigned slice.
 
 Pasture Task ID: "${TASK_ID_URI}"
@@ -253,8 +255,8 @@ Per [sup-worker-persistence], workers stay alive for the full review-fix cycle:
 4. If ANY findings (BLOCKER/IMPORTANT/MINOR): supervisor sends fix assignment to worker
 5. Worker fixes issues → notifies supervisor
 6. New ephemeral reviewers re-review
-7. Repeat steps 4-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate
-8. After a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR): supervisor shuts down worker
+7. Repeat steps 4-6 up to the chosen review-effort budget; only an open BLOCKER gates the wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate
+8. After convergence finds no open `pasture:finding`: supervisor shuts down worker
 
 ### Fix Assignment Message Template
 
@@ -267,10 +269,10 @@ send_assignment_message({
 BLOCKERs (must fix — blocks slice closure):
 - "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
-IMPORTANT (must fix — must reach 0 before wave close):
+IMPORTANT (must fix — stays open until its raiser verifies the fix):
 - "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
-MINOR (must fix — must reach 0 before wave close):
+MINOR (must fix — stays open until its raiser verifies the fix):
 - "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
 
 After fixing all items:

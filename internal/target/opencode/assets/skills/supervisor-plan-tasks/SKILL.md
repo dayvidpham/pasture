@@ -1,13 +1,13 @@
 ---
 name: supervisor-plan-tasks
-description: Decompose ratified plan into vertical slices (SLICE-N)
+description: Decompose ratified plan into vertical slices (SLICE-{W}-{N})
 ---
 
 # Supervisor Plan Tasks
 
 <!-- BEGIN GENERATED FROM pasture schema -->
 <!-- GENERATED FROM pasture v0.0.32 artifact v1 -->
-**Command:** `pasture:supervisor:plan-tasks` — Decompose ratified plan into vertical slices (SLICE-N)
+**Command:** `pasture:supervisor:plan-tasks` — Decompose ratified plan into vertical slices (SLICE-{W}-{N})
 
 Break RATIFIED_PLAN into vertical slice Implementation tasks for workers.
 
@@ -90,7 +90,7 @@ L2 Test File Requirements:
 **[sup-plan-review-effort-budget]**
 - Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate (per C-review-effort-budget)
 - When: deciding how much review-and-fix effort to spend per slice
-- Then: request a configurable review-effort budget from the user (defaults: 3 rounds, 1 round, 0 rounds, unlimited, custom); the Phase-10 review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Then: request a configurable review-effort budget from the user (defaults: 3 rounds, 1 round, 0 rounds, unlimited, custom); the Phase-10 review->fix->re-review loop iterates up to the chosen budget, only an open BLOCKER gates a wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 ## Task Recovery
@@ -126,10 +126,10 @@ At the **start of Phase 8** — like the Phase-1 research-depth gate — request
 | **3 rounds** | Up to three review -> fix -> re-review cycles per slice |
 | **1 round** | A single review + one fix pass |
 | **0 rounds** | No review-fix iteration (review once, surface anything found) |
-| **unlimited** | Iterate until a fix-free clean 0/0/0 round (no upper bound) |
+| **unlimited** | Iterate until convergence (no upper bound) |
 | **custom** | A user-specified number of rounds |
 
-The Phase-10 review->fix->re-review loop iterates **up to the chosen budget** until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR. On **budget exhaustion WITHOUT a clean round**, SURFACE the outstanding findings to the user for a decision — never proceed dirty, never loop forever, and never hardcode the budget. Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.
+The Phase-10 review->fix->re-review loop iterates **up to the chosen budget**. Only an open BLOCKER gates a wave; IMPORTANT and MINOR findings stay open, and convergence at the end queries every open `pasture:finding` toward 0/0/0 within **maxRounds**. On **budget exhaustion without convergence**, SURFACE the outstanding findings to the user for a decision — never proceed dirty, never loop forever, and never hardcode the budget. Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.
 
 ## Critical: Vertical Slices, Not Horizontal Layers
 

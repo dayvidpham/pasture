@@ -10,7 +10,7 @@ var implSliceBody = SkillBody{
 			Id:        "impl-slice-full-specs",
 			Given:     "IMPL_PLAN complete",
 			When:      "assigning slices",
-			Then:      "create SLICE-N tasks with full specs",
+			Then:      "create SLICE-{W}-{N} tasks with full specs",
 			ShouldNot: "leave specs vague",
 		},
 		{

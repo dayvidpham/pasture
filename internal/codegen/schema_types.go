@@ -189,13 +189,16 @@ type SkillInvocationElem struct {
 	Note       string `xml:"note,attr,omitempty"`
 }
 
-// SeverityTreeElem is the <severity-tree ...> element.
+// SeverityTreeElem is the <severity-tree ...> element. When enabled, it is the
+// gate declaration for the review phase: MaxRounds is the count parameter the
+// convergence rule reads, so the review bound has one home in the schema.
 type SeverityTreeElem struct {
-	Enabled  string         `xml:"enabled,attr"`
-	Creation string         `xml:"creation,attr,omitempty"`
-	Reason   string         `xml:"reason,attr,omitempty"`
-	Rules    []string       `xml:"rule"`
-	Groups   []SevGroupElem `xml:"group"`
+	Enabled   string         `xml:"enabled,attr"`
+	Creation  string         `xml:"creation,attr,omitempty"`
+	MaxRounds string         `xml:"maxRounds,attr,omitempty"`
+	Reason    string         `xml:"reason,attr,omitempty"`
+	Rules     []string       `xml:"rule"`
+	Groups    []SevGroupElem `xml:"group"`
 }
 
 // SevGroupElem is a <group severity-ref="..." label-ref="..." .../> element.

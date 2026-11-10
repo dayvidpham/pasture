@@ -7,7 +7,7 @@ var afkImplementBody = SkillBody{
 	Behaviors: []BehaviorSpec{
 		{
 			Id:        "B-afk-no-merge",
-			Given:     "an unattended session with green CI and a clean review wave",
+			Given:     "an unattended session with green CI and a review wave with no open blocker",
 			When:      "a pull request is ready",
 			Then:      "leave it open, record the merge order and evidence, and stop",
 			ShouldNot: "merge, self-approve on the human's behalf, or push to the default branch",
@@ -27,15 +27,15 @@ var afkImplementBody = SkillBody{
 			ShouldNot: "block or idle waiting for approval",
 		},
 		{
-			Id:        "B-afk-clean-wave",
+			Id:        "B-afk-wave-gate",
 			Given:     "a completed iteration",
 			When:      "running the review wave",
-			Then:      "require three independent ACCEPT votes with zero blockers and zero importants",
-			ShouldNot: "substitute self-review, ignore findings, or fabricate consensus",
+			Then:      "require three independent ACCEPT votes with zero open blockers; IMPORTANT and MINOR findings stay open to convergence",
+			ShouldNot: "substitute self-review, ignore findings, fabricate consensus, or require a zeroed round at the wave gate",
 		},
 		{
-			Id:        "B-afk-stop-at-clean",
-			Given:     "every scoped iteration has an open PR and the final cross-stack wave is clean",
+			Id:        "B-afk-stop-at-convergence",
+			Given:     "every scoped iteration has an open PR and the final cross-stack convergence has no open finding",
 			When:      "the run is complete",
 			Then:      "stop and write the morning handoff",
 			ShouldNot: "start new scope or continue looking for work",
@@ -59,7 +59,7 @@ var afkImplementBody = SkillBody{
 				"they say they are going AFK or to bed, ask for overnight or unattended implementation, say " +
 				"\"don't block on me\", ask for progressive adoption, or ask for open pull requests that must " +
 				"not be merged. It also fits an in-flight branch that needs its gates run, a PR opened, and a " +
-				"review wave driven to clean.\n\n" +
+				"review wave driven to convergence.\n\n" +
 				"Do not use it for an attended session where the human expects the normal live URE/UAT gates, " +
 				"and do not use it to authorize a release, deploy, or merge.",
 		},
@@ -75,7 +75,7 @@ var afkImplementBody = SkillBody{
 				"| Progressive adoption | Each iteration is independently reviewable and revertable; prefer several small PRs to one large one. |\n" +
 				"| Stack changes when needed | Base an iteration on its predecessor only when it depends on it; otherwise branch from the default branch. |\n" +
 				"| Open PRs, do not merge | Push feature branches and open ready PRs; never merge or push to the default branch. |\n" +
-				"| Stop on a clean review wave | Use the exit criteria below; do not keep burning the backlog after clean. |\n" +
+				"| Stop at convergence | Use the exit criteria below; do not keep burning the backlog after convergence. |\n" +
 				"| Handle design questions sensibly | Decide reversible questions from the repository, record the rationale, and continue. |\n" +
 				"| Review in the morning | Write a five-minute handoff with merge order, decisions, risks, and first checks. |",
 		},
@@ -157,15 +157,16 @@ var afkImplementBody = SkillBody{
 				},
 				{
 					Id:    "afk-review-clean",
-					Title: "Clean Wave",
-					Content: "A clean wave is three ACCEPT votes with zero blockers and zero importants. Fix blockers " +
-						"and importants in the same branch, commit atomically, push, and re-run the wave. Fix a minor " +
-						"finding if trivial; otherwise record it as follow-up. Cap the loop at three cycles per PR.\n\n" +
-						"If a blocker survives three cycles, mark the PR draft, write the exact blocker and attempted " +
-						"fixes, and move to independent work. Do not merge and do not call the wave clean.\n\n" +
-						"After the final iteration, run one cross-stack wave over all open PRs or the cumulative diff: " +
-						"conflicting assumptions, duplicated helpers, and merge-order breakage. That is the wave that " +
-						"must end clean before stopping.",
+					Title: "Wave Gate and Convergence",
+					Content: "A wave advances on three ACCEPT votes with zero open blockers. Fix blockers in the same branch, " +
+						"commit atomically, push, and re-run the wave. IMPORTANT and MINOR findings stay open past the wave " +
+						"gate; fix a minor if trivial, otherwise record it for convergence. A finding closes only when the " +
+						"reviewer who raised it verifies the fix. Cap the loop at three rounds per PR.\n\n" +
+						"If a blocker survives three rounds, mark the PR draft, write the exact blocker and attempted " +
+						"fixes, and move to independent work. Do not merge and do not report the work as done.\n\n" +
+						"After the final iteration, run one cross-stack convergence over all open PRs or the cumulative diff: " +
+						"conflicting assumptions, duplicated helpers, and merge-order breakage. That convergence must find " +
+						"no open finding before stopping.",
 				},
 			},
 		},
@@ -215,7 +216,7 @@ var afkImplementBody = SkillBody{
 			Content: "Create one tracker task per iteration and link it to the parent scope. Add labels and " +
 				"comments; never delete audit history. Comment the branch, commit SHA, PR URL, gate results, and " +
 				"each review round with its votes.\n\n" +
-				"Workers report evidence and never close their own tasks. Close only after the clean wave, and " +
+				"Workers report evidence and never close their own tasks. Close only after convergence finds no open finding, and " +
 				"only for work you supervised and verified. If the tracker is unavailable, report the store path, " +
 				"the failed operation, and the repair needed, then continue with Git and PR evidence. A failed " +
 				"query is not proof of no work.",
@@ -233,15 +234,15 @@ var afkImplementBody = SkillBody{
 				"4. Risks: residual findings, unverified paths, and flaky or skipped gates.\n" +
 				"5. Scope boundary: what you deliberately did not do.\n" +
 				"6. First three checks: the fastest way for the human to validate the work.\n\n" +
-				"Never describe unmerged work as done or shipped. Say open, review clean, awaiting merge.",
+				"Never describe unmerged work as done or shipped. Say open, convergence complete, awaiting merge.",
 		},
 		{
 			Id:    "afk-exit-criteria",
 			Title: "Exit Criteria",
 			Content: "Stop the session when all of these are true:\n\n" +
 				"- Every scoped iteration has an open PR, or is a draft with a hard-stop reason.\n" +
-				"- The final cross-stack review wave is clean: three ACCEPT, zero blockers, zero importants, or the " +
-				"three-cycle budget is exhausted and residual findings are recorded.\n" +
+				"- The final cross-stack convergence has no open finding: three ACCEPT and no open blocker, or the " +
+				"three-round budget is exhausted and residual findings are recorded.\n" +
 				"- The morning handoff is written and names the merge order.\n" +
 				"- No merge occurred, the default branch is untouched, and no unrelated work was modified.\n\n" +
 				"Then stop and report. Do not start new scope, do not make one more small fix, and do not wait or " +
@@ -255,7 +256,7 @@ var afkImplementBody = SkillBody{
 				"- Silencing, skipping, or deleting a failing test to reach green.\n" +
 				"- Refactoring adjacent code because it was already open.\n" +
 				"- Asking a question mid-run and idling, or blocking forever on approval.\n" +
-				"- Calling a wave clean without independent reviewers or without reading their findings.\n" +
+				"- Claiming convergence without independent reviewers or without reading their findings.\n" +
 				"- Expanding the backlog instead of stopping at the approved scope.\n" +
 				"- Describing a red or draft PR as ready in the handoff.",
 		},

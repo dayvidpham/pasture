@@ -148,7 +148,8 @@ const (
 	FragSupBlockerDualParent FragmentId = "frag--sup-blocker-dual-parent"
 
 	// FragSupDeferredFollowup is the canonical "route ONLY user-DEFER'd UAT items
-	// to the FOLLOWUP epic; all review severities must reach 0 before wave close"
+	// to the FOLLOWUP epic; open review findings stay open until their raiser
+	// verifies the fix and converge at the end"
 	// behavior shared between the supervisor and impl-review skill bodies.
 	// (Renamed from FragSupImportantMinorFollowup per R7/A1: review severities are
 	// no longer deferrable; the FOLLOWUP epic is fed solely by DEFER'd UAT items.)
@@ -164,7 +165,7 @@ const (
 	FragSupSeverityTree FragmentId = "frag--sup-severity-tree"
 
 	// FragSupNamingConvention is the canonical Naming Convention prose section
-	// (SLICE-{N}-REVIEW-{axis}-{round} format) shared between the supervisor and
+	// (WAVE-{W}-REVIEW-{axis}-{round} format) shared between the supervisor and
 	// impl-review skill bodies.
 	FragSupNamingConvention FragmentId = "frag--sup-naming-convention"
 
@@ -189,12 +190,13 @@ const (
 	// worker-implement skill bodies (wired in SLICE-2).
 	FragValidationCases FragmentId = "frag--validation-cases"
 
-	// FragReviewCleanExit is the canonical "iterate review->fix->re-review up to the
-	// chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within
-	// budget; on budget exhaustion without clean, surface outstanding findings to
-	// the user at a gate" behavior (R7/A1, reworked to a configurable budget at
-	// v2-2). Referenced via behaviorRef from the supervisor and impl-review skill
-	// bodies (wired in SLICE-3).
+	// FragReviewCleanExit is the canonical "two-phase review: only an open BLOCKER
+	// gates a wave; after the last wave convergence over open pasture:finding
+	// tasks targets 0/0/0 within maxRounds; on budget exhaustion without
+	// convergence, surface outstanding findings to the user at a gate" behavior
+	// (R7/A1, reworked to a configurable budget at v2-2 and to the two-phase
+	// model under PROPOSAL-4). Referenced via behaviorRef from the supervisor and
+	// impl-review skill bodies (wired in SLICE-3).
 	FragReviewCleanExit FragmentId = "frag--review-clean-exit"
 )
 

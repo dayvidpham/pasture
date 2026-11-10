@@ -193,7 +193,7 @@ Update status on start:
 		{
 			Id:    "wrk-followup-slices",
 			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
-			Content: `You may be assigned a ` + "`" + `FOLLOWUP_SLICE-N` + "`" + ` task instead of a ` + "`" + `SLICE-N` + "`" + ` task. The implementation procedure is identical, with these additions:
+			Content: `You may be assigned a ` + "`" + `FOLLOWUP_SLICE-N` + "`" + ` task instead of a ` + "`" + `SLICE-{W}-{N}` + "`" + ` task. The implementation procedure is identical, with these additions:
 
 - **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check ` + "`" + `[[rec]] show "${TASK_ID_URI}"` + "`" + ` for a "DEFER'd-Item Leaf Tasks" section.
 - **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.

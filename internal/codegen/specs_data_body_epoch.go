@@ -39,7 +39,7 @@ var epochBody = SkillBody{
 			Given:     "UAT (Phase 5 or 11) produces one or more user-DEFER'd items",
 			When:      "finishing UAT",
 			Then:      "Supervisor creates a follow-up epic (label pasture:epic-followup) from the user-DEFER'd UAT items only",
-			ShouldNot: "create a follow-up epic from any review severity (BLOCKER/IMPORTANT/MINOR) — all review severities must reach 0 before wave close",
+			ShouldNot: "create a follow-up epic from any review severity (BLOCKER/IMPORTANT/MINOR) — the FOLLOWUP epic is fed only by user-DEFER'd UAT items",
 		},
 		{
 			Id:        "epoch-supervisor-not-idle",
@@ -48,9 +48,9 @@ var epochBody = SkillBody{
 			Then:      "let it work — an apparently-idle supervisor is usually running Explore subagents to map the codebase",
 			ShouldNot: "shut down or restart a supervisor that looks idle at the start of the IMPL_PLAN phase",
 		},
-		// R7/A1: Phase-10 code review iterates up to the chosen review-effort budget
-		// until a fix-free clean round confirms 0/0/0; on budget exhaustion without
-		// clean, surface outstanding findings to the user at a gate. Resolves to
+		// R7/A1: Phase-10 code review gates each wave on open BLOCKERs and then
+		// converges over open findings; on budget exhaustion without convergence,
+		// surface outstanding findings to the user at a gate. Resolves to
 		// SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
 		behaviorRef(FragReviewCleanExit),
 		{
@@ -86,9 +86,9 @@ var epochBody = SkillBody{
 2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: ` + "`" + `[[rec]] dep add "${PARENT_URI}" --blocked-by "${CHILD_URI}"` + "`" + `
 3. **USER ENGAGEMENT** — URE and UAT at multiple checkpoints
 4. **CONSENSUS REQUIRED** — All 3 reviewers must ACCEPT before proceeding
-5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. ALL three groups must reach 0 before a review wave closes
+5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. Only an open BLOCKER gates a review wave; open findings converge at the end
 6. **FOLLOW-UP EPIC** — Fed ONLY by user-DEFER'd UAT items (Phase 5/11), never by any review severity; the Supervisor creates it from those DEFER'd items
-7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate; workers persist throughout`,
+7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review up to the chosen review-effort budget; only an open BLOCKER gates a wave, and after the last wave convergence queries every open pasture:finding toward 0/0/0 within maxRounds; on exhaustion, surface outstanding findings to the user at a gate; workers persist throughout`,
 		},
 		{
 			Id:    "epoch-12-phase-workflow",
@@ -104,8 +104,8 @@ Phase 5:  pasture:p5-user       -> Plan UAT (user acceptance test)
 Phase 6:  pasture:p6-plan       -> Ratification (supersede old proposals)
 Phase 7:  pasture:p7-plan       -> Handoff (architect -> supervisor)
 Phase 8:  pasture:p8-impl       -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
-Phase 9:  pasture:p9-impl       -> SLICE-N (parallel workers; Ride the Wave — workers persist for review)
-Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; review->fix->re-review up to the chosen review-effort budget until 0/0/0 clean, else surface to user)
+Phase 9:  pasture:p9-impl       -> SLICE-{W}-{N} (parallel workers; Ride the Wave — workers persist for review)
+Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; only an open BLOCKER gates a wave, then convergence at the end, else surface to user)
 Phase 11: pasture:p11-user      -> Implementation UAT
 Phase 12: pasture:p12-impl      -> Landing (commit, push, hand off)
 ` + "```" + `
@@ -163,7 +163,7 @@ Use the explicit task graph; no molecule subsystem is required.`,
 			Id:    "epoch-followup-epic",
 			Title: "Follow-up Epic",
 			Content: `**Trigger:** UAT (Phase 5 or 11) produces one or more **user-DEFER'd items**.
-The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (BLOCKER/IMPORTANT/MINOR all reach 0 before wave close).
+The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (review findings stay open until their raiser verifies the fix and converge at the end).
 **Owner:** Supervisor creates the follow-up epic.
 
 ` + "```" + `bash
@@ -200,15 +200,15 @@ See ` + "`" + `/pasture:supervisor` + "`" + ` and ` + "`" + `/pasture:impl-revie
 
 ` + "```" + `bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_ID_URI=$([[rec]] create "SLICE-N-REVIEW-{axis}-{round} BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_ID_URI=$([[rec]] create "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$BLOCKER_ID_URI" pasture:severity:blocker
 [[rec]] label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$([[rec]] create "SLICE-N-REVIEW-{axis}-{round} IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_ID_URI=$([[rec]] create "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$IMPORTANT_ID_URI" pasture:severity:important
 [[rec]] label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$([[rec]] create "SLICE-N-REVIEW-{axis}-{round} MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_ID_URI=$([[rec]] create "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 [[rec]] label add "$MINOR_ID_URI" pasture:severity:minor
 [[rec]] label add "$MINOR_ID_URI" pasture:p10-impl:s10-review

@@ -75,8 +75,8 @@ var reviewerCommentBody = SkillBody{
 			Content: `| Severity | When to Use | Blocks? |
 |----------|-------------|---------|
 | BLOCKER | Security, type errors, test failures, broken production code paths | Yes (code review only) |
-| IMPORTANT | Performance, missing validation, architectural concerns | Must reach 0 before review wave closes |
-| MINOR | Style, optional optimizations, naming improvements | Must reach 0 before review wave closes |`,
+| IMPORTANT | Performance, missing validation, architectural concerns | No — stays open past the wave gate and converges at the end |
+| MINOR | Style, optional optimizations, naming improvements | No — stays open past the wave gate and converges at the end |`,
 		},
 		{
 			Id:    "rev-comment-plan-vs-code",

@@ -66,10 +66,10 @@ pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
 - Should not: delete or close tasks prematurely, remove labels
 
 **[C-clean-review-exit]**
-- Given: per-slice code review
+- Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; a clean round is one where the re-review applies no fixes and finds nothing across all three severities; on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; hardcode the budget; proceed past the chosen budget without surfacing to the user; batch review across multiple slices
+- Then: during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -> fix -> re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: require a zeroed round at a wave boundary; close a finding before the reviewer who raised it verifies the fix; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
@@ -116,7 +116,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-review-effort-budget]**
 - Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
 - When: deciding how much review-and-fix effort to spend per slice
-- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[C-slice-review-before-close]**
@@ -195,7 +195,7 @@ Agents coordinate through **beads** tasks and comments:
 - Given: UAT (Phase 5 or 11) produces one or more user-DEFER'd items
 - When: finishing UAT
 - Then: Supervisor creates a follow-up epic (label pasture:epic-followup) from the user-DEFER'd UAT items only
-- Should not: create a follow-up epic from any review severity (BLOCKER/IMPORTANT/MINOR) — all review severities must reach 0 before wave close
+- Should not: create a follow-up epic from any review severity (BLOCKER/IMPORTANT/MINOR) — the FOLLOWUP epic is fed only by user-DEFER'd UAT items
 
 **[epoch-supervisor-not-idle]**
 - Given: a freshly spawned supervisor (Phase 8 IMPL_PLAN)
@@ -204,10 +204,10 @@ Agents coordinate through **beads** tasks and comments:
 - Should not: shut down or restart a supervisor that looks idle at the start of the IMPL_PLAN phase
 
 **[frag--review-clean-exit]**
-- Given: per-slice code review
+- Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; close a finding only when the reviewer who raised it verifies the fix; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding before its raiser verifies the fix; loop forever when a finite budget was chosen
 
 **[epoch-autonomous-progression]**
 - Given: non-user-gated phase completes
@@ -253,9 +253,9 @@ Select the current registered author with pasture task agents list and pasture t
 2. **DEPENDENCY CHAINING** — Each task blocks its predecessor: `pasture task dep add "${PARENT_URI}" --blocked-by "${CHILD_URI}"`
 3. **USER ENGAGEMENT** — URE and UAT at multiple checkpoints
 4. **CONSENSUS REQUIRED** — All 3 reviewers must ACCEPT before proceeding
-5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. ALL three groups must reach 0 before a review wave closes
+5. **EAGER SEVERITY TREE** — Code reviews (Phase 10) always create 3 severity groups (BLOCKER, IMPORTANT, MINOR); empty groups closed immediately. Only an open BLOCKER gates a review wave; open findings converge at the end
 6. **FOLLOW-UP EPIC** — Fed ONLY by user-DEFER'd UAT items (Phase 5/11), never by any review severity; the Supervisor creates it from those DEFER'd items
-7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate; workers persist throughout
+7. **RIDE THE WAVE** — Phases 8-10 form one continuous cycle: Explore subagents (P8), workers implement (P9), ephemeral reviewers review (P10), iterating review→fix→re-review up to the chosen review-effort budget; only an open BLOCKER gates a wave, and after the last wave convergence queries every open pasture:finding toward 0/0/0 within maxRounds; on exhaustion, surface outstanding findings to the user at a gate; workers persist throughout
 
 ## The 12-Phase Workflow
 
@@ -270,8 +270,8 @@ Phase 5:  pasture:p5-user       -> Plan UAT (user acceptance test)
 Phase 6:  pasture:p6-plan       -> Ratification (supersede old proposals)
 Phase 7:  pasture:p7-plan       -> Handoff (architect -> supervisor)
 Phase 8:  pasture:p8-impl       -> IMPL_PLAN (supervisor decomposes into slices; Explore subagents)
-Phase 9:  pasture:p9-impl       -> SLICE-N (parallel workers; Ride the Wave — workers persist for review)
-Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; review->fix->re-review up to the chosen review-effort budget until 0/0/0 clean, else surface to user)
+Phase 9:  pasture:p9-impl       -> SLICE-{W}-{N} (parallel workers; Ride the Wave — workers persist for review)
+Phase 10: pasture:p10-impl      -> Code Review (ephemeral reviewers review all slices; only an open BLOCKER gates a wave, then convergence at the end, else surface to user)
 Phase 11: pasture:p11-user      -> Implementation UAT
 Phase 12: pasture:p12-impl      -> Landing (commit, push, hand off)
 ```
@@ -326,7 +326,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 ## Follow-up Epic
 
 **Trigger:** UAT (Phase 5 or 11) produces one or more **user-DEFER'd items**.
-The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (BLOCKER/IMPORTANT/MINOR all reach 0 before wave close).
+The FOLLOWUP epic is fed ONLY by those DEFER'd UAT items — **never** by any review severity (review findings stay open until their raiser verifies the fix and converge at the end).
 **Owner:** Supervisor creates the follow-up epic.
 
 ```bash
@@ -362,15 +362,15 @@ Code reviews ALWAYS create 3 severity group tasks per review round, even if empt
 
 ```bash
 # Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_ID_URI=$(pasture task create "SLICE-N-REVIEW-{axis}-{round} BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_ID_URI=$(pasture task create "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
 pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$(pasture task create "SLICE-N-REVIEW-{axis}-{round} IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_ID_URI=$(pasture task create "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
 pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$(pasture task create "SLICE-N-REVIEW-{axis}-{round} MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_ID_URI=$(pasture task create "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
    --description "Severity group for this review round; close only if empty" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$MINOR_ID_URI" pasture:severity:minor
 pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review

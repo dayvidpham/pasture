@@ -14,7 +14,7 @@ description: Vertical slice assignment and tracking
 **[impl-slice-full-specs]**
 - Given: IMPL_PLAN complete
 - When: assigning slices
-- Then: create SLICE-N tasks with full specs
+- Then: create SLICE-{W}-{N} tasks with full specs
 - Should not: leave specs vague
 
 **[impl-slice-dep-chain]**

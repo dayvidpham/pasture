@@ -14,7 +14,7 @@ var reviewerBody = SkillBody{
 | Label | ` + "`pasture:p4-plan:s4-review`" + ` | ` + "`pasture:p10-impl:s10-review`" + ` |
 | Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
-| Naming | PROPOSAL-N-REVIEW-{axis}-{round} | SLICE-N-REVIEW-{axis}-{round} |
+| Naming | PROPOSAL-N-REVIEW-{axis}-{round} | WAVE-{W}-REVIEW-{axis}-{round} |
 | Focus | End-user alignment, MVP scope | Production code paths, severity findings |`,
 		},
 		{
@@ -36,8 +36,8 @@ var reviewerBody = SkillBody{
 			Content: `| Severity | When to Use | Blocks Slice? |
 |----------|-------------|---------------|
 | BLOCKER | Security, type errors, test failures, broken production code paths | Yes |
-| IMPORTANT | Performance, missing validation, architectural concerns | Must reach 0 before review wave closes |
-| MINOR | Style, optional optimizations, naming improvements | Must reach 0 before review wave closes |`,
+| IMPORTANT | Performance, missing validation, architectural concerns | No — stays open past the wave gate and converges at the end |
+| MINOR | Style, optional optimizations, naming improvements | No — stays open past the wave gate and converges at the end |`,
 		},
 		{
 			Id:    "rev-followup-lifecycle",
@@ -46,7 +46,7 @@ var reviewerBody = SkillBody{
 
 - **FOLLOWUP_PROPOSAL review (Phase 4):** Same procedure as standard plan review. Task naming: ` + "`FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`" + `. Binary ACCEPT/REVISE, no severity tree.
 - **FOLLOWUP_SLICE code review (Phase 10):** Same procedure as standard code review. Task naming: ` + "`FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`" + `. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
-- **All severities reach 0 (no followup-of-followup):** ALL findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review must reach 0 before the follow-up wave closes — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.`,
+- **Open findings converge at the end (no followup-of-followup):** findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review stay open past the wave gate and converge at the end — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.`,
 		},
 		{
 			Id:    "rev-task-process",

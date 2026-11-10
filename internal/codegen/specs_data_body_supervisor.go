@@ -37,7 +37,7 @@ var supervisorBody = SkillBody{
 			Id:        "sup-followup-deps",
 			Given:     "IMPORTANT or MINOR severity groups",
 			When:      "linking dependencies",
-			Then:      "wire each group to its review round only: `[[rec]] dep add \"${REVIEW_ROUND_ID_URI}\" --blocked-by \"${IMPORTANT_GROUP_ID_URI}\"` — ALL severity groups must reach 0 before the wave closes",
+			Then:      "wire each group to its review round only: `[[rec]] dep add \"${REVIEW_ROUND_ID_URI}\" --blocked-by \"${IMPORTANT_GROUP_ID_URI}\"` — only an open BLOCKER gates the wave; open findings converge at the end",
 			ShouldNot: "route IMPORTANT or MINOR severity groups to the FOLLOWUP epic, or wire them as blocking IMPL_PLAN/any slice — only BLOCKER findings block slices, and the FOLLOWUP epic is fed solely by user-DEFER'd UAT items",
 		},
 		behaviorRef(FragSupReviewAllSlices),
@@ -60,9 +60,9 @@ var supervisorBody = SkillBody{
 			Then:      "proceed autonomously without asking permission; the 5 user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 8 (implementation-effort / review-effort budget request), Phase 11 (Impl UAT); all other phase transitions (9 SLICES, 10 CODE REVIEW, 12 LANDING) progress automatically",
 			ShouldNot: "ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined; only pause for user-facing phases that require human input",
 		},
-		// R7/A1: code review iterates up to the chosen review-effort budget until
-		// 0/0/0 clean; on exhaustion, surface outstanding findings to the user.
-		// Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		// R7/A1: code review gates each wave on open BLOCKERs and converges over
+		// open findings at the end; on exhaustion, surface outstanding findings to
+		// the user. Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
 		behaviorRef(FragReviewCleanExit),
 	},
 
@@ -357,7 +357,7 @@ The worker skill provides:
 		{
 			Id:      "sup-epic-followup",
 			Title:   "EPIC_FOLLOWUP Creation (Phase 5/11)",
-			Content: `After UAT, if the user **DEFER'd** one or more items, create a follow-up epic from those DEFER'd items. Per [frag--sup-followup-epic-timing], create immediately after UAT completes. Review severities (BLOCKER/IMPORTANT/MINOR) are **never** routed here — they must all reach 0 before the review wave closes.`,
+			Content: `After UAT, if the user **DEFER'd** one or more items, create a follow-up epic from those DEFER'd items. Per [frag--sup-followup-epic-timing], create immediately after UAT completes. Review severities (BLOCKER/IMPORTANT/MINOR) are **never** routed here — they stay open until their raiser verifies the fix and converge at the end.`,
 			Subsections: []ProseSection{
 				{
 					Id:    "sup-followup-step1",
@@ -378,7 +378,7 @@ Aggregated user-DEFER'd items from UAT (Phase 5/11)." | python3 -c 'import json,
 [[rec]] dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "${DEFERRED_ITEM_ID_2_URI}"
 ` + "```" + `
 
-Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred-followup]: all review severities reach 0; the FOLLOWUP epic is DEFER-fed only.`,
+Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred-followup]: only an open BLOCKER gates a wave; open findings converge at the end; the FOLLOWUP epic is DEFER-fed only.`,
 				},
 				{
 					Id:    "sup-followup-step2",

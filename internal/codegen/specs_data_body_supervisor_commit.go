@@ -60,7 +60,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 			Id:    "sup-commit-update-impl-plan",
 			Title: "Update IMPL_PLAN",
 			Content: `` + "```" + `bash
-[[rec]] update "${IMPL_PLAN_ID_URI}" --notes="SLICE-N complete: "${TASK_A_URI}", ${TASK_B_URI}"
+[[rec]] update "${IMPL_PLAN_ID_URI}" --notes="SLICE-{W}-{N} complete: "${TASK_A_URI}", ${TASK_B_URI}"
 ` + "```" + ``,
 		},
 		{

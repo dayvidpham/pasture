@@ -116,9 +116,9 @@ When tracking review progress, monitor severity groups:
 
 | Severity | Blocks Slice? | Action |
 |----------|---------------|--------|
-| BLOCKER | Yes | Must reach 0 before wave close (dual-parent: also blocks the slice) |
-| IMPORTANT | No (not via dual-parent) | Must reach 0 before wave close (never routed to FOLLOWUP) |
-| MINOR | No (not via dual-parent) | Must reach 0 before wave close (never routed to FOLLOWUP) |
+| BLOCKER | Yes | An open BLOCKER gates the wave (dual-parent: also blocks the slice) |
+| IMPORTANT | No (not via dual-parent) | Stays open past the wave gate; converges at the end (never routed to FOLLOWUP) |
+| MINOR | No (not via dual-parent) | Stays open past the wave gate; converges at the end (never routed to FOLLOWUP) |
 
 ## Follow-up Lifecycle Tracking
 

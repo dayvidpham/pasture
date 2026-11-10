@@ -77,7 +77,7 @@ pasture task close "${TASK_B_URI}" --reason="Committed in <commit-hash>"
 ## Update IMPL_PLAN
 
 ```bash
-pasture task update "${IMPL_PLAN_ID_URI}" --notes="SLICE-N complete: "${TASK_A_URI}", ${TASK_B_URI}"
+pasture task update "${IMPL_PLAN_ID_URI}" --notes="SLICE-{W}-{N} complete: "${TASK_A_URI}", ${TASK_B_URI}"
 ```
 
 ## Follow-up Commits

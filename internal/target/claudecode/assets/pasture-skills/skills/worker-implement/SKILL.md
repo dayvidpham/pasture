@@ -198,7 +198,7 @@ If your Pasture task is a `FOLLOWUP_SLICE-N`, the implementation procedure is id
 
 ## Review-Fix Cycle (within the chosen review-effort budget)
 
-Your slice is not finished when the first pass lands. Code review iterates **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget. Stay available to fix findings of every severity — IMPORTANT and MINOR must reach 0 too, not just BLOCKER. If the budget is exhausted before a clean round, the outstanding findings are surfaced to the user at a gate (not proceeded-past silently). Do not treat "tests pass once" as wave completion.
+Your slice is not finished when the first pass lands. Code review runs in two phases. **During a wave**, only an open BLOCKER finding gates progress; IMPORTANT and MINOR findings stay open. **After the last wave**, convergence queries every open `pasture:finding` across all waves and targets **0/0/0** within **maxRounds**. Stay available to fix findings of every severity — IMPORTANT and MINOR reach the convergence round too, not just BLOCKER. A finding closes only when the reviewer who raised it verifies your fix; you cannot close it. Iterate up to the **review-effort budget chosen at Phase 8**. If the budget is exhausted before convergence, the outstanding findings are surfaced to the user at a gate (not proceeded-past silently). Do not treat "tests pass once" as wave completion.
 
 ## Next
 

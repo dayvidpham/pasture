@@ -298,7 +298,7 @@ func buildLabels(buf *bytes.Buffer, depth int) {
 	specialLabelIDs := []string{
 		"L-urd", "L-superseded",
 		"L-sev-blocker", "L-sev-import", "L-sev-minor",
-		"L-followup",
+		"L-finding", "L-followup",
 	}
 
 	section := LabelsSection{}
@@ -532,11 +532,14 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 			phase.TDDLayers = tdd
 		case "p10":
 			phase.SeverityTree = &SeverityTreeElem{
-				Enabled:  "true",
-				Creation: "eager",
+				Enabled:   "true",
+				Creation:  "eager",
+				MaxRounds: "3",
 				Rules: []string{
 					"Always create 3 severity groups per review round, even if empty.",
 					"Empty groups have no children and are closed immediately.",
+					"maxRounds is the default convergence bound; the Phase 8 review-effort budget selects the count the convergence rule reads.",
+					"Only an open BLOCKER gates a wave; IMPORTANT and MINOR findings stay open to convergence.",
 				},
 				Groups: []SevGroupElem{
 					{SeverityRef: "BLOCKER", LabelRef: "L-sev-blocker", DualParent: "true"},
@@ -827,13 +830,13 @@ var handoffSkillInvocations = map[string]map[string]string{
 
 // handoffNotes maps handoff IDs to extra notes.
 var handoffNotes = map[string]string{
-	"h5": "Reviewer hands code-review findings to supervisor; ALL severity groups must reach 0 before wave close (the FOLLOWUP epic is created later at UAT from user-DEFER'd items, never from review findings)",
+	"h5": "Reviewer hands code-review findings to supervisor; open BLOCKER findings gate the wave, while open IMPORTANT and MINOR findings converge at the end (the FOLLOWUP epic is created later at UAT from user-DEFER'd items, never from review findings)",
 	"h6": "Follow-up specific. Supervisor completes FOLLOWUP_URE and FOLLOWUP_URD,\n      then hands off to architect with scoped findings and requirements\n      for FOLLOWUP_PROPOSAL creation.",
 }
 
 // handoffTriggers maps handoff IDs to trigger strings.
 var handoffTriggers = map[string]string{
-	"h5": "code-review findings exist (all severities must reach 0 before wave close)",
+	"h5": "code-review findings exist (open BLOCKERs gate the wave; the rest converge at the end)",
 	"h6": "follow-up lifecycle only",
 }
 
@@ -916,6 +919,7 @@ var constraintOrder = []string{
 	"C-severity-eager",
 	"C-severity-not-plan",
 	"C-blocker-dual-parent",
+	"C-finding-lifecycle",
 	"C-followup-timing",
 	"C-vertical-slices",
 	"C-supervisor-no-impl",
@@ -1217,7 +1221,7 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 func buildDependencyModel(buf *bytes.Buffer, depth int) {
 	section := DependencyModelSection{
 		Rule:           "Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.",
-		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-N \u2192 blocked-by leaf tasks",
+		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-{W}-{N} \u2192 blocked-by leaf tasks",
 		Command:        "[[rec]] dep add {parent-uri} --blocked-by {child-uri}",
 		AntiPattern:    "[[rec]] dep add {child-uri} --blocked-by {parent-uri}",
 		ReferenceLinks: &ReferenceLinksElem{

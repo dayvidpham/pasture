@@ -42,8 +42,8 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 **[frag--sup-deferred-followup]**
 - Given: a review finding (BLOCKER, IMPORTANT, or MINOR)
 - When: categorizing
-- Then: track it in its severity group; ALL severity groups must reach 0 before wave close — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity
-- Should not: route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a wave with any finding outstanding
+- Then: track it in its severity group as an open finding; open findings do not block a wave unless they are BLOCKERs, and the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity
+- Should not: route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a finding before its raiser verifies the fix
 
 **[frag--sup-followup-epic-timing]**
 - Given: UAT (Phase 5 or 11) produces one or more user-DEFER'd items
@@ -77,7 +77,7 @@ Per [frag--sup-review-severity-groups], create all 3 severity groups immediately
 
 ```bash
 # Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+BLOCKER_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -87,7 +87,7 @@ BLOCKER findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import
 pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
 pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
 
-IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+IMPORTANT_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -97,7 +97,7 @@ IMPORTANT findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'impo
 pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
 pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
 
-MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
+MINOR_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
   --description "---
 references:
   slice: "${SLICE_1_ID_URI}"
@@ -113,7 +113,7 @@ pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
 pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
-# IMPORTANT/MINOR must ALSO reach 0 before wave close — they are NOT routed to FOLLOWUP.
+# Open findings converge at the end; only an open BLOCKER gates the wave. IMPORTANT/MINOR are NOT routed to FOLLOWUP.
 # The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (see Follow-up Epic section).
 
 # Step 3: Close empty groups immediately
@@ -125,19 +125,19 @@ pasture task close "$MINOR_ID_URI"        # if no MINOR findings
 ### Naming Convention
 
 ```
-SLICE-{N}-REVIEW-{axis}-{round}
+WAVE-{W}-REVIEW-{axis}-{round}
 ```
 
-Where axis = A (Correctness), B (Test quality), C (Elegance).
+Where axis = A (Correctness), B (Test quality), C (Elegance). Slice titles use `SLICE-{W}-{N}`, where W is the wave and N is the slice within it.
 
 Examples:
-- `SLICE-1-REVIEW-A-1` — Reviewer A (Correctness), Round 1, SLICE-1
-- `SLICE-2-REVIEW-C-2` — Reviewer C (Elegance), Round 2, SLICE-2
+- `WAVE-1-REVIEW-A-1` — Reviewer A (Correctness), Round 1, wave 1
+- `WAVE-2-REVIEW-C-2` — Reviewer C (Elegance), Round 2, wave 2
 
 Severity groups:
-- `SLICE-1-REVIEW-A-1 BLOCKER`
-- `SLICE-1-REVIEW-A-1 IMPORTANT`
-- `SLICE-1-REVIEW-A-1 MINOR`
+- `WAVE-1-REVIEW-A-1 BLOCKER`
+- `WAVE-1-REVIEW-A-1 IMPORTANT`
+- `WAVE-1-REVIEW-A-1 MINOR`
 
 ## Dual-Parent BLOCKER Relationship
 
@@ -156,13 +156,14 @@ references:
 ---
 Missing error handling causes silent failure in auth flow." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$FINDING_ID" pasture:p10-impl:s10-review
+pasture task label add "$FINDING_ID" pasture:finding
 
 # Wire dual-parent: finding blocks BOTH severity group AND slice
 pasture task dep add "$BLOCKER_GROUP_ID_URI" --blocked-by "$FINDING_ID"
 pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$FINDING_ID"
 ```
 
-Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent), but ALL severity groups (BLOCKER/IMPORTANT/MINOR) must reach 0 before the review wave closes — they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
+Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent). They stay open past the wave gate and converge at the end, and they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
 
 ```bash
 # IMPORTANT finding — attaches to the IMPORTANT severity group (NOT the slice)
@@ -175,8 +176,9 @@ references:
 ---
 API calls should have configurable timeouts." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
+pasture task label add "$IMPORTANT_FINDING_ID" pasture:finding
 
-# Attaches to the IMPORTANT severity group (NOT the slice); the group must still reach 0
+# Attaches to the IMPORTANT severity group (NOT the slice); it stays open until its raiser verifies the fix
 pasture task dep add "$IMPORTANT_GROUP_ID_URI" --blocked-by "$IMPORTANT_FINDING_ID"
 ```
 
@@ -186,14 +188,14 @@ Each reviewer (A, B, C) reviews EVERY slice:
 
 ```
 Reviewer A (Correctness): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: SLICE-1-REVIEW-A-1, SLICE-2-REVIEW-A-1, SLICE-3-REVIEW-A-1
+  Creates: WAVE-1-REVIEW-A-1, WAVE-2-REVIEW-A-1, WAVE-3-REVIEW-A-1
   Each review has 3 severity groups (BLOCKER/IMPORTANT/MINOR)
 
 Reviewer B (Test quality): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: SLICE-1-REVIEW-B-1, SLICE-2-REVIEW-B-1, SLICE-3-REVIEW-B-1
+  Creates: WAVE-1-REVIEW-B-1, WAVE-2-REVIEW-B-1, WAVE-3-REVIEW-B-1
 
 Reviewer C (Elegance): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: SLICE-1-REVIEW-C-1, SLICE-2-REVIEW-C-1, SLICE-3-REVIEW-C-1
+  Creates: WAVE-1-REVIEW-C-1, WAVE-2-REVIEW-C-1, WAVE-3-REVIEW-C-1
 ```
 
 ## Spawning Reviewers
@@ -210,7 +212,7 @@ URD: "${URD_ID_URI}" (read with pasture task show "${URD_ID_URI}" for user requi
 Focus: Does implementation faithfully serve the user? Are technical decisions consistent with rationale?
 Review ALL slices: "${SLICE_1_ID_URI}", "${SLICE_2_ID_URI}", "${SLICE_3_ID_URI}"
 For each slice, run: pasture task show "${SLICE_ID_URI}"
-Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: SLICE-N-REVIEW-A-1
+Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: WAVE-{W}-REVIEW-A-1
 Call skill(/pasture:reviewer-review-code) for the review procedure.`
 }
 ```
@@ -314,7 +316,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 
 ## Follow-up Epic (EPIC_FOLLOWUP)
 
-Per [frag--sup-followup-epic-timing], create only when UAT produces user-DEFER'd items. Review findings of every severity must be resolved before the review wave closes.
+Per [frag--sup-followup-epic-timing], create only when UAT produces user-DEFER'd items. Open review findings stay open past a wave gate and converge at the end; they never feed the FOLLOWUP epic.
 
 ### Step 1: Create the follow-up epic
 
@@ -396,7 +398,7 @@ pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LE
 
 ### Followup Handoff (h5)
 
-The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (all review severities reach 0 before the wave closes). Author this handoff in its Pasture task body (no filesystem path):
+The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (open findings stay open until their raiser verifies the fix and converge at the end). Author this handoff in its Pasture task body (no filesystem path):
 
 ```markdown
 # Handoff: Reviewer → Supervisor (review wave complete)
@@ -407,7 +409,7 @@ The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review
 - Ratified Proposal: ${PROPOSAL_ID_URI}
 
 ## Review Outcome
-- All slices reviewed; ALL severity groups (BLOCKER/IMPORTANT/MINOR) reached 0 on a fix-free clean round.
+- All slices reviewed; convergence found no open pasture:finding across all waves.
 
 ## Open Items
 - None for this wave. Any user-DEFER'd UAT items feed the FOLLOWUP epic at Phase 11.

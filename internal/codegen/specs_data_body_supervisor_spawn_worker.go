@@ -51,19 +51,19 @@ var supervisorSpawnWorkerBody = SkillBody{
 			Id:        "sup-spawn-max-cycles",
 			Given:     "worker-reviewer cycle",
 			When:      "counting iterations",
-			Then:      "iterate review->fix->re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, surface outstanding findings to the user at a gate",
-			ShouldNot: "hardcode the budget, proceed past the chosen budget without surfacing to the user, close a wave on a fix-applying round, or proceed with any finding silently outstanding",
+			Then:      "iterate review->fix->re-review up to the chosen review-effort budget; only an open BLOCKER gates a wave, IMPORTANT and MINOR findings stay open, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate",
+			ShouldNot: "hardcode the budget, proceed past the chosen budget without surfacing to the user, require a zeroed round to close a wave, or close a finding before its raiser verifies the fix",
 		},
 		{
 			Id:        "sup-spawn-important-after-cycles",
 			Given:     "IMPORTANT or MINOR findings remain",
 			When:      "deciding next step",
-			Then:      "keep iterating review->fix->re-review until ALL severity groups reach 0 — every severity must be resolved before the wave closes",
-			ShouldNot: "proceed to UAT with non-zero findings or route any review severity (IMPORTANT/MINOR) to the FOLLOWUP epic",
+			Then:      "keep them open past the wave gate and converge over every open `pasture:finding` at the end — only an open BLOCKER blocks the wave",
+			ShouldNot: "proceed to UAT with an open BLOCKER or route any review severity (IMPORTANT/MINOR) to the FOLLOWUP epic",
 		},
-		// R7/A1: code review iterates up to the chosen review-effort budget until
-		// 0/0/0 clean; on exhaustion, surface outstanding findings to the user.
-		// Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		// R7/A1: code review gates each wave on open BLOCKERs and converges over
+		// open findings at the end; on exhaustion, surface outstanding findings to
+		// the user. Resolves to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
 		behaviorRef(FragReviewCleanExit),
 	},
 	Sections: []ProseSection{
@@ -86,15 +86,15 @@ var supervisorSpawnWorkerBody = SkillBody{
 				"4. REVIEW → Ephemeral reviewers ([[op:delegate_assignment]] tool): review per-slice\n" +
 				"5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits\n" +
 				"6. RE-REVIEW → Spawn new ephemeral reviewers for re-review\n" +
-				"7. REPEAT → Steps 5-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface to the user\n" +
-				"8. TRACK → ALL severities (BLOCKER/IMPORTANT/MINOR) must reach 0 — none route to FOLLOWUP\n" +
-				"9. NEXT  → When fix-free clean (0 BLOCKER + 0 IMPORTANT + 0 MINOR) → Phase 11 (UAT); escalate to architect only if genuinely stuck\n" +
+				"7. REPEAT → Steps 5-6 up to the chosen review-effort budget; only an open BLOCKER gates the wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface to the user\n" +
+				"8. TRACK → Open findings stay open until their raiser verifies the fix; none route to FOLLOWUP\n" +
+				"9. NEXT  → When convergence finds no open `pasture:finding` → Phase 11 (UAT); escalate to architect only if genuinely stuck\n" +
 				"```\n" +
 				"\n" +
 				"**Key rules:**\n" +
 				"- Reviewers are ephemeral (spawned per review cycle with the [[op:delegate_assignment]] tool)\n" +
 				"- Slices are **never closed** until reviewed at least once\n" +
-				"- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; on budget exhaustion without clean, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck\n" +
+				"- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget; only an open BLOCKER gates a wave, and convergence at the end queries open `pasture:finding` toward 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck\n" +
 				"- The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities",
 		},
 		{
@@ -149,7 +149,7 @@ full Ride the Wave cycle.
 			Title: "Task Call",
 			Content: `` + "```" + `
 delegation: {
-  description: "Worker: implement SLICE-N",
+  description: "Worker: implement SLICE-{W}-{N}",
   prompt: ` + "`" + `Call [[op:invoke_skill]](/pasture:worker) and implement the assigned slice.
 
 Pasture Task ID: "${TASK_ID_URI}"
@@ -205,8 +205,8 @@ Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec]] show` 
 				"4. If ANY findings (BLOCKER/IMPORTANT/MINOR): supervisor sends fix assignment to worker\n" +
 				"5. Worker fixes issues → notifies supervisor\n" +
 				"6. New ephemeral reviewers re-review\n" +
-				"7. Repeat steps 4-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate\n" +
-				"8. After a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR): supervisor shuts down worker",
+				"7. Repeat steps 4-6 up to the chosen review-effort budget; only an open BLOCKER gates the wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate\n" +
+				"8. After convergence finds no open `pasture:finding`: supervisor shuts down worker",
 			Subsections: []ProseSection{
 				{
 					Id:    "sup-spawn-fix-assignment-template",
@@ -220,10 +220,10 @@ Per [sup-teamcreate-msg], include Pasture task IDs and ` + "`" + `[[rec]] show` 
 BLOCKERs (must fix — blocks slice closure):
 - "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
-IMPORTANT (must fix — must reach 0 before wave close):
+IMPORTANT (must fix — stays open until its raiser verifies the fix):
 - "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
-MINOR (must fix — must reach 0 before wave close):
+MINOR (must fix — stays open until its raiser verifies the fix):
 - "${FINDING_ID_URI}": <description> ([[rec]] show "${FINDING_ID_URI}")
 
 After fixing all items:

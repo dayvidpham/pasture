@@ -1,18 +1,18 @@
 ---
 name: afk-implement
-description: Run an unattended implementation session with small PRs and a clean review wave, never merging
+description: Run an unattended implementation session with small PRs and a review wave that ends in convergence, never merging
 ---
 
 # AFK Implement
 
 <!-- BEGIN GENERATED FROM pasture schema -->
 <!-- GENERATED FROM pasture v0.0.32 artifact v1 -->
-**Command:** `pasture:afk-implement` — Run an unattended implementation session with small PRs and a clean review wave, never merging
+**Command:** `pasture:afk-implement` — Run an unattended implementation session with small PRs and a review wave that ends in convergence, never merging
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phases 8-10
 
 **[B-afk-no-merge]**
-- Given: an unattended session with green CI and a clean review wave
+- Given: an unattended session with green CI and a review wave with no open blocker
 - When: a pull request is ready
 - Then: leave it open, record the merge order and evidence, and stop
 - Should not: merge, self-approve on the human's behalf, or push to the default branch
@@ -29,14 +29,14 @@ description: Run an unattended implementation session with small PRs and a clean
 - Then: decide from repository conventions, record the rationale and reversal path, and continue
 - Should not: block or idle waiting for approval
 
-**[B-afk-clean-wave]**
+**[B-afk-wave-gate]**
 - Given: a completed iteration
 - When: running the review wave
-- Then: require three independent ACCEPT votes with zero blockers and zero importants
-- Should not: substitute self-review, ignore findings, or fabricate consensus
+- Then: require three independent ACCEPT votes with zero open blockers; IMPORTANT and MINOR findings stay open to convergence
+- Should not: substitute self-review, ignore findings, fabricate consensus, or require a zeroed round at the wave gate
 
-**[B-afk-stop-at-clean]**
-- Given: every scoped iteration has an open PR and the final cross-stack wave is clean
+**[B-afk-stop-at-convergence]**
+- Given: every scoped iteration has an open PR and the final cross-stack convergence has no open finding
 - When: the run is complete
 - Then: stop and write the morning handoff
 - Should not: start new scope or continue looking for work
@@ -69,7 +69,7 @@ Select the current registered author with pasture task agents list and pasture t
 
 ## When to Use
 
-Use this skill when the human hands over a scoped direction and expects to review later: they say they are going AFK or to bed, ask for overnight or unattended implementation, say "don't block on me", ask for progressive adoption, or ask for open pull requests that must not be merged. It also fits an in-flight branch that needs its gates run, a PR opened, and a review wave driven to clean.
+Use this skill when the human hands over a scoped direction and expects to review later: they say they are going AFK or to bed, ask for overnight or unattended implementation, say "don't block on me", ask for progressive adoption, or ask for open pull requests that must not be merged. It also fits an in-flight branch that needs its gates run, a PR opened, and a review wave driven to convergence.
 
 Do not use it for an attended session where the human expects the normal live URE/UAT gates, and do not use it to authorize a release, deploy, or merge.
 
@@ -85,7 +85,7 @@ Translate the human's words into explicit defaults, and state the mapping in the
 | Progressive adoption | Each iteration is independently reviewable and revertable; prefer several small PRs to one large one. |
 | Stack changes when needed | Base an iteration on its predecessor only when it depends on it; otherwise branch from the default branch. |
 | Open PRs, do not merge | Push feature branches and open ready PRs; never merge or push to the default branch. |
-| Stop on a clean review wave | Use the exit criteria below; do not keep burning the backlog after clean. |
+| Stop at convergence | Use the exit criteria below; do not keep burning the backlog after convergence. |
 | Handle design questions sensibly | Decide reversible questions from the repository, record the rationale, and continue. |
 | Review in the morning | Write a five-minute handoff with merge order, decisions, risks, and first checks. |
 
@@ -150,13 +150,13 @@ Spawn three independent reviewers in parallel with the model named in the invoca
 
 Require findings as severity (blocker, important, minor), file and line, problem, and a concrete fix. Require a binary vote: ACCEPT or REVISE. Load the impl-review skill for the full severity-group and dual-parent procedure when the run uses tracker severity tasks.
 
-### Clean Wave
+### Wave Gate and Convergence
 
-A clean wave is three ACCEPT votes with zero blockers and zero importants. Fix blockers and importants in the same branch, commit atomically, push, and re-run the wave. Fix a minor finding if trivial; otherwise record it as follow-up. Cap the loop at three cycles per PR.
+A wave advances on three ACCEPT votes with zero open blockers. Fix blockers in the same branch, commit atomically, push, and re-run the wave. IMPORTANT and MINOR findings stay open past the wave gate; fix a minor if trivial, otherwise record it for convergence. A finding closes only when the reviewer who raised it verifies the fix. Cap the loop at three rounds per PR.
 
-If a blocker survives three cycles, mark the PR draft, write the exact blocker and attempted fixes, and move to independent work. Do not merge and do not call the wave clean.
+If a blocker survives three rounds, mark the PR draft, write the exact blocker and attempted fixes, and move to independent work. Do not merge and do not report the work as done.
 
-After the final iteration, run one cross-stack wave over all open PRs or the cumulative diff: conflicting assumptions, duplicated helpers, and merge-order breakage. That is the wave that must end clean before stopping.
+After the final iteration, run one cross-stack convergence over all open PRs or the cumulative diff: conflicting assumptions, duplicated helpers, and merge-order breakage. That convergence must find no open finding before stopping.
 
 ## Autonomous Decisions
 
@@ -193,7 +193,7 @@ If CI cannot run, say so explicitly and report local results instead. Keep the t
 
 Create one tracker task per iteration and link it to the parent scope. Add labels and comments; never delete audit history. Comment the branch, commit SHA, PR URL, gate results, and each review round with its votes.
 
-Workers report evidence and never close their own tasks. Close only after the clean wave, and only for work you supervised and verified. If the tracker is unavailable, report the store path, the failed operation, and the repair needed, then continue with Git and PR evidence. A failed query is not proof of no work.
+Workers report evidence and never close their own tasks. Close only after convergence finds no open finding, and only for work you supervised and verified. If the tracker is unavailable, report the store path, the failed operation, and the repair needed, then continue with Git and PR evidence. A failed query is not proof of no work.
 
 ## Morning Handoff
 
@@ -206,14 +206,14 @@ Write the handoff to the repository's untracked agent-handoff directory, for exa
 5. Scope boundary: what you deliberately did not do.
 6. First three checks: the fastest way for the human to validate the work.
 
-Never describe unmerged work as done or shipped. Say open, review clean, awaiting merge.
+Never describe unmerged work as done or shipped. Say open, convergence complete, awaiting merge.
 
 ## Exit Criteria
 
 Stop the session when all of these are true:
 
 - Every scoped iteration has an open PR, or is a draft with a hard-stop reason.
-- The final cross-stack review wave is clean: three ACCEPT, zero blockers, zero importants, or the three-cycle budget is exhausted and residual findings are recorded.
+- The final cross-stack convergence has no open finding: three ACCEPT and no open blocker, or the three-round budget is exhausted and residual findings are recorded.
 - The morning handoff is written and names the merge order.
 - No merge occurred, the default branch is untouched, and no unrelated work was modified.
 
@@ -226,7 +226,7 @@ Then stop and report. Do not start new scope, do not make one more small fix, an
 - Silencing, skipping, or deleting a failing test to reach green.
 - Refactoring adjacent code because it was already open.
 - Asking a question mid-run and idling, or blocking forever on approval.
-- Calling a wave clean without independent reviewers or without reading their findings.
+- Claiming convergence without independent reviewers or without reading their findings.
 - Expanding the backlog instead of stopping at the approved scope.
 - Describing a red or draft PR as ready in the handoff.
 <!-- END GENERATED FROM pasture schema -->

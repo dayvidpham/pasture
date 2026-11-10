@@ -174,7 +174,7 @@ NOT: A single file or horizontal layer (e.g., 'all types' or 'all tests'). YES: 
 - [ ] Supervisor notified via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close)
 - [ ] All completion-gate items passed
 - [ ] Can only close on a review wave, not a worker wave
-- [ ] Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings
+- [ ] No open BLOCKER finding on this slice; IMPORTANT and MINOR findings stay open to convergence
 
 ### Inter-Agent Coordination
 
@@ -461,7 +461,7 @@ pasture task update "${TASK_ID_URI}" --status=in_progress
 
 ## Follow-up Slices (FOLLOWUP_SLICE-N)
 
-You may be assigned a `FOLLOWUP_SLICE-N` task instead of a `SLICE-N` task. The implementation procedure is identical, with these additions:
+You may be assigned a `FOLLOWUP_SLICE-N` task instead of a `SLICE-{W}-{N}` task. The implementation procedure is identical, with these additions:
 
 - **DEFER'd-item leaf tasks**: Your slice task will list specific user-DEFER'd UAT-item leaf tasks that you must resolve. Check `pasture task show "${TASK_ID_URI}"` for a "DEFER'd-Item Leaf Tasks" section.
 - **Dual-parent resolution**: Each leaf task is a child of both the DEFER'd-items tracking group AND your FOLLOWUP_SLICE-N. Resolving the leaf task satisfies both parents.

@@ -84,6 +84,12 @@ _Example (anti-pattern)_
 pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 ```
 
+**[C-finding-lifecycle]**
+- Given: a code-review finding
+- When: recording or closing it
+- Then: create it as a child of its severity group labelled `pasture:finding`, and close it only when the reviewer who raised it verifies the fix — a worker or supervisor cannot close it, and a wave boundary never closes it
+- Should not: close a finding from a worker or supervisor, close one at a wave boundary, or record severity in the finding label (severity lives on its parent group)
+
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
 - When: linking tasks
@@ -105,7 +111,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 **[C-review-effort-budget]**
 - Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
 - When: deciding how much review-and-fix effort to spend per slice
-- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[C-review-naming]**
@@ -124,13 +130,13 @@ _Example (correct)_
 
 ```bash
 # Create all 3 severity groups immediately (even if empty)
-BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+BLOCKER_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
 pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+IMPORTANT_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
 pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+MINOR_ID_URI=$(pasture task create "WAVE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 pasture task label add "$MINOR_ID_URI" pasture:severity:minor
 pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
 
@@ -256,7 +262,7 @@ Select the current registered author with pasture task agents list and pasture t
 | Label | `pasture:p4-plan:s4-review` | `pasture:p10-impl:s10-review` |
 | Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
-| Naming | PROPOSAL-N-REVIEW-{axis}-{round} | SLICE-N-REVIEW-{axis}-{round} |
+| Naming | PROPOSAL-N-REVIEW-{axis}-{round} | WAVE-{W}-REVIEW-{axis}-{round} |
 | Focus | End-user alignment, MVP scope | Production code paths, severity findings |
 
 ## End-User Alignment Criteria
@@ -284,8 +290,8 @@ Binary only. No intermediate levels.
 | Severity | When to Use | Blocks Slice? |
 |----------|-------------|---------------|
 | BLOCKER | Security, type errors, test failures, broken production code paths | Yes |
-| IMPORTANT | Performance, missing validation, architectural concerns | Must reach 0 before review wave closes |
-| MINOR | Style, optional optimizations, naming improvements | Must reach 0 before review wave closes |
+| IMPORTANT | Performance, missing validation, architectural concerns | No — stays open past the wave gate and converges at the end |
+| MINOR | Style, optional optimizations, naming improvements | No — stays open past the wave gate and converges at the end |
 
 ## Follow-up Lifecycle Reviews
 
@@ -293,7 +299,7 @@ Reviewers also participate in the follow-up lifecycle:
 
 - **FOLLOWUP_PROPOSAL review (Phase 4):** Same procedure as standard plan review. Task naming: `FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`. Binary ACCEPT/REVISE, no severity tree.
 - **FOLLOWUP_SLICE code review (Phase 10):** Same procedure as standard code review. Task naming: `FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
-- **All severities reach 0 (no followup-of-followup):** ALL findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review must reach 0 before the follow-up wave closes — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.
+- **Open findings converge at the end (no followup-of-followup):** findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review stay open past the wave gate and converge at the end — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.
 
 ## Pasture Review Process
 

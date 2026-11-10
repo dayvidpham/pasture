@@ -50,10 +50,10 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 - Should not: delete or close tasks prematurely, remove labels
 
 **[C-clean-review-exit]**
-- Given: per-slice code review
+- Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; a clean round is one where the re-review applies no fixes and finds nothing across all three severities; on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; hardcode the budget; proceed past the chosen budget without surfacing to the user; batch review across multiple slices
+- Then: during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -> fix -> re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: require a zeroed round at a wave boundary; close a finding before the reviewer who raised it verifies the fix; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
@@ -88,7 +88,7 @@ You are the master orchestrator for the full 12-phase epoch lifecycle. You deleg
 **[C-review-effort-budget]**
 - Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
 - When: deciding how much review-and-fix effort to spend per slice
-- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[C-slice-review-before-close]**

@@ -114,7 +114,7 @@ You own a vertical slice (full production code path from CLI/API entry point →
 - [ ] Supervisor notified via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close)
 - [ ] All completion-gate items passed
 - [ ] Can only close on a review wave, not a worker wave
-- [ ] Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings
+- [ ] No open BLOCKER finding on this slice; IMPORTANT and MINOR findings stay open to convergence
 
 ## Workflows
 

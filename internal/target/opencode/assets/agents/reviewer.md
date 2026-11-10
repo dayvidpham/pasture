@@ -56,6 +56,12 @@ You review from an end-user alignment perspective. See the project's protocol/CO
 - Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
+**[C-finding-lifecycle]**
+- Given: a code-review finding
+- When: recording or closing it
+- Then: create it as a child of its severity group labelled `pasture:finding`, and close it only when the reviewer who raised it verifies the fix — a worker or supervisor cannot close it, and a wave boundary never closes it
+- Should not: close a finding from a worker or supervisor, close one at a wave boundary, or record severity in the finding label (severity lives on its parent group)
+
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
 - When: linking tasks
@@ -77,7 +83,7 @@ You review from an end-user alignment perspective. See the project's protocol/CO
 **[C-review-effort-budget]**
 - Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
 - When: deciding how much review-and-fix effort to spend per slice
-- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[C-review-naming]**
