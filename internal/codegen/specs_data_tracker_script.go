@@ -4,7 +4,7 @@
 // the rec asset's flag parser, and the pasture argv are rendered from that
 // table, so a declared op and the script that serves it cannot name different
 // commands. The ledger backend is the same case arm writing one JSONL line per
-// mutation; its field order is ledgerFieldOrder, also the one home.
+// mutation. Key order is ledgerFieldOrder. An independent pin rejects a reorder.
 package codegen
 
 import (
@@ -14,11 +14,36 @@ import (
 )
 
 // ledgerFieldOrder is the stable key order of every ledger mutation line.
-// The writer and the order guard both read this slice.
+// The writer reads this slice. The order guard pins an independent literal
+// and does not treat this slice as its expectation.
 var ledgerFieldOrder = []string{
 	"op", "id", "at", "namespace", "title", "kind", "phase", "status",
 	"priority", "label", "parent", "child", "edge_kind", "author",
 	"note_kind", "to", "reason", "ref", "body",
+}
+
+// ledgerLineKeyOrder reads the key sequence the rendered ledger_line writer
+// emits. The order guard compares this to an independent literal, so a reorder
+// of ledgerFieldOrder changes the writer and fails that pin.
+func ledgerLineKeyOrder(script string) ([]string, error) {
+	start := strings.Index(script, "ledger_line() {")
+	if start < 0 {
+		return nil, fmt.Errorf("ledger field order: rendered rec has no ledger_line function — why: the writer is generated from ledgerFieldOrder; where: internal/codegen/specs_data_tracker_script.go renderLedgerLineFunc; fix: keep ledger_line in the rec asset")
+	}
+	rest := script[start:]
+	end := strings.Index(rest, "\n}\n")
+	if end < 0 {
+		return nil, fmt.Errorf("ledger field order: ledger_line function is not closed — where: rendered TrackerRecScript; fix: keep the function terminated before the next definition")
+	}
+	re := regexp.MustCompile(`printf '(?:,)?"([a-z_]+)":`)
+	var keys []string
+	for _, match := range re.FindAllStringSubmatch(rest[:end], -1) {
+		keys = append(keys, match[1])
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("ledger field order: ledger_line emits no keys — why: the printf sequence is the writer; where: renderLedgerLineFunc; fix: emit one printf per ledgerFieldOrder key")
+	}
+	return keys, nil
 }
 
 // trackerFlag is one neutral flag. The rec parser is rendered from these
@@ -175,7 +200,7 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 		},
 		TrackerOpShow: {
 			Id:         TrackerOpShow,
-			Action:     "read one record, optionally with its notes or history",
+			Action:     "read one record, including description, phase, priority and refs; timestamps stay on --history; --notes lists notes",
 			Signature:  `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]`,
 			Positional: "id",
 			Flags: []trackerFlag{
@@ -191,7 +216,8 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 		},
 		TrackerOpQuery: {
 			Id:        TrackerOpQuery,
-			Action:    "enumerate records by status, label, blocked state, or dependency tree",
+			Action:    "enumerate records by status, label, blocked state, or dependency tree; --blocked rejects --status",
+			Prelude:   `[ "$blocked" != 1 ] || [ -z "$status" ] || fail "query rejected --blocked with --status" "the blocked read has no --status flag, so forwarding it exits 1" "drop --status, or run query --status without --blocked"`,
 			Signature: `"${EPOCH_REC}" query [--status S] [--label L] [--blocked] [--tree ID] [--all-namespaces] [--format text|json]`,
 			Flags: []trackerFlag{
 				{Name: "status"},
@@ -207,7 +233,7 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 					Name:      "blocked",
 					When:      `[ "$blocked" = 1 ]`,
 					Argv:      []string{"task", "blocked"},
-					Optional:  []pastureOptional{{Var: "status", Flag: "--status"}, {Var: "label", Flag: "--label"}},
+					Optional:  []pastureOptional{{Var: "label", Flag: "--label"}},
 					Scoped:    true,
 					PassAllNS: true,
 					Format:    `"$fmt"`,
@@ -485,21 +511,23 @@ if [ "$RC" -ne 0 ]; then
   emit error "store-exit-$RC" "$DB" "" "" "$VER"
 fi
 
-# 4. Scope and identity are read-only checks on the existing store.
+# 4. Scope. Same derivation as pasture: explicit env, else git origin, else
+# file:// of the working directory. A missing remote is not an unusable store.
 if [ -n "${PASTURE_NAMESPACE:-}" ]; then
   NS="$PASTURE_NAMESPACE"
 else
   NS="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')"
-fi
-if [ -z "$NS" ]; then
-  emit error no-namespace "$DB" "" "" "$VER"
+  if [ -z "$NS" ]; then
+    NS="file://$(pwd)"
+  fi
 fi
 
 ACT="${PASTURE_AUTHOR:-pasture-system/00000000-0000-0000-0000-000000000000}"
 "$PASTURE_BIN" --db "$DB" task agents show "$ACT" --format json >/dev/null 2>&1
 RC=$?
 if [ "$RC" -ne 0 ]; then
-  emit error no-author "$DB" "$NS" "$ACT" "$VER"
+  printf 'WARN=no-author\n'
+  printf 'probe: warning: author %%s is not registered in %%s\n  why: task agents show exited %%s, and a missing author is not an unusable store\n  where: epoch tracker probe, author check\n  fix: register the actor, or export PASTURE_AUTHOR to a registered id; the epoch still records backend pasture\n' "$ACT" "$DB" "$RC" >&2
 fi
 
 emit pasture "" "$DB" "$NS" "$ACT" "$VER"
@@ -895,6 +923,8 @@ ledger_append() {
 const ledgerRuntime = `
 ledger_create() {
   id=$(mint_id)
+  # Empty priority matches the pasture create flag default so show agrees.
+  [ -n "$priority" ] || priority=medium
   ledger_append "$id" "$(ledger_line op create id "$id" namespace "$NS" title "$title" kind "$kind" phase "$phase" status open priority "$priority" author "$AUTHOR" ref "$refs" body "$body")"
   printf '%s\n' "$id"
   for label in $labels; do
@@ -992,6 +1022,18 @@ function add_edge(id, kind, child,   cur) {
   if (cur == "") edges[id] = item
   else edges[id] = cur ";" item
 }
+function row_escape(s,   i, c, out) {
+  out = ""
+  if (s == "") return ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c == "\\") out = out "\\"
+    else if (c == "\n") out = out "\\n"
+    else if (c == "\037") out = out " "
+    else out = out c
+  }
+  return out
+}
 {
   parse($0)
   id = f["id"]
@@ -1001,6 +1043,9 @@ function add_edge(id, kind, child,   cur) {
     title[id] = f["title"]
     ns[id] = f["namespace"]
     body[id] = f["body"]
+    phase[id] = f["phase"]
+    priority[id] = f["priority"]
+    ref[id] = f["ref"]
     if (st[id] == "") st[id] = "open"
   }
   if (f["namespace"] != "" && ns[id] == "") ns[id] = f["namespace"]
@@ -1025,10 +1070,26 @@ END {
     ready = 0
     if (st[id] != "closed" && blocked == 0) ready = 1
     gsub(/\037/, " ", title[id])
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\n", id, ns[id], title[id], st[id], labels[id], edges[id], notes[id]+0, ready, blocked
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\037%s\037%s\037%s\037%s\n", id, ns[id], title[id], st[id], labels[id], edges[id], notes[id]+0, ready, blocked, row_escape(phase[id]), row_escape(priority[id]), row_escape(ref[id]), row_escape(body[id])
   }
 }
 '
+}
+
+row_unescape() {
+  printf '%s' "$1" | awk 'BEGIN{ORS=""} {
+    esc = 0
+    for (i = 1; i <= length($0); i++) {
+      c = substr($0, i, 1)
+      if (esc) {
+        if (c == "n") printf "\n"
+        else if (c == "\\") printf "\\"
+        else printf "%s", c
+        esc = 0
+      } else if (c == "\\") esc = 1
+      else printf "%s", c
+    }
+  }'
 }
 
 ledger_split() {
@@ -1042,6 +1103,7 @@ ledger_split() {
   IFS=$old
   rid=${1:-}; rns=${2:-}; rtitle=${3:-}; rstatus=${4:-}; rlabels=${5:-}
   redges=${6:-}; rcomments=${7:-}; rready=${8:-}; rblocked=${9:-}
+  rphase=${10:-}; rpriority=${11:-}; rref=${12:-}; rbody=$(row_unescape "${13:-}")
 }
 
 ledger_match() {
@@ -1103,13 +1165,15 @@ ledger_show() {
     [ "$rid" = "$id" ] || continue
     found=1
     if [ "$fmt" = text ]; then
-      printf 'id: %s\ntitle: %s\nstatus: %s\nnamespace: %s\nlabels: %s\nedges: %s\ncomments: %s\n' \
-        "$rid" "$rtitle" "$rstatus" "$rns" "$rlabels" "$redges" "$rcomments"
+      printf 'id: %s\ntitle: %s\nstatus: %s\nnamespace: %s\nlabels: %s\nedges: %s\ncomments: %s\nphase: %s\npriority: %s\nref: %s\ndescription: %s\n' \
+        "$rid" "$rtitle" "$rstatus" "$rns" "$rlabels" "$redges" "$rcomments" \
+        "$rphase" "$rpriority" "$rref" "$rbody"
     else
-      printf '{"id":"%s","title":"%s","status":"%s","namespace":"%s","labels":"%s","edges":"%s","comments":%s}\n' \
+      printf '{"id":"%s","title":"%s","status":"%s","namespace":"%s","labels":"%s","edges":"%s","comments":%s,"phase":"%s","priority":"%s","ref":"%s","description":"%s"}\n' \
         "$(json_escape "$rid")" "$(json_escape "$rtitle")" "$(json_escape "$rstatus")" \
         "$(json_escape "$rns")" "$(json_escape "$rlabels")" "$(json_escape "$redges")" \
-        "$rcomments"
+        "$rcomments" \
+        "$(json_escape "$rphase")" "$(json_escape "$rpriority")" "$(json_escape "$rref")" "$(json_escape "$rbody")"
     fi
   done
   printf '%s\n' "$rows" | while IFS= read -r row; do

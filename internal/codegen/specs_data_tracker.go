@@ -116,9 +116,6 @@ type TrackerOp struct {
 // claim as an additive label.
 const TrackerAssignmentForm = `label ID owner:<role>`
 
-// ValidateTrackerOps fails when the closed operation set is incomplete or a
-// recipe is missing. It is called by the generator, so an incomplete contract
-// fails the build instead of shipping a partial adapter.
 func ValidateTrackerOps() error {
 	ids := AllTrackerOpIds()
 	ops := make([]TrackerOp, 0, len(ids))
@@ -130,6 +127,9 @@ func ValidateTrackerOps() error {
 		ops = append(ops, op)
 	}
 	if err := validateTrackerOps(ops); err != nil {
+		return err
+	}
+	if err := validateTrackerImplementations(ops, ledgerRuntime); err != nil {
 		return err
 	}
 	if err := validateTrackerDispatch(TrackerOps); err != nil {
@@ -169,11 +169,28 @@ func validateTrackerOps(ops []TrackerOp) error {
 		if strings.TrimSpace(op.Ledger) == "" {
 			return fmt.Errorf("tracker contract: operation %q has no ledger recipe — why: a ledger epoch would have no call for this op; where: internal/codegen/specs_data_tracker.go TrackerOps[%q].Ledger; fix: add the ledger mutation", op.Id, op.Id)
 		}
+		if len(op.PastureCalls) == 0 {
+			return fmt.Errorf("tracker contract: operation %q has no Pasture calls — why: an empty call list still renders a non-empty Pasture string, so the pasture arm is a silent no-op; where: internal/codegen/specs_data_tracker.go validateTrackerOps; when: checking TrackerOps before generation; impact: the op ships and exits 0 without calling the backend; fix: add at least one PastureCall for %q", op.Id, op.Id)
+		}
 	}
 	for _, id := range canonicalTrackerOpIds {
 		if !seen[id] {
 			return fmt.Errorf("tracker contract: operation %q is missing — why: the closed set requires all ten operations; where: internal/codegen/specs_data_tracker.go; fix: add the missing entry", id)
 		}
+	}
+	return nil
+}
+
+// validateTrackerImplementations fails the build when an op has no ledger
+// handler. renderOpArm calls ledger_<id>; a missing function is exit 127 at
+// runtime, after generation has already shipped.
+func validateTrackerImplementations(ops []TrackerOp, runtime string) error {
+	for _, op := range ops {
+		needle := "ledger_" + string(op.Id) + "()"
+		if strings.Contains(runtime, needle) {
+			continue
+		}
+		return fmt.Errorf("tracker contract: operation %q has no %s handler — why: the rec asset calls ledger_%s and a missing function fails at runtime with exit 127 (command not found); where: internal/codegen/specs_data_tracker_script.go ledgerRuntime; when: checking TrackerOps before generation; impact: a ledger epoch dies on the first %s call; fix: define %s in ledgerRuntime", op.Id, needle, op.Id, op.Id, needle)
 	}
 	return nil
 }
@@ -195,8 +212,9 @@ const TrackerProbeLimits = `Detection limits, by step:
 
 - pasture --help: detects that the binary is on PATH and that each required verb has a help page. It cannot detect version compatibility, store health, permissions, schema, namespace or author. A help page can exist on a binary whose runtime is broken.
 - test -f: detects a missing store file and stops the probe before anything opens it. It cannot detect a directory, an unreadable or corrupt database, an out-of-date schema, a held lock, or a different store selected by configuration. Never replace it with a read: opening a missing store creates it.
-- migrate --dry-run: detects that the store opens and that its migrations can be planned; it leaves the file's SHA-256 unchanged. It still opens the store and may take locks. It cannot detect concurrent writers, a defect that only a real migration touches, an unregistered author, or a namespace mismatch.
-- Scope and author checks: detect that a namespace resolves and that the configured author is registered. They cannot detect an author registered in another namespace, nor prove the adapter will be allowed to write.
+- migrate --dry-run: detects that the store opens and that its migrations can be planned; it leaves the file's SHA-256 unchanged. It still opens the store and may take locks. It cannot detect concurrent writers, a defect that only a real migration touches, an unregistered author, or a namespace mismatch. A non-zero result is the only error backend: the store exists but cannot be used.
+- Namespace: explicit PASTURE_NAMESPACE, else the git origin remote, else file:// of the working directory. A missing remote is not an unusable store. It cannot detect a remote other than origin.
+- Author: a missing or unregistered author is a warning (WARN=no-author), not an error backend. It cannot detect an author registered in another namespace, nor prove a later write will be allowed.
 - The probe cannot detect a store chosen by configuration outside the env/default precedence, and it does not prove that any later write will succeed.`
 
 // TrackerEpochHeaderTemplate is the EPOCH.md shape. The file lives outside the
@@ -274,15 +292,26 @@ func buildTrackerAdapterContent() string {
 	b.WriteString(TrackerWriteFailureRule)
 	b.WriteString("\n\nThe orchestrator runs the probe once. Subagents read EPOCH.md and never re-probe.\n\n")
 	b.WriteString("Write this probe to `.agents.local/pasture/probe.sh` and run it before the first write:\n\n")
+	b.WriteString("<!-- pasture:asset probe -->\n")
 	b.WriteString("~~~sh\n")
-	b.WriteString(TrackerProbeScript)
-	b.WriteString("~~~\n\n")
+	b.WriteString(ensureTrailingNewline(TrackerProbeScript))
+	b.WriteString("~~~\n")
+	b.WriteString("<!-- /pasture:asset probe -->\n\n")
 	b.WriteString(TrackerProbeLimits)
 	b.WriteString("\n\nWrite this adapter to the path the header records in `rec:` and make it executable; every tracker call goes through it:\n\n")
+	b.WriteString("<!-- pasture:asset rec -->\n")
 	b.WriteString("~~~sh\n")
-	b.WriteString(TrackerRecScript)
+	b.WriteString(ensureTrailingNewline(TrackerRecScript))
 	b.WriteString("~~~\n")
+	b.WriteString("<!-- /pasture:asset rec -->\n")
 	return b.String()
+}
+
+func ensureTrailingNewline(script string) string {
+	if strings.HasSuffix(script, "\n") {
+		return script
+	}
+	return script + "\n"
 }
 
 // SortedTrackerOps returns the operations in canonical order. It exists so a

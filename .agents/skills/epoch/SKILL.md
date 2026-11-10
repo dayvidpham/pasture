@@ -279,8 +279,8 @@ The operation set is closed. `relate` is `block --kind`; `assign` is `label ID o
 | `label` | `"${EPOCH_REC}" label ID L   (assignment: label ID owner:<role>)` | add a label; never remove one |
 | `block` | `"${EPOCH_REC}" block PARENT --by CHILD [--kind blocked_by|derived_from|supersedes|discovered_from]` | add an edge; a blocked_by edge keeps the parent open until the child closes; a typed edge uses --kind |
 | `note` | `"${EPOCH_REC}" note ID --author A [--kind K] [--to ROLE] [--body TEXT|-]` | append an attributed immutable note; --to makes it a message |
-| `show` | `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]` | read one record, optionally with its notes or history |
-| `query` | `"${EPOCH_REC}" query [--status S] [--label L] [--blocked] [--tree ID] [--all-namespaces] [--format text|json]` | enumerate records by status, label, blocked state, or dependency tree |
+| `show` | `"${EPOCH_REC}" show ID [--notes] [--history] [--format text|json]` | read one record, including description, phase, priority and refs; timestamps stay on --history; --notes lists notes |
+| `query` | `"${EPOCH_REC}" query [--status S] [--label L] [--blocked] [--tree ID] [--all-namespaces] [--format text|json]` | enumerate records by status, label, blocked state, or dependency tree; --blocked rejects --status |
 | `ready` | `"${EPOCH_REC}" ready [--label L] [--all-namespaces] [--format text|json]` | list non-closed records with no non-closed blocker |
 | `status` | `"${EPOCH_REC}" status ID --set open|in_progress|closed` | change state (start work); the store keeps the only status field |
 | `close` | `"${EPOCH_REC}" close ID --reason R` | close a record; policy reserves this for the supervisor |
@@ -310,6 +310,7 @@ The orchestrator runs the probe once. Subagents read EPOCH.md and never re-probe
 
 Write this probe to `.agents.local/pasture/probe.sh` and run it before the first write:
 
+<!-- pasture:asset probe -->
 ~~~sh
 #!/bin/sh
 # Epoch tracker probe. Side-effect free. Prints KEY=VALUE lines and exits 0.
@@ -380,36 +381,41 @@ if [ "$RC" -ne 0 ]; then
   emit error "store-exit-$RC" "$DB" "" "" "$VER"
 fi
 
-# 4. Scope and identity are read-only checks on the existing store.
+# 4. Scope. Same derivation as pasture: explicit env, else git origin, else
+# file:// of the working directory. A missing remote is not an unusable store.
 if [ -n "${PASTURE_NAMESPACE:-}" ]; then
   NS="$PASTURE_NAMESPACE"
 else
   NS="$(git remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')"
-fi
-if [ -z "$NS" ]; then
-  emit error no-namespace "$DB" "" "" "$VER"
+  if [ -z "$NS" ]; then
+    NS="file://$(pwd)"
+  fi
 fi
 
 ACT="${PASTURE_AUTHOR:-pasture-system/00000000-0000-0000-0000-000000000000}"
 "$PASTURE_BIN" --db "$DB" task agents show "$ACT" --format json >/dev/null 2>&1
 RC=$?
 if [ "$RC" -ne 0 ]; then
-  emit error no-author "$DB" "$NS" "$ACT" "$VER"
+  printf 'WARN=no-author\n'
+  printf 'probe: warning: author %s is not registered in %s\n  why: task agents show exited %s, and a missing author is not an unusable store\n  where: epoch tracker probe, author check\n  fix: register the actor, or export PASTURE_AUTHOR to a registered id; the epoch still records backend pasture\n' "$ACT" "$DB" "$RC" >&2
 fi
 
 emit pasture "" "$DB" "$NS" "$ACT" "$VER"
 ~~~
+<!-- /pasture:asset probe -->
 
 Detection limits, by step:
 
 - pasture --help: detects that the binary is on PATH and that each required verb has a help page. It cannot detect version compatibility, store health, permissions, schema, namespace or author. A help page can exist on a binary whose runtime is broken.
 - test -f: detects a missing store file and stops the probe before anything opens it. It cannot detect a directory, an unreadable or corrupt database, an out-of-date schema, a held lock, or a different store selected by configuration. Never replace it with a read: opening a missing store creates it.
-- migrate --dry-run: detects that the store opens and that its migrations can be planned; it leaves the file's SHA-256 unchanged. It still opens the store and may take locks. It cannot detect concurrent writers, a defect that only a real migration touches, an unregistered author, or a namespace mismatch.
-- Scope and author checks: detect that a namespace resolves and that the configured author is registered. They cannot detect an author registered in another namespace, nor prove the adapter will be allowed to write.
+- migrate --dry-run: detects that the store opens and that its migrations can be planned; it leaves the file's SHA-256 unchanged. It still opens the store and may take locks. It cannot detect concurrent writers, a defect that only a real migration touches, an unregistered author, or a namespace mismatch. A non-zero result is the only error backend: the store exists but cannot be used.
+- Namespace: explicit PASTURE_NAMESPACE, else the git origin remote, else file:// of the working directory. A missing remote is not an unusable store. It cannot detect a remote other than origin.
+- Author: a missing or unregistered author is a warning (WARN=no-author), not an error backend. It cannot detect an author registered in another namespace, nor prove a later write will be allowed.
 - The probe cannot detect a store chosen by configuration outside the env/default precedence, and it does not prove that any later write will succeed.
 
 Write this adapter to the path the header records in `rec:` and make it executable; every tracker call goes through it:
 
+<!-- pasture:asset rec -->
 ~~~sh
 #!/bin/sh
 # Epoch tracker adapter (rec). Generated from TrackerOps. Do not hand-edit.
@@ -635,6 +641,8 @@ ledger_line() {
 
 ledger_create() {
   id=$(mint_id)
+  # Empty priority matches the pasture create flag default so show agrees.
+  [ -n "$priority" ] || priority=medium
   ledger_append "$id" "$(ledger_line op create id "$id" namespace "$NS" title "$title" kind "$kind" phase "$phase" status open priority "$priority" author "$AUTHOR" ref "$refs" body "$body")"
   printf '%s\n' "$id"
   for label in $labels; do
@@ -732,6 +740,18 @@ function add_edge(id, kind, child,   cur) {
   if (cur == "") edges[id] = item
   else edges[id] = cur ";" item
 }
+function row_escape(s,   i, c, out) {
+  out = ""
+  if (s == "") return ""
+  for (i = 1; i <= length(s); i++) {
+    c = substr(s, i, 1)
+    if (c == "\\") out = out "\\"
+    else if (c == "\n") out = out "\\n"
+    else if (c == "\037") out = out " "
+    else out = out c
+  }
+  return out
+}
 {
   parse($0)
   id = f["id"]
@@ -741,6 +761,9 @@ function add_edge(id, kind, child,   cur) {
     title[id] = f["title"]
     ns[id] = f["namespace"]
     body[id] = f["body"]
+    phase[id] = f["phase"]
+    priority[id] = f["priority"]
+    ref[id] = f["ref"]
     if (st[id] == "") st[id] = "open"
   }
   if (f["namespace"] != "" && ns[id] == "") ns[id] = f["namespace"]
@@ -765,10 +788,26 @@ END {
     ready = 0
     if (st[id] != "closed" && blocked == 0) ready = 1
     gsub(/\037/, " ", title[id])
-    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\n", id, ns[id], title[id], st[id], labels[id], edges[id], notes[id]+0, ready, blocked
+    printf "%s\037%s\037%s\037%s\037%s\037%s\037%d\037%d\037%d\037%s\037%s\037%s\037%s\n", id, ns[id], title[id], st[id], labels[id], edges[id], notes[id]+0, ready, blocked, row_escape(phase[id]), row_escape(priority[id]), row_escape(ref[id]), row_escape(body[id])
   }
 }
 '
+}
+
+row_unescape() {
+  printf '%s' "$1" | awk 'BEGIN{ORS=""} {
+    esc = 0
+    for (i = 1; i <= length($0); i++) {
+      c = substr($0, i, 1)
+      if (esc) {
+        if (c == "n") printf "\n"
+        else if (c == "\\") printf "\\"
+        else printf "%s", c
+        esc = 0
+      } else if (c == "\\") esc = 1
+      else printf "%s", c
+    }
+  }'
 }
 
 ledger_split() {
@@ -782,6 +821,7 @@ ledger_split() {
   IFS=$old
   rid=${1:-}; rns=${2:-}; rtitle=${3:-}; rstatus=${4:-}; rlabels=${5:-}
   redges=${6:-}; rcomments=${7:-}; rready=${8:-}; rblocked=${9:-}
+  rphase=${10:-}; rpriority=${11:-}; rref=${12:-}; rbody=$(row_unescape "${13:-}")
 }
 
 ledger_match() {
@@ -843,13 +883,15 @@ ledger_show() {
     [ "$rid" = "$id" ] || continue
     found=1
     if [ "$fmt" = text ]; then
-      printf 'id: %s\ntitle: %s\nstatus: %s\nnamespace: %s\nlabels: %s\nedges: %s\ncomments: %s\n' \
-        "$rid" "$rtitle" "$rstatus" "$rns" "$rlabels" "$redges" "$rcomments"
+      printf 'id: %s\ntitle: %s\nstatus: %s\nnamespace: %s\nlabels: %s\nedges: %s\ncomments: %s\nphase: %s\npriority: %s\nref: %s\ndescription: %s\n' \
+        "$rid" "$rtitle" "$rstatus" "$rns" "$rlabels" "$redges" "$rcomments" \
+        "$rphase" "$rpriority" "$rref" "$rbody"
     else
-      printf '{"id":"%s","title":"%s","status":"%s","namespace":"%s","labels":"%s","edges":"%s","comments":%s}\n' \
+      printf '{"id":"%s","title":"%s","status":"%s","namespace":"%s","labels":"%s","edges":"%s","comments":%s,"phase":"%s","priority":"%s","ref":"%s","description":"%s"}\n' \
         "$(json_escape "$rid")" "$(json_escape "$rtitle")" "$(json_escape "$rstatus")" \
         "$(json_escape "$rns")" "$(json_escape "$rlabels")" "$(json_escape "$redges")" \
-        "$rcomments"
+        "$rcomments" \
+        "$(json_escape "$rphase")" "$(json_escape "$rpriority")" "$(json_escape "$rref")" "$(json_escape "$rbody")"
     fi
   done
   printf '%s\n' "$rows" | while IFS= read -r row; do
@@ -1122,6 +1164,7 @@ $_val"; fi
         *) fail "query rejected argument '$1'" "the argument is not in the query contract" "use --status, --label, --tree, --format, --blocked, --all-namespaces" ;;
       esac
     done
+    [ "$blocked" != 1 ] || [ -z "$status" ] || fail "query rejected --blocked with --status" "the blocked read has no --status flag, so forwarding it exits 1" "drop --status, or run query --status without --blocked"
     if [ "$BACKEND" = ledger ]; then
       ledger_query
       exit $?
@@ -1132,7 +1175,6 @@ $_val"; fi
         exit $?
       elif [ "$blocked" = 1 ]; then
         set -- task blocked
-        [ -n "$status" ] && set -- "$@" --status "$status"
         [ -n "$label" ] && set -- "$@" --label "$label"
         if [ "$allns" != 1 ] && [ -n "$NS" ]; then set -- "$@" --namespace "$NS"; fi
         [ "$allns" = 1 ] && set -- "$@" --all-namespaces
@@ -1235,6 +1277,7 @@ $_val"; fi
     ;;
 esac
 ~~~
+<!-- /pasture:asset rec -->
 
 
 ## Core Principles
@@ -1282,14 +1325,35 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 
 **Step 0: detect the tracker backend before the first write.**
 
-Write the probe and the adapter from the Tracker Adapter section to `.agents.local/pasture/probe.sh` and the path you will record in `rec:`, make the adapter executable, and run the probe. Write `EPOCH.md` from its output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe.
+Write the probe and the adapter by running the installer below against this skill file. It writes `.agents.local/pasture/probe.sh` and `.agents.local/pasture/rec` from the shipped fences in the Tracker Adapter section. Set `SKILL_FILE` to this file, run the installer, then the probe. Write `EPOCH.md` from the probe output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe. A missing git origin is not an error backend: the probe sets NS to file:// of the working directory. A missing or unregistered author is a warning (`WARN=no-author`), not an error backend.
 
 ```bash
-mkdir -p .agents.local/pasture
-# Paste the two fenced blocks from the Tracker Adapter section:
-#   probe -> .agents.local/pasture/probe.sh
-#   rec   -> .agents.local/pasture/rec
-chmod +x .agents.local/pasture/rec
+# pasture:install-tracker
+install_tracker_assets() {
+  skill=$1
+  dest=${2:-.agents.local/pasture}
+  if [ -z "$skill" ] || [ ! -f "$skill" ]; then
+    printf 'install: no skill file\n  why: install_tracker_assets needs the rendered skill path\n  where: Starting an Epoch install step\n  fix: set SKILL_FILE to this skill and pass it as the first argument\n' >&2
+    return 1
+  fi
+  mkdir -p "$dest" || return 1
+  awk -v dest="$dest" '
+    $0 == "<!-- pasture:asset probe -->" { kind = "probe"; next }
+    $0 == "<!-- pasture:asset rec -->" { kind = "rec"; next }
+    $0 ~ /^<!-- \/pasture:asset / { kind = ""; grab = 0; next }
+    kind != "" && $0 == "~~~sh" { grab = 1; next }
+    kind != "" && grab == 1 && $0 == "~~~" { grab = 0; next }
+    grab == 1 && kind == "probe" { print > (dest "/probe.sh"); next }
+    grab == 1 && kind == "rec" { print > (dest "/rec"); next }
+  ' "$skill"
+  if [ ! -s "$dest/probe.sh" ] || [ ! -s "$dest/rec" ]; then
+    printf 'install: the skill did not emit probe.sh and rec\n  why: the Tracker Adapter fences were missing or empty\n  where: %s\n  fix: regenerate the skill so it contains pasture:asset probe and pasture:asset rec\n' "$skill" >&2
+    return 1
+  fi
+  chmod +x "$dest/probe.sh" "$dest/rec"
+}
+# /pasture:install-tracker
+install_tracker_assets "$SKILL_FILE" .agents.local/pasture
 sh .agents.local/pasture/probe.sh
 # Then write .agents.local/pasture/EPOCH.md from the KEY=VALUE output, and in
 # every shell session resolve the entry point:

@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/dayvidpham/pasture/pkg/protocol"
 )
 
 // TestTrackerOpsContract proves the closed operation set is exactly the ten
@@ -76,6 +78,51 @@ func TestTrackerOpsValidationHasTwoSamples(t *testing.T) {
 	defective = SortedTrackerOps()
 	defective[0].Signature = "pasture task create"
 	require.Error(t, validateTrackerOps(defective), "a signature that bypasses the entry point must fail")
+}
+
+// TestTrackerOpsRequireCallsAndLedgerHandlers is the two-sample guard for a
+// declared op that has no implementation. A zero-call op and a missing
+// ledger_<id>() must fail; the production contract must pass.
+func TestTrackerOpsRequireCallsAndLedgerHandlers(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateTrackerOps(SortedTrackerOps()))
+	require.NoError(t, validateTrackerImplementations(SortedTrackerOps(), ledgerRuntime))
+	for _, id := range AllTrackerOpIds() {
+		require.NotEmpty(t, TrackerOps[id].PastureCalls, "clean sample: %s has Pasture calls", id)
+		needle := "ledger_" + string(id) + "()"
+		require.Contains(t, ledgerRuntime, needle)
+		require.Contains(t, TrackerRecScript, needle)
+	}
+
+	zero := SortedTrackerOps()
+	zero[0].PastureCalls = nil
+	err := validateTrackerOps(zero)
+	require.Error(t, err, "an op with zero Pasture calls must fail")
+	require.Contains(t, err.Error(), "no Pasture calls")
+
+	missing := strings.Replace(ledgerRuntime, "ledger_create()", "ledger_create_missing()", 1)
+	require.NotEqual(t, ledgerRuntime, missing, "the defective runtime must actually drop the handler")
+	err = validateTrackerImplementations(SortedTrackerOps(), missing)
+	require.Error(t, err, "a missing ledger_create() must fail")
+	require.Contains(t, err.Error(), "ledger_create()")
+
+	// Runtime sample: the rendered asset calls the function the validator names.
+	// Renaming the definition is exit 127, the failure the validator exists to stop.
+	dir := t.TempDir()
+	header := filepath.Join(dir, "EPOCH.md")
+	require.NoError(t, os.WriteFile(header, []byte("backend: ledger\nledger: "+filepath.Join(dir, "ledger")+"\n"), 0o600))
+	mutated := strings.Replace(TrackerRecScript, "ledger_label() {", "ledger_label_missing() {", 1)
+	require.NotEqual(t, TrackerRecScript, mutated)
+	cmd := exec.Command("sh", append([]string{"-c", mutated, "rec"}, "label", "ledger/x", "L")...)
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "EPOCH_FILE=" + header}
+	out, runErr := cmd.CombinedOutput()
+	require.Error(t, runErr)
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, runErr, &exitErr)
+	require.Equal(t, 127, exitErr.ExitCode(), "missing handler: %s", out)
+	require.Contains(t, string(out), "ledger_label")
 }
 
 // TestTrackerFragmentIsBackendNeutral proves the generated appendix carries
@@ -187,6 +234,7 @@ func TestProbeSubprocess(t *testing.T) {
 		require.Equal(t, "pasture", result["BACKEND"])
 		require.Equal(t, store, result["DB"])
 		require.Equal(t, "https://example.test/repo", result["NS"])
+		require.Empty(t, result["WARN"], "a registered author is not a warning")
 		require.Equal(t, "pasture-system/00000000-0000-0000-0000-000000000000", result["ACT"])
 		require.Equal(t, "v9.9.9", result["VER"])
 		invocations, err := os.ReadFile(log)
@@ -244,7 +292,7 @@ func TestProbeSubprocess(t *testing.T) {
 		require.Equal(t, "help-failed", result["REASON"])
 	})
 
-	t.Run("unregistered-author-is-error", func(t *testing.T) {
+	t.Run("unregistered-author-is-a-warning", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		bin, log := writeFakePasture(t, dir)
@@ -258,13 +306,14 @@ func TestProbeSubprocess(t *testing.T) {
 			"PASTURE_DB_PATH":   store,
 			"PASTURE_NAMESPACE": "https://example.test/repo",
 		})
-		require.Equal(t, "error", result["BACKEND"])
-		require.Equal(t, "no-author", result["REASON"])
+		require.Equal(t, "pasture", result["BACKEND"], "a missing author must not select the error backend")
+		require.Equal(t, "no-author", result["WARN"])
+		require.NotEqual(t, "error", result["REASON"])
 	})
 
-	t.Run("missing-namespace-is-error", func(t *testing.T) {
+	t.Run("usable-store-without-origin-is-pasture", func(t *testing.T) {
 		t.Parallel()
-		dir := t.TempDir()
+		dir := initRepoWithoutOrigin(t)
 		bin, log := writeFakePasture(t, dir)
 		store := filepath.Join(dir, "pasture.db")
 		require.NoError(t, os.WriteFile(store, []byte("store"), 0o600))
@@ -275,9 +324,51 @@ func TestProbeSubprocess(t *testing.T) {
 			"PROBE_FAKE_MODE": "ok",
 			"PASTURE_DB_PATH": store,
 		})
-		require.Equal(t, "error", result["BACKEND"])
-		require.Equal(t, "no-namespace", result["REASON"])
+		require.Equal(t, "pasture", result["BACKEND"])
+		require.Equal(t, "file://"+probePwd(t, dir), result["NS"])
+		require.NotEqual(t, "error", result["BACKEND"])
 	})
+
+	t.Run("broken-store-without-origin-is-error", func(t *testing.T) {
+		t.Parallel()
+		dir := initRepoWithoutOrigin(t)
+		bin, log := writeFakePasture(t, dir)
+		store := filepath.Join(dir, "pasture.db")
+		require.NoError(t, os.WriteFile(store, []byte("store"), 0o600))
+		result := runTrackerProbe(t, dir, map[string]string{
+			"HOME":            dir,
+			"PASTURE_BIN":     bin,
+			"PROBE_FAKE_LOG":  log,
+			"PROBE_FAKE_MODE": "store-unusable",
+			"PASTURE_DB_PATH": store,
+		})
+		require.Equal(t, "error", result["BACKEND"], "a store that cannot be opened must still stop")
+		require.Equal(t, "store-exit-2", result["REASON"])
+	})
+}
+
+func initRepoWithoutOrigin(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q", dir)
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + dir, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "git init: %s", out)
+	remote := exec.Command("git", "-C", dir, "remote")
+	remote.Env = cmd.Env
+	names, err := remote.Output()
+	require.NoError(t, err, "git remote: %s", names)
+	require.Empty(t, strings.TrimSpace(string(names)), "the reproduction repo must have no origin")
+	return dir
+}
+
+func probePwd(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("pwd")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	require.NoError(t, err)
+	return strings.TrimSpace(string(out))
 }
 
 // runTrackerProbe executes the production probe script in dir with exactly the
@@ -741,9 +832,128 @@ func TestTrackerDispatchScopeGuard(t *testing.T) {
 	require.Error(t, validateTrackerDispatch(ops))
 }
 
-// TestEmptyHomeInstallUsesLedger follows the install path: write the probe and
-// adapter, run the probe against an empty home, write EPOCH.md, and complete
-// the first operation on the ledger backend.
+// TestLedgerFieldOrderIsPinned fails when ledgerFieldOrder is reordered. The
+// expectation is an independent literal, not the slice the writer reads.
+func TestLedgerFieldOrderIsPinned(t *testing.T) {
+	t.Parallel()
+
+	want := []string{
+		"op", "id", "at", "namespace", "title", "kind", "phase", "status",
+		"priority", "label", "parent", "child", "edge_kind", "author",
+		"note_kind", "to", "reason", "ref", "body",
+	}
+	got, err := ledgerLineKeyOrder(TrackerRecScript)
+	require.NoError(t, err)
+	require.Empty(t, ledgerFieldOrderFindings(got, want), "clean sample: emitted order matches the pin")
+	require.Equal(t, want, ledgerFieldOrder, "reordering ledgerFieldOrder must fail this pin")
+
+	swapped := append([]string(nil), got...)
+	swapped[4], swapped[5] = swapped[5], swapped[4]
+	require.NotEmpty(t, ledgerFieldOrderFindings(swapped, want), "a reordered key list must fail")
+}
+
+func ledgerFieldOrderFindings(got, want []string) string {
+	if len(got) != len(want) {
+		return fmt.Sprintf("length %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return fmt.Sprintf("index %d: got %s, want %s", i, got[i], want[i])
+		}
+	}
+	return ""
+}
+
+// TestQueryBlockedRejectsStatus proves --blocked does not forward --status,
+// which pasture task blocked does not accept, and that --status still reaches
+// the list read.
+func TestQueryBlockedRejectsStatus(t *testing.T) {
+	t.Parallel()
+
+	t.Run("status-on-list-is-forwarded", func(t *testing.T) {
+		t.Parallel()
+		got := recArgv(t, []string{"query", "--status", "open"}, true)
+		require.Equal(t, []string{"task", "list", "--status", "open", "--namespace", "https://example.test/repo", "--format", "json"}, got)
+	})
+
+	t.Run("status-on-blocked-is-rejected", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		bin, log := writeFakePasture(t, dir)
+		header := filepath.Join(dir, "EPOCH.md")
+		require.NoError(t, os.WriteFile(header, []byte("backend: pasture\ndb: "+filepath.Join(dir, "store.db")+"\n"), 0o600))
+		out, code := runRec(t, dir, map[string]string{
+			"PASTURE_BIN":    bin,
+			"EPOCH_FILE":     header,
+			"PROBE_FAKE_LOG": log,
+		}, "query", "--blocked", "--status", "open")
+		require.Equal(t, 3, code, out)
+		require.Contains(t, out, "--status")
+		require.Contains(t, out, "fix:")
+		_, err := os.Stat(log)
+		require.True(t, os.IsNotExist(err), "the rejected combination must not call the backend")
+	})
+}
+
+// TestInstallStepWritesShippedAssets proves the rendered skill's install step
+// writes the probe and rec the generator ships. A fence that is not the shipped
+// script must fail that equality.
+func TestInstallStepWritesShippedAssets(t *testing.T) {
+	t.Parallel()
+
+	rendered := renderEpochSkill(t)
+	dest := filepath.Join(t.TempDir(), "installed")
+	installTrackerAssets(t, rendered, dest)
+	probe, err := os.ReadFile(filepath.Join(dest, "probe.sh"))
+	require.NoError(t, err)
+	rec, err := os.ReadFile(filepath.Join(dest, "rec"))
+	require.NoError(t, err)
+	require.Equal(t, ensureTrailingNewline(TrackerProbeScript), string(probe))
+	require.Equal(t, ensureTrailingNewline(TrackerRecScript), string(rec))
+
+	defective := strings.Replace(rendered, TrackerProbeScript, "echo defect\n", 1)
+	require.NotEqual(t, rendered, defective, "the defective sample must change the probe fence")
+	defectDest := filepath.Join(t.TempDir(), "defect")
+	installTrackerAssets(t, defective, defectDest)
+	got, err := os.ReadFile(filepath.Join(defectDest, "probe.sh"))
+	require.NoError(t, err)
+	require.NotEqual(t, ensureTrailingNewline(TrackerProbeScript), string(got), "a mutated fence must fail the shipped-bytes check")
+}
+
+func renderEpochSkill(t *testing.T) string {
+	t.Helper()
+	rendered, err := renderSkill(protocol.RoleEpoch, "", "", "test", HarnessClaudeCode)
+	require.NoError(t, err)
+	require.Contains(t, rendered, "# pasture:install-tracker")
+	require.Contains(t, rendered, "<!-- pasture:asset probe -->")
+	require.Contains(t, rendered, "<!-- pasture:asset rec -->")
+	return rendered
+}
+
+func installTrackerAssets(t *testing.T, skillText, dest string) {
+	t.Helper()
+	dir := t.TempDir()
+	skill := filepath.Join(dir, "SKILL.md")
+	require.NoError(t, os.WriteFile(skill, []byte(skillText), 0o644))
+	installer := extractMarked(t, skillText, "# pasture:install-tracker\n", "\n# /pasture:install-tracker")
+	cmd := exec.Command("sh", "-c", installer+"\ninstall_tracker_assets \"$1\" \"$2\"", "install", skill, dest)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "install step: %s", out)
+}
+
+func extractMarked(t *testing.T, text, start, end string) string {
+	t.Helper()
+	i := strings.Index(text, start)
+	require.NotEqualf(t, -1, i, "missing start marker %q", start)
+	rest := text[i+len(start):]
+	j := strings.Index(rest, end)
+	require.NotEqualf(t, -1, j, "missing end marker %q", end)
+	return rest[:j]
+}
+
+// TestEmptyHomeInstallUsesLedger follows the install path: the rendered skill's
+// install step writes the probe and adapter, the probe runs against an empty
+// home, EPOCH.md is written, and the first operation completes on the ledger.
 func TestEmptyHomeInstallUsesLedger(t *testing.T) {
 	t.Parallel()
 
@@ -751,11 +961,10 @@ func TestEmptyHomeInstallUsesLedger(t *testing.T) {
 	home := filepath.Join(dir, "home")
 	require.NoError(t, os.MkdirAll(home, 0o755))
 	work := filepath.Join(dir, "work")
-	require.NoError(t, os.MkdirAll(filepath.Join(work, ".agents.local", "pasture"), 0o755))
-	probe := filepath.Join(work, ".agents.local", "pasture", "probe.sh")
-	rec := filepath.Join(work, ".agents.local", "pasture", "rec")
-	require.NoError(t, os.WriteFile(probe, []byte(TrackerProbeScript), 0o755))
-	require.NoError(t, os.WriteFile(rec, []byte(TrackerRecScript), 0o755))
+	assetDir := filepath.Join(work, ".agents.local", "pasture")
+	installTrackerAssets(t, renderEpochSkill(t), assetDir)
+	probe := filepath.Join(assetDir, "probe.sh")
+	rec := filepath.Join(assetDir, "rec")
 	bin, log := writeFakePasture(t, dir)
 
 	cmd := exec.Command("sh", probe)
@@ -839,7 +1048,7 @@ func TestLedgerReplayParity(t *testing.T) {
 	ledgerHeader := writeEpoch(t, ledgerDir, "ledger", ns, author, "", ledgerPath)
 
 	sequence := [][]string{
-		{"create", "--kind", "task", "--title", "alpha", "--phase", "request", "--label", "L1", "--body", "hello"},
+		{"create", "--kind", "task", "--title", "alpha", "--phase", "request", "--label", "L1", "--ref", "spec=alpha", "--body", "hello"},
 		{"create", "--kind", "task", "--title", "beta", "--phase", "request", "--body", "other"},
 	}
 	pastureIDs := runSequence(t, pastureHeader, bin, db, sequence)
@@ -860,6 +1069,7 @@ func TestLedgerReplayParity(t *testing.T) {
 	pastureProj := projectPasture(t, bin, db, ns)
 	ledgerProj := projectLedger(t, ledgerPath)
 	requireEquivalent(t, pastureProj, ledgerProj)
+	requireShowParity(t, bin, db, pastureHeader, pastureIDs[0], ledgerHeader, ledgerIDs[0])
 
 	other := writeEpochFile(t, filepath.Join(ledgerDir, "EPOCH-other.md"), "ledger", "https://example.test/other", author, "", ledgerPath)
 	runOne(t, other, "", "", "create", "--kind", "task", "--title", "otherns", "--phase", "request", "--body", "x")
@@ -1074,6 +1284,33 @@ func requireEquivalent(t *testing.T, pasture, ledger []parityTask) {
 		sort.Strings(gotEdges)
 		require.Equal(t, nonempty(wantEdges), nonempty(gotEdges), task.Title)
 	}
+}
+
+func requireShowParity(t *testing.T, bin, db, pastureHeader, pastureID, ledgerHeader, ledgerID string) {
+	t.Helper()
+	pastureRaw := runOne(t, pastureHeader, bin, db, "show", pastureID)
+	ledgerRaw := runOne(t, ledgerHeader, "", "", "show", ledgerID)
+	var pasture struct {
+		Description string `json:"description"`
+		Phase       string `json:"phase"`
+		Priority    string `json:"priority"`
+	}
+	var ledger struct {
+		Description string `json:"description"`
+		Phase       string `json:"phase"`
+		Priority    string `json:"priority"`
+		Ref         string `json:"ref"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(pastureRaw), &pasture), pastureRaw)
+	require.NoError(t, json.Unmarshal([]byte(ledgerRaw), &ledger), ledgerRaw)
+	require.Equal(t, pasture.Description, ledger.Description, "show description")
+	require.Equal(t, pasture.Phase, ledger.Phase, "show phase")
+	require.Equal(t, pasture.Priority, ledger.Priority, "show priority")
+	require.Equal(t, "spec=alpha", ledger.Ref, "show must include refs, not only show --history")
+	require.Contains(t, pasture.Description, "spec: alpha")
+	require.NotEmpty(t, ledger.Description)
+	require.NotEmpty(t, ledger.Phase)
+	require.NotEmpty(t, ledger.Priority)
 }
 
 func nonempty(values []string) []string {

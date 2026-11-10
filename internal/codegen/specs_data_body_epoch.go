@@ -128,14 +128,35 @@ After classification, user confirms research depth. Then s1_2 and s1_3 run in pa
 			Title: "Starting an Epoch",
 			Content: `**Step 0: detect the tracker backend before the first write.**
 
-Write the probe and the adapter from the Tracker Adapter section to ` + "`" + `.agents.local/pasture/probe.sh` + "`" + ` and the path you will record in ` + "`rec:`" + `, make the adapter executable, and run the probe. Write ` + "`EPOCH.md`" + ` from its output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe.
+Write the probe and the adapter by running the installer below against this skill file. It writes ` + "`" + `.agents.local/pasture/probe.sh` + "`" + ` and ` + "`" + `.agents.local/pasture/rec` + "`" + ` from the shipped fences in the Tracker Adapter section. Set ` + "`SKILL_FILE`" + ` to this file, run the installer, then the probe. Write ` + "`EPOCH.md`" + ` from the probe output before any task is created. The orchestrator runs this probe once; subagents read the header and never re-probe. A missing git origin is not an error backend: the probe sets NS to file:// of the working directory. A missing or unregistered author is a warning (` + "`WARN=no-author`" + `), not an error backend.
 
 ` + "```" + `bash
-mkdir -p .agents.local/pasture
-# Paste the two fenced blocks from the Tracker Adapter section:
-#   probe -> .agents.local/pasture/probe.sh
-#   rec   -> .agents.local/pasture/rec
-chmod +x .agents.local/pasture/rec
+# pasture:install-tracker
+install_tracker_assets() {
+  skill=$1
+  dest=${2:-.agents.local/pasture}
+  if [ -z "$skill" ] || [ ! -f "$skill" ]; then
+    printf 'install: no skill file\n  why: install_tracker_assets needs the rendered skill path\n  where: Starting an Epoch install step\n  fix: set SKILL_FILE to this skill and pass it as the first argument\n' >&2
+    return 1
+  fi
+  mkdir -p "$dest" || return 1
+  awk -v dest="$dest" '
+    $0 == "<!-- pasture:asset probe -->" { kind = "probe"; next }
+    $0 == "<!-- pasture:asset rec -->" { kind = "rec"; next }
+    $0 ~ /^<!-- \/pasture:asset / { kind = ""; grab = 0; next }
+    kind != "" && $0 == "~~~sh" { grab = 1; next }
+    kind != "" && grab == 1 && $0 == "~~~" { grab = 0; next }
+    grab == 1 && kind == "probe" { print > (dest "/probe.sh"); next }
+    grab == 1 && kind == "rec" { print > (dest "/rec"); next }
+  ' "$skill"
+  if [ ! -s "$dest/probe.sh" ] || [ ! -s "$dest/rec" ]; then
+    printf 'install: the skill did not emit probe.sh and rec\n  why: the Tracker Adapter fences were missing or empty\n  where: %s\n  fix: regenerate the skill so it contains pasture:asset probe and pasture:asset rec\n' "$skill" >&2
+    return 1
+  fi
+  chmod +x "$dest/probe.sh" "$dest/rec"
+}
+# /pasture:install-tracker
+install_tracker_assets "$SKILL_FILE" .agents.local/pasture
 sh .agents.local/pasture/probe.sh
 # Then write .agents.local/pasture/EPOCH.md from the KEY=VALUE output, and in
 # every shell session resolve the entry point:
