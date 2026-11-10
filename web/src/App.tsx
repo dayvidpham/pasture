@@ -1371,7 +1371,6 @@ export default function App() {
               type="button"
               className="rail-toggle"
               aria-expanded={railOpen}
-              aria-label="session details"
               onClick={() => setRailOpen((open) => !open)}
             >
               {railOpen ? 'hide details' : 'show details'}
@@ -1389,7 +1388,7 @@ export default function App() {
         </div>
       }
       rail={
-        <>
+        <div className="rail-contents" inert={!railOpen} aria-hidden={railOpen ? undefined : true}>
           <RailSection
             title="peasant projects"
             icon={Folder}
@@ -1516,9 +1515,7 @@ export default function App() {
               />
             </RailSection>
           )}
-
-
-        </>
+        </div>
       }
     >
       <header className="hero">
@@ -1526,7 +1523,7 @@ export default function App() {
           <p className="eyebrow">pasture / local console</p>
           <h1>session epochs</h1>
           <p className="lede">
-            Active, idle, ended, and unbound harness sessions from the local Pasture store.
+            Active, idle, ended, and unbound sessions from the local Pasture store.
           </p>
         </div>
         <div className="hero-meta">

@@ -39,13 +39,27 @@ body {
 /* Slide the desktop rail out instead of unmounting it. The mobile sheet is a
    sibling, so this does not change the sheet. The motion matches the transcript
    viewer's rail: transform over the shared duration and ease. */
+.rs-rail {
+  visibility: visible;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .rs-rail {
     transition:
       transform var(--dur-3) var(--ease-in-out),
       opacity var(--dur-3) var(--ease-in-out),
       flex-basis var(--dur-3) var(--ease-in-out),
-      width var(--dur-3) var(--ease-in-out);
+      width var(--dur-3) var(--ease-in-out),
+      visibility 0s linear 0s;
+  }
+
+  .rs.rs--rail-collapsed .rs-rail {
+    transition:
+      transform var(--dur-3) var(--ease-in-out),
+      opacity var(--dur-3) var(--ease-in-out),
+      flex-basis var(--dur-3) var(--ease-in-out),
+      width var(--dur-3) var(--ease-in-out),
+      visibility 0s linear var(--dur-3);
   }
 }
 
@@ -61,6 +75,7 @@ body {
   min-width: 0;
   overflow: hidden;
   pointer-events: none;
+  visibility: hidden;
 }
 
 .rail-toggle {
@@ -77,6 +92,13 @@ body {
 .rail-toggle:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring);
   outline-offset: var(--focus-ring-offset);
+}
+
+/* The sheet owns details below this width. The desktop toggle is a no-op there. */
+@container rs-shell (width <= 560px) {
+  .rail-toggle {
+    display: none;
+  }
 }
 
 .toolbar {
@@ -133,6 +155,10 @@ body {
   margin: 0;
   color: var(--ink-2);
   font: var(--fs-body)/var(--lh-body) var(--font-body);
+}
+
+.hero .lede {
+  max-width: none;
 }
 
 .hero-meta {

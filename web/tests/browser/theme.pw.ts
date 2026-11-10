@@ -461,7 +461,7 @@ test('hero text keeps width at 1180 without horizontal overflow', async ({ page 
   await mockAPI(page)
   await page.goto(origin)
   await expect(page.getByRole('heading', { name: 'session epochs' })).toBeVisible()
-  await expect(page.locator('.hero .lede')).toHaveText('Active, idle, ended, and unbound harness sessions from the local Pasture store.')
+  await expect(page.locator('.hero .lede')).toHaveText('Active, idle, ended, and unbound sessions from the local Pasture store.')
   const measured = await page.evaluate(() => {
     const hero = document.querySelector('.hero') as HTMLElement
     const heading = hero.querySelector('h1') as HTMLElement
@@ -482,32 +482,111 @@ test('hero text keeps width at 1180 without horizontal overflow', async ({ page 
   expect(measured.scroll).toBeLessThanOrEqual(measured.viewport)
 })
 
+test('hero lede is one line at 1280', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await mockAPI(page)
+  await page.goto(origin)
+  const lede = page.locator('.hero .lede')
+  await expect(lede).toHaveText('Active, idle, ended, and unbound sessions from the local Pasture store.')
+  const lines = await lede.evaluate(element => {
+    const style = getComputedStyle(element)
+    const fontSize = parseFloat(style.fontSize)
+    const lineHeight = style.lineHeight.endsWith('px') ? parseFloat(style.lineHeight) : parseFloat(style.lineHeight) * fontSize
+    return element.getBoundingClientRect().height / lineHeight
+  })
+  expect(lines).toBeLessThanOrEqual(1.05)
+})
+
 test('the details rail collapses and expands from the keyboard', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
   await mockAPI(page)
   await page.goto(origin)
-  const toggle = page.getByRole('button', { name: 'session details' })
+  const toggle = page.getByRole('button', { name: 'hide details' })
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   const rail = page.locator('.rs-rail')
   await expect(toggle).toHaveText('hide details')
   await expect(rail).toBeVisible()
   await expect(rail.getByText('peasant projects', { exact: true })).toBeVisible()
   await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  const collapsed = page.getByRole('button', { name: 'show details' })
+  await expect(collapsed).toHaveAttribute('aria-expanded', 'false')
   await expect(rail).toBeHidden()
   await expect(rail.getByText('peasant projects', { exact: true })).toBeHidden()
-  await toggle.focus()
-  await expect(toggle).toBeFocused()
+  await collapsed.focus()
+  await expect(collapsed).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.getByRole('button', { name: 'hide details' })).toHaveAttribute('aria-expanded', 'true')
   await expect(rail).toBeVisible()
   await expect(rail.getByText('peasant projects', { exact: true })).toBeVisible()
+})
+
+test('collapsed rail contents leave the tab order until expanded', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const integration = { enabled: false, source: 'none', status: 'disabled', message: '' }
+  const epoch = { id: 'epoch-wave-6', title: 'wave six epoch', phase: 'impl', role: 'worker', sessionCount: 1, activeCount: 0 }
+  await mockAPI(page)
+  await page.route('**/api/v1/inspect', route => route.fulfill({
+    json: { ...snapshot, sessions: [session], epochs: [epoch], peasantIntegration: integration },
+  }))
+  await page.routeWebSocket('**/api/v1/ws', ws => {
+    ws.send(JSON.stringify({ type: 'ready', topics: [] }))
+    ws.onMessage(message => {
+      const { topic } = JSON.parse(String(message))
+      const payload = topic === 'sessions'
+        ? { items: [session], peasantIntegration: integration }
+        : { items: topic === 'epochs' ? [epoch] : [] }
+      ws.send(JSON.stringify({ type: topic, revision: 1, asOf: snapshot.asOf, payload }))
+    })
+  })
+  await page.goto(origin)
+  const peasant = page.getByRole('switch', { name: 'Peasant project enrichment' })
+  const epochButton = page.getByRole('button', { name: /wave six epoch/ })
+  await expect(peasant).toBeVisible()
+  await expect(epochButton).toBeVisible()
+  await page.getByRole('button', { name: 'hide details' }).click()
+  await expect(page.locator('.rs-rail')).toBeHidden()
+
+  const focusedWhileCollapsed = async () => {
+    const names: string[] = []
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    for (let step = 0; step < 40; step++) {
+      await page.keyboard.press('Tab')
+      names.push(await page.evaluate(() => {
+        const current = document.activeElement
+        if (!current || current === document.body) return ''
+        return `${current.getAttribute('aria-label') ?? ''} ${current.textContent ?? ''}`
+      }))
+    }
+    return names.join('\n')
+  }
+  const collapsedNames = await focusedWhileCollapsed()
+  expect(collapsedNames).not.toContain('Peasant project enrichment')
+  expect(collapsedNames).not.toContain('wave six epoch')
+  expect(collapsedNames).not.toContain('all epochs')
+
+  await page.getByRole('button', { name: 'show details' }).click()
+  await expect(peasant).toBeVisible()
+  await expect(epochButton).toBeVisible()
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  const restored: string[] = []
+  for (let step = 0; step < 40; step++) {
+    await page.keyboard.press('Tab')
+    restored.push(await page.evaluate(() => {
+      const current = document.activeElement
+      if (!current || current === document.body) return ''
+      return `${current.getAttribute('aria-label') ?? ''} ${current.textContent ?? ''}`
+    }))
+    if (restored.some(name => name.includes('Peasant project enrichment')) && restored.some(name => name.includes('wave six epoch'))) break
+  }
+  expect(restored.join('\n')).toContain('Peasant project enrichment')
+  expect(restored.join('\n')).toContain('wave six epoch')
 })
 
 test('mobile layout preserves the sheet without horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 420, height: 800 })
   await mockAPI(page)
   await page.goto(origin)
+  await expect(page.locator('.rail-toggle')).toBeHidden()
   await expect(page.locator('.rs-rail')).toBeHidden()
   await expect(page.locator('.rs-sheet')).toBeVisible()
   const toggle = page.locator('.rs-sheet-toggle')
