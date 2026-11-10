@@ -121,6 +121,7 @@ var AllFragmentIds = []FragmentId{
 	FragTaskAuthor,
 	FragTrackerAdapter,
 	FragWritingStandard,
+	FragWritingQuestions,
 	FragSignalCapture,
 }
 
@@ -133,13 +134,18 @@ const (
 	// the probe and the write-failure rule (R21, amendment A-3).
 	FragTrackerAdapter FragmentId = "frag--tracker-adapter"
 
-	// FragWritingStandard is the one authored home of the user-facing writing
-	// standard: the STE-aligned rules adapted from ASD-STE100 Issue 9 Part 1,
-	// the house rules for questions and options, the two message templates, the
-	// weak-question-tool degrade clause, the exempt material, and the pre-send
-	// check. Its consumers reference it through fragRef; the reference set is
-	// derived from their bodies by FragmentToOwnerRefs and is not restated here.
+	// FragWritingStandard is the wording half of the user-facing writing
+	// standard: plain terms, short sentences, active voice, no invented labels,
+	// the STE-aligned claim, and the pre-send check. Question and option design
+	// is FragWritingQuestions. Consumers reference each fragment through
+	// fragRef; the reference set is derived by FragmentToOwnerRefs.
 	FragWritingStandard FragmentId = "frag--writing-standard"
+
+	// FragWritingQuestions is the question half of the writing standard:
+	// grounding before asking, one decision, option shape, recommendation
+	// placement, both templates, and the weak-tool degrade. Status does not
+	// carry it. The union of the two fragments is the full rule set.
+	FragWritingQuestions FragmentId = "frag--writing-questions"
 
 	// FragSignalCapture is the one authored home of the signal-capture
 	// component: the typed closed kind set, the one feedback task per epoch,

@@ -8,7 +8,7 @@ var statusBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
-		fragRef(FragWritingStandard),
+		fragRef(FragWritingStandard), // wording only; status asks no question
 		{
 			Id:    "status-steps",
 			Title: "Steps",

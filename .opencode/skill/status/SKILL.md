@@ -37,7 +37,7 @@ Select the current registered author with "${EPOCH_REC}" whoami. It prints the a
 
 ## Writing to the User
 
-These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. Five skills carry these rules: architect-handoff, status, supervisor, user-elicit, user-uat. Ask through the `request_user_decision` operation, never by launching a subagent. That launch is `delegate_assignment`, a different operation. The role-tool binding in `internal/runtime/profiles.go` lowers `request_user_decision` to the harness question tool and lowers `delegate_assignment` to the subagent tool.
+These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. This fragment covers wording: plain terms, short sentences, active voice, and no invented labels, plus the pre-send check. Question and option design is in Question and Option Design; this fragment does not repeat it. Five skills carry these wording rules: architect-handoff, status, supervisor, user-elicit, user-uat.
 
 ### The rules
 
@@ -48,7 +48,6 @@ Format: number, requirement, the STE rule it adapts, then a compact bad-to-good 
 | # | Rule | Adapts | Bad to good |
 |---|---|---|---|
 | 1 | Lead with the result, the decision, or the blocker. | 6.1, 6.2 | 'This pins both the edge and the core case per branch, so a same-count swap fails.' to 'Result: the test now fails if a real case is replaced with a filler case.' |
-| 2 | Ground before you ask. Show what the thing is, where it lives, and one example. Never put the only explanation in the options. | 6.1, 4.4 | 'Which order: the types to the gate in parallel, or the gate first?' to 'Three parts share one type. The gate reads it. The fixtures copy it. Code: `ir.Event`.' |
 | 3 | One topic per paragraph. Max 3 sentences. | 6.5, 6.6 | One 25-word sentence with four stacked ideas, to three sentences with one idea each. |
 | 4 | For 3 or more items, a flow, or a comparison, use a list, a table, or an ASCII diagram. | 4.3 | 'Adopt the first option, then the second, then both' to a three-row table: option, what happens, cost. |
 | 5 | Cut filler, self-narration, hedging, praise, and closing offers. | house | 'It is important to note that this change effectively serves to ensure the test can detect' to 'The test detects a removed case.' |
@@ -84,113 +83,19 @@ Format: number, requirement, the STE rule it adapts, then a compact bad-to-good 
 | 20 | Backtick each identifier. Max 2 per sentence. Give a plain gloss on first use. | 8.6 + house | Four bare references in one line, to one task, one design decision, and two reviews, each written in substance first. |
 | 21 | Quote user text, code, paths, and logs exactly. Explain them outside the quote. | 8.6 | A quote silently edited, to the blockquote verbatim with a plain reading on the next line. |
 
-**Questions, options, risk**
-
-Rules 22 to 24 are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule.
+**Risk**
 
 | # | Rule | Adapts | Bad to good |
 |---|---|---|---|
-| 22 | One question, one decision. Say what the answer changes. | house | 'Which order do you want, and are the labels clear?' to 'Which part merges first? The answer sets the order for the next 3 days.' |
-| 23 | Each option is self-contained: a label of max 6 words, what happens, and the cost. Use only Terms words. | house | 'Both' to 'Both limits. The import stops at the first limit it reaches. Cost: one more setting to test.' |
-| 24 | Put the recommendation outside the options, with one reason. You may also mark the label '(recommended)'. | house | An option labelled 'recommended' with no reason, to 'Recommendation: merge the event types first, because a later change costs rework in two places.' |
 | 25 | Mark an irreversible action with WARNING or CAUTION, then the condition, then the result. | 7.1, 7.2, 7.3 | 'Removing the core case will fail the suite.' to 'CAUTION: if you remove the core case, the test passes and a broken branch ships.' |
 
-### House rules for questions, options and recommendations
+### Wording house rule
 
-ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding, one decision, option design and recommendation placement. Four rows in this table are pointers to those rules. The other three rows add only what those rules do not. Never cite an STE number for a house rule.
+No self-praise is the wording house rule. The question house rules are in Question and Option Design.
 
 | Rule | Requirement |
 |---|---|
-| Question shape | A short header, max 4 words. |
-| Option design | Extends rule 23. Do not restate it. |
-| Recommendation placement | Extends rule 24. Do not restate it. |
-| Grounding before asking | Extends rule 2. Do not restate it. |
-| One decision per question | Extends rule 22. Do not restate it. |
-| Text-before-question turn | Send the grounding as text and end the turn. Ask through the `request_user_decision` operation in the next turn, because a question tool can hide prose sent in the same turn. |
 | No self-praise | No self-congratulation. State the next step in one line instead. |
-
-### Template: present a component, then ask
-
-Send the block below as text only, then end the turn. In the next turn, ask through the `request_user_decision` operation with the same options. The split is the Text-before-question turn house rule.
-
-~~~~markdown
-## <Part name>: <what it does for the user, max 10 words>
-
-**Decision needed:** <one sentence>. The answer changes <what>.
-
-**Terms**
-- **<term>**: <max 20 words>. Code: `<identifier>`.
-- **<term>**: <max 20 words>.
-
-**What it is**
-<max 3 sentences. Name the actor. One fact per sentence.>
-
-**Definition**
-~~~<lang>
-<the smallest type, interface, schema, or command shape that shows the choice>
-~~~
-
-**Example**
-~~~
-<one realistic before and after, or input and output>
-~~~
-
-**Diagram**
-~~~
-<ASCII, plain labels, no em-dash>
-~~~
-
-**Options**
-
-| Option | What happens | Cost |
-|---|---|---|
-| <label, max 6 words> | <one sentence> | <one sentence> |
-| <label> | <one sentence> | <one sentence> |
-
-**Recommendation:** <option>, because <one reason>.
-~~~~
-
-Then, in the next turn:
-
-~~~
-`request_user_decision`: '<question, max 20 words>'
-options: the same labels, with the 'what happens' and 'cost' text repeated in each description, because the picker can hide the table.
-~~~
-
-One component per call. Use multi-select only when the options combine. Always add one open-ended feedback question.
-
-### Template: status update
-
-~~~markdown
-**Status:** <the result or the state, max 25 words>.
-
-**Done**
-- <artifact or outcome, past tense, actor named> (`<path>`, pull request #N, or task title).
-
-**Next**
-- <what happens next, and who does it>.
-
-**Needs you** (omit if empty)
-- <the decision>, needed for <what it unblocks>.
-
-**Risk** (omit if empty)
-- WARNING or CAUTION: <condition>. <result>.
-
-**Terms** (new terms only)
-- **<term>**: <max 20 words>.
-~~~
-
-Budget: 120 words. Every Done item names an artefact. Do not restate the plan. One status per message, not one per thought.
-
-### Degrade when the question tool is weak
-
-Some hosts expose a weak question tool: it takes one question per call, it has no multi-select, or its picker hides option descriptions. Degrade in this order:
-
-1. Ask one question.
-2. Phrase the options as a single-select choice.
-3. State the assumption you will use if the answer is unavailable.
-
-Put the assumption in the text turn that grounds the question, not inside the options. An assumption never satisfies a user gate: a gated phase waits for the user's answer. The question still asks for one decision, and the recommendation names the cost of the assumption.
 
 ### Exempt material
 

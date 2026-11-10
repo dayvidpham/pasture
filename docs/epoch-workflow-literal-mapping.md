@@ -188,8 +188,13 @@ source below now authors typed markers and is covered by `renderedSources`:
 ## 5. Equivalence
 
 Method (strict): compare the generated trees at the fix-pass base `5ab7cb7e`
-and at `c1950bc3`. Later commits on this branch change only guards and docs, so
-that is still the branch's generated tree. Every changed generated file under
+and at `c1950bc3`. This listing is that pair only. Later commits changed
+generated skill prose, including the Codex rendering of the question
+operation, so the listing is not a description of the current tree. Rows that
+record `request-input` describe that pair. Current skill prose uses the
+neutral `request_user_decision` operation. The reproducer refuses
+insertion-only lines, so it cannot be re-run against the current tree without
+a different classifier. Every changed generated file under
 `skills/`, `.agents/skills/`, `.opencode/skill/`, `.opencode/agent/`, `agents/`,
 `internal/target/`, and `schema.xml` is diffed line by line with
 `difflib.SequenceMatcher` (no autojunk). A one-to-one `replace` pair is

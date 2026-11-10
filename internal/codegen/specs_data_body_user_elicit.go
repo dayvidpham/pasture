@@ -80,6 +80,7 @@ var userElicitBody = SkillBody{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
 		fragRef(FragWritingStandard),
+		fragRef(FragWritingQuestions),
 		{
 			Id:    "user-elicit-substeps",
 			Title: "Sub-steps",
@@ -194,53 +195,71 @@ Use the Phase 1 findings to identify:
 		{
 			Id:    "user-elicit-example-survey",
 			Title: "Example Survey",
-			Content: "```\n" +
-				"[[op:request_user_decision]](questions: [\n" +
-				"  {\n" +
-				"    question: \"What is your end vision for this feature? How will users interact with it when complete?\",\n" +
-				"    header: \"End Vision\",\n" +
-				"    multiSelect: true,\n" +
-				"    options: [\n" +
-				"      { label: \"Simple UI control\", description: \"Button/link users click\" },\n" +
-				"      { label: \"Automated process\", description: \"Happens without user action\" },\n" +
-				"      { label: \"API endpoint\", description: \"Programmatic access\" },\n" +
-				"      { label: \"Background service\", description: \"Runs continuously\" }\n" +
-				"    ]\n" +
-				"  },\n" +
-				"  {\n" +
-				"    question: \"What is the minimum viable version (MVP) that would be useful?\",\n" +
-				"    header: \"MVP Scope\",\n" +
-				"    multiSelect: true,\n" +
-				"    options: [\n" +
-				"      { label: \"Core functionality only\", description: \"Just the basic action\" },\n" +
-				"      { label: \"With confirmation\", description: \"User confirms before action\" },\n" +
-				"      { label: \"With feedback\", description: \"Show success/error state\" },\n" +
-				"      { label: \"Full featured\", description: \"All bells and whistles\" }\n" +
-				"    ]\n" +
-				"  },\n" +
-				"  {\n" +
-				"    question: \"Are there any specific constraints or requirements?\",\n" +
-				"    header: \"Constraints\",\n" +
-				"    multiSelect: true,\n" +
-				"    options: [\n" +
-				"      { label: \"Performance critical\", description: \"Must be fast\" },\n" +
-				"      { label: \"Security sensitive\", description: \"Handles sensitive data\" },\n" +
-				"      { label: \"Backwards compatible\", description: \"Can't break existing\" },\n" +
-				"      { label: \"No constraints\", description: \"Flexible implementation\" }\n" +
-				"    ]\n" +
-				"  },\n" +
-				"  {\n" +
-				"    question: \"Is there anything else we should know about this feature?\",\n" +
-				"    header: \"Other\",\n" +
-				"    multiSelect: true,\n" +
-				"    options: [\n" +
-				"      { label: \"Related to existing feature\", description: \"Connects to something\" },\n" +
-				"      { label: \"Inspired by another product\", description: \"Has a reference\" },\n" +
-				"      { label: \"Urgent timeline\", description: \"Needed soon\" },\n" +
-				"      { label: \"Nothing else\", description: \"Covered everything\" }\n" +
-				"    ]\n" +
-				"  }\n" +
-				"])\n" +
+			Content: "Each call asks one question. Do not batch these decisions into one call.\n\n" +
+				"```\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
+				"    {\n" +
+				"      question: \"What is your end vision for this feature? How will users interact with it when complete?\",\n" +
+				"      header: \"End Vision\",\n" +
+				"      multiSelect: true,\n" +
+				"      options: [\n" +
+				"        { label: \"Simple UI control\", description: \"Button/link users click\" },\n" +
+				"        { label: \"Automated process\", description: \"Happens without user action\" },\n" +
+				"        { label: \"API endpoint\", description: \"Programmatic access\" },\n" +
+				"        { label: \"Background service\", description: \"Runs continuously\" }\n" +
+				"      ]\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
+				"\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
+				"    {\n" +
+				"      question: \"What is the minimum viable version (MVP) that would be useful?\",\n" +
+				"      header: \"MVP Scope\",\n" +
+				"      multiSelect: true,\n" +
+				"      options: [\n" +
+				"        { label: \"Core functionality only\", description: \"Just the basic action\" },\n" +
+				"        { label: \"With confirmation\", description: \"User confirms before action\" },\n" +
+				"        { label: \"With feedback\", description: \"Show success/error state\" },\n" +
+				"        { label: \"Full featured\", description: \"All bells and whistles\" }\n" +
+				"      ]\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
+				"\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
+				"    {\n" +
+				"      question: \"Are there any specific constraints or requirements?\",\n" +
+				"      header: \"Constraints\",\n" +
+				"      multiSelect: true,\n" +
+				"      options: [\n" +
+				"        { label: \"Performance critical\", description: \"Must be fast\" },\n" +
+				"        { label: \"Security sensitive\", description: \"Handles sensitive data\" },\n" +
+				"        { label: \"Backwards compatible\", description: \"Can't break existing\" },\n" +
+				"        { label: \"No constraints\", description: \"Flexible implementation\" }\n" +
+				"      ]\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
+				"\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
+				"    {\n" +
+				"      question: \"Is there anything else we should know about this feature?\",\n" +
+				"      header: \"Other\",\n" +
+				"      multiSelect: true,\n" +
+				"      options: [\n" +
+				"        { label: \"Related to existing feature\", description: \"Connects to something\" },\n" +
+				"        { label: \"Inspired by another product\", description: \"Has a reference\" },\n" +
+				"        { label: \"Urgent timeline\", description: \"Needed soon\" },\n" +
+				"        { label: \"Nothing else\", description: \"Covered everything\" }\n" +
+				"      ]\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
 				"```",
 		},
 		{

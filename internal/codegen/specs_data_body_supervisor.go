@@ -70,6 +70,7 @@ var supervisorBody = SkillBody{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
 		fragRef(FragWritingStandard),
+		fragRef(FragWritingQuestions),
 		{
 			Id:    "sup-first-steps",
 			Title: "First Steps",

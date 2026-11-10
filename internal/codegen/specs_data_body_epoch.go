@@ -167,11 +167,17 @@ EPOCH_REC=$(sed -n 's/^rec: //p' .agents.local/pasture/EPOCH.md | tail -1)
 
 If the probe prints ` + "`BACKEND=error`" + `, stop and report before the first mutation: the store exists but cannot be used. If it prints ` + "`BACKEND=ledger`" + `, record ` + "`ledger:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output and continue; the adapter writes one JSONL line per mutation under that ledger and derives the namespace with the same function that printed NS. Offer a gitignore entry; never require one. If it prints ` + "`BACKEND=pasture`" + `, record ` + "`db:`" + `, ` + "`author:`" + `, ` + "`rec:`" + ` and ` + "`probed_at:`" + ` from the output. Record ` + "`namespace:`" + ` only to pin one; the adapter then passes ` + "`--namespace`" + `, and that pin wins over Pasture's derivation.
 
-**Step 0b: create the epoch feedback task once.** This is the only create. A second run finds the task by reading the ` + "`feedback:`" + ` line from the header. If that line is already present, do not create another. No other skill creates a feedback task.
+**Step 0b: create the epoch feedback task once, and only on the pasture backend.** This is the only create. On the pasture backend, create the task once and record ` + "`feedback:`" + `. On the ledger backend, create nothing and record nothing. The lookup rule is in Signal Capture. No other skill creates a feedback task.
 
 ` + "```" + `bash
-FEEDBACK_ID_URI=$([[rec:create]] --kind task --title "FEEDBACK: epoch signals" --phase unscoped)
-printf 'feedback: %s\n' "$FEEDBACK_ID_URI" >> .agents.local/pasture/EPOCH.md
+BACKEND=$(sed -n 's/^backend: //p' .agents.local/pasture/EPOCH.md | tail -1)
+if [ "$BACKEND" = pasture ]; then
+  FEEDBACK_ID_URI=$(sed -n 's/^feedback: //p' .agents.local/pasture/EPOCH.md | tail -1)
+  if [ -z "$FEEDBACK_ID_URI" ]; then
+    FEEDBACK_ID_URI=$([[rec:create]] --kind task --title "FEEDBACK: epoch signals" --phase unscoped)
+    printf 'feedback: %s\n' "$FEEDBACK_ID_URI" >> .agents.local/pasture/EPOCH.md
+  fi
+fi
 ` + "```" + `
 
 **Option 1: Manual Task Creation**

@@ -65,21 +65,48 @@ type writingRequiredPart struct {
 	BodyPhrases []string
 }
 
-var writingRequiredParts = []writingRequiredPart{
+var writingWordingParts = []writingRequiredPart{
 	{"frag-writing-standard-rules", []string{"| # | Rule | Adapts | Bad to good |", "Lead with the result, the decision, or the blocker."}},
-	{"frag-writing-standard-house-rules", []string{"| Rule | Requirement |", "Never cite an STE number for a house rule."}},
-	{"frag-writing-standard-present-template", []string{"**Decision needed:**", "| Option | What happens | Cost |", "**Recommendation:**"}},
-	{"frag-writing-standard-status-template", []string{"**Status:**", "**Done**", "**Needs you**"}},
-	{"frag-writing-standard-degrade", []string{"Ask one question.", "An assumption never satisfies a user gate"}},
+	{"frag-writing-standard-house-rules", []string{"| Rule | Requirement |", "No self-praise is the wording house rule."}},
 	{"frag-writing-standard-exempt", []string{"Quoted user text", "Code, logs, diffs, test output"}},
 	{"frag-writing-standard-check", []string{"Delete one sentence.", "[A-Z]{1,3}-?[0-9]"}},
 }
 
+var writingQuestionParts = []writingRequiredPart{
+	{"frag-writing-questions-rules", []string{"Ground before you ask.", "One question, one decision."}},
+	{"frag-writing-questions-house-rules", []string{"| Rule | Requirement |", "Never cite an STE number for a house rule."}},
+	{"frag-writing-standard-present-template", []string{"**Decision needed:**", "| Option | What happens | Cost |", "**Recommendation:**"}},
+	{"frag-writing-standard-status-template", []string{"**Status:**", "**Done**", "**Needs you**"}},
+	{"frag-writing-standard-degrade", []string{"Ask one question.", "An assumption never satisfies a user gate"}},
+}
+
+// writingWordingTopLevel is the fragment intro the subsection walk does not
+// read: the STE-aligned claim and the five-skill carrier numeral.
+var writingWordingTopLevel = []string{
+	"These rules adapt ASD-STE100",
+	"They are STE-aligned.",
+	"Five skills carry these wording rules:",
+	"architect-handoff, status, supervisor, user-elicit, user-uat.",
+}
+
+// writingQuestionTopLevel is the question fragment intro: the four-skill
+// numeral and the ask-binding sentence.
+var writingQuestionTopLevel = []string{
+	"Four skills carry these question rules:",
+	"architect-handoff, supervisor, user-elicit, user-uat.",
+	writingAskBindingSentence,
+}
+
 // findWritingStandardGaps is the pure core of the content guard. It reports a
-// missing subsection, an empty body, or a missing body phrase. It reads Content
-// only, so a Title cannot satisfy it.
-func findWritingStandardGaps(prose ProseSection, parts []writingRequiredPart) []string {
+// missing top-level phrase, a missing subsection, an empty body, or a missing
+// body phrase. It reads Content only, so a Title cannot satisfy it.
+func findWritingStandardGaps(prose ProseSection, parts []writingRequiredPart, topLevel []string) []string {
 	var gaps []string
+	for _, phrase := range topLevel {
+		if !strings.Contains(prose.Content, phrase) {
+			gaps = append(gaps, "top-level: missing "+strconv.Quote(phrase))
+		}
+	}
 	for _, part := range parts {
 		sub, ok := subsectionByID(prose, part.Subsection)
 		if !ok {
@@ -141,7 +168,13 @@ func TestWritingStandardDeclaredOnce(t *testing.T) {
 
 	owners := FragmentToOwnerRefs()[FragWritingStandard]
 	assert.Equal(t, WritingStandardCarriers, owners,
-		"the writing standard must ship in the five declared skills, no more and no fewer")
+		"the wording fragment must ship in the five declared skills, no more and no fewer")
+
+	question, ok := SharedFragmentSpecs[FragWritingQuestions]
+	require.True(t, ok, "question design must be declared in SharedFragmentSpecs")
+	require.NotNil(t, question.Prose)
+	assert.Equal(t, WritingQuestionCarriers, FragmentToOwnerRefs()[FragWritingQuestions],
+		"question design must ship in the four declared skills, and not in status")
 
 	const marker = "These rules adapt ASD-STE100"
 	sources, err := renderedSources()
@@ -165,20 +198,30 @@ func TestWritingStandardCarriesTheRequiredParts(t *testing.T) {
 
 	fragment := SharedFragmentSpecs[FragWritingStandard]
 	require.NotNil(t, fragment.Prose)
-	assert.Empty(t, findWritingStandardGaps(*fragment.Prose, writingRequiredParts),
-		"the writing standard must carry every required body")
+	assert.Empty(t, findWritingStandardGaps(*fragment.Prose, writingWordingParts, writingWordingTopLevel),
+		"the wording fragment must carry every required body and its intro")
 
-	present := writingStandardFragment()
+	question := SharedFragmentSpecs[FragWritingQuestions]
+	require.NotNil(t, question.Prose)
+	assert.Empty(t, findWritingStandardGaps(*question.Prose, writingQuestionParts, writingQuestionTopLevel),
+		"the question fragment must carry every required body and its intro")
+
+	present := writingQuestionFragment()
 	require.True(t, blankSubsection(present.Prose, "frag-writing-standard-present-template"),
 		"the defective sample must find the present template")
-	assert.NotEmpty(t, findWritingStandardGaps(*present.Prose, writingRequiredParts),
+	assert.NotEmpty(t, findWritingStandardGaps(*present.Prose, writingQuestionParts, writingQuestionTopLevel),
 		"blanking a template body must fail the guard")
 
 	check := writingStandardFragment()
 	require.True(t, blankSubsection(check.Prose, "frag-writing-standard-check"),
 		"the defective sample must find the pre-send check")
-	assert.NotEmpty(t, findWritingStandardGaps(*check.Prose, writingRequiredParts),
+	assert.NotEmpty(t, findWritingStandardGaps(*check.Prose, writingWordingParts, writingWordingTopLevel),
 		"blanking the pre-send check body must fail the guard")
+
+	intro := writingQuestionFragment()
+	intro.Prose.Content = "Question and Option Design"
+	assert.NotEmpty(t, findWritingStandardGaps(*intro.Prose, writingQuestionParts, writingQuestionTopLevel),
+		"deleting the ask-binding sentence or the carrier numeral from the intro must fail the guard")
 }
 
 // TestWritingRulesAreAuthoredOnce proves each rule and house rule has exactly
@@ -233,6 +276,21 @@ func TestWritingRuleRegistryIsClosed(t *testing.T) {
 
 	empty := []WritingRuleGroup{{Heading: "Shape"}}
 	require.Error(t, validateWritingRules(empty), "an empty rule table must fail")
+}
+
+// TestWritingHouseRulesRejectADefectiveSample is the two-sample proof that
+// validateWritingHouseRules can fail. The clean registry produces no error. A
+// row that says "below" does.
+func TestWritingHouseRulesRejectADefectiveSample(t *testing.T) {
+	t.Parallel()
+
+	require.NoError(t, validateWritingHouseRules(WritingHouseRules, AllWritingRules()))
+
+	bad := append([]WritingHouseRule(nil), WritingHouseRules...)
+	bad[0] = WritingHouseRule{Name: bad[0].Name, Requirement: "see the rules below"}
+	err := validateWritingHouseRules(bad, AllWritingRules())
+	require.Error(t, err, "a house row that says below must fail")
+	assert.Contains(t, err.Error(), "below")
 }
 
 // signalKindBulletPattern matches one closed-kind bullet in fragment prose.
@@ -393,8 +451,16 @@ func TestFeedbackTaskHasOneCreator(t *testing.T) {
 
 	fragment := SharedFragmentSpecs[FragSignalCapture]
 	text := fragmentAllText(*fragment.Prose)
-	assert.Contains(t, text, "A second run finds that task by reading the `feedback:` line.")
+	assert.Contains(t, text, feedbackLookupRule)
+	assert.Contains(t, text, "On the ledger backend, create nothing and record nothing")
 	assert.NotContains(t, text, title, "the signal section must not carry a second create")
+
+	assert.Empty(t, findNonSingleNeedles([]string{feedbackLookupRule}, sources),
+		"the feedback lookup rule must have one home")
+	pasted := append(append([]renderingSource(nil), sources...),
+		renderingSource{Corpus: `SkillBodySpecs["epoch"]`, Owner: "restated lookup", Text: feedbackLookupRule})
+	assert.NotEmpty(t, findNonSingleNeedles([]string{feedbackLookupRule}, pasted),
+		"a second copy of the lookup rule must fail")
 }
 
 // TestUATTemplateIsOneDecisionPerCall proves each survey call asks one question.
@@ -428,4 +494,38 @@ func TestUATTemplateIsOneDecisionPerCall(t *testing.T) {
 			"call %d must ask one question", decisions)
 	}
 	assert.GreaterOrEqual(t, decisions, 3, "the template must split its questions into separate calls")
+}
+
+// TestElicitExampleIsOneDecisionPerCall proves the example survey does not
+// batch several decisions into one call.
+func TestElicitExampleIsOneDecisionPerCall(t *testing.T) {
+	t.Parallel()
+
+	body, ok := SkillBodySpecs["user-elicit"]
+	require.True(t, ok)
+	var template string
+	var walk func(ProseSection)
+	walk = func(section ProseSection) {
+		if section.Id == "user-elicit-example-survey" {
+			template = section.Content
+		}
+		for _, sub := range section.Subsections {
+			walk(sub)
+		}
+	}
+	for _, section := range body.Sections {
+		walk(section)
+	}
+	require.NotEmpty(t, template, "the elicit example survey must exist")
+	calls := strings.Split(template, "[[op:request_user_decision]]")
+	var decisions int
+	for _, call := range calls[1:] {
+		if !strings.Contains(call, "questions:") {
+			continue
+		}
+		decisions++
+		assert.Equal(t, 1, strings.Count(call, "question:"),
+			"call %d must ask one question", decisions)
+	}
+	assert.GreaterOrEqual(t, decisions, 4, "the example must split its four questions into separate calls")
 }

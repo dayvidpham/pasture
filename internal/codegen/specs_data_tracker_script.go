@@ -313,17 +313,7 @@ func buildTrackerOps() map[TrackerOpId]TrackerOp {
 				{Name: "entry"},
 				{Name: "quote"},
 			},
-			Prelude: `[ -n "$kind" ] || fail "signal needs --kind" "the kind operand was empty" "pass --kind with one registered signal kind"
-    [ -n "$phase" ] || fail "signal needs --phase" "the phase operand was empty" "pass --phase with one registered phase name"
-    [ -n "$skill" ] || fail "signal needs --skill" "the skill operand was empty" "pass --skill with the skill directory name"
-    [ -n "$entry" ] || fail "signal needs --entry" "the entry operand was empty" "pass --entry with the record that holds the interaction"
-    [ -n "$quote" ] || fail "signal needs --quote" "the quote operand was empty" "pass --quote with a short verbatim fragment"
-    signal_line=$(signal_json)
-    if [ "$BACKEND" != ledger ]; then
-      FEEDBACK_ID=$(field feedback)
-      [ -n "$FEEDBACK_ID" ] || fail "signal has no feedback task" "EPOCH.md has no feedback: line, so a note would run with an empty id and record nothing" "the epoch creates the feedback task once at start and writes feedback:; a second run reads that line and does not create another task"
-      [ -n "$AUTHOR" ] || fail "signal needs a recorded author" "the header author: line and PASTURE_AUTHOR are both empty" "set author: in $EPOCH_FILE or export PASTURE_AUTHOR to a registered actor id"
-    fi`,
+			Prelude: signalPrelude(),
 			PastureCalls: []pastureCall{{
 				Name: "note",
 				Argv: []string{"task", "comment", "add", `"$FEEDBACK_ID"`, "--author", `"$AUTHOR"`, "--", `"$signal_line"`},
@@ -629,10 +619,90 @@ fi
 emit pasture "" "$DB" "" "$ACT" "$VER"
 `
 
+// signalPrelude is the signal operation's checks. Kind and phase are closed
+// sets rendered from the registries, so a hand-written list cannot drift.
+func signalPrelude() string {
+	kinds := strings.Join(signalKindNames(), "|")
+	kindList := strings.Join(signalKindNames(), ", ")
+	phases := strings.Join(signalPhaseNames(), "|")
+	phaseList := strings.Join(signalPhaseNames(), ", ")
+	return fmt.Sprintf(`[ -n "$kind" ] || fail "signal needs --kind" "the kind operand was empty" "pass --kind with one registered signal kind"
+    [ -n "$phase" ] || fail "signal needs --phase" "the phase operand was empty" "pass --phase with one registered phase name"
+    [ -n "$skill" ] || fail "signal needs --skill" "the skill operand was empty" "pass --skill with the skill directory name"
+    [ -n "$entry" ] || fail "signal needs --entry" "the entry operand was empty" "pass --entry with the record that holds the interaction"
+    [ -n "$quote" ] || fail "signal needs --quote" "the quote operand was empty" "pass --quote with a short verbatim fragment"
+    case "$kind" in
+      %s) ;;
+      *) fail "signal rejected kind '$kind'" "the kind is not in the closed set, so a later count would treat an unregistered label as data" "pass --kind with one of: %s" "signal operation in the tracker adapter, before the backend call" ;;
+    esac
+    case "$phase" in
+      %s) ;;
+      *) fail "signal rejected phase '$phase'" "the phase is not in the registered vocabulary, so the record would not join the phase it names" "pass --phase with one of: %s" "signal operation in the tracker adapter, before the backend call" ;;
+    esac
+    signal_line=$(signal_json)
+    if [ "$BACKEND" != ledger ]; then
+      FEEDBACK_ID=$(field feedback)
+      [ -n "$FEEDBACK_ID" ] || fail "signal has no feedback task" "EPOCH.md has no feedback: line, so a note would run with an empty id and record nothing" "the lookup rule is in Signal Capture; do not create a task from the signal operation"
+      [ -n "$AUTHOR" ] || fail "signal needs a recorded author" "the header author: line and PASTURE_AUTHOR are both empty" "set author: in $EPOCH_FILE or export PASTURE_AUTHOR to a registered actor id"
+    fi`, kinds, kindList, phases, phaseList)
+}
+
+// renderSignalJSONFunc writes one JSON object. Field order is SignalLineFields,
+// the same registry the line template reads, so a reorder has one home.
+func renderSignalJSONFunc() string {
+	var format strings.Builder
+	args := make([]string, 0, len(SignalLineFields))
+	format.WriteString("{")
+	for i, field := range SignalLineFields {
+		if i > 0 {
+			format.WriteString(",")
+		}
+		fmt.Fprintf(&format, `"%s":"%%s"`, field.Field)
+		args = append(args, fmt.Sprintf(`"$(json_escape "$%s")"`, field.Field))
+	}
+	format.WriteString("}")
+	var b strings.Builder
+	b.WriteString("signal_json() {\n")
+	fmt.Fprintf(&b, "  printf '%s' \\\n", format.String())
+	for i, arg := range args {
+		if i == len(args)-1 {
+			fmt.Fprintf(&b, "    %s\n", arg)
+			continue
+		}
+		fmt.Fprintf(&b, "    %s \\\n", arg)
+	}
+	b.WriteString("}\n\n")
+	return b.String()
+}
+
+// signalJSONKeyOrder reads the key sequence the rendered signal_json writer
+// emits. The order guard compares this to an independent literal.
+func signalJSONKeyOrder(script string) ([]string, error) {
+	start := strings.Index(script, "signal_json() {")
+	if start < 0 {
+		return nil, fmt.Errorf("signal field order: rendered rec has no signal_json function — why: the writer is generated from SignalLineFields; where: internal/codegen/specs_data_tracker_script.go renderSignalJSONFunc; fix: keep signal_json in the rec asset")
+	}
+	rest := script[start:]
+	end := strings.Index(rest, "\n}\n")
+	if end < 0 {
+		return nil, fmt.Errorf("signal field order: signal_json function is not closed — where: rendered TrackerRecScript; fix: keep the function terminated before the next definition")
+	}
+	re := regexp.MustCompile(`"([a-z]+)":"%s"`)
+	var keys []string
+	for _, match := range re.FindAllStringSubmatch(rest[:end], -1) {
+		keys = append(keys, match[1])
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("signal field order: signal_json emits no keys — where: internal/codegen/specs_data_tracker_script.go renderSignalJSONFunc; fix: render one %%s field per SignalLineFields entry")
+	}
+	return keys, nil
+}
+
 func renderTrackerRecScript(ops map[TrackerOpId]TrackerOp) string {
 	var b strings.Builder
 	b.WriteString(insertAfterShebang(recPreamble, namespaceDeriveShell))
 	b.WriteString(renderLedgerLineFunc())
+	b.WriteString(renderSignalJSONFunc())
 	b.WriteString(ledgerRuntime)
 	b.WriteString("case \"$OP\" in\n")
 	for _, id := range canonicalTrackerOpIds {
@@ -881,7 +951,11 @@ EPOCH_FILE="${EPOCH_FILE:-.agents.local/pasture/EPOCH.md}"
 PASTURE_BIN="${PASTURE_BIN:-pasture}"
 
 fail() {
-  printf 'rec: %s\n  why: %s\n  fix: %s\n' "$1" "$2" "$3" >&2
+  printf 'rec: %s\n  why: %s\n' "$1" "$2" >&2
+  if [ -n "${4:-}" ]; then
+    printf '  where: %s\n' "$4" >&2
+  fi
+  printf '  fix: %s\n' "$3" >&2
   exit 3
 }
 
@@ -1109,12 +1183,6 @@ ledger_append() {
 `
 
 const ledgerRuntime = `
-signal_json() {
-  printf '{"kind":"%s","phase":"%s","skill":"%s","entry":"%s","quote":"%s"}' \
-    "$(json_escape "$kind")" "$(json_escape "$phase")" "$(json_escape "$skill")" \
-    "$(json_escape "$entry")" "$(json_escape "$quote")"
-}
-
 ledger_signal() {
   dir=$(dirname "$EPOCH_FILE")
   file="$dir/signals.jsonl"

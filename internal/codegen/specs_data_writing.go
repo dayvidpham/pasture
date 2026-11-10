@@ -1,7 +1,9 @@
-// The one authored home of the user-facing writing standard: the STE-aligned
-// rules adapted from ASD-STE100 Issue 9, Part 1, the house rules for questions
-// and options, the two message templates, the weak-question-tool degrade
-// clause, the exempt material, and the pre-send check.
+// The authored home of the user-facing writing standard, split into two
+// fragments so a reporting skill does not ship a questionnaire guide.
+// FragWritingStandard covers wording. FragWritingQuestions covers question
+// and option design. The union is the STE-aligned rules, the house rules,
+// both templates, the degrade clause, the exempt material, and the pre-send
+// check.
 //
 // The rule tables are rendered from typed registries, not hand-written rows, so
 // a guard can read each rule and prove it is authored once. Which skills
@@ -207,6 +209,9 @@ func validateWritingHouseRules(house []WritingHouseRule, rules []WritingRule) er
 	if strings.Contains(writingHouseIntro, "below") {
 		return fmt.Errorf("codegen.ValidateWritingRules: the house intro says \"below\" — why: that word is a dangling cross-reference; where: internal/codegen/specs_data_writing.go writingHouseIntro; fix: name the table in this section")
 	}
+	if strings.Contains(writingWordingHouseIntro, "below") {
+		return fmt.Errorf("codegen.ValidateWritingRules: the wording house intro says \"below\" — why: that word is a dangling cross-reference; where: internal/codegen/specs_data_writing.go writingWordingHouseIntro; fix: name the question fragment, and drop \"below\"")
+	}
 	return nil
 }
 
@@ -221,6 +226,9 @@ func writingBodyTexts() []string {
 		"Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit.",
 		writingTurnSplitReason,
 		"closing offer",
+		writingWordingCarrierSentence(),
+		writingQuestionCarrierSentence(),
+		writingAskBindingSentence,
 	}
 }
 
@@ -257,9 +265,13 @@ type WritingHouseRule struct {
 // present template points at the house rule by name and does not repeat it.
 const writingTurnSplitReason = "a question tool can hide prose sent in the same turn"
 
-// writingHouseIntro precedes the house-rule table. It names the four pointer
-// rows and does not say they sit "below" a section that does not exist.
-const writingHouseIntro = "ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding, one decision, option design and recommendation placement. Four rows in this table are pointers to those rules. The other three rows add only what those rules do not. Never cite an STE number for a house rule."
+// writingHouseIntro precedes the question house-rule table. It names the four
+// pointer rows in that table and does not say they sit "below".
+const writingHouseIntro = "ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding, one decision, option design and recommendation placement. Four rows in this table are pointers to those rules. Question shape and Text-before-question turn add only what those rules do not. No self-praise is a wording rule; it is in Writing to the User. Never cite an STE number for a house rule."
+
+// writingWordingHouseIntro precedes the one wording house rule. The question
+// house rules live in the other fragment.
+const writingWordingHouseIntro = "No self-praise is the wording house rule. The question house rules are in Question and Option Design."
 
 // writingHousePointer is an explicit pointer. It names the rule and does not
 // restate that rule's sentence.
@@ -279,8 +291,8 @@ var WritingHouseRules = []WritingHouseRule{
 	{"No self-praise", "No self-congratulation. State the next step in one line instead."},
 }
 
-// WritingStandardCarriers names the five skills that carry the writing
-// standard. FragmentToOwnerRefs is the registry; this list is the declaration
+// WritingStandardCarriers names the five skills that carry the wording
+// fragment. FragmentToOwnerRefs is the registry; this list is the declaration
 // an agent and a guard both read.
 var WritingStandardCarriers = []string{
 	"architect-handoff",
@@ -290,43 +302,168 @@ var WritingStandardCarriers = []string{
 	"user-uat",
 }
 
-func writingCarrierSentence() string {
-	return "Five skills carry these rules: " + strings.Join(WritingStandardCarriers, ", ") + "."
+// WritingQuestionCarriers names the four skills that carry question and option
+// design. Status asks no question, so it is not in this list. The union of the
+// two carrier lists is what satisfies the writing requirement.
+var WritingQuestionCarriers = []string{
+	"architect-handoff",
+	"supervisor",
+	"user-elicit",
+	"user-uat",
+}
+
+func writingWordingCarrierSentence() string {
+	return "Five skills carry these wording rules: " + strings.Join(WritingStandardCarriers, ", ") + "."
+}
+
+func writingQuestionCarrierSentence() string {
+	return "Four skills carry these question rules: " + strings.Join(WritingQuestionCarriers, ", ") + ". The status skill asks no question, so it does not carry this fragment."
 }
 
 // writingAskBindingSentence points at the role-tool binding that enforces
 // asking through the question tool rather than a subagent.
 const writingAskBindingSentence = "Ask through the `request_user_decision` operation, never by launching a subagent. That launch is `delegate_assignment`, a different operation. The role-tool binding in `internal/runtime/profiles.go` lowers `request_user_decision` to the harness question tool and lowers `delegate_assignment` to the subagent tool."
 
-// RenderWritingHouseRules renders the house-rule table from its registry.
-func RenderWritingHouseRules(rules []WritingHouseRule) string {
+// RenderWritingHouseRules renders one house-rule table. intro is the sentence
+// that precedes that table; it is not copied from the other fragment.
+func RenderWritingHouseRules(intro string, rules []WritingHouseRule) string {
 	var b strings.Builder
-	b.WriteString(writingHouseIntro)
-	b.WriteString("\n\n| Rule | Requirement |\n|---|---|")
+	if intro != "" {
+		b.WriteString(intro)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("| Rule | Requirement |\n|---|---|")
 	for _, rule := range rules {
 		fmt.Fprintf(&b, "\n| %s | %s |", rule.Name, rule.Requirement)
 	}
 	return b.String()
 }
 
-// writingStandardFragment builds the shared writing fragment.
+// writingQuestionRuleNumbers are the rules that belong to question design.
+// Every other rule is wording. The registry stays one ordered list.
+func writingQuestionRuleNumbers() map[int]bool {
+	return map[int]bool{2: true, 22: true, 23: true, 24: true}
+}
+
+// writingRuleGroupsFor returns the rule groups for one fragment. Question
+// groups keep their note. The leftover risk rule is not a question rule.
+func writingRuleGroupsFor(question bool) []WritingRuleGroup {
+	want := writingQuestionRuleNumbers()
+	var out []WritingRuleGroup
+	for _, group := range WritingRuleGroups {
+		var rules []WritingRule
+		for _, rule := range group.Rules {
+			if want[rule.Number] == question {
+				rules = append(rules, rule)
+			}
+		}
+		if len(rules) == 0 {
+			continue
+		}
+		rendered := WritingRuleGroup{Heading: group.Heading, Rules: rules}
+		if question {
+			rendered.Note = group.Note
+		}
+		if question && group.Heading == "Shape" {
+			rendered.Heading = "Grounding"
+		}
+		if !question && group.Heading == "Questions, options, risk" {
+			rendered.Heading = "Risk"
+		}
+		out = append(out, rendered)
+	}
+	return out
+}
+
+// writingQuestionHouseNames are the house rules that belong to question design.
+func writingQuestionHouseNames() map[string]bool {
+	return map[string]bool{
+		"Question shape":            true,
+		"Option design":             true,
+		"Recommendation placement":  true,
+		"Grounding before asking":   true,
+		"One decision per question": true,
+		"Text-before-question turn": true,
+	}
+}
+
+// writingHouseRulesFor returns the house rows for one fragment.
+func writingHouseRulesFor(question bool) []WritingHouseRule {
+	want := writingQuestionHouseNames()
+	var out []WritingHouseRule
+	for _, rule := range WritingHouseRules {
+		if want[rule.Name] == question {
+			out = append(out, rule)
+		}
+	}
+	return out
+}
+
+// writingStandardFragment builds the wording fragment. Question design is
+// writingQuestionFragment; this fragment names that fragment and does not
+// copy it.
 func writingStandardFragment() SharedFragment {
 	prose := ProseSection{
 		Id:    string(FragWritingStandard),
 		Title: "Writing to the User",
 		Content: "These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are " +
 			"STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can " +
-			"claim full compliance. " + writingCarrierSentence() + " " + writingAskBindingSentence,
+			"claim full compliance. This fragment covers wording: plain terms, short sentences, " +
+			"active voice, and no invented labels, plus the pre-send check. Question and option " +
+			"design is in Question and Option Design; this fragment does not repeat it. " +
+			writingWordingCarrierSentence(),
 		Subsections: []ProseSection{
 			{
 				Id:      "frag-writing-standard-rules",
 				Title:   "The rules",
-				Content: RenderWritingRules(WritingRuleGroups),
+				Content: RenderWritingRules(writingRuleGroupsFor(false)),
 			},
 			{
 				Id:      "frag-writing-standard-house-rules",
+				Title:   "Wording house rule",
+				Content: RenderWritingHouseRules(writingWordingHouseIntro, writingHouseRulesFor(false)),
+			},
+			{
+				Id:      "frag-writing-standard-exempt",
+				Title:   "Exempt material",
+				Content: writingExemptContent(),
+			},
+			{
+				Id:      "frag-writing-standard-check",
+				Title:   "Pre-send check",
+				Content: writingCheckContent(),
+			},
+		},
+	}
+	return SharedFragment{
+		Id:    FragWritingStandard,
+		Kind:  FragmentKindProse,
+		Prose: &prose,
+	}
+}
+
+// writingQuestionFragment builds the question and option fragment. It is not
+// carried by status. It points at the wording fragment for the STE-aligned
+// claim and the pre-send check.
+func writingQuestionFragment() SharedFragment {
+	prose := ProseSection{
+		Id:    string(FragWritingQuestions),
+		Title: "Question and Option Design",
+		Content: "This fragment covers question and option design: grounding before asking, one " +
+			"decision, option shape, recommendation placement, the two templates, and the " +
+			"weak-tool degrade. Wording rules, the STE-aligned claim, and the pre-send check " +
+			"are in Writing to the User. " + writingQuestionCarrierSentence() + " " +
+			writingAskBindingSentence,
+		Subsections: []ProseSection{
+			{
+				Id:      "frag-writing-questions-rules",
+				Title:   "The rules",
+				Content: RenderWritingRules(writingRuleGroupsFor(true)),
+			},
+			{
+				Id:      "frag-writing-questions-house-rules",
 				Title:   "House rules for questions, options and recommendations",
-				Content: RenderWritingHouseRules(WritingHouseRules),
+				Content: RenderWritingHouseRules(writingHouseIntro, writingHouseRulesFor(true)),
 			},
 			{
 				Id:      "frag-writing-standard-present-template",
@@ -343,20 +480,10 @@ func writingStandardFragment() SharedFragment {
 				Title:   "Degrade when the question tool is weak",
 				Content: writingDegradeContent(),
 			},
-			{
-				Id:      "frag-writing-standard-exempt",
-				Title:   "Exempt material",
-				Content: writingExemptContent(),
-			},
-			{
-				Id:      "frag-writing-standard-check",
-				Title:   "Pre-send check",
-				Content: writingCheckContent(),
-			},
 		},
 	}
 	return SharedFragment{
-		Id:    FragWritingStandard,
+		Id:    FragWritingQuestions,
 		Kind:  FragmentKindProse,
 		Prose: &prose,
 	}

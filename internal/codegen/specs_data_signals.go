@@ -220,9 +220,10 @@ func SignalLineExample() string {
 	}))
 }
 
-// signalPhaseVocabulary is the registered phase list, rendered from the
-// protocol registry. The terminal phase is not a place a signal can appear.
-func signalPhaseVocabulary() string {
+// signalPhaseNames is the registered phase list a signal may name. The
+// terminal phase is not a place a signal can appear. The prose list and the
+// adapter's runtime check both read this function.
+func signalPhaseNames() []string {
 	names := make([]string, 0, len(protocol.AllPhaseIds))
 	for _, phase := range protocol.AllPhaseIds {
 		if phase == protocol.PhaseComplete {
@@ -230,8 +231,29 @@ func signalPhaseVocabulary() string {
 		}
 		names = append(names, string(phase))
 	}
-	return strings.Join(names, ", ")
+	return names
 }
+
+// signalKindNames is the closed kind list in registry order. The adapter's
+// runtime check reads this function, not a second list.
+func signalKindNames() []string {
+	names := make([]string, len(canonicalSignalKinds))
+	for i, kind := range canonicalSignalKinds {
+		names[i] = string(kind)
+	}
+	return names
+}
+
+// signalPhaseVocabulary is the registered phase list, rendered from the
+// protocol registry.
+func signalPhaseVocabulary() string {
+	return strings.Join(signalPhaseNames(), ", ")
+}
+
+// feedbackLookupRule is the one home of how a second run finds the feedback
+// task. The epoch start step and the adapter point at Signal Capture; they
+// do not restate this sentence.
+const feedbackLookupRule = "A second run reads the `feedback:` line and does not create another task."
 
 // signalCaptureFragment builds the shared signal-capture fragment.
 func signalCaptureFragment() SharedFragment {
@@ -266,12 +288,12 @@ func signalCaptureFragment() SharedFragment {
 	}
 }
 
-// signalTaskContent names the one creator and how a second run finds the task.
-// The create command lives in the epoch start step, not here, so a consumer
-// skill cannot create a second task.
+// signalTaskContent names the one creator, the backend gate, and the one
+// lookup rule. The create command lives in the epoch start step, not here, so
+// a consumer skill cannot create a second task.
 func signalTaskContent() string {
 	return strings.Join([]string{
-		"The epoch creates one feedback task at epoch start and writes `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md`. A second run finds that task by reading the `feedback:` line. No other skill creates a feedback task. If the line is absent, the signal operation fails and records nothing; do not create a task to fill the gap.",
+		"On the pasture backend, the epoch creates one feedback task at epoch start and writes `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md`. " + feedbackLookupRule + " On the ledger backend, create nothing and record nothing: there is no feedback task and no `feedback:` line. No other skill creates a feedback task. If the pasture line is absent, the signal operation fails and records nothing; do not create a task to fill the gap.",
 	}, "\n")
 }
 

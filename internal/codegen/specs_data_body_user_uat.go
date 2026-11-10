@@ -87,6 +87,7 @@ var userUatBody = SkillBody{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
 		fragRef(FragWritingStandard),
+		fragRef(FragWritingQuestions),
 		{
 			Id:      "uat-phases",
 			Title:   "UAT Phases",

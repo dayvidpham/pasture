@@ -329,9 +329,13 @@ Binary only. No severity tree for plan reviews.`,
 
 	// ── SLICE-6: writing standard and signal capture ───────────────────────────
 
-	// FragWritingStandard is the one authored home of the user-facing writing
-	// rules. Consumers reference it through fragRef; none copies the text.
+	// FragWritingStandard is the wording half of the writing standard.
+	// Consumers reference it through fragRef; none copies the text.
 	FragWritingStandard: writingStandardFragment(),
+
+	// FragWritingQuestions is the question-and-option half. Status does not
+	// reference it. The union of the two fragments is the full rule set.
+	FragWritingQuestions: writingQuestionFragment(),
 
 	// FragSignalCapture is the one authored home of the signal capture.
 	// Consumers reference it through fragRef; none copies the text.

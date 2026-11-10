@@ -134,7 +134,7 @@ func TestTrackerOpsRequireCallsAndLedgerHandlers(t *testing.T) {
 }
 
 // TestTrackerFragmentIsBackendNeutral proves the generated appendix carries
-// the entry point, the three backend states, the ten ops, EPOCH.md and the
+// the entry point, the three backend states, the registered ops, EPOCH.md and the
 // no-switch / write-failure rules, and that it names no native Pasture recipe.
 func TestTrackerFragmentIsBackendNeutral(t *testing.T) {
 	t.Parallel()
@@ -725,11 +725,11 @@ func TestProbeStoreGuardIsLive(t *testing.T) {
 	require.NoError(t, err, "the fake must create the store on a task call, so the no-create assertion can fail")
 }
 
-// TestRecAssetServesTheTenOps runs the shipped rec asset against a fake Pasture
-// binary and proves every neutral op lowers to the argv declared in TrackerOps.
-// It compares the argument vector, not a substring of a joined command line,
-// with a namespace and without one.
-func TestRecAssetServesTheTenOps(t *testing.T) {
+// TestRecAssetServesTheRegisteredOps runs the shipped rec asset against a fake
+// Pasture binary and proves every neutral op lowers to the argv declared in
+// TrackerOps. It compares the argument vector, not a substring of a joined
+// command line, with a namespace and without one.
+func TestRecAssetServesTheRegisteredOps(t *testing.T) {
 	t.Parallel()
 
 	ns := "https://example.test/repo"
@@ -925,6 +925,263 @@ func TestSignalLedgerLineIsJSON(t *testing.T) {
 	var first map[string]string
 	require.NoError(t, json.Unmarshal([]byte(lines[0]), &first))
 	require.Equal(t, example, first, "the first appended line must match SignalLineExample()")
+	order, err := jsonObjectKeyOrder(lines[0])
+	require.NoError(t, err)
+	require.Equal(t, []string{"kind", "phase", "skill", "entry", "quote"}, order,
+		"the appended line must keep SignalLineFields order, not only the same keys")
+}
+
+// TestSignalJSONFieldOrderIsPinned fails when the rendered signal_json key
+// order, or SignalLineFields, moves. The expectation is an independent literal.
+func TestSignalJSONFieldOrderIsPinned(t *testing.T) {
+	t.Parallel()
+
+	want := []string{"kind", "phase", "skill", "entry", "quote"}
+	got, err := signalJSONKeyOrder(TrackerRecScript)
+	require.NoError(t, err)
+	require.Empty(t, ledgerFieldOrderFindings(got, want), "clean sample: emitted order matches the pin")
+	var fields []string
+	for _, field := range SignalLineFields {
+		fields = append(fields, field.Field)
+	}
+	require.Equal(t, want, fields, "reordering SignalLineFields must fail this pin")
+
+	swapped := append([]string(nil), got...)
+	swapped[0], swapped[1] = swapped[1], swapped[0]
+	require.NotEmpty(t, ledgerFieldOrderFindings(swapped, want), "a reordered key list must fail")
+}
+
+func jsonObjectKeyOrder(line string) ([]string, error) {
+	dec := json.NewDecoder(strings.NewReader(line))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok || delim != '{' {
+		return nil, fmt.Errorf("signal line is not a JSON object")
+	}
+	var keys []string
+	for dec.More() {
+		tok, err = dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return nil, fmt.Errorf("signal line key is not a string")
+		}
+		keys = append(keys, key)
+		if _, err = dec.Token(); err != nil {
+			return nil, err
+		}
+	}
+	return keys, nil
+}
+
+// TestSignalPastureArmRefusesAMissingFeedbackID proves the pasture signal path
+// refuses an empty feedback id before any backend call, and that a recorded id
+// reaches task comment add.
+func TestSignalPastureArmRefusesAMissingFeedbackID(t *testing.T) {
+	t.Parallel()
+
+	args := []string{"signal", "--kind", "confusion", "--phase", "elicit", "--skill", "user-elicit", "--entry", "<task URI>#end-vision", "--quote", "what does arm mean here"}
+
+	t.Run("missing-id", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		bin, log := writeFakePasture(t, dir)
+		header := filepath.Join(dir, "EPOCH.md")
+		require.NoError(t, os.WriteFile(header, []byte("backend: pasture\ndb: "+filepath.Join(dir, "store.db")+"\nauthor: actor/x\n"), 0o600))
+		out, code := runRec(t, dir, map[string]string{
+			"PASTURE_BIN":    bin,
+			"EPOCH_FILE":     header,
+			"PROBE_FAKE_LOG": log,
+		}, args...)
+		require.Equal(t, 3, code)
+		require.Contains(t, out, "signal has no feedback task")
+		require.Contains(t, out, "why:")
+		require.Contains(t, out, "fix:")
+		_, err := os.Stat(log)
+		require.True(t, os.IsNotExist(err), "the empty-id guard must stop before any backend call")
+	})
+
+	t.Run("recorded-id", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		bin, log := writeFakePasture(t, dir)
+		argvLog := filepath.Join(dir, "argv.log")
+		header := filepath.Join(dir, "EPOCH.md")
+		require.NoError(t, os.WriteFile(header, []byte("backend: pasture\ndb: "+filepath.Join(dir, "store.db")+"\nauthor: actor/x\nfeedback: pasture/feedback-1\n"), 0o600))
+		out, code := runRec(t, dir, map[string]string{
+			"HOME":            dir,
+			"PASTURE_BIN":     bin,
+			"EPOCH_FILE":      header,
+			"PROBE_FAKE_LOG":  log,
+			"PROBE_FAKE_ARGV": argvLog,
+		}, args...)
+		require.Zero(t, code, out)
+		got := firstTaskArgv(t, argvLog)
+		require.Equal(t, []string{"task", "comment", "add", "pasture/feedback-1", "--author", "actor/x", "--", SignalLineExample()}, got)
+	})
+}
+
+// TestSignalClosedSetsAreCheckedAtRuntime proves an unregistered kind or phase
+// fails before a line is written, with what, why, where and fix.
+func TestSignalClosedSetsAreCheckedAtRuntime(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		what string
+		why  string
+		fix  string
+	}{
+		{
+			name: "kind",
+			args: []string{"signal", "--kind", "utter-nonsense", "--phase", "elicit", "--skill", "user-elicit", "--entry", "ref", "--quote", "what does arm mean here"},
+			what: "signal rejected kind 'utter-nonsense'",
+			why:  "the kind is not in the closed set",
+			fix:  "pass --kind with one of: frustration, positive-signal, satisfaction, confusion, correction",
+		},
+		{
+			name: "phase",
+			args: []string{"signal", "--kind", "confusion", "--phase", "bogus-phase", "--skill", "user-elicit", "--entry", "ref", "--quote", "what does arm mean here"},
+			what: "signal rejected phase 'bogus-phase'",
+			why:  "the phase is not in the registered vocabulary",
+			fix:  "pass --phase with one of: request, elicit, propose, review, plan-review, ratify, handoff, impl-plan, worker-slices, code-review, impl-uat, landing",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			header := filepath.Join(dir, "EPOCH.md")
+			require.NoError(t, os.WriteFile(header, []byte("backend: ledger\n"), 0o600))
+			out, code := runRec(t, dir, map[string]string{"EPOCH_FILE": header}, tc.args...)
+			require.Equal(t, 3, code, out)
+			require.Contains(t, out, tc.what)
+			require.Contains(t, out, "why: "+tc.why)
+			require.Contains(t, out, "where: signal operation in the tracker adapter, before the backend call")
+			require.Contains(t, out, "fix: "+tc.fix)
+			_, err := os.Stat(filepath.Join(dir, "signals.jsonl"))
+			require.True(t, os.IsNotExist(err), "a rejected signal must record nothing")
+		})
+	}
+
+	t.Run("registered", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		header := filepath.Join(dir, "EPOCH.md")
+		require.NoError(t, os.WriteFile(header, []byte("backend: ledger\n"), 0o600))
+		out, code := runRec(t, dir, map[string]string{"EPOCH_FILE": header},
+			"signal", "--kind", "confusion", "--phase", "elicit", "--skill", "user-elicit", "--entry", "ref", "--quote", "what does arm mean here")
+		require.Zero(t, code, out)
+		raw, err := os.ReadFile(filepath.Join(dir, "signals.jsonl"))
+		require.NoError(t, err)
+		require.Contains(t, string(raw), `"kind":"confusion"`)
+	})
+}
+
+// TestLedgerEpochCreatesNoFeedbackTask runs the epoch start snippet. A ledger
+// header creates nothing. A pasture header creates once and a second run does
+// not create again.
+func TestLedgerEpochCreatesNoFeedbackTask(t *testing.T) {
+	t.Parallel()
+
+	snippet := step0bSnippet(t)
+	require.Contains(t, snippet, `sed -n 's/^feedback: //p'`)
+	require.Contains(t, snippet, `[ "$BACKEND" = pasture ]`)
+	require.NotContains(t, snippet, feedbackLookupRule)
+
+	t.Run("ledger", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		log := runFeedbackSnippet(t, dir, "backend: ledger\n", snippet)
+		_, err := os.Stat(log)
+		require.True(t, os.IsNotExist(err), "a ledger epoch must not create a feedback task")
+		raw, err := os.ReadFile(filepath.Join(dir, ".agents.local", "pasture", "EPOCH.md"))
+		require.NoError(t, err)
+		require.NotContains(t, string(raw), "feedback:")
+		require.NotContains(t, string(raw), "FEEDBACK:")
+	})
+
+	t.Run("pasture-once", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		log := runFeedbackSnippet(t, dir, "backend: pasture\n", snippet)
+		first, err := os.ReadFile(log)
+		require.NoError(t, err)
+		require.Contains(t, string(first), "FEEDBACK: epoch signals")
+		header := filepath.Join(dir, ".agents.local", "pasture", "EPOCH.md")
+		raw, err := os.ReadFile(header)
+		require.NoError(t, err)
+		require.Contains(t, string(raw), "feedback: pasture/feedback-1")
+
+		runFeedbackSnippet(t, dir, "", snippet)
+		second, err := os.ReadFile(log)
+		require.NoError(t, err)
+		require.Equal(t, string(first), string(second), "a second pasture run must not create another task")
+		again, err := os.ReadFile(header)
+		require.NoError(t, err)
+		require.Equal(t, 1, strings.Count(string(again), "feedback:"), "a second run must not append another feedback line")
+	})
+}
+
+func step0bSnippet(t *testing.T) string {
+	t.Helper()
+	body, ok := SkillBodySpecs["epoch"]
+	require.True(t, ok)
+	var content string
+	var walk func(ProseSection)
+	walk = func(section ProseSection) {
+		if section.Id == "epoch-starting" {
+			content = section.Content
+		}
+		for _, sub := range section.Subsections {
+			walk(sub)
+		}
+	}
+	for _, section := range body.Sections {
+		walk(section)
+	}
+	require.NotEmpty(t, content, "the epoch start step must exist")
+	resolved, err := ResolveBodyMarkers(content, HarnessClaudeCode)
+	require.NoError(t, err)
+	start := strings.Index(resolved, "**Step 0b")
+	require.GreaterOrEqual(t, start, 0)
+	rest := resolved[start:]
+	end := strings.Index(rest, "**Option 1")
+	require.Greater(t, end, 0)
+	chunk := rest[:end]
+	const fence = "```bash\n"
+	i := strings.Index(chunk, fence)
+	require.GreaterOrEqual(t, i, 0)
+	chunk = chunk[i+len(fence):]
+	j := strings.Index(chunk, "\n```")
+	require.GreaterOrEqual(t, j, 0)
+	return chunk[:j] + "\n"
+}
+
+func runFeedbackSnippet(t *testing.T, dir, headerBody, snippet string) string {
+	t.Helper()
+	headerDir := filepath.Join(dir, ".agents.local", "pasture")
+	require.NoError(t, os.MkdirAll(headerDir, 0o755))
+	header := filepath.Join(headerDir, "EPOCH.md")
+	if headerBody != "" {
+		require.NoError(t, os.WriteFile(header, []byte(headerBody), 0o600))
+	}
+	log := filepath.Join(dir, "create.log")
+	stub := filepath.Join(dir, "rec-stub")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CREATE_LOG\"\nprintf 'pasture/feedback-1\\n'\n"
+	require.NoError(t, os.WriteFile(stub, []byte(script), 0o755))
+	cmd := exec.Command("sh", "-c", snippet)
+	cmd.Dir = dir
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "EPOCH_REC=" + stub, "CREATE_LOG=" + log}
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "snippet failed: %s", out)
+	return log
 }
 
 // TestRecAssetStopsOnErrorBackend proves the adapter's error backend prints an

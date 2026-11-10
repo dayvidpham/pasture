@@ -444,11 +444,38 @@
     {
       "owner": "skills/user-elicit/SKILL.md",
       "pattern": "ask_user_question",
-      "content_window": "AskUserQuestion(questions: [",
+      "content_window": "AskUserQuestion({",
       "section": "Example Survey",
       "ordinal": 0,
       "classification": "user_decision",
-      "notes": "native AskUserQuestion(...) call; maps to #38's RequestUserDecision (SelectOne/SelectMany/FreeText)"
+      "notes": "first one-decision call in the elicit example; maps to #38's RequestUserDecision (SelectOne/SelectMany/FreeText)"
+    },
+    {
+      "owner": "skills/user-elicit/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "Example Survey",
+      "ordinal": 1,
+      "classification": "user_decision",
+      "notes": "second one-decision call in the elicit example; maps to #38's RequestUserDecision"
+    },
+    {
+      "owner": "skills/user-elicit/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "Example Survey",
+      "ordinal": 2,
+      "classification": "user_decision",
+      "notes": "third one-decision call in the elicit example; maps to #38's RequestUserDecision"
+    },
+    {
+      "owner": "skills/user-elicit/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "Example Survey",
+      "ordinal": 3,
+      "classification": "user_decision",
+      "notes": "fourth one-decision call in the elicit example; maps to #38's RequestUserDecision"
     },
     {
       "owner": "skills/user-uat/SKILL.md",

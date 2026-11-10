@@ -263,7 +263,7 @@ var TrackerWriteFailureRule = fmt.Sprintf(`A mid-epoch write failure retries %d 
 
 // trackerAdapterFragment builds the shared appendix that carries the adapter
 // contract into generated skill prose. It is rendered once and referenced by
-// the epoch body, so the backend table, the ten ops, the probe and the failure
+// the epoch body, so the backend table, the registered ops, the probe and the failure
 // rule have one authored home.
 func trackerAdapterFragment() SharedFragment {
 	prose := ProseSection{
