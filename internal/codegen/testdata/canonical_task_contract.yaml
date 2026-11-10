@@ -1,3 +1,4 @@
+# Namespace scope: explicit --namespace wins over PASTURE_NAMESPACE; creation otherwise derives the git remote, then file:// of the working directory.
 forbidden:
   - name: reference URD is never blocking work
     pattern: '\bpasture\s+task\s+dep\s+add\b[^\n]*--(?:blocked-by|target)(?:=|\s+)"?\$\{?[A-Z_]*URD(?:_ID)?(?:_URI)?\}?'
@@ -23,8 +24,6 @@ forbidden:
     pattern: '\baura-(?:xxx|yyy|zzz|www)\b'
   - name: unsupported relation vocabulary
     pattern: '\brelates_to:'
-  - name: readiness queries do not filter by namespace
-    pattern: '\bpasture\s+task\s+(?:ready|blocked)\s+--namespace\b'
 fragments:
   - id: frag--task-recovery
     every_body: true

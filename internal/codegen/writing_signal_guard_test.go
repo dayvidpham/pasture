@@ -737,3 +737,15 @@ func TestElicitExampleIsOneDecisionPerCall(t *testing.T) {
 	}
 	assert.GreaterOrEqual(t, decisions, 4, "the example must split its four questions into separate calls")
 }
+
+func TestQuestionHeadingUsesRiskRegistryNotFixedNumber(t *testing.T) {
+	groups := []WritingRuleGroup{
+		{Heading: "Risk", Rules: []WritingRule{{Number: 71, Fragment: WritingFragmentWording}}},
+		{Heading: "Questions and risk", Rules: []WritingRule{{Number: 71, Fragment: WritingFragmentQuestion}}},
+	}
+	require.NoError(t, validateWritingQuestionHeadings(groups), "a renumbered risk rule present in the question group is valid")
+	groups[1].Rules[0].Number = 25
+	err := validateWritingQuestionHeadings(groups)
+	require.Error(t, err, "the old number is not risk unless the registry says so")
+	t.Log(err)
+}

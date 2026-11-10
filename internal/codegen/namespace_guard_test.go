@@ -23,24 +23,7 @@
 //
 // # Allowlist
 //
-// The explicit allowlists document lines that are intentionally preserved as
-// "aura" references for cross-project or historical reasons (not pasture
-// identity). Current allowlist for protocol docs:
-//
-//   - MIGRATION_v1_to_v2.md:3 — "migrate existing Aura protocol usage from v1" —
-//     the word "Aura" (no colon) describes what is being migrated FROM; no `aura:`
-//     token, so the colon-anchored guard does not flag it.
-//   - user-request-revamp-v2.md:39-43 — task titles from the unified-schema-*
-//     beads project ("Aura ingest CLI command"); these reference a SEPARATE project
-//     with pre-existing task IDs. No `aura:` colon token; not flagged.
-//   - HANDOFF_EXAMPLE-*.md — "Aura web dashboard", `aura web` command from an
-//     example handoff of a separate project. No `aura:` colon token; not flagged.
-//   - CLAUDE.md references to `aura-swarm`, `aura-parallel` (deferred tools, D6).
-//
-// (The former `.git/.aura/handoff/...` storage-path allowlist entry was removed:
-// R8/A3 retired that filesystem pattern entirely — handoffs are authored in the
-// Pasture task body — so no such path should remain in any generated output. The
-// G2 guard (TestG2_NoHandoffStoragePaths) enforces its absence.)
+// Non-colon references are outside the scope of this guard.
 package codegen_test
 
 import (
@@ -254,14 +237,6 @@ func TestNamespaceGuard_NoStrayAuraRefs(t *testing.T) {
 // These docs describe the pasture protocol and were swept in SLICE-2 cycle-1.
 // The allowlist is the same as the primary guard (aura-swarm, aura-parallel,
 // .git/.aura — all non-colon refs that the colon anchor already excludes).
-//
-// Preserved cross-project references in these docs (NOT flagged — no aura: colon):
-//   - MIGRATION_v1_to_v2.md: "migrate existing Aura protocol usage from v1"
-//     (word "Aura" with no colon; describes what is being migrated away from)
-//   - user-request-revamp-v2.md: "Aura ingest CLI command" task titles from a
-//     separate beads project (unified-schema-*; no aura: colon)
-//   - HANDOFF_EXAMPLE-*.md: "Aura web dashboard" / "aura web" command from an
-//     example handoff of a separate project (no aura: colon)
 func TestNamespaceGuard_ProtocolDocs_NoStrayAuraRefs(t *testing.T) {
 	root := repoRoot(t)
 	files, relFor := guardProtocolDocFiles(t, root)

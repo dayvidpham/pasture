@@ -19,7 +19,7 @@ import (
 // their handoff-path prose.
 //
 // UAT-2 dropped the LAST exclusion: the hand-authored skills/protocol/*.md docs
-// (CLAUDE.md, CONSTRAINTS.md, AGENTS.md, PROCESS.md, HANDOFF_TEMPLATE.md) were
+// (CLAUDE.md, CONSTRAINTS.md, AGENTS.md, PROCESS.md) were
 // previously left out because they carried legitimate retired-pattern migration
 // callouts (e.g. "R8/A3 retired the .git/.aura/handoff pattern"). The user chose
 // absolute cleanliness (UAT-2 FIX-NOW): the path must appear NOWHERE, so those
