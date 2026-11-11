@@ -1,5 +1,98 @@
 # Changelog
 
+## [0.0.33] - 2026-11-11
+
+### Added
+- feat(skills): restore the wont-do disposition and guard four more requirements
+- feat(web): hide subagents, refuse empty transcripts, and collapse the rail
+- feat(sessionapi): include subagent ids in the transcript catalog
+- feat(sessionapi): prefer the Peasant DB for the transcript catalog
+- feat(web): show transcript availability and fix the narrow hero
+- feat(sessionapi): catalog durable transcript session ids
+- feat(skills): one writing fragment and five-kind signal capture
+- feat(web): route sessions to transcript page
+- feat(tracker): generated adapter dispatch and ledger backend, tier corrections
+- feat(codegen): capability tiers with a user-chosen fallback chain
+- feat(codegen): tracker backend contract, probe and EPOCH.md
+- feat(codegen): two-phase review model and finding lifecycle
+- feat(web): polish console layout and transcript rail
+- feat(codegen): type role tool surfaces and scan foreign tool names
+- feat(web): finish theme accessibility evidence and CI
+- feat(web): wire persistent light/dark/system theme
+- feat(web): add pre-paint theme bootstrap and parity tests
+- feat(web): add theme preference controller
+- feat(web): upgrade Fairtrade to 0.0.60 and preserve transcript rendering
+
+### Fixed
+- fix(install): accept the Claude plugin fields 2.1 emits and refresh the vendor hash
+- fix(codegen): reconcile the classification manifest after the disposition wording
+- fix(skills): classify every guard-file test, ban the two-value phrasing
+- fix(skills): one disposition set, one question record, a pinned gate list
+- fix: centralize handoff creation and guard recipe
+- fix(protocol): one handoff registry, bindings beside the fields
+- fix(protocol): bind handoff references from one registry in both skills
+- fix(protocol): bind handoff references, isolate guard samples, register MR fields
+- fix(skills): give the merge-request section its own id
+- fix(protocol): one home for merge-request fields, structural index guards
+- fix(protocol): register the index, unify the handoff fields, narrow the skip rule
+- fix(skills): correct the constraint owner, drop the retired name, realign guards
+- fix(ingress): record the OpenCode parity transport digest
+- fix(web): keep the mobile sheet usable while the rail is collapsed
+- fix(web): inert collapsed rail and one-line lede
+- fix(skills): status template back in wording, derive the partition and carrier count
+- fix(skills): restore the backend gate, split writing fragments, validate signal kinds
+- fix(web): refresh the transcript catalog after the Peasant toggle
+- fix(skills): signal operation, valid JSON lines, seven house rules
+- fix(web): fetch catalog once and lock the failed-catalog test
+- fix(skills): backend-correct signal capture, content-pinned writing guards, de-duplicated fragment
+- fix(tracker): derive namespace from the backend, fix argument escaping
+- fix(tracker): complete op validation, probe classification, ledger order and install guard
+- fix(codegen): one tracker vocabulary, installable rec asset, tier and probe guards
+- fix(protocol): remove the transition into follow-up, retarget h5 to supervisor
+- fix(protocol): align shipped protocol docs with two-phase review, remove follow-up start claim
+- fix(codegen): wave-scoped review unit, remove review-completion followup, harden review guards
+- fix(codegen): guard every rendering corpus, fix article resolution
+- fix(web): use defined Fairtrade theme tokens
+
+### Changed
+- refactor: centralize user gate enumeration
+- refactor(skills): delete pointer-only protocol docs and repair references
+- refactor(skills): protocol assets, placeholder titles, tracker and writing minors
+- refactor(skills): remove internal taxonomy and retired mechanisms from spec sources
+- refactor(codegen): replace literal tool names with IR kinds
+- refactor(codegen): one native-name derivation, fail-closed scan
+
+### Documentation
+- docs: add the session replay performance runbook
+
+### Other
+- Merge pull request #282 from dayvidpham/pasture-01a1c98f--fix--installer-probe-and-flake
+- Merge pull request #281 from dayvidpham/pasture-01a1bf75--feat--epoch-workflow-overhaul
+- test(codegen): run the sample through the guard, pin the required set
+- test(codegen): a meta-guard for the guards this epoch added
+- test(codegen): guard validation-case steps and the two record shapes
+- test(codegen): guard taxonomy, user gates, error format and handoff export
+- test(codegen): wave 8 guard cores with two samples each
+- test(codegen): state the line-pin cost, assert the finding kinds
+- test(codegen): construct the reference line, run the binding check
+- test(codegen): pin the handoff bindings independently, bind followup_urd
+- test(codegen): isolate the last three document-guard branches
+- test(codegen): registry-derived document guard and citation resolution
+- test(codegen): guard link resolution, surviving documents and derived rule numbers
+- Merge pull request #280 from dayvidpham/pasture-273--feat--web-themes
+- test(peasantexport): hard-link the fake catalog binary
+- test(web): assert viewport-width transcript and restore execution coverage
+- test(web): verify responsive transcript navigation
+- test(codegen): give the generated-recipe harness the tracker entry point
+- test(web): assert both page gutters and bound epoch copy
+- test(codegen): sweep schema prose, commit auditable equivalence record
+- test(web): reconcile axe incomplete nodes by focused re-scan
+- test(web): measure hover and boundary contrast and harden asset capture
+- test(web): complete rendered contrast and focus evidence
+- test(web): add real-binary theme browser and accessibility suite
+- test(web): verify transcript capability gates interactively
+- Merge pull request #272 from dayvidpham/pasture-271--docs--performance-runbook
+
 ## [0.0.32] - 2026-11-06
 
 ### Fixed
