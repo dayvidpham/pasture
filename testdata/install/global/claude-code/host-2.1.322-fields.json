@@ -1,0 +1,72 @@
+{
+  "installed": [
+    {
+      "id": "agentfilter@aura-plugins",
+      "version": "0.4.0",
+      "scope": "user",
+      "enabled": false,
+      "installPath": "/home/user/.claude/plugins/cache/aura-plugins/agentfilter/0.4.0",
+      "installedAt": "2026-02-20T15:53:59.658Z",
+      "lastUpdated": "2026-02-25T16:15:59.374Z",
+      "projectEnabled": false
+    },
+    {
+      "id": "agent-integration@entire-dev-tools",
+      "version": "1.0.0",
+      "scope": "project",
+      "enabled": false,
+      "installPath": "/home/user/.claude/plugins/cache/entire-dev-tools/agent-integration/1.0.0",
+      "readFromFolder": "/home/user/project/.claude/plugins/agent-integration",
+      "installedAt": "2026-06-02T11:02:45.113Z",
+      "lastUpdated": "2026-06-02T11:02:45.113Z",
+      "projectPath": "/home/user/project",
+      "projectEnabled": true
+    }
+  ],
+  "available": [
+    {
+      "pluginId": "api-security-testing@claude-plugins-official",
+      "name": "api-security-testing",
+      "description": "Audit OpenAPI specs.",
+      "marketplaceName": "claude-plugins-official",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/example/claude-plugins.git",
+        "path": "plugins/api-security-testing",
+        "ref": "v1.5.5",
+        "sha": "faf5305385de8afed9468904e8639be737aff39e"
+      },
+      "installCount": 3474
+    },
+    {
+      "pluginId": "remote-tool@claude-plugins-official",
+      "name": "remote-tool",
+      "description": "A URL-sourced plugin.",
+      "marketplaceName": "claude-plugins-official",
+      "version": "1.0.0",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/example/remote-tool.git",
+        "sha": "0123456789abcdef0123456789abcdef01234567"
+      }
+    },
+    {
+      "pluginId": "xcode@claude-plugins-official",
+      "name": "xcode",
+      "marketplaceName": "claude-plugins-official",
+      "source": {
+        "source": "command",
+        "command": "xcrun agent plugin path --plugin-format claude",
+        "mode": "link"
+      }
+    },
+    {
+      "pluginId": "pasture-skills@aura-plugins",
+      "name": "pasture-skills",
+      "description": "Pasture skills",
+      "marketplaceName": "aura-plugins",
+      "version": "0.0.4",
+      "source": "./pasture-skills"
+    }
+  ]
+}
