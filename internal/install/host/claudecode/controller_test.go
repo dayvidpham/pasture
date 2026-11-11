@@ -331,6 +331,43 @@ func TestCodecFixturesAndUnknownFields(t *testing.T) {
 	}
 }
 
+// TestCodecAcceptsClaude2_1_322PluginFieldsAndStillRejectsUnknown pins the
+// plugin-list keys Claude Code 2.1.322 emits. The first sample carries every
+// one of them (projectEnabled, projectPath, readFromFolder on installed
+// entries; installCount and object-shaped source on available entries) and
+// must decode. The second sample adds one key nobody reviewed and must still
+// fail, so the strict decode keeps catching real contract changes.
+func TestCodecAcceptsClaude2_1_322PluginFieldsAndStillRejectsUnknown(t *testing.T) {
+	t.Parallel()
+	rows, err := decodePlugins(fixture(t, "host-2.1.322-fields.json"))
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, "agentfilter@aura-plugins", rows[0].ID)
+	assert.Equal(t, "user", rows[0].Scope)
+	assert.Equal(t, "agent-integration", rows[1].Name)
+	assert.Equal(t, "entire-dev-tools", rows[1].Marketplace)
+	assert.Equal(t, "project", rows[1].Scope)
+
+	unknownInstalled := `{"installed":[{"id":"x@m","scope":"user","enabled":true,"installPath":"/tmp/x","installedAt":"x","lastUpdated":"x","projectEnabled":false,"unreviewedKey":true}],"available":[]}`
+	_, err = decodePlugins([]byte(unknownInstalled))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `unknown field "unreviewedKey"`)
+
+	invalidSources := []string{
+		`{"installed":[],"available":[{"pluginId":"p@m","name":"p","marketplaceName":"m","source":""}]}`,
+		`{"installed":[],"available":[{"pluginId":"p@m","name":"p","marketplaceName":"m"}]}`,
+		`{"installed":[],"available":[{"pluginId":"p@m","name":"p","marketplaceName":"m","source":{"url":"https://x"}}]}`,
+		`{"installed":[],"available":[{"pluginId":"p@m","name":"p","marketplaceName":"m","source":{"source":""}}]}`,
+		`{"installed":[],"available":[{"pluginId":"p@m","name":"p","marketplaceName":"m","source":7}]}`,
+		`{"installed":[],"available":[{"pluginId":"p@m","name":"p","marketplaceName":"m","source":"./p","installCount":"many"}]}`,
+		`{"installed":[{"id":"x@m","scope":"project","enabled":true,"installPath":"/tmp/x","installedAt":"x","lastUpdated":"x","readFromFolder":true}],"available":[]}`,
+	}
+	for _, input := range invalidSources {
+		_, decodeErr := decodePlugins([]byte(input))
+		require.Error(t, decodeErr, input)
+	}
+}
+
 func commandStrings(commands []activation.CommandSchema) []string {
 	out := make([]string, len(commands))
 	for i, cmd := range commands {

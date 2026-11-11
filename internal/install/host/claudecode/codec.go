@@ -43,6 +43,10 @@ type pluginRow struct {
 	Enabled                                   bool
 }
 
+// installedPluginWire is the reviewed schema of one `installed` entry of
+// `claude plugin list --available --json`. It is decoded with unknown fields
+// disallowed, so every key Claude emits must be named here; a new key is a
+// contract change that must be reviewed, not silently accepted.
 type installedPluginWire struct {
 	ID          string  `json:"id"`
 	Version     *string `json:"version,omitempty"`
@@ -51,15 +55,80 @@ type installedPluginWire struct {
 	InstallPath string  `json:"installPath"`
 	InstalledAt string  `json:"installedAt"`
 	LastUpdated string  `json:"lastUpdated"`
+
+	// Claude Code 2.1.322 also emits the three keys below. They are
+	// recognised so the strict decode admits them, and ignored deliberately:
+	// pasture installs only user-scope plugins, and these keys describe
+	// project-scope activation, which never decides ownership of a pasture
+	// cell. Older hosts omit them, so each is optional.
+	//
+	// ProjectEnabled is a boolean on every installed entry: whether the
+	// plugin is enabled for the current project.
+	ProjectEnabled *bool `json:"projectEnabled,omitempty"`
+	// ProjectPath is a string, present only on project-scope entries: the
+	// project directory that installed the plugin.
+	ProjectPath *string `json:"projectPath,omitempty"`
+	// ReadFromFolder is a string (a directory path, not a boolean), present
+	// only on project-scope entries: the local folder Claude reads the plugin
+	// from.
+	ReadFromFolder *string `json:"readFromFolder,omitempty"`
 }
 
+// availablePluginWire is the reviewed schema of one `available` entry of
+// `claude plugin list --available --json`, decoded with unknown fields
+// disallowed.
 type availablePluginWire struct {
 	PluginID        string  `json:"pluginId"`
 	Name            string  `json:"name"`
 	Description     *string `json:"description,omitempty"`
 	MarketplaceName string  `json:"marketplaceName"`
 	Version         *string `json:"version,omitempty"`
-	Source          string  `json:"source"`
+	// Source is a relative path string or a typed source object; see
+	// availablePluginSource. It is validated for presence and ignored.
+	Source availablePluginSource `json:"source"`
+	// InstallCount is a JSON integer that Claude Code 2.1.322 emits on some
+	// available entries: the marketplace's install count. It is recognised
+	// so the strict decode admits it, and ignored deliberately: popularity
+	// never decides ownership of a pasture cell.
+	InstallCount *int64 `json:"installCount,omitempty"`
+}
+
+// availablePluginSource is the `source` of an available entry. Claude Code
+// emits either a relative path string (for example "./pasture-skills") or an
+// object carrying a string `source` discriminator (for example
+// {"source":"url","url":"...","sha":"..."} or {"source":"git-subdir",...}).
+// The installer never uses the value; it only requires that one of the two
+// documented shapes is present. The object's other members are the
+// marketplace author's per-kind source specification, echoed from the
+// marketplace manifest rather than defined by the Claude CLI, so they are
+// ignored deliberately; the discriminator is still required.
+type availablePluginSource struct {
+	present bool
+}
+
+func (s *availablePluginSource) UnmarshalJSON(data []byte) error {
+	var path string
+	if err := json.Unmarshal(data, &path); err == nil {
+		if path == "" {
+			return fmt.Errorf("available plugin source is an empty string")
+		}
+		s.present = true
+		return nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil || object == nil {
+		return fmt.Errorf("available plugin source %s is neither a path string nor a source object", data)
+	}
+	var kind string
+	raw, ok := object["source"]
+	if !ok {
+		return fmt.Errorf("available plugin source object lacks its \"source\" discriminator")
+	}
+	if err := json.Unmarshal(raw, &kind); err != nil || kind == "" {
+		return fmt.Errorf("available plugin source object has discriminator %s, want a non-empty string", raw)
+	}
+	s.present = true
+	return nil
 }
 
 type pluginListWire struct {
@@ -137,7 +206,7 @@ func decodePlugins(data []byte) ([]pluginRow, error) {
 	}
 	for i, row := range wire.Available {
 		id := row.PluginID
-		if id == "" || row.Name == "" || row.MarketplaceName == "" || row.Source == "" {
+		if id == "" || row.Name == "" || row.MarketplaceName == "" || !row.Source.present {
 			return nil, fmt.Errorf("available plugin row %d lacks pluginId/name/marketplaceName/source", i)
 		}
 		at := strings.LastIndex(id, "@")
