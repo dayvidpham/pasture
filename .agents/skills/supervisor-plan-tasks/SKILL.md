@@ -6,7 +6,7 @@ description: Decompose ratified plan into vertical slices (SLICE-{W}-{N})
 # Supervisor Plan Tasks
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.32 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.33 artifact v1 -->
 **Command:** `pasture:supervisor:plan-tasks` — Decompose ratified plan into vertical slices (SLICE-{W}-{N})
 
 Break RATIFIED_PLAN into vertical slice Implementation tasks for workers.

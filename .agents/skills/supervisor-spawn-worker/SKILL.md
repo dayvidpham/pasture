@@ -6,7 +6,7 @@ description: Launch a worker agent for an assigned slice
 # Supervisor Spawn Worker
 
 <!-- BEGIN GENERATED FROM pasture schema -->
-<!-- GENERATED FROM pasture v0.0.32 artifact v1 -->
+<!-- GENERATED FROM pasture v0.0.33 artifact v1 -->
 **Command:** `pasture:supervisor:spawn-worker` — Launch a worker agent for an assigned slice
 
 Launch the wave of workers for parallel vertical slice implementation, reviewed by ephemeral reviewers.
