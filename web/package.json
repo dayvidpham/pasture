@@ -22,7 +22,7 @@
   "name": "@dayvidpham/pasture-web",
   "private": true,
   "scripts": {
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit \u0026\u0026 vite build",
     "dev": "vite",
     "generate:api": "openapi-typescript ../internal/sessionapi/openapi/pasture-local-api-0.7.0.json -o src/generated/api.ts",
     "preview": "vite preview",
@@ -30,5 +30,5 @@
     "test:browser": "playwright test"
   },
   "type": "module",
-  "version": "0.0.32"
+  "version": "0.0.33"
 }
