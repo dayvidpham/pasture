@@ -6,6 +6,7 @@
 package codegen
 
 import (
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -207,20 +208,20 @@ var ConstraintSpecs = map[string]ConstraintSpec{
 		Id:        "C-audit-dep-chain",
 		Given:     "any phase transition",
 		When:      "creating new task",
-		Then:      "chain dependency: pasture task dep add parent --blocked-by child",
+		Then:      "chain dependency: [[rec:block]] parent --by child",
 		ShouldNot: "skip dependency chaining or invert direction",
-		Command:   "pasture task dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
+		Command:   "[[rec:block]] \"${PARENT_URI}\" --by \"${CHILD_URI}\"",
 		Examples: []Example{
 			{
 				Id:    "C-audit-dep-chain-full",
 				Lang:  "bash",
 				Label: "correct",
 				Code: `# Full dependency chain: work flows bottom-up, closure flows top-down
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
-pasture task dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
-pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
-pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
-pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"`,
+[[rec:block]] "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
+[[rec:block]] "${URE_ID_URI}" --by "${PROPOSAL_ID_URI}"
+[[rec:block]] "${PROPOSAL_ID_URI}" --by "${IMPL_PLAN_ID_URI}"
+[[rec:block]] "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
+[[rec:block]] "${SLICE_1_ID_URI}" --by "${LEAF_TASK_A_ID_URI}"`,
 			},
 		},
 	},
@@ -242,7 +243,7 @@ pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"`,
 		Id:        "C-severity-eager",
 		Given:     "code review round (p10 only)",
 		When:      "starting review",
-		Then:      "ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately",
+		Then:      "ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately, one trio per wave per axis per round",
 		ShouldNot: "lazily create severity groups only when findings exist",
 		Examples: []Example{
 			{
@@ -250,19 +251,16 @@ pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"`,
 				Lang:  "bash",
 				Label: "correct",
 				Code: `# Create all 3 severity groups immediately (even if empty)
-BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+BLOCKER_ID_URI=$([[rec:create]] --kind task --title "BLOCKER" --phase code_review)
+[[rec:label]] "$BLOCKER_ID_URI" pasture:severity:blocker
+IMPORTANT_ID_URI=$([[rec:create]] --kind task --title "IMPORTANT" --phase code_review)
+[[rec:label]] "$IMPORTANT_ID_URI" pasture:severity:important
+MINOR_ID_URI=$([[rec:create]] --kind task --title "MINOR" --phase code_review)
+[[rec:label]] "$MINOR_ID_URI" pasture:severity:minor
 
 # Close empty groups immediately
-pasture task close "${IMPORTANT_ID_URI}"
-pasture task close "${MINOR_ID_URI}"`,
+[[rec:close]] "${IMPORTANT_ID_URI}"
+[[rec:close]] "${MINOR_ID_URI}"`,
 			},
 			{
 				Id:    "C-severity-eager-anti",
@@ -271,7 +269,7 @@ pasture task close "${MINOR_ID_URI}"`,
 				Code: `# WRONG: only creating groups when findings exist
 # This skips empty groups and breaks the audit trail
 if [ -n "$BLOCKER_FINDINGS" ]; then
-    BLOCKER_ID_URI=$(pasture task create "BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+    BLOCKER_ID_URI=$([[rec:create]] --kind task --title "BLOCKER" --phase code_review --body "Describe the specific work and reference full task URIs")
 fi`,
 			},
 		},
@@ -290,6 +288,14 @@ fi`,
 		Then:      "add as child of BOTH the severity group AND the slice it blocks",
 		ShouldNot: "add to severity group only",
 	},
+	"C-finding-lifecycle": {
+		Id:    "C-finding-lifecycle",
+		Given: "a code-review finding",
+		When:  "recording or closing it",
+		Then:  "create it as a child of its severity group labelled `pasture:finding`, and close it only when the reviewer who raised it verifies the fix — a worker or supervisor cannot close it, and a wave boundary never closes it",
+		ShouldNot: "close a finding from a worker or supervisor, close one at a wave boundary, " +
+			"or record severity in the finding label (severity lives on its parent group)",
+	},
 	"C-followup-timing": {
 		Id:    "C-followup-timing",
 		Given: "UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items",
@@ -297,7 +303,7 @@ fi`,
 		Then: "create the FOLLOWUP epic at UAT when user-DEFER'd items exist; " +
 			"the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items",
 		ShouldNot: "trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — " +
-			"all review findings must reach 0 before wave close, no severity is deferrable to FOLLOWUP",
+			"no review severity is deferrable to FOLLOWUP (a finding's close rule is `C-finding-lifecycle`)",
 	},
 	"C-vertical-slices": {
 		Id:        "C-vertical-slices",
@@ -317,32 +323,33 @@ fi`,
 		Id:    "C-supervisor-explore-ephemeral",
 		Given: "supervisor needs codebase exploration",
 		When:  "starting Phase 8 (IMPL_PLAN)",
-		Then: "spawn ephemeral Explore subagents via Task tool for scoped codebase queries; " +
+		Then: "spawn ephemeral Explore subagents via [[op:delegate_assignment]] tool for scoped codebase queries; " +
 			"each subagent is short-lived and returns findings; no standing team overhead",
 		ShouldNot: "explore the codebase directly as supervisor; " +
 			"maintain a standing explore team",
 	},
 	"C-clean-review-exit": {
 		Id:    "C-clean-review-exit",
-		Given: "per-slice code review",
+		Given: "per-wave code review and end-of-epoch convergence",
 		When:  "evaluating review results",
-		Then: "iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round " +
-			"confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; " +
-			"a clean round is one where the re-review applies no fixes and finds nothing across all three severities; " +
-			"on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision",
-		ShouldNot: "close a wave on a fix-applying round; " +
-			"proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; " +
-			"hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
-			"batch review across multiple slices",
+		Then: "during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; " +
+			"after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; " +
+			"iterate review -> fix -> re-review up to the chosen review-effort budget; " +
+			"on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision",
+		ShouldNot: "require a zeroed round at a wave boundary; " +
+			"close a finding outside `C-finding-lifecycle`; " +
+			"proceed past the chosen budget without surfacing outstanding findings to the user; " +
+			"hardcode the budget; batch review across multiple slices",
 	},
 	"C-review-effort-budget": {
 		Id:    "C-review-effort-budget",
 		Given: "the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate",
-		When:  "deciding how much review-and-fix effort to spend per slice",
+		When:  "deciding how much review-and-fix effort to spend per wave",
 		Then: "request a configurable review-effort budget from the user — defaults: " +
 			"(1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; " +
 			"the review->fix->re-review loop iterates up to the chosen budget; " +
-			"on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision",
+			"convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; " +
+			"on budget exhaustion without convergence, surface the outstanding findings to the user for a decision",
 		ShouldNot: "hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); " +
 			"proceed past the chosen budget without surfacing outstanding findings to the user; " +
 			"loop forever when a finite budget was chosen",
@@ -351,12 +358,10 @@ fi`,
 		Id:    "C-autonomous-progression",
 		Given: "supervisor orchestrating phases",
 		When:  "deciding whether to proceed",
-		Then: "5 user-gated phases only: (1) research depth decision, (2) URE survey, " +
-			"(3) Plan UAT, (4) Phase 8 implementation-effort / review-effort budget request, " +
-			"(5) Impl UAT; all other phase transitions are auto-ratified " +
+		Then: renderUserGates() + "; all other phase transitions are auto-ratified " +
 			"by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification " +
 			"without user gate",
-		ShouldNot: "add additional user gates beyond the 5 defined; " +
+		ShouldNot: "add additional user gates beyond the defined list; " +
 			"require user approval for ratification after UAT ACCEPT",
 	},
 	"C-integration-points": {
@@ -373,7 +378,7 @@ fi`,
 		Id:    "C-slice-review-before-close",
 		Given: "workers complete their implementation slices",
 		When:  "slice implementation is done",
-		Then:  "workers notify supervisor with pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes",
+		Then:  "workers notify supervisor with [[rec:note]] (not [[rec:close]]); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes",
 		ShouldNot: "close slices immediately upon worker completion; " +
 			"allow workers to close their own slices",
 	},
@@ -381,17 +386,17 @@ fi`,
 		Id:    "C-slice-leaf-tasks",
 		Given: "vertical slice created",
 		When:  "decomposing slice into implementation units",
-		Then:  "create one or more Pasture leaf tasks per slice, named after the real work units they represent, with pasture task dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)",
+		Then:  "create one or more Pasture leaf tasks per slice, named after the real work units they represent, with [[rec:block]] \"${SLICE_ID_URI}\" --by \"${LEAF_TASK_ID_URI}\"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)",
 		ShouldNot: "create slices without leaf tasks — " +
 			"a slice with no children is undecomposed and cannot be tracked; " +
 			"force every slice into a fixed L1/L2/L3 triple when the real work units differ",
-		Command: "pasture task dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"",
+		Command: "[[rec:block]] \"${SLICE_ID_URI}\" --by \"${LEAF_TASK_ID_URI}\"",
 	},
 	"C-handoff-skill-invocation": {
 		Id:    "C-handoff-skill-invocation",
 		Given: "an agent is launched for a new phase (especially p7 to p8 handoff)",
 		When:  "composing the launch prompt",
-		Then: "prompt MUST start with Skill(/pasture:{role}) invocation directive " +
+		Then: "prompt MUST start with [[op:invoke_skill]](/pasture:{role}) invocation directive " +
 			"so the agent loads its role instructions",
 		ShouldNot: "launch agents without skill invocation — " +
 			"they skip role-critical procedures like ephemeral exploration and leaf task creation",
@@ -400,22 +405,22 @@ fi`,
 		Id:        "C-dep-direction",
 		Given:     "adding a Pasture dependency",
 		When:      "determining direction",
-		Then:      "parent blocked-by child: pasture task dep add \"${STAYS_OPEN_URI}\" --blocked-by \"${MUST_FINISH_FIRST_URI}\"",
+		Then:      "parent blocked-by child: [[rec:block]] \"${STAYS_OPEN_URI}\" --by \"${MUST_FINISH_FIRST_URI}\"",
 		ShouldNot: "invert (child blocked-by parent)",
-		Command:   "pasture task dep add \"${STAYS_OPEN_URI}\" --blocked-by \"${MUST_FINISH_FIRST_URI}\"",
+		Command:   "[[rec:block]] \"${STAYS_OPEN_URI}\" --by \"${MUST_FINISH_FIRST_URI}\"",
 		Examples: []Example{
 			{
 				Id:              "C-dep-direction-correct",
 				Lang:            "bash",
 				Label:           "correct",
-				Code:            "pasture task dep add \"${REQUEST_ID_URI}\" --blocked-by \"${URE_ID_URI}\"",
+				Code:            "[[rec:block]] \"${REQUEST_ID_URI}\" --by \"${URE_ID_URI}\"",
 				AlsoIllustrates: "C-audit-dep-chain",
 			},
 			{
 				Id:    "C-dep-direction-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
-				Code:  "pasture task dep add \"${URE_ID_URI}\" --blocked-by \"${REQUEST_ID_URI}\"",
+				Code:  "[[rec:block]] \"${URE_ID_URI}\" --by \"${REQUEST_ID_URI}\"",
 			},
 		},
 	},
@@ -466,7 +471,7 @@ fi`,
 		Id:    "C-ure-verbatim",
 		Given: "user interview (Request, URE, or UAT), URD update, or mid-implementation design decision",
 		When:  "recording in Pasture",
-		Then:  "capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured",
+		Then:  "capture " + questionRecordFieldsPhrase() + ", INCLUDING any code, snippets, or examples shown inside [[op:request_user_decision]] option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via [[rec:note]] whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured",
 		ShouldNot: "summarize options as (1)/(2)/(3) without option text, paraphrase user responses, " +
 			"or omit code/snippets shown inside option previews",
 		Examples: []Example{
@@ -475,23 +480,23 @@ fi`,
 				Lang:  "bash",
 				Label: "correct",
 				Code: `# Full question, all options with descriptions, verbatim response
-UAT_ID_URI=$(pasture task create "UAT: Plan acceptance for feature-X" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "## Component: Verbose fields
+UAT_ID_URI=$([[rec:create]] --kind task --title "UAT: Plan acceptance for feature-X" --phase plan_uat \
+  --body "## Component: Verbose fields
 **Question:** Which verbose fields are useful?
 **Options:**
 - backupDir (full path): Shows where the backup landed
 - session ID: Enables log correlation across events
 - repo path + hash: Confirms which git repo was detected
 **User response:** backupDir (full path), session ID
-**Decision:** ACCEPT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')`,
+**Decision:** ACCEPT")`,
 			},
 			{
 				Id:    "C-ure-verbatim-anti",
 				Lang:  "bash",
 				Label: "anti-pattern",
 				Code: `# WRONG: options summarized as numbers, response paraphrased
-UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')`,
+UAT_ID_URI=$([[rec:create]] --kind task --title "UAT: Plan acceptance" --phase plan_uat \
+  --body "Asked about verbose fields (1-4). User picked 1 and 2. Accepted.")`,
 			},
 		},
 	},
@@ -505,7 +510,7 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
 	},
 	"C-followup-leaf-adoption": {
 		Id:    "C-followup-leaf-adoption",
-		Given: "supervisor creates FOLLOWUP_SLICE-N",
+		Given: "supervisor creates the follow-up slice",
 		When:  "assigning user-DEFER'd UAT-item leaf tasks to follow-up slices",
 		Then: "add leaf task as child of follow-up slice " +
 			"(dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice)",
@@ -545,16 +550,16 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
 		Id:    "C-interview-skill-invocation",
 		Given: "a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT)",
 		When:  "conducting the phase",
-		Then: "the agent MUST invoke the matching interview skill (Skill(/pasture:user-elicit) for URE, " +
-			"Skill(/pasture:user-uat) for UAT) so the verbatim-capture and disposition procedures are loaded",
+		Then: "the agent MUST invoke the matching interview skill ([[op:invoke_skill]](/pasture:user-elicit) for URE, " +
+			"[[op:invoke_skill]](/pasture:user-uat) for UAT) so the verbatim-capture and disposition procedures are loaded",
 		ShouldNot: "conduct an interview phase without invoking its skill — " +
-			"skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures",
+			"skipping it loses the verbatim-capture and FIX-NOW/DEFER/WON'T-DO disposition procedures",
 	},
 	"C-uat-feedback-disposition": {
 		Id:    "C-uat-feedback-disposition",
 		Given: "any UAT feedback item (Phase 5 or Phase 11) — flagged by the user OR a deferral proposed by the architect/supervisor",
 		When:  "recording each item",
-		Then: "assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER; " +
+		Then: "assign every item an explicit, user-confirmed disposition of FIX-NOW, DEFER, or WON'T-DO; " +
 			"deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user " +
 			"at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; " +
 			"FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic",
@@ -582,9 +587,15 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Id:          protocol.RoleEpoch,
 		Name:        "Epoch",
 		Description: "Master orchestrator for full 12-phase workflow",
-		Model:       "opus",
-		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
+		Tier:        TierFrontier,
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
+			ir.HarnessToolBash, ir.HarnessToolTask,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationDelegateAssignment,
+			ir.OperationSendAssignmentMessage,
+		},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -603,9 +614,16 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Id:          protocol.RoleArchitect,
 		Name:        "Architect",
 		Description: "Specification writer and implementation designer",
-		Model:       "opus",
-		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
+		Tier:        TierFrontier,
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
+			ir.HarnessToolBash, ir.HarnessToolTask,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationDelegateAssignment,
+			ir.OperationSendAssignmentMessage,
+		},
+		Policies: []RolePolicy{RolePolicyReadOnly, RolePolicyHandoff},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseRequest, protocol.PhaseElicit, protocol.PhasePropose,
 			protocol.PhaseReview, protocol.PhasePlanReview, protocol.PhaseRatify,
@@ -660,16 +678,22 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		},
 	},
 	protocol.RoleReviewer: {
-		Id:          protocol.RoleReviewer,
-		Name:        "Reviewer",
-		Description: "End-user alignment reviewer for plans and code",
-		Model:       "sonnet",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "SendMessage"},
+		Id:           protocol.RoleReviewer,
+		Name:         "Reviewer",
+		Description:  "End-user alignment reviewer for plans and code",
+		Tier:         TierMini,
+		TierOverride: TierStandard,
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep, ir.HarnessToolBash,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationSendAssignmentMessage,
+		},
+		Policies: []RolePolicy{RolePolicyReadOnly},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseReview, protocol.PhaseCodeReview,
 		},
-		Introduction: "You review from an end-user alignment perspective. " +
-			"See the project's protocol/CONSTRAINTS.md for coding standards.",
+		Introduction: "You review from an end-user alignment perspective.",
 		OwnershipNarrative: "You participate in two phases: " +
 			"Phase 4 (plan review) — evaluate PROPOSAL-N against one axis using binary ACCEPT/REVISE, " +
 			"NO severity tree; " +
@@ -710,9 +734,16 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Id:          protocol.RoleSupervisor,
 		Name:        "Supervisor",
 		Description: "Task coordinator, spawns workers, manages parallel execution",
-		Model:       "opus",
-		Thinking:    "medium",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Agent", "Task", "SendMessage"},
+		Tier:        TierFrontier,
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
+			ir.HarnessToolBash, ir.HarnessToolTask,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationDelegateAssignment,
+			ir.OperationSendAssignmentMessage,
+		},
+		Policies: []RolePolicy{RolePolicyHandoff},
 		OwnedPhases: []protocol.PhaseId{
 			protocol.PhaseHandoff, protocol.PhaseImplPlan, protocol.PhaseWorkerSlices,
 			protocol.PhaseCodeReview, protocol.PhaseImplUAT, protocol.PhaseLanding,
@@ -722,8 +753,8 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		OwnershipNarrative: "You own Phases 7-12 of the epoch: " +
 			"receive handoff from architect (p7), " +
 			"create vertical slice decomposition IMPL_PLAN (p8), " +
-			"spawn workers for parallel implementation SLICE-N (p9), " +
-			"spawn reviewers for per-slice code review with severity tree (p10), " +
+			"spawn workers for parallel implementation the slice (p9), " +
+			"spawn reviewers for whole-wave code review with severity tree (p10), " +
 			"coordinate user acceptance test (p11), " +
 			"commit, push, and hand off (p12). " +
 			"You NEVER implement code directly — all implementation is delegated to workers.",
@@ -739,26 +770,26 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 				Id:        "B-sup-model-trivial",
 				Given:     "trivial changes (single-file edits, config tweaks, typo fixes)",
 				When:      "spawning a worker",
-				Then:      "use model: haiku to minimize cost and latency",
-				ShouldNot: "use a heavyweight model for trivial work",
+				Then:      "keep the worker at its mapped capability tier (T2 standard), with the tier's effort, to minimize cost and latency",
+				ShouldNot: "raise a worker's tier for trivial work",
 			},
 			{
 				Id:        "B-sup-model-nontrivial",
 				Given:     "non-trivial changes (multi-file, architectural, logic-heavy)",
 				When:      "spawning a worker",
-				Then:      "prefer model: sonnet for the Task tool to ensure quality",
-				ShouldNot: "default to haiku for complex work",
+				Then:      "override the worker to T1 frontier for the delegate_assignment tool to ensure quality",
+				ShouldNot: "leave a high-complexity slice at the default tier",
 			},
 			{
 				Id:    "B-sup-ride-the-wave",
 				Given: "Phase 8-10 execution",
 				When:  "starting implementation",
 				Then: "follow the Ride the Wave cycle: plan tasks with integration points, " +
-					"launch the wave of workers, spawn reviewers for per-slice review " +
-					"(clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, " +
-					"and iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate",
+					"launch the wave of workers, spawn reviewers for whole-wave review " +
+					"(only an open BLOCKER finding gates the wave), workers fix findings with atomic commits, " +
+					"and iterate review -> fix -> re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate",
 				ShouldNot: "skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; " +
-					"close a wave with any finding silently outstanding",
+					"require a zeroed round to close a wave; close a finding outside `C-finding-lifecycle`",
 			},
 		},
 	},
@@ -766,8 +797,14 @@ var RoleSpecs = map[protocol.RoleId]RoleSpec{
 		Id:          protocol.RoleWorker,
 		Name:        "Worker",
 		Description: "Vertical slice implementer (full production code path)",
-		Model:       "sonnet",
-		Tools:       []string{"Read", "Glob", "Grep", "Bash", "Skill", "Edit", "Write", "SendMessage"},
+		Tier:        TierStandard,
+		Tools: []ir.HarnessTool{
+			ir.HarnessToolRead, ir.HarnessToolGlob, ir.HarnessToolGrep,
+			ir.HarnessToolBash, ir.HarnessToolEdit, ir.HarnessToolWrite,
+		},
+		Operations: []ir.OperationKind{
+			ir.OperationInvokeSkill, ir.OperationSendAssignmentMessage,
+		},
 		OwnedPhases: []protocol.PhaseId{protocol.PhaseWorkerSlices},
 		Introduction: "You own a vertical slice (full production code path from CLI/API entry point " +
 			"→ service → types). " +
@@ -844,7 +881,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-afk-implement": {
 		Id:          "cmd-afk-implement",
 		Name:        "pasture:afk-implement",
-		Description: "Run an unattended implementation session with small PRs and a clean review wave, never merging",
+		Description: "Run an unattended implementation session with small PRs and a review wave that ends in convergence, never merging",
 		Title:       "AFK Implement",
 		RoleRef:     protocol.RoleSupervisor,
 		Phases: []protocol.PhaseId{
@@ -947,7 +984,7 @@ var CommandSpecs = map[string]CommandSpec{
 	"cmd-sup-plan": {
 		Id:            "cmd-sup-plan",
 		Name:          "pasture:supervisor:plan-tasks",
-		Description:   "Decompose ratified plan into vertical slices (SLICE-N)",
+		Description:   "Decompose ratified plan into vertical slices (SLICE-{W}-{N})",
 		Title:         "Supervisor Plan Tasks",
 		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseImplPlan},
@@ -1045,7 +1082,7 @@ var CommandSpecs = map[string]CommandSpec{
 		RoleRef:       protocol.RoleReviewer,
 		Phases:        []protocol.PhaseId{protocol.PhaseCodeReview},
 		File:          "skills/reviewer-review-code/SKILL.md",
-		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
+		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor", "L-finding"},
 	},
 	"cmd-rev-comment": {
 		Id:          "cmd-rev-comment",
@@ -1083,7 +1120,7 @@ var CommandSpecs = map[string]CommandSpec{
 		RoleRef:       protocol.RoleSupervisor,
 		Phases:        []protocol.PhaseId{protocol.PhaseCodeReview},
 		File:          "skills/impl-review/SKILL.md",
-		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor"},
+		CreatesLabels: []string{"L-p10s10", "L-sev-blocker", "L-sev-import", "L-sev-minor", "L-finding"},
 	},
 	"cmd-explore": {
 		Id:            "cmd-explore",
@@ -1125,6 +1162,12 @@ var HandoffSpecs = map[string]HandoffSpec{
 		RequiredFields: []string{
 			"request", "urd", "proposal", "ratified-plan",
 			"context", "key-decisions", "open-items", "acceptance-criteria",
+		},
+		Bindings: []HandoffBinding{
+			{Field: "request", Var: "REQUEST_ID_URI"},
+			{Field: "urd", Var: "URD_ID_URI"},
+			{Field: "proposal", Var: "RATIFIED_PROPOSAL_ID_URI"},
+			{Field: "ratified-plan", Var: "RATIFIED_PLAN_ID_URI"},
 		},
 	},
 	"h2": {
@@ -1236,31 +1279,31 @@ var ChecklistSpecs = map[string]Checklist{
 		RoleRef: protocol.RoleWorker,
 		Gate:    "slice-closure",
 		Items: []ChecklistItem{
-			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close)", Required: true},
+			{Id: "CL-worker-notified-supervisor", Text: "Supervisor notified via [[rec:note]] (not [[rec:close]])", Required: true},
 			{Id: "CL-worker-completion-done", Text: "All completion-gate items passed", Required: true},
 			{Id: "CL-worker-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
-			{Id: "CL-worker-review-eligible", Text: "Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings", Required: true},
+			{Id: "CL-worker-review-eligible", Text: "No open BLOCKER finding on this slice; IMPORTANT and MINOR findings stay open to convergence", Required: true},
 		},
 	},
 	"supervisor-review-ready": {
 		RoleRef: protocol.RoleSupervisor,
 		Gate:    "review-ready",
 		Items: []ChecklistItem{
-			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via pasture task comment add", Required: true},
+			{Id: "CL-sup-all-slices-notified", Text: "All workers have notified completion via [[rec:note]]", Required: true},
 			{Id: "CL-sup-reviewers-assigned", Text: "Ephemeral reviewers spawned for all slices", Required: true},
-			{Id: "CL-sup-severity-groups-created", Text: "Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice", Required: true},
+			{Id: "CL-sup-severity-groups-created", Text: "Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per wave per axis per round", Required: true},
 		},
 	},
 	"supervisor-landing": {
 		RoleRef: protocol.RoleSupervisor,
 		Gate:    "landing",
 		Items: []ChecklistItem{
-			{Id: "CL-sup-all-accept", Text: "Fix-free clean re-review: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all 3 reviewers", Required: true},
+			{Id: "CL-sup-all-accept", Text: "All 3 reviewers ACCEPT at convergence and no open pasture:finding remains", Required: true},
 			{Id: "CL-sup-followup-created", Text: "FOLLOWUP epic created at UAT only if user-DEFER'd items exist (never from review severities)", Required: true},
 			{Id: "CL-sup-agent-commit", Text: "git agent-commit used (not git commit -m)", Required: true},
 			{Id: "CL-sup-tasks-closed", Text: "All upstream tasks closed or dependency-resolved", Required: true},
 			{Id: "CL-sup-close-on-review-wave", Text: "Can only close on a review wave, not a worker wave", Required: true},
-			{Id: "CL-sup-review-eligible", Text: "Eligible to close only after review by independent agents with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings", Required: true},
+			{Id: "CL-sup-review-eligible", Text: "Eligible to close only after convergence finds no open pasture:finding across all waves", Required: true},
 		},
 	},
 }
@@ -1272,61 +1315,61 @@ var CoordinationCommands = map[string]CoordinationCommand{
 	"cmd-coord-show": {
 		Id:       "cmd-coord-show",
 		Action:   "Check task details",
-		Template: "pasture task show \"${TASK_ID_URI}\"",
+		Template: "[[rec:show]] \"${TASK_ID_URI}\"",
 		Shared:   true,
 	},
 	"cmd-coord-status": {
 		Id:       "cmd-coord-status",
 		Action:   "Update status",
-		Template: "pasture task update \"${TASK_ID_URI}\" --status=in_progress",
+		Template: "[[rec:status]] \"${TASK_ID_URI}\" --set in_progress",
 		Shared:   true,
 	},
 	"cmd-coord-comment": {
 		Id:       "cmd-coord-comment",
 		Action:   "Add progress note",
-		Template: "pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Progress: ...\"",
+		Template: "[[rec:note]] \"${TASK_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"Progress: ...\"",
 		Shared:   true,
 	},
 	"cmd-coord-list": {
 		Id:       "cmd-coord-list",
 		Action:   "List in-progress",
-		Template: "pasture task list --namespace \"$PASTURE_NAMESPACE\" --status=in_progress",
+		Template: "[[rec:query]] --status=in_progress",
 		Shared:   true,
 	},
 	"cmd-coord-blocked": {
 		Id:       "cmd-coord-blocked",
 		Action:   "List blocked",
-		Template: "pasture task blocked",
+		Template: "[[rec:query]] --blocked",
 		Shared:   true,
 	},
 	"cmd-coord-assign": {
 		Id:       "cmd-coord-assign",
 		Action:   "Transfer existing assignment (supervisor only)",
-		Template: "pasture task assignment transfer \"${TASK_ID_URI}\" --slot owner-responsibility --assignment \"${SUCCESSOR_ASSIGNMENT_ID}\" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant \"${REGISTERED_WORKER_ACTOR}\"",
+		Template: "[[rec:label]] \"${TASK_ID_URI}\" owner:\"${REGISTERED_WORKER_ACTOR}\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-label": {
 		Id:       "cmd-coord-label",
-		Action:   "Label completed slice",
-		Template: "pasture task label add \"${SLICE_ID_URI}\" pasture:p9-impl:slice-complete",
+		Action:   "Record slice completion",
+		Template: "[[rec:note]] \"${SLICE_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"Slice complete.\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-dep-add": {
 		Id:       "cmd-coord-dep-add",
 		Action:   "Chain dependency",
-		Template: "pasture task dep add \"${PARENT_URI}\" --blocked-by \"${CHILD_URI}\"",
+		Template: "[[rec:block]] \"${PARENT_URI}\" --by \"${CHILD_URI}\"",
 		RoleRef:  protocol.RoleSupervisor,
 	},
 	"cmd-coord-close": {
 		Id:       "cmd-coord-close",
 		Action:   "Report completion without closing",
-		Template: "pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${TASK_ID_URI}\" \"Implementation complete; awaiting independent review and supervisor closure.\"",
+		Template: "[[rec:note]] \"${TASK_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"Implementation complete; awaiting independent review and supervisor closure.\"",
 		RoleRef:  protocol.RoleWorker,
 	},
 	"cmd-coord-worker-notes": {
 		Id:       "cmd-coord-worker-notes",
 		Action:   "Add completion notes",
-		Template: "pasture task update \"${TASK_ID_URI}\" --notes=\"Implementation complete. Production code verified.\"",
+		Template: "[[rec:note]] \"${TASK_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body=\"Implementation complete. Production code verified.\"",
 		RoleRef:  protocol.RoleWorker,
 	},
 }
@@ -1341,8 +1384,8 @@ var WorkflowSpecs = map[string]Workflow{
 		RoleRef: protocol.RoleSupervisor,
 		Description: "Coordinated Phase 8-10 execution pattern. The supervisor orchestrates " +
 			"the full cycle: plan slices, launch workers, " +
-			"spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget " +
-			"until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate.",
+			"spawn reviewers for whole-wave review, where only an open BLOCKER finding gates the wave, workers fix, " +
+			"and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.",
 		Stages: []WorkflowStage{
 			{
 				Id:        "rtw-plan",
@@ -1353,8 +1396,8 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						Id:          "rtw-plan-read",
-						Instruction: "Read RATIFIED_PLAN and URD via pasture task show",
-						Command:     "pasture task show \"${RATIFIED_PLAN_ID_URI}\" && pasture task show \"${URD_ID_URI}\"",
+						Instruction: "Read RATIFIED_PLAN and URD via [[rec:show]]",
+						Command:     "[[rec:show]] \"${RATIFIED_PLAN_ID_URI}\" && [[rec:show]] \"${URD_ID_URI}\"",
 					},
 					{
 						Id:          "rtw-plan-explore",
@@ -1367,7 +1410,7 @@ var WorkflowSpecs = map[string]Workflow{
 					{
 						Id:          "rtw-plan-leaf-tasks",
 						Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
-						Command:     "pasture task dep add \"${SLICE_ID_URI}\" --blocked-by \"${LEAF_TASK_ID_URI}\"",
+						Command:     "[[rec:block]] \"${SLICE_ID_URI}\" --by \"${LEAF_TASK_ID_URI}\"",
 					},
 				},
 				OperationalDetail: "",
@@ -1387,16 +1430,15 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						Id: "rtw-build-spawn",
-						Instruction: "Spawn workers via the Agent tool — " +
-							"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
-							"(NOT aura-swarm). " +
-							"Choose model: sonnet for non-trivial slices, haiku for trivial changes. " +
-							"Set thinking effort to match slice complexity.",
+						Instruction: "Spawn workers via the [[op:delegate_assignment]] tool — " +
+							"set `name` for a named teammate, leave `name` empty for a backgrounded subagent. " +
+							"Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. " +
+							"Pass the tier-mapped native model id and " + concurrencyCapSentence(),
 					},
 					{
 						Id:          "rtw-build-monitor",
-						Instruction: "Monitor worker progress via pasture task list --namespace \"$PASTURE_NAMESPACE\" and pasture task show",
-						Command:     "pasture task list --namespace \"$PASTURE_NAMESPACE\" --label=\"pasture:p9-impl:s9-slice\" --status=in_progress",
+						Instruction: "Monitor worker progress via [[rec:query]] and [[rec:show]]",
+						Command:     "[[rec:query]] --phase worker_slices --status=in_progress",
 					},
 					{
 						Id:          "rtw-build-integrate",
@@ -1407,7 +1449,7 @@ var WorkflowSpecs = map[string]Workflow{
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "proceed",
-						Condition: "All workers have notified completion via pasture task comment add",
+						Condition: "All workers have notified completion via [[rec:note]]",
 					},
 				},
 			},
@@ -1420,39 +1462,39 @@ var WorkflowSpecs = map[string]Workflow{
 				Actions: []WorkflowAction{
 					{
 						Id:          "rtw-review-spawn",
-						Instruction: "Spawn reviewers via Task tool for per-slice code review",
+						Instruction: "Spawn reviewers via [[op:delegate_assignment]] tool for whole-wave code review",
 					},
 					{
 						Id:          "rtw-review-severity",
-						Instruction: "Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice",
+						Instruction: "Reviewers create one severity trio (BLOCKER/IMPORTANT/MINOR) per wave, per axis, per round",
 					},
 					{
 						Id:          "rtw-review-severity-track",
-						Instruction: "Track findings in the 3 severity groups; ALL groups must reach 0 before wave close (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)",
+						Instruction: "Track findings as `pasture:finding` children of the 3 severity groups; only an open BLOCKER gates the wave, and open findings converge at the end (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)",
 					},
 					{
 						Id:          "rtw-review-fix",
 						Instruction: "Workers fix ALL findings (BLOCKER, IMPORTANT, and MINOR)",
 					},
 				},
-				OperationalDetail: "- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)\n" +
-					"- **CLEAN REVIEW** = 0 BLOCKER + 0 IMPORTANT + 0 MINOR from ALL reviewers on a fix-free round\n" +
-					"- Per-slice fix+review; iterate up to the chosen review-effort budget\n" +
+				OperationalDetail: "- Spawn 3 ephemeral reviewer subagents per wave review round (same pattern as Phase 4 plan review)\n" +
+					"- **WAVE GATE** = only an open BLOCKER finding blocks the wave; IMPORTANT and MINOR findings stay open\n" +
+					"- Per-wave review, per-slice fix; iterate up to the chosen review-effort budget\n" +
 					"- Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)\n" +
-					"- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review until the slice is clean (0/0/0); on budget exhaustion without clean, surface outstanding findings to the user at a gate\n" +
+					"- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review up to the budget; convergence targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate\n" +
 					"- **MUST end on a review wave** — cannot proceed after a worker wave without review\n" +
 					"\n" +
 					"```text\n" +
-					"Stage 3 Flow (per-slice):\n" +
+					"Stage 3 Flow (per-wave review):\n" +
 					"\n" +
 					"  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n" +
 					"  \u2502 Spawn 3 ephemeral reviewers             \u2502\n" +
 					"  \u2502 Review slice (severity: BLOCKER/IMP/MIN)\u2502\n" +
 					"  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n" +
 					"                 \u2502\n" +
-					"          CLEAN? \u251c\u2500\u2500 YES (0/0/0) \u2192 slice passes, proceed\n" +
+					"          BLOCKER? \u251c\u2500\u2500 NO \u2192 wave advances, findings stay open\n" +
 					"                 \u2502\n" +
-					"                 \u2514\u2500\u2500 NO (any finding remains)\n" +
+					"                 \u2514\u2500\u2500 YES (an open BLOCKER)\n" +
 					"                       \u2502\n" +
 					"                       \u25bc\n" +
 					"              \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n" +
@@ -1470,16 +1512,16 @@ var WorkflowSpecs = map[string]Workflow{
 					"                       \u2502\n" +
 					"                 loop (re-review)\n" +
 					"                       \u2502\n" +
-					"          repeat until clean (0/0/0) \u2014 up to the chosen budget, else surface to user\n" +
+					"          repeat to the budget \u2014 convergence at the end, else surface to user\n" +
 					"```",
 				ExitConditions: []ExitCondition{
 					{
 						Type:      "success",
-						Condition: "All reviewers report 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free clean round — proceed to Phase 11 UAT",
+						Condition: "Convergence finds no open pasture:finding across all waves — proceed to Phase 11 UAT",
 					},
 					{
 						Type:      "continue",
-						Condition: "Any finding (BLOCKER, IMPORTANT, or MINOR) remains within budget — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)",
+						Condition: "An open BLOCKER gates the current wave, or convergence has not reached 0/0/0 within maxRounds — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)",
 					},
 				},
 			},
@@ -1503,7 +1545,7 @@ var WorkflowSpecs = map[string]Workflow{
 					{
 						Id:          "lc-types-read",
 						Instruction: "Read slice task and identify required types",
-						Command:     "pasture task show \"${SLICE_TASK_ID_URI}\"",
+						Command:     "[[rec:show]] \"${SLICE_TASK_ID_URI}\"",
 					},
 					{
 						Id:          "lc-types-define",
@@ -1566,8 +1608,8 @@ var WorkflowSpecs = map[string]Workflow{
 					},
 					{
 						Id:          "lc-impl-notify",
-						Instruction: "Notify supervisor of completion via pasture task comment add",
-						Command:     "pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 \"${SLICE_ID_URI}\" \"Implementation complete\"",
+						Instruction: "Notify supervisor of completion via [[rec:note]]",
+						Command:     "[[rec:note]] \"${SLICE_ID_URI}\" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \"Implementation complete\"",
 					},
 				},
 				ExitConditions: []ExitCondition{
@@ -1816,19 +1858,19 @@ var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 		{
 			Id:          "S-supervisor-call-skill",
 			Order:       1,
-			Instruction: "Call Skill(/pasture:supervisor) to load role instructions",
-			Command:     "Skill(/pasture:supervisor)",
+			Instruction: "Call [[op:invoke_skill]](/pasture:supervisor) to load role instructions",
+			Command:     "[[op:invoke_skill]](/pasture:supervisor)",
 		},
 		{
 			Id:          "S-supervisor-read-plan",
 			Order:       2,
-			Instruction: "Read RATIFIED_PLAN, URD, UAT, and elicit tasks via pasture task show for full context",
-			Command:     "pasture task show \"${RATIFIED_PLAN_ID_URI}\" && pasture task show \"${URD_ID_URI}\" && pasture task show \"${UAT_ID_URI}\" && pasture task show \"${ELICIT_ID_URI}\"",
+			Instruction: "Read RATIFIED_PLAN, URD, UAT, and elicit tasks via [[rec:show]] for full context",
+			Command:     "[[rec:show]] \"${RATIFIED_PLAN_ID_URI}\" && [[rec:show]] \"${URD_ID_URI}\" && [[rec:show]] \"${UAT_ID_URI}\" && [[rec:show]] \"${ELICIT_ID_URI}\"",
 		},
 		{
 			Id:          "S-supervisor-explore-ephemeral",
 			Order:       3,
-			Instruction: "Spawn ephemeral Explore subagents via Task tool for scoped codebase queries",
+			Instruction: "Spawn ephemeral Explore subagents via [[op:delegate_assignment]] tool for scoped codebase queries",
 			Context:     "Each subagent is short-lived and returns findings; no standing team overhead",
 		},
 		{
@@ -1843,22 +1885,20 @@ var ProcedureSteps = map[protocol.RoleId][]ProcedureStep{
 			Id:          "S-supervisor-create-leaf-tasks",
 			Order:       5,
 			Instruction: "Create leaf tasks (L1/L2/L3) for every slice",
-			Command: `CREATED_URI=$(pasture task create "SLICE-{K}-L{1,2,3}: <description>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice`,
+			Command:     `CREATED_URI=$([[rec:create]] --kind task --title "<description>" --phase worker_slices --body "Describe the specific work and reference full task URIs")`,
 			Examples: []Example{
 				{
 					Id:    "S-supervisor-create-leaf-tasks-frontmatter",
 					Lang:  "bash",
 					Label: "template",
-					Code: `CREATED_URI=$(pasture task create "SLICE-1-L1: Types -- <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+					Code: `CREATED_URI=$([[rec:create]] --kind task --title "Types — <slice name>" --phase worker_slices \
+  --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
   impl_plan: "${IMPL_PLAN_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
-Layer 1: types and interfaces for <slice name>." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice`,
+Layer 1: types and interfaces for <slice name>.")`,
 					AlsoIllustrates: "C-frontmatter-refs",
 				},
 			},
@@ -1866,11 +1906,10 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice`,
 		{
 			Id:    "S-supervisor-spawn-workers",
 			Order: 6,
-			Instruction: "Spawn workers via the Agent tool — " +
-				"set `name` for a named teammate, leave `name` empty for a backgrounded subagent " +
-				"(NOT aura-swarm). " +
-				"Choose model: sonnet for non-trivial slices, haiku for trivial changes. " +
-				"Set thinking effort to match slice complexity.",
+			Instruction: "Spawn workers via the [[op:delegate_assignment]] tool — " +
+				"set `name` for a named teammate, leave `name` empty for a backgrounded subagent. " +
+				"Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. " +
+				"Pass the tier-mapped native model id and " + concurrencyCapSentence(),
 			NextState: protocol.PhaseWorkerSlices,
 		},
 	},
@@ -1918,6 +1957,7 @@ var LabelSpecs = map[string]LabelSpec{
 	"L-sev-blocker": {Id: "L-sev-blocker", Value: "pasture:severity:blocker", Special: true, SeverityRef: "BLOCKER"},
 	"L-sev-import":  {Id: "L-sev-import", Value: "pasture:severity:important", Special: true, SeverityRef: "IMPORTANT"},
 	"L-sev-minor":   {Id: "L-sev-minor", Value: "pasture:severity:minor", Special: true, SeverityRef: "MINOR"},
+	"L-finding":     {Id: "L-finding", Value: "pasture:finding", Special: true, Description: "A single review finding; child of a severity group"},
 	"L-followup":    {Id: "L-followup", Value: "pasture:epic-followup", Special: true, Description: "Follow-up epic for user-DEFER'd UAT items only"},
 }
 
@@ -1939,12 +1979,12 @@ var TitleConventions = []TitleConvention{
 	{Pattern: "UAT-{N}: {description}", LabelRef: "L-p5s5", CreatedBy: "architect", PhaseRef: "p5"},
 	{Pattern: "IMPL_PLAN: {description}", LabelRef: "L-p8s8", CreatedBy: "supervisor", PhaseRef: "p8"},
 	{
-		Pattern: "SLICE-{N}: {description}", LabelRef: "L-p9s9", CreatedBy: "supervisor", PhaseRef: "p9",
-		Note: "N identifies slice within the implementation plan",
+		Pattern: "SLICE-{W}-{N}: {description}", LabelRef: "L-p9s9", CreatedBy: "supervisor", PhaseRef: "p9",
+		Note: "W identifies the wave, N the slice within that wave",
 	},
 	{
-		Pattern: "SLICE-{N}-REVIEW-{axis}-{round}: {description}", LabelRef: "L-p10s10", CreatedBy: "reviewer", PhaseRef: "p10",
-		Note: "axis=A|B|C, round starts at 1",
+		Pattern: "WAVE-{W}-REVIEW-{axis}-{round}: {description}", LabelRef: "L-p10s10", CreatedBy: "reviewer", PhaseRef: "p10",
+		Note: "axis=A|B|C, round starts at 1; findings hang under this wave review task",
 	},
 	{
 		Pattern: "IMPL-REVIEW-{axis}-{round}: {description}", LabelRef: "L-p10s10", CreatedBy: "supervisor", PhaseRef: "p10",
@@ -1953,7 +1993,7 @@ var TitleConventions = []TitleConvention{
 	{
 		Pattern: "FOLLOWUP: {description}", LabelRef: "L-followup", CreatedBy: "supervisor",
 		Note: "Follow-up epic created at UAT when user-DEFER'd items exist (never from review severities; " +
-			"all review findings must reach 0 before wave close). " +
+			"review findings converge at the end — close rule: `C-finding-lifecycle`). " +
 			"Single-parent epic relationship — no followup-of-followup.",
 	},
 	{
@@ -2054,7 +2094,7 @@ var SubstepDataMap = map[string][]SubstepData{
 		{
 			Id: "s8", Type: "plan", Execution: "sequential", Order: 1,
 			LabelRef:        "L-p8s8",
-			Description:     "Identify production code paths. Create SLICE-N tasks with leaf tasks. Assign workers.",
+			Description:     "Identify production code paths. Create the slice tasks with leaf tasks. Assign workers.",
 			StartupSequence: true,
 		},
 	},

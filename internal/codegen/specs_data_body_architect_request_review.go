@@ -52,7 +52,7 @@ var architectRequestReviewBody = SkillBody{
 		{
 			Id:      "arch-review-steps",
 			Title:   "Steps",
-			Content: "1. Verify PROPOSAL-N task is complete with all sections\n2. Spawn three reviewers with the task ID and URD reference:\n\n```\nTask(description: \"Reviewer A: correctness\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer A (Correctness). Focus: Does it faithfully serve the user? Are technical decisions consistent with rationale? Create review task titled PROPOSAL-1-REVIEW-A-1...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer B: test quality\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer B (Test quality). Focus: Integration over unit? SUT not mocked? Shared fixtures? Assert outcomes? Create review task titled PROPOSAL-1-REVIEW-B-1...\", subagent_type: \"general-purpose\")\nTask(description: \"Reviewer C: elegance\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer C (Elegance). Focus: Right API? Not over/under-engineered? Complexity proportional to problem? Create review task titled PROPOSAL-1-REVIEW-C-1...\", subagent_type: \"general-purpose\")\n```\n\n3. Wait for all 3 reviewers to vote ACCEPT",
+			Content: "1. Verify PROPOSAL-N task is complete with all sections\n2. Spawn three reviewers with the task ID and URD reference:\n\n```\ndelegation: description: \"Reviewer A: correctness\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer A (Correctness). Focus: Does it faithfully serve the user? Are technical decisions consistent with rationale? Create review task titled PROPOSAL-1-REVIEW-A-1...\", subagent_type: \"general-purpose\"\ndelegation: description: \"Reviewer B: test quality\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer B (Test quality). Focus: Integration over unit? SUT not mocked? Shared fixtures? Assert outcomes? Create review task titled PROPOSAL-1-REVIEW-B-1...\", subagent_type: \"general-purpose\"\ndelegation: description: \"Reviewer C: elegance\", prompt: \"Review PROPOSAL-1 task ${TASK_ID_URI}. URD: ${URD_ID_URI} (read for requirements context). You are Reviewer C (Elegance). Focus: Right API? Not over/under-engineered? Complexity proportional to problem? Create review task titled PROPOSAL-1-REVIEW-C-1...\", subagent_type: \"general-purpose\"\n```\n\n3. Wait for all 3 reviewers to vote ACCEPT",
 		},
 		{
 			Id:      "arch-review-consensus",
@@ -63,8 +63,8 @@ var architectRequestReviewBody = SkillBody{
 			Id:    "arch-review-checking",
 			Title: "Checking Reviews",
 			Content: `` + "```" + `bash
-pasture task show "${PROPOSAL_ID_URI}"
-pasture task comments "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}" --notes
 ` + "```" + ``,
 		},
 		{
@@ -72,10 +72,10 @@ pasture task comments "${PROPOSAL_ID_URI}"
 			Title: "Coordination",
 			Content: `` + "```" + `bash
 # Add comment to notify that review is ready
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "Review requested — 3 reviewers spawned"
+[[rec:note]] "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Review requested — 3 reviewers spawned"
 
 # Check for review votes
-pasture task comments "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}" --notes
 ` + "```" + ``,
 		},
 		{

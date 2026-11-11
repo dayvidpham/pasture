@@ -152,7 +152,7 @@ func RenderGeneratedAssets(repoRoot string) (map[string][]byte, error) {
 			Content: string(out[key]),
 		})
 	}
-	if err := codegen.ValidateOperationalFiles(repoRoot, candidates, "Claude Code asset candidate validation"); err != nil {
+	if err := codegen.ValidateOperationalFiles(repoRoot, candidates, "Claude Code asset candidate validation", codegen.HarnessClaudeCode); err != nil {
 		return nil, err
 	}
 	return out, nil

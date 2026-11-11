@@ -2,7 +2,7 @@
   "author": {
     "name": "David Pham"
   },
-  "description": "Pasture — a 12-phase protocol for structured multi-agent software development, delivered as Claude Code skills and agents (supervisor, worker, reviewer, architect, epoch + phase sub-skills) generated from the pasture Go codegen. Beads task tracking and vertical-slice TDD implementation.",
+  "description": "Pasture — a 12-phase protocol for structured multi-agent software development, delivered as Claude Code skills and agents (supervisor, worker, reviewer, architect, epoch + phase sub-skills) generated from the pasture Go codegen. Pasture task tracking and vertical-slice TDD implementation.",
   "keywords": [
     "workflow",
     "protocol",
@@ -10,7 +10,6 @@
     "planning",
     "review",
     "implementation",
-    "beads",
     "vertical-slices",
     "tdd",
     "golang",

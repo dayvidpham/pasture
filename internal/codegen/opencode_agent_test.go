@@ -210,23 +210,29 @@ func TestOpenCodeAgentReviewerSubagent(t *testing.T) {
 	}
 }
 
-// TestOpenCodeAgentEveryModelMaps asserts every distinct RoleSpec.Model nickname
-// in use resolves through the generator's openCodeModel lookup table (fail-hard
-// if a role's model has no mapping).
+// TestOpenCodeAgentEveryModelMaps asserts every tool-bearing role's effective
+// tier resolves through the OpenCode tier table (fail-hard if a role's tier has
+// no mapping).
 func TestOpenCodeAgentEveryModelMaps(t *testing.T) {
 	t.Parallel()
 
-	for roleID, spec := range RoleSpecs {
+	for roleID := range RoleSpecs {
+		spec := RoleSpecs[roleID]
 		if len(spec.Tools) == 0 {
 			continue
 		}
-		got, ok := openCodeModel[spec.Model]
-		if !ok {
-			t.Errorf("role %q model nickname %q has no OpenCode model mapping in openCodeModel", roleID, spec.Model)
+		tier, err := TierForRole(roleID)
+		if err != nil {
+			t.Errorf("role %q has no effective tier: %v", roleID, err)
+			continue
+		}
+		got, err := ModelForTier(HarnessOpenCode, tier)
+		if err != nil {
+			t.Errorf("role %q tier %q has no OpenCode model mapping: %v", roleID, tier, err)
 			continue
 		}
 		if !strings.HasPrefix(got, "anthropic/") {
-			t.Errorf("role %q model %q maps to %q, want an anthropic/<id> qualified id", roleID, spec.Model, got)
+			t.Errorf("role %q tier %q maps to %q, want an anthropic/<id> qualified id", roleID, tier, got)
 		}
 	}
 }

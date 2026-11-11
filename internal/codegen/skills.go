@@ -437,7 +437,7 @@ func unifiedDiff(fromFile, toFile, oldContent, newContent string) string {
 // including both the header and body content inside BEGIN/END markers.
 // This is the single-pass replacement for the former renderHeader + renderBody
 // two-pass pipeline.
-func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string, version string) (string, error) {
+func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string, version string, target HarnessName) (string, error) {
 	if tmplName == "" {
 		tmplName = TemplateSkill
 	}
@@ -521,14 +521,27 @@ func renderSkill(roleId protocol.RoleId, figuresDir string, tmplName string, ver
 			roleId, err,
 		)
 	}
-	return buf.String(), nil
+
+	// Resolve typed markers (harness tools, orchestration operations, the
+	// tracker entry point) across the WHOLE rendered document. Resolving the
+	// final text, rather than a hand-picked set of body fields, means every
+	// rendering corpus — bodies, fragments, role behaviours, constraints and
+	// workflow prose — goes through the one resolver (tenets 3, 4, 7).
+	rendered, err := ResolveBodyMarkers(buf.String(), target)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderSkill: marker resolution failed for role %q on target %q: %w",
+			roleId, target, err,
+		)
+	}
+	return rendered, nil
 }
 
 // renderSubSkill renders the complete generated content for a sub-skill
 // SKILL.md file, including both figures and body content inside BEGIN/END
 // markers. This is the single-pass replacement for the former
 // renderSubSkillHeader + renderBody two-pass pipeline.
-func renderSubSkill(commandId, figuresDir string, tmplName string, version string) (string, error) {
+func renderSubSkill(commandId, figuresDir string, tmplName string, version string, target HarnessName) (string, error) {
 	if tmplName == "" {
 		tmplName = TemplateSubSkill
 	}
@@ -607,7 +620,17 @@ func renderSubSkill(commandId, figuresDir string, tmplName string, version strin
 			commandId, err,
 		)
 	}
-	return buf.String(), nil
+
+	// Resolve typed markers across the whole rendered sub-skill, exactly as
+	// renderSkill does for a role skill.
+	rendered, err := ResolveBodyMarkers(buf.String(), target)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderSubSkill: marker resolution failed for command %q on target %q: %w",
+			commandId, target, err,
+		)
+	}
+	return rendered, nil
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -631,14 +654,14 @@ func renderSubSkill(commandId, figuresDir string, tmplName string, version strin
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
 func GenerateSkill(roleId protocol.RoleId, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
-	return generateSkillInto(roleId, inPlaceSkillPaths(skillPath), figuresDir, opts)
+	return generateSkillInto(roleId, inPlaceSkillPaths(skillPath), figuresDir, opts, HarnessClaudeCode)
 }
 
 // generateSkillInto is the split-root form of GenerateSkill: the marker-merge
 // base is read from paths.Src and the merged result is written to paths.Dst.
 // GenerateSkill passes the same path for both, which keeps in-place generation
 // unchanged.
-func generateSkillInto(roleId protocol.RoleId, paths skillPaths, figuresDir string, opts GenerateOptions) (string, error) {
+func generateSkillInto(roleId protocol.RoleId, paths skillPaths, figuresDir string, opts GenerateOptions, target HarnessName) (string, error) {
 	skillPath := paths.Src
 	// Read existing file.
 	oldContent, err := os.ReadFile(skillPath)
@@ -666,7 +689,7 @@ func generateSkillInto(roleId protocol.RoleId, paths skillPaths, figuresDir stri
 	}
 
 	// Single-pass render: template produces all content inside BEGIN/END.
-	rendered, err := renderSkill(roleId, figuresDir, TemplateSkill, versionForSkillPath(skillPath))
+	rendered, err := renderSkill(roleId, figuresDir, TemplateSkill, versionForSkillPath(skillPath), target)
 	if err != nil {
 		return "", err
 	}
@@ -735,13 +758,13 @@ func generateSkillInto(roleId protocol.RoleId, paths skillPaths, figuresDir stri
 // Returns a *MarkerError if skillPath is missing the BEGIN/END marker pair (and
 // Init is false), or if the markers are malformed.
 func GenerateSubSkill(commandId string, skillPath string, figuresDir string, opts GenerateOptions) (string, error) {
-	return generateSubSkillInto(commandId, inPlaceSkillPaths(skillPath), figuresDir, opts)
+	return generateSubSkillInto(commandId, inPlaceSkillPaths(skillPath), figuresDir, opts, HarnessClaudeCode)
 }
 
 // generateSubSkillInto is the split-root form of GenerateSubSkill: the
 // marker-merge base is read from paths.Src and the merged result is written to
 // paths.Dst.
-func generateSubSkillInto(commandId string, paths skillPaths, figuresDir string, opts GenerateOptions) (string, error) {
+func generateSubSkillInto(commandId string, paths skillPaths, figuresDir string, opts GenerateOptions, target HarnessName) (string, error) {
 	skillPath := paths.Src
 	// Read existing file.
 	oldContent, err := os.ReadFile(skillPath)
@@ -773,7 +796,7 @@ func generateSubSkillInto(commandId string, paths skillPaths, figuresDir string,
 	}
 
 	// Single-pass render: template produces frontmatter + H1 + BEGIN/END content.
-	rendered, err := renderSubSkill(commandId, figuresDir, TemplateSubSkill, versionForSkillPath(skillPath))
+	rendered, err := renderSubSkill(commandId, figuresDir, TemplateSubSkill, versionForSkillPath(skillPath), target)
 	if err != nil {
 		return "", err
 	}

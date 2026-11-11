@@ -11,10 +11,10 @@ var reviewerBody = SkillBody{
 			Title: "Plan Review vs Code Review",
 			Content: `| Aspect | Plan Review (Phase 4) | Code Review (Phase 10) |
 |--------|-----------------------|------------------------|
-| Label | ` + "`pasture:p4-plan:s4-review`" + ` | ` + "`pasture:p10-impl:s10-review`" + ` |
+| Phase | plan review | code review |
 | Vote | ACCEPT / REVISE (binary) | ACCEPT / REVISE (binary) |
 | Severity tree | **NO** — no severity groups | **YES** — EAGER creation (always 3 groups) |
-| Naming | PROPOSAL-N-REVIEW-{axis}-{round} | SLICE-N-REVIEW-{axis}-{round} |
+| Naming | the proposal review | the wave review |
 | Focus | End-user alignment, MVP scope | Production code paths, severity findings |`,
 		},
 		{
@@ -36,8 +36,8 @@ var reviewerBody = SkillBody{
 			Content: `| Severity | When to Use | Blocks Slice? |
 |----------|-------------|---------------|
 | BLOCKER | Security, type errors, test failures, broken production code paths | Yes |
-| IMPORTANT | Performance, missing validation, architectural concerns | Must reach 0 before review wave closes |
-| MINOR | Style, optional optimizations, naming improvements | Must reach 0 before review wave closes |`,
+| IMPORTANT | Performance, missing validation, architectural concerns | No — stays open past the wave gate and converges at the end |
+| MINOR | Style, optional optimizations, naming improvements | No — stays open past the wave gate and converges at the end |`,
 		},
 		{
 			Id:    "rev-followup-lifecycle",
@@ -45,25 +45,25 @@ var reviewerBody = SkillBody{
 			Content: `Reviewers also participate in the follow-up lifecycle:
 
 - **FOLLOWUP_PROPOSAL review (Phase 4):** Same procedure as standard plan review. Task naming: ` + "`FOLLOWUP_PROPOSAL-N-REVIEW-{axis}-{round}`" + `. Binary ACCEPT/REVISE, no severity tree.
-- **FOLLOWUP_SLICE code review (Phase 10):** Same procedure as standard code review. Task naming: ` + "`FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`" + `. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
-- **All severities reach 0 (no followup-of-followup):** ALL findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review must reach 0 before the follow-up wave closes — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.`,
+- **Follow-up code review (Phase 10):** Same procedure as standard code review. Name the review for the follow-up slice, the axis, and the round. Full EAGER severity tree (BLOCKER/IMPORTANT/MINOR).
+- **Open findings converge at the end (no followup-of-followup):** findings (BLOCKER/IMPORTANT/MINOR) from a FOLLOWUP_SLICE code review stay open past the wave gate and converge at the end — they are never re-routed to a follow-up epic. The FOLLOWUP epic is fed only by user-DEFER'd UAT items.`,
 		},
 		{
 			Id:    "rev-task-process",
 			Title: "Pasture Review Process",
 			Content: `Read the plan and URD:
 ` + "```" + `bash
-pasture task show "${TASK_ID_URI}"
-pasture task show "${URD_ID_URI}"   # Read URD for user requirements context
+[[rec:show]] "${TASK_ID_URI}"
+[[rec:show]] "${URD_ID_URI}"   # Read URD for user requirements context
 ` + "```" + `
 
 Add review comment with vote:
 ` + "```" + `bash
 # If accepting:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+[[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
 
 # If requesting revision:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+[[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
 ` + "```" + ``,
 		},
 		{

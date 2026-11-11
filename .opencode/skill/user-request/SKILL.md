@@ -49,23 +49,47 @@ description: Capture user feature request verbatim (Phase 1)
 
 ## Task Recovery
 
-Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami, signal.
 
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-Run pasture task ready, pasture task blocked, and pasture task list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+The adapter passes `--namespace` only when EPOCH.md records `namespace:`. That pin wins on both backends. Otherwise it omits the flag. Pasture then derives the namespace itself: PASTURE_NAMESPACE, else the git remote, then file:// of the working directory. The ledger calls derive_namespace for the header and for every write that has no pin. That function is the one list of remote forms; do not restate it. With no origin, both backends use file:// of the working directory, so invocations from different subdirectories use different namespaces. Queries without a pin follow that backend's derivation; pass `--all-namespaces` to opt out. When neither a pin nor PASTURE_NAMESPACE is set, pasture reads are unscoped and creation falls back to the git remote, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
-Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
+
+Parent stays open and is blocked by child: `"${EPOCH_REC}" block "$PARENT_URI" --by "$CHILD_URI"`. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records `backend: error`, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami. It prints the author recorded in the header or PASTURE_AUTHOR, and on the pasture backend it confirms that actor with agents show. It does not list agents and it does not invent one. If neither source names an author, it stops: set author: in EPOCH.md or export PASTURE_AUTHOR. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
+## Model Policy and Fallback Chain
+
+A role names a capability tier. A tier carries a neutral default model nickname, an effort level, and its default roles.
+
+<!-- pasture:model-chain-ask -->
+
+| Tier | Name | Default model | Effort | Effective roles |
+|------|------|---------------|--------|----------------|
+| T1 | frontier | frontier | high | architect, epoch, supervisor |
+| T2 | standard | standard | medium | reviewer, worker |
+| T3 | mini | mini | low | (runtime choice only) |
+
+The reviewer's effective default is T2 standard, so the table lists reviewer under T2, not under T3. T3 mini has no effective default role; it is a phase-8 runtime choice. Record that choice as `reviewer_tier: T3` in `.agents.local/pasture/EPOCH.md` and pass that tier's native model id when reviewers are spawned. Each harness publishes every tier's native id in its emitted agent files (`capability-tier` lines). On a harness with no smaller model than T2, T3's id equals T2's; Codex is that harness, so a cheap review there uses the standard profile.
+
+**Ask here, and at the matching gate in the other phase.** At phase 1 and again at phase 8, ask the user for three models: a primary, a secondary, and a tertiary. One gate, two asks, not five. The three form one fallback chain: when a provider is exhausted, use the next model in the chain; never fail the epoch. Record the chain on the request or IMPL_PLAN task and repeat it in every handoff. Advance the chain in the architect and supervisor surfaces too: they spawn the reviewers and workers, so a provider exhaustion reaches them first.
+
+**Reviewer override.** The reviewer tier is the reviewer role's TierOverride, not a separate review-budget type. The default is T2 standard (full review); treat T3 mini as an epoch-recorded runtime choice, never a compile-time one.
+
+**Concurrency cap.** Run at most 4 delegated agents at once in one stage. Phase 9 spawns one worker per slice and has no slice bound; when a plan has more slices than the cap, start them in batches of that size. The cap is a batching policy, not a protocol maximum. It bounds concurrency only; maxRounds remains the only bound on review rounds.
 
 ## Phase 1 Sub-steps
 
@@ -83,15 +107,15 @@ Select the current registered author with pasture task agents list and pasture t
 
 1. **Get the user's request verbatim:**
    ```
-   AskUserQuestion: "What feature or change would you like to request?"
+   question: "What feature or change would you like to request?"
    ```
 
 2. **Create the request task:**
    ```bash
-   REQUEST_ID_URI=$(pasture task create "REQUEST: {{short summary}}" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-     --description "{{VERBATIM user request - do not edit}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-   pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-   pasture task update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+   REQUEST_ID_URI=$("${EPOCH_REC}" create --kind task --title "REQUEST: {{short summary}}" --phase request \
+     --body "{{VERBATIM user request - do not edit}}")
+   "${EPOCH_REC}" label "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+   "${EPOCH_REC}" note "$REQUEST_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
    ```
 
 3. **Classify along 4 axes:**
@@ -102,7 +126,7 @@ Select the current registered author with pasture task agents list and pasture t
 
 4. **Record classification** via comment on the request task:
    ```bash
-   pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+   "${EPOCH_REC}" note "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
      "Classification: scope={{scope}}, complexity={{complexity}}, risk={{risk}}, novelty={{novelty}}"
    ```
 
@@ -114,7 +138,7 @@ When the intent is to fix existing behavior, the **validation-case lifecycle** a
 
 Record the recognition in the same classification comment so downstream phases pick it up:
 ```bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+"${EPOCH_REC}" note "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Fix-intent: yes — validation-case lifecycle applies (elicit cases in URE, confirm in UAT, store as fixtures)"
 ```
 
@@ -123,7 +147,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 After classification, confirm research depth with the user:
 
 ```
-AskUserQuestion:
+question:
   question: "Based on classification ({{scope}}, {{complexity}}, {{risk}}, {{novelty}}), how deep should research go?"
   header: "Research Depth"
   options:
@@ -144,11 +168,11 @@ AskUserQuestion:
 Record the user's depth choice, then spawn two parallel agents:
 
 ```bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+"${EPOCH_REC}" note "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Research depth: {{depth}} (user confirmed)"
 ```
 
-Spawn both agents in parallel (via Task tool with `run_in_background: true`). Each agent invokes its dedicated skill.
+Spawn both agents in parallel (with the task tool and `run_in_background: true`). Each agent invokes its dedicated skill.
 
 ### s1_2-research: Domain Research
 
@@ -177,7 +201,7 @@ See [skills/research/SKILL.md](../research/SKILL.md) for full procedure, output 
 
 **Record findings** as a comment on the REQUEST task:
 ```bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+"${EPOCH_REC}" note "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}
@@ -208,13 +232,13 @@ See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output fo
 
 | Depth | Scope | Tools |
 |-------|-------|-------|
-| **Quick scan** | Grep for keywords, check obvious entry points | Glob, Grep |
-| **Standard research** | Trace data flow, map dependencies, read related modules | Glob, Grep, Read |
-| **Deep dive** | Full dependency graph, architectural analysis, identify all touchpoints | Glob, Grep, Read, Bash (for build/dep tools) |
+| **Quick scan** | Grep for keywords, check obvious entry points | glob, grep |
+| **Standard research** | Trace data flow, map dependencies, read related modules | glob, grep, read |
+| **Deep dive** | Full dependency graph, architectural analysis, identify all touchpoints | glob, grep, read, bash (for build/dep tools) |
 
 **Record findings** as a comment on the REQUEST task:
 ```bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+"${EPOCH_REC}" note "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions}}
   - Related types: {{existing types/schemas}}
@@ -232,12 +256,12 @@ Both agents must complete before proceeding to Phase 2. Their findings are recor
 User says: "I want to add a logout button to the header that clears the session and redirects to the login page"
 
 ```bash
-REQUEST_ID_URI=$(pasture task create "REQUEST: Add logout button to header" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "I want to add a logout button to the header that clears the session and redirects to the login page" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-pasture task update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+REQUEST_ID_URI=$("${EPOCH_REC}" create --kind task --title "REQUEST: Add logout button to header" --phase request \
+  --body "I want to add a logout button to the header that clears the session and redirects to the login page")
+"${EPOCH_REC}" label "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+"${EPOCH_REC}" note "$REQUEST_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
 
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+"${EPOCH_REC}" note "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Classification: scope=module, complexity=low, risk=internal-only, novelty=familiar"
 ```
 
@@ -247,6 +271,6 @@ After Phase 1 completes, invoke `/pasture:user-elicit` to begin requirements eli
 
 The elicit task will block this request task:
 ```bash
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"
 ```
 <!-- END GENERATED FROM pasture schema -->

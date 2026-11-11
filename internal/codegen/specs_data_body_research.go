@@ -4,8 +4,7 @@ package codegen
 
 var researchBody = SkillBody{
 	Preamble: "General-purpose domain research skill. Finds standards, prior art, existing solutions, and established patterns for a given topic. " +
-		"Writes structured findings to `llm/research/<topic>.md`.\n\n" +
-		"See `../protocol/CONSTRAINTS.md` for coding standards.",
+		"Writes structured findings to `llm/research/<topic>.md`.",
 
 	Behaviors: []BehaviorSpec{
 		{
@@ -19,7 +18,7 @@ var researchBody = SkillBody{
 			Id:        "research-depth-quick-scan",
 			Given:     "depth is quick-scan",
 			When:      "researching",
-			Then:      "search local project only (Grep, Glob, Read)",
+			Then:      "search local project only ([[tool:grep]], [[tool:glob]], [[tool:read]])",
 			ShouldNot: "make web requests",
 		},
 		{
@@ -47,7 +46,7 @@ var researchBody = SkillBody{
 			Id:        "research-phase1-recording",
 			Given:     "Phase 1 context",
 			When:      "recording findings",
-			Then:      "ALSO add a summary comment on the REQUEST task via `pasture task comment add`",
+			Then:      "ALSO add a summary comment on the REQUEST task via `[[rec:note]]`",
 			ShouldNot: "only write the file without updating the REQUEST task",
 		},
 	},
@@ -203,7 +202,7 @@ code snippet here
 			Content: `When invoked as part of Phase 1 (s1_2-research), record a summary on the REQUEST task in addition to writing the full report:
 
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}

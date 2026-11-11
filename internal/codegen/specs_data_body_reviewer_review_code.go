@@ -27,17 +27,17 @@ var reviewerReviewCodeBody = SkillBody{
 			Then:      "use BLOCKER/IMPORTANT/MINOR severity with EAGER group creation",
 			ShouldNot: "skip creating empty severity groups",
 		},
-		// 3rd owner of frag--sup-blocker-dual-parent (SLICE-4): canonical Then
+		// 3rd owner of frag--sup-blocker-dual-parent: canonical Then
 		// "add dual-parent: blocks BOTH the severity group AND the slice".
 		behaviorRef(FragSupBlockerDualParent),
-		// R7/A1: code review iterates review->fix->re-review up to the chosen
-		// review-effort budget until a fix-free clean round confirms 0/0/0; on budget
-		// exhaustion without clean, surface outstanding findings to the user. Resolves
-		// to SharedFragmentSpecs[FragReviewCleanExit] (SLICE-1).
+		// R7/A1: code review gates each wave on open BLOCKERs and then converges
+		// over open findings; on budget exhaustion without convergence, surface
+		// outstanding findings to the user. Resolves to
+		// SharedFragmentSpecs[FragReviewCleanExit].
 		behaviorRef(FragReviewCleanExit),
 		// R6: verify EVERY request carries validation-case fixtures (generalized
 		// from fix-intent-only at v2-2). Resolves to
-		// SharedFragmentSpecs[FragValidationCases] (SLICE-1).
+		// SharedFragmentSpecs[FragValidationCases].
 		behaviorRef(FragValidationCases),
 	},
 
@@ -52,68 +52,104 @@ var reviewerReviewCodeBody = SkillBody{
 		{
 			Id:      "rev-code-severity-tree",
 			Title:   "Severity Tree: EAGER Creation",
-			Content: `First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS create 3 severity group tasks per review round**, even if some groups have no findings:`,
+			Content: `First bind REVIEW_ID_URI using Step 4: Create Review Task below; then **ALWAYS create 3 severity group tasks per wave, per axis, per round**, even if some groups have no findings:`,
 			Subsections: []ProseSection{
 				{
 					Id:    "rev-code-create-groups",
 					Title: "Step 1: Create All 3 Severity Groups Immediately",
 					Content: `` + "```" + `bash
+# One severity trio per wave, per axis, per round — not one per slice.
+# Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER, not lazy)
-BLOCKER_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+BLOCKER_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_ID_URI}"
-  review: "${REVIEW_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
+  review: \"${REVIEW_ID_URI}\"
 ---
-BLOCKER findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_GROUP_ID_URI" pasture:p10-impl:s10-review
+BLOCKER findings for this wave review round")
+[[rec:label]] "$BLOCKER_GROUP_ID_URI" pasture:severity:blocker
 
-IMPORTANT_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_ID_URI}"
-  review: "${REVIEW_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
+  review: \"${REVIEW_ID_URI}\"
 ---
-IMPORTANT findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_GROUP_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT findings for this wave review round")
+[[rec:label]] "$IMPORTANT_GROUP_ID_URI" pasture:severity:important
 
-MINOR_GROUP_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+MINOR_GROUP_ID_URI=$([[rec:create]] --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_ID_URI}"
-  review: "${REVIEW_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
+  review: \"${REVIEW_ID_URI}\"
 ---
-MINOR findings for this review round" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_GROUP_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_GROUP_ID_URI" pasture:p10-impl:s10-review
+MINOR findings for this wave review round")
+[[rec:label]] "$MINOR_GROUP_ID_URI" pasture:severity:minor
 
-# Step 2: Wire severity groups to review task
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${BLOCKER_GROUP_ID_URI}"
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"
-pasture task dep add "${REVIEW_ID_URI}" --blocked-by "${MINOR_GROUP_ID_URI}"
+# Step 2: Wire the one severity trio to the wave's review task
+[[rec:block]] "${REVIEW_ID_URI}" --by "${BLOCKER_GROUP_ID_URI}"
+[[rec:block]] "${REVIEW_ID_URI}" --by "${IMPORTANT_GROUP_ID_URI}"
+[[rec:block]] "${REVIEW_ID_URI}" --by "${MINOR_GROUP_ID_URI}"
 ` + "```" + ``,
 				},
 				{
 					Id:    "rev-code-add-findings",
 					Title: "Adding Findings to Severity Groups",
 					Content: `` + "```" + `bash
+# Each finding carries slice: and wave: in references.
 # BLOCKER finding — dual-parent relationship
-BLOCKER_FINDING_ID_URI=$(pasture task create "BLOCKER: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<finding details with file:line references>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task dep add "${BLOCKER_GROUP_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
-pasture task dep add "${SLICE_ID_URI}" --blocked-by "${BLOCKER_FINDING_ID_URI}"
+BLOCKER_FINDING_ID_URI=$([[rec:create]] --kind task --title "BLOCKER: <finding title>" --phase code_review \
+  --body "---
+references:
+  wave: 1
+  slice: \"${SLICE_1_1_ID_URI}\"
+  reviewer: reviewer-A
+  round: 1
+---
+<finding details with file:line references>")
+[[rec:label]] "${BLOCKER_FINDING_ID_URI}" pasture:finding
+[[rec:block]] "${BLOCKER_GROUP_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
+[[rec:block]] "${SLICE_1_1_ID_URI}" --by "${BLOCKER_FINDING_ID_URI}"
 
 # IMPORTANT finding — single parent (severity group only)
-IMPORTANT_FINDING_ID_URI=$(pasture task create "IMPORTANT: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task dep add "${IMPORTANT_GROUP_ID_URI}" --blocked-by "${IMPORTANT_FINDING_ID_URI}"
+IMPORTANT_FINDING_ID_URI=$([[rec:create]] --kind task --title "IMPORTANT: <finding title>" --phase code_review \
+  --body "---
+references:
+  wave: 1
+  slice: \"${SLICE_1_2_ID_URI}\"
+  reviewer: reviewer-A
+  round: 1
+---
+<finding details>")
+[[rec:label]] "${IMPORTANT_FINDING_ID_URI}" pasture:finding
+[[rec:block]] "${IMPORTANT_GROUP_ID_URI}" --by "${IMPORTANT_FINDING_ID_URI}"
 
 # MINOR finding — single parent (severity group only)
-MINOR_FINDING_ID_URI=$(pasture task create "MINOR: <finding title>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "<finding details>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_URI}"
+MINOR_FINDING_ID_URI=$([[rec:create]] --kind task --title "MINOR: <finding title>" --phase code_review \
+  --body "---
+references:
+  wave: 1
+  slice: \"${SLICE_1_3_ID_URI}\"
+  reviewer: reviewer-A
+  round: 1
+---
+<finding details>")
+[[rec:label]] "${MINOR_FINDING_ID_URI}" pasture:finding
+[[rec:block]] "${MINOR_GROUP_ID_URI}" --by "${MINOR_FINDING_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -123,10 +159,10 @@ pasture task dep add "${MINOR_GROUP_ID_URI}" --blocked-by "${MINOR_FINDING_ID_UR
 
 ` + "```" + `bash
 # If no IMPORTANT findings were found:
-pasture task close "${IMPORTANT_GROUP_ID_URI}"
+[[rec:close]] "${IMPORTANT_GROUP_ID_URI}"
 
 # If no MINOR findings were found:
-pasture task close "${MINOR_GROUP_ID_URI}"
+[[rec:close]] "${MINOR_GROUP_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -138,7 +174,7 @@ pasture task close "${MINOR_GROUP_ID_URI}"
 
 This ensures BLOCKERs both categorize under the severity tree AND block the slice they apply to.
 
-IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BLOCKER does), but they are **not** routed to a follow-up epic either: ALL severity groups (BLOCKER, IMPORTANT, MINOR) must reach 0 before the review wave closes (R7/A1). The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity.`,
+IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BLOCKER does), and they are **not** routed to a follow-up epic: they stay open past the wave gate and converge at the end, where the convergence rule reads open pasture:finding tasks across all waves (R7/A1). The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity.`,
 				},
 			},
 		},
@@ -151,8 +187,8 @@ IMPORTANT and MINOR findings do **NOT** block the slice via dual-parent (only BL
 					Id:    "rev-code-step1-read",
 					Title: "Step 1: Read Code Changes and URD",
 					Content: `` + "```" + `bash
-pasture task show "${SLICE_ID_URI}"
-pasture task show "${URD_ID_URI}"   # Read URD for requirements context
+[[rec:show]] "${SLICE_ID_URI}"
+[[rec:show]] "${URD_ID_URI}"   # Read URD for requirements context
 ` + "```" + ``,
 				},
 				{
@@ -171,15 +207,21 @@ pasture task show "${URD_ID_URI}"   # Read URD for requirements context
 					Id:    "rev-code-step4-create",
 					Title: "Step 4: Create Review Task",
 					Content: `` + "```" + `bash
-REVIEW_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1: <feature>" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+REVIEW_ID_URI=$([[rec:create]] --kind task --title "Review: <feature>" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_ID_URI}"
-  urd: "${URD_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
+  urd: \"${URD_ID_URI}\"
 ---
-VOTE: <ACCEPT|REVISE> - <justification>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$REVIEW_ID_URI" pasture:p10-impl:s10-review
-pasture task dep add "${SLICE_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
+VOTE: <ACCEPT|REVISE> - <justification>")
+# One review covers the whole wave, so wire every slice in the wave to it.
+[[rec:block]] "${SLICE_1_1_ID_URI}" --by "${REVIEW_ID_URI}"
+[[rec:block]] "${SLICE_1_2_ID_URI}" --by "${REVIEW_ID_URI}"
+[[rec:block]] "${SLICE_1_3_ID_URI}" --by "${REVIEW_ID_URI}"
 ` + "```" + ``,
 				},
 				{
@@ -188,7 +230,7 @@ pasture task dep add "${SLICE_ID_URI}" --blocked-by "${REVIEW_ID_URI}"
 					Content: `5. Create severity tree (EAGER — all 3 groups immediately)
 6. Add findings to appropriate severity groups
 7. Close empty severity groups
-8. Cast vote via ` + "`" + `pasture task comment add` + "`" + ``,
+8. Cast vote via ` + "`" + `[[rec:note]]` + "`" + ``,
 				},
 			},
 		},
@@ -263,21 +305,21 @@ An implementation that ships without validation-case fixtures is an IMPORTANT fi
 		},
 		{
 			Id:      "rev-code-clean-exit",
-			Title:   "Clean-Review Exit (within the chosen review-effort budget)",
-			Content: `Per [` + "frag--review-clean-exit" + `] and ` + "`C-review-effort-budget`" + `, iterate **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom) until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget. On **budget exhaustion without a clean round**, SURFACE the outstanding findings to the user at a gate for a decision — do not proceed dirty and do not loop forever. The budget is never hardcoded. A wave never closes on a fix-applying round, and never with any finding silently outstanding.`,
+			Title:   "Two-Phase Review (within the chosen review-effort budget)",
+			Content: `Per [` + "frag--review-clean-exit" + `], ` + "`C-finding-lifecycle`" + `, and ` + "`C-review-effort-budget`" + `, run the two-phase review. **During a wave**, only an open BLOCKER finding gates progress; IMPORTANT and MINOR findings stay open. **After the last wave**, convergence queries every open ` + "`pasture:finding`" + ` across all waves and targets **0/0/0** within the gate declaration's ` + "`maxRounds`" + `. Iterate **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** (defaults: 3 rounds / 1 round / 0 rounds / unlimited / custom). The close rule is owned by ` + "`C-finding-lifecycle`" + `. On **budget exhaustion without convergence**, SURFACE the outstanding findings to the user at a gate for a decision — do not proceed dirty and do not loop forever. The budget is never hardcoded.`,
 		},
 		{
 			Id:      "rev-code-followup-epic",
 			Title:   "Follow-up Epic",
-			Content: `The FOLLOWUP epic is **not** created from review findings. ALL review severities (BLOCKER/IMPORTANT/MINOR) must reach 0 before the wave closes (R7/A1). The FOLLOWUP epic is fed ONLY by **user-DEFER'd UAT items** (Phase 11), and the Supervisor creates it from those (label ` + "`pasture:epic-followup`" + `).`,
+			Content: `The FOLLOWUP epic is **not** created from review findings. Open review findings converge at the end; their close rule is ` + "`C-finding-lifecycle`" + ` (R7/A1). The FOLLOWUP epic is fed ONLY by **user-DEFER'd UAT items** (Phase 11), and the Supervisor creates it from those (label ` + "`pasture:epic-followup`" + `).`,
 		},
 		{
 			Id:    "rev-code-followup-slice",
-			Title: "Reviewing FOLLOWUP_SLICE-N (Follow-up Code Review)",
+			Title: "Reviewing a follow-up slice",
 			Content: `When reviewing follow-up slices, use the same procedure:
-- **Review task naming:** ` + "`FOLLOWUP_SLICE-N-REVIEW-{axis}-{round}`" + `
-- **Same EAGER severity tree** (BLOCKER/IMPORTANT/MINOR per review round)
-- **All severities reach 0:** ALL findings (BLOCKER/IMPORTANT/MINOR) in a FOLLOWUP_SLICE review must also reach 0 before the follow-up wave closes — they are **never** re-routed to a follow-up epic (no followup-of-followup; the FOLLOWUP epic is fed only by user-DEFER'd UAT items)
+- **Review task naming:** name the review for the follow-up slice, the axis, and the round
+- **Same EAGER severity tree** (BLOCKER/IMPORTANT/MINOR per wave, per axis, per round)
+- **Open findings converge at the end:** findings (BLOCKER/IMPORTANT/MINOR) in a FOLLOWUP_SLICE review also stay open past the wave gate and converge at the end — they are **never** re-routed to a follow-up epic (no followup-of-followup; the FOLLOWUP epic is fed only by user-DEFER'd UAT items)
 - The worker's completion handoff (h4) reports which DEFER'd-item leaf tasks were resolved — verify these during review`,
 		},
 		{
@@ -285,10 +327,10 @@ An implementation that ships without validation-case fixtures is an IMPORTANT fi
 			Title: "Report Results",
 			Content: `` + "```" + `bash
 # Add vote comment to the review task
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
+[[rec:note]] "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: ACCEPT - Implementation matches plan, tests comprehensive"
 
 # Or
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REVIEW_ID_URI}" "VOTE: REVISE - BLOCKERs found, see severity tree for details"
+[[rec:note]] "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: REVISE - BLOCKERs found, see severity tree for details"
 ` + "```" + ``,
 		},
 	},

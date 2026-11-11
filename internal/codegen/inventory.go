@@ -90,8 +90,12 @@ func renderInventoryNativeFunctionRows() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("derive opencode native tool names: %w", err)
 	}
+	codexNative, err := codexNativeFunctions()
+	if err != nil {
+		return nil, fmt.Errorf("derive codex native tool names: %w", err)
+	}
 	perHarness := map[ir.HarnessID][]string{
-		ir.HarnessCodex:    codexNativeFunctions(),
+		ir.HarnessCodex:    codexNative,
 		ir.HarnessOpenCode: openCodeNative,
 	}
 

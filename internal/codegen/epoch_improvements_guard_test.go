@@ -83,63 +83,14 @@ var inlineFragTokenRe = regexp.MustCompile(`\[(frag--[a-z0-9-]+)\]`)
 
 // ─── G2: handoff storage path absence ────────────────────────────────────────
 
-// g2ScopedFiles returns the full surface swept by G2: the root schema.xml,
-// every agents/*.md (SLICE-1), every skills/*/SKILL.md (SLICE-5 widening), and
-// every skills/protocol/*.md (UAT-2 widening).
-//
-// SLICE-1 authored this guard against the schema.xml + agents/*.md it owned and
-// documented the widening point (A3: "G2 widened [SLICE-1 guard; SLICE-5 final
-// sweep]"). SLICE-5 widened the scope to skills/*/SKILL.md once SLICE-3 (bodies)
-// and SLICE-4 (protocol docs) dropped their handoff-path prose.
-//
-// UAT-2 dropped the LAST exclusion: the hand-authored skills/protocol/*.md docs
-// (CLAUDE.md, CONSTRAINTS.md, AGENTS.md, PROCESS.md, HANDOFF_TEMPLATE.md) were
-// previously left out because they carried legitimate retired-pattern migration
-// callouts (e.g. "R8/A3 retired the .git/.aura/handoff pattern"). The user chose
-// absolute cleanliness (UAT-2 FIX-NOW): the path must appear NOWHERE, so those
-// callouts were stripped and the protocol docs are now swept too. There is NO
-// allowlist and NO exclusion anywhere — zero-tolerance is durable across the
-// entire generated + hand-authored surface.
-func g2ScopedFiles(t *testing.T, root string) []string {
-	t.Helper()
-
-	agentGlob := filepath.Join(root, "agents", "*.md")
-	agentFiles, err := filepath.Glob(agentGlob)
-	require.NoError(t, err, "G2: globbing %q failed", agentGlob)
-	require.NotEmpty(t, agentFiles,
-		"G2: no agents/*.md found under %q — the guard would vacuously pass", root)
-
-	skillGlob := filepath.Join(root, "skills", "*", "SKILL.md")
-	skillFiles, err := filepath.Glob(skillGlob)
-	require.NoError(t, err, "G2: globbing %q failed", skillGlob)
-	require.NotEmpty(t, skillFiles,
-		"G2: no skills/*/SKILL.md found under %q — the SLICE-5 widening would vacuously pass", root)
-
-	// UAT-2 widening: the hand-authored protocol docs (skills/protocol/*.md) were
-	// previously excluded because they carried legitimate retired-pattern migration
-	// callouts. The user chose absolute cleanliness (UAT-2 FIX-NOW): the path must
-	// appear NOWHERE, so the exclusion is dropped and these are now swept too.
-	protocolGlob := filepath.Join(root, "skills", "protocol", "*.md")
-	protocolFiles, err := filepath.Glob(protocolGlob)
-	require.NoError(t, err, "G2: globbing %q failed", protocolGlob)
-	require.NotEmpty(t, protocolFiles,
-		"G2: no skills/protocol/*.md found under %q — the UAT-2 widening would vacuously pass", root)
-
-	files := append([]string{}, agentFiles...)
-	files = append(files, skillFiles...)
-	files = append(files, protocolFiles...)
-	files = append(files, filepath.Join(root, "schema.xml"))
-	return files
-}
-
 // TestG2_NoHandoffStoragePaths asserts that the retired `.git/.aura/handoff`
 // filesystem path appears NOWHERE across the full swept surface — schema.xml +
-// agents/*.md + skills/*/SKILL.md + skills/protocol/*.md (see g2ScopedFiles).
+// agents/*.md + skills/*/SKILL.md + skills/protocol/*.md (see codegen.G2ScopedFiles).
 // No allowlist and no exclusion (R8/A3; protocol-docs exclusion dropped at UAT-2).
 func TestG2_NoHandoffStoragePaths(t *testing.T) {
 	root := repoRoot(t)
 
-	for _, file := range g2ScopedFiles(t, root) {
+	for _, file := range codegen.G2ScopedFiles(t, root) {
 		data, err := os.ReadFile(file)
 		require.NoError(t, err, "G2: reading %q failed", file)
 
@@ -410,6 +361,11 @@ func g6ScopedFiles(t *testing.T, root string) []string {
 // TestG6_NoStaleCycleCapOrSeverityRoutingProse asserts no retired pre-R7/A1
 // regime prose (cycle cap, or review severity routed to a follow-up epic)
 // remains in any generated skill/agent output.
+//
+// Scope split (deduplicated): the per-wave 0/0/0 property has ONE home,
+// TestNoPerWaveCleanRound, which sweeps the authored rendering sources. G6 is
+// the generated-output recurrence check for the other retired forms, so the two
+// guards do not maintain duplicate pattern lists.
 func TestG6_NoStaleCycleCapOrSeverityRoutingProse(t *testing.T) {
 	root := repoRoot(t)
 
@@ -441,9 +397,10 @@ func TestG6_NoStaleCycleCapOrSeverityRoutingProse(t *testing.T) {
 				}
 				assert.Failf(t, "G6: stale pre-R7/A1 regime prose found",
 					"G6: generated file %q matches retired-regime pattern %q (matched text: %q) on line %q — "+
-						"R7/A1 retired the HARDCODED cycle-cap + severity-fed-FOLLOWUP regime. Fix: code review iterates "+
-						"review->fix->re-review up to the CONFIGURABLE review-effort budget until a fix-free clean round confirms 0/0/0 "+
-						"(on budget exhaustion without clean, surface to the user), and the FOLLOWUP epic is fed ONLY by "+
+						"R7/A1 retired the HARDCODED cycle-cap + severity-fed-FOLLOWUP regime. Fix: code review "+
+						"iterates review->fix->re-review up to the CONFIGURABLE review-effort budget; a wave is gated "+
+						"only by open BLOCKERs, convergence over open findings targets 0/0/0 within maxRounds "+
+						"(on budget exhaustion, surface to the user), and the FOLLOWUP epic is fed ONLY by "+
 						"user-DEFER'd UAT items (never review severities). A numeric cap is allowed only as a chosen budget value "+
 						"(state it alongside budget vocabulary). Update the source spec/figure (e.g. "+
 						"skills/protocol/figures/ride-the-wave.yaml or specs_data_body*.go) and regenerate.",
@@ -497,7 +454,7 @@ func TestG7_ReviewLoopReferencesConfigurableBudget(t *testing.T) {
 				"Re-add the budget vocabulary in the source body spec and regenerate.", rel)
 		assert.Truef(t, surfaceToUserRe.MatchString(content),
 			"G7: generated %q does not reference the surface-to-user-on-exhaustion fallback — "+
-				"on budget exhaustion without a clean 0/0/0 round, outstanding findings must be surfaced to the user "+
+				"when convergence has not reached 0/0/0 within maxRounds, outstanding findings must be surfaced to the user "+
 				"(never proceed-dirty, never loop forever). Re-add the surface-to-user prose and regenerate.", rel)
 	}
 }

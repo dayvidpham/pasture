@@ -288,17 +288,22 @@ func buildEnums(buf *bytes.Buffer, depth int) {
 	marshalSection(buf, depth, section)
 }
 
+// specialLabelIDs is the ordered registry of special (non-phase) labels emitted
+// into schema.xml. It exists because LabelSpecs is a map and schema output is
+// ordered; the order is the authored one. TestSpecialLabelIDsMatchRegistry pins
+// this list to every LabelSpecs entry marked Special, so the two cannot drift.
+var specialLabelIDs = []string{
+	"L-urd", "L-superseded",
+	"L-sev-blocker", "L-sev-import", "L-sev-minor",
+	"L-finding", "L-followup",
+}
+
 func buildLabels(buf *bytes.Buffer, depth int) {
 	phaseLabelIDs := []string{
 		"L-p1s1_1", "L-p1s1_2", "L-p1s1_3",
 		"L-p2s2_1", "L-p2s2_2",
 		"L-p3s3", "L-p4s4", "L-p5s5", "L-p6s6", "L-p7s7",
 		"L-p8s8", "L-p9s9", "L-p10s10", "L-p11s11", "L-p12s12",
-	}
-	specialLabelIDs := []string{
-		"L-urd", "L-superseded",
-		"L-sev-blocker", "L-sev-import", "L-sev-minor",
-		"L-followup",
 	}
 
 	section := LabelsSection{}
@@ -371,7 +376,7 @@ var phaseDescriptions = map[string]string{
 var p7SkillInvocation = map[string]string{
 	"target-role": "supervisor",
 	"command-ref": "cmd-supervisor",
-	"directive":   "Supervisor launch prompt MUST start with Skill(/pasture:supervisor)",
+	"directive":   "Supervisor launch prompt MUST start with [[op:invoke_skill]](/pasture:supervisor)",
 }
 
 // buildPhaseTaskTitles derives per-phase task-title hints from TitleConventions.
@@ -532,23 +537,20 @@ func buildPhases(buf *bytes.Buffer, depth int) {
 			phase.TDDLayers = tdd
 		case "p10":
 			phase.SeverityTree = &SeverityTreeElem{
-				Enabled:  "true",
-				Creation: "eager",
+				Enabled:   "true",
+				Creation:  "eager",
+				MaxRounds: "3",
 				Rules: []string{
 					"Always create 3 severity groups per review round, even if empty.",
 					"Empty groups have no children and are closed immediately.",
+					"maxRounds is the default convergence bound; the Phase 8 review-effort budget selects the count the convergence rule reads.",
+					"Only an open BLOCKER gates a wave; IMPORTANT and MINOR findings stay open to convergence.",
 				},
 				Groups: []SevGroupElem{
 					{SeverityRef: "BLOCKER", LabelRef: "L-sev-blocker", DualParent: "true"},
 					{SeverityRef: "IMPORTANT", LabelRef: "L-sev-import"},
 					{SeverityRef: "MINOR", LabelRef: "L-sev-minor"},
 				},
-			}
-			phase.FollowupEpic = &FollowupEpicElem{
-				LabelRef:       "L-followup",
-				Trigger:        "review-completion AND (IMPORTANT OR MINOR findings exist)",
-				GatedOnBlocker: "false",
-				OwnerRole:      "supervisor",
 			}
 		}
 
@@ -677,12 +679,17 @@ func buildRoles(buf *bytes.Buffer, depth int) {
 			role.Invariants = &InvariantsElem{Invariants: invs}
 		}
 
-		// Tools, model, thinking
-		if len(spec.Tools) > 0 {
-			role.Tools = strings.Join(spec.Tools, ", ")
+		// Tools, model, thinking. The schema shows the canonical Claude Code
+		// spelling for tools, and the harness-neutral capability tier's default
+		// model nickname and effort for the model policy. Every target resolves
+		// its own native model id from the same tier registry.
+		if roleHasToolSurface(spec) {
+			role.Tools = strings.Join(mustRoleToolNames(HarnessClaudeCode, spec), ", ")
 		}
-		role.Model = spec.Model
-		role.Thinking = spec.Thinking
+		tier := spec.EffectiveTier()
+		tierSpec := mustCapabilityTierSpec(tier)
+		role.Model = tierSpec.DefaultModel
+		role.Thinking = string(tierSpec.Effort)
 
 		// Ownership model (worker)
 		if om, ok := roleOwnershipModel[rid]; ok {
@@ -803,35 +810,35 @@ var handoffFilePatterns = map[string]string{
 	"h2": "supervisor-to-worker.md",
 	"h3": "supervisor-to-reviewer.md",
 	"h4": "worker-to-reviewer.md",
-	"h5": "reviewer-to-followup.md",
+	"h5": "reviewer-to-supervisor.md",
 	"h6": "supervisor-to-architect.md",
 }
 
 // handoffSkillInvocations maps handoff IDs to their skill invocation data.
 var handoffSkillInvocations = map[string]map[string]string{
 	"h1": {
-		"directive": "Skill(/pasture:supervisor)",
+		"directive": "[[op:invoke_skill]](/pasture:supervisor)",
 		"note":      "Supervisor launch prompt MUST start with this invocation. Without it, supervisor skips leaf task creation.",
 	},
 	"h2": {
-		"directive": "Skill(/pasture:worker)",
+		"directive": "[[op:invoke_skill]](/pasture:worker)",
 		"note":      "Worker message MUST include explicit instruction to call this skill.",
 	},
 	"h3": {
-		"directive": "Skill(/pasture:reviewer)",
+		"directive": "[[op:invoke_skill]](/pasture:reviewer)",
 		"note":      "Reviewer prompt MUST include instruction to call this skill.",
 	},
 }
 
 // handoffNotes maps handoff IDs to extra notes.
 var handoffNotes = map[string]string{
-	"h5": "Reviewer hands code-review findings to supervisor; ALL severity groups must reach 0 before wave close (the FOLLOWUP epic is created later at UAT from user-DEFER'd items, never from review findings)",
+	"h5": "Reviewer hands code-review findings to supervisor; open BLOCKER findings gate the wave, while open IMPORTANT and MINOR findings converge at the end (the FOLLOWUP epic is created later at UAT from user-DEFER'd items, never from review findings)",
 	"h6": "Follow-up specific. Supervisor completes FOLLOWUP_URE and FOLLOWUP_URD,\n      then hands off to architect with scoped findings and requirements\n      for FOLLOWUP_PROPOSAL creation.",
 }
 
 // handoffTriggers maps handoff IDs to trigger strings.
 var handoffTriggers = map[string]string{
-	"h5": "code-review findings exist (all severities must reach 0 before wave close)",
+	"h5": "code-review findings exist (open BLOCKERs gate the wave; the rest converge at the end)",
 	"h6": "follow-up lifecycle only",
 }
 
@@ -914,6 +921,7 @@ var constraintOrder = []string{
 	"C-severity-eager",
 	"C-severity-not-plan",
 	"C-blocker-dual-parent",
+	"C-finding-lifecycle",
 	"C-followup-timing",
 	"C-vertical-slices",
 	"C-supervisor-no-impl",
@@ -1044,113 +1052,28 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 
 	docs := []docEntry{
 		{
-			id:      "doc-readme",
-			path:    "protocol/README.md",
-			purpose: "Protocol entry point and quick-start guide",
-			covers: []map[string]string{
-				{"type": "phase", "refs": "p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12", "depth": "overview"},
-				{"type": "label", "refs": "all", "depth": "schema-summary"},
-			},
+			id: "doc-skill", path: "protocol/SKILL.md", purpose: "Protocol index",
+			covers: []map[string]string{{"type": "phase", "refs": "all", "depth": "index"}},
 		},
 		{
-			id:      "doc-claude",
-			path:    "protocol/CLAUDE.md",
-			purpose: "Core agent directive: philosophy, constraints, roles, label schema",
-			covers: []map[string]string{
-				{"type": "phase", "refs": "p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12", "depth": "summary"},
-				{"type": "role", "refs": "architect,reviewer,supervisor,worker", "depth": "summary"},
-				{"type": "label", "refs": "all", "depth": "full"},
-				{"type": "constraint", "refs": "all-protocol", "depth": "full"},
-				{"type": "task-title", "refs": "all", "depth": "full"},
-				{"type": "handoff", "refs": "h1,h2,h3,h4,h5,h6", "depth": "summary"},
-				{"type": "severity", "refs": "BLOCKER,IMPORTANT,MINOR", "depth": "full"},
-				{"type": "review-axis", "refs": "axis-correctness,axis-test_quality,axis-elegance", "depth": "summary"},
-			},
+			id: "doc-claude", path: "protocol/CLAUDE.md", purpose: "Agent directive",
+			covers: []map[string]string{{"type": "role", "refs": "epoch", "depth": "index"}},
 		},
 		{
-			id:      "doc-constraints",
-			path:    "protocol/CONSTRAINTS.md",
-			purpose: "Coding standards, checklists, severity definitions, naming conventions",
-			covers: []map[string]string{
-				{"type": "constraint", "refs": "all", "depth": "full"},
-				{"type": "severity", "refs": "BLOCKER,IMPORTANT,MINOR", "depth": "full"},
-				{"type": "vote", "refs": "ACCEPT,REVISE", "depth": "full"},
-				{"type": "label", "refs": "all", "depth": "schema"},
-				{"type": "task-title", "refs": "all", "depth": "full"},
-			},
+			id: "doc-constraints", path: "protocol/CONSTRAINTS.md", purpose: "Constraint index",
+			covers: []map[string]string{{"type": "constraint", "refs": "all", "depth": "index"}},
 		},
 		{
-			id:      "doc-process",
-			path:    "protocol/PROCESS.md",
-			purpose: "Step-by-step workflow execution (single source of truth)",
-			covers: []map[string]string{
-				{"type": "phase", "refs": "p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12", "depth": "full"},
-				{"type": "substep", "refs": "all", "depth": "full"},
-				{"type": "role", "refs": "architect,reviewer,supervisor,worker", "depth": "tools-matrix"},
-				{"type": "command", "refs": "all", "depth": "tools-matrix"},
-				{"type": "label", "refs": "all", "depth": "full"},
-				{"type": "transition", "refs": "all", "depth": "full"},
-				{"type": "severity", "refs": "BLOCKER,IMPORTANT,MINOR", "depth": "full"},
-			},
+			id: "doc-process", path: "protocol/PROCESS.md", purpose: "Phase index and workflow anchors",
+			covers: []map[string]string{{"type": "phase", "refs": "all", "depth": "index"}},
 		},
 		{
-			id:      "doc-agents",
-			path:    "protocol/AGENTS.md",
-			purpose: "Role taxonomy: phases owned, tools, handoffs per agent",
-			covers: []map[string]string{
-				{"type": "role", "refs": "epoch,architect,reviewer,supervisor,worker", "depth": "full"},
-				{"type": "phase", "refs": "all", "depth": "role-mapping"},
-				{"type": "command", "refs": "all", "depth": "role-mapping"},
-				{"type": "handoff", "refs": "h1,h2,h3,h4,h5,h6", "depth": "full"},
-				{"type": "review-axis", "refs": "axis-correctness,axis-test_quality,axis-elegance", "depth": "full"},
-			},
+			id: "doc-agents", path: "protocol/AGENTS.md", purpose: "Role and phase index",
+			covers: []map[string]string{{"type": "role", "refs": "epoch,architect,reviewer,supervisor,worker", "depth": "index"}},
 		},
 		{
-			id:      "doc-skills",
-			path:    "protocol/SKILLS.md",
-			purpose: "Command reference: all /pasture:* skills mapped to phase and role",
-			covers: []map[string]string{
-				{"type": "command", "refs": "all", "depth": "full"},
-				{"type": "phase", "refs": "all", "depth": "command-mapping"},
-				{"type": "role", "refs": "all", "depth": "command-mapping"},
-				{"type": "label", "refs": "all", "depth": "command-creates"},
-				{"type": "review-axis", "refs": "axis-correctness,axis-test_quality,axis-elegance", "depth": "summary"},
-			},
-		},
-		{
-			id:      "doc-handoff",
-			path:    "protocol/HANDOFF_TEMPLATE.md",
-			purpose: "Standardized template for 6 actor-change transitions",
-			covers: []map[string]string{
-				{"type": "handoff", "refs": "h1,h2,h3,h4,h5,h6", "depth": "full"},
-				{"type": "role", "refs": "architect,supervisor,worker,reviewer", "depth": "handoff-fields"},
-			},
-		},
-		{
-			id:      "doc-migration",
-			path:    "protocol/MIGRATION_v1_to_v2.md",
-			purpose: "Label and title migration from v1 to v2",
-			covers: []map[string]string{
-				{"type": "label", "refs": "all", "depth": "v1-v2-mapping"},
-				{"type": "task-title", "refs": "all", "depth": "v1-v2-mapping"},
-				{"type": "vote", "refs": "ACCEPT,REVISE", "depth": "v1-v2-mapping"},
-			},
-		},
-		{
-			id:      "doc-uat-template",
-			path:    "protocol/UAT_TEMPLATE.md",
-			purpose: "User Acceptance Test structured output template",
-			covers: []map[string]string{
-				{"type": "phase", "refs": "p5,p11", "depth": "template"},
-			},
-		},
-		{
-			id:      "doc-uat-example",
-			path:    "protocol/UAT_EXAMPLE.md",
-			purpose: "Worked UAT example",
-			covers: []map[string]string{
-				{"type": "phase", "refs": "p5", "depth": "example"},
-			},
+			id: "doc-skills", path: "protocol/SKILLS.md", purpose: "Skill and role index",
+			covers: []map[string]string{{"type": "command", "refs": "all", "depth": "index"}},
 		},
 		{
 			id:      "doc-schema",
@@ -1215,9 +1138,9 @@ func buildDocuments(buf *bytes.Buffer, depth int) {
 func buildDependencyModel(buf *bytes.Buffer, depth int) {
 	section := DependencyModelSection{
 		Rule:           "Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.",
-		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-N \u2192 blocked-by leaf tasks",
-		Command:        "pasture task dep add {parent-uri} --blocked-by {child-uri}",
-		AntiPattern:    "pasture task dep add {child-uri} --blocked-by {parent-uri}",
+		CanonicalChain: "REQUEST \u2192 blocked-by ELICIT \u2192 blocked-by PROPOSAL \u2192 blocked-by IMPL_PLAN \u2192 blocked-by SLICE-{W}-{N} \u2192 blocked-by leaf tasks",
+		Command:        "[[rec:block]] {parent-uri} --by {child-uri}",
+		AntiPattern:    "[[rec:block]] {child-uri} --by {parent-uri}",
 		ReferenceLinks: &ReferenceLinksElem{
 			Note:    "URD and other reference docs use frontmatter, not blocking deps",
 			Pattern: "description frontmatter:\n  references:\n    urd: {urd-task-uri}\n    request: {request-task-uri}",
@@ -1228,42 +1151,41 @@ func buildDependencyModel(buf *bytes.Buffer, depth int) {
 
 func buildFollowupLifecycle(buf *bytes.Buffer, depth int) {
 	section := FollowupLifecycleSection{
-		Trigger:        "Code review completion AND (IMPORTANT OR MINOR findings exist)",
+		Trigger:        "UAT (Phase 5 or Phase 11) produces user-DEFER'd items",
 		OwnerRole:      "supervisor",
 		GatedOnBlocker: "false",
 		DependencyChain: &DepChainElem{
 			Note: "Same protocol phases but with FOLLOWUP_ prefix",
 			Steps: []DepChainStepElem{
-				{TaskTitle: "FOLLOWUP: {description}", PhaseRef: "p10", Description: "Epic created by supervisor. References original URD and review tasks."},
-				{TaskTitle: "FOLLOWUP_URE: {description}", PhaseRef: "p2", Description: "Scoping URE with user to determine which findings to address."},
+				{TaskTitle: "FOLLOWUP: {description}", PhaseRef: "p11", Description: "Epic created by supervisor from user-DEFER'd UAT items. References original URD and UAT task."},
+				{TaskTitle: "FOLLOWUP_URE: {description}", PhaseRef: "p2", Description: "Scoping URE with user to determine which DEFER'd items to address."},
 				{TaskTitle: "FOLLOWUP_URD: {description}", PhaseRef: "p2", Description: "Requirements doc for follow-up scope. References original URD."},
-				{TaskTitle: "FOLLOWUP_PROPOSAL-{N}: {description}", PhaseRef: "p3", Description: "Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings."},
+				{TaskTitle: "FOLLOWUP_PROPOSAL-{N}: {description}", PhaseRef: "p3", Description: "Proposal accounting for original URD + FOLLOWUP_URD + DEFER'd items."},
 				{TaskTitle: "FOLLOWUP_IMPL_PLAN: {description}", PhaseRef: "p8", Description: "Supervisor decomposes follow-up into slices."},
-				{TaskTitle: "FOLLOWUP_SLICE-{N}: {description}", PhaseRef: "p9", Description: "Each slice adopts original IMPORTANT/MINOR leaf tasks as children."},
+				{TaskTitle: "FOLLOWUP_SLICE-{N}: {description}", PhaseRef: "p9", Description: "Each slice adopts user-DEFER'd UAT-item leaf tasks as children."},
 			},
 		},
 		LeafTaskAdoption: &LeafTaskAdoptElem{
-			Rule:    "When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.",
-			Command: "pasture task dep add {followup-slice-uri} --blocked-by {important-leaf-task-uri}\npasture task dep add {followup-slice-uri} --blocked-by {minor-leaf-task-uri}",
-			Note:    "Leaf tasks retain their original parent (the severity group from the original review) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.",
+			Rule:    "When supervisor creates FOLLOWUP_SLICE-N, the user-DEFER'd UAT-item leaf tasks gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.",
+			Command: "[[rec:block]] {followup-slice-uri} --by {defer-item-leaf-task-1-uri}\n[[rec:block]] {followup-slice-uri} --by {defer-item-leaf-task-2-uri}",
+			Note:    "Leaf tasks retain their original parent (the DEFER'd-items tracking group) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.",
 		},
 		References: &FollowupRefsElem{
 			Refs: []FollowupRefElem{
 				{Type: "relates_to", Target: "original URD", Note: "Follow-up epic references original URD via frontmatter"},
-				{Type: "relates_to", Target: "original REVIEW tasks", Note: "Follow-up epic references review tasks via frontmatter"},
+				{Type: "relates_to", Target: "original UAT task", Note: "Follow-up epic references the UAT task via frontmatter"},
 			},
 		},
 		HandoffChain: &HandoffChainElem{
 			Note: "How handoffs flow through the follow-up lifecycle",
 			Transitions: []HandoffChainTransElem{
-				{Order: "1", HandoffRef: "h5", Description: "Reviewer \u2192 Followup: Bridge from original review to follow-up epic. Created by supervisor when IMPORTANT/MINOR findings exist. This handoff STARTS the follow-up lifecycle."},
-				{Order: "2", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URE (same actor \u2014 supervisor owns follow-up epic and initiates scoping)"},
-				{Order: "3", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URD (same actor within Phase 2 \u2014 supervisor synthesizes follow-up requirements)"},
-				{Order: "4", HandoffRef: "h6", Description: "Supervisor \u2192 Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped findings and requirements."},
-				{Order: "5", HandoffRef: "h1", Description: "Architect \u2192 Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and outstanding findings."},
-				{Order: "6", HandoffRef: "h2", Description: "Supervisor \u2192 Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."},
-				{Order: "7", HandoffRef: "h3", Description: "Supervisor \u2192 Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + original findings being addressed."},
-				{Order: "8", HandoffRef: "h4", Description: "Worker \u2192 Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."},
+				{Order: "1", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URE from the user-DEFER'd UAT items (same actor \u2014 supervisor owns the follow-up epic and initiates scoping)"},
+				{Order: "2", HandoffRef: "none", SameActor: "true", Description: "Supervisor creates FOLLOWUP_URD (same actor within Phase 2 \u2014 supervisor synthesizes follow-up requirements)"},
+				{Order: "3", HandoffRef: "h6", Description: "Supervisor \u2192 Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped requirements and DEFER'd items."},
+				{Order: "4", HandoffRef: "h1", Description: "Architect \u2192 Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and the DEFER'd items."},
+				{Order: "5", HandoffRef: "h2", Description: "Supervisor \u2192 Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."},
+				{Order: "6", HandoffRef: "h3", Description: "Supervisor \u2192 Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + the DEFER'd items being addressed."},
+				{Order: "7", HandoffRef: "h4", Description: "Worker \u2192 Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."},
 			},
 		},
 	}
@@ -1586,7 +1508,7 @@ func generateSchemaContent() string {
 		{"TASK TITLE CONVENTIONS\n\n     Mapping from task titles to labels and creating roles.", buildTaskTitles},
 		{"DOCUMENTS\n\n     Mapping from protocol documentation files to the entities they cover.", buildDocuments},
 		{"DEPENDENCY DIRECTION (Pasture)\n\n     Canonical definition of how work flows through the dependency tree.", buildDependencyModel},
-		{"FOLLOW-UP LIFECYCLE (R6 from URD)\n\n     When code review produces IMPORTANT or MINOR findings, the supervisor\n     creates a follow-up epic that runs the same protocol phases with\n     FOLLOWUP_* prefixed task types. The IMPORTANT/MINOR leaf tasks from\n     the original review gain a second parent: the follow-up slice they\n     are assigned to (dual-parent).\n\n     Kind: Separate enum values (FOLLOWUP_URE, FOLLOWUP_SLICE, etc.).\n     Simple single-parent epic relationship — no followup-of-followup.", buildFollowupLifecycle},
+		{"FOLLOW-UP LIFECYCLE (R6 from URD)\n\n     When UAT (Phase 5 or Phase 11) produces user-DEFER'd items, the\n     supervisor creates a follow-up epic that runs the same protocol phases\n     with FOLLOWUP_* prefixed task types. The user-DEFER'd UAT-item leaf\n     tasks gain a second parent: the follow-up slice they are assigned to\n     (dual-parent).\n\n     Kind: Separate enum values (FOLLOWUP_URE, FOLLOWUP_SLICE, etc.).\n     Simple single-parent epic relationship — no followup-of-followup.", buildFollowupLifecycle},
 		{"PROCEDURE STEPS\n\n     Per-role ordered steps (startup sequence for supervisor,\n     TDD layers for worker). Only roles with non-empty steps are listed.", buildProcedureSteps},
 		{"CHECKLISTS\n\n     Per-role quality gate checklists for slice completion, review readiness,\n     and landing.", buildChecklists},
 		{"COORDINATION COMMANDS\n\n     Pasture coordination commands shared across roles and role-specific.", buildCoordinationCommands},
@@ -1601,7 +1523,14 @@ func generateSchemaContent() string {
 
 	buf.WriteString("</pasture-protocol>\n")
 
-	return buf.String()
+	// schema.xml names no single harness, so typed markers resolve to the
+	// neutral operation or capability spelling rather than any host's tool
+	// name (tenet 3).
+	content, err := ResolveBodyMarkersNeutral(buf.String())
+	if err != nil {
+		panic(fmt.Sprintf("codegen.generateSchemaContent: marker resolution failed: %v", err))
+	}
+	return content
 }
 
 // printUnifiedDiff prints a simple line-by-line diff between old and new content.

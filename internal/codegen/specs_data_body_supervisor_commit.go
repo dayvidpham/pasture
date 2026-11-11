@@ -2,6 +2,8 @@
 // Ported from aura-plugins/skills/supervisor-commit/SKILL.md.
 package codegen
 
+import "strings"
+
 var supervisorCommitBody = SkillBody{
 	Preamble: `**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-12-landing)** <- Phase 12`,
 
@@ -52,15 +54,15 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 			Id:    "sup-commit-close-task",
 			Title: "Close Pasture Tasks",
 			Content: `` + "```" + `bash
-pasture task close "${TASK_A_URI}" --reason="Committed in <commit-hash>"
-pasture task close "${TASK_B_URI}" --reason="Committed in <commit-hash>"
+[[rec:close]] "${TASK_A_URI}" --reason="Committed in <commit-hash>"
+[[rec:close]] "${TASK_B_URI}" --reason="Committed in <commit-hash>"
 ` + "```" + ``,
 		},
 		{
 			Id:    "sup-commit-update-impl-plan",
 			Title: "Update IMPL_PLAN",
 			Content: `` + "```" + `bash
-pasture task update "${IMPL_PLAN_ID_URI}" --notes="SLICE-N complete: "${TASK_A_URI}", ${TASK_B_URI}"
+[[rec:note]] "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="Slice complete: "${TASK_A_URI}", ${TASK_B_URI}"
 ` + "```" + ``,
 		},
 		{
@@ -72,12 +74,17 @@ pasture task update "${IMPL_PLAN_ID_URI}" --notes="SLICE-N complete: "${TASK_A_U
 feat|fix(scope): Description (follow-up)
 
 Files: file1.go, file2.go
-Task: ${TASK_A_URI} (FOLLOWUP_SLICE-1)
+Task: ${TASK_A_URI} (the first follow-up slice)
 Followup-Epic: ${TASK_B_URI}
 Ratified-Plan: ${TASK_C_URI} (FOLLOWUP_PROPOSAL-1)
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 ` + "```" + ``,
+		},
+		{
+			Id:      "sup-commit-merge-request",
+			Title:   "Merge Request Description",
+			Content: mergeRequestDescription(),
 		},
 		{
 			Id:    "sup-commit-commands",
@@ -93,4 +100,30 @@ git agent-commit -m "..."
 	},
 
 	Recipes: []RecipeBlock{},
+}
+
+// MRDescriptionField is one required line of a merge request description.
+type MRDescriptionField struct {
+	Id   string
+	Text string
+}
+
+// MRDescriptionFields is the one declaration of what a merge request
+// description states. The landing skill renders it, and a guard asserts both
+// ends, so the section cannot be deleted or emptied silently.
+var MRDescriptionFields = []MRDescriptionField{
+	{Id: "what-changed", Text: "What changed, in one sentence."},
+	{Id: "how-verified", Text: "How it was verified, naming the command."},
+	{Id: "what-remains", Text: "What was not done, if anything remains."},
+}
+
+// mergeRequestDescription renders the merge-request section from the registry.
+func mergeRequestDescription() string {
+	var b strings.Builder
+	b.WriteString("A merge request description states these fields, and nothing else belongs in it:\n\n")
+	for _, field := range MRDescriptionFields {
+		b.WriteString("- " + field.Text + "\n")
+	}
+	b.WriteString("\nDo not put an internal task code in the title or the body.")
+	return b.String()
 }

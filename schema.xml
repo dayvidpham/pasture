@@ -91,6 +91,7 @@
     <label id="L-sev-blocker" value="pasture:severity:blocker" special="true" severity-ref="BLOCKER"></label>
     <label id="L-sev-import" value="pasture:severity:important" special="true" severity-ref="IMPORTANT"></label>
     <label id="L-sev-minor" value="pasture:severity:minor" special="true" severity-ref="MINOR"></label>
+    <label id="L-finding" value="pasture:finding" special="true" description="A single review finding; child of a severity group"></label>
     <label id="L-followup" value="pasture:epic-followup" special="true" description="Follow-up epic for user-DEFER&#39;d UAT items only"></label>
   </labels>
   <!-- ═══════════════════════════════════════════════════════════════════════
@@ -248,7 +249,7 @@
       </substeps>
       <transitions>
         <transition to-phase="p8" condition="handoff authored in the HANDOFF Pasture task body">
-          <skill-invocation target-role="supervisor" command-ref="cmd-supervisor" directive="Supervisor launch prompt MUST start with Skill(/pasture:supervisor)"></skill-invocation>
+          <skill-invocation target-role="supervisor" command-ref="cmd-supervisor" directive="Supervisor launch prompt MUST start with invoke_skill(/pasture:supervisor)"></skill-invocation>
         </transition>
       </transitions>
     </phase>
@@ -256,18 +257,18 @@
       <description>Supervisor decomposes ratified plan into vertical slices</description>
       <substeps>
         <substep id="s8" type="plan" execution="sequential" order="1" label-ref="L-p8s8">
-          <description>Identify production code paths. Create SLICE-N tasks with leaf tasks. Assign workers.</description>
+          <description>Identify production code paths. Create the slice tasks with leaf tasks. Assign workers.</description>
           <startup-sequence>
             <step order="1" id="S-supervisor-call-skill">
-              <instruction>Call Skill(/pasture:supervisor) to load role instructions</instruction>
-              <command>Skill(/pasture:supervisor)</command>
+              <instruction>Call invoke_skill(/pasture:supervisor) to load role instructions</instruction>
+              <command>invoke_skill(/pasture:supervisor)</command>
             </step>
             <step order="2" id="S-supervisor-read-plan">
-              <instruction>Read RATIFIED_PLAN, URD, UAT, and elicit tasks via pasture task show for full context</instruction>
-              <command>pasture task show &#34;${RATIFIED_PLAN_ID_URI}&#34; &amp;&amp; pasture task show &#34;${URD_ID_URI}&#34; &amp;&amp; pasture task show &#34;${UAT_ID_URI}&#34; &amp;&amp; pasture task show &#34;${ELICIT_ID_URI}&#34;</command>
+              <instruction>Read RATIFIED_PLAN, URD, UAT, and elicit tasks via ${EPOCH_REC} show for full context</instruction>
+              <command>${EPOCH_REC} show &#34;${RATIFIED_PLAN_ID_URI}&#34; &amp;&amp; ${EPOCH_REC} show &#34;${URD_ID_URI}&#34; &amp;&amp; ${EPOCH_REC} show &#34;${UAT_ID_URI}&#34; &amp;&amp; ${EPOCH_REC} show &#34;${ELICIT_ID_URI}&#34;</command>
             </step>
             <step order="3" id="S-supervisor-explore-ephemeral">
-              <instruction>Spawn ephemeral Explore subagents via Task tool for scoped codebase queries</instruction>
+              <instruction>Spawn ephemeral Explore subagents via delegate_assignment tool for scoped codebase queries</instruction>
               <context>Each subagent is short-lived and returns findings; no standing team overhead</context>
             </step>
             <step order="4" id="S-supervisor-decompose-slices" next-state="p8">
@@ -276,10 +277,10 @@
             </step>
             <step order="5" id="S-supervisor-create-leaf-tasks">
               <instruction>Create leaf tasks (L1/L2/L3) for every slice</instruction>
-              <command>CREATED_URI=$(pasture task create &#34;SLICE-{K}-L{1,2,3}: &lt;description&gt;&#34; --phase worker_slices --namespace &#34;$PASTURE_NAMESPACE&#34; --format json --description &#34;Describe the specific work and reference full task URIs&#34; | python3 -c &#39;import json,sys; print(json.load(sys.stdin)[&#34;id&#34;])&#39;)&#xA;pasture task label add &#34;$CREATED_URI&#34; pasture:p9-impl:s9-slice</command>
+              <command>CREATED_URI=$(${EPOCH_REC} create --kind task --title &#34;&lt;description&gt;&#34; --phase worker_slices --body &#34;Describe the specific work and reference full task URIs&#34;)</command>
             </step>
             <step order="6" id="S-supervisor-spawn-workers" next-state="p9">
-              <instruction>Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.</instruction>
+              <instruction>Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent. Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.</instruction>
             </step>
           </startup-sequence>
         </substep>
@@ -302,8 +303,8 @@
           <instances count="N" per="production-code-path"></instances>
         </substep>
       </substeps>
-      <task-title pattern="SLICE-{N}: {description}" substep="s9">
-        <convention>N identifies slice within the implementation plan</convention>
+      <task-title pattern="SLICE-{W}-{N}: {description}" substep="s9">
+        <convention>W identifies the wave, N the slice within that wave</convention>
       </task-title>
       <task-title pattern="FOLLOWUP_SLICE-{N}: {description}" substep="s9">
         <convention>Follow-up slice. Adopts user-DEFER&#39;d UAT-item leaf tasks as children (dual-parent: leaf blocks both the DEFER&#39;d-items tracking group AND follow-up slice).</convention>
@@ -325,8 +326,8 @@
           <instances count="3" per="review-axis"></instances>
         </substep>
       </substeps>
-      <task-title pattern="SLICE-{N}-REVIEW-{axis}-{round}: {description}" substep="s10">
-        <convention>axis=A|B|C, round starts at 1</convention>
+      <task-title pattern="WAVE-{W}-REVIEW-{axis}-{round}: {description}" substep="s10">
+        <convention>axis=A|B|C, round starts at 1; findings hang under this wave review task</convention>
       </task-title>
       <task-title pattern="IMPL-REVIEW-{axis}-{round}: {description}" substep="s10">
         <convention>When reviewing all slices collectively</convention>
@@ -335,14 +336,15 @@
         <transition to-phase="p11" condition="all 3 reviewers ACCEPT, all BLOCKERs resolved"></transition>
         <transition to-phase="p9" condition="any reviewer votes REVISE" action="fix BLOCKERs in affected slices, then re-review"></transition>
       </transitions>
-      <severity-tree enabled="true" creation="eager">
+      <severity-tree enabled="true" creation="eager" maxRounds="3">
         <rule>Always create 3 severity groups per review round, even if empty.</rule>
         <rule>Empty groups have no children and are closed immediately.</rule>
+        <rule>maxRounds is the default convergence bound; the Phase 8 review-effort budget selects the count the convergence rule reads.</rule>
+        <rule>Only an open BLOCKER gates a wave; IMPORTANT and MINOR findings stay open to convergence.</rule>
         <group severity-ref="BLOCKER" label-ref="L-sev-blocker" dual-parent="true"></group>
         <group severity-ref="IMPORTANT" label-ref="L-sev-import"></group>
         <group severity-ref="MINOR" label-ref="L-sev-minor"></group>
       </severity-tree>
-      <followup-epic label-ref="L-followup" trigger="review-completion AND (IMPORTANT OR MINOR findings exist)" gated-on-blocker="false" owner-role="supervisor"></followup-epic>
     </phase>
     <phase id="p11" number="11" domain="user" name="Impl UAT">
       <description>User acceptance test on the implementation</description>
@@ -397,8 +399,8 @@
       </delegates>
       <label-awareness></label-awareness>
       <tools>Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage</tools>
-      <model>opus</model>
-      <thinking>medium</thinking>
+      <model>frontier</model>
+      <thinking>high</thinking>
       <ownership-model></ownership-model>
       <introduction>You are the master orchestrator for the full 12-phase epoch lifecycle. You delegate planning phases (1-7) to the architect and implementation phases (7-12) to the supervisor.</introduction>
       <ownership-narrative>You own the full 12-phase lifecycle from Request to Landing. You delegate phases 1-7 to the architect and phases 7-12 to the supervisor. The epoch role coordinates the complete workflow end-to-end and is the only role that spans all phases.</ownership-narrative>
@@ -415,8 +417,8 @@
       </owns-phases>
       <label-awareness>pasture:p1-user, pasture:p2-user, pasture:p3-plan, pasture:p4-plan, pasture:p5-user, pasture:p6-plan, pasture:p7-plan</label-awareness>
       <tools>Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage</tools>
-      <model>opus</model>
-      <thinking>medium</thinking>
+      <model>frontier</model>
+      <thinking>high</thinking>
       <ownership-model></ownership-model>
       <introduction>You design specifications and coordinate the planning phases of epochs. See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
       <ownership-narrative>You own Phases 1-7 of the epoch: capture and classify user request (p1), run requirements elicitation URE survey (p2), create PROPOSAL-N with full technical plan (p3), spawn 3 axis-specific reviewers and loop until consensus (p4), present plan to user for acceptance test (p5), add ratify label to accepted PROPOSAL-N (p6), create handoff document and transfer to supervisor (p7).</ownership-narrative>
@@ -440,10 +442,10 @@
         <axis-ref ref="axis-elegance"></axis-ref>
       </uses-axes>
       <tools>Read, Glob, Grep, Bash, Skill, SendMessage</tools>
-      <model>sonnet</model>
-      <thinking></thinking>
+      <model>standard</model>
+      <thinking>medium</thinking>
       <ownership-model></ownership-model>
-      <introduction>You review from an end-user alignment perspective. See the project&#39;s protocol/CONSTRAINTS.md for coding standards.</introduction>
+      <introduction>You review from an end-user alignment perspective.</introduction>
       <ownership-narrative>You participate in two phases: Phase 4 (plan review) — evaluate PROPOSAL-N against one axis using binary ACCEPT/REVISE, NO severity tree; Phase 10 (code review) — review ALL implementation slices against your axis using full severity tree (BLOCKER/IMPORTANT/MINOR), EAGER creation of all 3 severity groups.</ownership-narrative>
       <behaviors>
         <behavior id="B-rev-end-user" given="a review assignment" when="reviewing" then="apply end-user alignment criteria" should-not="focus only on technical details"></behavior>
@@ -469,16 +471,16 @@
         <invariant>Creates follow-up epic when code review has IMPORTANT or MINOR findings</invariant>
       </invariants>
       <tools>Read, Glob, Grep, Bash, Skill, Agent, Task, SendMessage</tools>
-      <model>opus</model>
-      <thinking>medium</thinking>
+      <model>frontier</model>
+      <thinking>high</thinking>
       <ownership-model></ownership-model>
       <introduction>You coordinate parallel task execution. See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
-      <ownership-narrative>You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation SLICE-N (p9), spawn reviewers for per-slice code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.</ownership-narrative>
+      <ownership-narrative>You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation the slice (p9), spawn reviewers for whole-wave code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.</ownership-narrative>
       <behaviors>
         <behavior id="B-sup-read-context" given="handoff received" when="starting" then="read ratified plan, URD, UAT, and elicit tasks for full context" should-not="start without reading all four"></behavior>
-        <behavior id="B-sup-model-trivial" given="trivial changes (single-file edits, config tweaks, typo fixes)" when="spawning a worker" then="use model: haiku to minimize cost and latency" should-not="use a heavyweight model for trivial work"></behavior>
-        <behavior id="B-sup-model-nontrivial" given="non-trivial changes (multi-file, architectural, logic-heavy)" when="spawning a worker" then="prefer model: sonnet for the Task tool to ensure quality" should-not="default to haiku for complex work"></behavior>
-        <behavior id="B-sup-ride-the-wave" given="Phase 8-10 execution" when="starting implementation" then="follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for per-slice review (clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, and iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate" should-not="skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; close a wave with any finding silently outstanding"></behavior>
+        <behavior id="B-sup-model-trivial" given="trivial changes (single-file edits, config tweaks, typo fixes)" when="spawning a worker" then="keep the worker at its mapped capability tier (T2 standard), with the tier&#39;s effort, to minimize cost and latency" should-not="raise a worker&#39;s tier for trivial work"></behavior>
+        <behavior id="B-sup-model-nontrivial" given="non-trivial changes (multi-file, architectural, logic-heavy)" when="spawning a worker" then="override the worker to T1 frontier for the delegate_assignment tool to ensure quality" should-not="leave a high-complexity slice at the default tier"></behavior>
+        <behavior id="B-sup-ride-the-wave" given="Phase 8-10 execution" when="starting implementation" then="follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for whole-wave review (only an open BLOCKER finding gates the wave), workers fix findings with atomic commits, and iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate" should-not="skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; require a zeroed round to close a wave; close a finding outside `C-finding-lifecycle`"></behavior>
       </behaviors>
     </role>
     <role id="worker" name="Worker" description="Vertical slice implementer (full production code path)">
@@ -487,8 +489,8 @@
       </owns-phases>
       <label-awareness>pasture:p9-impl:s9-slice</label-awareness>
       <tools>Read, Glob, Grep, Bash, Skill, Edit, Write, SendMessage</tools>
-      <model>sonnet</model>
-      <thinking></thinking>
+      <model>standard</model>
+      <thinking>medium</thinking>
       <ownership-model>One worker per production code path. Owns full vertical&#xA;      (types → tests → implementation → wiring).</ownership-model>
       <introduction>You own a vertical slice (full production code path from CLI/API entry point → service → types). See the project&#39;s AGENTS.md and ~/.claude/CLAUDE.md for coding standards and constraints.</introduction>
       <ownership-narrative>NOT: A single file or horizontal layer (e.g., &#39;all types&#39; or &#39;all tests&#39;). YES: A full vertical slice (complete production code path end-to-end). You own the FEATURE end-to-end, not a layer or file. Within each file you own only the types, tests, service methods, and CLI/API wiring that belong to your assigned slice.</ownership-narrative>
@@ -528,7 +530,7 @@
     <command id="cmd-status" name="pasture:status" description="Project status and monitoring via Pasture queries">
       <file>skills/status/SKILL.md</file>
     </command>
-    <command id="cmd-afk-implement" name="pasture:afk-implement" role-ref="supervisor" description="Run an unattended implementation session with small PRs and a clean review wave, never merging">
+    <command id="cmd-afk-implement" name="pasture:afk-implement" role-ref="supervisor" description="Run an unattended implementation session with small PRs and a review wave that ends in convergence, never merging">
       <phases>
         <phase-ref ref="p8"></phase-ref>
         <phase-ref ref="p9"></phase-ref>
@@ -630,7 +632,7 @@
       </phases>
       <file>skills/supervisor/SKILL.md</file>
     </command>
-    <command id="cmd-sup-plan" name="pasture:supervisor:plan-tasks" role-ref="supervisor" description="Decompose ratified plan into vertical slices (SLICE-N)">
+    <command id="cmd-sup-plan" name="pasture:supervisor:plan-tasks" role-ref="supervisor" description="Decompose ratified plan into vertical slices (SLICE-{W}-{N})">
       <phases>
         <phase-ref ref="p8"></phase-ref>
       </phases>
@@ -717,6 +719,7 @@
         <label-ref ref="L-sev-blocker"></label-ref>
         <label-ref ref="L-sev-import"></label-ref>
         <label-ref ref="L-sev-minor"></label-ref>
+        <label-ref ref="L-finding"></label-ref>
       </creates-labels>
       <file>skills/reviewer-review-code/SKILL.md</file>
     </command>
@@ -752,6 +755,7 @@
         <label-ref ref="L-sev-blocker"></label-ref>
         <label-ref ref="L-sev-import"></label-ref>
         <label-ref ref="L-sev-minor"></label-ref>
+        <label-ref ref="L-finding"></label-ref>
       </creates-labels>
       <file>skills/impl-review/SKILL.md</file>
     </command>
@@ -785,22 +789,22 @@
   <handoffs storage-pattern="pasture-task-body">
     <handoff id="h1" source-role="architect" target-role="supervisor" at-phase="p7" content-level="full-provenance" file-pattern="architect-to-supervisor.md">
       <required-fields>request, urd, proposal, ratified-plan, context, key-decisions, open-items, acceptance-criteria</required-fields>
-      <skill-invocation directive="Skill(/pasture:supervisor)" note="Supervisor launch prompt MUST start with this invocation. Without it, supervisor skips leaf task creation."></skill-invocation>
+      <skill-invocation directive="invoke_skill(/pasture:supervisor)" note="Supervisor launch prompt MUST start with this invocation. Without it, supervisor skips leaf task creation."></skill-invocation>
     </handoff>
     <handoff id="h2" source-role="supervisor" target-role="worker" at-phase="p9" content-level="summary-with-ids" file-pattern="supervisor-to-worker.md">
       <required-fields>request, urd, proposal, ratified-plan, impl-plan, slice, context, key-decisions, open-items, acceptance-criteria</required-fields>
-      <skill-invocation directive="Skill(/pasture:worker)" note="Worker message MUST include explicit instruction to call this skill."></skill-invocation>
+      <skill-invocation directive="invoke_skill(/pasture:worker)" note="Worker message MUST include explicit instruction to call this skill."></skill-invocation>
     </handoff>
     <handoff id="h3" source-role="supervisor" target-role="reviewer" at-phase="p10" content-level="summary-with-ids" file-pattern="supervisor-to-reviewer.md">
       <required-fields>request, urd, proposal, ratified-plan, impl-plan, context, key-decisions, acceptance-criteria</required-fields>
-      <skill-invocation directive="Skill(/pasture:reviewer)" note="Reviewer prompt MUST include instruction to call this skill."></skill-invocation>
+      <skill-invocation directive="invoke_skill(/pasture:reviewer)" note="Reviewer prompt MUST include instruction to call this skill."></skill-invocation>
     </handoff>
     <handoff id="h4" source-role="worker" target-role="reviewer" at-phase="p10" content-level="summary-with-ids" file-pattern="worker-to-reviewer.md">
       <required-fields>request, urd, impl-plan, slice, context, key-decisions, open-items</required-fields>
     </handoff>
-    <handoff id="h5" source-role="reviewer" target-role="supervisor" at-phase="p10" content-level="summary-with-ids" file-pattern="reviewer-to-followup.md" trigger="code-review findings exist (all severities must reach 0 before wave close)">
+    <handoff id="h5" source-role="reviewer" target-role="supervisor" at-phase="p10" content-level="summary-with-ids" file-pattern="reviewer-to-supervisor.md" trigger="code-review findings exist (open BLOCKERs gate the wave; the rest converge at the end)">
       <required-fields>request, urd, proposal, context, key-decisions, open-items, acceptance-criteria</required-fields>
-      <note>Reviewer hands code-review findings to supervisor; ALL severity groups must reach 0 before wave close (the FOLLOWUP epic is created later at UAT from user-DEFER&#39;d items, never from review findings)</note>
+      <note>Reviewer hands code-review findings to supervisor; open BLOCKER findings gate the wave, while open IMPORTANT and MINOR findings converge at the end (the FOLLOWUP epic is created later at UAT from user-DEFER&#39;d items, never from review findings)</note>
     </handoff>
     <handoff id="h6" source-role="supervisor" target-role="architect" at-phase="p3" content-level="summary-with-ids" file-pattern="supervisor-to-architect.md" context="follow-up lifecycle only">
       <required-fields>request, urd, followup-epic, followup-ure, followup-urd, context, key-decisions, findings-summary, acceptance-criteria</required-fields>
@@ -820,67 +824,65 @@
   <constraints>
     <!-- Audit trail -->
     <constraint id="C-audit-never-delete" given="any task or label" when="modifying" then="add labels and comments only" should-not="delete or close tasks prematurely, remove labels" />
-    <constraint id="C-audit-dep-chain" given="any phase transition" when="creating new task" then="chain dependency: pasture task dep add parent --blocked-by child" should-not="skip dependency chaining or invert direction" command="pasture task dep add &quot;${PARENT_URI}&quot; --blocked-by &quot;${CHILD_URI}&quot;">
+    <constraint id="C-audit-dep-chain" given="any phase transition" when="creating new task" then="chain dependency: ${EPOCH_REC} block parent --by child" should-not="skip dependency chaining or invert direction" command="${EPOCH_REC} block &quot;${PARENT_URI}&quot; --by &quot;${CHILD_URI}&quot;">
       <example id="C-audit-dep-chain-full" lang="bash" label="correct">
         <code><![CDATA[# Full dependency chain: work flows bottom-up, closure flows top-down
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
-pasture task dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
-pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
-pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
-pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"]]></code>
+${EPOCH_REC} block "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
+${EPOCH_REC} block "${URE_ID_URI}" --by "${PROPOSAL_ID_URI}"
+${EPOCH_REC} block "${PROPOSAL_ID_URI}" --by "${IMPL_PLAN_ID_URI}"
+${EPOCH_REC} block "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
+${EPOCH_REC} block "${SLICE_1_ID_URI}" --by "${LEAF_TASK_A_ID_URI}"]]></code>
       </example>
     </constraint>
     <!-- Reviews -->
     <constraint id="C-review-consensus" given="review cycle (p4 or p10)" when="evaluating" then="all 3 reviewers must ACCEPT before proceeding" should-not="proceed with any REVISE vote outstanding" role-ref="epoch,reviewer,supervisor" phase-ref="p4,p10" />
     <constraint id="C-review-binary" given="a reviewer" when="voting" then="use ACCEPT or REVISE only" should-not="use APPROVE, APPROVE_WITH_COMMENTS, REQUEST_CHANGES, or REJECT" role-ref="reviewer" phase-ref="p4,p10" />
-    <constraint id="C-severity-eager" given="code review round (p10 only)" when="starting review" then="ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately" should-not="lazily create severity groups only when findings exist" role-ref="reviewer" phase-ref="p10">
+    <constraint id="C-severity-eager" given="code review round (p10 only)" when="starting review" then="ALWAYS create 3 severity group tasks (BLOCKER, IMPORTANT, MINOR) immediately, one trio per wave per axis per round" should-not="lazily create severity groups only when findings exist" role-ref="reviewer" phase-ref="p10">
       <example id="C-severity-eager-create" lang="bash" label="correct">
         <code><![CDATA[# Create all 3 severity groups immediately (even if empty)
-BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
-IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
-MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+BLOCKER_ID_URI=$(${EPOCH_REC} create --kind task --title "BLOCKER" --phase code_review)
+${EPOCH_REC} label "$BLOCKER_ID_URI" pasture:severity:blocker
+IMPORTANT_ID_URI=$(${EPOCH_REC} create --kind task --title "IMPORTANT" --phase code_review)
+${EPOCH_REC} label "$IMPORTANT_ID_URI" pasture:severity:important
+MINOR_ID_URI=$(${EPOCH_REC} create --kind task --title "MINOR" --phase code_review)
+${EPOCH_REC} label "$MINOR_ID_URI" pasture:severity:minor
 
 # Close empty groups immediately
-pasture task close "${IMPORTANT_ID_URI}"
-pasture task close "${MINOR_ID_URI}"]]></code>
+${EPOCH_REC} close "${IMPORTANT_ID_URI}"
+${EPOCH_REC} close "${MINOR_ID_URI}"]]></code>
       </example>
       <example id="C-severity-eager-anti" lang="bash" label="anti-pattern">
         <code><![CDATA[# WRONG: only creating groups when findings exist
 # This skips empty groups and breaks the audit trail
 if [ -n "$BLOCKER_FINDINGS" ]; then
-    BLOCKER_ID_URI=$(pasture task create "BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+    BLOCKER_ID_URI=$(${EPOCH_REC} create --kind task --title "BLOCKER" --phase code_review --body "Describe the specific work and reference full task URIs")
 fi]]></code>
       </example>
     </constraint>
     <constraint id="C-severity-not-plan" given="plan review (p4)" when="reviewing" then="use binary ACCEPT/REVISE only" should-not="create severity tree for plan reviews" role-ref="reviewer" phase-ref="p4" />
     <constraint id="C-blocker-dual-parent" given="a BLOCKER finding in code review" when="recording" then="add as child of BOTH the severity group AND the slice it blocks" should-not="add to severity group only" role-ref="reviewer" phase-ref="p10" />
-    <constraint id="C-followup-timing" given="UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items" when="creating the FOLLOWUP epic" then="create the FOLLOWUP epic at UAT when user-DEFER'd items exist; the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items" should-not="trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — all review findings must reach 0 before wave close, no severity is deferrable to FOLLOWUP" role-ref="supervisor" phase-ref="p10" />
+    <constraint id="C-finding-lifecycle" given="a code-review finding" when="recording or closing it" then="create it as a child of its severity group labelled `pasture:finding`, and close it only when the reviewer who raised it verifies the fix — a worker or supervisor cannot close it, and a wave boundary never closes it" should-not="close a finding from a worker or supervisor, close one at a wave boundary, or record severity in the finding label (severity lives on its parent group)" role-ref="reviewer,supervisor" />
+    <constraint id="C-followup-timing" given="UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items" when="creating the FOLLOWUP epic" then="create the FOLLOWUP epic at UAT when user-DEFER'd items exist; the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items" should-not="trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — no review severity is deferrable to FOLLOWUP (a finding's close rule is `C-finding-lifecycle`)" role-ref="supervisor" phase-ref="p10" />
     <!-- Ownership -->
     <constraint id="C-vertical-slices" given="implementation decomposition" when="assigning work" then="each production code path owned by exactly ONE worker (full vertical)" should-not="assign horizontal layers or same path to multiple workers" role-ref="supervisor" phase-ref="p8,p9" />
     <constraint id="C-supervisor-no-impl" given="supervisor role" when="implementation phase" then="spawn workers for all code changes" should-not="implement code directly" role-ref="supervisor" phase-ref="p8,p9" />
-    <constraint id="C-supervisor-explore-ephemeral" given="supervisor needs codebase exploration" when="starting Phase 8 (IMPL_PLAN)" then="spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead" should-not="explore the codebase directly as supervisor; maintain a standing explore team" role-ref="epoch,supervisor" phase-ref="p8,p9,p10" />
-    <constraint id="C-clean-review-exit" given="per-slice code review" when="evaluating review results" then="iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; a clean round is one where the re-review applies no fixes and finds nothing across all three severities; on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision" should-not="close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; hardcode the budget; proceed past the chosen budget without surfacing to the user; batch review across multiple slices" role-ref="epoch,supervisor" phase-ref="p10" />
-    <constraint id="C-review-effort-budget" given="the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate" when="deciding how much review-and-fix effort to spend per slice" then="request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review-&gt;fix-&gt;re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision" should-not="hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen" role-ref="epoch,reviewer,supervisor" phase-ref="p10" />
-    <constraint id="C-autonomous-progression" given="supervisor orchestrating phases" when="deciding whether to proceed" then="5 user-gated phases only: (1) research depth decision, (2) URE survey, (3) Plan UAT, (4) Phase 8 implementation-effort / review-effort budget request, (5) Impl UAT; all other phase transitions are auto-ratified by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification without user gate" should-not="add additional user gates beyond the 5 defined; require user approval for ratification after UAT ACCEPT" />
+    <constraint id="C-supervisor-explore-ephemeral" given="supervisor needs codebase exploration" when="starting Phase 8 (IMPL_PLAN)" then="spawn ephemeral Explore subagents via delegate_assignment tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead" should-not="explore the codebase directly as supervisor; maintain a standing explore team" role-ref="epoch,supervisor" phase-ref="p8,p9,p10" />
+    <constraint id="C-clean-review-exit" given="per-wave code review and end-of-epoch convergence" when="evaluating review results" then="during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -&gt; fix -&gt; re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision" should-not="require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices" role-ref="epoch,supervisor" phase-ref="p10" />
+    <constraint id="C-review-effort-budget" given="the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate" when="deciding how much review-and-fix effort to spend per wave" then="request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review-&gt;fix-&gt;re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision" should-not="hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen" role-ref="epoch,reviewer,supervisor" phase-ref="p10" />
+    <constraint id="C-autonomous-progression" given="supervisor orchestrating phases" when="deciding whether to proceed" then="User gates: [request (p1 research depth); elicit (p2 requirements interview); plan-review (p5 plan UAT); impl-plan (p8 implementation effort and review budget); impl-uat (p11 implementation UAT)]; all other phase transitions are auto-ratified by the supervisor; after Plan UAT ACCEPT, proceed directly to ratification without user gate" should-not="add additional user gates beyond the defined list; require user approval for ratification after UAT ACCEPT" />
     <constraint id="C-integration-points" given="multiple vertical slices share types, interfaces, or data flows" when="decomposing IMPL_PLAN in Phase 8" then="identify horizontal Layer Integration Points and document them in IMPL_PLAN; each integration point specifies: owning slice, consuming slices, shared contract, merge timing; include integration points in slice descriptions so workers know what to export and import" should-not="leave cross-slice dependencies implicit; assume workers will discover contracts on their own" role-ref="epoch,supervisor" phase-ref="p8" />
     <constraint id="C-interface-first-slices" given="decomposing a RATIFIED plan into vertical slices (Phase 8 IMPL_PLAN)" when="ordering the slices" then="prefer an interface-first FOUNDATION slice that exports all shared identifiers (types, constraints, fragments) and lands green BEFORE dependent slices (Strong SHOULD); if a linear (non-interface-first) decomposition is chosen instead, justify it explicitly in the IMPL_PLAN" should-not="leave cross-slice contracts implicit; choose a linear decomposition without recording the justification in the IMPL_PLAN" />
-    <constraint id="C-slice-review-before-close" given="workers complete their implementation slices" when="slice implementation is done" then="workers notify supervisor with pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes" should-not="close slices immediately upon worker completion; allow workers to close their own slices" role-ref="epoch,supervisor" phase-ref="p9,p10" />
-    <constraint id="C-slice-leaf-tasks" given="vertical slice created" when="decomposing slice into implementation units" then="create one or more Pasture leaf tasks per slice, named after the real work units they represent, with pasture task dep add &quot;${SLICE_ID_URI}&quot; --blocked-by &quot;${LEAF_TASK_ID_URI}&quot;; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)" should-not="create slices without leaf tasks — a slice with no children is undecomposed and cannot be tracked; force every slice into a fixed L1/L2/L3 triple when the real work units differ" role-ref="supervisor" phase-ref="p8,p9" command="pasture task dep add &quot;${SLICE_ID_URI}&quot; --blocked-by &quot;${LEAF_TASK_ID_URI}&quot;" />
-    <constraint id="C-handoff-skill-invocation" given="an agent is launched for a new phase (especially p7 to p8 handoff)" when="composing the launch prompt" then="prompt MUST start with Skill(/pasture:{role}) invocation directive so the agent loads its role instructions" should-not="launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation" role-ref="epoch,architect,supervisor" phase-ref="p7" />
-    <constraint id="C-interview-skill-invocation" given="a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT)" when="conducting the phase" then="the agent MUST invoke the matching interview skill (Skill(/pasture:user-elicit) for URE, Skill(/pasture:user-uat) for UAT) so the verbatim-capture and disposition procedures are loaded" should-not="conduct an interview phase without invoking its skill — skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures" />
+    <constraint id="C-slice-review-before-close" given="workers complete their implementation slices" when="slice implementation is done" then="workers notify supervisor with ${EPOCH_REC} note (not ${EPOCH_REC} close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes" should-not="close slices immediately upon worker completion; allow workers to close their own slices" role-ref="epoch,supervisor" phase-ref="p9,p10" />
+    <constraint id="C-slice-leaf-tasks" given="vertical slice created" when="decomposing slice into implementation units" then="create one or more Pasture leaf tasks per slice, named after the real work units they represent, with ${EPOCH_REC} block &quot;${SLICE_ID_URI}&quot; --by &quot;${LEAF_TASK_ID_URI}&quot;; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)" should-not="create slices without leaf tasks — a slice with no children is undecomposed and cannot be tracked; force every slice into a fixed L1/L2/L3 triple when the real work units differ" role-ref="supervisor" phase-ref="p8,p9" command="${EPOCH_REC} block &quot;${SLICE_ID_URI}&quot; --by &quot;${LEAF_TASK_ID_URI}&quot;" />
+    <constraint id="C-handoff-skill-invocation" given="an agent is launched for a new phase (especially p7 to p8 handoff)" when="composing the launch prompt" then="prompt MUST start with invoke_skill(/pasture:{role}) invocation directive so the agent loads its role instructions" should-not="launch agents without skill invocation — they skip role-critical procedures like ephemeral exploration and leaf task creation" role-ref="epoch,architect,supervisor" phase-ref="p7" />
+    <constraint id="C-interview-skill-invocation" given="a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT)" when="conducting the phase" then="the agent MUST invoke the matching interview skill (invoke_skill(/pasture:user-elicit) for URE, invoke_skill(/pasture:user-uat) for UAT) so the verbatim-capture and disposition procedures are loaded" should-not="conduct an interview phase without invoking its skill — skipping it loses the verbatim-capture and FIX-NOW/DEFER/WON'T-DO disposition procedures" />
     <!-- Task management -->
-    <constraint id="C-dep-direction" given="adding a Pasture dependency" when="determining direction" then="parent blocked-by child: pasture task dep add &quot;${STAYS_OPEN_URI}&quot; --blocked-by &quot;${MUST_FINISH_FIRST_URI}&quot;" should-not="invert (child blocked-by parent)" command="pasture task dep add &quot;${STAYS_OPEN_URI}&quot; --blocked-by &quot;${MUST_FINISH_FIRST_URI}&quot;">
+    <constraint id="C-dep-direction" given="adding a Pasture dependency" when="determining direction" then="parent blocked-by child: ${EPOCH_REC} block &quot;${STAYS_OPEN_URI}&quot; --by &quot;${MUST_FINISH_FIRST_URI}&quot;" should-not="invert (child blocked-by parent)" command="${EPOCH_REC} block &quot;${STAYS_OPEN_URI}&quot; --by &quot;${MUST_FINISH_FIRST_URI}&quot;">
       <example id="C-dep-direction-correct" lang="bash" label="correct" also-illustrates="C-audit-dep-chain">
-        <code><![CDATA[pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"]]></code>
+        <code><![CDATA[${EPOCH_REC} block "${REQUEST_ID_URI}" --by "${URE_ID_URI}"]]></code>
       </example>
       <example id="C-dep-direction-anti" lang="bash" label="anti-pattern">
-        <code><![CDATA[pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"]]></code>
+        <code><![CDATA[${EPOCH_REC} block "${URE_ID_URI}" --by "${REQUEST_ID_URI}"]]></code>
       </example>
     </constraint>
     <constraint id="C-frontmatter-refs" given="cross-task references (URD, request, etc.)" when="linking tasks" then="use description frontmatter references: block" should-not="invent relationship commands or use blocking dependencies for reference documents" />
@@ -897,30 +899,30 @@ fi]]></code>
     <constraint id="C-proposal-naming" given="a new or revised proposal" when="creating task" then="title PROPOSAL-{N} where N increments; mark old as pasture:superseded" should-not="reuse N or delete old proposals" role-ref="architect" phase-ref="p3" />
     <constraint id="C-review-naming" given="a review task" when="creating" then="title {SCOPE}-REVIEW-{axis}-{round} where axis=A|B|C, round starts at 1" should-not="use numeric reviewer IDs (1/2/3) instead of axis letters" role-ref="reviewer" phase-ref="p4,p10" />
     <!-- User interviews -->
-    <constraint id="C-ure-verbatim" given="user interview (Request, URE, or UAT), URD update, or mid-implementation design decision" when="recording in Pasture" then="capture full question text, ALL option descriptions, AND user's verbatim response, INCLUDING any code, snippets, or examples shown inside AskUserQuestion option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 whenever user intent is captured" should-not="summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews" role-ref="architect" phase-ref="p2,p5,p11">
+    <constraint id="C-ure-verbatim" given="user interview (Request, URE, or UAT), URD update, or mid-implementation design decision" when="recording in Pasture" then="capture the header, the exact question text, every option label and description, the multi-select flag, the preview when the harness showed one, the user's verbatim response, INCLUDING any code, snippets, or examples shown inside request_user_decision option labels, descriptions, or definition blocks (the preview/stimulus the user actually saw); the URD is the living document of ALL user requests, URE, UAT, and mid-implementation design decisions and feedback — update it via ${EPOCH_REC} note whenever --author pasture-system/00000000-0000-0000-0000-000000000000 --body user intent is captured" should-not="summarize options as (1)/(2)/(3) without option text, paraphrase user responses, or omit code/snippets shown inside option previews" role-ref="architect" phase-ref="p2,p5,p11">
       <example id="C-ure-verbatim-correct" lang="bash" label="correct">
         <code><![CDATA[# Full question, all options with descriptions, verbatim response
-UAT_ID_URI=$(pasture task create "UAT: Plan acceptance for feature-X" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "## Component: Verbose fields
+UAT_ID_URI=$(${EPOCH_REC} create --kind task --title "UAT: Plan acceptance for feature-X" --phase plan_uat \
+  --body "## Component: Verbose fields
 **Question:** Which verbose fields are useful?
 **Options:**
 - backupDir (full path): Shows where the backup landed
 - session ID: Enables log correlation across events
 - repo path + hash: Confirms which git repo was detected
 **User response:** backupDir (full path), session ID
-**Decision:** ACCEPT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')]]></code>
+**Decision:** ACCEPT")]]></code>
       </example>
       <example id="C-ure-verbatim-anti" lang="bash" label="anti-pattern">
         <code><![CDATA[# WRONG: options summarized as numbers, response paraphrased
-UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "Asked about verbose fields (1-4). User picked 1 and 2. Accepted." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')]]></code>
+UAT_ID_URI=$(${EPOCH_REC} create --kind task --title "UAT: Plan acceptance" --phase plan_uat \
+  --body "Asked about verbose fields (1-4). User picked 1 and 2. Accepted.")]]></code>
       </example>
     </constraint>
     <constraint id="C-validation-cases" given="any REQUEST (every request, not only fix-intent ones)" when="eliciting (URE), acceptance-testing (UAT), or implementing" then="elicit concrete validation cases for the request — a definition of done plus correct and incorrect behaviours (inputs/behaviors that must pass or must fail), confirm the case set with the user in UAT, evaluate the implementation against them, and store failing real-data cases as test fixtures" should-not="ship without validation cases; treat validation cases as applying to fix-intent requests only; introduce a request-type axis or enum to gate them (recognize what a request needs semantically instead)" role-ref="supervisor" />
-    <constraint id="C-uat-feedback-disposition" given="any UAT feedback item (Phase 5 or Phase 11) — flagged by the user OR a deferral proposed by the architect/supervisor" when="recording each item" then="assign every item an explicit, user-confirmed disposition of FIX-NOW or DEFER; deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic" should-not="leave a feedback item without a confirmed disposition; silently defer any item without raising it to the user at the next gate; route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it" role-ref="epoch" />
+    <constraint id="C-uat-feedback-disposition" given="any UAT feedback item (Phase 5 or Phase 11) — flagged by the user OR a deferral proposed by the architect/supervisor" when="recording each item" then="assign every item an explicit, user-confirmed disposition of FIX-NOW, DEFER, or WON'T-DO; deferrals may be agent-proposed, but ALL deferred items — whoever proposed them — MUST be raised to the user at the next user gate (URE, Plan UAT, or Impl UAT) for confirmation; FIX-NOW items are resolved in the current wave, DEFER'd items are the SOLE source feeding the FOLLOWUP epic" should-not="leave a feedback item without a confirmed disposition; silently defer any item without raising it to the user at the next gate; route any review severity (BLOCKER/IMPORTANT/MINOR) into FOLLOWUP — only DEFER'd UAT items feed it" role-ref="epoch" />
     <!-- Follow-up lifecycle -->
     <constraint id="C-followup-lifecycle" given="follow-up epic created" when="starting follow-up work" then="run same protocol phases with FOLLOWUP_* prefix: FOLLOWUP_URE → FOLLOWUP_URD → FOLLOWUP_PROPOSAL → FOLLOWUP_IMPL_PLAN → FOLLOWUP_SLICE" should-not="skip the follow-up lifecycle or treat the follow-up epic as a flat task list" role-ref="supervisor" phase-ref="p10" />
-    <constraint id="C-followup-leaf-adoption" given="supervisor creates FOLLOWUP_SLICE-N" when="assigning user-DEFER'd UAT-item leaf tasks to follow-up slices" then="add leaf task as child of follow-up slice (dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice)" should-not="remove the leaf task from its original DEFER'd-items tracking parent" role-ref="supervisor" phase-ref="p10" />
+    <constraint id="C-followup-leaf-adoption" given="supervisor creates the follow-up slice" when="assigning user-DEFER'd UAT-item leaf tasks to follow-up slices" then="add leaf task as child of follow-up slice (dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice)" should-not="remove the leaf task from its original DEFER'd-items tracking parent" role-ref="supervisor" phase-ref="p10" />
     <!-- Worker completion -->
     <constraint id="C-worker-gates" given="worker finishes implementation" when="signaling completion" then="run quality gates (typecheck + tests) AND verify production code path (no TODOs, real deps)" should-not="close with only 'tests pass' as completion gate" role-ref="worker" phase-ref="p9" />
     <!-- Error quality -->
@@ -939,10 +941,10 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
     <title-convention pattern="PROPOSAL-{N}-REVIEW-{axis}-{round}: {description}" label-ref="L-p4s4" created-by="reviewer" phase-ref="p4" note="axis=A|B|C, round starts at 1"></title-convention>
     <title-convention pattern="UAT-{N}: {description}" label-ref="L-p5s5" created-by="architect" phase-ref="p5"></title-convention>
     <title-convention pattern="IMPL_PLAN: {description}" label-ref="L-p8s8" created-by="supervisor" phase-ref="p8"></title-convention>
-    <title-convention pattern="SLICE-{N}: {description}" label-ref="L-p9s9" created-by="supervisor" phase-ref="p9" note="N identifies slice within the implementation plan"></title-convention>
-    <title-convention pattern="SLICE-{N}-REVIEW-{axis}-{round}: {description}" label-ref="L-p10s10" created-by="reviewer" phase-ref="p10" note="axis=A|B|C, round starts at 1"></title-convention>
+    <title-convention pattern="SLICE-{W}-{N}: {description}" label-ref="L-p9s9" created-by="supervisor" phase-ref="p9" note="W identifies the wave, N the slice within that wave"></title-convention>
+    <title-convention pattern="WAVE-{W}-REVIEW-{axis}-{round}: {description}" label-ref="L-p10s10" created-by="reviewer" phase-ref="p10" note="axis=A|B|C, round starts at 1; findings hang under this wave review task"></title-convention>
     <title-convention pattern="IMPL-REVIEW-{axis}-{round}: {description}" label-ref="L-p10s10" created-by="supervisor" phase-ref="p10" note="When reviewing all slices collectively"></title-convention>
-    <title-convention pattern="FOLLOWUP: {description}" label-ref="L-followup" created-by="supervisor" note="Follow-up epic created at UAT when user-DEFER&#39;d items exist (never from review severities; all review findings must reach 0 before wave close). Single-parent epic relationship — no followup-of-followup."></title-convention>
+    <title-convention pattern="FOLLOWUP: {description}" label-ref="L-followup" created-by="supervisor" note="Follow-up epic created at UAT when user-DEFER&#39;d items exist (never from review severities; review findings converge at the end — close rule: `C-finding-lifecycle`). Single-parent epic relationship — no followup-of-followup."></title-convention>
     <title-convention pattern="FOLLOWUP_URE: {description}" label-ref="L-p2s2_1" created-by="supervisor" phase-ref="p2" note="Scoping URE to determine which user-DEFER&#39;d UAT items to address"></title-convention>
     <title-convention pattern="FOLLOWUP_URD: {description}" label-ref="L-p2s2_2" created-by="supervisor" phase-ref="p2" extra-label-ref="L-urd" note="Requirements doc for follow-up scope. References original URD."></title-convention>
     <title-convention pattern="FOLLOWUP_PROPOSAL-{N}: {description}" label-ref="L-p3s3" created-by="architect" phase-ref="p3" note="Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings"></title-convention>
@@ -955,83 +957,34 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
      Mapping from protocol documentation files to the entities they cover.
        ═══════════════════════════════════════════════════════════════════════ -->
   <documents>
-    <document id="doc-readme" path="protocol/README.md" purpose="Protocol entry point and quick-start guide">
+    <document id="doc-skill" path="protocol/SKILL.md" purpose="Protocol index">
       <covers>
-        <entity type="phase" depth="overview" refs="p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12"></entity>
-        <entity type="label" depth="schema-summary" refs="all"></entity>
+        <entity type="phase" depth="index" refs="all"></entity>
       </covers>
     </document>
-    <document id="doc-claude" path="protocol/CLAUDE.md" purpose="Core agent directive: philosophy, constraints, roles, label schema">
+    <document id="doc-claude" path="protocol/CLAUDE.md" purpose="Agent directive">
       <covers>
-        <entity type="phase" depth="summary" refs="p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12"></entity>
-        <entity type="role" depth="summary" refs="architect,reviewer,supervisor,worker"></entity>
-        <entity type="label" depth="full" refs="all"></entity>
-        <entity type="constraint" depth="full" refs="all-protocol"></entity>
-        <entity type="task-title" depth="full" refs="all"></entity>
-        <entity type="handoff" depth="summary" refs="h1,h2,h3,h4,h5,h6"></entity>
-        <entity type="severity" depth="full" refs="BLOCKER,IMPORTANT,MINOR"></entity>
-        <entity type="review-axis" depth="summary" refs="axis-correctness,axis-test_quality,axis-elegance"></entity>
+        <entity type="role" depth="index" refs="epoch"></entity>
       </covers>
     </document>
-    <document id="doc-constraints" path="protocol/CONSTRAINTS.md" purpose="Coding standards, checklists, severity definitions, naming conventions">
+    <document id="doc-constraints" path="protocol/CONSTRAINTS.md" purpose="Constraint index">
       <covers>
-        <entity type="constraint" depth="full" refs="all"></entity>
-        <entity type="severity" depth="full" refs="BLOCKER,IMPORTANT,MINOR"></entity>
-        <entity type="vote" depth="full" refs="ACCEPT,REVISE"></entity>
-        <entity type="label" depth="schema" refs="all"></entity>
-        <entity type="task-title" depth="full" refs="all"></entity>
+        <entity type="constraint" depth="index" refs="all"></entity>
       </covers>
     </document>
-    <document id="doc-process" path="protocol/PROCESS.md" purpose="Step-by-step workflow execution (single source of truth)">
+    <document id="doc-process" path="protocol/PROCESS.md" purpose="Phase index and workflow anchors">
       <covers>
-        <entity type="phase" depth="full" refs="p1,p2,p3,p4,p5,p6,p7,p8,p9,p10,p11,p12"></entity>
-        <entity type="substep" depth="full" refs="all"></entity>
-        <entity type="role" depth="tools-matrix" refs="architect,reviewer,supervisor,worker"></entity>
-        <entity type="command" depth="tools-matrix" refs="all"></entity>
-        <entity type="label" depth="full" refs="all"></entity>
-        <entity type="transition" depth="full" refs="all"></entity>
-        <entity type="severity" depth="full" refs="BLOCKER,IMPORTANT,MINOR"></entity>
+        <entity type="phase" depth="index" refs="all"></entity>
       </covers>
     </document>
-    <document id="doc-agents" path="protocol/AGENTS.md" purpose="Role taxonomy: phases owned, tools, handoffs per agent">
+    <document id="doc-agents" path="protocol/AGENTS.md" purpose="Role and phase index">
       <covers>
-        <entity type="role" depth="full" refs="epoch,architect,reviewer,supervisor,worker"></entity>
-        <entity type="phase" depth="role-mapping" refs="all"></entity>
-        <entity type="command" depth="role-mapping" refs="all"></entity>
-        <entity type="handoff" depth="full" refs="h1,h2,h3,h4,h5,h6"></entity>
-        <entity type="review-axis" depth="full" refs="axis-correctness,axis-test_quality,axis-elegance"></entity>
+        <entity type="role" depth="index" refs="epoch,architect,reviewer,supervisor,worker"></entity>
       </covers>
     </document>
-    <document id="doc-skills" path="protocol/SKILLS.md" purpose="Command reference: all /pasture:* skills mapped to phase and role">
+    <document id="doc-skills" path="protocol/SKILLS.md" purpose="Skill and role index">
       <covers>
-        <entity type="command" depth="full" refs="all"></entity>
-        <entity type="phase" depth="command-mapping" refs="all"></entity>
-        <entity type="role" depth="command-mapping" refs="all"></entity>
-        <entity type="label" depth="command-creates" refs="all"></entity>
-        <entity type="review-axis" depth="summary" refs="axis-correctness,axis-test_quality,axis-elegance"></entity>
-      </covers>
-    </document>
-    <document id="doc-handoff" path="protocol/HANDOFF_TEMPLATE.md" purpose="Standardized template for 6 actor-change transitions">
-      <covers>
-        <entity type="handoff" depth="full" refs="h1,h2,h3,h4,h5,h6"></entity>
-        <entity type="role" depth="handoff-fields" refs="architect,supervisor,worker,reviewer"></entity>
-      </covers>
-    </document>
-    <document id="doc-migration" path="protocol/MIGRATION_v1_to_v2.md" purpose="Label and title migration from v1 to v2">
-      <covers>
-        <entity type="label" depth="v1-v2-mapping" refs="all"></entity>
-        <entity type="task-title" depth="v1-v2-mapping" refs="all"></entity>
-        <entity type="vote" depth="v1-v2-mapping" refs="ACCEPT,REVISE"></entity>
-      </covers>
-    </document>
-    <document id="doc-uat-template" path="protocol/UAT_TEMPLATE.md" purpose="User Acceptance Test structured output template">
-      <covers>
-        <entity type="phase" depth="template" refs="p5,p11"></entity>
-      </covers>
-    </document>
-    <document id="doc-uat-example" path="protocol/UAT_EXAMPLE.md" purpose="Worked UAT example">
-      <covers>
-        <entity type="phase" depth="example" refs="p5"></entity>
+        <entity type="command" depth="index" refs="all"></entity>
       </covers>
     </document>
     <document id="doc-schema" path="schema.xml" purpose="Generated machine-readable protocol projection (BCNF)">
@@ -1060,9 +1013,9 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
        ═══════════════════════════════════════════════════════════════════════ -->
   <dependency-model>
     <rule>Parent (stays open) is blocked-by child (must finish first). Work flows bottom-up; closure flows top-down.</rule>
-    <canonical-chain>REQUEST → blocked-by ELICIT → blocked-by PROPOSAL → blocked-by IMPL_PLAN → blocked-by SLICE-N → blocked-by leaf tasks</canonical-chain>
-    <command>pasture task dep add {parent-uri} --blocked-by {child-uri}</command>
-    <anti-pattern>pasture task dep add {child-uri} --blocked-by {parent-uri}</anti-pattern>
+    <canonical-chain>REQUEST → blocked-by ELICIT → blocked-by PROPOSAL → blocked-by IMPL_PLAN → blocked-by SLICE-{W}-{N} → blocked-by leaf tasks</canonical-chain>
+    <command>${EPOCH_REC} block {parent-uri} --by {child-uri}</command>
+    <anti-pattern>${EPOCH_REC} block {child-uri} --by {parent-uri}</anti-pattern>
     <reference-links note="URD and other reference docs use frontmatter, not blocking deps">
       <pattern>description frontmatter:&#xA;  references:&#xA;    urd: {urd-task-uri}&#xA;    request: {request-task-uri}</pattern>
     </reference-links>
@@ -1070,45 +1023,44 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
   <!-- ═══════════════════════════════════════════════════════════════════════
        FOLLOW-UP LIFECYCLE (R6 from URD)
 
-     When code review produces IMPORTANT or MINOR findings, the supervisor
-     creates a follow-up epic that runs the same protocol phases with
-     FOLLOWUP_* prefixed task types. The IMPORTANT/MINOR leaf tasks from
-     the original review gain a second parent: the follow-up slice they
-     are assigned to (dual-parent).
+     When UAT (Phase 5 or Phase 11) produces user-DEFER'd items, the
+     supervisor creates a follow-up epic that runs the same protocol phases
+     with FOLLOWUP_* prefixed task types. The user-DEFER'd UAT-item leaf
+     tasks gain a second parent: the follow-up slice they are assigned to
+     (dual-parent).
 
      Kind: Separate enum values (FOLLOWUP_URE, FOLLOWUP_SLICE, etc.).
      Simple single-parent epic relationship — no followup-of-followup.
        ═══════════════════════════════════════════════════════════════════════ -->
   <followup-lifecycle>
-    <trigger>Code review completion AND (IMPORTANT OR MINOR findings exist)</trigger>
+    <trigger>UAT (Phase 5 or Phase 11) produces user-DEFER&#39;d items</trigger>
     <owner-role>supervisor</owner-role>
     <gated-on-blocker>false</gated-on-blocker>
     <dependency-chain note="Same protocol phases but with FOLLOWUP_ prefix">
-      <step task-title="FOLLOWUP: {description}" phase-ref="p10" description="Epic created by supervisor. References original URD and review tasks."></step>
-      <step task-title="FOLLOWUP_URE: {description}" phase-ref="p2" description="Scoping URE with user to determine which findings to address."></step>
+      <step task-title="FOLLOWUP: {description}" phase-ref="p11" description="Epic created by supervisor from user-DEFER&#39;d UAT items. References original URD and UAT task."></step>
+      <step task-title="FOLLOWUP_URE: {description}" phase-ref="p2" description="Scoping URE with user to determine which DEFER&#39;d items to address."></step>
       <step task-title="FOLLOWUP_URD: {description}" phase-ref="p2" description="Requirements doc for follow-up scope. References original URD."></step>
-      <step task-title="FOLLOWUP_PROPOSAL-{N}: {description}" phase-ref="p3" description="Proposal accounting for original URD + FOLLOWUP_URD + outstanding findings."></step>
+      <step task-title="FOLLOWUP_PROPOSAL-{N}: {description}" phase-ref="p3" description="Proposal accounting for original URD + FOLLOWUP_URD + DEFER&#39;d items."></step>
       <step task-title="FOLLOWUP_IMPL_PLAN: {description}" phase-ref="p8" description="Supervisor decomposes follow-up into slices."></step>
-      <step task-title="FOLLOWUP_SLICE-{N}: {description}" phase-ref="p9" description="Each slice adopts original IMPORTANT/MINOR leaf tasks as children."></step>
+      <step task-title="FOLLOWUP_SLICE-{N}: {description}" phase-ref="p9" description="Each slice adopts user-DEFER&#39;d UAT-item leaf tasks as children."></step>
     </dependency-chain>
     <leaf-task-adoption>
-      <rule>When supervisor creates FOLLOWUP_SLICE-N, the IMPORTANT/MINOR leaf tasks from the original review gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.</rule>
-      <command>pasture task dep add {followup-slice-uri} --blocked-by {important-leaf-task-uri}&#xA;pasture task dep add {followup-slice-uri} --blocked-by {minor-leaf-task-uri}</command>
-      <note>Leaf tasks retain their original parent (the severity group from the original review) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.</note>
+      <rule>When supervisor creates FOLLOWUP_SLICE-N, the user-DEFER&#39;d UAT-item leaf tasks gain a second parent: the follow-up slice. This is the same dual-parent pattern as BLOCKER findings.</rule>
+      <command>${EPOCH_REC} block {followup-slice-uri} --by {defer-item-leaf-task-1-uri}&#xA;${EPOCH_REC} block {followup-slice-uri} --by {defer-item-leaf-task-2-uri}</command>
+      <note>Leaf tasks retain their original parent (the DEFER&#39;d-items tracking group) AND gain the follow-up slice as a second parent. Both must close for the leaf to be fully resolved.</note>
     </leaf-task-adoption>
     <references>
       <ref type="relates_to" target="original URD" note="Follow-up epic references original URD via frontmatter"></ref>
-      <ref type="relates_to" target="original REVIEW tasks" note="Follow-up epic references review tasks via frontmatter"></ref>
+      <ref type="relates_to" target="original UAT task" note="Follow-up epic references the UAT task via frontmatter"></ref>
     </references>
     <handoff-chain note="How handoffs flow through the follow-up lifecycle">
-      <transition order="1" handoff-ref="h5" description="Reviewer → Followup: Bridge from original review to follow-up epic. Created by supervisor when IMPORTANT/MINOR findings exist. This handoff STARTS the follow-up lifecycle."></transition>
-      <transition order="2" handoff-ref="none" description="Supervisor creates FOLLOWUP_URE (same actor — supervisor owns follow-up epic and initiates scoping)" same-actor="true"></transition>
-      <transition order="3" handoff-ref="none" description="Supervisor creates FOLLOWUP_URD (same actor within Phase 2 — supervisor synthesizes follow-up requirements)" same-actor="true"></transition>
-      <transition order="4" handoff-ref="h6" description="Supervisor → Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped findings and requirements."></transition>
-      <transition order="5" handoff-ref="h1" description="Architect → Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and outstanding findings."></transition>
-      <transition order="6" handoff-ref="h2" description="Supervisor → Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."></transition>
-      <transition order="7" handoff-ref="h3" description="Supervisor → Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + original findings being addressed."></transition>
-      <transition order="8" handoff-ref="h4" description="Worker → Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."></transition>
+      <transition order="1" handoff-ref="none" description="Supervisor creates FOLLOWUP_URE from the user-DEFER&#39;d UAT items (same actor — supervisor owns the follow-up epic and initiates scoping)" same-actor="true"></transition>
+      <transition order="2" handoff-ref="none" description="Supervisor creates FOLLOWUP_URD (same actor within Phase 2 — supervisor synthesizes follow-up requirements)" same-actor="true"></transition>
+      <transition order="3" handoff-ref="h6" description="Supervisor → Architect: Hands off completed FOLLOWUP_URE + FOLLOWUP_URD to architect for FOLLOWUP_PROPOSAL creation. Architect receives scoped requirements and DEFER&#39;d items."></transition>
+      <transition order="4" handoff-ref="h1" description="Architect → Supervisor: After FOLLOWUP_PROPOSAL is ratified, architect hands off to supervisor for FOLLOWUP_IMPL_PLAN. Handoff doc references original URD, FOLLOWUP_URD, and the DEFER&#39;d items."></transition>
+      <transition order="5" handoff-ref="h2" description="Supervisor → Worker: FOLLOWUP_SLICE-N assignment. Worker receives both the follow-up slice spec AND the original leaf task IDs they must resolve."></transition>
+      <transition order="6" handoff-ref="h3" description="Supervisor → Reviewer: Code review of follow-up slices. Reviewer receives follow-up context + the DEFER&#39;d items being addressed."></transition>
+      <transition order="7" handoff-ref="h4" description="Worker → Reviewer: Worker completes follow-up slice. Handoff includes which original leaf tasks were resolved."></transition>
     </handoff-chain>
   </followup-lifecycle>
   <!-- ═══════════════════════════════════════════════════════════════════════
@@ -1120,15 +1072,15 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
   <procedure-steps>
     <role ref="supervisor">
       <step order="1" id="S-supervisor-call-skill">
-        <instruction>Call Skill(/pasture:supervisor) to load role instructions</instruction>
-        <command>Skill(/pasture:supervisor)</command>
+        <instruction>Call invoke_skill(/pasture:supervisor) to load role instructions</instruction>
+        <command>invoke_skill(/pasture:supervisor)</command>
       </step>
       <step order="2" id="S-supervisor-read-plan">
-        <instruction>Read RATIFIED_PLAN, URD, UAT, and elicit tasks via pasture task show for full context</instruction>
-        <command>pasture task show "${RATIFIED_PLAN_ID_URI}" &amp;&amp; pasture task show "${URD_ID_URI}" &amp;&amp; pasture task show "${UAT_ID_URI}" &amp;&amp; pasture task show "${ELICIT_ID_URI}"</command>
+        <instruction>Read RATIFIED_PLAN, URD, UAT, and elicit tasks via ${EPOCH_REC} show for full context</instruction>
+        <command>${EPOCH_REC} show "${RATIFIED_PLAN_ID_URI}" &amp;&amp; ${EPOCH_REC} show "${URD_ID_URI}" &amp;&amp; ${EPOCH_REC} show "${UAT_ID_URI}" &amp;&amp; ${EPOCH_REC} show "${ELICIT_ID_URI}"</command>
       </step>
       <step order="3" id="S-supervisor-explore-ephemeral">
-        <instruction>Spawn ephemeral Explore subagents via Task tool for scoped codebase queries</instruction>
+        <instruction>Spawn ephemeral Explore subagents via delegate_assignment tool for scoped codebase queries</instruction>
         <context>Each subagent is short-lived and returns findings; no standing team overhead</context>
       </step>
       <step order="4" id="S-supervisor-decompose-slices" next-state="p8">
@@ -1137,22 +1089,20 @@ UAT_ID_URI=$(pasture task create "UAT: Plan acceptance" --phase plan_uat --names
       </step>
       <step order="5" id="S-supervisor-create-leaf-tasks">
         <instruction>Create leaf tasks (L1/L2/L3) for every slice</instruction>
-        <command>CREATED_URI=$(pasture task create "SLICE-{K}-L{1,2,3}: &lt;description&gt;" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice</command>
+        <command>CREATED_URI=$(${EPOCH_REC} create --kind task --title "&lt;description&gt;" --phase worker_slices --body "Describe the specific work and reference full task URIs")</command>
         <example id="S-supervisor-create-leaf-tasks-frontmatter" lang="bash" label="template" also-illustrates="C-frontmatter-refs">
-          <code><![CDATA[CREATED_URI=$(pasture task create "SLICE-1-L1: Types -- <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+          <code><![CDATA[CREATED_URI=$(${EPOCH_REC} create --kind task --title "Types — <slice name>" --phase worker_slices \
+  --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
   impl_plan: "${IMPL_PLAN_ID_URI}"
   urd: "${URD_ID_URI}"
 ---
-Layer 1: types and interfaces for <slice name>." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
+Layer 1: types and interfaces for <slice name>.")]]></code>
         </example>
       </step>
       <step order="6" id="S-supervisor-spawn-workers" next-state="p9">
-        <instruction>Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.</instruction>
+        <instruction>Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent. Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.</instruction>
       </step>
     </role>
     <role ref="worker">
@@ -1175,17 +1125,17 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
        ═══════════════════════════════════════════════════════════════════════ -->
   <checklists>
     <checklist id="supervisor-landing" role-ref="supervisor" gate="landing">
-      <item id="CL-sup-all-accept" required="true">Fix-free clean re-review: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all 3 reviewers</item>
+      <item id="CL-sup-all-accept" required="true">All 3 reviewers ACCEPT at convergence and no open pasture:finding remains</item>
       <item id="CL-sup-followup-created" required="true">FOLLOWUP epic created at UAT only if user-DEFER&#39;d items exist (never from review severities)</item>
       <item id="CL-sup-agent-commit" required="true">git agent-commit used (not git commit -m)</item>
       <item id="CL-sup-tasks-closed" required="true">All upstream tasks closed or dependency-resolved</item>
       <item id="CL-sup-close-on-review-wave" required="true">Can only close on a review wave, not a worker wave</item>
-      <item id="CL-sup-review-eligible" required="true">Eligible to close only after review by independent agents with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings</item>
+      <item id="CL-sup-review-eligible" required="true">Eligible to close only after convergence finds no open pasture:finding across all waves</item>
     </checklist>
     <checklist id="supervisor-review-ready" role-ref="supervisor" gate="review-ready">
-      <item id="CL-sup-all-slices-notified" required="true">All workers have notified completion via pasture task comment add</item>
+      <item id="CL-sup-all-slices-notified" required="true">All workers have notified completion via ${EPOCH_REC} note</item>
       <item id="CL-sup-reviewers-assigned" required="true">Ephemeral reviewers spawned for all slices</item>
-      <item id="CL-sup-severity-groups-created" required="true">Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice</item>
+      <item id="CL-sup-severity-groups-created" required="true">Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per wave per axis per round</item>
     </checklist>
     <checklist id="worker-completion" role-ref="worker" gate="completion">
       <item id="CL-worker-no-todos" required="true">No TODO placeholders in CLI/API actions</item>
@@ -1196,10 +1146,10 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
       <item id="CL-worker-production-path" required="true">Production code path verified end-to-end via code inspection</item>
     </checklist>
     <checklist id="worker-slice-closure" role-ref="worker" gate="slice-closure">
-      <item id="CL-worker-notified-supervisor" required="true">Supervisor notified via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close)</item>
+      <item id="CL-worker-notified-supervisor" required="true">Supervisor notified via ${EPOCH_REC} note (not ${EPOCH_REC} close)</item>
       <item id="CL-worker-completion-done" required="true">All completion-gate items passed</item>
       <item id="CL-worker-close-on-review-wave" required="true">Can only close on a review wave, not a worker wave</item>
-      <item id="CL-worker-review-eligible" required="true">Eligible to close only after independent review with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings</item>
+      <item id="CL-worker-review-eligible" required="true">No open BLOCKER finding on this slice; IMPORTANT and MINOR findings stay open to convergence</item>
     </checklist>
   </checklists>
   <!-- ═══════════════════════════════════════════════════════════════════════
@@ -1208,16 +1158,16 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
      Pasture coordination commands shared across roles and role-specific.
        ═══════════════════════════════════════════════════════════════════════ -->
   <coordination-commands>
-    <coord-cmd id="cmd-coord-assign" action="Transfer existing assignment (supervisor only)" template="pasture task assignment transfer &#34;${TASK_ID_URI}&#34; --slot owner-responsibility --assignment &#34;${SUCCESSOR_ASSIGNMENT_ID}&#34; --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant &#34;${REGISTERED_WORKER_ACTOR}&#34;" role-ref="supervisor"></coord-cmd>
-    <coord-cmd id="cmd-coord-blocked" action="List blocked" template="pasture task blocked" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-close" action="Report completion without closing" template="pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 &#34;${TASK_ID_URI}&#34; &#34;Implementation complete; awaiting independent review and supervisor closure.&#34;" role-ref="worker"></coord-cmd>
-    <coord-cmd id="cmd-coord-comment" action="Add progress note" template="pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 &#34;${TASK_ID_URI}&#34; &#34;Progress: ...&#34;" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-dep-add" action="Chain dependency" template="pasture task dep add &#34;${PARENT_URI}&#34; --blocked-by &#34;${CHILD_URI}&#34;" role-ref="supervisor"></coord-cmd>
-    <coord-cmd id="cmd-coord-label" action="Label completed slice" template="pasture task label add &#34;${SLICE_ID_URI}&#34; pasture:p9-impl:slice-complete" role-ref="supervisor"></coord-cmd>
-    <coord-cmd id="cmd-coord-list" action="List in-progress" template="pasture task list --namespace &#34;$PASTURE_NAMESPACE&#34; --status=in_progress" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-show" action="Check task details" template="pasture task show &#34;${TASK_ID_URI}&#34;" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-status" action="Update status" template="pasture task update &#34;${TASK_ID_URI}&#34; --status=in_progress" shared="true"></coord-cmd>
-    <coord-cmd id="cmd-coord-worker-notes" action="Add completion notes" template="pasture task update &#34;${TASK_ID_URI}&#34; --notes=&#34;Implementation complete. Production code verified.&#34;" role-ref="worker"></coord-cmd>
+    <coord-cmd id="cmd-coord-assign" action="Transfer existing assignment (supervisor only)" template="${EPOCH_REC} label &#34;${TASK_ID_URI}&#34; owner:&#34;${REGISTERED_WORKER_ACTOR}&#34;" role-ref="supervisor"></coord-cmd>
+    <coord-cmd id="cmd-coord-blocked" action="List blocked" template="${EPOCH_REC} query --blocked" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-close" action="Report completion without closing" template="${EPOCH_REC} note &#34;${TASK_ID_URI}&#34; --author pasture-system/00000000-0000-0000-0000-000000000000 --body &#34;Implementation complete; awaiting independent review and supervisor closure.&#34;" role-ref="worker"></coord-cmd>
+    <coord-cmd id="cmd-coord-comment" action="Add progress note" template="${EPOCH_REC} note &#34;${TASK_ID_URI}&#34; --author pasture-system/00000000-0000-0000-0000-000000000000 --body &#34;Progress: ...&#34;" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-dep-add" action="Chain dependency" template="${EPOCH_REC} block &#34;${PARENT_URI}&#34; --by &#34;${CHILD_URI}&#34;" role-ref="supervisor"></coord-cmd>
+    <coord-cmd id="cmd-coord-label" action="Record slice completion" template="${EPOCH_REC} note &#34;${SLICE_ID_URI}&#34; --author pasture-system/00000000-0000-0000-0000-000000000000 --body &#34;Slice complete.&#34;" role-ref="supervisor"></coord-cmd>
+    <coord-cmd id="cmd-coord-list" action="List in-progress" template="${EPOCH_REC} query --status=in_progress" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-show" action="Check task details" template="${EPOCH_REC} show &#34;${TASK_ID_URI}&#34;" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-status" action="Update status" template="${EPOCH_REC} status &#34;${TASK_ID_URI}&#34; --set in_progress" shared="true"></coord-cmd>
+    <coord-cmd id="cmd-coord-worker-notes" action="Add completion notes" template="${EPOCH_REC} note &#34;${TASK_ID_URI}&#34; --author pasture-system/00000000-0000-0000-0000-000000000000 --body=&#34;Implementation complete. Production code verified.&#34;" role-ref="worker"></coord-cmd>
   </coordination-commands>
   <!-- ═══════════════════════════════════════════════════════════════════════
        WORKFLOWS
@@ -1267,7 +1217,7 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
     </workflow>
     <workflow id="layer-cake" name="Layer Cake" role-ref="worker" description="TDD layer-by-layer implementation within a vertical slice. Worker implements types first, then tests (will fail), then production code to make tests pass.">
       <stage id="lc-types" name="Types" order="1" execution="sequential" phase-ref="p9">
-        <action id="lc-types-read" instruction="Read slice task and identify required types" command="pasture task show &#34;${SLICE_TASK_ID_URI}&#34;"></action>
+        <action id="lc-types-read" instruction="Read slice task and identify required types" command="${EPOCH_REC} show &#34;${SLICE_TASK_ID_URI}&#34;"></action>
         <action id="lc-types-define" instruction="Define types, interfaces, and schemas (no deps) — only types for YOUR slice"></action>
         <exit-condition type="proceed" condition="All required types defined; file imports without error"></exit-condition>
       </stage>
@@ -1281,32 +1231,32 @@ pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice]]></code>
         <action id="lc-impl-wire" instruction="Wire with real dependencies (not mocks in production code)"></action>
         <action id="lc-impl-run-tests" instruction="Run tests — all Layer 2 tests must pass"></action>
         <action id="lc-impl-commit" instruction="Commit completed work" command="git agent-commit -m ..."></action>
-        <action id="lc-impl-notify" instruction="Notify supervisor of completion via pasture task comment add" command="pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 &#34;${SLICE_ID_URI}&#34; &#34;Implementation complete&#34;"></action>
+        <action id="lc-impl-notify" instruction="Notify supervisor of completion via ${EPOCH_REC} note" command="${EPOCH_REC} note &#34;${SLICE_ID_URI}&#34; --author pasture-system/00000000-0000-0000-0000-000000000000 --body &#34;Implementation complete&#34;"></action>
         <exit-condition type="success" condition="All tests pass; no TODO placeholders; real deps wired; production code path verified via code inspection"></exit-condition>
         <exit-condition type="escalate" condition="Blocker encountered — use /pasture:worker-blocked with details"></exit-condition>
       </stage>
     </workflow>
-    <workflow id="ride-the-wave" name="Ride the Wave" role-ref="supervisor" description="Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate.">
+    <workflow id="ride-the-wave" name="Ride the Wave" role-ref="supervisor" description="Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for whole-wave review, where only an open BLOCKER finding gates the wave, workers fix, and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.">
       <stage id="rtw-plan" name="Plan" order="1" execution="sequential" phase-ref="p8">
-        <action id="rtw-plan-read" instruction="Read RATIFIED_PLAN and URD via pasture task show" command="pasture task show &#34;${RATIFIED_PLAN_ID_URI}&#34; &amp;&amp; pasture task show &#34;${URD_ID_URI}&#34;"></action>
+        <action id="rtw-plan-read" instruction="Read RATIFIED_PLAN and URD via ${EPOCH_REC} show" command="${EPOCH_REC} show &#34;${RATIFIED_PLAN_ID_URI}&#34; &amp;&amp; ${EPOCH_REC} show &#34;${URD_ID_URI}&#34;"></action>
         <action id="rtw-plan-explore" instruction="Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams"></action>
         <action id="rtw-plan-decompose" instruction="Use Explore findings to decompose into vertical slices with integration points"></action>
-        <action id="rtw-plan-leaf-tasks" instruction="Create leaf tasks (L1/L2/L3) for every slice" command="pasture task dep add &#34;${SLICE_ID_URI}&#34; --blocked-by &#34;${LEAF_TASK_ID_URI}&#34;"></action>
+        <action id="rtw-plan-leaf-tasks" instruction="Create leaf tasks (L1/L2/L3) for every slice" command="${EPOCH_REC} block &#34;${SLICE_ID_URI}&#34; --by &#34;${LEAF_TASK_ID_URI}&#34;"></action>
         <exit-condition type="proceed" condition="All slices created with leaf tasks, dependency-chained, assigned"></exit-condition>
       </stage>
       <stage id="rtw-build" name="Build" order="2" execution="parallel" phase-ref="p9">
-        <action id="rtw-build-spawn" instruction="Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity."></action>
-        <action id="rtw-build-monitor" instruction="Monitor worker progress via pasture task list --namespace &#34;$PASTURE_NAMESPACE&#34; and pasture task show" command="pasture task list --namespace &#34;$PASTURE_NAMESPACE&#34; --label=&#34;pasture:p9-impl:s9-slice&#34; --status=in_progress"></action>
+        <action id="rtw-build-spawn" instruction="Spawn workers via the delegate_assignment tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent. Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4."></action>
+        <action id="rtw-build-monitor" instruction="Monitor worker progress via ${EPOCH_REC} query and ${EPOCH_REC} show" command="${EPOCH_REC} query --phase worker_slices --status=in_progress"></action>
         <action id="rtw-build-integrate" instruction="Supervisor commits at integration points (atomic commits) — commit small, integrate early and often"></action>
-        <exit-condition type="proceed" condition="All workers have notified completion via pasture task comment add"></exit-condition>
+        <exit-condition type="proceed" condition="All workers have notified completion via ${EPOCH_REC} note"></exit-condition>
       </stage>
       <stage id="rtw-review-fix" name="Review + Fix Cycles" order="3" execution="conditional-loop" phase-ref="p10">
-        <action id="rtw-review-spawn" instruction="Spawn reviewers via Task tool for per-slice code review"></action>
-        <action id="rtw-review-severity" instruction="Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice"></action>
-        <action id="rtw-review-severity-track" instruction="Track findings in the 3 severity groups; ALL groups must reach 0 before wave close (FOLLOWUP is created later at UAT, fed only by user-DEFER&#39;d items)"></action>
+        <action id="rtw-review-spawn" instruction="Spawn reviewers via delegate_assignment tool for whole-wave code review"></action>
+        <action id="rtw-review-severity" instruction="Reviewers create one severity trio (BLOCKER/IMPORTANT/MINOR) per wave, per axis, per round"></action>
+        <action id="rtw-review-severity-track" instruction="Track findings as `pasture:finding` children of the 3 severity groups; only an open BLOCKER gates the wave, and open findings converge at the end (FOLLOWUP is created later at UAT, fed only by user-DEFER&#39;d items)"></action>
         <action id="rtw-review-fix" instruction="Workers fix ALL findings (BLOCKER, IMPORTANT, and MINOR)"></action>
-        <exit-condition type="success" condition="All reviewers report 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free clean round — proceed to Phase 11 UAT"></exit-condition>
-        <exit-condition type="continue" condition="Any finding (BLOCKER, IMPORTANT, or MINOR) remains within budget — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)"></exit-condition>
+        <exit-condition type="success" condition="Convergence finds no open pasture:finding across all waves — proceed to Phase 11 UAT"></exit-condition>
+        <exit-condition type="continue" condition="An open BLOCKER gates the current wave, or convergence has not reached 0/0/0 within maxRounds — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)"></exit-condition>
       </stage>
     </workflow>
   </workflows>

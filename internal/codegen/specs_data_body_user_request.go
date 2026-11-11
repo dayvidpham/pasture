@@ -44,13 +44,14 @@ var userRequestBody = SkillBody{
 		// R6/A2: surface the shared validation-cases lifecycle at the classification
 		// entry point — it applies to EVERY request (generalized from fix-intent-only
 		// at v2-2). behaviorRef resolves to SharedFragmentSpecs[FragValidationCases]
-		// (SLICE-1).
+		//.
 		behaviorRef(FragValidationCases),
 	},
 
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragModelPolicy),
 		{
 			Id:    "user-req-substeps",
 			Title: "Phase 1 Sub-steps",
@@ -70,15 +71,15 @@ var userRequestBody = SkillBody{
 					Title: "Capture verbatim and create the request task",
 					Content: `1. **Get the user's request verbatim:**
    ` + "```" + `
-   AskUserQuestion: "What feature or change would you like to request?"
+   [[op:request_user_decision]]: "What feature or change would you like to request?"
    ` + "```" + `
 
 2. **Create the request task:**
    ` + "```" + `bash
-   REQUEST_ID_URI=$(pasture task create "REQUEST: {{short summary}}" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-     --description "{{VERBATIM user request - do not edit}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-   pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-   pasture task update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+   REQUEST_ID_URI=$([[rec:create]] --kind task --title "REQUEST: {{short summary}}" --phase request \
+     --body "{{VERBATIM user request - do not edit}}")
+   [[rec:label]] "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+   [[rec:note]] "$REQUEST_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
    ` + "```" + `
 
 3. **Classify along 4 axes:**
@@ -89,7 +90,7 @@ var userRequestBody = SkillBody{
 
 4. **Record classification** via comment on the request task:
    ` + "```" + `bash
-   pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+   [[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
      "Classification: scope={{scope}}, complexity={{complexity}}, risk={{risk}}, novelty={{novelty}}"
    ` + "```" + ``,
 				},
@@ -102,7 +103,7 @@ When the intent is to fix existing behavior, the **validation-case lifecycle** a
 
 Record the recognition in the same classification comment so downstream phases pick it up:
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Fix-intent: yes — validation-case lifecycle applies (elicit cases in URE, confirm in UAT, store as fixtures)"
 ` + "```" + ``,
 				},
@@ -114,7 +115,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 			Content: "After classification, confirm research depth with the user:\n" +
 				"\n" +
 				"```\n" +
-				"AskUserQuestion:\n" +
+				"[[op:request_user_decision]]:\n" +
 				"  question: \"Based on classification ({{scope}}, {{complexity}}, {{risk}}, {{novelty}}), how deep should research go?\"\n" +
 				"  header: \"Research Depth\"\n" +
 				"  options:\n" +
@@ -137,11 +138,11 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 					Content: `Record the user's depth choice, then spawn two parallel agents:
 
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Research depth: {{depth}} (user confirmed)"
 ` + "```" + `
 
-Spawn both agents in parallel (via Task tool with ` + "`" + `run_in_background: true` + "`" + `). Each agent invokes its dedicated skill.`,
+Spawn both agents in parallel (with the [[op:delegate_assignment]] tool and ` + "`" + `run_in_background: true` + "`" + `). Each agent invokes its dedicated skill.`,
 				},
 				{
 					Id:    "user-req-step3-research",
@@ -171,7 +172,7 @@ See [skills/research/SKILL.md](../research/SKILL.md) for full procedure, output 
 
 **Record findings** as a comment on the REQUEST task:
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Research findings ({{depth}}):
   - Standards: {{list or 'none found'}}
   - Prior art: {{list of projects/solutions}}
@@ -203,13 +204,13 @@ See [skills/explore/SKILL.md](../explore/SKILL.md) for full procedure, output fo
 
 | Depth | Scope | Tools |
 |-------|-------|-------|
-| **Quick scan** | Grep for keywords, check obvious entry points | Glob, Grep |
-| **Standard research** | Trace data flow, map dependencies, read related modules | Glob, Grep, Read |
-| **Deep dive** | Full dependency graph, architectural analysis, identify all touchpoints | Glob, Grep, Read, Bash (for build/dep tools) |
+| **Quick scan** | Grep for keywords, check obvious entry points | [[tool:glob]], [[tool:grep]] |
+| **Standard research** | Trace data flow, map dependencies, read related modules | [[tool:glob]], [[tool:grep]], [[tool:read]] |
+| **Deep dive** | Full dependency graph, architectural analysis, identify all touchpoints | [[tool:glob]], [[tool:grep]], [[tool:read]], [[tool:bash]] (for build/dep tools) |
 
 **Record findings** as a comment on the REQUEST task:
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions}}
   - Related types: {{existing types/schemas}}
@@ -231,12 +232,12 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 			Content: `User says: "I want to add a logout button to the header that clears the session and redirects to the login page"
 
 ` + "```" + `bash
-REQUEST_ID_URI=$(pasture task create "REQUEST: Add logout button to header" --phase request --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "I want to add a logout button to the header that clears the session and redirects to the login page" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
-pasture task update "$REQUEST_ID_URI" --notes "Requested role (not an assignment): architect"
+REQUEST_ID_URI=$([[rec:create]] --kind task --title "REQUEST: Add logout button to header" --phase request \
+  --body "I want to add a logout button to the header that clears the session and redirects to the login page")
+[[rec:label]] "$REQUEST_ID_URI" pasture:p1-user:s1_1-classify
+[[rec:note]] "$REQUEST_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
 
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Classification: scope=module, complexity=low, risk=internal-only, novelty=familiar"
 ` + "```" + ``,
 		},
@@ -247,7 +248,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 
 The elicit task will block this request task:
 ` + "```" + `bash
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
+[[rec:block]] "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"
 ` + "```" + ``,
 		},
 	},

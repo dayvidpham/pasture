@@ -41,8 +41,8 @@ var reviewerVoteBody = SkillBody{
 		{
 			Id:    "rev-vote-plan-vs-code",
 			Title: "Plan Review vs Code Review",
-			Content: `- **Plan review (Phase 4, ` + "`pasture:p4-plan:s4-review`" + `):** ACCEPT/REVISE only. No severity tree.
-- **Code review (Phase 10, ` + "`pasture:p10-impl:s10-review`" + `):** ACCEPT/REVISE vote. Findings tracked via severity tree (3 groups: BLOCKER, IMPORTANT, MINOR created per round).`,
+			Content: `- **Plan review (Phase 4):** ACCEPT/REVISE only. No severity tree.
+- **Code review (Phase 10):** ACCEPT/REVISE vote. Findings tracked via severity tree (3 groups: BLOCKER, IMPORTANT, MINOR created per wave, per axis, per round).`,
 		},
 		{
 			Id:      "rev-vote-consensus",
@@ -54,10 +54,10 @@ var reviewerVoteBody = SkillBody{
 			Title: "Adding Vote to Pasture",
 			Content: `` + "```" + `bash
 # If accepting:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
+[[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: ACCEPT - End-user impact clear. MVP scope appropriate. Checklist items verifiable."
 
 # If requesting revision:
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
+[[rec:note]] "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: REVISE - Missing: what happens if X fails? Suggestion: add error handling to checklist."
 ` + "```" + ``,
 		},
 		{

@@ -69,15 +69,5 @@ func TestOperationalHistoryPinsExactCanonicalQuotations(t *testing.T) {
 	t.Parallel()
 	history, err := scan.OperationalHistory()
 	require.NoError(t, err)
-	require.Len(t, history, 13)
-	counts := map[string]int{}
-	for _, entry := range history {
-		counts[entry.Owner]++
-	}
-	require.Equal(t, map[string]int{
-		"skills/protocol/UAT_EXAMPLE.md":                                    5,
-		"skills/protocol/RESEARCH_EXAMPLE-nix-openclaw-req-ure-proposal.md": 3,
-		"skills/protocol/user-request-revamp-v2.md":                         2,
-		"skills/protocol/MIGRATION_v1_to_v2.md":                             3,
-	}, counts)
+	require.Empty(t, history, "retired tracker quotations were deleted from the protocol documents; a new quotation must be reviewed into the inventory before it is allowed")
 }

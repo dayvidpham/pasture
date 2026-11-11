@@ -39,7 +39,7 @@ const event = { sessionID: "constructed", agent: "constructed", model: { provide
 const verify = (e) => {
   assert.equal(e.system.filter(p => p.type === "text" && p.text.startsWith(marker)).length, 1);
   const text = e.system.find(p => p.text.startsWith(marker)).text;
-  for (const phrase of ["pasture task ready", "pasture task blocked", "--status in_progress", "--author", "git agent-commit"])
+  for (const phrase of ['"${EPOCH_REC}" ready', '"${EPOCH_REC}" query --blocked', '"${EPOCH_REC}" query --status in_progress', '--notes', "--author", "git agent-commit", "pending/", "backend: error"])
     assert.ok(text.includes(phrase), phrase);
 };
 for (const stage of ["first", "repeat", "continuation"]) {

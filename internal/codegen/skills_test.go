@@ -292,7 +292,7 @@ func TestGenerateSubSkill_OwnsHeader(t *testing.T) {
 	// The output must START with the generated YAML frontmatter (name = dir key,
 	// description = CommandSpec.Description), exactly mirroring role skills.
 	wantFrontmatter := "---\nname: supervisor-plan-tasks\n" +
-		"description: Decompose ratified plan into vertical slices (SLICE-N)\n---\n"
+		"description: Decompose ratified plan into vertical slices (SLICE-{W}-{N})\n---\n"
 	assert.True(t, strings.HasPrefix(result, wantFrontmatter),
 		"GenerateSubSkill should emit YAML frontmatter at the top of the file\n"+
 			"Expected prefix: %q\nActual start: %q",

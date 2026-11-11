@@ -18,7 +18,7 @@ Launch the wave of workers for parallel vertical slice implementation, reviewed 
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Spawn ephemeral Explore subagents (delegation operation, scoped queries)
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -28,31 +28,33 @@ Phase 9: BUILD
   ├─ Workers implement their slices in parallel
   └─ Workers do NOT shut down when finished
 
-Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
+Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (delegation operation, whole-wave review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
+  │   ├─ Reviewers label every finding pasture:finding under its severity group
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review
   ├─ Cycle 2 (if needed): same pattern
   ├─ Cycle N (as many as needed): same pattern
-  └─ Continue until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
+  └─ Each wave advances when no BLOCKER is open; IMPORTANT and MINOR findings stay open
 
 DONE → Phase 11 (UAT)
   ├─ Shut down Workers
   └─ FOLLOWUP epic (if any) is created at UAT from user-DEFER'd items only
 
 Cycle Exit Conditions:
-  Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR   → Proceed to Phase 11 (UAT)
-  ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (up to chosen budget; on exhaustion, surface to user)
-  Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning
+  A wave gate: no open BLOCKER finding                        → the wave advances; open findings stay open
+  After the last wave: convergence over open pasture:finding  → targets 0/0/0 within maxRounds; on exhaustion, surface to the user
+  Finding close rule: see C-finding-lifecycle
+  Genuinely stuck (cannot converge)                           → Escalate to architect for re-planning
 
 ```
 
 **[sup-spawn-task-tool]**
 - Given: implementation tasks
 - When: spawning
-- Then: use Task tool with `run_in_background: true`
+- Then: use task tool with `run_in_background: true`
 - Should not: block on worker completion
 
 **[sup-spawn-parallel-wave]**
@@ -88,44 +90,48 @@ Cycle Exit Conditions:
 **[sup-spawn-max-cycles]**
 - Given: worker-reviewer cycle
 - When: counting iterations
-- Then: iterate review->fix->re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, surface outstanding findings to the user at a gate
-- Should not: hardcode the budget, proceed past the chosen budget without surfacing to the user, close a wave on a fix-applying round, or proceed with any finding silently outstanding
+- Then: iterate review->fix->re-review up to the chosen review-effort budget; only an open BLOCKER gates a wave, IMPORTANT and MINOR findings stay open, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate
+- Should not: hardcode the budget, proceed past the chosen budget without surfacing to the user, require a zeroed round to close a wave, or close a finding outside `C-finding-lifecycle`
 
 **[sup-spawn-important-after-cycles]**
 - Given: IMPORTANT or MINOR findings remain
 - When: deciding next step
-- Then: keep iterating review->fix->re-review until ALL severity groups reach 0 — every severity must be resolved before the wave closes
-- Should not: proceed to UAT with non-zero findings or route any review severity (IMPORTANT/MINOR) to the FOLLOWUP epic
+- Then: keep them open past the wave gate and converge over every open `pasture:finding` at the end — only an open BLOCKER blocks the wave
+- Should not: proceed to UAT with an open BLOCKER or route any review severity (IMPORTANT/MINOR) to the FOLLOWUP epic
 
 **[frag--review-clean-exit]**
-- Given: per-slice code review
+- Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; a finding closes only per `C-finding-lifecycle`; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; loop forever when a finite budget was chosen
 
 ## Task Recovery
 
-Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami, signal.
 
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-Run pasture task ready, pasture task blocked, and pasture task list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+The adapter passes `--namespace` only when EPOCH.md records `namespace:`. That pin wins on both backends. Otherwise it omits the flag. Pasture then derives the namespace itself: PASTURE_NAMESPACE, else the git remote, then file:// of the working directory. The ledger calls derive_namespace for the header and for every write that has no pin. That function is the one list of remote forms; do not restate it. With no origin, both backends use file:// of the working directory, so invocations from different subdirectories use different namespaces. Queries without a pin follow that backend's derivation; pass `--all-namespaces` to opt out. When neither a pin nor PASTURE_NAMESPACE is set, pasture reads are unscoped and creation falls back to the git remote, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
-Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
+
+Parent stays open and is blocked by child: `"${EPOCH_REC}" block "$PARENT_URI" --by "$CHILD_URI"`. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records `backend: error`, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami. It prints the author recorded in the header or PASTURE_AUTHOR, and on the pasture backend it confirms that actor with agents show. It does not list agents and it does not invent one. If neither source names an author, it stops: set author: in EPOCH.md or export PASTURE_AUTHOR. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## When to Use
 
-Implementation tasks ready. Ephemeral reviewers will be spawned per-slice during review phase.
+Implementation tasks ready. Ephemeral reviewers will be spawned for the wave during review phase.
 
 ## Ride the Wave — Overview
 
@@ -133,20 +139,20 @@ The supervisor executes Phases 8-10 as a single coordinated cycle called **Ride 
 
 ```
 1. PLAN  → supervisor-plan-tasks: decompose into slices + integration points
-2. EXPLORE → Ephemeral Explore subagents (Task tool): map codebase, short-lived
+2. EXPLORE → Ephemeral Explore subagents (task tool): map codebase, short-lived
 3. BUILD → N Workers: implement slices in parallel
-4. REVIEW → Ephemeral reviewers (Task tool): review per-slice
+4. REVIEW → Ephemeral reviewers (task tool): review the whole wave
 5. FIX   → Workers fix BLOCKERs + IMPORTANTs with atomic commits
 6. RE-REVIEW → Spawn new ephemeral reviewers for re-review
-7. REPEAT → Steps 5-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface to the user
-8. TRACK → ALL severities (BLOCKER/IMPORTANT/MINOR) must reach 0 — none route to FOLLOWUP
-9. NEXT  → When fix-free clean (0 BLOCKER + 0 IMPORTANT + 0 MINOR) → Phase 11 (UAT); escalate to architect only if genuinely stuck
+7. REPEAT → Steps 5-6 up to the chosen review-effort budget; only an open BLOCKER gates the wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface to the user
+8. TRACK → Open findings converge at the end per `C-finding-lifecycle`; none route to FOLLOWUP
+9. NEXT  → When convergence finds no open `pasture:finding` → Phase 11 (UAT); escalate to architect only if genuinely stuck
 ```
 
 **Key rules:**
-- Reviewers are ephemeral (spawned per review cycle via Task tool)
+- Reviewers are ephemeral (spawned per review cycle with the task tool)
 - Slices are **never closed** until reviewed at least once
-- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget until 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free round; on budget exhaustion without clean, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck
+- **Configurable review-effort budget** (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — iterate review→fix→re-review up to the budget; only an open BLOCKER gates a wave, and convergence at the end queries open `pasture:finding` toward 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate; escalate to architect only if genuinely stuck
 - The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by review severities
 
 ## Handoff Template (Supervisor → Worker)
@@ -165,7 +171,7 @@ Before spawning each worker, author its handoff in the slice (or a dedicated han
 - Ratified Proposal: ${PROPOSAL_ID_URI}
 
 ## Your Slice
-- Slice: SLICE-<N>
+- Slice: the assigned work
 - Task ID: ${SLICE_TASK_ID_URI}
 - Production Code Path: <what end users run>
 
@@ -198,35 +204,35 @@ full Ride the Wave cycle.
 ## Task Call
 
 ```
-Task({
-  description: "Worker: implement SLICE-N",
-  prompt: `Call Skill(/pasture:worker) and implement the assigned slice.
+delegation: {
+  description: "Worker: implement the slice",
+  prompt: `Call skill(/pasture:worker) and implement the assigned slice.
 
 Pasture Task ID: "${TASK_ID_URI}"
-Read full requirements + handoff: pasture task show "${TASK_ID_URI}"
+Read full requirements + handoff: "${EPOCH_REC}" show "${TASK_ID_URI}"
 
 Do NOT shut down after implementation. You will receive review feedback and may need to fix issues.`,
   subagent_type: "general-purpose",
   run_in_background: true
-})
+}
 ```
 
-Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `Skill(/pasture:worker)`.
+Per [sup-spawn-workers], use `subagent_type: "general-purpose"`, not a custom agent type. The worker skill is invoked inside the agent via `skill(/pasture:worker)`.
 
-## TeamCreate: SendMessage Assignment
+## Delegated Assignment Message
 
-When workers are spawned via TeamCreate, they receive context through SendMessage instead of a Task prompt. The message MUST be self-contained — teammates have **no prior context**:
+When a worker is delegated an assignment, the assignment message is its only context. The message MUST be self-contained — the worker has **no prior context**:
 
 ```
-SendMessage({
+send_assignment_message({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
+  content: `You are assigned the slice. Start by calling skill(/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
-Run this to get full requirements + handoff: pasture task show "${SLICE_TASK_ID_URI}"
+Run this to get full requirements + handoff: "${EPOCH_REC}" show "${SLICE_TASK_ID_URI}"
 
-Key references (run pasture task show on each for full context):
+Key references (run "${EPOCH_REC}" show on each for full context):
 - Request: "${REQUEST_ID_URI}"
 - URD: "${URD_ID_URI}"
 - IMPL_PLAN: "${IMPL_PLAN_ID_URI}"
@@ -237,11 +243,11 @@ Read the handoff doc and your Pasture task before starting implementation.
 IMPORTANT: Do NOT shut down after completing implementation. You will receive
 review feedback from ephemeral reviewers and may need to fix BLOCKERs and IMPORTANT
 findings. Stay alive for the full Ride the Wave cycle.`,
-  summary: "SLICE-1 assignment with Pasture context"
+  summary: "slice assignment"
 })
 ```
 
-Per [sup-teamcreate-msg], include Pasture task IDs and `pasture task show` commands in every assignment. Teammates cannot see your conversation or task tree.
+Per [sup-teamcreate-msg], include Pasture task IDs and `"${EPOCH_REC}" show` commands in every assignment. Teammates cannot see your conversation or task tree.
 
 ## Worker Persistence (Ride the Wave)
 
@@ -253,49 +259,49 @@ Per [sup-worker-persistence], workers stay alive for the full review-fix cycle:
 4. If ANY findings (BLOCKER/IMPORTANT/MINOR): supervisor sends fix assignment to worker
 5. Worker fixes issues → notifies supervisor
 6. New ephemeral reviewers re-review
-7. Repeat steps 4-6 up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate
-8. After a fix-free clean round (0 BLOCKER + 0 IMPORTANT + 0 MINOR): supervisor shuts down worker
+7. Repeat steps 4-6 up to the chosen review-effort budget; only an open BLOCKER gates the wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate
+8. After convergence finds no open `pasture:finding`: supervisor shuts down worker
 
 ### Fix Assignment Message Template
 
 ```
-SendMessage({
+send_assignment_message({
   type: "message",
   recipient: "worker-1",
-  content: `Review cycle <N> found issues in your slice (SLICE-1).
+  content: `Review cycle <N> found issues in your slice (the slice).
 
 BLOCKERs (must fix — blocks slice closure):
-- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
+- "${FINDING_ID_URI}": <description> ("${EPOCH_REC}" show "${FINDING_ID_URI}")
 
-IMPORTANT (must fix — must reach 0 before wave close):
-- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
+IMPORTANT (must fix — closes only per C-finding-lifecycle):
+- "${FINDING_ID_URI}": <description> ("${EPOCH_REC}" show "${FINDING_ID_URI}")
 
-MINOR (must fix — must reach 0 before wave close):
-- "${FINDING_ID_URI}": <description> (pasture task show "${FINDING_ID_URI}")
+MINOR (must fix — closes only per C-finding-lifecycle):
+- "${FINDING_ID_URI}": <description> ("${EPOCH_REC}" show "${FINDING_ID_URI}")
 
 After fixing all items:
-  pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "Fixes applied for review cycle <N>"
+  "${EPOCH_REC}" note "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Fixes applied for review cycle <N>"
 
 Do NOT shut down. Ephemeral reviewers will re-review.`,
-  summary: "Review cycle <N> fixes for SLICE-1"
+  summary: "Review cycle <N> fixes for the slice"
 })
 ```
 
 ## Worker Should Update Pasture Status
 
-- On start: `pasture task update "${TASK_ID_URI}" --status=in_progress`
-- On implementation complete (NOT slice close): `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Implementation complete, awaiting review"`
-- On blocked: `pasture task update "${TASK_ID_URI}" --notes="Blocked: <reason>"`
+- On start: `"${EPOCH_REC}" status "${TASK_ID_URI}" --set in_progress`
+- On implementation complete (NOT slice close): `"${EPOCH_REC}" note "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Implementation complete, awaiting review"`
+- On blocked: `"${EPOCH_REC}" note "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="Blocked: <reason>"`
 - Slice closure: **only the supervisor** closes slices after review passes
 
 ## Assign via Pasture
 
 ```bash
-pasture task assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"
-pasture task update "${TASK_ID_URI}" --status=in_progress
+"${EPOCH_REC}" label "${TASK_ID_URI}" owner:"${REGISTERED_WORKER_ACTOR}"
+"${EPOCH_REC}" status "${TASK_ID_URI}" --set in_progress
 ```
 
-## Follow-up Slice Handoff (FOLLOWUP_SLICE-N)
+## Follow-up slice handoff
 
 For follow-up slices, the handoff (authored in the Pasture task body — no filesystem path) extends with additional fields:
 
@@ -309,7 +315,7 @@ For follow-up slices, the handoff (authored in the Pasture task body — no file
 - FOLLOWUP_IMPL_PLAN: "${FOLLOWUP_IMPL_PLAN_ID_URI}"
 
 ## Your Slice
-- Slice: FOLLOWUP_SLICE-<N>
+- Slice: the follow-up slice
 - Task ID: "${SLICE_TASK_ID_URI}"
 
 ## DEFER'd Items (from UAT)
@@ -320,6 +326,6 @@ For follow-up slices, the handoff (authored in the Pasture task body — no file
 
 ## Acceptance Criteria
 - All DEFER'd items in this slice resolved (tests pass, production code path verified)
-- See pasture task show "${SLICE_TASK_ID_URI}" for full validation_checklist
+- See "${EPOCH_REC}" show "${SLICE_TASK_ID_URI}" for full validation_checklist
 ```
 <!-- END GENERATED FROM pasture schema -->

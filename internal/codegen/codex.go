@@ -98,36 +98,11 @@ func CodexRuntimeContractID() ir.RuntimeContractID { return CodexRuntimeContract
 
 // codexNativeFunctions returns the sorted, de-duplicated native Codex function
 // (call) names the pinned contract classifies across the closed core operation
-// vocabulary. For the recorded Codex version this is exactly ["request-input"]. Deriving the
-// list from the contract — never a literal — guarantees the target can never
-// emit or accept a fabricated native call: if the pinned contract stops
-// classifying an operation as native, this set changes with it.
-func codexNativeFunctions() []string {
-	contract := CodexRuntimeContract()
-	seen := make(map[string]struct{})
-	for _, kind := range ir.AllOperationKinds() {
-		descriptor, ok := runtime.CoreOperationDescriptorFor(kind)
-		if !ok {
-			continue
-		}
-		binding, err := runtime.LookupOperationBinding(contract, descriptor)
-		if err != nil {
-			// Unsupported operations return an actionable lookup error and are,
-			// by definition, not native; mediated/semantic bindings resolve but
-			// report Native()==false below. Either way they contribute no native
-			// call name.
-			continue
-		}
-		if call, isNative := binding.Native(); isNative {
-			seen[call.CallName()] = struct{}{}
-		}
-	}
-	names := make([]string, 0, len(seen))
-	for name := range seen {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+// vocabulary. For the recorded Codex version this is exactly ["request-input"].
+// It delegates to runtime.NativeOperationNames so the emitters, the inventory
+// and the foreign-name guard share one derivation.
+func codexNativeFunctions() ([]string, error) {
+	return runtime.NativeOperationNames(CodexRuntimeContract())
 }
 
 // ─── Component identities ────────────────────────────────────────────────────
@@ -499,8 +474,12 @@ func ValidateCodexTarget(descriptor CodexTargetDescriptor) error {
 		}
 	}
 
+	nativeCalls, err := codexNativeFunctions()
+	if err != nil {
+		return fmt.Errorf("codegen.ValidateCodexTarget: derive native Codex functions: %w", err)
+	}
 	allowed := make(map[string]struct{})
-	for _, call := range codexNativeFunctions() {
+	for _, call := range nativeCalls {
 		allowed[call] = struct{}{}
 	}
 
@@ -520,7 +499,11 @@ func ValidateCodexTarget(descriptor CodexTargetDescriptor) error {
 		if err != nil {
 			return fmt.Errorf("codegen.ValidateCodexTarget: read agent profile %q: %w", rel, err)
 		}
-		for _, call := range parseCodexAgentFunctions(content) {
+		calls, found := parseCodexAgentFunctions(content)
+		if !found {
+			continue
+		}
+		for _, call := range calls {
 			if _, ok := allowed[call]; !ok {
 				return fmt.Errorf(
 					"codegen.ValidateCodexTarget: agent profile %q declares native function %q, which the pinned Codex contract %q does not classify as native — "+
@@ -585,9 +568,11 @@ func codexRootForComponent(id CodexComponentID) string {
 
 // parseCodexAgentFunctions extracts the TOML `functions = [...]` array values
 // from an emitted agent profile. It reads only the single-line array the agent
-// emitter writes (see renderCodexAgent); a profile without a functions line has
-// no native declarations and returns nil.
-func parseCodexAgentFunctions(content string) []string {
+// emitter writes (see renderCodexAgent). found reports whether the profile
+// carried a functions declaration at all, so a caller that must fail closed on
+// an unrecognised shape can tell "declares no functions" from "does not look
+// like a functions declaration".
+func parseCodexAgentFunctions(content string) (calls []string, found bool) {
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "functions") {
@@ -600,7 +585,6 @@ func parseCodexAgentFunctions(content string) []string {
 		rhs := strings.TrimSpace(trimmed[eq+1:])
 		rhs = strings.TrimPrefix(rhs, "[")
 		rhs = strings.TrimSuffix(rhs, "]")
-		var calls []string
 		for _, part := range strings.Split(rhs, ",") {
 			part = strings.TrimSpace(part)
 			if part == "" {
@@ -608,7 +592,7 @@ func parseCodexAgentFunctions(content string) []string {
 			}
 			calls = append(calls, strings.Trim(part, `"`))
 		}
-		return calls
+		return calls, true
 	}
-	return nil
+	return nil, false
 }

@@ -77,39 +77,7 @@
       "disposition": "active"
     },
     {
-      "path": "skills/protocol/EXAMPLE_MR_DESCRIPTION.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/HANDOFF_EXAMPLE-ingest-pipeline-impl.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/HANDOFF_EXAMPLE-web-command-impl.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/HANDOFF_TEMPLATE.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/MIGRATION_v1_to_v2.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/MR_TEMPLATE.md",
-      "disposition": "active"
-    },
-    {
       "path": "skills/protocol/PROCESS.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/README.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/RESEARCH_EXAMPLE-nix-openclaw-req-ure-proposal.md",
       "disposition": "active"
     },
     {
@@ -118,22 +86,6 @@
     },
     {
       "path": "skills/protocol/SKILLS.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/UAT_EXAMPLE.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/UAT_TABLE.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/UAT_TEMPLATE.md",
-      "disposition": "active"
-    },
-    {
-      "path": "skills/protocol/user-request-revamp-v2.md",
       "disposition": "active"
     },
     {

@@ -2610,3 +2610,121 @@ The preceding digest identifies the prior recovery revision; neither revision
 participated in the historical captures above, and no capture payload, capture
 kit, fixture identity, activation state or acceptance record changes. No new
 live session, capture or host capability is claimed.
+
+### Tracker adapter recovery transport — 2026-11-09
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`5df357427313fc48c03840209fd6677ea386e6062d5dd4ed9e4dcbe02c2ee40b`.
+This later generated revision changes the embedded recovery prose to read the
+tracker backend from `.agents.local/pasture/EPOCH.md` and route every tracker
+call through the runtime adapter entry point (`${EPOCH_REC}`); the native
+Pasture recipes live in the generator's tracker contract. Lifecycle transport,
+activation, version guards, decision handling and the injection contract are
+unchanged; no runtime task query, file read or cached task state is added. The
+generated plugin and embedded hook asset still have identical bytes. The
+preceding digest identifies the prior recovery revision; neither revision
+participated in the historical captures above, and no capture payload, capture
+kit, fixture identity, activation state or acceptance record changes. No new
+live session, capture or host capability is claimed.
+
+### Neutral tracker vocabulary recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`9423f258751d0bf3ddd1244684b352e3e871481a75fa02c62674a111a1e0353d`.
+This later generated revision changes the embedded recovery prose from the
+native tracker verbs to the ten neutral operations (`create`, `label`, `block`,
+`note`, `show`, `query`, `ready`, `status`, `close`, `whoami`) and states the
+mid-epoch write-failure rule in the recovery text every role carries. The rec
+adapter owns the backend recipes, so no native verb remains after the entry
+point. Lifecycle transport, activation, version guards, decision handling and
+the injection contract are unchanged; no runtime task query, file read or
+cached task state is added. The generated plugin and embedded hook asset still
+have identical bytes. The preceding digest identifies the prior recovery
+revision; neither revision participated in the historical captures above, and
+no capture payload, capture kit, fixture identity, activation state or
+acceptance record changes. No new live session, capture or host capability is
+claimed.
+
+### Generated adapter and ledger recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`935d7942d50ca1e39617f92bb4e5beee318a6072455994ee622e566fad780515`.
+This later generated revision changes the embedded recovery prose so whoami
+prints the recorded author and confirms it with agents show, instead of listing
+agents when none is recorded, and so the adapter text describes the ledger
+backend that writes one JSONL line per mutation. Lifecycle transport,
+activation, version guards, decision handling and the injection contract are
+unchanged; no runtime task query, file read or cached task state is added. The
+generated plugin and embedded hook asset still have identical bytes. The
+preceding digest identifies the prior recovery revision; neither revision
+participated in the historical captures above, and no capture payload, capture
+kit, fixture identity, activation state or acceptance record changes. No new
+live session, capture or host capability is claimed.
+
+### Generated adapter and ledger recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`935d7942d50ca1e39617f92bb4e5beee318a6072455994ee622e566fad780515`.
+This later generated revision changes the embedded recovery prose so whoami
+prints the recorded author and confirms it with agents show, instead of listing
+agents when none is recorded, and so the adapter text describes the ledger
+backend that writes one JSONL line per mutation. Lifecycle transport,
+activation, version guards, decision handling and the injection contract are
+unchanged; no runtime task query, file read or cached task state is added. The
+generated plugin and embedded hook asset still have identical bytes. The
+preceding digest identifies the prior recovery revision; neither revision
+participated in the historical captures above, and no capture payload, capture
+kit, fixture identity, activation state or acceptance record changes. No new
+live session, capture or host capability is claimed.
+
+### Namespace derivation recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`7719d5586dd013824ca87489a2c32394bd411686f113bb2cf346efdd35bc0e6c`.
+This later generated revision changes the embedded recovery prose so the
+adapter passes `--namespace` only when EPOCH.md records one, and otherwise
+lets Pasture derive it. The ledger derivation is named in that prose. Lifecycle
+transport, activation, version guards, decision handling and the injection
+contract are unchanged; no runtime task query, file read or cached task state
+is added. The generated plugin and embedded hook asset still have identical
+bytes (`internal/target/opencode/assets/hooks/pasture-hooks.ts` has the same
+SHA-256). The preceding digest identifies the prior recovery revision; neither
+revision participated in the historical captures above, and no capture payload,
+capture kit, fixture identity, activation state or acceptance record changes.
+No new live session, capture or host capability is claimed.
+
+### Signal operation recovery transport — 2026-11-10
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`4885e46b63a6dd2f80207385fac7c91a269f268c85e21cbf26879475b62ed67b`.
+This later generated revision adds `signal` to the closed tracker operation
+list in the embedded recovery prose. The adapter owns that operation's pasture
+and ledger recipes; the recovery text still names no backend recipe. Lifecycle
+transport, activation, version guards, decision handling and the injection
+contract are unchanged; no runtime task query, file read or cached task state
+is added. The generated plugin and embedded hook asset still have identical
+bytes (`internal/target/opencode/assets/hooks/pasture-hooks.ts` has the same
+SHA-256). The preceding digest identifies the prior recovery revision; neither
+revision participated in the historical captures above, and no capture payload,
+capture kit, fixture identity, activation state or acceptance record changes.
+No new live session, capture or host capability is claimed.
+# Recovery namespace wording transport addendum
+
+The generated `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`739a8042942a368df4648f177d43597bc690cbcdfb25e36e6dff21e38a75c7c4`.
+The embedded recovery text now references the ledger's remote normalization
+and describes its no-origin work-tree root. This is the current transport
+identity, not the historical build-kit digest or evidence of a new capture.
+No historical fixture bytes or clearance decisions change.
+# Recovery namespace parity transport addendum
+
+The generated `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`3cae1b161aa853ec4134f6326288a4540aa92db8b99902f473acf8657b431ecf`.
+The embedded recovery text now states that both backends use `file://` of the
+working directory when there is no origin remote, so an invocation from a
+different subdirectory uses a different namespace. That corrects the prior
+revision, which claimed the ledger used the work-tree root while Pasture used
+the working directory. Only the recovery prose changed. Lifecycle transport,
+activation, version guards, decision handling and the injection contract are
+unchanged, and no capture payload, fixture identity or acceptance record moves.
+No new live session, capture or host capability is claimed.

@@ -11,6 +11,7 @@
 package codegen
 
 import (
+	"github.com/dayvidpham/pasture/internal/codegen/ir"
 	"github.com/dayvidpham/pasture/internal/types"
 	"github.com/dayvidpham/pasture/pkg/protocol"
 )
@@ -115,13 +116,53 @@ var AllFragmentIds = []FragmentId{
 	FragRevPlanVoteOptions,
 	FragValidationCases,
 	FragReviewCleanExit,
+	FragModelPolicy,
 	FragTaskRecovery,
 	FragTaskAuthor,
+	FragTrackerAdapter,
+	FragWritingStandard,
+	FragWritingQuestions,
+	FragSignalCapture,
 }
 
 const (
 	FragTaskRecovery FragmentId = "frag--task-recovery"
 	FragTaskAuthor   FragmentId = "frag--task-author"
+
+	// FragTrackerAdapter is the one authored home of the tracker backend
+	// contract: the runtime entry point, the closed operation set, EPOCH.md,
+	// the probe and the write-failure rule (R21, amendment A-3).
+	FragTrackerAdapter FragmentId = "frag--tracker-adapter"
+
+	// FragWritingStandard is the wording half of the user-facing writing
+	// standard: plain terms, short sentences, active voice, no invented labels,
+	// the wording house rule, the STE-aligned claim, the status template, and
+	// the pre-send check.
+	// Question and option design is FragWritingQuestions. Consumers reference
+	// each fragment through fragRef; the reference set is derived by
+	// FragmentToOwnerRefs.
+	FragWritingStandard FragmentId = "frag--writing-standard"
+
+	// FragWritingQuestions is the question half of the writing standard:
+	// grounding before asking, one decision, option shape, recommendation
+	// placement, the present template, and the weak-tool degrade. Status does
+	// not carry it. The status template is in FragWritingStandard. The union
+	// of the two fragments is the full rule set.
+	FragWritingQuestions FragmentId = "frag--writing-questions"
+
+	// FragSignalCapture is the one authored home of the signal-capture
+	// component: the typed closed kind set, the one feedback task per epoch,
+	// the stable one-line record and its two recording targets, and the
+	// non-blocking recording rule. Its consumers reference it through fragRef;
+	// the reference set is derived from their bodies by FragmentToOwnerRefs.
+	FragSignalCapture FragmentId = "frag--signal-capture"
+
+	// FragModelPolicy is the one authored home of the capability-tier model
+	// policy: the tier table, the primary/secondary/tertiary fallback-chain
+	// ask, the reviewer role's tier override, and the concurrency cap. It is
+	// referenced from the phase-1 and phase-8 gate bodies only, so the policy
+	// is asked once at each gate and nowhere else.
+	FragModelPolicy FragmentId = "frag--model-policy"
 
 	// FragRevVoteOptions is the canonical vote-options table shared between the
 	// reviewer and reviewer-vote skill bodies (D3-ratified ACCEPT row wording).
@@ -147,7 +188,8 @@ const (
 	FragSupBlockerDualParent FragmentId = "frag--sup-blocker-dual-parent"
 
 	// FragSupDeferredFollowup is the canonical "route ONLY user-DEFER'd UAT items
-	// to the FOLLOWUP epic; all review severities must reach 0 before wave close"
+	// to the FOLLOWUP epic; open review findings stay open until their raiser
+	// verifies the fix and converge at the end"
 	// behavior shared between the supervisor and impl-review skill bodies.
 	// (Renamed from FragSupImportantMinorFollowup per R7/A1: review severities are
 	// no longer deferrable; the FOLLOWUP epic is fed solely by DEFER'd UAT items.)
@@ -163,7 +205,7 @@ const (
 	FragSupSeverityTree FragmentId = "frag--sup-severity-tree"
 
 	// FragSupNamingConvention is the canonical Naming Convention prose section
-	// (SLICE-{N}-REVIEW-{axis}-{round} format) shared between the supervisor and
+	// (WAVE-{W}-REVIEW-{axis}-{round} format) shared between the supervisor and
 	// impl-review skill bodies.
 	FragSupNamingConvention FragmentId = "frag--sup-naming-convention"
 
@@ -188,12 +230,13 @@ const (
 	// worker-implement skill bodies (wired in SLICE-2).
 	FragValidationCases FragmentId = "frag--validation-cases"
 
-	// FragReviewCleanExit is the canonical "iterate review->fix->re-review up to the
-	// chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within
-	// budget; on budget exhaustion without clean, surface outstanding findings to
-	// the user at a gate" behavior (R7/A1, reworked to a configurable budget at
-	// v2-2). Referenced via behaviorRef from the supervisor and impl-review skill
-	// bodies (wired in SLICE-3).
+	// FragReviewCleanExit is the canonical "two-phase review: only an open BLOCKER
+	// gates a wave; after the last wave convergence over open pasture:finding
+	// tasks targets 0/0/0 within maxRounds; on budget exhaustion without
+	// convergence, surface outstanding findings to the user at a gate" behavior
+	// (R7/A1, reworked to a configurable budget at v2-2 and to the two-phase
+	// model under PROPOSAL-4). Referenced via behaviorRef from the supervisor and
+	// impl-review skill bodies (wired in SLICE-3).
 	FragReviewCleanExit FragmentId = "frag--review-clean-exit"
 )
 
@@ -238,14 +281,59 @@ type SkillBody struct {
 
 // ─── RoleSpec ─────────────────────────────────────────────────────────────────
 
+// RolePolicy is the closed set of non-tool capabilities a role may hold. These
+// are policy decisions, not host tools: they are typed here so a policy cannot
+// be spelled as a free string beside the tool list.
+type RolePolicy string
+
+const (
+	// RolePolicyReadOnly forbids Edit and Write on the role's tool surface.
+	RolePolicyReadOnly RolePolicy = "read-only"
+	// RolePolicyHandoff allows the role to author or receive a phase handoff.
+	RolePolicyHandoff RolePolicy = "handoff"
+)
+
+var canonicalRolePolicies = [...]RolePolicy{
+	RolePolicyReadOnly,
+	RolePolicyHandoff,
+}
+
+// AllRolePolicies returns a fresh defensive copy of the closed role-policy set.
+func AllRolePolicies() []RolePolicy {
+	return append([]RolePolicy(nil), canonicalRolePolicies[:]...)
+}
+
+// IsValid reports whether the value is a registered member of the closed set.
+func (p RolePolicy) IsValid() bool {
+	for _, candidate := range canonicalRolePolicies {
+		if candidate == p {
+			return true
+		}
+	}
+	return false
+}
+
 // RoleSpec is the complete specification for an agent role.
+//
+// Tools holds only native file and shell capabilities (ir.HarnessTool), and
+// Operations holds orchestration intents (ir.OperationKind). Both are typed
+// closed sets: a raw string tool name cannot be stored in either field without
+// an explicit conversion, so a harness-specific name cannot leak into a role by
+// accident. The emitter resolves both through internal/runtime/profiles.go.
+//
+// Tier is the role's mapped capability tier. TierOverride is the per-role
+// override: when set it wins, so the reviewer tier is the reviewer role's
+// override and no separate review-budget type exists. Neither field accepts a
+// vendor model name; the emitters resolve a tier to a native id per harness.
 type RoleSpec struct {
 	Id                 protocol.RoleId
 	Name               string
 	Description        string
-	Model              string // e.g. "opus", "sonnet", "haiku"
-	Thinking           string // e.g. "medium"
-	Tools              []string
+	Tier               CapabilityTier
+	TierOverride       CapabilityTier
+	Tools              []ir.HarnessTool
+	Operations         []ir.OperationKind
+	Policies           []RolePolicy
 	OwnedPhases        []protocol.PhaseId
 	Introduction       string
 	OwnershipNarrative string
@@ -307,6 +395,17 @@ type HandoffSpec struct {
 	AtPhase        protocol.PhaseId
 	ContentLevel   string // ContentLevel wire value: "full-provenance", "summary-with-ids"
 	RequiredFields []string
+	// Bindings names the required fields the handoff body also binds as task
+	// URIs, with the shell variable that carries each. Every binding names a
+	// field in RequiredFields; a bound field renders as a reference with its
+	// read command, an unbound one renders as a section the author fills.
+	Bindings []HandoffBinding
+}
+
+// HandoffBinding is a required handoff field carried as a shell variable.
+type HandoffBinding struct {
+	Field string
+	Var   string
 }
 
 // ─── FigureSpec ───────────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@ Conduct code review across ALL implementation slices. Each of 3 reviewers review
 
 **-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-10-code-review)** <- Phase 10
 
-See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
+See [reviewer-review-code](../reviewer-review-code/SKILL.md) for severity definitions.
 
 **[frag--sup-review-all-slices]**
 - Given: all slices complete
@@ -28,9 +28,9 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 - Should not: skip any slice
 
 **[frag--sup-review-severity-groups]**
-- Given: review round
+- Given: a wave review round
 - When: creating severity groups
-- Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty
+- Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per wave, per axis, per round, even if empty
 - Should not: lazily create groups only when findings exist
 
 **[frag--sup-blocker-dual-parent]**
@@ -42,8 +42,8 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 **[frag--sup-deferred-followup]**
 - Given: a review finding (BLOCKER, IMPORTANT, or MINOR)
 - When: categorizing
-- Then: track it in its severity group; ALL severity groups must reach 0 before wave close — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity
-- Should not: route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a wave with any finding outstanding
+- Then: track it in its severity group as an open finding; open findings do not block a wave unless they are BLOCKERs, and the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity
+- Should not: route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a finding outside `C-finding-lifecycle`
 
 **[frag--sup-followup-epic-timing]**
 - Given: UAT (Phase 5 or 11) produces one or more user-DEFER'd items
@@ -53,91 +53,94 @@ See `../protocol/CONSTRAINTS.md` for coding standards and severity definitions.
 
 ## Task Recovery
 
-Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami, signal.
 
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-Run pasture task ready, pasture task blocked, and pasture task list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+The adapter passes `--namespace` only when EPOCH.md records `namespace:`. That pin wins on both backends. Otherwise it omits the flag. Pasture then derives the namespace itself: PASTURE_NAMESPACE, else the git remote, then file:// of the working directory. The ledger calls derive_namespace for the header and for every write that has no pin. That function is the one list of remote forms; do not restate it. With no origin, both backends use file:// of the working directory, so invocations from different subdirectories use different namespaces. Queries without a pin follow that backend's derivation; pass `--all-namespaces` to opt out. When neither a pin nor PASTURE_NAMESPACE is set, pasture reads are unscoped and creation falls back to the git remote, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
-Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
+
+Parent stays open and is blocked by child: `"${EPOCH_REC}" block "$PARENT_URI" --by "$CHILD_URI"`. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records `backend: error`, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami. It prints the author recorded in the header or PASTURE_AUTHOR, and on the pasture backend it confirms that actor with agents show. It does not list agents and it does not invent one. If neither source names an author, it stops: set author: in EPOCH.md or export PASTURE_AUTHOR. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
 
 ## Severity Tree (EAGER Creation)
 
-Per [frag--sup-review-severity-groups], create all 3 severity groups immediately:
+Per [frag--sup-review-severity-groups], create ONE severity trio per wave, per axis, per round — not one per slice:
 
 ```bash
+# Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-BLOCKER findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+BLOCKER findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:severity:blocker
 
-IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-IMPORTANT findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:severity:important
 
-MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-MINOR findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+MINOR findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:severity:minor
 
-# Step 2: Wire severity groups to the review round task
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$BLOCKER_ID_URI"
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
+# Step 2: Wire the one severity trio to the wave's review round task
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$BLOCKER_ID_URI"
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$IMPORTANT_ID_URI"
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$MINOR_ID_URI"
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
-# IMPORTANT/MINOR must ALSO reach 0 before wave close — they are NOT routed to FOLLOWUP.
+# Open findings converge at the end; only an open BLOCKER gates the wave. IMPORTANT/MINOR are NOT routed to FOLLOWUP.
 # The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (see Follow-up Epic section).
 
 # Step 3: Close empty groups immediately
 # If a group has no findings, close it right away
-pasture task close "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
-pasture task close "$MINOR_ID_URI"        # if no MINOR findings
+"${EPOCH_REC}" close "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
+"${EPOCH_REC}" close "$MINOR_ID_URI"        # if no MINOR findings
 ```
 
 ### Naming Convention
 
-```
-SLICE-{N}-REVIEW-{axis}-{round}
-```
+Name the review for one wave, one axis, and one round. Axis A is correctness, B is test quality, and C is elegance. List every slice of that wave on the review. Create one severity trio under it: blocker, important, and minor. Do not create one review per slice.
 
-Where axis = A (Correctness), B (Test quality), C (Elegance).
-
-Examples:
-- `SLICE-1-REVIEW-A-1` — Reviewer A (Correctness), Round 1, SLICE-1
-- `SLICE-2-REVIEW-C-2` — Reviewer C (Elegance), Round 2, SLICE-2
-
-Severity groups:
-- `SLICE-1-REVIEW-A-1 BLOCKER`
-- `SLICE-1-REVIEW-A-1 IMPORTANT`
-- `SLICE-1-REVIEW-A-1 MINOR`
+The first wave's correctness review, first round, has one blocker group, one important group, and one minor group. A later wave gets its own review.
 
 ## Dual-Parent BLOCKER Relationship
 
@@ -147,72 +150,77 @@ BLOCKER findings have **two parents**:
 
 ```bash
 # Create a BLOCKER finding
-FINDING_ID=$(pasture task create "BLOCKER: Missing error handling in auth flow" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+FINDING_ID=$("${EPOCH_REC}" create --kind task --title "BLOCKER: Missing error handling in auth flow" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slice: \"${SLICE_1_1_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-Missing error handling causes silent failure in auth flow." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FINDING_ID" pasture:p10-impl:s10-review
+Missing error handling causes silent failure in auth flow.")
+"${EPOCH_REC}" label "$FINDING_ID" pasture:finding
 
 # Wire dual-parent: finding blocks BOTH severity group AND slice
-pasture task dep add "$BLOCKER_GROUP_ID_URI" --blocked-by "$FINDING_ID"
-pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$FINDING_ID"
+"${EPOCH_REC}" block "$BLOCKER_GROUP_ID_URI" --by "$FINDING_ID"
+"${EPOCH_REC}" block "${SLICE_1_1_ID_URI}" --by "$FINDING_ID"
 ```
 
-Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent), but ALL severity groups (BLOCKER/IMPORTANT/MINOR) must reach 0 before the review wave closes — they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
+Per [frag--sup-deferred-followup], IMPORTANT/MINOR findings attach to their severity group only (they do **not** block the slice via dual-parent). They stay open past the wave gate and converge at the end, and they are **never** routed to the FOLLOWUP epic. The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items.
 
 ```bash
 # IMPORTANT finding — attaches to the IMPORTANT severity group (NOT the slice)
-IMPORTANT_FINDING_ID=$(pasture task create "IMPORTANT: Add request timeout" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_FINDING_ID=$("${EPOCH_REC}" create --kind task --title "IMPORTANT: Add request timeout" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slice: \"${SLICE_1_2_ID_URI}\"
   reviewer: reviewer-A
   round: 1
 ---
-API calls should have configurable timeouts." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_FINDING_ID" pasture:p10-impl:s10-review
+API calls should have configurable timeouts.")
+"${EPOCH_REC}" label "$IMPORTANT_FINDING_ID" pasture:finding
 
-# Attaches to the IMPORTANT severity group (NOT the slice); the group must still reach 0
-pasture task dep add "$IMPORTANT_GROUP_ID_URI" --blocked-by "$IMPORTANT_FINDING_ID"
+# Attaches to the IMPORTANT severity group (NOT the slice); its close rule is C-finding-lifecycle
+"${EPOCH_REC}" block "$IMPORTANT_GROUP_ID_URI" --by "$IMPORTANT_FINDING_ID"
 ```
 
 ## Review Structure
 
-Each reviewer (A, B, C) reviews EVERY slice:
+One review round covers one whole wave, never a single slice. Wave 1 holds the first slice, the second slice, and the third slice; each reviewer reviews all three together and creates ONE review title for the wave:
 
 ```
-Reviewer A (Correctness): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: SLICE-1-REVIEW-A-1, SLICE-2-REVIEW-A-1, SLICE-3-REVIEW-A-1
-  Each review has 3 severity groups (BLOCKER/IMPORTANT/MINOR)
+Wave 1: the first slice, the second slice, the third slice
+  Reviewer A (Correctness): reviews the whole wave →
+    Creates: the review (references: wave: 1, slices: the first slice, the second slice, the third slice)
+    Each review has 3 severity groups (BLOCKER/IMPORTANT/MINOR)
 
-Reviewer B (Test quality): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: SLICE-1-REVIEW-B-1, SLICE-2-REVIEW-B-1, SLICE-3-REVIEW-B-1
+  Reviewer B (Test quality): reviews the whole wave →
+    Creates: the review
 
-Reviewer C (Elegance): Reviews SLICE-1, SLICE-2, SLICE-3 →
-  Creates: SLICE-1-REVIEW-C-1, SLICE-2-REVIEW-C-1, SLICE-3-REVIEW-C-1
+  Reviewer C (Elegance): reviews the whole wave →
+    Creates: the review
 ```
+
+A later wave gets its own review titles (for example, wave 2 → the later review). A wave never produces one title per reviewed slice.
 
 ## Spawning Reviewers
 
-Supervisor spawns 3 parallel reviewers as **subagents** (via the Task tool) or via **TeamCreate**. Reviewers are short-lived — keep them in-session.
+Supervisor spawns 3 parallel reviewers as **subagents** via the delegate_assignment operation. Reviewers are short-lived — keep them in-session.
 
 ```
 // Spawn 3 reviewers (one per axis)
-Task({
+delegation: {
   subagent_type: "general-purpose",
   run_in_background: true,
   prompt: `You are Reviewer A (Correctness).
-URD: "${URD_ID_URI}" (read with pasture task show "${URD_ID_URI}" for user requirements context)
+URD: "${URD_ID_URI}" (read with "${EPOCH_REC}" show "${URD_ID_URI}" for user requirements context)
 Focus: Does implementation faithfully serve the user? Are technical decisions consistent with rationale?
-Review ALL slices: "${SLICE_1_ID_URI}", "${SLICE_2_ID_URI}", "${SLICE_3_ID_URI}"
-For each slice, run: pasture task show "${SLICE_ID_URI}"
-Create severity groups (BLOCKER/IMPORTANT/MINOR) for each slice. Title: SLICE-N-REVIEW-A-1
-Call Skill(/pasture:reviewer-review-code) for the review procedure.`
-})
+Review the whole wave: "${SLICE_1_1_ID_URI}", "${SLICE_1_2_ID_URI}", "${SLICE_1_3_ID_URI}"
+For each slice, run: "${EPOCH_REC}" show "${SLICE_ID_URI}"
+Create ONE severity trio (BLOCKER/IMPORTANT/MINOR) for the wave, listing every slice in its references. Title: the review
+Call invoke_skill(/pasture:reviewer-review-code) for the review procedure.`
+}
 ```
 
 **Handoff:** Before spawning each reviewer, author its handoff in a Pasture task body (the task body IS the handoff — no filesystem path).
@@ -231,26 +239,26 @@ Call Skill(/pasture:reviewer-review-code) for the review procedure.`
 ## Slices to Review
 | Slice | Task ID | Description | Worker |
 |-------|---------|-------------|--------|
-| SLICE-1 | "${ID_URI}" | <description> | worker-1 |
-| SLICE-2 | "${ID_URI}" | <description> | worker-2 |
+| the first slice | "${ID_URI}" | <description> | worker-1 |
+| the second slice | "${ID_URI}" | <description> | worker-2 |
 
 ## Review Procedure
-1. For each slice: `pasture task show "${SLICE_ID_URI}"`
-2. Create 3 severity groups per slice (EAGER)
+1. For each slice: `"${EPOCH_REC}" show "${SLICE_ID_URI}"`
+2. Create ONE severity trio for the wave (EAGER)
 3. Add findings as children of severity groups
 4. BLOCKER findings: dual-parent (severity group + slice)
 5. Close empty severity groups immediately
-6. Vote ACCEPT or REVISE per slice
+6. Vote ACCEPT or REVISE for the wave
 ```
 
 ## Review Criteria
 
-Each reviewer checks each slice for:
+Each reviewer checks every slice in the wave for:
 
 1. **Requirements Alignment (check URD)**
    - Does implementation match ratified plan?
    - Are all acceptance criteria met?
-   - Read URD (`pasture task show "${URD_ID_URI}"`) for requirements traceability
+   - Read URD (`"${EPOCH_REC}" show "${URD_ID_URI}"`) for requirements traceability
 
 2. **User Vision (check URD)**
    - Does it fulfill the user's original request (as documented in URD)?
@@ -274,11 +282,13 @@ Each reviewer checks each slice for:
 | **ACCEPT** | All 5 criteria satisfied; no BLOCKER items |
 | **REVISE** | BLOCKER issues found; must provide actionable feedback |
 
+One vote per wave on the wave review task (not one per slice):
+
 **Documentation (via Pasture comments):**
 ```bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: ACCEPT - [reason]"
+"${EPOCH_REC}" note "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: ACCEPT - [reason]"
 # OR
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "VOTE: REVISE - [specific issue]. Suggest: [fix]"
+"${EPOCH_REC}" note "${REVIEW_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "VOTE: REVISE - [specific issue]. Suggest: [fix]"
 ```
 
 ## Consensus Check
@@ -287,10 +297,10 @@ All reviews across all slices must be ACCEPT:
 
 ```bash
 # Check for any REVISE votes
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p10-impl:s10-review"
+"${EPOCH_REC}" query --phase code_review
 
 # Check for unresolved BLOCKERs
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
+"${EPOCH_REC}" query --label="pasture:severity:blocker" --status=open
 
 # If any REVISE or open BLOCKERs, return to implementation
 # If all ACCEPT and BLOCKERs resolved, proceed to Phase 11 (UAT)
@@ -298,7 +308,7 @@ pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blo
 
 ## Handling REVISE
 
-If any reviewer votes REVISE on any slice:
+If any reviewer votes REVISE on the wave:
 
 1. **Document issues** in the review task description
 2. **Return slice to worker** for fixes
@@ -306,7 +316,7 @@ If any reviewer votes REVISE on any slice:
 
 ```bash
 # Mark slice as needing revision
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${SLICE_ID_URI}" "REVISION NEEDED: <specific issues>"
+"${EPOCH_REC}" note "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "REVISION NEEDED: <specific issues>"
 
 # After worker fixes, start new review round
 # New severity groups are created fresh for the new round
@@ -314,24 +324,24 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 
 ## Follow-up Epic (EPIC_FOLLOWUP)
 
-Per [frag--sup-followup-epic-timing], create only when UAT produces user-DEFER'd items. Review findings of every severity must be resolved before the review wave closes.
+Per [frag--sup-followup-epic-timing], create only when UAT produces user-DEFER'd items. Open review findings stay open past a wave gate and converge at the end; they never feed the FOLLOWUP epic.
 
 ### Step 1: Create the follow-up epic
 
 ```bash
-FOLLOWUP_EPIC_ID_URI=$(pasture task create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
-  --description="---
+FOLLOWUP_EPIC_ID_URI=$("${EPOCH_REC}" create --kind epic --title "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --priority 3 \
+  --body="---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
   review_round: ${REVIEW_ROUND_ID_URI}
 ---
-User-DEFER'd UAT items only; no review findings." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
+User-DEFER'd UAT items only; no review findings.")
+"${EPOCH_REC}" label "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 
 # Link only the UAT-deferred item leaves
-pasture task dep add "$FOLLOWUP_EPIC_ID_URI" --blocked-by "$DEFERRED_ITEM_ID_1_URI"
-pasture task dep add "$FOLLOWUP_EPIC_ID_URI" --blocked-by "$DEFERRED_ITEM_ID_2_URI"
+"${EPOCH_REC}" block "$FOLLOWUP_EPIC_ID_URI" --by "$DEFERRED_ITEM_ID_1_URI"
+"${EPOCH_REC}" block "$FOLLOWUP_EPIC_ID_URI" --by "$DEFERRED_ITEM_ID_2_URI"
 ```
 
 ### Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
@@ -346,57 +356,50 @@ FOLLOWUP epic (pasture:epic-followup)
         ├── frontmatter reference: FOLLOWUP_URD (living requirements document)
         └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
               └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
-                    ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
+                    ├── blocked-by: the first follow-up slice  (Phase 9)
                     │     ├── blocked-by: deferred-item-leaf-task-...
                     │     └── blocked-by: deferred-item-leaf-task-...
-                    └── blocked-by: FOLLOWUP_SLICE-2
+                    └── blocked-by: the second follow-up slice
 ```
 
 ```bash
-# Create follow-up lifecycle tasks
-FOLLOWUP_URE_ID=$(pasture task create "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+# Create follow-up lifecycle tasks. The URD lands first so the URE can record it.
+FOLLOWUP_URD_ID=$("${EPOCH_REC}" create --kind task --title "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit \
+  --body "---
 references:
   followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
   original_urd: "${ORIGINAL_URD_ID_URI}"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
-pasture task dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "$FOLLOWUP_URE_ID"
+Follow-up requirements. References original URD.")
+"${EPOCH_REC}" label "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
+"${EPOCH_REC}" label "$FOLLOWUP_URD_ID" pasture:urd
 
-FOLLOWUP_URD_ID=$(pasture task create "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
-references:
-  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
-  original_urd: "${ORIGINAL_URD_ID_URI}"
----
-Follow-up requirements. References original URD." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
-pasture task label add "$FOLLOWUP_URD_ID" pasture:urd
-# Preserve the URE's references and scoping text; the living URD is not blocking work.
-pasture task update "$FOLLOWUP_URE_ID" --description "---
+FOLLOWUP_URE_ID=$("${EPOCH_REC}" create --kind task --title "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit \
+  --body "---
 references:
   followup_epic: \"${FOLLOWUP_EPIC_ID_URI}\"
   original_urd: \"${ORIGINAL_URD_ID_URI}\"
   followup_urd: \"${FOLLOWUP_URD_ID}\"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address."
+Scoping URE: determine which user-DEFER'd UAT items to address.")
+"${EPOCH_REC}" label "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
+"${EPOCH_REC}" block "${FOLLOWUP_EPIC_ID_URI}" --by "$FOLLOWUP_URE_ID"
 ```
 
 ### Step 3: DEFER'd-item leaf adoption (dual-parent)
 
-When the supervisor creates FOLLOWUP_SLICE-N tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
+When the supervisor creates the follow-up slice tasks, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
 
 ```bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
-pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
-pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
-# Leaf task already has: pasture task dep add "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"
+"${EPOCH_REC}" block "${FOLLOWUP_SLICE_ID_URI}" --by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
+"${EPOCH_REC}" block "${FOLLOWUP_SLICE_ID_URI}" --by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
+# Leaf task already has: "${EPOCH_REC}" block "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --by "${LEAF_TASK_ID_URI}"
 ```
 
-### Followup Handoff (h5)
+### Reviewer → Supervisor Handoff (h5)
 
-The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (all review severities reach 0 before the wave closes). Author this handoff in its Pasture task body (no filesystem path):
+The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review wave. The FOLLOWUP epic itself is created later, at UAT, from the user-DEFER'd UAT items — **not** from review findings (open findings converge at the end; close rule: `C-finding-lifecycle`). Author this handoff in its Pasture task body (no filesystem path):
 
 ```markdown
 # Handoff: Reviewer → Supervisor (review wave complete)
@@ -407,7 +410,7 @@ The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review
 - Ratified Proposal: ${PROPOSAL_ID_URI}
 
 ## Review Outcome
-- All slices reviewed; ALL severity groups (BLOCKER/IMPORTANT/MINOR) reached 0 on a fix-free clean round.
+- All slices reviewed; convergence found no open pasture:finding across all waves.
 
 ## Open Items
 - None for this wave. Any user-DEFER'd UAT items feed the FOLLOWUP epic at Phase 11.
@@ -417,20 +420,22 @@ The h5 handoff (Reviewer → Supervisor, summary-with-ids) closes out the review
 
 Inside the follow-up lifecycle, the same handoff types (h1-h4) apply but scoped to the follow-up epic:
 
+The follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`); code review never starts it. The Supervisor creates the FOLLOWUP epic from those items (same actor), then:
+
 | Order | Handoff | Transition |
 |-------|---------|------------|
-| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |
+| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |
 | 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
-| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
-| 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
+| 6 | h2 | Supervisor → Worker: the follow-up slice with DEFER'd-item leaf tasks |
+| 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
 Follow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).
 
-See `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples and field requirements.
+See `../architect-handoff/SKILL.md` for handoff field requirements.
 
 ## Proceeding to UAT
 
@@ -438,10 +443,10 @@ Only when ALL reviews are ACCEPT and all BLOCKERs are resolved:
 
 ```text
 # Verify consensus — no open BLOCKERs
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker" --status=open
+"${EPOCH_REC}" query --label="pasture:severity:blocker" --status=open
 # Should return 0 results
 
 # Proceed to Phase 11 (Implementation UAT)
-Skill(/pasture:user-uat)
+invoke_skill(/pasture:user-uat)
 ```
 <!-- END GENERATED FROM pasture schema -->

@@ -46,11 +46,11 @@ var userElicitBody = SkillBody{
 			Given:     "URD created",
 			When:      "linking to other tasks",
 			Then:      "include URD ID in description frontmatter of referencing tasks",
-			ShouldNot: "use `pasture task dep add --blocked-by` for URD links (URD is a reference document, not a blocking dependency)",
+			ShouldNot: "use `[[rec:block]] --blocked-by` for URD links (URD is a reference document, not a blocking dependency)",
 		},
 		{
 			Id:        "user-elicit-code-shown",
-			Given:     "any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in an AskUserQuestion preview)",
+			Given:     "any definition, code snippet, interface, or before/after example shown to the user during elicitation (e.g. in the preview the [[op:request_user_decision]] call shows)",
 			When:      "recording the Q&A",
 			Then:      "capture the shown definition/code VERBATIM in the elicit task alongside the question and response (parity with UAT's 'Definition shown' / 'Command run' fields)",
 			ShouldNot: "record only the answer while dropping the code or definition the user was reacting to — the response is meaningless without what was shown",
@@ -59,7 +59,7 @@ var userElicitBody = SkillBody{
 			Id:        "user-elicit-invoke-skill",
 			Given:     "the Phase 2 URE interview",
 			When:      "conducting it",
-			Then:      "MUST invoke `Skill(/pasture:user-elicit)` so the verbatim-capture and validation-case elicitation procedures are loaded",
+			Then:      "MUST invoke `[[op:invoke_skill]](/pasture:user-elicit)` so the verbatim-capture and validation-case elicitation procedures are loaded",
 			ShouldNot: "conduct the URE without invoking its skill — skipping it loses verbatim capture and the validation-case lifecycle",
 		},
 		{
@@ -71,7 +71,7 @@ var userElicitBody = SkillBody{
 		},
 		// R6: EVERY REQUEST elicits concrete validation cases during URE (generalized
 		// from fix-intent-only at v2-2). behaviorRef resolves to
-		// SharedFragmentSpecs[FragValidationCases] (SLICE-1) so the lifecycle renders
+		// SharedFragmentSpecs[FragValidationCases] so the lifecycle renders
 		// into the generated SKILL.md.
 		behaviorRef(FragValidationCases),
 	},
@@ -79,6 +79,8 @@ var userElicitBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragWritingStandard),
+		fragRef(FragWritingQuestions),
 		{
 			Id:    "user-elicit-substeps",
 			Title: "Sub-steps",
@@ -150,7 +152,7 @@ These narrow the design space and reveal which boundaries are already clear vs
 which need user input.
 
 ` + "```" + `bash
-pasture task show "${REQUEST_ID_URI}"   # Read classification + research + explore findings
+[[rec:show]] "${REQUEST_ID_URI}"   # Read classification + research + explore findings
 ` + "```" + `
 
 Use the Phase 1 findings to identify:
@@ -164,7 +166,7 @@ Use the Phase 1 findings to identify:
 					Content: "Structure questions as a decision tree that progressively narrows the design\n" +
 						"space. Each question should depend on the answers to previous questions.\n" +
 						"\n" +
-						"**Round 1: Highest-leverage boundaries** (1-2 questions per AskUserQuestion call)\n" +
+						"**Round 1: Highest-leverage boundaries** (one decision per [[op:request_user_decision]] call)\n" +
 						"\n" +
 						"Identify the 2-3 dimensions that most constrain the design. These are the axes\n" +
 						"where different choices lead to fundamentally different architectures.\n" +
@@ -193,69 +195,85 @@ Use the Phase 1 findings to identify:
 		{
 			Id:    "user-elicit-example-survey",
 			Title: "Example Survey",
-			Content: "```\n" +
-				"AskUserQuestion(questions: [\n" +
-				"  {\n" +
-				"    question: \"What is your end vision for this feature? How will users interact with it when complete?\",\n" +
-				"    header: \"End Vision\",\n" +
-				"    multiSelect: true,\n" +
-				"    options: [\n" +
-				"      { label: \"Simple UI control\", description: \"Button/link users click\" },\n" +
-				"      { label: \"Automated process\", description: \"Happens without user action\" },\n" +
-				"      { label: \"API endpoint\", description: \"Programmatic access\" },\n" +
-				"      { label: \"Background service\", description: \"Runs continuously\" }\n" +
-				"    ]\n" +
-				"  },\n" +
-				"  {\n" +
-				"    question: \"What is the minimum viable version (MVP) that would be useful?\",\n" +
-				"    header: \"MVP Scope\",\n" +
-				"    multiSelect: true,\n" +
-				"    options: [\n" +
-				"      { label: \"Core functionality only\", description: \"Just the basic action\" },\n" +
-				"      { label: \"With confirmation\", description: \"User confirms before action\" },\n" +
-				"      { label: \"With feedback\", description: \"Show success/error state\" },\n" +
-				"      { label: \"Full featured\", description: \"All bells and whistles\" }\n" +
-				"    ]\n" +
-				"  },\n" +
-				"  {\n" +
-				"    question: \"Are there any specific constraints or requirements?\",\n" +
-				"    header: \"Constraints\",\n" +
-				"    multiSelect: true,\n" +
-				"    options: [\n" +
-				"      { label: \"Performance critical\", description: \"Must be fast\" },\n" +
-				"      { label: \"Security sensitive\", description: \"Handles sensitive data\" },\n" +
-				"      { label: \"Backwards compatible\", description: \"Can't break existing\" },\n" +
-				"      { label: \"No constraints\", description: \"Flexible implementation\" }\n" +
-				"    ]\n" +
-				"  },\n" +
-				"  {\n" +
-				"    question: \"Is there anything else we should know about this feature?\",\n" +
-				"    header: \"Other\",\n" +
-				"    multiSelect: true,\n" +
-				"    options: [\n" +
-				"      { label: \"Related to existing feature\", description: \"Connects to something\" },\n" +
-				"      { label: \"Inspired by another product\", description: \"Has a reference\" },\n" +
-				"      { label: \"Urgent timeline\", description: \"Needed soon\" },\n" +
-				"      { label: \"Nothing else\", description: \"Covered everything\" }\n" +
-				"    ]\n" +
-				"  }\n" +
-				"])\n" +
+			Content: "Each call asks one question. Do not batch these decisions into one call.\n\n" +
+				"```\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
+				"    {\n" +
+				"      question: \"What is your end vision for this feature? How will users interact with it when complete?\",\n" +
+				"      header: \"End Vision\",\n" +
+				"      multiSelect: true,\n" +
+				"      options: [\n" +
+				"        { label: \"Simple UI control\", description: \"Button/link users click\" },\n" +
+				"        { label: \"Automated process\", description: \"Happens without user action\" },\n" +
+				"        { label: \"API endpoint\", description: \"Programmatic access\" },\n" +
+				"        { label: \"Background service\", description: \"Runs continuously\" }\n" +
+				"      ]\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
+				"\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
+				"    {\n" +
+				"      question: \"What is the minimum viable version (MVP) that would be useful?\",\n" +
+				"      header: \"MVP Scope\",\n" +
+				"      multiSelect: true,\n" +
+				"      options: [\n" +
+				"        { label: \"Core functionality only\", description: \"Just the basic action\" },\n" +
+				"        { label: \"With confirmation\", description: \"User confirms before action\" },\n" +
+				"        { label: \"With feedback\", description: \"Show success/error state\" },\n" +
+				"        { label: \"Full featured\", description: \"All bells and whistles\" }\n" +
+				"      ]\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
+				"\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
+				"    {\n" +
+				"      question: \"Are there any specific constraints or requirements?\",\n" +
+				"      header: \"Constraints\",\n" +
+				"      multiSelect: true,\n" +
+				"      options: [\n" +
+				"        { label: \"Performance critical\", description: \"Must be fast\" },\n" +
+				"        { label: \"Security sensitive\", description: \"Handles sensitive data\" },\n" +
+				"        { label: \"Backwards compatible\", description: \"Can't break existing\" },\n" +
+				"        { label: \"No constraints\", description: \"Flexible implementation\" }\n" +
+				"      ]\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
+				"\n" +
+				"[[op:request_user_decision]]({\n" +
+				"  questions: [\n" +
+				"    {\n" +
+				"      question: \"Is there anything else we should know about this feature?\",\n" +
+				"      header: \"Other\",\n" +
+				"      multiSelect: true,\n" +
+				"      options: [\n" +
+				"        { label: \"Related to existing feature\", description: \"Connects to something\" },\n" +
+				"        { label: \"Inspired by another product\", description: \"Has a reference\" },\n" +
+				"        { label: \"Urgent timeline\", description: \"Needed soon\" },\n" +
+				"        { label: \"Nothing else\", description: \"Covered everything\" }\n" +
+				"      ]\n" +
+				"    }\n" +
+				"  ]\n" +
+				"})\n" +
 				"```",
 		},
 		{
 			Id:    "user-elicit-create-task",
 			Title: "Creating the Elicit Task (s2_1)",
 			Content: `After survey completion, capture the full Q&A record using the same structured
-format as [UAT_TEMPLATE.md](../protocol/UAT_TEMPLATE.md). Each question must
-include the exact question text, ALL options with their descriptions, and the
-user's verbatim response. When a definition, code snippet, or example was shown
+format in [user-uat](../user-uat/SKILL.md). ` + questionRecordSentence() + ` When a definition, code snippet, or example was shown
 to the user before a question, capture it verbatim in a **Definition/code shown:**
 field (parity with UAT's 'Definition shown' / 'Command run' fields). For
 **every** request, also record the elicited validation cases verbatim.
 
 ` + "```" + `bash
-ELICIT_ID_URI=$(pasture task create "ELICIT: {{feature name}}" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+ELICIT_ID_URI=$([[rec:create]] --kind task --title "ELICIT: {{feature name}}" --phase elicit \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
 ---
@@ -286,12 +304,12 @@ A: {{user's verbatim input}}
 - Definition of done: {{verbatim observable outcome that means the request is satisfied}}
 - Must pass (correct behaviour): {{verbatim expected correct behavior}}
 - Must fail / out of scope (incorrect behaviour): {{verbatim — for fix-intent, the input/behavior that fails today}}
-- Repro / real data: {{verbatim commands, data, or steps — or 'none'}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
-pasture task update "$ELICIT_ID_URI" --notes "Requested role (not an assignment): architect"
+- Repro / real data: {{verbatim commands, data, or steps — or 'none'}}")
+[[rec:label]] "$ELICIT_ID_URI" pasture:p2-user:s2_1-elicit
+[[rec:note]] "$ELICIT_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Requested role (not an assignment): architect"
 
 # Chain dependency: REQUEST blocked by ELICIT
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
+[[rec:block]] "${REQUEST_ID_URI}" --by "${ELICIT_ID_URI}"
 ` + "```" + ``,
 		},
 		{
@@ -300,8 +318,8 @@ pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${ELICIT_ID_URI}"
 			Content: `After the elicit task is created, create the URD as the single source of truth for user requirements:
 
 ` + "```" + `bash
-URD_ID_URI=$(pasture task create "URD: {{feature name}}" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+URD_ID_URI=$([[rec:create]] --kind task --title "URD: {{feature name}}" --phase elicit \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   elicit: "${ELICIT_ID_URI}"
@@ -319,9 +337,9 @@ references:
 {{minimum viable scope identified}}
 
 ## End-Vision Goals
-{{user's ultimate vision for the feature}}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$URD_ID_URI" pasture:urd
-pasture task label add "$URD_ID_URI" pasture:p2-user:s2_2-urd
+{{user's ultimate vision for the feature}}")
+[[rec:label]] "$URD_ID_URI" pasture:urd
+[[rec:label]] "$URD_ID_URI" pasture:p2-user:s2_2-urd
 ` + "```" + `
 
 The URD is a **reference document**, not a blocking dependency. Other tasks reference it via description frontmatter (` + "`" + `urd: "${URD_ID_URI}"` + "`" + `), not via blocking dependency commands.
@@ -335,9 +353,10 @@ Record the URD task ID — pass it to the architect for Phase 3.`,
 
 The proposal task will block the elicit task:
 ` + "```" + `bash
-pasture task dep add "${ELICIT_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
+[[rec:block]] "${ELICIT_ID_URI}" --by "${PROPOSAL_ID_URI}"
 ` + "```" + ``,
 		},
+		fragRef(FragSignalCapture),
 	},
 
 	Recipes: []RecipeBlock{},

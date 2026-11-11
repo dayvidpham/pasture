@@ -99,7 +99,8 @@ var generalConstraints = map[string]bool{
 //   C-supervisor-explore-ephemeral → SUPERVISOR (given: "supervisor needs codebase exploration")
 //   C-integration-points      → SUPERVISOR (given: "multiple vertical slices share types" when: "decomposing IMPL_PLAN")
 //   C-slice-review-before-close → SUPERVISOR (given: "workers complete their implementation slices")
-//   C-clean-review-exit       → EPOCH + SUPERVISOR (given: "per-slice code review" — review loop within chosen budget; surface on exhaustion)
+//   C-finding-lifecycle       → REVIEWER + SUPERVISOR (given: "a code-review finding" — the raiser closes it after verification)
+//   C-clean-review-exit       → EPOCH + SUPERVISOR (given: "per-wave code review and end-of-epoch convergence" — blocker gate, then convergence; surface on exhaustion)
 //   C-review-effort-budget    → EPOCH + SUPERVISOR + REVIEWER (given: "start of Phase 8" — request configurable review-effort budget)
 //   C-uat-feedback-disposition → EPOCH (V2-PROP: epoch orchestrates ALL deferred items raised to the user at the next gate)
 //   C-validation-cases        → SUPERVISOR (V4-PROP: supervisor enforces the validation-case contract workers' tests verify)
@@ -129,7 +130,7 @@ var roleConstraints = map[protocol.RoleId]map[string]bool{
 		"C-integration-points": true,
 		// Epoch enforces: slices reviewed before closure; supervisor closes, not workers
 		"C-slice-review-before-close": true,
-		// Epoch enforces: review->fix->re-review up to the chosen budget until a fix-free clean round (0/0/0), else surface
+		// Epoch enforces: per-wave blocker gate, then convergence over open findings, else surface
 		"C-clean-review-exit": true,
 		// Epoch requests the configurable review-effort budget at Phase 8 (IMPL_PLAN start)
 		"C-review-effort-budget": true,
@@ -157,6 +158,9 @@ var roleConstraints = map[protocol.RoleId]map[string]bool{
 		"C-severity-not-plan": true,
 		// Reviewer records BLOCKER findings with dual parents
 		"C-blocker-dual-parent": true,
+		// Reviewer owns the finding lifecycle: creates it labelled pasture:finding under its severity group,
+		// and is the only actor who may close it after verifying the fix
+		"C-finding-lifecycle": true,
 		// Reviewer creates review task names
 		"C-review-naming": true,
 		// Reviewer iterates within the chosen review-effort budget; surfaces on exhaustion
@@ -173,7 +177,9 @@ var roleConstraints = map[protocol.RoleId]map[string]bool{
 		"C-integration-points": true,
 		// Slices must be reviewed before closure
 		"C-slice-review-before-close": true,
-		// Review->fix->re-review up to the chosen budget until a fix-free clean round (0/0/0), else surface
+		// Supervisor enforces the finding lifecycle: it may not close a finding, and a wave boundary never does
+		"C-finding-lifecycle": true,
+		// Review->fix->re-review up to the chosen budget, then convergence over open findings, else surface
 		"C-clean-review-exit": true,
 		// Supervisor requests the configurable review-effort budget at Phase 8 (IMPL_PLAN start)
 		"C-review-effort-budget": true,
@@ -313,7 +319,7 @@ var phaseConstraints = map[protocol.PhaseId]map[string]bool{
 		"C-supervisor-explore-ephemeral": true,
 		// Slices reviewed before closure — supervisor closes after review passes
 		"C-slice-review-before-close": true,
-		// Review->fix->re-review up to the chosen budget until a fix-free clean round (0/0/0), else surface
+		// Per-wave blocker gate, then convergence over open findings, else surface
 		"C-clean-review-exit": true,
 		// Configurable review-effort budget governs the per-slice review loop
 		"C-review-effort-budget": true,

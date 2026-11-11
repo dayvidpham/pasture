@@ -46,6 +46,14 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 		return GenerateResult{}, []error{err}
 	}
 
+	// ── 2b. Tracker contract gate (fail-closed, before any write) ────────────
+	if err := ValidateTrackerOps(); err != nil {
+		return GenerateResult{}, []error{err}
+	}
+	if err := ValidateSignalCaptureHasNoBackendRecipe(); err != nil {
+		return GenerateResult{}, []error{err}
+	}
+
 	var result GenerateResult
 	var errs []error
 
@@ -88,7 +96,11 @@ func Generate(root string, targets []TargetHarness, opts GenerateOptions) (Gener
 	}
 	stage := append([]GeneratedFile{{Path: schemaPath, Content: content}}, result.Files...)
 	stage = append(stage, inventory...)
-	if err := ValidateOperationalFiles(root, stage, "complete generation candidate validation"); err != nil {
+	// The aggregate stage spans every requested target, so it has no single
+	// target for the foreign-name scan. Each target's EmitHarness call above
+	// already ran that scan on its own staged bytes before any target output
+	// entered this stage.
+	if err := ValidateOperationalFiles(root, stage, "complete generation candidate validation", ""); err != nil {
 		return GenerateResult{}, []error{err}
 	}
 	if err := publishGeneratedFiles(stage, opts); err != nil {

@@ -51,7 +51,7 @@ var workerImplementBody = SkillBody{
 		// R6: for EVERY request (generalized from fix-intent-only at v2-2), evaluate
 		// the implementation against the concrete validation cases captured in
 		// URE/UAT and store the failing real-data cases as test fixtures. Resolves to
-		// SharedFragmentSpecs[FragValidationCases] (SLICE-1). See C-validation-cases.
+		// SharedFragmentSpecs[FragValidationCases]. See C-validation-cases.
 		behaviorRef(FragValidationCases),
 	},
 
@@ -74,7 +74,7 @@ var workerImplementBody = SkillBody{
 					Content: `**Given** Pasture task **when** starting **then** identify production code path first
 
 ` + "```" + `bash
-pasture task show "${TASK_ID_URI}"
+[[rec:show]] "${TASK_ID_URI}" --notes
 # Look for: "productionCodePath": "cli-command subcommand" or "api-endpoint"
 ` + "```" + `
 
@@ -95,14 +95,14 @@ End: User runs production command
 					Id:    "wimpl-step1-read",
 					Title: "Step 1: Read Pasture task for full context",
 					Content: `` + "```" + `bash
-pasture task show "${TASK_ID_URI}"
+[[rec:show]] "${TASK_ID_URI}" --notes
 ` + "```" + ``,
 				},
 				{
 					Id:    "wimpl-step2-status",
 					Title: "Step 2: Update status",
 					Content: `` + "```" + `bash
-pasture task update "${TASK_ID_URI}" --status=in_progress
+[[rec:status]] "${TASK_ID_URI}" --set in_progress
 ` + "```" + ``,
 				},
 				{
@@ -164,7 +164,7 @@ they sweep peer-worker WIP into your commit.
 ` + "`" + `git checkout HEAD -- <path>` + "`" + `, ` + "`" + `git stash pop` + "`" + `, ` + "`" + `git stash apply` + "`" + `,
 ` + "`" + `git clean -fd` + "`" + `, ` + "`" + `git branch -D` + "`" + `) on the shared worktree. A
 PreToolUse hook blocks these for worker agents; if you find peer
-work in your way, post ` + "`" + `pasture task comment add` + "`" + ` and wait for supervisor
+work in your way, post ` + "`" + `[[rec:note]]` + "`" + ` and wait for supervisor
 coordination instead. See **Shared-Worktree Git Discipline** in
 ` + "`" + `/pasture:worker` + "`" + ` for the full rationale and the escape hatch.`,
 				},
@@ -177,16 +177,16 @@ coordination instead. See **Shared-Worktree Git Discipline** in
 		},
 		{
 			Id:    "wimpl-followup-slices",
-			Title: "Follow-up Slices (FOLLOWUP_SLICE-N)",
-			Content: `If your Pasture task is a ` + "`" + `FOLLOWUP_SLICE-N` + "`" + `, the implementation procedure is identical. Additionally:
-- Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`" + `pasture task show "${TASK_ID_URI}"` + "`" + ` — these are user-DEFER'd UAT items you must resolve
+			Title: "Follow-up slices",
+			Content: `If your Pasture task is a follow-up slice, the implementation procedure is identical. Additionally:
+- Check for a "DEFER'd-Item Leaf Tasks" section in ` + "`" + `[[rec:show]] "${TASK_ID_URI}"` + "`" + ` — these are user-DEFER'd UAT items you must resolve
 - Your implementation must address each DEFER'd-item leaf task's acceptance criteria
 - On completion, report which DEFER'd-item leaf tasks were resolved`,
 		},
 		{
 			Id:      "wimpl-review-fix-cycle",
 			Title:   "Review-Fix Cycle (within the chosen review-effort budget)",
-			Content: `Your slice is not finished when the first pass lands. Code review iterates **review → fix → re-review** up to the **review-effort budget chosen at Phase 8** until a fix-free clean round confirms **0 BLOCKER + 0 IMPORTANT + 0 MINOR** within budget. Stay available to fix findings of every severity — IMPORTANT and MINOR must reach 0 too, not just BLOCKER. If the budget is exhausted before a clean round, the outstanding findings are surfaced to the user at a gate (not proceeded-past silently). Do not treat "tests pass once" as wave completion.`,
+			Content: `Your slice is not finished when the first pass lands. Code review runs in two phases. **During a wave**, only an open BLOCKER finding gates progress; IMPORTANT and MINOR findings stay open. **After the last wave**, convergence queries every open ` + "`pasture:finding`" + ` across all waves and targets **0/0/0** within **maxRounds**. Stay available to fix findings of every severity — IMPORTANT and MINOR reach the convergence round too, not just BLOCKER. Findings close only per ` + "`C-finding-lifecycle`" + `; a worker cannot close one. Iterate up to the **review-effort budget chosen at Phase 8**. If the budget is exhausted before convergence, the outstanding findings are surfaced to the user at a gate (not proceeded-past silently). Do not treat "tests pass once" as wave completion.`,
 		},
 		{
 			Id:    "wimpl-next",

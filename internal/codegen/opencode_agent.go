@@ -41,32 +41,21 @@ var openCodeMode = map[protocol.RoleId]string{
 	protocol.RoleReviewer:   "subagent",
 }
 
-// openCodeModel maps the harness-neutral RoleSpec.Model nickname to the fully
-// qualified OpenCode model id ("<provider>/<model-id>").
-//
-// Source: the LIVE models.dev catalog (https://models.dev/api.json), anthropic
-// provider entries. A committed snapshot of the relevant entries lives at
-// internal/codegen/testdata/opencode_models.json; opencode_models_test.go
-// asserts each id below EXISTS in that snapshot (catalog-existence, not merely
-// map-key presence). Refresh both together when the catalog changes.
-var openCodeModel = map[string]string{
-	"opus":   "anthropic/claude-opus-4-8",
-	"sonnet": "anthropic/claude-sonnet-4-6",
-}
-
-// openCodeToolPermission maps each Claude-side tool name to the OpenCode
-// permission key it grants. Tools with no OpenCode analog (Agent, SendMessage)
-// are intentionally absent and therefore omitted from the emitted permission
-// map. Both Edit and Write map to the single OpenCode "edit" permission.
+// openCodeToolPermission maps each native OpenCode tool name to the permission
+// key it grants. The native names come from the runtime lowerings, so this
+// table is keyed by the resolved name, not by a Claude-side spelling. Tools
+// with no OpenCode native name never reach it. Both "edit" and "write" map to
+// the single OpenCode "edit" permission.
 var openCodeToolPermission = map[string]string{
-	"Read":  "read",
-	"Glob":  "glob",
-	"Grep":  "grep",
-	"Bash":  "bash",
-	"Skill": "skill",
-	"Edit":  "edit",
-	"Write": "edit",
-	"Task":  "task",
+	"read":     "read",
+	"glob":     "glob",
+	"grep":     "grep",
+	"bash":     "bash",
+	"skill":    "skill",
+	"edit":     "edit",
+	"write":    "edit",
+	"task":     "task",
+	"webfetch": "webfetch",
 }
 
 // ─── Template context ─────────────────────────────────────────────────────────
@@ -84,6 +73,7 @@ type openCodeAgentTemplateData struct {
 	Description string
 	Mode        string
 	Model       string
+	TierCatalog string
 	Permissions []openCodePermissionEntry
 	Body        string
 }
@@ -97,7 +87,7 @@ type openCodeAgentEmitter struct{}
 func (openCodeAgentEmitter) Emit(root string, figuresDir string, opts GenerateOptions) ([]GeneratedFile, error) {
 	var out []GeneratedFile
 	for roleID, roleSpec := range RoleSpecs {
-		if len(roleSpec.Tools) == 0 {
+		if !roleHasToolSurface(roleSpec) {
 			continue
 		}
 		content, err := renderOpenCodeAgent(roleID, figuresDir)
@@ -146,24 +136,32 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 		)
 	}
 
-	model, ok := openCodeModel[roleSpec.Model]
-	if !ok {
-		return "", fmt.Errorf(
-			"codegen.renderOpenCodeAgent: role %q model nickname %q has no OpenCode model "+
-				"mapping — add it to openCodeModel in internal/codegen/opencode_agent.go and to "+
-				"the testdata/opencode_models.json snapshot",
-			roleID, roleSpec.Model,
-		)
+	tier, err := TierForRole(roleID)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderOpenCodeAgent: resolving model tier for role %q failed: %w", roleID, err)
+	}
+	model, err := ModelForTier(HarnessOpenCode, tier)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderOpenCodeAgent: resolving model id for role %q failed: %w", roleID, err)
 	}
 
-	permissions := buildOpenCodePermissions(roleSpec.Tools)
-
-	// Reuse the Claude agent body verbatim (no re-authoring): render the full
-	// Claude agent file, then strip its leading YAML frontmatter block.
-	claudeAgent, err := renderAgent(roleID, figuresDir)
+	toolNames, err := RoleToolNames(HarnessOpenCode, roleSpec)
 	if err != nil {
 		return "", fmt.Errorf(
-			"codegen.renderOpenCodeAgent: renderAgent for role %q failed: %w",
+			"codegen.renderOpenCodeAgent: resolving tools for role %q failed: %w",
+			roleID, err,
+		)
+	}
+	permissions := buildOpenCodePermissions(toolNames)
+
+	// Reuse the authored agent body (no re-authoring), but resolve its typed
+	// markers for OpenCode: the OpenCode agent must not carry Claude's native
+	// tool names. Strip the Claude frontmatter, which the OpenCode template
+	// replaces.
+	claudeAgent, err := renderAgentForTarget(roleID, figuresDir, HarnessOpenCode)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderOpenCodeAgent: renderAgentForTarget for role %q failed: %w",
 			roleID, err,
 		)
 	}
@@ -188,10 +186,15 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 		)
 	}
 
+	catalog, err := harnessTierCatalog(HarnessOpenCode)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderOpenCodeAgent: resolving tier catalog for role %q failed: %w", roleID, err)
+	}
 	data := openCodeAgentTemplateData{
 		Description: roleSpec.Description,
 		Mode:        mode,
 		Model:       model,
+		TierCatalog: catalog,
 		Permissions: permissions,
 		Body:        body,
 	}
@@ -212,10 +215,10 @@ func renderOpenCodeAgent(roleID protocol.RoleId, figuresDir string) (string, err
 }
 
 // buildOpenCodePermissions produces the least-privilege, deterministically
-// ordered permission slice for a role's tools: a leading "*": deny seed, then
-// each granted permission key sorted ascending and de-duplicated (Edit + Write
-// both map to "edit"). Tools with no OpenCode analog (Agent, SendMessage) are
-// omitted because they are absent from openCodeToolPermission.
+// ordered permission slice for a role's resolved native tools: a leading
+// "*": deny seed, then each granted permission key sorted ascending and
+// de-duplicated (Edit + Write both map to "edit"). A tool with no OpenCode
+// native name is absent from openCodeToolPermission and grants nothing.
 func buildOpenCodePermissions(tools []string) []openCodePermissionEntry {
 	granted := make(map[string]struct{})
 	for _, tool := range tools {

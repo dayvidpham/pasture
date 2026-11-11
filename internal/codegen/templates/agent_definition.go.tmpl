@@ -1,10 +1,13 @@
 ---
 name: {{ .Role.Id }}
 description: {{ .Role.Description }}
-tools: {{ join .Role.Tools ", " }}
-model: {{ .Role.Model }}
-{{- if .Role.Thinking }}
-thinking: {{ .Role.Thinking }}
+tools: {{ join .ToolNames ", " }}
+model: {{ .Model }}
+{{- if .TierCatalog }}
+{{ .TierCatalog }}
+{{- end }}
+{{- if .Effort }}
+thinking: {{ .Effort }}
 {{- end }}
 ---
 

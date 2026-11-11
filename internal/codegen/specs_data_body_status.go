@@ -8,6 +8,12 @@ var statusBody = SkillBody{
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragWritingStandard), // wording only; status asks no question
+		{
+			Id:      "status-question-rules-elsewhere",
+			Title:   "Question rules",
+			Content: writingQuestionLivesSentence(),
+		},
 		{
 			Id:    "status-steps",
 			Title: "Steps",
@@ -16,31 +22,31 @@ var statusBody = SkillBody{
 					Id:    "status-step1-plans",
 					Title: "1. Check for active plans",
 					Content: `` + "```" + `bash
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p3-plan:s3-propose" --status=open
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p6-plan:s6-ratify" --status=open
+[[rec:query]] --label="pasture:p3-plan:s3-propose" --status=open
+[[rec:query]] --label="pasture:p6-plan:s6-ratify" --status=open
 ` + "```" + ``,
 				},
 				{
 					Id:    "status-step2-impl",
 					Title: "2. Check implementation progress",
 					Content: `` + "```" + `bash
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p8-impl:s8-plan" --status=open
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
-pasture task blocked --label="pasture:p9-impl:s9-slice"
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
+[[rec:query]] --phase impl_plan --status=open
+[[rec:query]] --phase worker_slices --status=in_progress
+[[rec:query]] --blocked --phase worker_slices
+[[rec:query]] --phase worker_slices --status=closed
 ` + "```" + ``,
 				},
 				{
 					Id:    "status-step3-stats",
 					Title: "3. Get project stats",
 					Content: `` + "```" + `bash
-pasture task list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
+[[rec:query]] | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
 ` + "```" + ``,
 				},
 				{
 					Id:      "status-step4-report",
 					Title:   "4. Report status",
-					Content: "Summarize findings across plans, implementation, and blocked tasks in the output format below.",
+					Content: "Summarize findings across plans, implementation, and blocked tasks in the output format in the next section. That format is the protocol status report. Template: status update, in Writing to the User, is the message to the user. Use the report here. Use the message when you write to the user. Do not mix them.",
 				},
 			},
 		},
@@ -66,16 +72,16 @@ pasture task list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'i
 - {task-id}: {blocker reason}
 
 ### Recent Activity
-pasture task list --namespace "$PASTURE_NAMESPACE"
+[[rec:query]]
 ` + "```" + ``,
 		},
 		{
 			Id:    "status-quick-status",
 			Title: "Quick Status",
 			Content: `` + "```" + `bash
-pasture task list --namespace "$PASTURE_NAMESPACE" --format json | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
-pasture task ready
-pasture task blocked
+[[rec:query]] | python3 -c 'import collections,json,sys; print(dict(collections.Counter(x["status"] for x in json.load(sys.stdin))))'
+[[rec:ready]]
+[[rec:query]] --blocked
 ` + "```" + ``,
 		},
 	},

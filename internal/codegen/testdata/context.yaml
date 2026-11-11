@@ -8,9 +8,10 @@
 
 role_constraint_checks:
   - role: supervisor
-    exact_count: 20
+    exact_count: 21
     must_contain:
       - C-review-effort-budget
+      - C-finding-lifecycle
       - C-validation-cases
       - C-supervisor-no-impl
       - C-vertical-slices
@@ -37,9 +38,10 @@ role_constraint_checks:
       - C-worker-gates         # worker only
 
   - role: reviewer
-    exact_count: 12
+    exact_count: 13
     must_contain:
       - C-review-effort-budget
+      - C-finding-lifecycle
       - C-review-binary
       - C-severity-eager
       - C-review-consensus

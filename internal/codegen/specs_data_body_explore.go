@@ -3,8 +3,7 @@
 package codegen
 
 var exploreBody = SkillBody{
-	Preamble: "General-purpose codebase exploration skill. Searches the codebase for integration points, existing patterns, data flow, dependencies, and potential conflicts relevant to a topic or feature.\n\n" +
-		"See `../protocol/CONSTRAINTS.md` for coding standards.",
+	Preamble: "General-purpose codebase exploration skill. Searches the codebase for integration points, existing patterns, data flow, dependencies, and potential conflicts relevant to a topic or feature.",
 
 	Behaviors: []BehaviorSpec{
 		{
@@ -46,7 +45,7 @@ var exploreBody = SkillBody{
 			Id:        "explore-phase1-recording",
 			Given:     "Phase 1 context",
 			When:      "recording findings",
-			Then:      "add a structured comment on the REQUEST task via `pasture task comment add`",
+			Then:      "add a structured comment on the REQUEST task via `[[rec:note]]`",
 			ShouldNot: "only produce output without updating the REQUEST task",
 		},
 	},
@@ -121,9 +120,9 @@ var exploreBody = SkillBody{
 			Title: "Depth Scoping",
 			Content: "| Depth | Scope | Tools | Deliverable |\n" +
 				"|-------|-------|-------|-------------|\n" +
-				"| **quick-scan** | Grep for keywords, check obvious entry points, scan file tree | Glob, Grep | 1-paragraph summary per checklist item |\n" +
-				"| **standard-research** | Trace data flow, map dependencies, read related modules, check test patterns | Glob, Grep, Read | Per-section structured findings with file:line citations |\n" +
-				"| **deep-dive** | Full dependency graph, architectural analysis, identify all touchpoints, trace transitive consumers | Glob, Grep, Read, Bash (build/dep tools) | Complete architectural map with dependency diagram and risk assessment |",
+				"| **quick-scan** | Grep for keywords, check obvious entry points, scan file tree | [[tool:glob]], [[tool:grep]] | 1-paragraph summary per checklist item |\n" +
+				"| **standard-research** | Trace data flow, map dependencies, read related modules, check test patterns | [[tool:glob]], [[tool:grep]], [[tool:read]] | Per-section structured findings with file:line citations |\n" +
+				"| **deep-dive** | Full dependency graph, architectural analysis, identify all touchpoints, trace transitive consumers | [[tool:glob]], [[tool:grep]], [[tool:read]], [[tool:bash]] (build/dep tools) | Complete architectural map with dependency diagram and risk assessment |",
 		},
 		{
 			Id:    "explore-output-format",
@@ -195,7 +194,7 @@ User input → CLI parser (src/cli/parse.ts:30)
 			Content: `When invoked as part of Phase 1 (s1_3-explore), record findings on the REQUEST task:
 
 ` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${REQUEST_ID_URI}" \
+[[rec:note]] "${REQUEST_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body \
   "Explore findings ({{depth}}):
   - Entry points: {{list of files/functions with line numbers}}
   - Related types: {{existing types/schemas with locations}}

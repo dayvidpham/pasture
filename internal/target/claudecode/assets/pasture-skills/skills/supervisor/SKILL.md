@@ -27,12 +27,12 @@ skills: pasture:afk-implement, pasture:impl-review, pasture:impl-slice, pasture:
 
 | Command | Description | Phases |
 |---------|-------------|--------|
-| `pasture:afk-implement` | Run an unattended implementation session with small PRs and a clean review wave, never merging | p8-impl-plan, p9-worker-slices, p10-code-review |
+| `pasture:afk-implement` | Run an unattended implementation session with small PRs and a review wave that ends in convergence, never merging | p8-impl-plan, p9-worker-slices, p10-code-review |
 | `pasture:impl:review` | Code review coordination across all slices (Phase 10) | p10-code-review |
 | `pasture:impl:slice` | Vertical slice assignment and tracking | p9-worker-slices |
 | `pasture:supervisor` | Task coordinator, spawns workers, manages parallel execution | p7-handoff, p8-impl-plan, p9-worker-slices, p10-code-review, p11-impl-uat, p12-landing |
 | `pasture:supervisor:commit` | Atomic commit per completed layer/slice | p12-landing |
-| `pasture:supervisor:plan-tasks` | Decompose ratified plan into vertical slices (SLICE-N) | p8-impl-plan |
+| `pasture:supervisor:plan-tasks` | Decompose ratified plan into vertical slices (SLICE-{W}-{N}) | p8-impl-plan |
 | `pasture:supervisor:spawn-worker` | Launch a worker agent for an assigned slice | p9-worker-slices |
 | `pasture:supervisor:track-progress` | Monitor worker status via Pasture | p9-worker-slices, p10-code-review |
 
@@ -65,18 +65,18 @@ git commit -m "feat: add login"
 **[C-audit-dep-chain]**
 - Given: any phase transition
 - When: creating new task
-- Then: chain dependency: pasture task dep add parent --blocked-by child
+- Then: chain dependency: "${EPOCH_REC}" block parent --by child
 - Should not: skip dependency chaining or invert direction
 
 _Example (correct)_
 
 ```bash
 # Full dependency chain: work flows bottom-up, closure flows top-down
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
-pasture task dep add "${URE_ID_URI}" --blocked-by "${PROPOSAL_ID_URI}"
-pasture task dep add "${PROPOSAL_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
-pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
-pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
+"${EPOCH_REC}" block "${URE_ID_URI}" --by "${PROPOSAL_ID_URI}"
+"${EPOCH_REC}" block "${PROPOSAL_ID_URI}" --by "${IMPL_PLAN_ID_URI}"
+"${EPOCH_REC}" block "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
+"${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "${LEAF_TASK_A_ID_URI}"
 ```
 
 **[C-audit-never-delete]**
@@ -86,31 +86,37 @@ pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "${LEAF_TASK_A_ID_URI}"
 - Should not: delete or close tasks prematurely, remove labels
 
 **[C-clean-review-exit]**
-- Given: per-slice code review
+- Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; a clean round is one where the re-review applies no fixes and finds nothing across all three severities; on budget exhaustion without a clean round, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: close a wave on a fix-applying round; proceed with ANY finding (BLOCKER, IMPORTANT, or MINOR) outstanding without surfacing it to the user; hardcode the budget; proceed past the chosen budget without surfacing to the user; batch review across multiple slices
+- Then: during a wave, only an open BLOCKER finding gates the wave; IMPORTANT and MINOR findings may stay open past a wave gate; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within the gate declaration's maxRounds; iterate review -> fix -> re-review up to the chosen review-effort budget; on budget exhaustion without reaching that target, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; proceed past the chosen budget without surfacing outstanding findings to the user; hardcode the budget; batch review across multiple slices
 
 **[C-dep-direction]**
 - Given: adding a Pasture dependency
 - When: determining direction
-- Then: parent blocked-by child: pasture task dep add "${STAYS_OPEN_URI}" --blocked-by "${MUST_FINISH_FIRST_URI}"
+- Then: parent blocked-by child: "${EPOCH_REC}" block "${STAYS_OPEN_URI}" --by "${MUST_FINISH_FIRST_URI}"
 - Should not: invert (child blocked-by parent)
 
 _Example (correct)_ — also illustrates: C-audit-dep-chain
 
 ```bash
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${URE_ID_URI}"
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${URE_ID_URI}"
 ```
 
 _Example (anti-pattern)_
 
 ```bash
-pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
+"${EPOCH_REC}" block "${URE_ID_URI}" --by "${REQUEST_ID_URI}"
 ```
 
+**[C-finding-lifecycle]**
+- Given: a code-review finding
+- When: recording or closing it
+- Then: create it as a child of its severity group labelled `pasture:finding`, and close it only when the reviewer who raised it verifies the fix — a worker or supervisor cannot close it, and a wave boundary never closes it
+- Should not: close a finding from a worker or supervisor, close one at a wave boundary, or record severity in the finding label (severity lives on its parent group)
+
 **[C-followup-leaf-adoption]**
-- Given: supervisor creates FOLLOWUP_SLICE-N
+- Given: supervisor creates the follow-up slice
 - When: assigning user-DEFER'd UAT-item leaf tasks to follow-up slices
 - Then: add leaf task as child of follow-up slice (dual-parent: leaf blocks both the DEFER'd-items tracking group AND follow-up slice)
 - Should not: remove the leaf task from its original DEFER'd-items tracking parent
@@ -125,7 +131,7 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 - Given: UAT (Phase 5 or Phase 11) produces one or more user-DEFER'd items
 - When: creating the FOLLOWUP epic
 - Then: create the FOLLOWUP epic at UAT when user-DEFER'd items exist; the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items
-- Should not: trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — all review findings must reach 0 before wave close, no severity is deferrable to FOLLOWUP
+- Should not: trigger FOLLOWUP from any review severity (BLOCKER/IMPORTANT/MINOR) — no review severity is deferrable to FOLLOWUP (a finding's close rule is `C-finding-lifecycle`)
 
 **[C-frontmatter-refs]**
 - Given: cross-task references (URD, request, etc.)
@@ -153,26 +159,26 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 
 **[C-review-effort-budget]**
 - Given: the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate
-- When: deciding how much review-and-fix effort to spend per slice
-- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision
+- When: deciding how much review-and-fix effort to spend per wave
+- Then: request a configurable review-effort budget from the user — defaults: (1) three rounds, (2) one round, (3) zero rounds, (4) unlimited, (5) custom; the review->fix->re-review loop iterates up to the chosen budget; convergence runs at the end over open `pasture:finding` tasks across all waves and targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision
 - Should not: hardcode the review-cycle budget (e.g. an unconditional fixed cap baked into the prose instead of asked); proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
 
 **[C-slice-leaf-tasks]**
 - Given: vertical slice created
 - When: decomposing slice into implementation units
-- Then: create one or more Pasture leaf tasks per slice, named after the real work units they represent, with pasture task dep add "${SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)
+- Then: create one or more Pasture leaf tasks per slice, named after the real work units they represent, with "${EPOCH_REC}" block "${SLICE_ID_URI}" --by "${LEAF_TASK_ID_URI}"; a slice may have ANY number of leaves (the L1: types / L2: tests / L3: impl triple is ONE illustrative shape, not a required count)
 - Should not: create slices without leaf tasks — a slice with no children is undecomposed and cannot be tracked; force every slice into a fixed L1/L2/L3 triple when the real work units differ
 
 **[C-slice-review-before-close]**
 - Given: workers complete their implementation slices
 - When: slice implementation is done
-- Then: workers notify supervisor with pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 (not pasture task close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
+- Then: workers notify supervisor with "${EPOCH_REC}" note (not "${EPOCH_REC}" close); slices must be reviewed at least once by reviewers before closure; only the supervisor closes slices, after review passes
 - Should not: close slices immediately upon worker completion; allow workers to close their own slices
 
 **[C-supervisor-explore-ephemeral]**
 - Given: supervisor needs codebase exploration
 - When: starting Phase 8 (IMPL_PLAN)
-- Then: spawn ephemeral Explore subagents via Task tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
+- Then: spawn ephemeral Explore subagents via Agent tool for scoped codebase queries; each subagent is short-lived and returns findings; no standing team overhead
 - Should not: explore the codebase directly as supervisor; maintain a standing explore team
 
 **[C-supervisor-no-impl]**
@@ -207,16 +213,15 @@ pasture task dep add "${URE_ID_URI}" --blocked-by "${REQUEST_ID_URI}"
 
 **Step 1:** Call Skill(/pasture:supervisor) to load role instructions (`Skill(/pasture:supervisor)`)
 
-**Step 2:** Read RATIFIED_PLAN, URD, UAT, and elicit tasks via pasture task show for full context (`pasture task show "${RATIFIED_PLAN_ID_URI}" && pasture task show "${URD_ID_URI}" && pasture task show "${UAT_ID_URI}" && pasture task show "${ELICIT_ID_URI}"`)
+**Step 2:** Read RATIFIED_PLAN, URD, UAT, and elicit tasks via "${EPOCH_REC}" show for full context (`"${EPOCH_REC}" show "${RATIFIED_PLAN_ID_URI}" && "${EPOCH_REC}" show "${URD_ID_URI}" && "${EPOCH_REC}" show "${UAT_ID_URI}" && "${EPOCH_REC}" show "${ELICIT_ID_URI}"`)
 
-**Step 3:** Spawn ephemeral Explore subagents via Task tool for scoped codebase queries — _Each subagent is short-lived and returns findings; no standing team overhead_
+**Step 3:** Spawn ephemeral Explore subagents via Agent tool for scoped codebase queries — _Each subagent is short-lived and returns findings; no standing team overhead_
 
 **Step 4:** Decompose into vertical slices — _Vertical slices give one worker end-to-end ownership of a feature path (types → tests → impl → wiring) with clear file boundaries_ → `impl-plan`
 
-**Step 5:** Create leaf tasks (L1/L2/L3) for every slice (`CREATED_URI=$(pasture task create "SLICE-{K}-L{1,2,3}: <description>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --description "Describe the specific work and reference full task URIs" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$CREATED_URI" pasture:p9-impl:s9-slice`)
+**Step 5:** Create leaf tasks (L1/L2/L3) for every slice (`CREATED_URI=$("${EPOCH_REC}" create --kind task --title "<description>" --phase worker_slices --body "Describe the specific work and reference full task URIs")`)
 
-**Step 6:** Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity. → `worker-slices`
+**Step 6:** Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent. Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4. → `worker-slices`
 
 ### Introduction
 
@@ -224,7 +229,7 @@ You coordinate parallel task execution. See the project's AGENTS.md and ~/.claud
 
 ### What You Own
 
-You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation SLICE-N (p9), spawn reviewers for per-slice code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.
+You own Phases 7-12 of the epoch: receive handoff from architect (p7), create vertical slice decomposition IMPL_PLAN (p8), spawn workers for parallel implementation the slice (p9), spawn reviewers for whole-wave code review with severity tree (p10), coordinate user acceptance test (p11), commit, push, and hand off (p12). You NEVER implement code directly — all implementation is delegated to workers.
 
 ### Role Behaviors (Given/When/Then/Should Not)
 
@@ -237,98 +242,98 @@ You own Phases 7-12 of the epoch: receive handoff from architect (p7), create ve
 **[B-sup-model-trivial]**
 - Given: trivial changes (single-file edits, config tweaks, typo fixes)
 - When: spawning a worker
-- Then: use model: haiku to minimize cost and latency
-- Should not: use a heavyweight model for trivial work
+- Then: keep the worker at its mapped capability tier (T2 standard), with the tier's effort, to minimize cost and latency
+- Should not: raise a worker's tier for trivial work
 
 **[B-sup-model-nontrivial]**
 - Given: non-trivial changes (multi-file, architectural, logic-heavy)
 - When: spawning a worker
-- Then: prefer model: sonnet for the Task tool to ensure quality
-- Should not: default to haiku for complex work
+- Then: override the worker to T1 frontier for the delegate_assignment tool to ensure quality
+- Should not: leave a high-complexity slice at the default tier
 
 **[B-sup-ride-the-wave]**
 - Given: Phase 8-10 execution
 - When: starting implementation
-- Then: follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for per-slice review (clean exit = 0 BLOCKER + 0 IMPORTANT + 0 MINOR), workers fix per-slice with atomic commits, and iterate review -> fix -> re-review up to the chosen review-effort budget until a fix-free clean round confirms 0/0/0; on budget exhaustion without clean, surface outstanding findings to the user at a gate
-- Should not: skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; close a wave with any finding silently outstanding
+- Then: follow the Ride the Wave cycle: plan tasks with integration points, launch the wave of workers, spawn reviewers for whole-wave review (only an open BLOCKER finding gates the wave), workers fix findings with atomic commits, and iterate review -> fix -> re-review up to the chosen review-effort budget; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds, and on exhaustion surface outstanding findings to the user at a gate
+- Should not: skip any stage; batch review across slices; hardcode the budget; proceed past the chosen budget without surfacing to the user; require a zeroed round to close a wave; close a finding outside `C-finding-lifecycle`
 
 ### Completion Checklist
 
 **landing gates:**
-- [ ] Fix-free clean re-review: 0 BLOCKER + 0 IMPORTANT + 0 MINOR from all 3 reviewers
+- [ ] All 3 reviewers ACCEPT at convergence and no open pasture:finding remains
 - [ ] FOLLOWUP epic created at UAT only if user-DEFER'd items exist (never from review severities)
 - [ ] git agent-commit used (not git commit -m)
 - [ ] All upstream tasks closed or dependency-resolved
 - [ ] Can only close on a review wave, not a worker wave
-- [ ] Eligible to close only after review by independent agents with 0 BLOCKER + 0 IMPORTANT + 0 MINOR findings
+- [ ] Eligible to close only after convergence finds no open pasture:finding across all waves
 
 **review-ready gates:**
-- [ ] All workers have notified completion via pasture task comment add
+- [ ] All workers have notified completion via "${EPOCH_REC}" note
 - [ ] Ephemeral reviewers spawned for all slices
-- [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per slice
+- [ ] Severity groups (BLOCKER/IMPORTANT/MINOR) eagerly created per wave per axis per round
 
 ### Inter-Agent Coordination
 
-Agents coordinate through **beads** tasks and comments:
+Agents coordinate through tracker tasks and comments:
 
 | Action | Command |
 |--------|---------|
-| Transfer existing assignment (supervisor only) | `pasture task assignment transfer "${TASK_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR}"` |
-| List blocked | `pasture task blocked` |
-| Add progress note | `pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${TASK_ID_URI}" "Progress: ..."` |
-| Chain dependency | `pasture task dep add "${PARENT_URI}" --blocked-by "${CHILD_URI}"` |
-| Label completed slice | `pasture task label add "${SLICE_ID_URI}" pasture:p9-impl:slice-complete` |
-| List in-progress | `pasture task list --namespace "$PASTURE_NAMESPACE" --status=in_progress` |
-| Check task details | `pasture task show "${TASK_ID_URI}"` |
-| Update status | `pasture task update "${TASK_ID_URI}" --status=in_progress` |
+| Transfer existing assignment (supervisor only) | `"${EPOCH_REC}" label "${TASK_ID_URI}" owner:"${REGISTERED_WORKER_ACTOR}"` |
+| List blocked | `"${EPOCH_REC}" query --blocked` |
+| Add progress note | `"${EPOCH_REC}" note "${TASK_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Progress: ..."` |
+| Chain dependency | `"${EPOCH_REC}" block "${PARENT_URI}" --by "${CHILD_URI}"` |
+| Record slice completion | `"${EPOCH_REC}" note "${SLICE_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Slice complete."` |
+| List in-progress | `"${EPOCH_REC}" query --status=in_progress` |
+| Check task details | `"${EPOCH_REC}" show "${TASK_ID_URI}"` |
+| Update status | `"${EPOCH_REC}" status "${TASK_ID_URI}" --set in_progress` |
 
 ## Workflows
 
 ### Ride the Wave
 
-Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for per-slice review, workers fix, and re-review up to the chosen review-effort budget until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR; on budget exhaustion without clean, surface outstanding findings to the user at a gate.
+Coordinated Phase 8-10 execution pattern. The supervisor orchestrates the full cycle: plan slices, launch workers, spawn reviewers for whole-wave review, where only an open BLOCKER finding gates the wave, workers fix, and review repeats up to the chosen review-effort budget; after the last wave, convergence queries every open `pasture:finding` across all waves and targets 0/0/0 within maxRounds, surfacing outstanding findings to the user at a gate on exhaustion.
 
 ### Stage 1: Plan _(sequential)_
-- Read RATIFIED_PLAN and URD via pasture task show (`pasture task show "${RATIFIED_PLAN_ID_URI}" && pasture task show "${URD_ID_URI}"`)
+- Read RATIFIED_PLAN and URD via "${EPOCH_REC}" show (`"${EPOCH_REC}" show "${RATIFIED_PLAN_ID_URI}" && "${EPOCH_REC}" show "${URD_ID_URI}"`)
 - Spawn ephemeral Explore subagents (`subagent_type=Explore`) for scoped codebase queries — NOT standing teams
 - Use Explore findings to decompose into vertical slices with integration points
-- Create leaf tasks (L1/L2/L3) for every slice (`pasture task dep add "${SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"`)
+- Create leaf tasks (L1/L2/L3) for every slice (`"${EPOCH_REC}" block "${SLICE_ID_URI}" --by "${LEAF_TASK_ID_URI}"`)
 
 Exit conditions:
 - **proceed**: All slices created with leaf tasks, dependency-chained, assigned
 
 ### Stage 2: Build _(parallel)_
-- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent (NOT aura-swarm). Choose model: sonnet for non-trivial slices, haiku for trivial changes. Set thinking effort to match slice complexity.
-- Monitor worker progress via pasture task list --namespace "$PASTURE_NAMESPACE" and pasture task show (`pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress`)
+- Spawn workers via the Agent tool — set `name` for a named teammate, leave `name` empty for a backgrounded subagent. Choose the capability tier: T1 frontier for non-trivial slices, T2 standard for ordinary work. Pass the tier-mapped native model id and respect the concurrency cap of 4.
+- Monitor worker progress via "${EPOCH_REC}" query and "${EPOCH_REC}" show (`"${EPOCH_REC}" query --phase worker_slices --status=in_progress`)
 - Supervisor commits at integration points (atomic commits) — commit small, integrate early and often
 
 Exit conditions:
-- **proceed**: All workers have notified completion via pasture task comment add
+- **proceed**: All workers have notified completion via "${EPOCH_REC}" note
 
 ### Stage 3: Review + Fix Cycles _(conditional-loop)_
-- Spawn reviewers via Task tool for per-slice code review
-- Reviewers create severity groups (BLOCKER/IMPORTANT/MINOR) per slice
-- Track findings in the 3 severity groups; ALL groups must reach 0 before wave close (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)
+- Spawn reviewers via Agent tool for whole-wave code review
+- Reviewers create one severity trio (BLOCKER/IMPORTANT/MINOR) per wave, per axis, per round
+- Track findings as `pasture:finding` children of the 3 severity groups; only an open BLOCKER gates the wave, and open findings converge at the end (FOLLOWUP is created later at UAT, fed only by user-DEFER'd items)
 - Workers fix ALL findings (BLOCKER, IMPORTANT, and MINOR)
 
-- Spawn 3 ephemeral reviewer subagents per round (same pattern as Phase 4 plan review)
-- **CLEAN REVIEW** = 0 BLOCKER + 0 IMPORTANT + 0 MINOR from ALL reviewers on a fix-free round
-- Per-slice fix+review; iterate up to the chosen review-effort budget
+- Spawn 3 ephemeral reviewer subagents per wave review round (same pattern as Phase 4 plan review)
+- **WAVE GATE** = only an open BLOCKER finding blocks the wave; IMPORTANT and MINOR findings stay open
+- Per-wave review, per-slice fix; iterate up to the chosen review-effort budget
 - Fix flow: Stage 3 (dirty review) -> Stage 2 (worker fixes) -> Stage 3 (re-review)
-- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review until the slice is clean (0/0/0); on budget exhaustion without clean, surface outstanding findings to the user at a gate
+- Configurable review-effort budget (chosen at Phase 8: 3 rounds / 1 round / 0 rounds / unlimited / custom) — repeat review -> fix -> re-review up to the budget; convergence targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface outstanding findings to the user at a gate
 - **MUST end on a review wave** — cannot proceed after a worker wave without review
 
 ```text
-Stage 3 Flow (per-slice):
+Stage 3 Flow (per-wave review):
 
   ┌─────────────────────────────────────────┐
   │ Spawn 3 ephemeral reviewers             │
   │ Review slice (severity: BLOCKER/IMP/MIN)│
   └──────────────┬──────────────────────────┘
                  │
-          CLEAN? ├── YES (0/0/0) → slice passes, proceed
+          BLOCKER? ├── NO → wave advances, findings stay open
                  │
-                 └── NO (any finding remains)
+                 └── YES (an open BLOCKER)
                        │
                        ▼
               ┌────────────────────┐
@@ -346,19 +351,19 @@ Stage 3 Flow (per-slice):
                        │
                  loop (re-review)
                        │
-          repeat until clean (0/0/0) — up to the chosen budget, else surface to user
+          repeat to the budget — convergence at the end, else surface to user
 ```
 
 Exit conditions:
-- **success**: All reviewers report 0 BLOCKER + 0 IMPORTANT + 0 MINOR on a fix-free clean round — proceed to Phase 11 UAT
-- **continue**: Any finding (BLOCKER, IMPORTANT, or MINOR) remains within budget — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)
+- **success**: Convergence finds no open pasture:finding across all waves — proceed to Phase 11 UAT
+- **continue**: An open BLOCKER gates the current wave, or convergence has not reached 0/0/0 within maxRounds — workers fix, spawn new ephemeral reviewers (up to the chosen review-effort budget; on exhaustion, surface to the user)
 
 ##### Ride the Wave — Coordinated Phase 8-10 Execution
 
 ```text
 Phase 8: PLAN
   ├─ Read RATIFIED_PLAN + URD
-  ├─ Spawn ephemeral Explore subagents (Task tool, scoped queries)
+  ├─ Spawn ephemeral Explore subagents (delegation operation, scoped queries)
   ├─ Use Explore findings to map codebase
   ├─ Decompose into vertical slices + integration points
   └─ Create leaf tasks for every slice
@@ -368,24 +373,26 @@ Phase 9: BUILD
   ├─ Workers implement their slices in parallel
   └─ Workers do NOT shut down when finished
 
-Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget — iterate until 0/0/0 clean, else surface to user)
+Phase 10: REVIEW + FIX CYCLES (up to the chosen review-effort budget)
   ├─ Cycle 1:
-  │   ├─ Spawn ephemeral reviewers (Task tool, per-slice review)
+  │   ├─ Spawn ephemeral reviewers (delegation operation, whole-wave review)
   │   ├─ Reviewers review ALL slices (severity tree: BLOCKER/IMPORTANT/MINOR)
+  │   ├─ Reviewers label every finding pasture:finding under its severity group
   │   ├─ Workers fix ALL findings (BLOCKER + IMPORTANT + MINOR) with atomic commits
   │   └─ Spawn new ephemeral reviewers for re-review
   ├─ Cycle 2 (if needed): same pattern
   ├─ Cycle N (as many as needed): same pattern
-  └─ Continue until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR
+  └─ Each wave advances when no BLOCKER is open; IMPORTANT and MINOR findings stay open
 
 DONE → Phase 11 (UAT)
   ├─ Shut down Workers
   └─ FOLLOWUP epic (if any) is created at UAT from user-DEFER'd items only
 
 Cycle Exit Conditions:
-  Fix-free clean round: 0 BLOCKER + 0 IMPORTANT + 0 MINOR   → Proceed to Phase 11 (UAT)
-  ANY finding remains (BLOCKER/IMPORTANT/MINOR)             → Workers fix, spawn new ephemeral reviewers (up to chosen budget; on exhaustion, surface to user)
-  Genuinely stuck (cannot reach a clean round)             → Escalate to architect for re-planning
+  A wave gate: no open BLOCKER finding                        → the wave advances; open findings stay open
+  After the last wave: convergence over open pasture:finding  → targets 0/0/0 within maxRounds; on exhaustion, surface to the user
+  Finding close rule: see C-finding-lifecycle
+  Genuinely stuck (cannot converge)                           → Escalate to architect for re-planning
 
 ```
 
@@ -400,13 +407,13 @@ Cycle Exit Conditions:
 **[sup-spawn-workers]**
 - Given: worker assignments
 - When: spawning
-- Then: use Task tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start
+- Then: use Agent tool with `subagent_type: "general-purpose"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start
 - Should not: spawn workers sequentially or use specialized agent types
 
 **[sup-teamcreate-msg]**
-- Given: teammates spawned via TeamCreate
+- Given: an assignment delegated with the Agent operation
 - When: assigning work via SendMessage
-- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `pasture task show "${TASK_ID_URI}"` for full context, and (4) the handoff authored in the Pasture task body
+- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `"${EPOCH_REC}" show "${TASK_ID_URI}"` for full context, and (4) the handoff authored in the Pasture task body
 - Should not: send bare instructions without Pasture context — teammates have no prior knowledge of the task
 
 **[sup-layer-integration-points]**
@@ -418,7 +425,7 @@ Cycle Exit Conditions:
 **[sup-followup-deps]**
 - Given: IMPORTANT or MINOR severity groups
 - When: linking dependencies
-- Then: wire each group to its review round only: `pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "${IMPORTANT_GROUP_ID_URI}"` — ALL severity groups must reach 0 before the wave closes
+- Then: wire each group to its review round only: `"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "${IMPORTANT_GROUP_ID_URI}"` — only an open BLOCKER gates the wave; open findings converge at the end
 - Should not: route IMPORTANT or MINOR severity groups to the FOLLOWUP epic, or wire them as blocking IMPL_PLAN/any slice — only BLOCKER findings block slices, and the FOLLOWUP epic is fed solely by user-DEFER'd UAT items
 
 **[frag--sup-review-all-slices]**
@@ -434,9 +441,9 @@ Cycle Exit Conditions:
 - Should not: skip any slice
 
 **[frag--sup-review-severity-groups]**
-- Given: review round
+- Given: a wave review round
 - When: creating severity groups
-- Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per round even if empty
+- Then: ALWAYS create 3 severity groups (BLOCKER, IMPORTANT, MINOR) per wave, per axis, per round, even if empty
 - Should not: lazily create groups only when findings exist
 
 **[frag--sup-blocker-dual-parent]**
@@ -448,8 +455,8 @@ Cycle Exit Conditions:
 **[frag--sup-deferred-followup]**
 - Given: a review finding (BLOCKER, IMPORTANT, or MINOR)
 - When: categorizing
-- Then: track it in its severity group; ALL severity groups must reach 0 before wave close — the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity
-- Should not: route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a wave with any finding outstanding
+- Then: track it in its severity group as an open finding; open findings do not block a wave unless they are BLOCKERs, and the FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items, never by any review severity
+- Should not: route any review severity (BLOCKER/IMPORTANT/MINOR) to the FOLLOWUP epic; close a finding outside `C-finding-lifecycle`
 
 **[frag--sup-followup-epic-timing]**
 - Given: UAT (Phase 5 or 11) produces one or more user-DEFER'd items
@@ -460,40 +467,260 @@ Cycle Exit Conditions:
 **[sup-worker-persistence]**
 - Given: worker completes initial implementation
 - When: deciding whether to shut down the worker
-- Then: keep workers alive for the review-fix cycle; workers notify supervisor via pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 but do NOT shut down
+- Then: keep workers alive for the review-fix cycle; workers notify supervisor via "${EPOCH_REC}" note but --author pasture-system/00000000-0000-0000-0000-000000000000 --body do NOT shut down
 - Should not: shut down workers after first implementation pass; workers must stay alive to fix BLOCKERs and IMPORTANT findings
 
 **[sup-autonomous-progression]**
 - Given: non-user-gated phase completes
 - When: transitioning to next phase
-- Then: proceed autonomously without asking permission; the 5 user-gated phases are: Phase 1 s1_1 (research depth), Phase 2 (URE), Phase 5 (Plan UAT), Phase 8 (implementation-effort / review-effort budget request), Phase 11 (Impl UAT); all other phase transitions (9 SLICES, 10 CODE REVIEW, 12 LANDING) progress automatically
-- Should not: ask 'Should I proceed?' for autonomous phases; add user gates beyond the 5 defined; only pause for user-facing phases that require human input
+- Then: proceed autonomously; User gates: [request (p1 research depth); elicit (p2 requirements interview); plan-review (p5 plan UAT); impl-plan (p8 implementation effort and review budget); impl-uat (p11 implementation UAT)]
+- Should not: ask 'Should I proceed?' for autonomous phases; add user gates beyond the defined list; only pause for user-facing phases that require human input
 
 **[frag--review-clean-exit]**
-- Given: per-slice code review
+- Given: per-wave code review and end-of-epoch convergence
 - When: evaluating review results
-- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; clean = 0 BLOCKER + 0 IMPORTANT + 0 MINOR within budget; on budget exhaustion without clean, SURFACE the outstanding findings to the user at a gate for a decision
-- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen
+- Then: iterate review -> fix -> re-review up to the chosen review-effort budget; during a wave only an open BLOCKER finding gates progress, while IMPORTANT and MINOR findings stay open; after the last wave, converge over open `pasture:finding` tasks across all waves toward 0/0/0 within maxRounds; a finding closes only per `C-finding-lifecycle`; on budget exhaustion without convergence, SURFACE the outstanding findings to the user at a gate for a decision
+- Should not: hardcode the budget; proceed past the chosen budget without surfacing outstanding findings to the user; require a zeroed round at a wave boundary; close a finding outside `C-finding-lifecycle`; loop forever when a finite budget was chosen
 
 ## Task Recovery
 
-Recover from live Pasture state at session start and after compaction; never trust cached task rows.
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
 
-Store selection: an explicit --db overrides PASTURE_DB_PATH; otherwise use XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db. Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami, signal.
 
-Set PASTURE_NAMESPACE to the repository's canonical namespace URI, for example https://github.com/dayvidpham/pasture. The CLI reads it as the default for --namespace when the flag is omitted; an explicit --namespace always wins. task list, task ready, and task blocked are scoped to that effective namespace, and --all-namespaces ignores both sources. When neither source is set, those reads are unscoped. Creation still falls back to the git-remote-derived namespace, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
 
-Run pasture task ready, pasture task blocked, and pasture task list --status in_progress (all three use the effective namespace: PASTURE_NAMESPACE by default, an explicit --namespace, or --all-namespaces for every namespace). For each referenced active task, run pasture task show "$TASK_URI", pasture task comments "$TASK_URI", and pasture task timeline "$TASK_URI". All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the actual JSON id returned by create; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+The adapter passes `--namespace` only when EPOCH.md records `namespace:`. That pin wins on both backends. Otherwise it omits the flag. Pasture then derives the namespace itself: PASTURE_NAMESPACE, else the git remote, then file:// of the working directory. The ledger calls derive_namespace for the header and for every write that has no pin. That function is the one list of remote forms; do not restate it. With no origin, both backends use file:// of the working directory, so invocations from different subdirectories use different namespaces. Queries without a pin follow that backend's derivation; pass `--all-namespaces` to opt out. When neither a pin nor PASTURE_NAMESPACE is set, pasture reads are unscoped and creation falls back to the git remote, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
 
-Create returns an object whose id is the task URI: capture it with --format json and python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'. Persist that URI before label/comment steps. Create-plus-label is non-atomic: on failure retain the URI and retry only the failed label/comment operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
 
-Assignment transfer is not initial allocation: before using pasture task assignment transfer, obtain the existing owner-responsibility assignment and its exact successor assignment ID, registered committing actor, and registered worker occupant from the supervisor. If the task is unassigned, stop and let the supervisor arrange allocation; no assignment-start command is implied. Never repeat an identical transfer as a substitute for allocating different workers.
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
 
-Parent stays open and is blocked by child: pasture task dep add "$PARENT_URI" --blocked-by "$CHILD_URI". Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
+
+Parent stays open and is blocked by child: `"${EPOCH_REC}" block "$PARENT_URI" --by "$CHILD_URI"`. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records `backend: error`, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
 
 ## Task Attribution
 
-Select the current registered author with pasture task agents list and pasture task agents show ACTOR-ID. Never auto-register or guess an identity during recovery. Every comment supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+Select the current registered author with "${EPOCH_REC}" whoami. It prints the author recorded in the header or PASTURE_AUTHOR, and on the pasture backend it confirms that actor with agents show. It does not list agents and it does not invent one. If neither source names an author, it stops: set author: in EPOCH.md or export PASTURE_AUTHOR. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
+## Writing to the User
+
+These rules adapt ASD-STE100 Issue 9, Part 1 to chat messages. They are STE-aligned. The standard's Part 2 dictionary is not adopted, so no message can claim full compliance. This fragment covers wording: plain terms, short sentences, active voice, no invented labels, and the wording house rule, plus the pre-send check and the status template. Five skills carry these wording rules: architect-handoff, status, supervisor, user-elicit, user-uat.
+
+### The rules
+
+Format: number, requirement, the STE rule it adapts, then a compact bad-to-good pair.
+
+**Shape**
+
+| # | Rule | Adapts | Bad to good |
+|---|---|---|---|
+| 1 | Lead with the result, the decision, or the blocker. | 6.1, 6.2 | 'This pins both the edge and the core case per branch, so a same-count swap fails.' to 'Result: the test now fails if a real case is replaced with a filler case.' |
+| 3 | One topic per paragraph. Max 3 sentences. | 6.5, 6.6 | One 25-word sentence with four stacked ideas, to three sentences with one idea each. |
+| 4 | For 3 or more items, a flow, or a comparison, use a list, a table, or an ASCII diagram. | 4.3 | 'Adopt the first option, then the second, then both' to a three-row table: option, what happens, cost. |
+| 5 | Cut filler, self-narration, hedging, praise, and closing offers. | house | 'It is important to note that this change effectively serves to ensure the test can detect' to 'The test detects a removed case.' |
+
+**Terms**
+
+| # | Rule | Adapts | Bad to good |
+|---|---|---|---|
+| 6 | Put every term the user did not introduce in a Terms block before first use. Max 20 words per definition. Include the code name. | 1.1, 1.6 | 'per arm' to 'Arm: one of the 5 branches of the skip gate. Code: `arm`.' |
+| 7 | Use the industry term for the concept. Do not invent a term. | 1.8, 1.10 | 'a same-count swap' to 'a replacement that keeps the test count the same'. |
+| 8 | One name per item, in the message and across the session. | 1.11, 9.4 | 'the gate', then 'the event types', then 'the IR', to 'the event types' each time. |
+| 9 | One meaning per word. Do not use one word in two senses. | 1.2, 1.3 | 'pins' for a version lock and 'pins' for a test assertion, to 'locks the version' and 'the test checks'. |
+| 10 | No internal shorthand in prose. Write the substance first, then the reference in parentheses. | 1.10, 2.2, 8.6 | 'Adopt the option code and skip the explanation' to 'Adopt the retry limit (task: Importer retry limit, round 6).' |
+| 11 | Max 3 words in a noun cluster, and no stack of hidden ideas. A hyphenated stack still hides several. Break it with 'of', 'that', or a clause. | 2.1, 1.9 | 'mutation-load-bearing core case' to 'the core case (the one case per branch that fails when the branch breaks)'. |
+| 12 | Write each abbreviation in full once, then the short form in parentheses. | 2.2, 8.3 | 'the continuous integration job, then the CI job, with no first full form' to 'the continuous integration (CI) job, then the CI job.' |
+| 13 | Use plain verbs. No slang, no noun-as-verb, no phrasal verb. | 1.7, 1.10, 9.3 | 'reddens' to 'fails'. |
+
+**Sentences**
+
+| # | Rule | Adapts | Bad to good |
+|---|---|---|---|
+| 14 | Max 20 words for an instruction or a question. Max 25 for a description. An identifier or a quote counts as one word. The cap is necessary, not sufficient. | 5.1, 6.3, 8.6 | 'The test checks ten cases, and because each branch needs two named cases and the count is no longer enough, a replacement can pass.' to 'The test checks 10 cases. A filler case can no longer pass.' |
+| 15 | Active voice. Name the actor: the test, CI, the agent, the merge. Simple tenses only. | 3.2, 3.6 | 'The gate will be rebased on the types.' to 'The agent rebases the gate on the event types.' |
+| 16 | One instruction per sentence. Imperative. Condition first. | 5.2, 5.3, 5.4 | 'All three at once, then check.' to 'If the types change, rebase the gate. Then run the tests.' |
+| 17 | Full sentences keep articles and verbs. Fragments only in lists, tables, and labels. | 4.2, 4.3, 4.5 | 'Defer the timeout, keep the retry limit fix' to 'Keep the retry limit. Defer the timeout change. The correctness review is round 3 and the test-quality review is round 2.' |
+| 18 | No semicolons. No em-dashes. Use a period or a list. | 8.1 + house | 'per arm, so a swap fails' with an em-dash, to 'per arm. That is 10 checks, so a swap fails.' |
+| 19 | Show the logic with because, so, but, if, then. | 4.4 | '10 predicates. A same-count swap fails.' to 'The test checks 10 cases, so a replacement that keeps the count cannot pass.' |
+
+**Exempt material**
+
+| # | Rule | Adapts | Bad to good |
+|---|---|---|---|
+| 20 | Backtick each identifier. Max 2 per sentence. Give a plain gloss on first use. | 8.6 + house | Four bare references in one line, to one task, one design decision, and two reviews, each written in substance first. |
+| 21 | Quote user text, code, paths, and logs exactly. Explain them outside the quote. | 8.6 | A quote silently edited, to the blockquote verbatim with a plain reading on the next line. |
+
+**Risk**
+
+| # | Rule | Adapts | Bad to good |
+|---|---|---|---|
+| 25 | Mark an irreversible action with WARNING or CAUTION, then the condition, then the result. | 7.1, 7.2, 7.3 | 'Removing the core case will fail the suite.' to 'CAUTION: if you remove the core case, the test passes and a broken branch ships.' |
+
+### Wording house rule
+
+No self-praise is the wording house rule.
+
+| Rule | Requirement |
+|---|---|
+| No self-praise | No self-congratulation. State the next step in one line instead. |
+
+### Template: status update
+
+~~~markdown
+**Status:** <the result or the state, max 25 words>.
+
+**Done**
+- <artifact or outcome, past tense, actor named> (`<path>`, pull request #N, or task title).
+
+**Next**
+- <what happens next, and who does it>.
+
+**Needs you** (omit if empty)
+- <the decision>, needed for <what it unblocks>.
+
+**Risk** (omit if empty)
+- WARNING or CAUTION: <condition>. <result>.
+
+**Terms** (new terms only)
+- **<term>**: <max 20 words>.
+~~~
+
+Budget: 120 words. Every Done item names an artefact. Do not restate the plan. One status per message, not one per thought.
+
+### Exempt material
+
+Two material classes are exempt from the word and sentence caps: quoted text and code blocks. A third is allowed as technical nouns. Everything else obeys the caps.
+
+- **Quoted user text.** Verbatim in a blockquote. Never rewrite it into the house style. Put the plain reading after the quote.
+- **Code, logs, diffs, test output.** Exempt. Explain them in prose around the block.
+- **Industry terms of art.** Fixture, golden test, mutation testing, schema migration, fail-safe default, backfill, and closed enum are allowed as technical nouns. Define one in Terms if the user did not use it first.
+
+Two more rows are relaxations, not exemptions. **Spelling** keeps one spelling per message and does not enforce American spelling. **Identifiers** are not exempt from a gloss, as rule 20 says.
+
+The caps stay live for everything else. Rule 3 sets paragraph length, rule 14 sets the word caps, and rule 17 sets where a fragment is allowed; none of those three is an exemption.
+
+### Pre-send check
+
+Run this list on every user-facing message. A clean pass is not a gate.
+
+1. Does sentence one give the result, the decision, or the blocker?
+2. Does every term the reader did not introduce appear in Terms before first use?
+3. Search the draft for a token that matches `[A-Z]{1,3}-?[0-9]`, for a section sign (`§`), and for a five- or six-character token that matches `[A-Za-z0-9]{5,6}` and contains both a letter and a digit. Is each one defined, or replaced by its substance?
+4. Does one item have two names, or one word have two senses?
+5. Any sentence over 20 words (instruction or question) or 25 (description)?
+6. Any noun cluster over 3 words? Any slang verb, noun-as-verb, or phrasal verb?
+7. Any semicolon or em-dash?
+8. Any passive verb with no actor?
+9. Does an irreversible action carry WARNING or CAUTION?
+10. Delete one sentence. If nothing is lost, keep it deleted.
+
+## Question and Option Design
+
+This fragment covers question and option design: grounding before asking, one decision, option shape, recommendation placement, the present template, and the weak-tool degrade. Wording rules, the STE-aligned claim, the status template, and the pre-send check are in Writing to the User. Four skills carry these question rules: architect-handoff, supervisor, user-elicit, user-uat. The status skill asks no question, so it does not carry this fragment. Ask through the `request_user_decision` operation, never by launching a subagent. That launch is `delegate_assignment`, a different operation. The role-tool binding in `internal/runtime/profiles.go` lowers `request_user_decision` to the harness question tool and lowers `delegate_assignment` to the subagent tool.
+
+### The rules
+
+Format: number, requirement, the STE rule it adapts, then a compact bad-to-good pair.
+
+**Grounding**
+
+| # | Rule | Adapts | Bad to good |
+|---|---|---|---|
+| 2 | Ground before you ask. Show what the thing is, where it lives, and one example. Never put the only explanation in the options. | 6.1, 4.4 | 'Which order: the types to the gate in parallel, or the gate first?' to 'Three parts share one type. The gate reads it. The fixtures copy it. Code: `ir.Event`.' |
+
+**Questions and options**
+
+Rules 22, 23 and 24 are house rules. The house-rule table names them by number. Do not attach an STE number to a house rule.
+
+| # | Rule | Adapts | Bad to good |
+|---|---|---|---|
+| 22 | One question, one decision. Say what the answer changes. | house | 'Which order do you want, and are the labels clear?' to 'Which part merges first? The answer sets the order for the next 3 days.' |
+| 23 | Each option is self-contained: a label of max 6 words, what happens, and the cost. Use only Terms words. | house | 'Both' to 'Both limits. The import stops at the first limit it reaches. Cost: one more setting to test.' |
+| 24 | Put the recommendation outside the options, with one reason. You may also mark the label '(recommended)'. | house | An option labelled 'recommended' with no reason, to 'Recommendation: merge the event types first, because a later change costs rework in two places.' |
+
+### House rules for questions, options and recommendations
+
+ASD-STE100 has no rule for questions, options, recommendations, or the turn split around a question tool. Rules 2, 22, 23 and 24 already carry grounding before asking, one decision per question, option design and recommendation placement. Four rows in this table are pointers to those rules. Question shape and Text-before-question turn add only what those rules do not. No self-praise is a wording rule; it is in Writing to the User. Never cite an STE number for a house rule.
+
+| Rule | Requirement |
+|---|---|
+| Question shape | A short header, max 4 words. |
+| Option design | Extends rule 23. Do not restate it. |
+| Recommendation placement | Extends rule 24. Do not restate it. |
+| Grounding before asking | Extends rule 2. Do not restate it. |
+| One decision per question | Extends rule 22. Do not restate it. |
+| Text-before-question turn | Send the grounding as text and end the turn. Ask through the `request_user_decision` operation in the next turn, because a question tool can hide prose sent in the same turn. |
+
+### Template: present a component, then ask
+
+Send the block below as text only, then end the turn. In the next turn, ask through the `request_user_decision` operation with the same options. The split is the Text-before-question turn house rule.
+
+~~~~markdown
+## <Part name>: <what it does for the user, max 10 words>
+
+**Decision needed:** <one sentence>. The answer changes <what>.
+
+**Terms**
+- **<term>**: <max 20 words>. Code: `<identifier>`.
+- **<term>**: <max 20 words>.
+
+**What it is**
+<max 3 sentences. Name the actor. One fact per sentence.>
+
+**Definition**
+~~~<lang>
+<the smallest type, interface, schema, or command shape that shows the choice>
+~~~
+
+**Example**
+~~~
+<one realistic before and after, or input and output>
+~~~
+
+**Diagram**
+~~~
+<ASCII, plain labels, no em-dash>
+~~~
+
+**Options**
+
+| Option | What happens | Cost |
+|---|---|---|
+| <label, max 6 words> | <one sentence> | <one sentence> |
+| <label> | <one sentence> | <one sentence> |
+
+**Recommendation:** <option>, because <one reason>.
+~~~~
+
+Then, in the next turn:
+
+~~~
+`request_user_decision`: '<question, max 20 words>'
+options: the same labels, with the 'what happens' and 'cost' text repeated in each description, because the picker can hide the table.
+~~~
+
+One component per call. Use multi-select only when the options combine. Always add one open-ended feedback question.
+
+### Degrade when the question tool is weak
+
+Some hosts expose a weak question tool: it takes one question per call, it has no multi-select, or its picker hides option descriptions. Degrade in this order:
+
+1. Ask one question.
+2. Phrase the options as a single-select choice.
+3. State the assumption you will use if the answer is unavailable.
+
+Put the assumption in the text turn that grounds the question, not inside the options. An assumption never satisfies a user gate: a gated phase waits for the user's answer. The question still asks for one decision, and the recommendation names the cost of the assumption.
+
+### Pre-send check for a question
+
+Run this list before you send a question. It tests the question rules in this fragment. The wording pre-send check is in Writing to the User.
+
+1. Before a question: did the reader already see what the thing is, its definition, and one example, in an earlier turn or an earlier block?
+2. Can the reader choose from the options alone, with no other document? Is the recommendation outside the options?
 
 ## First Steps
 
@@ -501,8 +728,8 @@ The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it
 
 1. Read the RATIFIED_PLAN and the **URD** to understand the full scope, user requirements, and **identify production code paths**
    ```bash
-   pasture task show "${RATIFIED_PLAN_ID_URI}"
-   pasture task show "${URD_ID_URI}"
+   "${EPOCH_REC}" show "${RATIFIED_PLAN_ID_URI}"
+   "${EPOCH_REC}" show "${URD_ID_URI}"
    ```
 2. **Explore the codebase** using ephemeral Explore subagents (see [Exploration](#exploration-ephemeral-explore-subagents) below) — spawn scoped Explore subagents for codebase queries before decomposing into slices.
 3. **Prefer vertical slice decomposition** (feature ownership end-to-end) when possible:
@@ -517,7 +744,7 @@ The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it
 6. **Create leaf tasks for every slice** (see [Step 3](#step-3-create-leaf-tasks-within-each-slice-critical)) — a slice without leaf tasks is undecomposed and cannot be tracked
 7. Bind SLICE_1_ID_URI and SLICE_2_ID_URI from the corresponding slice create outputs first. Update the IMPL_PLAN with the layer breakdown + integration points:
    ```bash
-   pasture task update "${IMPL_PLAN_ID_URI}" --description="$(cat <<EOF
+   "${EPOCH_REC}" note "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="$(cat <<EOF
    ---
    references:
      request: "${REQUEST_ID_URI}"
@@ -527,8 +754,8 @@ The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it
    ## Layer Structure (TDD)
 
    ### Vertical Slices (Preferred)
-   - SLICE-1: Feature X command (Worker A owns types → tests → impl → CLI wiring)
-   - SLICE-2: Feature Y endpoint (Worker B owns types → tests → impl → API wiring)
+   - the first slice: Feature X command (Worker A owns types → tests → impl → CLI wiring)
+   - the second slice: Feature Y endpoint (Worker B owns types → tests → impl → API wiring)
 
    OR
 
@@ -539,8 +766,8 @@ The architect creates a placeholder IMPL_PLAN task. Your first job is to fill it
    - Layer 4: integration_test.go (depends on L3)
 
    ## Tasks
-   - "${SLICE_1_ID_URI}": SLICE-1 ...
-   - "${SLICE_2_ID_URI}": SLICE-2 ...
+   - "${SLICE_1_ID_URI}": the slice ...
+   - "${SLICE_2_ID_URI}": the slice ...
    ...
    EOF
    )"
@@ -554,7 +781,7 @@ Per [C-supervisor-explore-ephemeral], spawn ephemeral Explore subagents (Agent t
 
 ```
 // Explore subagent — ephemeral, scoped query
-Task({
+delegation: {
   subagent_type: "Explore",
   run_in_background: true,
   prompt: `Call Skill(/pasture:explore) to load your exploration role.
@@ -564,7 +791,7 @@ Depth: standard-research
 
 Explore the codebase for the requested topic. Produce structured findings
 (entry points, data flow, dependencies, patterns, conflicts). Return findings.`
-})
+}
 ```
 
 Spawn as many Explore subagents as needed — they are cheap and disposable. Use them during Phase 8 (IMPL_PLAN) to understand codebase areas before decomposing into slices.
@@ -573,10 +800,10 @@ Spawn as many Explore subagents as needed — they are cheap and disposable. Use
 
 Get the ratified plan and URD:
 ```bash
-pasture task show "${RATIFIED_PLAN_ID_URI}"
-pasture task show "${URD_ID_URI}"
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p6-plan:s6-ratify" --status=open
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:urd"
+"${EPOCH_REC}" show "${RATIFIED_PLAN_ID_URI}"
+"${EPOCH_REC}" show "${URD_ID_URI}"
+"${EPOCH_REC}" query --label="pasture:p6-plan:s6-ratify" --status=open
+"${EPOCH_REC}" query --label="pasture:urd"
 ```
 
 ## Implementation Task Structure
@@ -607,8 +834,8 @@ type ImplementationTask struct {
 ### Step 1: Create the IMPL_PLAN task
 
 ```bash
-IMPL_PLAN_ID_URI=$(pasture task create "IMPL_PLAN: <feature>" --phase impl_plan --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPL_PLAN_ID_URI=$("${EPOCH_REC}" create --kind task --title "IMPL_PLAN: <feature>" --phase impl_plan \
+  --body "---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
@@ -620,17 +847,16 @@ references:
 - L3: Implementation + wiring
 
 ## Vertical Slices
-- SLICE-1: <description> (files: ...)
-- SLICE-2: <description> (files: ...)" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPL_PLAN_ID_URI" pasture:p8-impl:s8-plan
-pasture task dep add "${REQUEST_ID_URI}" --blocked-by "${IMPL_PLAN_ID_URI}"
+- the first slice: <description> (files: ...)
+- the second slice: <description> (files: ...)")
+"${EPOCH_REC}" block "${REQUEST_ID_URI}" --by "${IMPL_PLAN_ID_URI}"
 ```
 
 ### Step 2: Create each slice
 
 ```bash
-SLICE_1_ID_URI=$(pasture task create "SLICE-1: <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+SLICE_1_ID_URI=$("${EPOCH_REC}" create --kind task --title "<slice name>" --phase worker_slices \
+  --body "---
 references:
   impl_plan: "${IMPL_PLAN_ID_URI}"
   urd: "${URD_ID_URI}"
@@ -642,18 +868,17 @@ references:
 <list of files>
 
 ## Leaf Tasks
-- SLICE-1-L1: Types and interfaces
-- SLICE-1-L2: Tests (import production code)
-- SLICE-1-L3: Implementation + wiring
+- the types task: Types and interfaces
+- the tests task: Tests (import production code)
+- the implementation task: Implementation + wiring
 
 ## Validation Checklist
 - [ ] Types defined
 - [ ] Tests written (import production code)
 - [ ] Implementation complete
-- [ ] Production path verified" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$SLICE_1_ID_URI" pasture:p9-impl:s9-slice
-pasture task update "$SLICE_1_ID_URI" --notes "Design: '{\"validation_checklist\":[\"Types defined\",\"Tests written (import production code)\",\"Implementation complete\",\"Production path verified\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"ratified_plan\":\"${RATIFIED_PLAN_ID_URI}\"}'"
-pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+- [ ] Production path verified")
+"${EPOCH_REC}" note "$SLICE_1_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Design: '{\"validation_checklist\":[\"Types defined\",\"Tests written (import production code)\",\"Implementation complete\",\"Production path verified\"],\"acceptance_criteria\":[{\"given\":\"X\",\"when\":\"Y\",\"then\":\"Z\"}],\"ratified_plan\":\"${RATIFIED_PLAN_ID_URI}\"}'"
+"${EPOCH_REC}" block "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
 ```
 
 ### Step 3: Create leaf tasks within each slice (CRITICAL)
@@ -662,8 +887,8 @@ Per [C-slice-leaf-tasks], create Pasture tasks for each implementation unit with
 
 ```bash
 # L1: Types and interfaces for this slice
-LEAF_L1=$(pasture task create "SLICE-1-L1: Types — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+LEAF_L1=$("${EPOCH_REC}" create --kind task --title "Types — <slice name>" --phase worker_slices \
+  --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
   impl_plan: "${IMPL_PLAN_ID_URI}"
@@ -677,13 +902,12 @@ Define types, interfaces, and schemas for this slice.
 - <file-path-2>
 
 ## Acceptance Criteria
-Given <context> when <action> then <outcome> should never <anti-pattern>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$LEAF_L1" pasture:p9-impl:s9-slice
-pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L1"
+Given <context> when <action> then <outcome> should never <anti-pattern>")
+"${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "$LEAF_L1"
 
 # L2: Tests (import production code, will fail until L3)
-LEAF_L2=$(pasture task create "SLICE-1-L2: Tests — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+LEAF_L2=$("${EPOCH_REC}" create --kind task --title "Tests — <slice name>" --phase worker_slices \
+  --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
   impl_plan: "${IMPL_PLAN_ID_URI}"
@@ -695,15 +919,14 @@ Write tests that import from production code paths. Tests MUST fail until L3.
 - <test-file-path-1>
 
 ## Acceptance Criteria
-Given <context> when <action> then <outcome> should never <anti-pattern>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$LEAF_L2" pasture:p9-impl:s9-slice
-pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L2"
+Given <context> when <action> then <outcome> should never <anti-pattern>")
+"${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "$LEAF_L2"
 # L2 depends on L1 types being defined first
-pasture task dep add "$LEAF_L2" --blocked-by "$LEAF_L1"
+"${EPOCH_REC}" block "$LEAF_L2" --by "$LEAF_L1"
 
 # L3: Implementation (makes tests pass)
-LEAF_L3=$(pasture task create "SLICE-1-L3: Impl — <slice name>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+LEAF_L3=$("${EPOCH_REC}" create --kind task --title "Implementation — <slice name>" --phase worker_slices \
+  --body "---
 references:
   slice: "${SLICE_1_ID_URI}"
   impl_plan: "${IMPL_PLAN_ID_URI}"
@@ -715,21 +938,20 @@ Implement production code to make L2 tests pass.
 - <impl-file-path-1>
 
 ## Acceptance Criteria
-Given <context> when <action> then <outcome> should never <anti-pattern>" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$LEAF_L3" pasture:p9-impl:s9-slice
-pasture task dep add "${SLICE_1_ID_URI}" --blocked-by "$LEAF_L3"
+Given <context> when <action> then <outcome> should never <anti-pattern>")
+"${EPOCH_REC}" block "${SLICE_1_ID_URI}" --by "$LEAF_L3"
 # L3 depends on L2 tests existing first
-pasture task dep add "$LEAF_L3" --blocked-by "$LEAF_L2"
+"${EPOCH_REC}" block "$LEAF_L3" --by "$LEAF_L2"
 ```
 
 The resulting tree per slice:
 
 ```
 IMPL_PLAN
-  └── blocked by SLICE-1
-        ├── blocked by SLICE-1-L1: Types
-        ├── blocked by SLICE-1-L2: Tests (blocked by L1)
-        └── blocked by SLICE-1-L3: Impl  (blocked by L2)
+  └── blocked by the slice
+        ├── blocked by the types task: Types
+        ├── blocked by the tests task: Tests (blocked by L1)
+        └── blocked by the implementation task: Impl  (blocked by L2)
 ```
 
 Workers are assigned to leaf tasks, not slices. The slice closes when all its leaf tasks close.
@@ -738,79 +960,79 @@ Workers are assigned to leaf tasks, not slices. The slice closes when all its le
 
 ```bash
 # Assign slices to workers
-pasture task assignment transfer "${SLICE_1_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_1_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_1}"
-pasture task assignment transfer "${SLICE_2_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_2_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_2}"
-pasture task assignment transfer "${SLICE_3_ID_URI}" --slot owner-responsibility --assignment "${SUCCESSOR_ASSIGNMENT_3_ID}" --actor pasture-system/00000000-0000-0000-0000-000000000000 --occupant "${REGISTERED_WORKER_ACTOR_3}"
+"${EPOCH_REC}" label "${SLICE_1_ID_URI}" owner:"${REGISTERED_WORKER_ACTOR_1}"
+"${EPOCH_REC}" label "${SLICE_2_ID_URI}" owner:"${REGISTERED_WORKER_ACTOR_2}"
+"${EPOCH_REC}" label "${SLICE_3_ID_URI}" owner:"${REGISTERED_WORKER_ACTOR_3}"
 ```
 
 ## Spawning Workers
 
 Per [C-supervisor-no-impl], all implementation work — no matter how small — is delegated to a worker agent. The supervisor's job is coordination, tracking, and quality control.
 
-Workers are **general-purpose agents** that call `/pasture:worker` at the start. Select the model based on task complexity:
+Workers are **general-purpose agents** that call `/pasture:worker` at the start. Select the worker's capability tier from the model policy: T2 standard for ordinary work, T1 frontier for non-trivial slices. Resolve the tier's native model id for the target harness, pass it on the assignment, and respect the concurrency cap of 4.
 
 ```
-// Non-trivial work → sonnet model
-Task({
+// Non-trivial work -> T1 frontier
+delegation: {
   subagent_type: "general-purpose",
-  model: "sonnet",
+  model: "<T1 frontier native model id for this harness>",
   run_in_background: true,
   prompt: `Call Skill(/pasture:worker) and implement the assigned slice.\n\nPasture Task ID: ${taskId}...`
-})
+}
 
-// Trivial work (config tweak, typo fix, single-file edit) → haiku model
-Task({
+// Ordinary work (config tweak, typo fix, single-file edit) -> T2 standard
+delegation: {
   subagent_type: "general-purpose",
-  model: "haiku",
+  model: "<T2 standard native model id for this harness>",
   run_in_background: true,
   prompt: `Call Skill(/pasture:worker) and fix the typo in...\n\nPasture Task ID: ${taskId}...`
-})
+}
 
 // WRONG: Supervisor implementing changes directly
 Edit({ file_path: "src/foo.ts", ... })  // Supervisors coordinate, they don't implement!
 
 // WRONG: Do not use specialized agent types like "pasture:worker" directly
-Task({
+delegation: {
   subagent_type: "pasture:worker",  // This doesn't exist!
   ...
-})
+}
 ```
 
-### Model Selection Guide
+### Capability Tier Guide
 
-| Complexity | Model | Examples |
-|------------|-------|----------|
-| Trivial | `haiku` | Single-file edit, config change, typo fix, renaming, adding a label |
-| Non-trivial | `sonnet` | Multi-file changes, new features, architectural work, complex logic, test suites |
+| Complexity | Tier | Examples |
+|------------|------|----------|
+| Trivial | T2 standard | Single-file edit, config change, typo fix, renaming, adding a label |
+| Non-trivial | T1 frontier | Multi-file changes, new features, architectural work, complex logic, test suites |
 
 **Handoff:** Before spawning each worker, author its handoff in the slice (or a dedicated handoff) Pasture task body — the task body IS the handoff (no filesystem path).
 
 See: [../supervisor-spawn-worker/SKILL.md](../supervisor-spawn-worker/SKILL.md) for handoff template.
 
-### TeamCreate Context Requirements
+### Delegated Assignment Context Requirements
 
-When using TeamCreate instead of the Task tool, teammates have **zero prior context**. Every SendMessage assigning work MUST be self-contained:
+A delegated assignment has **zero prior context**. Every SendMessage assigning work MUST be self-contained:
 
 ```
 SendMessage({
   type: "message",
   recipient: "worker-1",
-  content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).
+  content: `You are assigned the slice. Start by calling Skill(/pasture:worker).
 
 Your Pasture task ID: "${SLICE_TASK_ID_URI}"
-Run this to get full requirements + handoff: pasture task show "${SLICE_TASK_ID_URI}"
+Run this to get full requirements + handoff: "${EPOCH_REC}" show "${SLICE_TASK_ID_URI}"
 
 Key context:
-- Request: "${REQUEST_ID_URI}" (run: pasture task show "${REQUEST_ID_URI}")
-- URD: "${URD_ID_URI}" (run: pasture task show "${URD_ID_URI}")
-- IMPL_PLAN: "${IMPL_PLAN_ID_URI}" (run: pasture task show "${IMPL_PLAN_ID_URI}")
+- Request: "${REQUEST_ID_URI}" (run: "${EPOCH_REC}" show "${REQUEST_ID_URI}")
+- URD: "${URD_ID_URI}" (run: "${EPOCH_REC}" show "${URD_ID_URI}")
+- IMPL_PLAN: "${IMPL_PLAN_ID_URI}" (run: "${EPOCH_REC}" show "${IMPL_PLAN_ID_URI}")
 
 Read the handoff doc and your Pasture task before starting implementation.`,
-  summary: "SLICE-1 assignment with Pasture context"
+  summary: "slice assignment"
 })
 ```
 
-Per [sup-teamcreate-msg], every assignment must include actionable `pasture task show` commands. Teammates cannot see your conversation history, the Pasture task tree, or any prior context.
+Per [sup-teamcreate-msg], every assignment must include actionable `"${EPOCH_REC}" show` commands. Teammates cannot see your conversation history, the Pasture task tree, or any prior context.
 
 The worker skill provides:
 - File ownership validation
@@ -819,27 +1041,27 @@ The worker skill provides:
 
 ## EPIC_FOLLOWUP Creation (Phase 5/11)
 
-After UAT, if the user **DEFER'd** one or more items, create a follow-up epic from those DEFER'd items. Per [frag--sup-followup-epic-timing], create immediately after UAT completes. Review severities (BLOCKER/IMPORTANT/MINOR) are **never** routed here — they must all reach 0 before the review wave closes.
+After UAT, if the user **DEFER'd** one or more items, create a follow-up epic from those DEFER'd items. Per [frag--sup-followup-epic-timing], create immediately after UAT completes. Review severities (BLOCKER/IMPORTANT/MINOR) are **never** routed here — they converge at the end; close rule: `C-finding-lifecycle`.
 
 ### Step 1: Create follow-up epic
 
 ```bash
-FOLLOWUP_EPIC_ID_URI=$(pasture task create "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=3 \
-  --description="---
+FOLLOWUP_EPIC_ID_URI=$("${EPOCH_REC}" create --kind epic --title "FOLLOWUP: User-deferred improvements from UAT" --phase unscoped --priority 3 \
+  --body="---
 references:
   request: "${REQUEST_ID_URI}"
   urd: "${URD_ID_URI}"
   uat: ${UAT_ID_URI}
 ---
-Aggregated user-DEFER'd items from UAT (Phase 5/11)." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
+Aggregated user-DEFER'd items from UAT (Phase 5/11).")
+"${EPOCH_REC}" label "$FOLLOWUP_EPIC_ID_URI" pasture:epic-followup
 
 # Link the DEFER'd UAT items as children of the follow-up epic
-pasture task dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "${DEFERRED_ITEM_ID_1_URI}"
-pasture task dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "${DEFERRED_ITEM_ID_2_URI}"
+"${EPOCH_REC}" block "${FOLLOWUP_EPIC_ID_URI}" --by "${DEFERRED_ITEM_ID_1_URI}"
+"${EPOCH_REC}" block "${FOLLOWUP_EPIC_ID_URI}" --by "${DEFERRED_ITEM_ID_2_URI}"
 ```
 
-Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred-followup]: all review severities reach 0; the FOLLOWUP epic is DEFER-fed only.
+Severity routing follows [frag--sup-blocker-dual-parent] and [frag--sup-deferred-followup]: only an open BLOCKER gates a wave; open findings converge at the end; the FOLLOWUP epic is DEFER-fed only.
 
 ### Step 2: Follow-up lifecycle (same protocol, FOLLOWUP_* prefix)
 
@@ -853,75 +1075,70 @@ FOLLOWUP epic (pasture:epic-followup)
         ├── frontmatter reference: FOLLOWUP_URD (living requirements document)
         └── blocked-by: FOLLOWUP_PROPOSAL-1  (Phase 3: proposal for follow-up)
               └── blocked-by: FOLLOWUP_IMPL_PLAN  (Phase 8: decompose into slices)
-                    ├── blocked-by: FOLLOWUP_SLICE-1  (Phase 9)
+                    ├── blocked-by: the first follow-up slice  (Phase 9)
                     │     ├── blocked-by: deferred-item-leaf-task-...
                     │     └── blocked-by: deferred-item-leaf-task-...
-                    └── blocked-by: FOLLOWUP_SLICE-2
+                    └── blocked-by: the second follow-up slice
 ```
 
 ```bash
-# Create FOLLOWUP_URE — user scoping which findings to address
-FOLLOWUP_URE_ID=$(pasture task create "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+# Create FOLLOWUP_URD first so its URI can be recorded in the URE references.
+FOLLOWUP_URD_ID=$("${EPOCH_REC}" create --kind task --title "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit \
+  --body "---
 references:
   followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
   original_urd: "${ORIGINAL_URD_ID_URI}"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
-pasture task dep add "${FOLLOWUP_EPIC_ID_URI}" --blocked-by "$FOLLOWUP_URE_ID"
+Follow-up requirements. References original URD.")
+"${EPOCH_REC}" label "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
+"${EPOCH_REC}" label "$FOLLOWUP_URD_ID" pasture:urd
 
-# Create FOLLOWUP_URD — requirements for follow-up scope
-FOLLOWUP_URD_ID=$(pasture task create "FOLLOWUP_URD: Requirements for <feature> follow-up" --phase elicit --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
-references:
-  followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
-  original_urd: "${ORIGINAL_URD_ID_URI}"
----
-Follow-up requirements. References original URD." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_URD_ID" pasture:p2-user:s2_2-urd
-pasture task label add "$FOLLOWUP_URD_ID" pasture:urd
-# Preserve the URE's references and scoping text; the living URD is not blocking work.
-pasture task update "$FOLLOWUP_URE_ID" --description "---
+# Create FOLLOWUP_URE — user scoping which findings to address
+FOLLOWUP_URE_ID=$("${EPOCH_REC}" create --kind task --title "FOLLOWUP_URE: Scope follow-up for <feature>" --phase elicit \
+  --body "---
 references:
   followup_epic: \"${FOLLOWUP_EPIC_ID_URI}\"
   original_urd: \"${ORIGINAL_URD_ID_URI}\"
   followup_urd: \"${FOLLOWUP_URD_ID}\"
 ---
-Scoping URE: determine which user-DEFER'd UAT items to address."
+Scoping URE: determine which user-DEFER'd UAT items to address.")
+"${EPOCH_REC}" label "$FOLLOWUP_URE_ID" pasture:p2-user:s2_1-elicit
+"${EPOCH_REC}" block "${FOLLOWUP_EPIC_ID_URI}" --by "$FOLLOWUP_URE_ID"
 ```
 
 The remaining lifecycle tasks (FOLLOWUP_PROPOSAL, FOLLOWUP_IMPL_PLAN, FOLLOWUP_SLICE) are created as the follow-up epic progresses through the protocol phases.
 
 ### Step 3: DEFER'd-item leaf adoption (dual-parent)
 
-When the supervisor creates FOLLOWUP_SLICE-N tasks during the follow-up implementation phase, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
+When the supervisor creates the follow-up slice tasks during the follow-up implementation phase, the user-DEFER'd UAT-item leaf tasks gain a second parent (dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice):
 
 ```bash
 # Leaf task gets dual-parent: DEFER'd-items tracking group + follow-up slice
-pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
-pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
-# Leaf task already has: pasture task dep add "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --blocked-by "${LEAF_TASK_ID_URI}"
+"${EPOCH_REC}" block "${FOLLOWUP_SLICE_ID_URI}" --by "${DEFERRED_ITEM_LEAF_ID_1_URI}"
+"${EPOCH_REC}" block "${FOLLOWUP_SLICE_ID_URI}" --by "${DEFERRED_ITEM_LEAF_ID_2_URI}"
+# Leaf task already has: "${EPOCH_REC}" block "${DEFERRED_ITEMS_TRACKING_GROUP_ID_URI}" --by "${LEAF_TASK_ID_URI}"
 ```
 
 ### Follow-up Handoff Chain
 
 Inside the follow-up lifecycle, the same handoff types (h1-h4) reapply:
 
+The follow-up lifecycle starts ONLY from user-DEFER'd UAT items (`C-followup-timing`); code review never starts it. The Supervisor creates the FOLLOWUP epic from those items (same actor), then:
+
 | Order | Handoff | Transition |
 |-------|---------|------------|
-| 1 | h5 | Reviewer → Followup: **Starts** the follow-up lifecycle |
+| 1 | *(none)* | Supervisor creates the FOLLOWUP epic from user-DEFER'd UAT items (same actor) |
 | 2 | *(none)* | Supervisor creates FOLLOWUP_URE (same actor) |
 | 3 | *(none)* | Supervisor creates FOLLOWUP_URD (same actor) |
 | 4 | h6 | Supervisor → Architect: Hands off FOLLOWUP_URE + FOLLOWUP_URD for FOLLOWUP_PROPOSAL |
 | 5 | h1 | Architect → Supervisor: After FOLLOWUP_PROPOSAL ratified |
-| 6 | h2 | Supervisor → Worker: FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks |
-| 7 | h3 | Supervisor → Reviewer: Code review of follow-up slices |
+| 6 | h2 | Supervisor → Worker: the follow-up slice with DEFER'd-item leaf tasks |
+| 7 | h3 | Supervisor → Reviewer: One code review per follow-up wave |
 | 8 | h4 | Worker → Reviewer: Follow-up slice completion |
 
 Follow-up handoff storage: each handoff is authored in its Pasture task body (no filesystem path).
 
-See `../protocol/HANDOFF_TEMPLATE.md` for full follow-up handoff examples.
+See `../architect-handoff/SKILL.md` for handoff field requirements.
 
 ## Impl-Review Severity Tree Procedure
 
@@ -929,93 +1146,134 @@ The severity behaviors for code review (Phase 10) are defined above as structure
 
 ### Severity Tree (EAGER Creation)
 
-Per [frag--sup-review-severity-groups], create all 3 severity groups immediately:
+Per [frag--sup-review-severity-groups], create ONE severity trio per wave, per axis, per round — not one per slice:
 
 ```bash
+# Wave 1 contains the first slice, the second slice, and the third slice.
 # Step 1: Create all 3 severity groups immediately (EAGER)
-BLOCKER_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 BLOCKER" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+BLOCKER_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} BLOCKER" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-BLOCKER findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$BLOCKER_ID_URI" pasture:severity:blocker
-pasture task label add "$BLOCKER_ID_URI" pasture:p10-impl:s10-review
+BLOCKER findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$BLOCKER_ID_URI" pasture:severity:blocker
 
-IMPORTANT_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 IMPORTANT" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+IMPORTANT_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} IMPORTANT" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-IMPORTANT findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$IMPORTANT_ID_URI" pasture:severity:important
-pasture task label add "$IMPORTANT_ID_URI" pasture:p10-impl:s10-review
+IMPORTANT findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$IMPORTANT_ID_URI" pasture:severity:important
 
-MINOR_ID_URI=$(pasture task create "SLICE-1-REVIEW-A-1 MINOR" --phase code_review --namespace "$PASTURE_NAMESPACE" --format json \
-  --description "---
+MINOR_ID_URI=$("${EPOCH_REC}" create --kind task --title "WAVE-{W}-REVIEW-{axis}-{round} MINOR" --phase code_review \
+  --body "---
 references:
-  slice: "${SLICE_1_ID_URI}"
+  wave: 1
+  slices:
+    - \"${SLICE_1_1_ID_URI}\"
+    - \"${SLICE_1_2_ID_URI}\"
+    - \"${SLICE_1_3_ID_URI}\"
   review_round: 1
 ---
-MINOR findings from Reviewer A (Correctness) on SLICE-1." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$MINOR_ID_URI" pasture:severity:minor
-pasture task label add "$MINOR_ID_URI" pasture:p10-impl:s10-review
+MINOR findings from Reviewer A (Correctness) on wave 1.")
+"${EPOCH_REC}" label "$MINOR_ID_URI" pasture:severity:minor
 
-# Step 2: Wire severity groups to the review round task
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$BLOCKER_ID_URI"
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$IMPORTANT_ID_URI"
-pasture task dep add "${REVIEW_ROUND_ID_URI}" --blocked-by "$MINOR_ID_URI"
+# Step 2: Wire the one severity trio to the wave's review round task
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$BLOCKER_ID_URI"
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$IMPORTANT_ID_URI"
+"${EPOCH_REC}" block "${REVIEW_ROUND_ID_URI}" --by "$MINOR_ID_URI"
 # NEVER wire severity groups to IMPL_PLAN or slices directly.
 # BLOCKER findings block slices via dual-parent (see below).
-# IMPORTANT/MINOR must ALSO reach 0 before wave close — they are NOT routed to FOLLOWUP.
+# Open findings converge at the end; only an open BLOCKER gates the wave. IMPORTANT/MINOR are NOT routed to FOLLOWUP.
 # The FOLLOWUP epic is fed ONLY by user-DEFER'd UAT items (see Follow-up Epic section).
 
 # Step 3: Close empty groups immediately
 # If a group has no findings, close it right away
-pasture task close "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
-pasture task close "$MINOR_ID_URI"        # if no MINOR findings
+"${EPOCH_REC}" close "$IMPORTANT_ID_URI"   # if no IMPORTANT findings
+"${EPOCH_REC}" close "$MINOR_ID_URI"        # if no MINOR findings
 ```
 
 ### Naming Convention
 
-```
-SLICE-{N}-REVIEW-{axis}-{round}
-```
+Name the review for one wave, one axis, and one round. Axis A is correctness, B is test quality, and C is elegance. List every slice of that wave on the review. Create one severity trio under it: blocker, important, and minor. Do not create one review per slice.
 
-Where axis = A (Correctness), B (Test quality), C (Elegance).
-
-Examples:
-- `SLICE-1-REVIEW-A-1` — Reviewer A (Correctness), Round 1, SLICE-1
-- `SLICE-2-REVIEW-C-2` — Reviewer C (Elegance), Round 2, SLICE-2
-
-Severity groups:
-- `SLICE-1-REVIEW-A-1 BLOCKER`
-- `SLICE-1-REVIEW-A-1 IMPORTANT`
-- `SLICE-1-REVIEW-A-1 MINOR`
+The first wave's correctness review, first round, has one blocker group, one important group, and one minor group. A later wave gets its own review.
 
 ## Tracking Progress
 
 ```bash
 # Check all implementation slices
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=in_progress
+"${EPOCH_REC}" query --phase worker_slices --status=in_progress
 
 # Check for blocked tasks
-pasture task blocked --label="pasture:p9-impl:s9-slice"
+"${EPOCH_REC}" query --blocked --phase worker_slices
 
 # Check completed slices
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:p9-impl:s9-slice" --status=closed
+"${EPOCH_REC}" query --phase worker_slices --status=closed
 
 # Check specific task
-pasture task show "${TASK_ID_URI}"
+"${EPOCH_REC}" show "${TASK_ID_URI}"
 
 # Check severity groups from review
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:blocker"
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:important"
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:severity:minor"
+"${EPOCH_REC}" query --label="pasture:severity:blocker"
+"${EPOCH_REC}" query --label="pasture:severity:important"
+"${EPOCH_REC}" query --label="pasture:severity:minor"
 
 # Check follow-up epics
-pasture task list --namespace "$PASTURE_NAMESPACE" --label="pasture:epic-followup"
+"${EPOCH_REC}" query --label="pasture:epic-followup"
 ```
+
+## Signal Capture
+
+Record the user's friction or approval when it appears, so a later project-level skill can distill it. Capture is a side effect of work already happening: it never prompts the user and never blocks a phase.
+
+### Closed kind list
+
+The kind is a closed list. Use exactly one of:
+
+- `frustration`: the user shows annoyance, repeats a complaint, or rejects the interaction itself.
+- `positive-signal`: the user endorses a direction or a result before a gate asks.
+- `satisfaction`: the user accepts a gate and says the result is what they wanted.
+- `confusion`: the user asks what a term means, misreads a question, or answers a different question.
+- `correction`: the user corrects a fact, a requirement, or an earlier answer.
+
+### One feedback task per epoch
+
+On the pasture backend, the epoch creates one feedback task at epoch start and writes `feedback: <task URI>` into `.agents.local/pasture/EPOCH.md`. A second run reads the `feedback:` line and does not create another task. On the ledger backend, create nothing and record nothing: there is no feedback task and no `feedback:` line. No other skill creates a feedback task. If the pasture line is absent, the signal operation fails and records nothing; do not create a task to fill the gap.
+
+### Line format and recording
+
+Write one JSON object per signal. The fields, in this order, are kind, phase, skill, entry and quote.
+
+~~~
+{"kind":"<kind>","phase":"<phase>","skill":"<skill>","entry":"<entry-ref>","quote":"<short verbatim quote>"}
+~~~
+
+- `kind`: one of the registered kinds above, exactly.
+- `phase`: one of request, elicit, propose, review, plan-review, ratify, handoff, impl-plan, worker-slices, code-review, impl-uat, landing.
+- `skill`: the skill that recorded it, named exactly as the skill directory.
+- `entry`: the record that holds the interaction, such as a task URI plus the question or section.
+- `quote`: a short verbatim fragment, max 20 words. Never paraphrase or tidy it.
+
+Record the signal with one call. Do not name a backend command in this section.
+
+~~~bash
+"${EPOCH_REC}" signal --kind confusion --phase elicit --skill user-elicit --entry '<task URI>#end-vision' --quote 'what does arm mean here'
+~~~
+
+The adapter records that JSON object. An empty feedback id fails in the adapter and records nothing. Write the call in the same turn as the work. Do not ask permission to record. Do not wait for the write before you continue the phase.
+
+If the write fails, follow the tracker write-failure rule: retry, keep the recorded backend, and surface the pending line at the next gate. A failed record never blocks the phase and never prompts the user.
 <!-- END GENERATED FROM pasture schema -->

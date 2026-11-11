@@ -94,11 +94,9 @@ verbs for durable workflow control.
 
 ### Task tracker setup after installation
 
-Use [the protocol tracker bindings](../protocol/PROCESS.md#tracker-setup-and-recipe-bindings)
-before creating or recovering work. Set the shell binding `PASTURE_NAMESPACE`
-to the repository URL and pass it explicitly as `--namespace`; the CLI does
-not read that variable automatically. Without the flag it infers the Git
-remote or directory namespace. Store precedence is `--db`, `PASTURE_DB_PATH`,
+Before creating or recovering work, set `PASTURE_NAMESPACE` to the repository URL.
+The CLI reads it as the default namespace; an explicit `--namespace` wins.
+Without either, reads are unscoped and creation uses the Git remote or directory namespace. Store precedence is `--db`, `PASTURE_DB_PATH`,
 XDG data directory, home data directory, then the relative fallback.
 Use the same store throughout; an open failure is not an empty task list.
 

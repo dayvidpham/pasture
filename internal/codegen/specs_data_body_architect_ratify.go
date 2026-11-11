@@ -54,8 +54,8 @@ var architectRatifyBody = SkillBody{
 					Id:    "arch-ratify-step1-check",
 					Title: "Step 1: Check all reviews",
 					Content: `` + "```" + `bash
-pasture task show "${PROPOSAL_ID_URI}"
-pasture task comments "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}"
+[[rec:show]] "${PROPOSAL_ID_URI}" --notes
 ` + "```" + ``,
 				},
 				{
@@ -68,23 +68,23 @@ pasture task comments "${PROPOSAL_ID_URI}"
 					Title: "Step 3: Add ratify label to PROPOSAL-N",
 					Content: `Do NOT create a new task — add label to the existing proposal:
 ` + "```" + `bash
-pasture task label add "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${PROPOSAL_ID_URI}" "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
+[[rec:label]] "${PROPOSAL_ID_URI}" pasture:p6-plan:s6-ratify
+[[rec:note]] "${PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "RATIFIED: All 3 reviewers ACCEPT, UAT passed ("${UAT_ID_URI}")"
 ` + "```" + ``,
 				},
 				{
 					Id:    "arch-ratify-step4-supersede",
 					Title: "Step 4: Mark all previous proposals as superseded",
 					Content: `` + "```" + `bash
-pasture task label add "${OLD_PROPOSAL_ID_URI}" pasture:superseded
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${OLD_PROPOSAL_ID_URI}" "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
+[[rec:label]] "${OLD_PROPOSAL_ID_URI}" pasture:superseded
+[[rec:note]] "${OLD_PROPOSAL_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Superseded by PROPOSAL-N ("${RATIFIED_PROPOSAL_ID_URI}")"
 ` + "```" + ``,
 				},
 				{
 					Id:    "arch-ratify-step5-urd",
 					Title: "Step 5: Update URD with ratification",
 					Content: `` + "```" + `bash
-pasture task comment add --author pasture-system/00000000-0000-0000-0000-000000000000 "${URD_ID_URI}" "Ratified: scope confirmed. Ratified proposal: ${RATIFIED_PROPOSAL_ID_URI}"
+[[rec:note]] "${URD_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Ratified: scope confirmed. Ratified proposal: ${RATIFIED_PROPOSAL_ID_URI}"
 ` + "```" + ``,
 				},
 			},
@@ -100,7 +100,7 @@ pasture task comment add --author pasture-system/00000000-0000-0000-0000-0000000
 		{
 			Id:      "arch-ratify-followup",
 			Title:   "Follow-up Proposals (FOLLOWUP_PROPOSAL-N)",
-			Content: "When ratifying a FOLLOWUP_PROPOSAL-N, the next step is the same h1 handoff but scoped to the follow-up epic:\n- **Storage:** the follow-up handoff is authored in its HANDOFF Pasture task body (no filesystem path)\n- The supervisor then creates FOLLOWUP_IMPL_PLAN and FOLLOWUP_SLICE-N tasks\n- The follow-up scope comes from the user-DEFER'd UAT items the FOLLOWUP epic was created from",
+			Content: "When ratifying a FOLLOWUP_PROPOSAL-N, the next step is the same h1 handoff but scoped to the follow-up epic:\n- **Storage:** the follow-up handoff is authored in its HANDOFF Pasture task body (no filesystem path)\n- The supervisor then creates the follow-up plan and the follow-up slices\n- The follow-up scope comes from the user-DEFER'd UAT items the FOLLOWUP epic was created from",
 		},
 	},
 

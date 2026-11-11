@@ -80,9 +80,6 @@ func TestOpenCodeVerbatimCopiesProtocolRecursively(t *testing.T) {
 		"protocol/CONSTRAINTS.md",
 		"protocol/CLAUDE.md",
 		"protocol/SKILLS.md",
-		"protocol/README.md",
-		"protocol/HANDOFF_TEMPLATE.md",
-		"protocol/MR_TEMPLATE.md",
 	}
 	for _, doc := range linkedDocs {
 		assertVerbatim(t, root, byRel, doc)

@@ -27,6 +27,18 @@ type agentTemplateData struct {
 	// Role is the full RoleSpec for the role being generated.
 	Role RoleSpec
 
+	// ToolNames is the role's typed capability surface resolved through the
+	// Claude Code lowerings. The Claude agent file is the canonical rendered
+	// agent; OpenCode reuses its body with the frontmatter stripped.
+	ToolNames []string
+
+	// Model is the harness-native model id resolved from the role's effective
+	// capability tier. Effort is the tier's effort level. Both are emitted in
+	// frontmatter; neither is authored as prose in the role spec.
+	Model       string
+	Effort      string
+	TierCatalog string
+
 	// PhasesDetail holds PhaseSpec entries for the role's owned phases,
 	// sorted by phase number ascending.
 	PhasesDetail []PhaseSpec
@@ -72,6 +84,14 @@ type agentTemplateData struct {
 //   - The template file cannot be read from the embedded FS.
 //   - Template execution fails (e.g., missing key, rendering error).
 func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
+	return renderAgentForTarget(roleId, figuresDir, HarnessClaudeCode)
+}
+
+// renderAgentForTarget renders one role's agent definition for one generation
+// target. The Claude target is the authored agent file; OpenCode reuses this
+// body with its own frontmatter, so it must resolve markers for OpenCode
+// rather than inherit Claude's native names.
+func renderAgentForTarget(roleId protocol.RoleId, figuresDir string, target HarnessName) (string, error) {
 	roleSpec, ok := RoleSpecs[roleId]
 	if !ok {
 		return "", fmt.Errorf(
@@ -103,8 +123,37 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 		figures = loadFiguresForRole(roleId, figuresDir)
 	}
 
+	toolNames, err := RoleToolNames(target, roleSpec)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderAgent: resolving tools for role %q on target %q failed: %w",
+			roleId, target, err,
+		)
+	}
+
+	tier, err := TierForRole(roleId)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderAgent: resolving model tier for role %q failed: %w", roleId, err)
+	}
+	model, err := ModelForTier(target, tier)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderAgent: resolving model id for role %q failed: %w", roleId, err)
+	}
+	effort, err := EffortForTier(tier)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderAgent: resolving effort for role %q failed: %w", roleId, err)
+	}
+	catalog, err := harnessTierCatalog(target)
+	if err != nil {
+		return "", fmt.Errorf("codegen.renderAgent: resolving tier catalog for role %q failed: %w", roleId, err)
+	}
+
 	data := agentTemplateData{
 		Role:         roleSpec,
+		ToolNames:    toolNames,
+		Model:        model,
+		Effort:       string(effort),
+		TierCatalog:  catalog,
 		PhasesDetail: ownedPhaseDetails(roleSpec),
 		PhaseSlug:    buildPhaseSlug(),
 		Constraints:  roleCtx.Constraints,
@@ -124,6 +173,15 @@ func renderAgent(roleId protocol.RoleId, figuresDir string) (string, error) {
 	}
 
 	content := buf.String()
+	// Resolve typed markers for this target across the whole agent document,
+	// so role behaviours and constraints never carry a foreign tool name.
+	content, err = ResolveBodyMarkers(content, target)
+	if err != nil {
+		return "", fmt.Errorf(
+			"codegen.renderAgent: marker resolution failed for role %q on target %q: %w",
+			roleId, target, err,
+		)
+	}
 	// Ensure content always ends with a single newline (mirrors Python behaviour).
 	if !strings.HasSuffix(content, "\n") {
 		content += "\n"
@@ -171,7 +229,7 @@ func GenerateAgent(roleId protocol.RoleId, agentPath string, figuresDir string, 
 	}
 
 	// Only generate for roles with tools defined (non-empty slice).
-	if len(roleSpec.Tools) == 0 {
+	if !roleHasToolSurface(roleSpec) {
 		return "", nil
 	}
 

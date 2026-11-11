@@ -38,33 +38,6 @@
     },
     {
       "owner": "skills/architect-handoff/SKILL.md",
-      "pattern": "team_create",
-      "content_window": "2. Launch the supervisor as an **Opus teammate** via TeamCreate (the IMPL_PLAN phase runs as an Agent Team, not aura-swarm):",
-      "section": "Steps",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native TeamCreate(...) parallel-team spawn; maps to #38's DelegateAssignment orchestration operation"
-    },
-    {
-      "owner": "skills/architect-handoff/SKILL.md",
-      "pattern": "team_create",
-      "content_window": "TeamCreate({ team_name: \"<epoch>-impl\", ... })          # supervisor + workers as Opus teammates\n   # then assign the supervisor its task via SendMessage (see Example Prompt below)\n   ```",
-      "section": "Steps",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native TeamCreate(...) parallel-team spawn; maps to #38's DelegateAssignment orchestration operation"
-    },
-    {
-      "owner": "skills/architect-handoff/SKILL.md",
-      "pattern": "send_message",
-      "content_window": "TeamCreate({ team_name: \"<epoch>-impl\", ... })          # supervisor + workers as Opus teammates\n   # then assign the supervisor its task via SendMessage (see Example Prompt below)\n   ```",
-      "section": "Steps",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native SendMessage(...) assignment messaging; maps to #38's SendAssignmentMessage orchestration operation"
-    },
-    {
-      "owner": "skills/architect-handoff/SKILL.md",
       "pattern": "skill_invocation",
       "content_window": "Start by calling `Skill(/pasture:supervisor)` to load your role instructions.",
       "section": "Example Prompt",
@@ -111,8 +84,8 @@
     {
       "owner": "skills/architect-handoff/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- Teammates have **zero prior context**: every SendMessage assignment MUST be self-contained (call `Skill(/pasture:supervisor)`, the Pasture task IDs, and `pasture task show` commands to fetch full requirements).",
-      "section": "Spawning via TeamCreate",
+      "content_window": "- A delegated assignment has **zero prior context**: every assignment MUST be self-contained (call `Skill(/pasture:supervisor)`, the Pasture task IDs, and `\"${EPOCH_REC}\" show` commands to fetch full requirements).",
+      "section": "Delegation Notes",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
@@ -210,7 +183,7 @@
     {
       "owner": "skills/epoch/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- **Phases 5 & 11 (UAT):** invoke `Skill(/pasture:user-uat)` \u2014 it drives the FIX-NOW vs DEFER disposition and demonstrative examples.",
+      "content_window": "- **Phases 5 & 11 (UAT):** invoke `Skill(/pasture:user-uat)` \u2014 it drives the FIX-NOW, DEFER, or WON'T-DO disposition and demonstrative examples.",
       "section": "Skills to Invoke",
       "ordinal": 0,
       "classification": "orchestration",
@@ -244,87 +217,6 @@
       "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
     },
     {
-      "owner": "skills/protocol/CLAUDE.md",
-      "pattern": "skill_invocation",
-      "content_window": "**Given** you are assigning work to a teammate via TeamCreate/SendMessage **when** composing the message **then** MUST include: (1) explicit skill invocation instruction (e.g., `Skill(/pasture:worker)`), (2) all relevant full task URIs, (3) `pasture task show \"$TASK_URI\"` reads for each reference, and (4) the HANDOFF Pasture task URI if applicable (handoffs are authored in their task body, not a file path). **SHOULD NEVER** send bare instructions without tracker context \u2014 teammates have zero prior context and cannot see your conversation history or task tree.",
-      "section": "Agent Orchestration",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
-      "owner": "skills/protocol/CLAUDE.md",
-      "pattern": "skill_invocation",
-      "content_window": "**Given** a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT) **when** conducting the phase **then** the agent **MUST** invoke the matching interview skill (`Skill(/pasture:user-elicit)` for URE, `Skill(/pasture:user-uat)` for UAT) so the verbatim-capture and disposition procedures are loaded. **SHOULD NEVER** conduct an interview phase without invoking its skill \u2014 skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures and yields shallow questions.",
-      "section": "User Interviews (URE/UAT)",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
-      "owner": "skills/protocol/CLAUDE.md",
-      "pattern": "skill_invocation",
-      "content_window": "**Given** a user-interview phase (Phase 2 URE, Phase 5 Plan UAT, or Phase 11 Impl UAT) **when** conducting the phase **then** the agent **MUST** invoke the matching interview skill (`Skill(/pasture:user-elicit)` for URE, `Skill(/pasture:user-uat)` for UAT) so the verbatim-capture and disposition procedures are loaded. **SHOULD NEVER** conduct an interview phase without invoking its skill \u2014 skipping it loses the verbatim-capture and FIX-NOW/DEFER disposition procedures and yields shallow questions.",
-      "section": "User Interviews (URE/UAT)",
-      "ordinal": 1,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
-      "owner": "skills/protocol/CONSTRAINTS.md",
-      "pattern": "skill_invocation",
-      "content_window": "**Given** a user-interview phase (URE, Plan UAT, Impl UAT) **when** conducting it **then** invoke the matching interview skill (`Skill(/pasture:user-elicit)` or `Skill(/pasture:user-uat)`) so verbatim-capture and disposition procedures load **should never** conduct an interview phase without invoking its skill",
-      "section": "Workflow Constraints",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
-      "owner": "skills/protocol/CONSTRAINTS.md",
-      "pattern": "skill_invocation",
-      "content_window": "**Given** a user-interview phase (URE, Plan UAT, Impl UAT) **when** conducting it **then** invoke the matching interview skill (`Skill(/pasture:user-elicit)` or `Skill(/pasture:user-uat)`) so verbatim-capture and disposition procedures load **should never** conduct an interview phase without invoking its skill",
-      "section": "Workflow Constraints",
-      "ordinal": 1,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
-      "owner": "skills/protocol/PROCESS.md",
-      "pattern": "skill_invocation",
-      "content_window": "**The architect MUST invoke `Skill(/pasture:user-elicit)`** before conducting the URE (R2) \u2014 the skill loads the verbatim-capture and disposition procedures. Skipping it produces shallow, low-quality interview questions and loses the verbatim record.",
-      "section": "URE Survey (s2_1)",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
-      "owner": "skills/protocol/PROCESS.md",
-      "pattern": "skill_invocation",
-      "content_window": "**The architect MUST invoke `Skill(/pasture:user-uat)`** before running the UAT (R2) \u2014 the skill loads the verbatim-capture and FIX-NOW/DEFER disposition procedures.",
-      "section": "User Approval (Required!)",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
-      "owner": "skills/protocol/PROCESS.md",
-      "pattern": "skill_invocation",
-      "content_window": "1. Call `Skill(/pasture:supervisor)` to load role instructions",
-      "section": "Overview",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
-      "owner": "skills/protocol/PROCESS.md",
-      "pattern": "skill_invocation",
-      "content_window": "**The supervisor MUST invoke `Skill(/pasture:user-uat)`** before running the implementation UAT (R2) \u2014 the skill loads the verbatim-capture and FIX-NOW/DEFER disposition procedures.",
-      "section": "User Approval",
-      "ordinal": 0,
-      "classification": "orchestration",
-      "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
-    },
-    {
       "owner": "skills/supervisor-spawn-worker/SKILL.md",
       "pattern": "skill_invocation",
       "content_window": "prompt: `Call Skill(/pasture:worker) and implement the assigned slice.",
@@ -346,7 +238,7 @@
       "owner": "skills/supervisor-spawn-worker/SKILL.md",
       "pattern": "send_message",
       "content_window": "SendMessage({",
-      "section": "TeamCreate: SendMessage Assignment",
+      "section": "Delegated Assignment Message",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native SendMessage(...) assignment messaging; maps to #38's SendAssignmentMessage orchestration operation"
@@ -354,8 +246,8 @@
     {
       "owner": "skills/supervisor-spawn-worker/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).",
-      "section": "TeamCreate: SendMessage Assignment",
+      "content_window": "content: `You are assigned the slice. Start by calling Skill(/pasture:worker).",
+      "section": "Delegated Assignment Message",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
@@ -399,7 +291,7 @@
     {
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- Then: use Task tool with `subagent_type: \"general-purpose\"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start",
+      "content_window": "- Then: use Agent tool with `subagent_type: \"general-purpose\"` and `run_in_background: true`, worker MUST call `Skill(/pasture:worker)` at start",
       "section": "Ride the Wave \u2014 Coordinated Phase 8-10 Execution",
       "ordinal": 0,
       "classification": "orchestration",
@@ -408,7 +300,7 @@
     {
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `pasture task show \"${TASK_ID_URI}\"` for full context, and (4) the handoff authored in the Pasture task body",
+      "content_window": "- Then: the message MUST include: (1) explicit instruction to call `Skill(/pasture:worker)`, (2) the Pasture task ID, (3) instruction to run `\"${EPOCH_REC}\" show \"${TASK_ID_URI}\"` for full context, and (4) the handoff authored in the Pasture task body",
       "section": "Ride the Wave \u2014 Coordinated Phase 8-10 Execution",
       "ordinal": 0,
       "classification": "orchestration",
@@ -445,7 +337,7 @@
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "send_message",
       "content_window": "SendMessage({",
-      "section": "TeamCreate Context Requirements",
+      "section": "Delegated Assignment Context Requirements",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native SendMessage(...) assignment messaging; maps to #38's SendAssignmentMessage orchestration operation"
@@ -453,8 +345,8 @@
     {
       "owner": "skills/supervisor/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "content: `You are assigned SLICE-1. Start by calling Skill(/pasture:worker).",
-      "section": "TeamCreate Context Requirements",
+      "content_window": "content: `You are assigned the slice. Start by calling Skill(/pasture:worker).",
+      "section": "Delegated Assignment Context Requirements",
       "ordinal": 0,
       "classification": "orchestration",
       "notes": "native Skill(/...) invocation directive; maps to #38's InvokeSkill orchestration operation"
@@ -471,16 +363,43 @@
     {
       "owner": "skills/user-elicit/SKILL.md",
       "pattern": "ask_user_question",
-      "content_window": "AskUserQuestion(questions: [",
+      "content_window": "AskUserQuestion({",
       "section": "Example Survey",
       "ordinal": 0,
       "classification": "user_decision",
-      "notes": "native AskUserQuestion(...) call; maps to #38's RequestUserDecision (SelectOne/SelectMany/FreeText)"
+      "notes": "first one-decision call in the elicit example; maps to #38's RequestUserDecision (SelectOne/SelectMany/FreeText)"
+    },
+    {
+      "owner": "skills/user-elicit/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "Example Survey",
+      "ordinal": 1,
+      "classification": "user_decision",
+      "notes": "second one-decision call in the elicit example; maps to #38's RequestUserDecision"
+    },
+    {
+      "owner": "skills/user-elicit/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "Example Survey",
+      "ordinal": 2,
+      "classification": "user_decision",
+      "notes": "third one-decision call in the elicit example; maps to #38's RequestUserDecision"
+    },
+    {
+      "owner": "skills/user-elicit/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "Example Survey",
+      "ordinal": 3,
+      "classification": "user_decision",
+      "notes": "fourth one-decision call in the elicit example; maps to #38's RequestUserDecision"
     },
     {
       "owner": "skills/user-uat/SKILL.md",
       "pattern": "skill_invocation",
-      "content_window": "- Then: MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW/DEFER disposition, and validation-case confirmation procedures are loaded",
+      "content_window": "- Then: MUST invoke `Skill(/pasture:user-uat)` so the verbatim-capture, FIX-NOW, DEFER, WON'T-DO disposition, and validation-case confirmation procedures are loaded",
       "section": "User Acceptance Test (UAT)",
       "ordinal": 0,
       "classification": "orchestration",
@@ -494,6 +413,24 @@
       "ordinal": 0,
       "classification": "user_decision",
       "notes": "native AskUserQuestion(...) call; maps to #38's RequestUserDecision (SelectOne/SelectMany/FreeText)"
+    },
+    {
+      "owner": "skills/user-uat/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "UAT Survey Template",
+      "ordinal": 1,
+      "classification": "user_decision",
+      "notes": "second one-decision call in the UAT survey template; maps to #38's RequestUserDecision"
+    },
+    {
+      "owner": "skills/user-uat/SKILL.md",
+      "pattern": "ask_user_question",
+      "content_window": "AskUserQuestion({",
+      "section": "UAT Survey Template",
+      "ordinal": 2,
+      "classification": "user_decision",
+      "notes": "third one-decision call in the UAT survey template; maps to #38's RequestUserDecision"
     }
   ]
 }

@@ -57,14 +57,15 @@ var supervisorPlanTasksBody = SkillBody{
 		{
 			Id:        "sup-plan-review-effort-budget",
 			Given:     "the start of Phase 8 (IMPL_PLAN), like the Phase-1 research-depth gate (per C-review-effort-budget)",
-			When:      "deciding how much review-and-fix effort to spend per slice",
-			Then:      "request a configurable review-effort budget from the user (defaults: 3 rounds, 1 round, 0 rounds, unlimited, custom); the Phase-10 review->fix->re-review loop iterates up to the chosen budget; on budget exhaustion WITHOUT a clean 0/0/0 round, surface the outstanding findings to the user for a decision",
+			When:      "deciding how much review-and-fix effort to spend per wave",
+			Then:      "request a configurable review-effort budget from the user (defaults: 3 rounds, 1 round, 0 rounds, unlimited, custom); the Phase-10 review->fix->re-review loop iterates up to the chosen budget, only an open BLOCKER gates a wave, and convergence at the end targets 0/0/0 within maxRounds; on budget exhaustion without convergence, surface the outstanding findings to the user for a decision",
 			ShouldNot: "hardcode the review-cycle budget; proceed past the chosen budget without surfacing outstanding findings to the user; loop forever when a finite budget was chosen",
 		},
 	},
 	Sections: []ProseSection{
 		fragRef(FragTaskRecovery),
 		fragRef(FragTaskAuthor),
+		fragRef(FragModelPolicy),
 		{
 			Id:      "sup-plan-when-to-use",
 			Title:   "When to Use",
@@ -73,17 +74,17 @@ var supervisorPlanTasksBody = SkillBody{
 		{
 			Id:    "sup-plan-review-effort-budget-gate",
 			Title: "Request the Review-Effort Budget (Phase 8 user gate)",
-			Content: "At the **start of Phase 8** — like the Phase-1 research-depth gate — request a **configurable review-effort budget** from the user (per `C-review-effort-budget`). This is one of the 5 user-gated phases. Present the default choices:\n" +
+			Content: "At the **start of Phase 8** — like the Phase-1 research-depth gate — request a **configurable review-effort budget** from the user (per `C-review-effort-budget`). This is one of the user-gated phases. Present the default choices:\n" +
 				"\n" +
 				"| Option | Meaning |\n" +
 				"|--------|---------|\n" +
-				"| **3 rounds** | Up to three review -> fix -> re-review cycles per slice |\n" +
+				"| **3 rounds** | Up to three review -> fix -> re-review cycles per wave |\n" +
 				"| **1 round** | A single review + one fix pass |\n" +
 				"| **0 rounds** | No review-fix iteration (review once, surface anything found) |\n" +
-				"| **unlimited** | Iterate until a fix-free clean 0/0/0 round (no upper bound) |\n" +
+				"| **unlimited** | Iterate until convergence (no upper bound) |\n" +
 				"| **custom** | A user-specified number of rounds |\n" +
 				"\n" +
-				"The Phase-10 review->fix->re-review loop iterates **up to the chosen budget** until a fix-free clean round confirms 0 BLOCKER + 0 IMPORTANT + 0 MINOR. On **budget exhaustion WITHOUT a clean round**, SURFACE the outstanding findings to the user for a decision — never proceed dirty, never loop forever, and never hardcode the budget. Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.",
+				"The Phase-10 review->fix->re-review loop iterates **up to the chosen budget**. Only an open BLOCKER gates a wave; IMPORTANT and MINOR findings stay open, and convergence at the end queries every open `pasture:finding` toward 0/0/0 within **maxRounds**. On **budget exhaustion without convergence**, SURFACE the outstanding findings to the user for a decision — never proceed dirty, never loop forever, and never hardcode the budget. Record the chosen budget in the IMPL_PLAN so workers and reviewers know the bound.",
 		},
 		{
 			Id:    "sup-plan-critical-vertical-slices",
@@ -100,13 +101,13 @@ var supervisorPlanTasksBody = SkillBody{
 				"\n" +
 				"**CORRECT PATTERN:**\n" +
 				"```\n" +
-				"SLICE-1: \"feature list command\" (Worker A owns full vertical)\n" +
+				"feature list command (one worker owns the full vertical)\n" +
 				"  - ListOptions, ListEntry types (L1)\n" +
 				"  - Tests importing `cli-tool feature list` CLI (L2)\n" +
 				"  - service.ListItems() implementation (L3)\n" +
 				"  - listCmd (cobra) RunE handler wiring (L3)\n" +
 				"\n" +
-				"SLICE-2: \"feature detail command\" (Worker B owns full vertical)\n" +
+				"feature detail command (another worker owns the full vertical)\n" +
 				"  - DetailView types (L1)\n" +
 				"  - Tests importing `cli-tool feature detail` CLI (L2)\n" +
 				"  - service.GetItemDetail() implementation (L3)\n" +
@@ -118,8 +119,8 @@ var supervisorPlanTasksBody = SkillBody{
 			Title: "Steps",
 			Content: `1. **Read RATIFIED_PLAN and URD tasks:**
    ` + "```" + `bash
-   pasture task show "${RATIFIED_PLAN_ID_URI}"
-   pasture task show "${URD_ID_URI}"
+   [[rec:show]] "${RATIFIED_PLAN_ID_URI}"
+   [[rec:show]] "${URD_ID_URI}"
    ` + "```" + `
 
 2. **Identify production code paths** (what end users will actually run):
@@ -149,17 +150,17 @@ var supervisorPlanTasksBody = SkillBody{
 
    | ID | Contract | Owner (exports) | Consumer(s) (imports) | Merge Timing |
    |----|----------|-----------------|-----------------------|--------------|
-   | IP-1 | PhaseEnum type | SLICE-1 (foundation) | SLICE-2, SLICE-3, SLICE-4 | L1 (types) |
-   | IP-2 | ConstraintContext interface | SLICE-1 (foundation) | SLICE-2 (gen_schema) | L1 (types) |
-   | IP-3 | SkillRegistry protocol | SLICE-3 (gen_skills) | SLICE-4 (context_injection) | L3 (impl) |
+   | IP-1 | PhaseEnum type | foundation slice | schema slice, skill slice, injection slice | types |
+   | IP-2 | ConstraintContext interface | foundation slice | schema slice | types |
+   | IP-3 | SkillRegistry protocol | skill slice | injection slice | implementation |
    ` + "```" + `
 
    **Interface-first decomposition (R3, Strong SHOULD — see ` + "`" + `C-interface-first-slices` + "`" + `):** when slices share contracts, prefer extracting a horizontal **interface-first FOUNDATION slice** that exports ALL public types/interfaces/contracts and lands FIRST (a barrier). The dependent implementation slices then compile against those contracts and run in **parallel**, instead of being forced into a linear ` + "`" + `A → B → C` + "`" + ` chain whose only real coupling is at the interface boundary. Reserve a linear chain for cases where the runtime dependency genuinely exceeds the interface.
 
 6. **Create vertical slice tasks:**
    ` + "```" + `bash
-   SLICE_1_ID_URI=$(pasture task create "SLICE-1: Implement 'cli-tool feature list' command (full vertical)" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --type=task \
-     --description="$(cat <<EOF
+   SLICE_1_ID_URI=$([[rec:create]] --kind task --title "Implement the feature list command" --phase worker_slices \
+     --body="$(cat <<EOF
    ---
    references:
      impl_plan: "${IMPL_PLAN_ID_URI}"
@@ -210,9 +211,8 @@ var supervisorPlanTasksBody = SkillBody{
    - [ ] No TODO placeholders
    - [ ] Service wired with real dependencies
    EOF
-   )" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-   pasture task label add "$SLICE_1_ID_URI" pasture:p9-impl:s9-slice
-   pasture task update "$SLICE_1_ID_URI" --notes "Design: '{
+   )")
+   [[rec:note]] "$SLICE_1_ID_URI" --author pasture-system/00000000-0000-0000-0000-000000000000 --body "Design: '{
        \"productionCodePath\": \"cli-tool feature list\",
        \"validation_checklist\": [
          \"Type checking passes\",
@@ -231,12 +231,12 @@ var supervisorPlanTasksBody = SkillBody{
        \"ratified_plan\": \"${RATIFIED_PLAN_ID_URI}\"
      }'"
 
-   pasture task dep add "${IMPL_PLAN_ID_URI}" --blocked-by "${SLICE_1_ID_URI}"
+   [[rec:block]] "${IMPL_PLAN_ID_URI}" --by "${SLICE_1_ID_URI}"
    ` + "```" + `
 
 7. **Update IMPL_PLAN with vertical slice breakdown + integration points:** First create each remaining slice using the Step 6 pattern and bind SLICE_2_ID_URI, SLICE_3_ID_URI and SLICE_4_ID_URI from their respective create outputs.
    ` + "```" + `bash
-   pasture task update "${IMPL_PLAN_ID_URI}" --description="$(cat <<EOF
+   [[rec:note]] "${IMPL_PLAN_ID_URI}" --author pasture-system/00000000-0000-0000-0000-000000000000 --body="$(cat <<EOF
    ---
    references:
      request: "${REQUEST_ID_URI}"
@@ -253,25 +253,25 @@ var supervisorPlanTasksBody = SkillBody{
 
    ### Vertical Slices (parallel, after Layer 0)
 
-   **SLICE-1: "cli-tool feature" (default command)**
+   **default command: "cli-tool feature"**
    - Worker: A
    - Production path: \` + "`" + `./bin/cli-tool feature\` + "`" + `
    - Owns: default action, recent items logic
     - Task: "${SLICE_1_ID_URI}"
 
-   **SLICE-2: "cli-tool feature list"**
+   **list command: "cli-tool feature list"**
    - Worker: B
    - Production path: \` + "`" + `./bin/cli-tool feature list\` + "`" + `
    - Owns: ListOptions types, list tests, listItems() method, list CLI wiring
     - Task: "${SLICE_2_ID_URI}"
 
-   **SLICE-3: "cli-tool feature detail"**
+   **detail command: "cli-tool feature detail"**
    - Worker: C
     - Production path: \` + "`" + `./bin/cli-tool feature detail FEATURE_ID\` + "`" + `
    - Owns: DetailView types, detail tests, getItemDetail() method, detail CLI wiring
     - Task: ${SLICE_3_ID_URI}
 
-   **SLICE-4: "cli-tool feature search"**
+   **search command: "cli-tool feature search"**
    - Worker: D
    - Production path: \` + "`" + `./bin/cli-tool feature search\` + "`" + `
    - Owns: SearchQuery types, search tests, searchItems() method, search CLI wiring
@@ -283,13 +283,13 @@ var supervisorPlanTasksBody = SkillBody{
 
    | ID | Contract | Owner (exports) | Consumer(s) (imports) | Merge Timing |
    |----|----------|-----------------|-----------------------|--------------|
-   | IP-1 | FeatureError enum | SLICE-1 | SLICE-2, SLICE-3, SLICE-4 | L1 (types) |
-   | IP-2 | BaseService interface | SLICE-1 | SLICE-2, SLICE-3 | L1 (types) |
+   | IP-1 | FeatureError enum | the default command | the list command, the detail command, the search command | L1 (types) |
+   | IP-2 | BaseService interface | the default command | the list command, the detail command | L1 (types) |
 
    ## Execution Order
 
    1. Layer 0 (if needed): Shared infrastructure (parallel)
-   2. SLICE-1 through SLICE-4: Each worker implements their vertical slice (parallel)
+   2. the default command through the search command: Each worker implements their vertical slice (parallel)
       - Within each slice: Types (L1) → Tests (L2) → Impl+Wiring (L3)
    3. Integration points merge at documented timing (L1 contracts first, L3 wiring last)
 
@@ -298,7 +298,7 @@ var supervisorPlanTasksBody = SkillBody{
    All production code paths verified via code inspection:
    - ./bin/cli-tool feature
    - ./bin/cli-tool feature list
-   - ./bin/cli-tool feature detail "${ID_URI}"
+   - ./bin/cli-tool feature detail "${SLICE_1_ID_URI}"
    - ./bin/cli-tool feature search
    - All integration points verified: contracts match between owner and consumers
    EOF
@@ -400,8 +400,8 @@ var supervisorPlanTasksBody = SkillBody{
 
 ` + "```" + `bash
 # Create FOLLOWUP_IMPL_PLAN
-FOLLOWUP_IMPL_PLAN_ID_URI=$(pasture task create "FOLLOWUP_IMPL_PLAN: <follow-up feature>" --phase impl_plan --namespace "$PASTURE_NAMESPACE" --format json --type=epic --priority=2 \
-  --description="---
+FOLLOWUP_IMPL_PLAN_ID_URI=$([[rec:create]] --kind epic --title "FOLLOWUP_IMPL_PLAN: <follow-up feature>" --phase impl_plan --priority 2 \
+  --body="---
 references:
   followup_epic: "${FOLLOWUP_EPIC_ID_URI}"
   original_request: "${REQUEST_ID_URI}"
@@ -409,12 +409,11 @@ references:
   followup_urd: "${FOLLOWUP_URD_ID_URI}"
   followup_proposal: "${FOLLOWUP_PROPOSAL_ID_URI}"
 ---
-Vertical slice decomposition for follow-up epic." | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_IMPL_PLAN_ID_URI" pasture:p8-impl:s8-plan
+Vertical slice decomposition for follow-up epic.")
 
-# Create FOLLOWUP_SLICE-N with DEFER'd-item leaf tasks
-FOLLOWUP_SLICE_ID_URI=$(pasture task create "FOLLOWUP_SLICE-1: <description>" --phase worker_slices --namespace "$PASTURE_NAMESPACE" --format json --type=task \
-  --description="---
+# Create the follow-up slice with DEFER'd-item leaf tasks
+FOLLOWUP_SLICE_ID_URI=$([[rec:create]] --kind task --title "Follow-up: <description>" --phase worker_slices \
+  --body="---
 references:
   followup_impl_plan: "${FOLLOWUP_IMPL_PLAN_ID_URI}"
   followup_urd: "${FOLLOWUP_URD_ID_URI}"
@@ -431,12 +430,11 @@ references:
 ## Validation Checklist
 - [ ] All DEFER'd-item leaf tasks resolved
 - [ ] Tests pass
-- [ ] Production code path verified" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-pasture task label add "$FOLLOWUP_SLICE_ID_URI" pasture:p9-impl:s9-slice
+- [ ] Production code path verified")
 
 # Wire dual-parent: leaf blocks BOTH the DEFER'd-items tracking group AND the follow-up slice
-pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_1_URI}"
-pasture task dep add "${FOLLOWUP_SLICE_ID_URI}" --blocked-by "${LEAF_TASK_ID_2_URI}"
+[[rec:block]] "${FOLLOWUP_SLICE_ID_URI}" --by "${LEAF_TASK_ID_1_URI}"
+[[rec:block]] "${FOLLOWUP_SLICE_ID_URI}" --by "${LEAF_TASK_ID_2_URI}"
 ` + "```" + ``,
 		},
 	},
