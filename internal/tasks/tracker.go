@@ -71,6 +71,9 @@ type trackerImpl struct {
 	sysOnce    sync.Once
 	sysSession *provenance.Session
 	sysErr     error
+	// sysAuthority is the genesis authority memoized beside sysSession so
+	// assignment commands do not re-read and re-validate the singleton.
+	sysAuthority provenance.JournalID
 	// afterGenesisCommit is an internal dependency-injection boundary used by
 	// white-box crash tests. Production constructors leave it nil.
 	afterGenesisCommit func(provenance.JournalID) error

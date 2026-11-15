@@ -17,6 +17,9 @@ registration:
   - {name: dep add, path: [dep, add], flags: [blocked-by, target, kind]}
   - {name: dep tree, path: [dep, tree], flags: [kind]}
   - {name: assignment transfer, path: [assignment, transfer], flags: [slot, assignment, actor, occupant]}
+  - {name: assignment start, path: [assignment, start], flags: [assignment, actor, occupant, parent-task, parent-assignment]}
+  - {name: assignment show, path: [assignment, show], flags: []}
+  - {name: assignment end, path: [assignment, end], flags: [assignment, actor]}
 rejected:
   - {name: no stats, args: [stats], error: 'unknown command'}
   - {name: no count, args: [count], error: 'unknown command'}

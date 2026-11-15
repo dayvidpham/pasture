@@ -1,6 +1,170 @@
 package protocol
 
-import "github.com/dayvidpham/provenance"
+import (
+	"context"
+
+	"github.com/dayvidpham/provenance"
+)
+
+// StartTaskAssignmentRequest identifies the initial owner-responsibility
+// assignment for an existing task. ActorID records who committed the operation;
+// it does not authenticate the caller. ParentTask and ParentAssignment are
+// optional and must be supplied together.
+type StartTaskAssignmentRequest struct {
+	TaskID           provenance.TaskID
+	Slot             provenance.AssignmentSlotID
+	AssignmentID     provenance.AssignmentID
+	ActorID          provenance.ActorID
+	Occupant         provenance.ActorID
+	ParentTask       provenance.TaskID
+	ParentAssignment provenance.AssignmentID
+}
+
+// StartTaskAssignmentResult reports the committed assignment and whether the
+// exact request replayed an already-committed operation.
+type StartTaskAssignmentResult struct {
+	Assignment TaskAssignmentState
+	Replayed   bool
+}
+
+// EndTaskAssignmentRequest names the exact active owner-responsibility episode
+// to end and the actor that commits the ending operation.
+type EndTaskAssignmentRequest struct {
+	TaskID       provenance.TaskID
+	AssignmentID provenance.AssignmentID
+	ActorID      provenance.ActorID
+}
+
+// TaskAssignmentStarter is an optional TaskTracker capability.
+type TaskAssignmentStarter interface {
+	StartTaskAssignment(context.Context, StartTaskAssignmentRequest) (StartTaskAssignmentResult, error)
+}
+
+// TaskAssignmentReader is an optional TaskTracker capability that resolves the
+// one active owner-responsibility assignment for a task. It returns plain,
+// actionable errors; only StartTaskAssignment has a dedicated typed error set.
+type TaskAssignmentReader interface {
+	ShowTaskAssignment(context.Context, provenance.TaskID) (TaskAssignmentState, error)
+}
+
+// TaskAssignmentEnder is an optional TaskTracker capability. EndTaskAssignment
+// ends the exact live episode on the owner-responsibility slot, including a
+// non-owner role, after the caller names the id from the task history or
+// show's unresolved-live-assignment error. It is a supervisor or epoch
+// operation; a worker must not end the assignment that authorizes its review.
+// It returns actionable plain errors; only StartTaskAssignment has a dedicated
+// typed set.
+type TaskAssignmentEnder interface {
+	EndTaskAssignment(context.Context, EndTaskAssignmentRequest) (bool, error)
+}
+
+// TaskAssignmentStartErrorKind classifies semantic start failures without
+// exposing persistence or execution details.
+type TaskAssignmentStartErrorKind uint8
+
+const (
+	TaskAssignmentStartInvalidRequest TaskAssignmentStartErrorKind = iota + 1
+	TaskAssignmentStartUnsupportedSlot
+	TaskAssignmentStartMissingTask
+	TaskAssignmentStartClosedTask
+	TaskAssignmentStartAlreadyAssigned
+	TaskAssignmentStartAssignmentIDReused
+	TaskAssignmentStartUnregisteredActor
+	TaskAssignmentStartUnsupportedOccupant
+	TaskAssignmentStartParentMismatch
+	TaskAssignmentStartReplayConflict
+	TaskAssignmentStartUnavailable
+)
+
+// String returns the stable diagnostic name for a start error kind.
+func (k TaskAssignmentStartErrorKind) String() string {
+	switch k {
+	case TaskAssignmentStartInvalidRequest:
+		return "invalid request"
+	case TaskAssignmentStartUnsupportedSlot:
+		return "unsupported slot"
+	case TaskAssignmentStartMissingTask:
+		return "missing task"
+	case TaskAssignmentStartClosedTask:
+		return "closed task"
+	case TaskAssignmentStartAlreadyAssigned:
+		return "already assigned"
+	case TaskAssignmentStartAssignmentIDReused:
+		return "assignment id reused"
+	case TaskAssignmentStartUnregisteredActor:
+		return "unregistered actor"
+	case TaskAssignmentStartUnsupportedOccupant:
+		return "unsupported occupant"
+	case TaskAssignmentStartParentMismatch:
+		return "parent mismatch"
+	case TaskAssignmentStartReplayConflict:
+		return "replay conflict"
+	case TaskAssignmentStartUnavailable:
+		return "start unavailable"
+	default:
+		return "unknown start error"
+	}
+}
+
+// TaskAssignmentStartError is an actionable, typed start failure.
+type TaskAssignmentStartError struct {
+	Kind  TaskAssignmentStartErrorKind
+	cause error
+}
+
+// NewTaskAssignmentStartError constructs a typed semantic start failure. It is
+// exported for TaskTracker implementations outside this package.
+func NewTaskAssignmentStartError(kind TaskAssignmentStartErrorKind, cause error) *TaskAssignmentStartError {
+	return &TaskAssignmentStartError{Kind: kind, cause: cause}
+}
+
+// Unwrap preserves the underlying error classification for errors.Is and errors.As.
+func (e *TaskAssignmentStartError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.cause
+}
+
+// Error explains what failed, why no assignment changed, and how to recover.
+func (e *TaskAssignmentStartError) Error() string {
+	if e == nil {
+		return "task assignment start failed"
+	}
+	if e.cause == nil {
+		return e.message()
+	}
+	return e.message() + "; cause: " + e.cause.Error()
+}
+
+func (e *TaskAssignmentStartError) message() string {
+	switch e.Kind {
+	case TaskAssignmentStartInvalidRequest:
+		return "task assignment start rejected an invalid request; where: TaskTracker.StartTaskAssignment; when: before reading the task; impact: no assignment changed; fix: provide task, assignment, actor, and occupant values"
+	case TaskAssignmentStartUnsupportedSlot:
+		return "task assignment start rejected an unsupported slot; where: TaskTracker.StartTaskAssignment; when: before reading the task; impact: no assignment changed; fix: use the owner-responsibility slot"
+	case TaskAssignmentStartMissingTask:
+		return "task assignment start found no task; where: TaskTracker.StartTaskAssignment; when: resolving the task; impact: no assignment changed; fix: create the task before starting its owner assignment"
+	case TaskAssignmentStartClosedTask:
+		return "task assignment start found a closed task; where: TaskTracker.StartTaskAssignment; when: checking task lifecycle; impact: no assignment changed; fix: reopen the task before starting an owner assignment"
+	case TaskAssignmentStartAlreadyAssigned:
+		return "task assignment start found an active assignment on the owner-responsibility slot; where: TaskTracker.StartTaskAssignment; when: checking current ownership; impact: no assignment changed; fix: inspect the active assignment; transfer it only when it is an owner-responsibility assignment, otherwise use the epoch command that owns its role"
+	case TaskAssignmentStartAssignmentIDReused:
+		return "task assignment start rejected an assignment id that this store already used; where: TaskTracker.StartTaskAssignment; when: checking assignment identity; impact: no assignment changed; fix: choose a fresh assignment id"
+	case TaskAssignmentStartUnregisteredActor:
+		return "task assignment start found an unregistered actor; where: TaskTracker.StartTaskAssignment; when: resolving committed attribution and occupant; impact: no assignment changed; fix: register both actors before retrying"
+	case TaskAssignmentStartUnsupportedOccupant:
+		return "task assignment start found an occupant that cannot hold a task; the registered machine or system actor has a nil UUID; where: TaskTracker.StartTaskAssignment; when: validating the occupant; impact: no assignment changed; fix: pass the registered worker actor id as --occupant, not the system actor"
+	case TaskAssignmentStartParentMismatch:
+		return "task assignment start rejected the parent citation; where: TaskTracker.StartTaskAssignment; when: validating parent task and assignment; impact: no assignment changed; fix: supply the exact active parent assignment that belongs to the parent task"
+	case TaskAssignmentStartReplayConflict:
+		return "task assignment start could not replay the requested operation consistently; where: TaskTracker.StartTaskAssignment; when: validating a prior start; impact: no assignment changed; fix: resubmit the exact original request or inspect the existing assignment"
+	case TaskAssignmentStartUnavailable:
+		return "task assignment start could not read or commit the assignment; where: TaskTracker.StartTaskAssignment; when: reading or committing the start; impact: no assignment changed; fix: verify the task store is available and retry"
+	default:
+		return "task assignment start failed with an unknown semantic error; where: TaskTracker.StartTaskAssignment; impact: no assignment changed; fix: retry after verifying the task assignment"
+	}
+}
 
 // TransferTaskAssignmentRequest describes a semantic task-assignment transfer.
 // It intentionally contains no persistence identity or execution mechanism.
