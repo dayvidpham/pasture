@@ -26,6 +26,17 @@ func (t *trackerImpl) ShowTaskAssignment(ctx context.Context, task provenance.Ta
 	}
 	resolution, err := t.resolveTaskAssignmentTransfer(ctx, task, provenance.SlotOwnerResponsibility, false, "")
 	if err != nil {
+		var transferErr *protocol.TaskAssignmentTransferError
+		if errors.As(err, &transferErr) {
+			switch transferErr.Kind {
+			case protocol.TaskAssignmentTransferMissingAssignment, protocol.TaskAssignmentTransferStaleAssignment:
+				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has no active owner-responsibility assignment; start one with task assignment start or inspect the task history", task)
+			case protocol.TaskAssignmentTransferAmbiguousAssignment:
+				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has multiple active owner-responsibility assignments; repair the duplicate assignment records", task)
+			case protocol.TaskAssignmentTransferMismatchedAssignment:
+				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has an inconsistent owner-responsibility assignment record; repair it before retrying", task)
+			}
+		}
 		return protocol.TaskAssignmentState{}, err
 	}
 	return protocol.TaskAssignmentState{

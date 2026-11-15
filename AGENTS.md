@@ -764,7 +764,7 @@ registered agents with `pasture task agents list`.
 | Subcommand | Purpose |
 |---|---|
 | `pasture task create` / `show` / `update` / `close` | Create, read, change, or close a task. |
-| `pasture task assignment` | Manage task assignments. |
+| `pasture task assignment` | Manage task assignments: `start` allocates an existing task, `show` discovers the active owner, `end` closes the exact assignment, and `transfer` moves ownership to a successor. |
 | `pasture task list` | List tasks scoped to the effective namespace by default (explicit `--namespace`, otherwise `PASTURE_NAMESPACE`), or intersect status, priority, type, phase, namespace, and one exact label filter; `--all-namespaces` opts out. |
 | `pasture task ready` / `pasture task blocked` | List non-closed candidates scoped to the effective namespace, with an optional exact `--label` filter applied after readiness; `--all-namespaces` opts out. |
 | `pasture task dep add` | Add a typed edge with `--target` and `--kind`, or use `--blocked-by TARGET` alone. `relation` is an alias of `dep`. |

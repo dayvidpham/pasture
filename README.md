@@ -171,7 +171,15 @@ plus one exact label filter,
 `--kind` (`relation` is an alias), `task dep tree --kind` (`blocked_by` by
 default; `derived_from`, `supersedes`, `discovered_from`, or `all`),
 `task label add|remove|list`, `task comment add --author` and `task comments`,
-and `task assignment` — plus event/audit verbs:
+and `task assignment start|show|end|transfer` (explicit owner allocation,
+discovery, exact end, and successor transfer) — plus event/audit verbs:
+
+An owner label is a claim, not an allocation. A handoff must name the exact task
+URI, assignment ID, and registered occupant returned by
+`pasture task assignment show`, and the worker must run `show` itself before
+editing. `start` is serialized by the store's write gate and the released
+Provenance surface has no cross-process "no active owner" precondition, so run
+one supervisor process per store and stop on an ambiguous `show`.
 
 | Subcommand | Purpose |
 |---|---|

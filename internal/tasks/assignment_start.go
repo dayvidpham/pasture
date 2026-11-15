@@ -122,15 +122,27 @@ func (t *trackerImpl) StartTaskAssignment(ctx context.Context, request protocol.
 				return fail(protocol.TaskAssignmentStartUnregisteredActor, err)
 			}
 		}
-		if err := t.refuseActiveTaskAssignment(ctx, request.TaskID, request.Slot); err != nil {
-			return fail(protocol.TaskAssignmentStartAlreadyAssigned, err)
+		activeID, active, err := t.activeTaskAssignment(ctx, request.TaskID, request.Slot)
+		if err != nil {
+			return fail(protocol.TaskAssignmentStartUnavailable, err)
 		}
-		if err := t.refuseReusedAssignmentID(request.AssignmentID); err != nil {
-			return fail(protocol.TaskAssignmentStartAssignmentIDReused, err)
+		if active {
+			return fail(protocol.TaskAssignmentStartAlreadyAssigned, fmt.Errorf("task %q already has active owner assignment %q; transfer it instead", request.TaskID, activeID))
+		}
+		used, err := t.assignmentIDUsed(request.AssignmentID)
+		if err != nil {
+			return fail(protocol.TaskAssignmentStartUnavailable, err)
+		}
+		if used {
+			return fail(protocol.TaskAssignmentStartAssignmentIDReused, fmt.Errorf("assignment id %q was already used by this store; choose a fresh id", request.AssignmentID))
 		}
 		if hasParentTask {
-			if err := t.requireActiveParentAssignment(request.ParentTask, request.ParentAssignment); err != nil {
-				return fail(protocol.TaskAssignmentStartParentMismatch, err)
+			ok, err := t.parentAssignmentActive(request.ParentTask, request.ParentAssignment)
+			if err != nil {
+				return fail(protocol.TaskAssignmentStartUnavailable, err)
+			}
+			if !ok {
+				return fail(protocol.TaskAssignmentStartParentMismatch, fmt.Errorf("parent assignment %q is not the active owner of parent task %q", request.ParentAssignment, request.ParentTask))
 			}
 		}
 	}
@@ -171,58 +183,49 @@ func (t *trackerImpl) StartTaskAssignment(ctx context.Context, request protocol.
 	}, nil
 }
 
-// refuseActiveTaskAssignment uses the same resolver as transfer and show. A
-// missing or stale result means no episode is active; ambiguity or a mismatched
-// authority is a repairable store condition, not an invitation to start.
-func (t *trackerImpl) refuseActiveTaskAssignment(ctx context.Context, task provenance.TaskID, slot provenance.AssignmentSlotID) error {
+// activeTaskAssignment uses the same resolver as transfer and show. A missing
+// or stale result means no episode is active; ambiguity, a mismatched authority,
+// or a store failure is reported separately so start never mislabels it as a
+// second owner.
+func (t *trackerImpl) activeTaskAssignment(ctx context.Context, task provenance.TaskID, slot provenance.AssignmentSlotID) (provenance.AssignmentID, bool, error) {
 	resolution, err := t.resolveTaskAssignmentTransfer(ctx, task, slot, false, "")
 	if err == nil {
-		return fmt.Errorf("task %q already has active owner assignment %q; transfer it instead", task, resolution.assignmentID)
+		return resolution.assignmentID, true, nil
 	}
 	var transferErr *protocol.TaskAssignmentTransferError
 	if errors.As(err, &transferErr) && (transferErr.Kind == protocol.TaskAssignmentTransferMissingAssignment || transferErr.Kind == protocol.TaskAssignmentTransferStaleAssignment) {
-		return nil
+		return "", false, nil
 	}
-	return err
+	return "", false, err
 }
 
-// refuseReusedAssignmentID prevents an ended episode id from being reissued for
-// a new episode. Assignment ids are durable identity, not a reusable label.
-func (t *trackerImpl) refuseReusedAssignmentID(assignment provenance.AssignmentID) error {
+// assignmentIDUsed prevents an ended episode id from being reissued for a new
+// episode. Assignment ids are durable identity, not a reusable label.
+func (t *trackerImpl) assignmentIDUsed(assignment provenance.AssignmentID) (bool, error) {
 	rows, err := t.queryAssignmentStarts(provenance.AssignmentStartQuery{
 		AssignmentIDs: []provenance.AssignmentID{assignment},
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
-	if len(rows) > 0 {
-		return fmt.Errorf("assignment id %q was already used by this store; choose a fresh id", assignment)
-	}
-	return nil
+	return len(rows) > 0, nil
 }
 
-// requireActiveParentAssignment proves that the cited parent episode belongs to
-// the cited task and is active now. Provenance rechecks both conditions inside
-// the commit transaction.
-func (t *trackerImpl) requireActiveParentAssignment(task provenance.TaskID, assignment provenance.AssignmentID) error {
+// parentAssignmentActive proves that the cited parent episode belongs to the
+// cited task and is active now. Provenance rechecks both conditions inside the
+// commit transaction.
+func (t *trackerImpl) parentAssignmentActive(task provenance.TaskID, assignment provenance.AssignmentID) (bool, error) {
 	rows, err := t.queryAssignmentStarts(provenance.AssignmentStartQuery{
 		AssignmentIDs: []provenance.AssignmentID{assignment},
 		TaskIDs:       []provenance.TaskID{task},
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	if len(rows) != 1 || rows[0].AuthorityJournalID <= 0 {
-		return fmt.Errorf("parent assignment %q does not belong to parent task %q", assignment, task)
+		return false, nil
 	}
-	active, err := t.prov.Journal().AuthorityGovernsTaskAt(rows[0].AuthorityJournalID, task, provenance.JournalID(math.MaxInt64))
-	if err != nil {
-		return err
-	}
-	if !active {
-		return fmt.Errorf("parent assignment %q is not active on parent task %q", assignment, task)
-	}
-	return nil
+	return t.prov.Journal().AuthorityGovernsTaskAt(rows[0].AuthorityJournalID, task, provenance.JournalID(math.MaxInt64))
 }
 
 // queryAssignmentStarts drains a pinned assignment-start query. A filtered page
