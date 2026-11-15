@@ -31,7 +31,9 @@ import (
 //
 //   - Agent categorisation (R8): SetAgentCategories, AgentCategories
 //   - Context attachment (R9): AttachContext, EventContexts, Timeline
-//   - Task assignment: TransferTaskAssignment
+//   - Task assignment: TransferTaskAssignment; Start/Show/End are optional
+//     capabilities declared by TaskAssignmentStarter/Reader/Ender so callers
+//     can require only the lifecycle they need
 //   - Lifecycle: Close (closes both wrapped subsystems exactly once)
 //
 // The constructor OpenTaskTracker is the supported way to obtain an instance;

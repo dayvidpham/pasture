@@ -2728,3 +2728,18 @@ the working directory. Only the recovery prose changed. Lifecycle transport,
 activation, version guards, decision handling and the injection contract are
 unchanged, and no capture payload, fixture identity or acceptance record moves.
 No new live session, capture or host capability is claimed.
+
+# Assignment allocation handoff transport addendum
+
+The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
+`e209ead8da0dc48795f554ccd57736e9b80bf0644ea68c51c6a8079150e9e140`.
+The embedded recovery text now states that an owner label is a claim, not an
+allocation, names the task assignment start/show/transfer/end lifecycle, and
+requires a handoff to carry the exact assignment and occupant returned by show
+with the worker verifying it. Only the recovery prose changed. Lifecycle
+transport, activation, version guards, decision handling and the injection
+contract are unchanged; no runtime task query, file read or cached task state
+is added. The generated plugin and embedded hook asset still have identical
+bytes (`internal/target/opencode/assets/hooks/pasture-hooks.ts` has the same
+SHA-256). No capture payload, fixture identity, activation state or acceptance
+record changes. No new live session, capture or host capability is claimed.
