@@ -39,8 +39,10 @@ func readLedgerAndStoreIdentity(t *testing.T, dbPath string) (ledgerGeneration, 
 	defer func() { require.NoError(t, db.Close()) }()
 	require.NoError(t, db.QueryRow(`SELECT generation, journal_id FROM provenance_verified_store WHERE id = 1`).Scan(&ledgerGeneration, &ledgerTail),
 		"read the ledger's recorded generation and journal tail")
-	require.NoError(t, db.QueryRow(`SELECT generation FROM provenance_store_generation WHERE id = 1`).Scan(&storeGeneration),
-		"read the store's live generation counter")
+	// Provenance v0.10.4 records the live generation as the sum of the
+	// per-table counters; the old singleton is only the migration baseline.
+	require.NoError(t, db.QueryRow(`SELECT COALESCE(SUM(generation), 0) FROM provenance_table_generation`).Scan(&storeGeneration),
+		"read the store's live generation vector")
 	require.NoError(t, db.QueryRow(`SELECT COALESCE(MAX(journal_id), 0) FROM journal`).Scan(&storeTail),
 		"read the journal tail the ledger must name")
 	return ledgerGeneration, ledgerTail, storeGeneration, storeTail

@@ -258,14 +258,15 @@ func batchCoordinates(t *testing.T, tracker provenance.Tracker) (provenance.Batc
 	return batch, actor, authority
 }
 
-// readStoreGeneration reads the O(1)-open currency ledger's generation counter,
-// the value the store-wide triggers advance in the SAME transaction as the DML
-// that moved it.
+// readStoreGeneration reads the O(1)-open currency ledger's generation, the sum
+// of the per-table counters the store-wide triggers advance in the SAME
+// transaction as the DML that moved them. Provenance v0.10.4 keeps the old
+// singleton only as the migration baseline.
 func readStoreGeneration(t *testing.T, db *sql.DB) int64 {
 	t.Helper()
 	var generation int64
-	if err := db.QueryRow(`SELECT generation FROM provenance_store_generation WHERE id = 1`).Scan(&generation); err != nil {
-		t.Fatalf("read the store generation: %v", err)
+	if err := db.QueryRow(`SELECT COALESCE(SUM(generation), 0) FROM provenance_table_generation`).Scan(&generation); err != nil {
+		t.Fatalf("read the store generation vector: %v", err)
 	}
 	return generation
 }
