@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.34] - 2026-11-15
+
+### Added
+- feat(tasks): allocate and verify owner assignments on existing tasks
+
+### Fixed
+- fix(tasks): keep review assignments out of the worker recovery path
+- fix(tasks): make the non-owner assignment recovery path executable
+- fix(tasks): close the remaining assignment review findings
+- fix(tasks): point a blocked start at the owning role command
+- fix(tasks): close review gaps in assignment allocation
+- fix(tasks): classify assignment start failures and document the allocation route
+
+### Other
+- Merge pull request #285 from dayvidpham/pasture-284--feat--assignment-allocation
+
 ## [0.0.33] - 2026-11-11
 
 ### Added
