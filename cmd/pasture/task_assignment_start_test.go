@@ -86,6 +86,9 @@ func TestCLI_TaskAssignmentLifecycle(t *testing.T) {
 	if beforeStart.exitCode == 0 {
 		t.Fatal("show on an unassigned task was accepted")
 	}
+	if !strings.Contains(beforeStart.stderr, "no active owner-responsibility assignment") {
+		t.Fatalf("unassigned show stderr = %q", beforeStart.stderr)
+	}
 	started := runCLI(t, startArgs...)
 	if started.exitCode != 0 {
 		t.Fatalf("start exit %d: %s", started.exitCode, started.stderr)
@@ -136,13 +139,22 @@ func TestCLI_TaskAssignmentLifecycle(t *testing.T) {
 	if second.exitCode == 0 {
 		t.Fatal("second active owner was accepted")
 	}
+	if !strings.Contains(second.stderr, "active assignment") {
+		t.Fatalf("second start stderr = %q", second.stderr)
+	}
 	premature := runCLI(t, "--db", db, "task", "close", task.ID.String(), "--reason", "premature")
 	if premature.exitCode == 0 {
 		t.Fatal("close with an active assignment was accepted")
 	}
+	if !strings.Contains(premature.stderr, "active") {
+		t.Fatalf("premature close stderr = %q", premature.stderr)
+	}
 	invalidParent := runCLI(t, "--db", db, "task", "assignment", "start", task.ID.String(), "--assignment", "cli-parent", "--actor", actor.ID.String(), "--occupant", actor.ID.String(), "--parent-task", task.ID.String())
 	if invalidParent.exitCode == 0 {
 		t.Fatal("incomplete parent citation was accepted")
+	}
+	if !strings.Contains(invalidParent.stderr, "parent") {
+		t.Fatalf("incomplete parent stderr = %q", invalidParent.stderr)
 	}
 
 	transfer := runCLI(t, "--db", db, "task", "assignment", "transfer", task.ID.String(), "--slot", "owner-responsibility", "--assignment", "cli-next", "--actor", actor.ID.String(), "--occupant", actor.ID.String())
@@ -152,6 +164,9 @@ func TestCLI_TaskAssignmentLifecycle(t *testing.T) {
 	staleEnd := runCLI(t, "--db", db, "task", "assignment", "end", task.ID.String(), "--assignment", "cli-owner", "--actor", actor.ID.String())
 	if staleEnd.exitCode == 0 {
 		t.Fatal("stale assignment end was accepted")
+	}
+	if !strings.Contains(staleEnd.stderr, "owned by assignment") {
+		t.Fatalf("stale end stderr = %q", staleEnd.stderr)
 	}
 	for _, replay := range []bool{false, true} {
 		ended := runCLI(t, "--db", db, "task", "assignment", "end", task.ID.String(), "--assignment", "cli-next", "--actor", actor.ID.String())
@@ -175,5 +190,8 @@ func TestCLI_TaskAssignmentLifecycle(t *testing.T) {
 	closedStart := runCLI(t, "--db", db, "task", "assignment", "start", task.ID.String(), "--assignment", "after-close", "--actor", actor.ID.String(), "--occupant", actor.ID.String())
 	if closedStart.exitCode == 0 {
 		t.Fatal("start on a closed task was accepted")
+	}
+	if !strings.Contains(closedStart.stderr, "closed task") {
+		t.Fatalf("closed start stderr = %q", closedStart.stderr)
 	}
 }

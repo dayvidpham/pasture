@@ -15,6 +15,12 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	_ protocol.TaskAssignmentStarter = (*trackerImpl)(nil)
+	_ protocol.TaskAssignmentReader  = (*trackerImpl)(nil)
+	_ protocol.TaskAssignmentEnder   = (*trackerImpl)(nil)
+)
+
 // StartTaskAssignment starts the one owner-responsibility assignment for an
 // existing task. It refuses a task that already has an active owner and never
 // substitutes an owner label for an assignment. The episode start and its
@@ -151,14 +157,8 @@ func (t *trackerImpl) StartTaskAssignment(ctx context.Context, request protocol.
 		}
 	}
 
-	systemActor, authority, found, err := readSystemIdentity(t.auditDB)
+	authority, err := t.systemAuthority()
 	if err != nil {
-		return fail(protocol.TaskAssignmentStartUnavailable, err)
-	}
-	if !found {
-		return fail(protocol.TaskAssignmentStartUnavailable, fmt.Errorf("the persisted system identity is absent; initialize the store with a normal task command"))
-	}
-	if err := validatePersistedGenesisAuthority(t.prov.Journal(), systemActor, authority); err != nil {
 		return fail(protocol.TaskAssignmentStartUnavailable, err)
 	}
 

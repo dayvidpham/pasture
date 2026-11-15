@@ -27,7 +27,7 @@ forbidden:
 fragments:
   - id: frag--task-recovery
     every_body: true
-    contains: [PASTURE_DB_PATH, XDG_DATA_HOME, '--namespace', '"${EPOCH_REC}" ready', '"${EPOCH_REC}" query --blocked', '"${EPOCH_REC}" query --status in_progress', '"${EPOCH_REC}" show', '--notes', '--history', '"${EPOCH_REC}" block', '--by', 'references:', non-atomic, supervisor, 'git agent-commit', 'explicit user approval', 'retries 3 times', 'pending/']
+    contains: [PASTURE_DB_PATH, XDG_DATA_HOME, '--namespace', '"${EPOCH_REC}" ready', '"${EPOCH_REC}" query --blocked', '"${EPOCH_REC}" query --status in_progress', '"${EPOCH_REC}" show', '--notes', '--history', '"${EPOCH_REC}" block', '--by', 'references:', non-atomic, supervisor, 'git agent-commit', 'explicit user approval', 'retries 3 times', 'pending/', 'task assignment start', 'task assignment show', 'task assignment transfer', 'task assignment end', '--slot owner-responsibility', HEADER_DB, occupant]
   - id: frag--task-author
     every_body: true
     contains: ['"${EPOCH_REC}" whoami', '--author', 'pasture-system/00000000-0000-0000-0000-000000000000', verbatim]

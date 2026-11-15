@@ -94,14 +94,8 @@ func (t *trackerImpl) EndTaskAssignment(ctx context.Context, request protocol.En
 	}
 	operationID := endAssignmentOperationID(request)
 
-	systemActor, authority, found, err := readSystemIdentity(t.auditDB)
+	authority, err := t.systemAuthority()
 	if err != nil {
-		return false, err
-	}
-	if !found {
-		return false, fmt.Errorf("end assignment: the persisted system identity is absent; initialize the store with a normal task command")
-	}
-	if err := validatePersistedGenesisAuthority(t.prov.Journal(), systemActor, authority); err != nil {
 		return false, err
 	}
 

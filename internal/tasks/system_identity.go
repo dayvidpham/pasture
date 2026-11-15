@@ -57,6 +57,26 @@ func (t *trackerImpl) systemSession() (*provenance.Session, error) {
 	return t.sysSession, t.sysErr
 }
 
+// systemAuthority returns the genesis authority paired with systemSession,
+// memoized at the same time so callers that need to bind a different actor to
+// the system authority do not repeat the singleton read and replay validation.
+func (t *trackerImpl) systemAuthority() (provenance.JournalID, error) {
+	if _, err := t.systemSession(); err != nil {
+		return 0, err
+	}
+	if t.sysAuthority == 0 {
+		return 0, &pasterrors.StructuredError{
+			Category: pasterrors.CategoryStorage,
+			What:     "Pasture's system authority is absent after bootstrap.",
+			Why:      "The system session resolved without a genesis authority id.",
+			Where:    "Resolving the task-backend system authority (internal/tasks/system_identity.go in tasks.systemAuthority).",
+			Impact:   "The assignment command cannot bind a committing actor to the genesis authority.",
+			Fix:      "Reopen the store and retry; if the error persists, inspect the pasture_system_identity row and genesis operation.",
+		}
+	}
+	return t.sysAuthority, nil
+}
+
 // bootstrapSystemSession is the one-time resolution behind systemSession.
 func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 	if err := t.ensurePastureTablesOnce(); err != nil {
@@ -88,6 +108,7 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 		// The persisted path is deliberately read-only. Activation acquires a
 		// SQLite write transaction even for an exact repeat; lifecycle ingress
 		// must not spend a second writer acquisition before its receipt append.
+		t.sysAuthority = authority
 		return t.prov.As(expectedActor, authority), nil
 	}
 
@@ -146,6 +167,7 @@ func (t *trackerImpl) bootstrapSystemSession() (*provenance.Session, error) {
 			Fix:    "Inspect pasture_system_identity and the deterministic genesis operation; reconcile them through an explicit reviewed migration before retrying.",
 		}
 	}
+	t.sysAuthority = authority
 	return t.prov.As(actor, authority), nil
 }
 

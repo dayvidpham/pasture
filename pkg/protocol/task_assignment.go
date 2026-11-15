@@ -41,12 +41,16 @@ type TaskAssignmentStarter interface {
 }
 
 // TaskAssignmentReader is an optional TaskTracker capability that resolves the
-// one active owner-responsibility assignment for a task.
+// one active owner-responsibility assignment for a task. It reports ownership
+// resolution failures with the existing TaskAssignmentTransferError kinds so a
+// caller can branch on missing, ambiguous, or mismatched history.
 type TaskAssignmentReader interface {
 	ShowTaskAssignment(context.Context, provenance.TaskID) (TaskAssignmentState, error)
 }
 
-// TaskAssignmentEnder is an optional TaskTracker capability.
+// TaskAssignmentEnder is an optional TaskTracker capability. EndTaskAssignment
+// returns actionable plain errors; only StartTaskAssignment has a dedicated
+// typed error set.
 type TaskAssignmentEnder interface {
 	EndTaskAssignment(context.Context, EndTaskAssignmentRequest) (bool, error)
 }
