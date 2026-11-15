@@ -63,6 +63,7 @@ const (
 	TaskAssignmentStartAlreadyAssigned
 	TaskAssignmentStartAssignmentIDReused
 	TaskAssignmentStartUnregisteredActor
+	TaskAssignmentStartUnsupportedOccupant
 	TaskAssignmentStartParentMismatch
 	TaskAssignmentStartReplayConflict
 	TaskAssignmentStartUnavailable
@@ -85,6 +86,8 @@ func (k TaskAssignmentStartErrorKind) String() string {
 		return "assignment id reused"
 	case TaskAssignmentStartUnregisteredActor:
 		return "unregistered actor"
+	case TaskAssignmentStartUnsupportedOccupant:
+		return "unsupported occupant"
 	case TaskAssignmentStartParentMismatch:
 		return "parent mismatch"
 	case TaskAssignmentStartReplayConflict:
@@ -121,6 +124,13 @@ func (e *TaskAssignmentStartError) Error() string {
 	if e == nil {
 		return "task assignment start failed"
 	}
+	if e.cause == nil {
+		return e.message()
+	}
+	return e.message() + "; cause: " + e.cause.Error()
+}
+
+func (e *TaskAssignmentStartError) message() string {
 	switch e.Kind {
 	case TaskAssignmentStartInvalidRequest:
 		return "task assignment start rejected an invalid request; where: TaskTracker.StartTaskAssignment; when: before reading the task; impact: no assignment changed; fix: provide task, assignment, actor, and occupant values"
@@ -136,6 +146,8 @@ func (e *TaskAssignmentStartError) Error() string {
 		return "task assignment start rejected an assignment id that this store already used; where: TaskTracker.StartTaskAssignment; when: checking assignment identity; impact: no assignment changed; fix: choose a fresh assignment id"
 	case TaskAssignmentStartUnregisteredActor:
 		return "task assignment start found an unregistered actor; where: TaskTracker.StartTaskAssignment; when: resolving committed attribution and occupant; impact: no assignment changed; fix: register both actors before retrying"
+	case TaskAssignmentStartUnsupportedOccupant:
+		return "task assignment start found an occupant that cannot hold a task; the registered machine or system actor has a nil UUID; where: TaskTracker.StartTaskAssignment; when: validating the occupant; impact: no assignment changed; fix: pass the registered worker actor id as --occupant, not the system actor"
 	case TaskAssignmentStartParentMismatch:
 		return "task assignment start rejected the parent citation; where: TaskTracker.StartTaskAssignment; when: validating parent task and assignment; impact: no assignment changed; fix: supply the exact active parent assignment that belongs to the parent task"
 	case TaskAssignmentStartReplayConflict:

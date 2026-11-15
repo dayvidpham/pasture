@@ -12,6 +12,7 @@ import (
 
 	"github.com/dayvidpham/pasture/pkg/protocol"
 	"github.com/dayvidpham/provenance"
+	"github.com/google/uuid"
 )
 
 // StartTaskAssignment starts the one owner-responsibility assignment for an
@@ -46,6 +47,9 @@ func (t *trackerImpl) StartTaskAssignment(ctx context.Context, request protocol.
 	}
 	if _, err := provenance.ParseActorID(request.Occupant.String()); err != nil {
 		return fail(protocol.TaskAssignmentStartInvalidRequest, err)
+	}
+	if request.Occupant.UUID == uuid.Nil {
+		return fail(protocol.TaskAssignmentStartUnsupportedOccupant, fmt.Errorf("occupant %s has a nil UUID; pass the registered worker actor", request.Occupant))
 	}
 	if err := validateAssignmentScalar("assignment", string(request.AssignmentID)); err != nil {
 		return fail(protocol.TaskAssignmentStartInvalidRequest, err)
@@ -122,12 +126,12 @@ func (t *trackerImpl) StartTaskAssignment(ctx context.Context, request protocol.
 				return fail(protocol.TaskAssignmentStartUnregisteredActor, err)
 			}
 		}
-		activeID, active, err := t.activeTaskAssignment(ctx, request.TaskID, request.Slot)
+		activeID, activeOccupant, active, err := t.activeSlotAssignment(request.TaskID, request.Slot)
 		if err != nil {
-			return fail(protocol.TaskAssignmentStartUnavailable, err)
+			return fail(protocol.TaskAssignmentStartAlreadyAssigned, err)
 		}
 		if active {
-			return fail(protocol.TaskAssignmentStartAlreadyAssigned, fmt.Errorf("task %q already has active owner assignment %q; transfer it instead", request.TaskID, activeID))
+			return fail(protocol.TaskAssignmentStartAlreadyAssigned, fmt.Errorf("task %q already has active assignment %q occupied by %s on slot %q; transfer or end it instead", request.TaskID, activeID, activeOccupant, request.Slot))
 		}
 		used, err := t.assignmentIDUsed(request.AssignmentID)
 		if err != nil {
@@ -183,20 +187,40 @@ func (t *trackerImpl) StartTaskAssignment(ctx context.Context, request protocol.
 	}, nil
 }
 
-// activeTaskAssignment uses the same resolver as transfer and show. A missing
-// or stale result means no episode is active; ambiguity, a mismatched authority,
-// or a store failure is reported separately so start never mislabels it as a
-// second owner.
-func (t *trackerImpl) activeTaskAssignment(ctx context.Context, task provenance.TaskID, slot provenance.AssignmentSlotID) (provenance.AssignmentID, bool, error) {
-	resolution, err := t.resolveTaskAssignmentTransfer(ctx, task, slot, false, "")
-	if err == nil {
-		return resolution.assignmentID, true, nil
+// activeSlotAssignment enumerates every live episode on the slot, not only the
+// owner-responsibility material role. Epoch review children carry a live
+// owner-responsibility episode with an axis-reviewer role; ignoring them would
+// let start create a second live episode that no CLI path can end, leaving the
+// task unclosable. A missing result is unassigned; ambiguity is a repair case.
+func (t *trackerImpl) activeSlotAssignment(task provenance.TaskID, slot provenance.AssignmentSlotID) (provenance.AssignmentID, provenance.ActorID, bool, error) {
+	rows, err := t.queryAssignmentStarts(provenance.AssignmentStartQuery{
+		TaskIDs: []provenance.TaskID{task},
+		SlotIDs: []provenance.AssignmentSlotID{slot},
+	})
+	if err != nil {
+		return "", provenance.ActorID{}, false, err
 	}
-	var transferErr *protocol.TaskAssignmentTransferError
-	if errors.As(err, &transferErr) && (transferErr.Kind == protocol.TaskAssignmentTransferMissingAssignment || transferErr.Kind == protocol.TaskAssignmentTransferStaleAssignment) {
-		return "", false, nil
+	active := make([]provenance.AssignmentStartRow, 0, 1)
+	for _, row := range rows {
+		if row.AuthorityJournalID <= 0 {
+			continue
+		}
+		live, err := t.prov.Journal().AuthorityGovernsTaskAt(row.AuthorityJournalID, task, provenance.JournalID(math.MaxInt64))
+		if err != nil {
+			return "", provenance.ActorID{}, false, err
+		}
+		if live {
+			active = append(active, row)
+		}
 	}
-	return "", false, err
+	switch len(active) {
+	case 0:
+		return "", provenance.ActorID{}, false, nil
+	case 1:
+		return active[0].AssignmentID, active[0].Occupant, true, nil
+	default:
+		return "", provenance.ActorID{}, false, fmt.Errorf("task %q has %d active assignments on slot %q; repair the duplicate episodes", task, len(active), slot)
+	}
 }
 
 // assignmentIDUsed prevents an ended episode id from being reissued for a new

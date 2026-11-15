@@ -24,12 +24,25 @@ func (t *trackerImpl) ShowTaskAssignment(ctx context.Context, task provenance.Ta
 	if _, err := provenance.ParseTaskID(task.String()); err != nil {
 		return protocol.TaskAssignmentState{}, fmt.Errorf("show assignment: invalid task id: %w", err)
 	}
+	if _, err := t.prov.Show(task); err != nil {
+		if errors.Is(err, provenance.ErrNotFound) {
+			return protocol.TaskAssignmentState{}, fmt.Errorf("show assignment: task %q does not exist", task)
+		}
+		return protocol.TaskAssignmentState{}, fmt.Errorf("show assignment: read task %q: %w", task, err)
+	}
 	resolution, err := t.resolveTaskAssignmentTransfer(ctx, task, provenance.SlotOwnerResponsibility, false, "")
 	if err != nil {
 		var transferErr *protocol.TaskAssignmentTransferError
 		if errors.As(err, &transferErr) {
 			switch transferErr.Kind {
 			case protocol.TaskAssignmentTransferMissingAssignment, protocol.TaskAssignmentTransferStaleAssignment:
+				activeID, _, active, activeErr := t.activeSlotAssignment(task, provenance.SlotOwnerResponsibility)
+				if activeErr != nil {
+					return protocol.TaskAssignmentState{}, activeErr
+				}
+				if active {
+					return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has active assignment %q on the owner-responsibility slot, but it is not an owner-responsibility role; inspect it with the epoch assignment command or end it with the exact id", task, activeID)
+				}
 				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has no active owner-responsibility assignment; start one with task assignment start or inspect the task history", task)
 			case protocol.TaskAssignmentTransferAmbiguousAssignment:
 				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has multiple active owner-responsibility assignments; repair the duplicate assignment records", task)

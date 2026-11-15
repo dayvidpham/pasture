@@ -10,6 +10,48 @@ import (
 	"github.com/dayvidpham/provenance"
 )
 
+func TestCLI_TaskAssignmentParentLineage(t *testing.T) {
+	t.Parallel()
+	db := filepath.Join(t.TempDir(), "pasture.db")
+	tr, err := tasks.OpenTaskTracker(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := tr.RegisterSoftwareAgent("cli-test", "parent-owner", "1", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := tr.Create("cli-test", "parent", "", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseWorkerSlices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := tr.Create("cli-test", "child", "", provenance.TaskTypeTask, provenance.PriorityMedium, provenance.PhaseWorkerSlices)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	parentStart := runCLI(t, "--db", db, "task", "assignment", "start", parent.ID.String(), "--assignment", "parent-owner", "--actor", actor.ID.String(), "--occupant", actor.ID.String())
+	if parentStart.exitCode != 0 {
+		t.Fatalf("parent start exit %d: %s", parentStart.exitCode, parentStart.stderr)
+	}
+	childStart := runCLI(t, "--db", db, "task", "assignment", "start", child.ID.String(), "--assignment", "child-owner", "--actor", actor.ID.String(), "--occupant", actor.ID.String(), "--parent-task", parent.ID.String(), "--parent-assignment", "parent-owner")
+	if childStart.exitCode != 0 {
+		t.Fatalf("child start exit %d: %s", childStart.exitCode, childStart.stderr)
+	}
+	childShow := runCLI(t, "--db", db, "task", "assignment", "show", child.ID.String())
+	if childShow.exitCode != 0 || !strings.Contains(childShow.stdout, "child-owner") {
+		t.Fatalf("child show exit %d: %s", childShow.exitCode, childShow.stderr)
+	}
+	if end := runCLI(t, "--db", db, "task", "assignment", "end", child.ID.String(), "--assignment", "child-owner", "--actor", actor.ID.String()); end.exitCode != 0 {
+		t.Fatalf("child end exit %d: %s", end.exitCode, end.stderr)
+	}
+	if end := runCLI(t, "--db", db, "task", "assignment", "end", parent.ID.String(), "--assignment", "parent-owner", "--actor", actor.ID.String()); end.exitCode != 0 {
+		t.Fatalf("parent end exit %d: %s", end.exitCode, end.stderr)
+	}
+}
+
 func TestCLI_TaskAssignmentLifecycle(t *testing.T) {
 	t.Parallel()
 	help := runCLI(t, "task", "assignment", "--help")
@@ -40,6 +82,10 @@ func TestCLI_TaskAssignmentLifecycle(t *testing.T) {
 	}
 
 	startArgs := []string{"--db", db, "task", "assignment", "start", task.ID.String(), "--assignment", "cli-owner", "--actor", actor.ID.String(), "--occupant", actor.ID.String()}
+	beforeStart := runCLI(t, "--db", db, "task", "assignment", "show", task.ID.String())
+	if beforeStart.exitCode == 0 {
+		t.Fatal("show on an unassigned task was accepted")
+	}
 	started := runCLI(t, startArgs...)
 	if started.exitCode != 0 {
 		t.Fatalf("start exit %d: %s", started.exitCode, started.stderr)
@@ -73,8 +119,17 @@ func TestCLI_TaskAssignmentLifecycle(t *testing.T) {
 	if shown.exitCode != 0 {
 		t.Fatalf("show exit %d: %s", shown.exitCode, shown.stderr)
 	}
-	if !strings.Contains(shown.stdout, "cli-owner") {
-		t.Fatalf("show did not name the active assignment:\n%s", shown.stdout)
+	var shownState struct {
+		TaskID       string `json:"taskId"`
+		Slot         string `json:"slot"`
+		AssignmentID string `json:"assignmentId"`
+		Occupant     string `json:"occupant"`
+	}
+	if err := json.Unmarshal([]byte(shown.stdout), &shownState); err != nil {
+		t.Fatal(err)
+	}
+	if shownState.TaskID != task.ID.String() || shownState.Slot != "owner-responsibility" || shownState.AssignmentID != "cli-owner" || shownState.Occupant != actor.ID.String() {
+		t.Fatalf("show state = %+v", shownState)
 	}
 
 	second := runCLI(t, "--db", db, "task", "assignment", "start", task.ID.String(), "--assignment", "cli-second", "--actor", actor.ID.String(), "--occupant", actor.ID.String())

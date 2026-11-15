@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/dayvidpham/pasture/pkg/protocol"
@@ -188,6 +189,62 @@ func TestStartTaskAssignmentParentLineageAndCloseGate(t *testing.T) {
 		Occupant:     f.actorA,
 	}); err == nil {
 		t.Fatal("start on a closed task succeeded")
+	}
+}
+
+func TestStartTaskAssignmentSeesNonOwnerRoleOnTheSlot(t *testing.T) {
+	f := newTaskAssignmentTransferFixture(t)
+	ctx := context.Background()
+	session, err := f.tracker.systemSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	material, err := MapMaterialEvent(AssignmentStartedEvent{Task: f.task, Assignment: "review-child", Role: RoleAxisReviewer, Occupant: f.actorA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Atomic(func(operation *provenance.Operation) {
+		operation.Add(provenance.Effect{Sort: provenance.EffectAssignmentStart, TaskID: f.task, AssignmentID: "review-child", SlotID: provenance.SlotOwnerResponsibility, Occupant: f.actorA})
+		operation.Add(material)
+	}, provenance.WithOperationID("seed-review-child")); err != nil {
+		t.Fatalf("seed axis-reviewer episode: %v", err)
+	}
+	_, err = f.tracker.StartTaskAssignment(ctx, protocol.StartTaskAssignmentRequest{
+		TaskID:       f.task,
+		Slot:         provenance.SlotOwnerResponsibility,
+		AssignmentID: "second-owner",
+		ActorID:      f.actorA,
+		Occupant:     f.actorB,
+	})
+	var typed *protocol.TaskAssignmentStartError
+	if !errors.As(err, &typed) || typed.Kind != protocol.TaskAssignmentStartAlreadyAssigned {
+		t.Fatalf("start err = %v, want already assigned for the non-owner role", err)
+	}
+	_, err = f.tracker.ShowTaskAssignment(ctx, f.task)
+	if err == nil || !strings.Contains(err.Error(), "review-child") {
+		t.Fatalf("show err = %v, want the live non-owner assignment id", err)
+	}
+	if _, err := f.tracker.CloseTask(f.task, "premature"); err == nil {
+		t.Fatal("close with a live non-owner assignment was accepted")
+	}
+}
+
+func TestStartTaskAssignmentRejectsNilUUIDOccupant(t *testing.T) {
+	f := newTaskAssignmentTransferFixture(t)
+	occupant, err := provenance.ParseActorID("pasture-system/00000000-0000-0000-0000-000000000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.tracker.StartTaskAssignment(context.Background(), protocol.StartTaskAssignmentRequest{
+		TaskID:       f.task,
+		Slot:         provenance.SlotOwnerResponsibility,
+		AssignmentID: "system-occupant",
+		ActorID:      f.actorA,
+		Occupant:     occupant,
+	})
+	var typed *protocol.TaskAssignmentStartError
+	if !errors.As(err, &typed) || typed.Kind != protocol.TaskAssignmentStartUnsupportedOccupant {
+		t.Fatalf("err = %v, want unsupported occupant", err)
 	}
 }
 
