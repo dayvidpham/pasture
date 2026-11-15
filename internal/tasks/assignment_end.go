@@ -41,11 +41,11 @@ func (t *trackerImpl) ShowTaskAssignment(ctx context.Context, task provenance.Ta
 					return protocol.TaskAssignmentState{}, activeErr
 				}
 				if active {
-					return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has a live assignment %q on the owner-responsibility slot that this command cannot resolve; its material fact is missing or belongs to another role; inspect the task history or end it with the exact id", task, activeID)
+					return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has a live assignment %q on the owner-responsibility slot that this command cannot resolve; its material fact is missing or belongs to another role; if this is not your assignment, stop and report it; an epoch-managed review assignment must be ended by the epoch that created it", task, activeID)
 				}
 				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has no active owner-responsibility assignment; start one first or inspect the task history", task)
 			case protocol.TaskAssignmentTransferAmbiguousAssignment:
-				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has multiple active owner-responsibility assignments; repair the duplicate assignment records", task)
+				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has multiple active owner-responsibility assignments; no CLI repair exists, so restore from a backup or an explicit reviewed migration", task)
 			case protocol.TaskAssignmentTransferMismatchedAssignment:
 				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has an inconsistent owner-responsibility assignment record; repair it before retrying", task)
 			}
@@ -60,9 +60,11 @@ func (t *trackerImpl) ShowTaskAssignment(ctx context.Context, task provenance.Ta
 	}, nil
 }
 
-// EndTaskAssignment ends the exact active owner-responsibility episode. It
-// refuses a stale or mismatched assignment id so an operator cannot silently
-// remove a different worker's ownership.
+// EndTaskAssignment ends the exact live episode on the owner-responsibility
+// slot that the caller names, whatever its role. It refuses a stale or
+// mismatched assignment id so an operator cannot silently remove a different
+// worker's ownership. This is a supervisor or epoch operation: a worker must
+// not end the assignment that authorizes its own review.
 func (t *trackerImpl) EndTaskAssignment(ctx context.Context, request protocol.EndTaskAssignmentRequest) (bool, error) {
 	if ctx == nil {
 		return false, fmt.Errorf("end assignment: no execution context; invoke it through the CLI")
@@ -119,7 +121,7 @@ func (t *trackerImpl) EndTaskAssignment(ctx context.Context, request protocol.En
 		activeID, _, active, err := t.activeSlotAssignment(request.TaskID, provenance.SlotOwnerResponsibility)
 		switch {
 		case errors.Is(err, errAmbiguousSlotAssignment):
-			return false, fmt.Errorf("end assignment: task %q has multiple active assignments on the owner-responsibility slot; repair the duplicate episodes", request.TaskID)
+			return false, fmt.Errorf("end assignment: task %q has multiple active assignments on the owner-responsibility slot; no CLI repair exists, so restore from a backup or an explicit reviewed migration", request.TaskID)
 		case err != nil:
 			return false, fmt.Errorf("end assignment: resolve the active assignment: %w", err)
 		case !active:

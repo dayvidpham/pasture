@@ -49,8 +49,11 @@ type TaskAssignmentReader interface {
 
 // TaskAssignmentEnder is an optional TaskTracker capability. EndTaskAssignment
 // ends the exact live episode on the owner-responsibility slot, including a
-// non-owner role, after the caller names the id returned by show. It returns
-// actionable plain errors; only StartTaskAssignment has a dedicated typed set.
+// non-owner role, after the caller names the id from the task history or
+// show's unresolved-live-assignment error. It is a supervisor or epoch
+// operation; a worker must not end the assignment that authorizes its review.
+// It returns actionable plain errors; only StartTaskAssignment has a dedicated
+// typed set.
 type TaskAssignmentEnder interface {
 	EndTaskAssignment(context.Context, EndTaskAssignmentRequest) (bool, error)
 }

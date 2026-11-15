@@ -223,7 +223,7 @@ func (t *trackerImpl) activeSlotAssignment(task provenance.TaskID, slot provenan
 	case 1:
 		return active[0].AssignmentID, active[0].Occupant, true, nil
 	default:
-		return "", provenance.ActorID{}, false, fmt.Errorf("%w: task %q has %d active assignments on slot %q; repair the duplicate episodes", errAmbiguousSlotAssignment, task, len(active), slot)
+		return "", provenance.ActorID{}, false, fmt.Errorf("%w: task %q has %d active assignments on slot %q; no CLI repair exists, so restore from a backup or an explicit reviewed migration", errAmbiguousSlotAssignment, task, len(active), slot)
 	}
 }
 
