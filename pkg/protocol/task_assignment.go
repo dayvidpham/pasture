@@ -141,7 +141,7 @@ func (e *TaskAssignmentStartError) message() string {
 	case TaskAssignmentStartClosedTask:
 		return "task assignment start found a closed task; where: TaskTracker.StartTaskAssignment; when: checking task lifecycle; impact: no assignment changed; fix: reopen the task before starting an owner assignment"
 	case TaskAssignmentStartAlreadyAssigned:
-		return "task assignment start found an active owner assignment; where: TaskTracker.StartTaskAssignment; when: checking current ownership; impact: no assignment changed; fix: transfer the active assignment instead of starting a second one"
+		return "task assignment start found an active assignment on the owner-responsibility slot; where: TaskTracker.StartTaskAssignment; when: checking current ownership; impact: no assignment changed; fix: inspect the active assignment; transfer it only when it is an owner-responsibility assignment, otherwise use the epoch command that owns its role"
 	case TaskAssignmentStartAssignmentIDReused:
 		return "task assignment start rejected an assignment id that this store already used; where: TaskTracker.StartTaskAssignment; when: checking assignment identity; impact: no assignment changed; fix: choose a fresh assignment id"
 	case TaskAssignmentStartUnregisteredActor:

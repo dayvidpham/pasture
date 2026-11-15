@@ -131,7 +131,7 @@ func (t *trackerImpl) StartTaskAssignment(ctx context.Context, request protocol.
 			return fail(protocol.TaskAssignmentStartAlreadyAssigned, err)
 		}
 		if active {
-			return fail(protocol.TaskAssignmentStartAlreadyAssigned, fmt.Errorf("task %q already has active assignment %q occupied by %s on slot %q; transfer or end it instead", request.TaskID, activeID, activeOccupant, request.Slot))
+			return fail(protocol.TaskAssignmentStartAlreadyAssigned, fmt.Errorf("task %q already has active assignment %q occupied by %s on slot %q; inspect it with the command that owns its role before starting another", request.TaskID, activeID, activeOccupant, request.Slot))
 		}
 		used, err := t.assignmentIDUsed(request.AssignmentID)
 		if err != nil {
