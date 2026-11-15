@@ -2732,7 +2732,7 @@ No new live session, capture or host capability is claimed.
 # Assignment allocation handoff transport addendum
 
 The committed `.opencode/plugins/pasture-lifecycle.ts` now has SHA-256
-`61c4e26766cc7ee7c754d323cb146565aae4eb32d828ae29aa177a81f971498c`.
+`649b30aa7c4e2947b2c0c20f6c18840c95fd49e43558f49d2e86cf65eaa0a1bb`.
 The embedded recovery text now states that an owner label is a claim, not an
 allocation, names the direct task assignment start/show/transfer/end commands
 (including the adapter gap and the header store), and

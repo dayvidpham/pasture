@@ -80,7 +80,7 @@ var taskAssignmentShowCmd = &cobra.Command{
 
 var taskAssignmentEndCmd = &cobra.Command{
 	Use:   "end TASK-ID",
-	Short: "End the exact active owner-responsibility assignment",
+	Short: "End the exact active assignment on the owner-responsibility slot",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		err := handlers.TaskEndAssignment(cmd.Context(), handlers.TaskEndAssignmentInput{

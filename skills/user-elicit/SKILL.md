@@ -87,7 +87,7 @@ Create prints the new task URI directly. Persist it before any label or note: cr
 
 An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
 
-For an existing task, the supervisor records the one owner-responsibility assignment. The recovery adapter above exposes no assignment operation, so these are direct tracker commands against the store named by the header's db: value; on the ledger backend, stop and report that assignments are unsupported. Read db: from the header and run:
+For an existing task, the supervisor records the one owner-responsibility assignment. The recovery adapter above exposes no assignment operation, so these direct tracker commands are the documented exception to the closed recovery-operation set; on the ledger backend, stop and report that assignments are unsupported. Set HEADER_DB to PASTURE_DB_PATH when set, otherwise to the header's db: value, then run:
 - pasture --db HEADER_DB task assignment start TASK-ID --assignment ASSIGNMENT-ID --actor ACTOR-ID --occupant OCCUPANT-ID
 - pasture --db HEADER_DB task assignment show TASK-ID
 - pasture --db HEADER_DB task assignment transfer TASK-ID --slot owner-responsibility --assignment NEXT-ASSIGNMENT-ID --actor ACTOR-ID --occupant NEXT-OCCUPANT-ID

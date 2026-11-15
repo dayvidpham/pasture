@@ -299,16 +299,51 @@ func TestStartTaskAssignmentSeesNonOwnerRoleOnTheSlot(t *testing.T) {
 		ActorID:      f.actorA,
 		Occupant:     f.actorB,
 	})
-	var typed *protocol.TaskAssignmentStartError
-	if !errors.As(err, &typed) || typed.Kind != protocol.TaskAssignmentStartAlreadyAssigned {
-		t.Fatalf("start err = %v, want already assigned for the non-owner role", err)
-	}
+	assertTaskAssignmentStartError(t, err, protocol.TaskAssignmentStartAlreadyAssigned)
 	_, err = f.tracker.ShowTaskAssignment(ctx, f.task)
 	if err == nil || !strings.Contains(err.Error(), "review-child") {
 		t.Fatalf("show err = %v, want the live non-owner assignment id", err)
 	}
 	if _, err := f.tracker.CloseTask(f.task, "premature"); err == nil {
 		t.Fatal("close with a live non-owner assignment was accepted")
+	}
+	if _, err := f.tracker.EndTaskAssignment(ctx, protocol.EndTaskAssignmentRequest{
+		TaskID:       f.task,
+		AssignmentID: "review-child",
+		ActorID:      f.actorA,
+	}); err != nil {
+		t.Fatalf("end the live non-owner assignment: %v", err)
+	}
+	if _, err := f.tracker.CloseTask(f.task, "done"); err != nil {
+		t.Fatalf("close after ending the non-owner assignment: %v", err)
+	}
+}
+
+func TestShowAndEndFactlessOwnerEpisode(t *testing.T) {
+	f := newTaskAssignmentTransferFixture(t)
+	ctx := context.Background()
+	session, err := f.tracker.systemSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Atomic(func(operation *provenance.Operation) {
+		operation.Add(provenance.Effect{Sort: provenance.EffectAssignmentStart, TaskID: f.task, AssignmentID: "factless-owner", SlotID: provenance.SlotOwnerResponsibility, Occupant: f.actorA})
+	}, provenance.WithOperationID("seed-factless-owner")); err != nil {
+		t.Fatalf("seed factless owner episode: %v", err)
+	}
+	_, err = f.tracker.ShowTaskAssignment(ctx, f.task)
+	if err == nil || !strings.Contains(err.Error(), "factless-owner") || !strings.Contains(err.Error(), "cannot resolve") {
+		t.Fatalf("show err = %v, want the unresolved live assignment id", err)
+	}
+	if _, err := f.tracker.EndTaskAssignment(ctx, protocol.EndTaskAssignmentRequest{
+		TaskID:       f.task,
+		AssignmentID: "factless-owner",
+		ActorID:      f.actorA,
+	}); err != nil {
+		t.Fatalf("end the factless owner episode: %v", err)
+	}
+	if _, err := f.tracker.CloseTask(f.task, "done"); err != nil {
+		t.Fatalf("close after ending the factless owner episode: %v", err)
 	}
 }
 
@@ -372,6 +407,38 @@ func TestStartTaskAssignmentConcurrentStartsHaveOneWinner(t *testing.T) {
 	}
 	if _, err := f.tracker.ShowTaskAssignment(ctx, f.task); err != nil {
 		t.Fatalf("show after concurrent starts: %v", err)
+	}
+}
+
+func TestStartTaskAssignmentRefusesAmbiguousSlotState(t *testing.T) {
+	f := newTaskAssignmentTransferFixture(t)
+	ctx := context.Background()
+	session, err := f.tracker.systemSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, assignment := range []provenance.AssignmentID{"duplicate-a", "duplicate-b"} {
+		material, err := MapMaterialEvent(AssignmentStartedEvent{Task: f.task, Assignment: assignment, Role: RoleOwnerResponsibility, Occupant: f.actorA})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := session.Atomic(func(operation *provenance.Operation) {
+			operation.Add(provenance.Effect{Sort: provenance.EffectAssignmentStart, TaskID: f.task, AssignmentID: assignment, SlotID: provenance.SlotOwnerResponsibility, Occupant: f.actorA})
+			operation.Add(material)
+		}, provenance.WithOperationID(provenance.OperationID("seed-"+string(assignment)))); err != nil {
+			t.Fatalf("seed duplicate episode %q: %v", assignment, err)
+		}
+	}
+	_, err = f.tracker.StartTaskAssignment(ctx, protocol.StartTaskAssignmentRequest{
+		TaskID:       f.task,
+		Slot:         provenance.SlotOwnerResponsibility,
+		AssignmentID: "third",
+		ActorID:      f.actorA,
+		Occupant:     f.actorB,
+	})
+	assertTaskAssignmentStartError(t, err, protocol.TaskAssignmentStartAlreadyAssigned)
+	if !strings.Contains(err.Error(), "multiple live assignments") {
+		t.Fatalf("ambiguity error = %v, want the duplicate-slot message", err)
 	}
 }
 

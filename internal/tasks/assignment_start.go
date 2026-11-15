@@ -21,6 +21,8 @@ var (
 	_ protocol.TaskAssignmentEnder   = (*trackerImpl)(nil)
 )
 
+var errAmbiguousSlotAssignment = errors.New("multiple live assignments on the slot")
+
 // StartTaskAssignment starts the one owner-responsibility assignment for an
 // existing task. It refuses a task that already has an active owner and never
 // substitutes an owner label for an assignment. The episode start and its
@@ -133,10 +135,12 @@ func (t *trackerImpl) StartTaskAssignment(ctx context.Context, request protocol.
 			}
 		}
 		activeID, activeOccupant, active, err := t.activeSlotAssignment(request.TaskID, request.Slot)
-		if err != nil {
+		switch {
+		case errors.Is(err, errAmbiguousSlotAssignment):
 			return fail(protocol.TaskAssignmentStartAlreadyAssigned, err)
-		}
-		if active {
+		case err != nil:
+			return fail(protocol.TaskAssignmentStartUnavailable, err)
+		case active:
 			return fail(protocol.TaskAssignmentStartAlreadyAssigned, fmt.Errorf("task %q already has active assignment %q occupied by %s on slot %q; inspect it with the command that owns its role before starting another", request.TaskID, activeID, activeOccupant, request.Slot))
 		}
 		used, err := t.assignmentIDUsed(request.AssignmentID)
@@ -219,7 +223,7 @@ func (t *trackerImpl) activeSlotAssignment(task provenance.TaskID, slot provenan
 	case 1:
 		return active[0].AssignmentID, active[0].Occupant, true, nil
 	default:
-		return "", provenance.ActorID{}, false, fmt.Errorf("task %q has %d active assignments on slot %q; repair the duplicate episodes", task, len(active), slot)
+		return "", provenance.ActorID{}, false, fmt.Errorf("%w: task %q has %d active assignments on slot %q; repair the duplicate episodes", errAmbiguousSlotAssignment, task, len(active), slot)
 	}
 }
 

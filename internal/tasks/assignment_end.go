@@ -41,9 +41,9 @@ func (t *trackerImpl) ShowTaskAssignment(ctx context.Context, task provenance.Ta
 					return protocol.TaskAssignmentState{}, activeErr
 				}
 				if active {
-					return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has active assignment %q on the owner-responsibility slot, but it is not an owner-responsibility role; inspect it with the epoch assignment command or end it with the exact id", task, activeID)
+					return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has a live assignment %q on the owner-responsibility slot that this command cannot resolve; its material fact is missing or belongs to another role; inspect the task history or end it with the exact id", task, activeID)
 				}
-				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has no active owner-responsibility assignment; start one with task assignment start or inspect the task history", task)
+				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has no active owner-responsibility assignment; start one first or inspect the task history", task)
 			case protocol.TaskAssignmentTransferAmbiguousAssignment:
 				return protocol.TaskAssignmentState{}, fmt.Errorf("task %q has multiple active owner-responsibility assignments; repair the duplicate assignment records", task)
 			case protocol.TaskAssignmentTransferMismatchedAssignment:
@@ -116,12 +116,16 @@ func (t *trackerImpl) EndTaskAssignment(ctx context.Context, request protocol.En
 		if _, err := t.prov.Agent(request.ActorID); err != nil {
 			return false, fmt.Errorf("end assignment: actor %s is not registered: %w", request.ActorID, err)
 		}
-		resolution, err := t.resolveTaskAssignmentTransfer(ctx, request.TaskID, provenance.SlotOwnerResponsibility, false, "")
-		if err != nil {
-			return false, fmt.Errorf("end assignment: resolve the active owner: %w", err)
-		}
-		if resolution.assignmentID != request.AssignmentID {
-			return false, fmt.Errorf("end assignment: task %q is owned by assignment %q, not %q; show the current assignment and retry with that id", request.TaskID, resolution.assignmentID, request.AssignmentID)
+		activeID, _, active, err := t.activeSlotAssignment(request.TaskID, provenance.SlotOwnerResponsibility)
+		switch {
+		case errors.Is(err, errAmbiguousSlotAssignment):
+			return false, fmt.Errorf("end assignment: task %q has multiple active assignments on the owner-responsibility slot; repair the duplicate episodes", request.TaskID)
+		case err != nil:
+			return false, fmt.Errorf("end assignment: resolve the active assignment: %w", err)
+		case !active:
+			return false, fmt.Errorf("end assignment: task %q has no active assignment on the owner-responsibility slot", request.TaskID)
+		case activeID != request.AssignmentID:
+			return false, fmt.Errorf("end assignment: task %q is owned by assignment %q, not %q; show the current assignment and retry with that id", request.TaskID, activeID, request.AssignmentID)
 		}
 	}
 
