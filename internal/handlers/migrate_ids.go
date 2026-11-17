@@ -489,6 +489,7 @@ var identityCountTables = []string{
 	"pasture_session_execution",
 	"pasture_project_epoch_binding",
 	"session_entries", "provenance_verified_store",
+	"provenance_verified_agent",
 }
 
 func identityCountsQuery(ctx context.Context, q interface {
