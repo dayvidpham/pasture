@@ -83,6 +83,10 @@ var previewDependencyColumns = []struct{ table, column string }{
 	{"journal_authority_assignment_episodes", "task_id"}, {"journal_authority_assignment_episodes", "actor_id"},
 	{"journal_decisions", "task_id"}, {"journal_evidence", "task_id"}, {"journal_task_events", "task_id"},
 	{"governed_allocation_operations", "actor_id"},
+	// The verified agent proof copies agents.id; the dependency's ID conversion
+	// owns it as of v0.10.6. The proof digest is left stale, so the next open
+	// re-verifies and re-seeds it.
+	{"provenance_verified_agent", "agent_id"},
 }
 
 // previewDependencyContextColumns mirrors the dependency's kind-routed context
