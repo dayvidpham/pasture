@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.0.38] - 2026-11-18
+
+### Other
+- chore(deps): bump Provenance to v0.10.8
+
 ## [0.0.37] - 2026-11-18
 
 ### Other
