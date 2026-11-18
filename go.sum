@@ -8,8 +8,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dayvidpham/bestiary v0.2.11 h1:DT3A5QK5VOW6c0bhrLXz/inB4oHO2hDKqa5sQc5+h6A=
 github.com/dayvidpham/bestiary v0.2.11/go.mod h1:X+WiGZpdSPIyjIwBcVftqpoXlfXg5YHVEajvcxjh9Ec=
-github.com/dayvidpham/provenance v0.10.7 h1:bKVtZuu7YzDpqrSQsgi3aCfRzFL48z3TCgG4xiPUVBs=
-github.com/dayvidpham/provenance v0.10.7/go.mod h1:ao5LwQmM+gQljnlT9ZgG/NUcCxQwLVQKrZtS+a5Nkck=
+github.com/dayvidpham/provenance v0.10.8 h1:2vQsveQ8MTEFJ/sBkbJu47TUXuuBYQp862cs9718aYo=
+github.com/dayvidpham/provenance v0.10.8/go.mod h1:ao5LwQmM+gQljnlT9ZgG/NUcCxQwLVQKrZtS+a5Nkck=
 github.com/dbos-inc/dbos-transact-golang v1.8.0 h1:WZs22TGtsebJajxEIc2fXSC5dffE1Sv6U9ylochYg8E=
 github.com/dbos-inc/dbos-transact-golang v1.8.0/go.mod h1:zSo9qN3g9l+Kh/exJTXD7CsvRyWhrtRjfh7X/nJ3qW8=
 github.com/dominikbraun/graph v0.23.0 h1:TdZB4pPqCLFxYhdyMFb1TBdFxp8XLcJfTTBQucVPgCo=
