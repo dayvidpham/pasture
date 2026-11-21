@@ -344,6 +344,7 @@ cells:
   claude-code: {skills: false, agents: false, hooks: false}
   opencode: {skills: true, agents: false, hooks: false}
   codex: {skills: false, agents: false, hooks: false}
+  antigravity-cli: {skills: false, agents: false, hooks: false}
 `
 	if err := os.WriteFile(desired, []byte(selection), 0o600); err != nil {
 		t.Fatal(err)

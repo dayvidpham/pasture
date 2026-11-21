@@ -14,6 +14,7 @@
 //   - .agents/skills/{skill}/SKILL.md: Codex-compatible skills
 //   - .codex/agents/pasture-{role}.toml: Codex agent definitions
 //   - .codex/hooks/: Codex lifecycle adapters
+//   - .gemini/config/skills/{skill}/SKILL.md: Antigravity CLI skills
 //
-//go:generate go run ../../tools/codegen --targets claude-code,opencode,codex
+//go:generate go run ../../tools/codegen --targets claude-code,opencode,codex,antigravity-cli
 package codegen

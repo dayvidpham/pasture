@@ -73,9 +73,10 @@ var OpenCodeTarget = TargetHarness{
 }
 
 var harnessRegistry = map[HarnessName]TargetHarness{
-	HarnessClaudeCode: ClaudeCodeTarget,
-	HarnessOpenCode:   OpenCodeTarget,
-	HarnessCodex:      CodexTarget,
+	HarnessClaudeCode:     ClaudeCodeTarget,
+	HarnessOpenCode:       OpenCodeTarget,
+	HarnessCodex:          CodexTarget,
+	HarnessAntigravityCLI: AntigravityCLITarget,
 }
 
 func ResolveHarness(targets []string) ([]TargetHarness, error) {

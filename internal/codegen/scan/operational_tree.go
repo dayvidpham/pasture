@@ -35,14 +35,15 @@ func OperationalSourceRoots() []string {
 // active-document discovery with publication validation and adding dot trees
 // and all embedded assets. CheckOperationalTree deduplicates overlapping roots.
 func OperationalOutputRoots() []string {
-	return append(OperationalSourceRoots(), ".opencode", ".agents", ".codex",
-		"internal/target/claudecode/assets", "internal/target/opencode/assets", "internal/target/codex/assets")
+	return append(OperationalSourceRoots(), ".opencode", ".agents", ".codex", ".gemini",
+		"internal/target/claudecode/assets", "internal/target/opencode/assets", "internal/target/codex/assets",
+		"internal/target/antigravity/assets")
 }
 
 // OperationalOwner maps only known byte-verbatim projections back to source.
 // Other files own themselves and cannot borrow a historical disposition.
 func OperationalOwner(file string) string {
-	for _, prefix := range []string{".opencode/skill/", ".agents/skills/", "internal/target/opencode/assets/skills/", "internal/target/claudecode/assets/pasture-skills/skills/"} {
+	for _, prefix := range []string{".opencode/skill/", ".agents/skills/", ".gemini/config/skills/", "internal/target/opencode/assets/skills/", "internal/target/claudecode/assets/pasture-skills/skills/"} {
 		if strings.HasPrefix(file, prefix) {
 			return "skills/" + strings.TrimPrefix(file, prefix)
 		}

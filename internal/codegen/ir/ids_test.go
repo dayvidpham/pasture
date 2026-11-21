@@ -18,7 +18,7 @@ func TestEnabledHarnessIDsIsDefensiveAndExact(t *testing.T) {
 
 	second := ir.EnabledHarnessIDs()
 	assert.NotEqual(t, ir.HarnessID("forged"), second[0], "EnabledHarnessIDs must return a fresh defensive copy on every call")
-	assert.ElementsMatch(t, []ir.HarnessID{ir.HarnessClaudeCode, ir.HarnessOpenCode, ir.HarnessCodex}, second)
+	assert.ElementsMatch(t, []ir.HarnessID{ir.HarnessClaudeCode, ir.HarnessOpenCode, ir.HarnessCodex, ir.HarnessAntigravityCLI}, second)
 	for _, harness := range second {
 		assert.True(t, harness.IsValid())
 	}

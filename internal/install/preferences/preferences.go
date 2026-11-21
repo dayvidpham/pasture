@@ -41,9 +41,10 @@ type Preferences struct {
 func Default() Preferences {
 	return Preferences{
 		harnesses: map[ir.HarnessID]bool{
-			ir.HarnessClaudeCode: false,
-			ir.HarnessOpenCode:   false,
-			ir.HarnessCodex:      false,
+			ir.HarnessClaudeCode:     false,
+			ir.HarnessOpenCode:       false,
+			ir.HarnessCodex:          false,
+			ir.HarnessAntigravityCLI: false,
 		},
 		skills: true,
 		agents: true,
@@ -114,13 +115,15 @@ func (p Preferences) clone() Preferences {
 	return Preferences{harnesses: harnesses, skills: p.skills, agents: p.agents, hooks: p.hooks}
 }
 
-// EffectiveSelection normalizes the global choices into the nine-cell effective
-// selection: a cell is enabled iff its harness is enabled and its global axis is
-// enabled. Disabled harnesses receive no extensions even when an axis is on.
+// EffectiveSelection normalizes the global choices into the canonical
+// effective selection: a cell is enabled iff its harness is enabled and its
+// global axis is enabled (and the harness supports that axis). Disabled
+// harnesses receive no extensions even when an axis is on.
 func (p Preferences) EffectiveSelection() (selection.Selection, error) {
 	states := make(map[cell.Cell]bool, len(cell.CanonicalCells()))
 	for _, c := range cell.CanonicalCells() {
-		states[c] = p.HarnessEnabled(c.Harness()) && p.ExtensionEnabled(c.Extension())
+		supported := c.Harness() != ir.HarnessAntigravityCLI || c.Extension() == cell.SkillsAxis()
+		states[c] = supported && p.HarnessEnabled(c.Harness()) && p.ExtensionEnabled(c.Extension())
 	}
 	return selection.New(states)
 }
@@ -134,9 +137,10 @@ type axesWire struct {
 }
 
 type harnessesWire struct {
-	ClaudeCode *bool `yaml:"claude-code"`
-	OpenCode   *bool `yaml:"opencode"`
-	Codex      *bool `yaml:"codex"`
+	ClaudeCode     *bool `yaml:"claude-code"`
+	OpenCode       *bool `yaml:"opencode"`
+	Codex          *bool `yaml:"codex"`
+	AntigravityCLI *bool `yaml:"antigravity-cli"`
 }
 
 type installWire struct {
@@ -216,6 +220,7 @@ func decode(data []byte, path string) (Preferences, error) {
 	applyBool(&prefs.harnesses, ir.HarnessClaudeCode, wire.Harnesses.ClaudeCode)
 	applyBool(&prefs.harnesses, ir.HarnessOpenCode, wire.Harnesses.OpenCode)
 	applyBool(&prefs.harnesses, ir.HarnessCodex, wire.Harnesses.Codex)
+	applyBool(&prefs.harnesses, ir.HarnessAntigravityCLI, wire.Harnesses.AntigravityCLI)
 	if wire.Extensions.Skills != nil {
 		prefs.skills = *wire.Extensions.Skills
 	}
@@ -302,8 +307,9 @@ func encodeInstall(prefs Preferences) (*yaml.Node, error) {
 	claude := prefs.HarnessEnabled(ir.HarnessClaudeCode)
 	opencode := prefs.HarnessEnabled(ir.HarnessOpenCode)
 	codex := prefs.HarnessEnabled(ir.HarnessCodex)
+	antigravity := prefs.HarnessEnabled(ir.HarnessAntigravityCLI)
 	wire := installWire{
-		Harnesses:  harnessesWire{ClaudeCode: &claude, OpenCode: &opencode, Codex: &codex},
+		Harnesses:  harnessesWire{ClaudeCode: &claude, OpenCode: &opencode, Codex: &codex, AntigravityCLI: &antigravity},
 		Extensions: axesWire{Skills: &prefs.skills, Agents: &prefs.agents, Hooks: &prefs.hooks},
 	}
 	var node yaml.Node

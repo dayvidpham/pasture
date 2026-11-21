@@ -592,6 +592,7 @@ func TestServiceProductionPathPersistsExactScopedClaudeFact(t *testing.T) {
 	require.NoError(t, err)
 	contracts[ir.HarnessOpenCode] = fixtureDirectContract(t, ir.HarnessOpenCode, descriptor.Skills().Bundle())
 	contracts[ir.HarnessCodex] = fixtureDirectContract(t, ir.HarnessCodex, descriptor.Skills().Bundle())
+	contracts[ir.HarnessAntigravityCLI] = fixtureDirectContract(t, ir.HarnessAntigravityCLI, descriptor.Skills().Bundle())
 	sut, err := service.New(service.Config{Registry: store, Contracts: contracts, Activators: []apply.Activator{controller.Activator(), fixtureDirectActivator(t)}, Group: controller})
 	require.NoError(t, err)
 
@@ -720,6 +721,7 @@ func serviceFixture(t *testing.T, host *fixtureHost) (*service.Service, *memoryR
 	require.NoError(t, err)
 	contracts[ir.HarnessOpenCode] = fixtureDirectContract(t, ir.HarnessOpenCode, descriptor.Skills().Bundle())
 	contracts[ir.HarnessCodex] = fixtureDirectContract(t, ir.HarnessCodex, descriptor.Skills().Bundle())
+	contracts[ir.HarnessAntigravityCLI] = fixtureDirectContract(t, ir.HarnessAntigravityCLI, descriptor.Skills().Bundle())
 	sut, err := service.New(service.Config{Registry: store, Contracts: contracts, Activators: []apply.Activator{controller.Activator(), fixtureDirectActivator(t)}, Group: controller})
 	require.NoError(t, err)
 	return sut, store
@@ -749,8 +751,8 @@ func (r *memoryRegistry) Save(_ context.Context, store registry.Store) error {
 
 func fixtureDirectActivator(t *testing.T) *apply.DirectFileActivator {
 	t.Helper()
-	policies := make([]apply.DirectFilePolicy, 0, 6)
-	for _, harness := range []ir.HarnessID{ir.HarnessOpenCode, ir.HarnessCodex} {
+	policies := make([]apply.DirectFilePolicy, 0, 9)
+	for _, harness := range []ir.HarnessID{ir.HarnessOpenCode, ir.HarnessCodex, ir.HarnessAntigravityCLI} {
 		for _, extension := range cell.CanonicalExtensions() {
 			cc, err := cell.New(harness, extension)
 			require.NoError(t, err)
@@ -1125,6 +1127,7 @@ func serviceWith(t *testing.T, controller *Controller, store *memoryRegistry) *s
 	require.NoError(t, err)
 	contracts[ir.HarnessOpenCode] = fixtureDirectContract(t, ir.HarnessOpenCode, descriptor.Skills().Bundle())
 	contracts[ir.HarnessCodex] = fixtureDirectContract(t, ir.HarnessCodex, descriptor.Skills().Bundle())
+	contracts[ir.HarnessAntigravityCLI] = fixtureDirectContract(t, ir.HarnessAntigravityCLI, descriptor.Skills().Bundle())
 	sut, err := service.New(service.Config{Registry: store, Contracts: contracts, Activators: []apply.Activator{controller.Activator(), fixtureDirectActivator(t)}, Group: controller})
 	require.NoError(t, err)
 	return sut

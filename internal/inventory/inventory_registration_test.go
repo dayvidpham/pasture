@@ -74,9 +74,14 @@ func TestLifecycleEventHarnessCoverage(t *testing.T) {
 			seen[r.Key.Harness]++
 		}
 	}
-	for _, h := range ir.EnabledHarnessIDs() {
+	// Lifecycle hooks are only supported on claude-code, opencode, and codex.
+	// antigravity-cli explicitly has no lifecycle hook contract.
+	for _, h := range []ir.HarnessID{ir.HarnessClaudeCode, ir.HarnessOpenCode, ir.HarnessCodex} {
 		if seen[h] == 0 {
-			t.Errorf("no lifecycle-event rows for enabled harness %q — the same-walk emission dropped a harness", h)
+			t.Errorf("no lifecycle-event rows for lifecycle-enabled harness %q — the same-walk emission dropped a harness", h)
 		}
+	}
+	if seen[ir.HarnessAntigravityCLI] != 0 {
+		t.Errorf("unexpected lifecycle-event rows for %q (%d); Antigravity CLI must not register lifecycle hooks", ir.HarnessAntigravityCLI, seen[ir.HarnessAntigravityCLI])
 	}
 }

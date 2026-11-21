@@ -12,11 +12,13 @@ import (
 	"github.com/dayvidpham/pasture/internal/install/activation"
 	"github.com/dayvidpham/pasture/internal/install/apply"
 	"github.com/dayvidpham/pasture/internal/install/cell"
+	"github.com/dayvidpham/pasture/internal/install/host/antigravity"
 	"github.com/dayvidpham/pasture/internal/install/host/claudecode"
 	"github.com/dayvidpham/pasture/internal/install/host/codex"
 	"github.com/dayvidpham/pasture/internal/install/host/opencode"
 	"github.com/dayvidpham/pasture/internal/install/selection"
 	"github.com/dayvidpham/pasture/internal/install/service"
+	targetantigravity "github.com/dayvidpham/pasture/internal/target/antigravity"
 	targetclaude "github.com/dayvidpham/pasture/internal/target/claudecode"
 	targetcodex "github.com/dayvidpham/pasture/internal/target/codex"
 	"github.com/dayvidpham/pasture/internal/types"
@@ -33,10 +35,13 @@ type installComposition struct {
 	ClaudeManifests       claudecode.ManifestReader
 	NewClaudeController   func(claudecode.Runner, claudecode.ManifestReader) (*claudecode.Controller, error)
 	NewOpenCodeController func(string) (opencode.Controller, error)
-	ClaudeDescriptor      func() (targetclaude.TargetDescriptor, error)
-	CodexDescriptor       func() (targetcodex.TargetDescriptor, error)
-	NewCodexContract      func(targetcodex.TargetDescriptor, string) (activation.ActivationContract, error)
-	NewCodexPolicies      func(targetcodex.TargetDescriptor, string) ([3]apply.DirectFilePolicy, error)
+	ClaudeDescriptor       func() (targetclaude.TargetDescriptor, error)
+	CodexDescriptor        func() (targetcodex.TargetDescriptor, error)
+	NewCodexContract       func(targetcodex.TargetDescriptor, string) (activation.ActivationContract, error)
+	NewCodexPolicies       func(targetcodex.TargetDescriptor, string) ([3]apply.DirectFilePolicy, error)
+	AntigravityDescriptor  func() (targetantigravity.TargetDescriptor, error)
+	NewAntigravityContract func(targetantigravity.TargetDescriptor, string) (activation.ActivationContract, error)
+	NewAntigravityPolicy   func(targetantigravity.TargetDescriptor, string) (apply.DirectFilePolicy, error)
 }
 
 func productionInstallService() (*service.Service, error) {
@@ -58,6 +63,8 @@ func productionInstallService() (*service.Service, error) {
 		NewClaudeController: claudecode.NewController, NewOpenCodeController: opencode.New,
 		ClaudeDescriptor: targetclaude.Descriptor, CodexDescriptor: targetcodex.Descriptor,
 		NewCodexContract: codex.NewActivationContract, NewCodexPolicies: codex.NewDirectFilePolicies,
+		AntigravityDescriptor: targetantigravity.Descriptor,
+		NewAntigravityContract: antigravity.NewActivationContract, NewAntigravityPolicy: antigravity.NewDirectFilePolicy,
 	})
 }
 
@@ -123,7 +130,31 @@ func composeInstallService(config installComposition) (*service.Service, error) 
 		return nil, fmt.Errorf("installer composition/Codex policy: bind direct-file policies: %w", err)
 	}
 
+	if config.AntigravityDescriptor == nil {
+		config.AntigravityDescriptor = targetantigravity.Descriptor
+	}
+	if config.NewAntigravityContract == nil {
+		config.NewAntigravityContract = antigravity.NewActivationContract
+	}
+	if config.NewAntigravityPolicy == nil {
+		config.NewAntigravityPolicy = antigravity.NewDirectFilePolicy
+	}
+
+	antigravityTarget, err := config.AntigravityDescriptor()
+	if err != nil {
+		return nil, fmt.Errorf("installer composition/Antigravity CLI target: describe embedded target: %w", err)
+	}
+	antigravityContract, err := config.NewAntigravityContract(antigravityTarget, config.Home)
+	if err != nil {
+		return nil, fmt.Errorf("installer composition/Antigravity CLI contract: bind activation contract: %w", err)
+	}
+	antigravityPolicy, err := config.NewAntigravityPolicy(antigravityTarget, config.Home)
+	if err != nil {
+		return nil, fmt.Errorf("installer composition/Antigravity CLI policy: bind direct-file policy: %w", err)
+	}
+
 	policies := append(opencodePolicies, codexPolicies[:]...)
+	policies = append(policies, antigravityPolicy)
 	direct, err := apply.NewDirectFileActivator(policies...)
 	if err != nil {
 		return nil, fmt.Errorf("installer composition/activator: construct direct-file activator: %w", err)
@@ -131,11 +162,12 @@ func composeInstallService(config installComposition) (*service.Service, error) 
 	svc, err := service.New(service.Config{
 		Registry: state,
 		Contracts: map[ir.HarnessID]activation.ActivationContract{
-			ir.HarnessClaudeCode: claudeContract,
-			ir.HarnessOpenCode:   opencodeContract,
-			ir.HarnessCodex:      codexContract,
+			ir.HarnessClaudeCode:     claudeContract,
+			ir.HarnessOpenCode:       opencodeContract,
+			ir.HarnessCodex:          codexContract,
+			ir.HarnessAntigravityCLI: antigravityContract,
 		},
-		Activators: []apply.Activator{claudeController.Activator(), direct},
+		Activators: []apply.Activator{claudeController.Activator(), direct, apply.NewUnsupportedActivator()},
 		Group:      claudeController,
 	})
 	if err != nil {
@@ -206,7 +238,7 @@ func runApplyCellWith(cmd *cobra.Command, _ []string, makeService installService
 	installJSON, _ := cmd.Flags().GetBool("json")
 	harness := ir.HarnessID(installHarness)
 	if !harness.IsValid() {
-		return fmt.Errorf("install apply-cell: invalid --harness %q; use claude-code, opencode, or codex", installHarness)
+		return fmt.Errorf("install apply-cell: invalid --harness %q; use claude-code, opencode, codex, or antigravity-cli", installHarness)
 	}
 	axis, err := cell.ParseExtension(installExtension)
 	if err != nil {
@@ -312,7 +344,7 @@ func newInstallApplySelectionCommand(makeService installServiceFactory) *cobra.C
 func newInstallApplyCellCommand(makeService installServiceFactory) *cobra.Command {
 	cmd := &cobra.Command{Use: "apply-cell", Short: "Apply one explicitly selected installer cell (scripting/Home Manager surface)", Hidden: true, Args: cobra.NoArgs}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error { return runApplyCellWith(cmd, args, makeService) }
-	cmd.Flags().String("harness", "", "Harness: claude-code, opencode, or codex")
+	cmd.Flags().String("harness", "", "Harness: claude-code, opencode, codex, or antigravity-cli")
 	cmd.Flags().String("extension", "", "Extension: skills, agents, or hooks")
 	cmd.Flags().Bool("enabled", false, "Desired state for the cell")
 	cmd.Flags().String("source", "installer", "Controller source: installer or home-manager")

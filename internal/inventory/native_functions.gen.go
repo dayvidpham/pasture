@@ -9,5 +9,9 @@ func init() {
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindNativeFunction, ID: "skill"}},
 		{Key{Harness: ir.HarnessOpenCode, Kind: KindNativeFunction, ID: "task"}},
 		{Key{Harness: ir.HarnessCodex, Kind: KindNativeFunction, ID: "request-input"}},
+		{Key{Harness: ir.HarnessAntigravityCLI, Kind: KindNativeFunction, ID: "ask_question"}},
+		{Key{Harness: ir.HarnessAntigravityCLI, Kind: KindNativeFunction, ID: "invoke_subagent"}},
+		{Key{Harness: ir.HarnessAntigravityCLI, Kind: KindNativeFunction, ID: "manage_subagents"}},
+		{Key{Harness: ir.HarnessAntigravityCLI, Kind: KindNativeFunction, ID: "send_message"}},
 	}
 }

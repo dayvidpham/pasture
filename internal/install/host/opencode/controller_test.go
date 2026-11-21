@@ -271,7 +271,7 @@ func TestHomeManagerMaterializedCellsAreByteIdenticalReadOnlyFacts(t *testing.T)
 	result, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: desired, Scope: apply.GlobalScope(), Source: apply.HomeManagerSource()})
 	require.NoError(t, err)
 	require.True(t, result.OK())
-	require.Len(t, result.Rows(), 9)
+	require.Len(t, result.Rows(), len(cell.CanonicalCells()))
 	for _, row := range result.Rows() {
 		require.Equal(t, apply.ManagedDeclaratively(), row.Status())
 		require.Equal(t, apply.ManagementDeclarative, row.Management())
@@ -512,7 +512,7 @@ func productionServiceAt(t *testing.T, base string, controller host.Controller) 
 func fakeSiblingContracts(t *testing.T, base string) map[ir.HarnessID]activation.ActivationContract {
 	t.Helper()
 	out := map[ir.HarnessID]activation.ActivationContract{}
-	for _, harness := range []artifact.Harness{artifact.HarnessClaudeCode, artifact.HarnessCodex} {
+	for _, harness := range []artifact.Harness{artifact.HarnessClaudeCode, artifact.HarnessCodex, artifact.HarnessAntigravityCLI} {
 		var activations []activation.ComponentActivation
 		for _, extension := range cell.CanonicalExtensions() {
 			coordinate, _ := cell.New(harness, extension)

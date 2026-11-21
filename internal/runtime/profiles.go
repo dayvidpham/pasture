@@ -352,10 +352,49 @@ func Codex0_153_0() RuntimeContract {
 	return mustFloorContract(ir.HarnessCodex, buildCoreBindings(table))
 }
 
-// PinnedContracts returns the three runtime contracts, one per enabled harness,
+// AntigravityCLI1_5_9 is the runtime contract for Antigravity CLI (`agy`) at
+// the recorded host version carried by artifact.ProductionRuntimeContract.
+// Admission is a floor: that version and every later release. It covers the
+// skill-facing operation vocabulary only; native lifecycle hooks remain
+// explicitly unsupported (see AntigravityLifecycleContract).
+func AntigravityCLI1_5_9() RuntimeContract {
+	table := map[ir.OperationKind]operationLowering{
+		ir.OperationInvokeSkill: {
+			class:    effects.RuntimeClassSemanticInstruction,
+			semantic: mustSemantic("read the skill's SKILL.md via read_file and follow its protocol instructions directly"),
+		},
+		ir.OperationDelegateAssignment: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("invoke_subagent", []string{"TypeName", "Role", "Prompt"}, "a spawned subagent conversationId that notifies the parent on completion", "child runs in its own conversation context"),
+		},
+		ir.OperationContinueAssignment: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("send_message", []string{"Recipient", "Message"}, "message delivery acknowledgement to the existing subagent conversation", "resumes the target subagent's own context"),
+		},
+		ir.OperationSendAssignmentMessage: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("send_message", []string{"Recipient", "Message"}, "message delivery acknowledgement", "delivers into the target subagent's context"),
+		},
+		ir.OperationCollectAssignmentResults: {
+			class:    effects.RuntimeClassParentMediated,
+			mediated: mustMediated("parent orchestrator", "Antigravity delivers subagent replies reactively when the parent ends its turn; this contract binds no blocking wait call"),
+		},
+		ir.OperationStopAssignment: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("manage_subagents", []string{"Action", "ConversationIds"}, "termination acknowledgement for the addressed subagents", "stops the addressed subagents and cleans up branched workspaces"),
+		},
+		ir.OperationRequestUserDecision: {
+			class:  effects.RuntimeClassNative,
+			native: mustNativeCall("ask_question", []string{"questions"}, "the user's selected option bound to the originating request", "presents to the interactive user"),
+		},
+	}
+	return mustFloorContract(ir.HarnessAntigravityCLI, buildCoreBindings(table))
+}
+
+// PinnedContracts returns the four runtime contracts, one per enabled harness,
 // each admitting its recorded host version and every later release.
 func PinnedContracts() []RuntimeContract {
-	return []RuntimeContract{ClaudeCode2_1_261(), OpenCode2_0_20(), Codex0_153_0()}
+	return []RuntimeContract{ClaudeCode2_1_261(), OpenCode2_0_20(), Codex0_153_0(), AntigravityCLI1_5_9()}
 }
 
 // NativeOperationNames returns, sorted and de-duplicated, exactly the native
@@ -513,6 +552,16 @@ var harnessToolLowerings = map[ir.HarnessID]map[ir.HarnessTool]HarnessToolLoweri
 		ir.HarnessToolWrite:    unavailableHarnessTool(codexNoPerAgentToolList),
 		ir.HarnessToolTask:     unavailableHarnessTool(codexNoPerAgentToolList),
 		ir.HarnessToolWebFetch: unavailableHarnessTool(codexNoPerAgentToolList),
+	},
+	ir.HarnessAntigravityCLI: {
+		ir.HarnessToolRead:     nativeHarnessTool("read_file"),
+		ir.HarnessToolGlob:     nativeHarnessTool("run_command"),
+		ir.HarnessToolGrep:     nativeHarnessTool("run_command"),
+		ir.HarnessToolBash:     nativeHarnessTool("run_command"),
+		ir.HarnessToolEdit:     nativeHarnessTool("edit_file"),
+		ir.HarnessToolWrite:    nativeHarnessTool("write_file"),
+		ir.HarnessToolTask:     nativeHarnessTool("invoke_subagent"),
+		ir.HarnessToolWebFetch: nativeHarnessTool("search_web"),
 	},
 }
 

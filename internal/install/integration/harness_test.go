@@ -596,7 +596,7 @@ func (e *installerEnv) writeDesired(enabled map[string]bool) string {
 	e.t.Helper()
 	var body strings.Builder
 	body.WriteString("schema: pasture.install.effective-selection/v1\ncells:\n")
-	for _, harness := range []string{"claude-code", "opencode", "codex"} {
+	for _, harness := range []string{"claude-code", "opencode", "codex", "antigravity-cli"} {
 		fmt.Fprintf(&body, "  %s:\n", harness)
 		for _, extension := range []string{"skills", "agents", "hooks"} {
 			fmt.Fprintf(&body, "    %s: %t\n", extension, enabled[harness+"."+extension])

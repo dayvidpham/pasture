@@ -307,7 +307,7 @@ func TestOpenCodeContractInventsNoTools(t *testing.T) {
 func TestPinnedContractVersionBoundaries(t *testing.T) {
 	t.Parallel()
 	contracts := runtime.PinnedContracts()
-	require.Len(t, contracts, 3, "one runtime contract per enabled harness")
+	require.Len(t, contracts, len(ir.EnabledHarnessIDs()), "one runtime contract per enabled harness")
 	harnesses := make(map[ir.HarnessID]int, len(contracts))
 	for _, contract := range contracts {
 		harnesses[contract.Harness()]++

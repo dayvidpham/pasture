@@ -282,7 +282,7 @@ func TestServiceApplySelectionPersistsCanonicalFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.OK() || len(res.Rows()) != 9 {
+	if !res.OK() || len(res.Rows()) != len(cell.CanonicalCells()) {
 		t.Fatalf("result ok=%v rows=%d", res.OK(), len(res.Rows()))
 	}
 	for i, row := range res.Rows() {
@@ -294,8 +294,8 @@ func TestServiceApplySelectionPersistsCanonicalFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if store.Len() != 9 {
-		t.Fatalf("persisted records=%d, want 9", store.Len())
+	if store.Len() != len(cell.CanonicalCells()) {
+		t.Fatalf("persisted records=%d, want %d", store.Len(), len(cell.CanonicalCells()))
 	}
 }
 
@@ -393,7 +393,7 @@ func TestServiceHomeManagerInspectsWithoutOwnershipOrMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !res.OK() || len(res.Rows()) != 9 {
+	if !res.OK() || len(res.Rows()) != len(cell.CanonicalCells()) {
 		t.Fatalf("result ok=%v rows=%d", res.OK(), len(res.Rows()))
 	}
 	for _, row := range res.Rows() {
@@ -1844,7 +1844,7 @@ func TestServiceRegistrySaveFailureRetainsPriorBytesAndStopsLaterCells(t *testin
 	fault := &faultRegistry{base: file, saveErr: errors.New("injected atomic replacement failure")}
 	svc := newServiceConfig(t, root, state, service.Config{Registry: fault})
 	result, err := svc.ApplySelection(context.Background(), service.SelectionRequest{Selection: all(t, func(cell.Cell) bool { return true }), Scope: apply.GlobalScope(), Source: apply.InstallerSource()})
-	if err != nil || result.OK() || len(result.Rows()) != 9 || result.Rows()[0].Status() != apply.Failed() {
+	if err != nil || result.OK() || len(result.Rows()) != len(cell.CanonicalCells()) || result.Rows()[0].Status() != apply.Failed() {
 		t.Fatalf("result=%+v err=%v", result.Rows(), err)
 	}
 	for i, row := range result.Rows()[1:] {
@@ -1968,6 +1968,36 @@ func TestServiceRegistrySaveFailureRetainsPriorBytesAndStopsLaterCells(t *testin
       "index": 8,
       "cell": "codex.hooks",
       "harness": "codex",
+      "extension": "hooks",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 9,
+      "cell": "antigravity-cli.skills",
+      "harness": "antigravity-cli",
+      "extension": "skills",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 10,
+      "cell": "antigravity-cli.agents",
+      "harness": "antigravity-cli",
+      "extension": "agents",
+      "operation": "ensure",
+      "status": "unattempted",
+      "management": "unknown",
+      "diagnostic": "an earlier canonical cell failed; this cell was not attempted"
+    },
+    {
+      "index": 11,
+      "cell": "antigravity-cli.hooks",
+      "harness": "antigravity-cli",
       "extension": "hooks",
       "operation": "ensure",
       "status": "unattempted",

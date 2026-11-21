@@ -49,7 +49,12 @@ func TestExport_EmbeddedTargetsProduceVerifiedArchives(t *testing.T) {
 		if err := export.VerifyArchive(cellResult.ID, cellResult.Asset, content, byID[cellResult.ID]); err != nil {
 			t.Fatalf("embedded archive for %s does not match its bundle: %v", cellResult.ID, err)
 		}
-		if cellResult.Members == 0 {
+		unsupportedSlot := cellResult.ID.Harness() == artifact.HarnessAntigravityCLI && cellResult.ID.Extension() != artifact.ExtensionSkills
+		if unsupportedSlot {
+			if cellResult.Members != 0 {
+				t.Fatalf("embedded archive for unsupported slot %s should be empty, got %d members", cellResult.ID, cellResult.Members)
+			}
+		} else if cellResult.Members == 0 {
 			t.Fatalf("embedded archive for %s carries no members", cellResult.ID)
 		}
 	}

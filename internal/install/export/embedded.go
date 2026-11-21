@@ -5,13 +5,14 @@ import (
 	"io/fs"
 
 	"github.com/dayvidpham/pasture/artifact"
+	targetantigravity "github.com/dayvidpham/pasture/internal/target/antigravity"
 	targetclaude "github.com/dayvidpham/pasture/internal/target/claudecode"
 	targetcodex "github.com/dayvidpham/pasture/internal/target/codex"
 	targetopencode "github.com/dayvidpham/pasture/internal/target/opencode"
 )
 
 // EmbeddedBundles is the production bundle source: the exact per-cell bundles
-// the three embedded target descriptors declare — the same bundles the
+// the embedded target descriptors declare — the same bundles the
 // installer activates. Nothing here re-derives paths, modes, or identities.
 func EmbeddedBundles() ([]CellBundle, error) {
 	claude, err := targetclaude.Descriptor()
@@ -26,7 +27,11 @@ func EmbeddedBundles() ([]CellBundle, error) {
 	if err != nil {
 		return nil, descriptorFault(artifact.HarnessCodex, err)
 	}
-	cells := make([]CellBundle, 0, 9)
+	antigravity, err := targetantigravity.Descriptor()
+	if err != nil {
+		return nil, descriptorFault(artifact.HarnessAntigravityCLI, err)
+	}
+	cells := make([]CellBundle, 0, len(artifact.ComponentIDs()))
 	for _, id := range artifact.ComponentIDs() {
 		var bundle artifact.Bundle
 		var componentErr error
@@ -39,6 +44,9 @@ func EmbeddedBundles() ([]CellBundle, error) {
 			bundle, componentErr = component.Bundle(), err
 		case artifact.HarnessCodex:
 			component, err := codex.Component(id.Extension())
+			bundle, componentErr = component.Bundle(), err
+		case artifact.HarnessAntigravityCLI:
+			component, err := antigravity.Component(id.Extension())
 			bundle, componentErr = component.Bundle(), err
 		default:
 			componentErr = fs.ErrInvalid

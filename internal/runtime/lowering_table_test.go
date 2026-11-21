@@ -51,6 +51,15 @@ var loweringRows = []loweringRow{
 	{ir.HarnessCodex, ir.OperationCollectAssignmentResults, effects.RuntimeClassParentMediated, ""},
 	{ir.HarnessCodex, ir.OperationStopAssignment, effects.RuntimeClassParentMediated, ""},
 	{ir.HarnessCodex, ir.OperationRequestUserDecision, effects.RuntimeClassNative, "request-input"},
+
+	// Antigravity CLI
+	{ir.HarnessAntigravityCLI, ir.OperationInvokeSkill, effects.RuntimeClassSemanticInstruction, ""},
+	{ir.HarnessAntigravityCLI, ir.OperationDelegateAssignment, effects.RuntimeClassNative, "invoke_subagent"},
+	{ir.HarnessAntigravityCLI, ir.OperationContinueAssignment, effects.RuntimeClassNative, "send_message"},
+	{ir.HarnessAntigravityCLI, ir.OperationSendAssignmentMessage, effects.RuntimeClassNative, "send_message"},
+	{ir.HarnessAntigravityCLI, ir.OperationCollectAssignmentResults, effects.RuntimeClassParentMediated, ""},
+	{ir.HarnessAntigravityCLI, ir.OperationStopAssignment, effects.RuntimeClassNative, "manage_subagents"},
+	{ir.HarnessAntigravityCLI, ir.OperationRequestUserDecision, effects.RuntimeClassNative, "ask_question"},
 }
 
 type loweringKey struct {
@@ -165,6 +174,15 @@ var harnessToolRows = []struct {
 	{ir.HarnessCodex, ir.HarnessToolWrite, ""},
 	{ir.HarnessCodex, ir.HarnessToolTask, ""},
 	{ir.HarnessCodex, ir.HarnessToolWebFetch, ""},
+
+	{ir.HarnessAntigravityCLI, ir.HarnessToolRead, "read_file"},
+	{ir.HarnessAntigravityCLI, ir.HarnessToolGlob, "run_command"},
+	{ir.HarnessAntigravityCLI, ir.HarnessToolGrep, "run_command"},
+	{ir.HarnessAntigravityCLI, ir.HarnessToolBash, "run_command"},
+	{ir.HarnessAntigravityCLI, ir.HarnessToolEdit, "edit_file"},
+	{ir.HarnessAntigravityCLI, ir.HarnessToolWrite, "write_file"},
+	{ir.HarnessAntigravityCLI, ir.HarnessToolTask, "invoke_subagent"},
+	{ir.HarnessAntigravityCLI, ir.HarnessToolWebFetch, "search_web"},
 }
 
 func TestHarnessToolLoweringTable(t *testing.T) {

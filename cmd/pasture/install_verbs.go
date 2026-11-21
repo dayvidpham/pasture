@@ -40,9 +40,11 @@ func parseHarnessAlias(value string) (ir.HarnessID, error) {
 		return ir.HarnessOpenCode, nil
 	case "codex":
 		return ir.HarnessCodex, nil
+	case "agy", "antigravity-cli":
+		return ir.HarnessAntigravityCLI, nil
 	}
 	return ir.HarnessID(""), fmt.Errorf(
-		"unknown harness %q; use one of claude (claude-code), opencode, or codex", value)
+		"unknown harness %q; use one of claude (claude-code), opencode, codex, or agy (antigravity-cli)", value)
 }
 
 // resolveInstallCells turns positional CLI args ("<harness> <ext>...") into the
@@ -154,10 +156,12 @@ harness's other extensions untouched.
   pasture install claude                ambiguous — prints this help (name at least one extension)
   pasture install claude skills agents  install Claude skills and agents; Claude hooks are left as-is
   pasture install opencode skills       install OpenCode skills only
+  pasture install agy skills            install Antigravity CLI skills into ~/.gemini/config/skills/
 
-A harness is claude (alias for claude-code), opencode, or codex. An extension is
-skills, agents, or hooks. Each named extension is applied independently and every
-outcome is reported; the read-only "pasture install status" shows confirmed state.
+A harness is claude (alias for claude-code), opencode, codex, or agy (alias for
+antigravity-cli). An extension is skills, agents, or hooks. Each named extension
+is applied independently and every outcome is reported; the read-only
+"pasture install status" shows confirmed state.
 
 The scriptable "apply-selection" and "apply-cell" commands remain available for
 Home Manager and automation.`,
@@ -179,10 +183,10 @@ harness's other extensions untouched.
   pasture uninstall codex hooks         remove Codex hooks; Codex skills and agents are left as-is
   pasture uninstall claude skills       remove Claude skills only
 
-A harness is claude (alias for claude-code), opencode, or codex. An extension is
-skills, agents, or hooks. Only Pasture-managed cells are removed; exact external
-installations are preserved. Each named extension is applied independently and
-every outcome is reported.`,
+A harness is claude (alias for claude-code), opencode, codex, or agy (alias for
+antigravity-cli). An extension is skills, agents, or hooks. Only Pasture-managed
+cells are removed; exact external installations are preserved. Each named
+extension is applied independently and every outcome is reported.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInstallVerb(cmd, args, false, makeService)
 		},

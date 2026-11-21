@@ -94,9 +94,14 @@ func renderInventoryNativeFunctionRows() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("derive codex native tool names: %w", err)
 	}
+	antigravityNative, err := antigravityCLINativeFunctions()
+	if err != nil {
+		return nil, fmt.Errorf("derive antigravity-cli native tool names: %w", err)
+	}
 	perHarness := map[ir.HarnessID][]string{
-		ir.HarnessCodex:    codexNative,
-		ir.HarnessOpenCode: openCodeNative,
+		ir.HarnessCodex:          codexNative,
+		ir.HarnessOpenCode:       openCodeNative,
+		ir.HarnessAntigravityCLI: antigravityNative,
 	}
 
 	var b bytes.Buffer
@@ -131,6 +136,8 @@ func inventoryHarnessExpr(harness ir.HarnessID) (string, error) {
 		return "ir.HarnessOpenCode", nil
 	case ir.HarnessCodex:
 		return "ir.HarnessCodex", nil
+	case ir.HarnessAntigravityCLI:
+		return "ir.HarnessAntigravityCLI", nil
 	default:
 		return "", fmt.Errorf(
 			"codegen.inventoryHarnessExpr: no inventory selector for harness %q — "+
