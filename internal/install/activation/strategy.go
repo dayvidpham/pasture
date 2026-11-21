@@ -23,14 +23,16 @@ var (
 	nativePluginKind      = StrategyKind{name: "native-plugin"}
 	directFileKind        = StrategyKind{name: "direct-file"}
 	nativePendingKind     = StrategyKind{name: "native-plugin-pending-trust"}
-	canonicalStrategyKind = [...]StrategyKind{nativePluginKind, directFileKind, nativePendingKind}
+	unsupportedKind       = StrategyKind{name: "unsupported"}
+	canonicalStrategyKind = [...]StrategyKind{nativePluginKind, directFileKind, nativePendingKind, unsupportedKind}
 )
 
-// NativePluginKindValue, DirectFileKindValue, and NativePluginPendingTrustKindValue
-// expose the discriminators for switch comparisons.
+// NativePluginKindValue, DirectFileKindValue, NativePluginPendingTrustKindValue,
+// and UnsupportedKindValue expose the discriminators for switch comparisons.
 func NativePluginKindValue() StrategyKind             { return nativePluginKind }
 func DirectFileKindValue() StrategyKind               { return directFileKind }
 func NativePluginPendingTrustKindValue() StrategyKind { return nativePendingKind }
+func UnsupportedKindValue() StrategyKind              { return unsupportedKind }
 
 // String returns the stable discriminator name.
 func (k StrategyKind) String() string { return k.name }
@@ -181,3 +183,32 @@ func (DirectFile) Kind() StrategyKind        { return directFileKind }
 func (s DirectFile) Bundle() artifact.Bundle { return s.bundle }
 func (s DirectFile) DestinationRoot() string { return s.destinationRoot }
 func (s DirectFile) IsValid() bool           { return s.valid }
+
+// Unsupported marks a canonical cell that a harness explicitly does not support
+// (for example Antigravity CLI agents or lifecycle hooks). Keeping the cell in
+// the exhaustive matrix with this strategy lets disabled selections succeed
+// cleanly while any attempt to enable the cell fails actionably.
+type Unsupported struct {
+	reason string
+	valid  bool
+}
+
+// NewUnsupported validates an unsupported strategy with a non-empty actionable
+// reason explaining why the extension is not supported on its harness.
+func NewUnsupported(reason string) (Unsupported, error) {
+	if reason == "" {
+		return Unsupported{}, cell.NewFault(
+			"unsupported strategy construction", "non-empty refusal reason",
+			"the unsupported strategy reason is empty",
+			"internal/install/activation.NewUnsupported", "binding an unsupported strategy",
+			"an operator enabling this cell would receive no actionable explanation",
+			"provide a clear reason explaining why the cell is unsupported", nil,
+		)
+	}
+	return Unsupported{reason: reason, valid: true}, nil
+}
+
+func (Unsupported) activationStrategy() {}
+func (Unsupported) Kind() StrategyKind  { return unsupportedKind }
+func (s Unsupported) Reason() string    { return s.reason }
+func (s Unsupported) IsValid() bool     { return s.valid }

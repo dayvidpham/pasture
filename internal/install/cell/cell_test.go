@@ -13,6 +13,7 @@ func TestCanonicalCellsFrozenOrder(t *testing.T) {
 		"claude-code.skills", "claude-code.agents", "claude-code.hooks",
 		"opencode.skills", "opencode.agents", "opencode.hooks",
 		"codex.skills", "codex.agents", "codex.hooks",
+		"antigravity-cli.skills", "antigravity-cli.agents", "antigravity-cli.hooks",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("cell count = %d, want %d", len(got), len(want))

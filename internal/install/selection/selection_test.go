@@ -14,6 +14,7 @@ cells:
   claude-code: {skills: true, agents: false, hooks: false}
   opencode: {skills: false, agents: true, hooks: false}
   codex: {skills: false, agents: false, hooks: true}
+  antigravity-cli: {skills: true, agents: false, hooks: false}
 `
 
 func TestParseValidAndAccessors(t *testing.T) {
@@ -30,11 +31,11 @@ func TestParseValidAndAccessors(t *testing.T) {
 		t.Error("codex.hooks should be enabled")
 	}
 	ordered := sel.Ordered()
-	if len(ordered) != 9 {
-		t.Fatalf("Ordered len = %d, want 9", len(ordered))
+	if len(ordered) != len(cell.CanonicalCells()) {
+		t.Fatalf("Ordered len = %d, want %d", len(ordered), len(cell.CanonicalCells()))
 	}
-	if ordered[0].Cell.String() != "claude-code.skills" || ordered[8].Cell.String() != "codex.hooks" {
-		t.Errorf("canonical order broken: first=%s last=%s", ordered[0].Cell, ordered[8].Cell)
+	if ordered[0].Cell.String() != "claude-code.skills" || ordered[len(ordered)-1].Cell.String() != "antigravity-cli.hooks" {
+		t.Errorf("canonical order broken: first=%s last=%s", ordered[0].Cell, ordered[len(ordered)-1].Cell)
 	}
 }
 
@@ -93,6 +94,7 @@ func TestMarshalRoundTripCanonicalAndNormalizesEquivalent(t *testing.T) {
 	// in a different key order) must normalize to identical cells.
 	shuffled := `schema: pasture.install.effective-selection/v1
 cells:
+  antigravity-cli: {hooks: false, agents: false, skills: true}
   codex: {hooks: true, skills: false, agents: false}
   opencode: {agents: true, hooks: false, skills: false}
   claude-code: {hooks: false, agents: false, skills: true}

@@ -60,9 +60,10 @@ var canonicalHarnesses = [...]Harness{
 	artifact.HarnessClaudeCode,
 	artifact.HarnessOpenCode,
 	artifact.HarnessCodex,
+	artifact.HarnessAntigravityCLI,
 }
 
-// CanonicalHarnesses returns the three harnesses in frozen order.
+// CanonicalHarnesses returns the canonical harnesses in frozen order.
 func CanonicalHarnesses() []Harness {
 	return append([]Harness(nil), canonicalHarnesses[:]...)
 }
@@ -75,15 +76,15 @@ type Cell struct {
 }
 
 // New validates and constructs a Cell. It rejects unknown harnesses or axes so
-// no document can address a coordinate outside the nine-cell space.
+// no document can address a coordinate outside the canonical cell space.
 func New(harness Harness, extension Extension) (Cell, error) {
 	if !harness.IsValid() {
 		return Cell{}, newFault(
 			"cell construction", "known harness identity",
-			fmt.Sprintf("the harness %q is not one of claude-code, opencode, or codex", harness),
+			fmt.Sprintf("the harness %q is not one of claude-code, opencode, codex, or antigravity-cli", harness),
 			"internal/install/cell.New", "constructing a harness/extension coordinate",
 			"the coordinate cannot be ordered or activated",
-			"pass one of artifact.HarnessClaudeCode, artifact.HarnessOpenCode, artifact.HarnessCodex", nil,
+			"pass one of artifact.HarnessClaudeCode, artifact.HarnessOpenCode, artifact.HarnessCodex, artifact.HarnessAntigravityCLI", nil,
 		)
 	}
 	if !extension.IsValid() {

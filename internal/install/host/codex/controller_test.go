@@ -762,7 +762,7 @@ func newCodexService(t *testing.T, home string) (*service.Service, *memoryRegist
 	}
 	contracts := map[ir.HarnessID]activation.ActivationContract{ir.HarnessCodex: codexContract}
 	policies := append([]apply.DirectFilePolicy(nil), codexPolicies[:]...)
-	for _, harness := range []ir.HarnessID{ir.HarnessClaudeCode, ir.HarnessOpenCode} {
+	for _, harness := range []ir.HarnessID{ir.HarnessClaudeCode, ir.HarnessOpenCode, ir.HarnessAntigravityCLI} {
 		contract, additional := stubDirectFileContract(t, harness, t.TempDir())
 		contracts[harness] = contract
 		policies = append(policies, additional[:]...)

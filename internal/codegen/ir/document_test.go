@@ -42,8 +42,10 @@ func TestGoldmarkDocumentCompilesEntirelyInMemory(t *testing.T) {
 	require.NoError(t, err)
 	codexLiteral, err := ir.LiteralForHarness(ir.HarnessCodex, codexContract, []byte("\nCodex contract literal.\n"), "pinned native representation")
 	require.NoError(t, err)
+	antigravityUnsupported, err := ir.LiteralUnsupported(ir.HarnessAntigravityCLI, "the pinned host has no equivalent")
+	require.NoError(t, err)
 	literal, err := ir.TargetLiteral(
-		[]ir.TargetCase{claudeLiteral, openCodeUnsupported, codexLiteral},
+		[]ir.TargetCase{claudeLiteral, openCodeUnsupported, codexLiteral, antigravityUnsupported},
 		mustLocation(t, "literal", 0),
 	)
 	require.NoError(t, err)
@@ -234,7 +236,9 @@ func TestCompileFailureMatrixReturnsZeroTreeAndShortCircuits(t *testing.T) {
 		require.NoError(t, err)
 		codex, err := ir.LiteralUnsupported(ir.HarnessCodex, "unsupported")
 		require.NoError(t, err)
-		literal, err := ir.TargetLiteral([]ir.TargetCase{claude, openCode, codex}, mustLocation(t, "unsupported-literal", 0))
+		antigravity, err := ir.LiteralUnsupported(ir.HarnessAntigravityCLI, "unsupported")
+		require.NoError(t, err)
+		literal, err := ir.TargetLiteral([]ir.TargetCase{claude, openCode, codex, antigravity}, mustLocation(t, "unsupported-literal", 0))
 		require.NoError(t, err)
 		literalDocument, err := ir.NewDocument(literal)
 		require.NoError(t, err)
@@ -252,7 +256,9 @@ func TestCompileFailureMatrixReturnsZeroTreeAndShortCircuits(t *testing.T) {
 		require.NoError(t, err)
 		codex, err := ir.LiteralUnsupported(ir.HarnessCodex, "unsupported")
 		require.NoError(t, err)
-		literal, err := ir.TargetLiteral([]ir.TargetCase{claude, openCode, codex}, mustLocation(t, "mismatched-literal", 0))
+		antigravity, err := ir.LiteralUnsupported(ir.HarnessAntigravityCLI, "unsupported")
+		require.NoError(t, err)
+		literal, err := ir.TargetLiteral([]ir.TargetCase{claude, openCode, codex, antigravity}, mustLocation(t, "mismatched-literal", 0))
 		require.NoError(t, err)
 		literalDocument, err := ir.NewDocument(literal)
 		require.NoError(t, err)
@@ -297,10 +303,12 @@ func TestTargetLiteralRequiresExhaustiveUniqueCasesAndExactContract(t *testing.T
 	assert.Error(t, err)
 	codex, err := ir.LiteralUnsupported(ir.HarnessCodex, "unsupported")
 	require.NoError(t, err)
-	_, err = ir.TargetLiteral([]ir.TargetCase{claude, claude, openCode, codex}, location)
+	antigravity, err := ir.LiteralUnsupported(ir.HarnessAntigravityCLI, "unsupported")
+	require.NoError(t, err)
+	_, err = ir.TargetLiteral([]ir.TargetCase{claude, claude, openCode, codex, antigravity}, location)
 	assert.Error(t, err)
 
-	part, err := ir.TargetLiteral([]ir.TargetCase{claude, openCode, codex}, location)
+	part, err := ir.TargetLiteral([]ir.TargetCase{claude, openCode, codex, antigravity}, location)
 	require.NoError(t, err)
 	document, err := ir.NewDocument(part)
 	require.NoError(t, err)

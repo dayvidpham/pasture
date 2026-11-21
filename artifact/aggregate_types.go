@@ -25,13 +25,14 @@ const (
 type Harness string
 
 const (
-	HarnessClaudeCode Harness = "claude-code"
-	HarnessOpenCode   Harness = "opencode"
-	HarnessCodex      Harness = "codex"
+	HarnessClaudeCode     Harness = "claude-code"
+	HarnessOpenCode       Harness = "opencode"
+	HarnessCodex          Harness = "codex"
+	HarnessAntigravityCLI Harness = "antigravity-cli"
 )
 
 func (h Harness) IsValid() bool {
-	return h == HarnessClaudeCode || h == HarnessOpenCode || h == HarnessCodex
+	return h == HarnessClaudeCode || h == HarnessOpenCode || h == HarnessCodex || h == HarnessAntigravityCLI
 }
 
 // RuntimeContractID is one opaque constructor-owned, harness-bound target identity.
@@ -66,7 +67,7 @@ func parseRuntimeContractID(value string) (RuntimeContractID, error) {
 			return RuntimeContractID{}, aggregateInvalid("runtime contract decoding", "runtime_contract", fmt.Sprintf("contract contains whitespace/control U+%04X", r), "runtime identity is ambiguous", "remove whitespace and controls", fs.ErrInvalid)
 		}
 	}
-	for _, harness := range []Harness{HarnessClaudeCode, HarnessOpenCode, HarnessCodex} {
+	for _, harness := range []Harness{HarnessClaudeCode, HarnessOpenCode, HarnessCodex, HarnessAntigravityCLI} {
 		prefix := string(harness) + "/"
 		if strings.HasPrefix(value, prefix) && len(value) > len(prefix) {
 			return RuntimeContractID{harness: harness, value: value}, nil
@@ -100,9 +101,10 @@ func (id *RuntimeContractID) UnmarshalJSON(data []byte) error {
 }
 
 const (
-	claudeCodeProductionProfile = "claude-code@2.1.261"
-	openCodeProductionProfile   = "opencode@2.0.20"
-	codexProductionProfile      = "codex@0.153.0"
+	claudeCodeProductionProfile     = "claude-code@2.1.261"
+	openCodeProductionProfile       = "opencode@2.0.20"
+	codexProductionProfile          = "codex@0.153.0"
+	antigravityCLIProductionProfile = "antigravity-cli@1.5.9"
 )
 
 // ProductionRuntimeContract returns the sole registered target profile accepted
@@ -116,6 +118,8 @@ func ProductionRuntimeContract(harness Harness) (RuntimeContractID, error) {
 		profile = openCodeProductionProfile
 	case HarnessCodex:
 		profile = codexProductionProfile
+	case HarnessAntigravityCLI:
+		profile = antigravityCLIProductionProfile
 	default:
 		return RuntimeContractID{}, aggregateInvalid("runtime contract lookup", "harness", fmt.Sprintf("unsupported harness %q", harness), "no production target profile is registered", "use a supported Harness", fs.ErrInvalid)
 	}
@@ -338,10 +342,10 @@ func ParseComponentID(value string) (ComponentID, error) {
 
 func parseHarness(value string) (Harness, error) {
 	switch Harness(value) {
-	case HarnessClaudeCode, HarnessOpenCode, HarnessCodex:
+	case HarnessClaudeCode, HarnessOpenCode, HarnessCodex, HarnessAntigravityCLI:
 		return Harness(value), nil
 	}
-	return "", aggregateInvalid("manifest decoding", "harness", fmt.Sprintf("unsupported harness %q", value), "the component cannot be placed in the closed installation matrix", "use claude-code, opencode, or codex", fs.ErrInvalid)
+	return "", aggregateInvalid("manifest decoding", "harness", fmt.Sprintf("unsupported harness %q", value), "the component cannot be placed in the closed installation matrix", "use claude-code, opencode, codex, or antigravity-cli", fs.ErrInvalid)
 }
 
 func parseExtension(value string) (Extension, error) {
@@ -362,9 +366,11 @@ func canonicalComponentID(h Harness, e Extension) ComponentID {
 
 // ComponentIDs returns every canonical coordinate in harness-major order.
 func ComponentIDs() []ComponentID {
-	result := make([]ComponentID, 0, 9)
-	for _, harness := range []Harness{HarnessClaudeCode, HarnessOpenCode, HarnessCodex} {
-		for _, extension := range []Extension{ExtensionSkills, ExtensionAgents, ExtensionHooks} {
+	harnesses := []Harness{HarnessClaudeCode, HarnessOpenCode, HarnessCodex, HarnessAntigravityCLI}
+	extensions := []Extension{ExtensionSkills, ExtensionAgents, ExtensionHooks}
+	result := make([]ComponentID, 0, len(harnesses)*len(extensions))
+	for _, harness := range harnesses {
+		for _, extension := range extensions {
 			result = append(result, canonicalComponentID(harness, extension))
 		}
 	}

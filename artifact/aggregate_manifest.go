@@ -191,10 +191,11 @@ func ParseAggregateManifest(data []byte) (AggregateManifest, error) {
 	if err != nil {
 		return AggregateManifest{}, err
 	}
-	if len(wire.Components) != 9 {
-		return AggregateManifest{}, aggregateInvalid("manifest decoding", "components", fmt.Sprintf("found %d components instead of exactly 9", len(wire.Components)), "the aggregate does not cover the complete installation matrix", "publish exactly skills, agents, and hooks for all three harnesses", fs.ErrInvalid)
+	expectedComponentCount := len(ComponentIDs())
+	if len(wire.Components) != expectedComponentCount {
+		return AggregateManifest{}, aggregateInvalid("manifest decoding", "components", fmt.Sprintf("found %d components instead of exactly %d", len(wire.Components), expectedComponentCount), "the aggregate does not cover the complete installation matrix", "publish exactly skills, agents, and hooks for all supported harnesses", fs.ErrInvalid)
 	}
-	components := make([]AggregateComponent, 0, 9)
+	components := make([]AggregateComponent, 0, expectedComponentCount)
 	seen := map[ComponentID]bool{}
 	assets := map[string]bool{}
 	for i, item := range wire.Components {

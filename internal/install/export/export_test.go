@@ -231,8 +231,8 @@ func TestAssetBasename_IsAcceptedByAggregateValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("aggregate validation rejected the exported asset names: %v", err)
 	}
-	if len(manifest.Components()) != 9 {
-		t.Fatalf("aggregate holds %d components, want 9", len(manifest.Components()))
+	if len(manifest.Components()) != len(artifact.ComponentIDs()) {
+		t.Fatalf("aggregate holds %d components, want %d", len(manifest.Components()), len(artifact.ComponentIDs()))
 	}
 }
 

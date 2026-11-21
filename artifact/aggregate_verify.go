@@ -97,7 +97,7 @@ func VerifyAggregate(ctx context.Context, source AggregateAssetSource, requireme
 	if totalLimit == 0 {
 		totalLimit = defaultMaxAggregateTotalBytes
 	}
-	assets := make(map[ComponentID][]byte, 9)
+	assets := make(map[ComponentID][]byte, len(ComponentIDs()))
 	var total int64
 	for _, component := range manifest.components {
 		content, err := readBounded(ctx, source, component.asset, limit)

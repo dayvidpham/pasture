@@ -35,11 +35,11 @@ type Selection struct {
 func New(states map[cell.Cell]bool) (Selection, error) {
 	if len(states) != len(cell.CanonicalCells()) {
 		return Selection{}, cell.NewFault(
-			"selection construction", "exhaustive nine-cell mapping",
-			fmt.Sprintf("the mapping has %d cells, not the required 9", len(states)),
+			"selection construction", fmt.Sprintf("exhaustive %d-cell mapping", len(cell.CanonicalCells())),
+			fmt.Sprintf("the mapping has %d cells, not the required %d", len(states), len(cell.CanonicalCells())),
 			"internal/install/selection.New", "building an effective selection",
 			"an under- or over-specified selection could silently skip a cell",
-			"provide exactly one boolean for each of the nine canonical cells", nil,
+			fmt.Sprintf("provide exactly one boolean for each of the %d canonical cells", len(cell.CanonicalCells())), nil,
 		)
 	}
 	enabled := make(map[string]bool, len(states))
@@ -97,9 +97,10 @@ type axesWire struct {
 }
 
 type cellsWire struct {
-	ClaudeCode *axesWire `yaml:"claude-code"`
-	OpenCode   *axesWire `yaml:"opencode"`
-	Codex      *axesWire `yaml:"codex"`
+	ClaudeCode     *axesWire `yaml:"claude-code"`
+	OpenCode       *axesWire `yaml:"opencode"`
+	Codex          *axesWire `yaml:"codex"`
+	AntigravityCLI *axesWire `yaml:"antigravity-cli"`
 }
 
 type selectionWire struct {
@@ -139,6 +140,9 @@ func Parse(data []byte) (Selection, error) {
 		return Selection{}, err
 	}
 	if err := collectHarness(states, ir.HarnessCodex, wire.Cells.Codex); err != nil {
+		return Selection{}, err
+	}
+	if err := collectHarness(states, ir.HarnessAntigravityCLI, wire.Cells.AntigravityCLI); err != nil {
 		return Selection{}, err
 	}
 	return New(states)
@@ -203,9 +207,10 @@ func (s Selection) Marshal() ([]byte, error) {
 	wire := selectionWire{
 		Schema: SchemaID,
 		Cells: cellsWire{
-			ClaudeCode: axesFor(ir.HarnessClaudeCode),
-			OpenCode:   axesFor(ir.HarnessOpenCode),
-			Codex:      axesFor(ir.HarnessCodex),
+			ClaudeCode:     axesFor(ir.HarnessClaudeCode),
+			OpenCode:       axesFor(ir.HarnessOpenCode),
+			Codex:          axesFor(ir.HarnessCodex),
+			AntigravityCLI: axesFor(ir.HarnessAntigravityCLI),
 		},
 	}
 	var buf bytes.Buffer

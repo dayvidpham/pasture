@@ -14,12 +14,13 @@ import (
 type HarnessID = artifact.Harness
 
 const (
-	HarnessClaudeCode = artifact.HarnessClaudeCode
-	HarnessOpenCode   = artifact.HarnessOpenCode
-	HarnessCodex      = artifact.HarnessCodex
+	HarnessClaudeCode     = artifact.HarnessClaudeCode
+	HarnessOpenCode       = artifact.HarnessOpenCode
+	HarnessCodex          = artifact.HarnessCodex
+	HarnessAntigravityCLI = artifact.HarnessAntigravityCLI
 )
 
-var canonicalHarnessIDs = [...]HarnessID{HarnessClaudeCode, HarnessOpenCode, HarnessCodex}
+var canonicalHarnessIDs = [...]HarnessID{HarnessClaudeCode, HarnessOpenCode, HarnessCodex, HarnessAntigravityCLI}
 
 // EnabledHarnessIDs returns a fresh defensive copy of the canonical enabled
 // target set. This is the only enumeration accessor for HarnessID: an earlier

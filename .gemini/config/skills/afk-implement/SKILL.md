@@ -1,0 +1,243 @@
+---
+name: afk-implement
+description: Run an unattended implementation session with small PRs and a review wave that ends in convergence, never merging
+---
+
+# AFK Implement
+
+<!-- BEGIN GENERATED FROM pasture schema -->
+<!-- GENERATED FROM pasture v0.0.38 artifact v1 -->
+**Command:** `pasture:afk-implement` — Run an unattended implementation session with small PRs and a review wave that ends in convergence, never merging
+
+**-> [Full workflow in PROCESS.md](../protocol/PROCESS.md#phase-8-implementation-plan)** <- Phases 8-10
+
+**[B-afk-no-merge]**
+- Given: an unattended session with green CI and a review wave with no open blocker
+- When: a pull request is ready
+- Then: leave it open, record the merge order and evidence, and stop
+- Should not: merge, self-approve on the human's behalf, or push to the default branch
+
+**[B-afk-smallest-iteration]**
+- Given: an approved direction
+- When: scoping work
+- Then: ship the smallest independently reviewable and revertable change per iteration
+- Should not: batch unrelated changes, add speculative abstraction, or refactor adjacent code
+
+**[B-afk-decide-dont-ask]**
+- Given: a reversible design choice
+- When: the human is away
+- Then: decide from repository conventions, record the rationale and reversal path, and continue
+- Should not: block or idle waiting for approval
+
+**[B-afk-wave-gate]**
+- Given: a completed iteration
+- When: running the review wave
+- Then: require three independent ACCEPT votes with zero open blockers; IMPORTANT and MINOR findings stay open to convergence
+- Should not: substitute self-review, ignore findings, fabricate consensus, or require a zeroed round at the wave gate
+
+**[B-afk-stop-at-convergence]**
+- Given: every scoped iteration has an open PR and the final cross-stack convergence has no open finding
+- When: the run is complete
+- Then: stop and write the morning handoff
+- Should not: start new scope or continue looking for work
+
+**[B-afk-evidence]**
+- Given: a claimed quality gate
+- When: reporting the result
+- Then: name the exact command, the commit it ran against, and the outcome
+- Should not: claim a gate that did not run or report green for a job that never executed
+
+## Task Recovery
+
+The tracker backend is recorded once in .agents.local/pasture/EPOCH.md; read that file instead of re-probing. If EPOCH.md is absent, stop and ask the orchestrator to run detection.
+
+Recover from live tracker state at session start and after compaction; never trust cached task rows. Read the `rec:` path from the header and use it as the one entry point: `"${EPOCH_REC}" <op>`. The operation set is closed: create, label, block, note, show, query, ready, status, close, whoami, signal.
+
+Store selection: the adapter reads PASTURE_DB_PATH when set, otherwise the header's `db:`; the probe wrote that value from the same precedence (XDG_DATA_HOME/pasture/pasture.db, HOME/.local/share/pasture/pasture.db, then .pasture/pasture.db). Use the same selected store for every command. If a recovery query fails, report its actual store path, failed operation, impact, and permission/schema/configuration repair; failure is not an empty work queue.
+
+The adapter passes `--namespace` only when EPOCH.md records `namespace:`. That pin wins on both backends. Otherwise it omits the flag. Pasture then derives the namespace itself: PASTURE_NAMESPACE, else the git remote, then file:// of the working directory. The ledger calls derive_namespace for the header and for every write that has no pin. That function is the one list of remote forms; do not restate it. With no origin, both backends use file:// of the working directory, so invocations from different subdirectories use different namespaces. Queries without a pin follow that backend's derivation; pass `--all-namespaces` to opt out. When neither a pin nor PASTURE_NAMESPACE is set, pasture reads are unscoped and creation falls back to the git remote, then file:// of the working directory. Inspect the returned full URI before choosing repository work. Separate reads are not an atomic snapshot.
+
+Run `"${EPOCH_REC}" ready`, `"${EPOCH_REC}" query --blocked`, and `"${EPOCH_REC}" query --status in_progress`. For each referenced active task, run `"${EPOCH_REC}" show "$TASK_URI"`, `"${EPOCH_REC}" show "$TASK_URI" --notes`, and `"${EPOCH_REC}" show "$TASK_URI" --history`. All *_URI variables in examples are inputs bound to full task URIs from an assignment, a verified tracker read, or the URI create printed; never use legacy short IDs. Resolve each variable before execution and quote it as one operand.
+
+Create prints the new task URI directly. Persist it before any label or note: create-plus-label is non-atomic, so on failure retain the URI and retry only the failed label/note operation, never create again. Only open, in_progress, and closed are statuses; blockage is represented by live dependencies and notes, not a blocked status.
+
+An owner is recorded with `"${EPOCH_REC}" label "$TASK_URI" owner:<role>`. That is a claim, not an allocation: an unassigned task stays unassigned until the supervisor allocates it, and repeating an identical claim is not allocation. Never invent an owner.
+
+For an existing task, the supervisor records the one owner-responsibility assignment. The recovery adapter above exposes no assignment operation, so these direct tracker commands are the documented exception to the closed recovery-operation set; on the ledger backend, stop and report that assignments are unsupported. Set HEADER_DB to PASTURE_DB_PATH when set, otherwise to the header's db: value, then run:
+- pasture --db HEADER_DB task assignment start TASK-ID --assignment ASSIGNMENT-ID --actor ACTOR-ID --occupant OCCUPANT-ID
+- pasture --db HEADER_DB task assignment show TASK-ID
+- pasture --db HEADER_DB task assignment transfer TASK-ID --slot owner-responsibility --assignment NEXT-ASSIGNMENT-ID --actor ACTOR-ID --occupant NEXT-OCCUPANT-ID
+- pasture --db HEADER_DB task assignment end TASK-ID --assignment ASSIGNMENT-ID --actor ACTOR-ID
+Add --parent-task and --parent-assignment to start only when the new assignment must cite the exact active owner of a parent task. A handoff must carry the exact task URI, assignment ID, and occupant ID returned by show; the worker must run show itself with the same --db and stop if it cannot verify all three. A review child's axis-reviewer assignment is not resolvable by show: verify it with the epoch command that returned the id, and do not end it. An actor ID records attribution; it does not authenticate the caller. Never invent an identity and never claim an assignment that was not committed. Run one supervisor process per store: the released API has no cross-process no-active-owner precondition, so stop on an ambiguous show result. Exact retries replay the original operation; they do not allocate another worker.
+
+Parent stays open and is blocked by child: `"${EPOCH_REC}" block "$PARENT_URI" --by "$CHILD_URI"`. Reference documents belong in description frontmatter under references:, never fabricated blockers. Workers report evidence and handoffs without closing their slices or leaves; the supervisor closes only after independent review and satisfied gates. Use git agent-commit for local commits. Never install, enable, or modify Git hooks, Git hook path configuration, or pre-commit integration without explicit user approval. Tracker writes are durable; Git history lands separately.
+
+If the header records `backend: error`, stop before the first mutation: the store exists but cannot be used, and falling back could lose earlier epochs. A mid-epoch write failure retries 3 times. After the third failure, write the attempted record to .agents.local/pasture/pending/<timestamp>-<op>.md, keep the recorded backend, and surface the pending record to the user at the next gate. Never switch backends and never drop the record.
+
+## Task Attribution
+
+Select the current registered author with "${EPOCH_REC}" whoami. It prints the author recorded in the header or PASTURE_AUTHOR, and on the pasture backend it confirms that actor with agents show. It does not list agents and it does not invent one. If neither source names an author, it stops: set author: in EPOCH.md or export PASTURE_AUTHOR. Never auto-register or guess an identity during recovery. Every note supplies --author explicitly; machine examples use the pre-registered pasture-system/00000000-0000-0000-0000-000000000000 actor. If it is absent, stop and request registration from the operator rather than claiming registration is fixed. Preserve human intent verbatim and quote historical attribution as evidence, not as a forged new author.
+
+## When to Use
+
+Use this skill when the human hands over a scoped direction and expects to review later: they say they are going AFK or to bed, ask for overnight or unattended implementation, say "don't block on me", ask for progressive adoption, or ask for open pull requests that must not be merged. It also fits an in-flight branch that needs its gates run, a PR opened, and a review wave driven to convergence.
+
+Do not use it for an attended session where the human expects the normal live URE/UAT gates, and do not use it to authorize a release, deploy, or merge.
+
+## Invocation Contract
+
+Translate the human's words into explicit defaults, and state the mapping in the handoff.
+
+| The human says | Default |
+|---|---|
+| Act as the supervisor | Own the implementation and review loop; spawn workers and reviewers instead of serializing every part. |
+| Use a named model for all subagents | Resolve the exact provider/model ID with the harness before spawning, pass it on every subagent call, and record any substitution. |
+| Scope smaller; minimal code; YAGNI | One smallest end-to-end change per iteration; no speculative flags, config, abstraction, or drive-by edits. |
+| Progressive adoption | Each iteration is independently reviewable and revertable; prefer several small PRs to one large one. |
+| Stack changes when needed | Base an iteration on its predecessor only when it depends on it; otherwise branch from the default branch. |
+| Open PRs, do not merge | Push feature branches and open ready PRs; never merge or push to the default branch. |
+| Stop at convergence | Use the exit criteria below; do not keep burning the backlog after convergence. |
+| Handle design questions sensibly | Decide reversible questions from the repository, record the rationale, and continue. |
+| Review in the morning | Write a five-minute handoff with merge order, decisions, risks, and first checks. |
+
+## Operating Rules
+
+These are not negotiable, including when CI is green and every reviewer accepts:
+
+- Never merge. The human merges after review.
+- Never push to the default or protected branch; feature branches only.
+- Rewrite only your own feature branches, with force-with-lease, and only to rebase a stack.
+- No destructive commands, no shared-history rewrites, no branch or data deletion, and no Git hook installation or hook-path changes.
+- Preserve the primary checkout, including uncommitted work. Do all implementation in a worktree.
+- Reviewers must be independent subagents. Never write their findings or votes yourself.
+- Never claim a gate passed unless it ran on the commit you report.
+
+## Iteration Loop
+
+Work one iteration at a time, and open its PR before starting the next.
+
+1. Recover. Read live tracker state, Git status, branches ahead of the base, worktrees, and open PRs. If the human said to work on something specific, inventory the existing work instead of restarting it.
+2. Choose the next iteration. Follow the named scope first. Otherwise prefer a failing test or reproduction, a correctness bug, the smallest missing piece of the approved feature, then cleanup that unblocks it. Do not invent product scope.
+3. Plan in one paragraph: change, files, test, acceptance case, risk, base branch. If it does not fit, split it.
+4. Create or reuse a worktree using the repository naming convention (repository, issue number, commit type, short description); branch and directory share the name.
+5. Reproduce or write the failing test first where practical, then make the smallest production change that satisfies it.
+6. Run the repository gates for the touched surface, then the full gate when cheap. Record the exact commands and outcomes.
+7. Commit atomically with the repository's agent-commit path. Stage only files this iteration owns.
+8. Push the branch and open the PR. Then run the review wave, fix findings, re-review, and only then start the next iteration.
+
+## Pull Request Contract
+
+Open a ready PR so CI runs, not a draft, unless the iteration is hard-stopped.
+
+The body carries, in order:
+
+1. What and why, in one paragraph.
+2. Scope boundary: what this PR deliberately does not do.
+3. Acceptance: the Given/When/Then case, or the observed before and after.
+4. Verification: exact commands, results, and CI status.
+5. Stack: position, base branch, and merge order, or standalone.
+6. Decisions: choice, rationale, alternatives, and how to reverse it.
+7. Known gaps: residual findings, flaky tests, unverified paths.
+
+A hard-stopped iteration is a draft PR whose body names the exact blocker and next action. Never present a broken PR as ready, and never merge or close it.
+
+## Stacking
+
+Stack only when the change genuinely depends on its predecessor. Name the base branch in the PR body and the handoff, and order the merge bottom-up. When a base moves, rebase only your own branches and push with force-with-lease, then re-run the gates.
+
+Prefer not stacking. Two iterations that touch the same files are usually one iteration.
+
+## Review Wave
+
+Spawn three independent reviewers in parallel with the model named in the invocation. Give each the same inputs and a distinct axis.
+
+### Axes
+
+| Axis | Ask |
+|---|---|
+| Correctness | Does the diff do what the PR claims without breaking existing behavior? Check edge cases, error paths, data loss, and concurrency. |
+| Tests | Do tests exercise the production path rather than a test-only export? Do they cover failure cases and the acceptance case? Would they catch a regression? Are they flaky? |
+| Elegance and YAGNI | Is complexity proportional? Any speculative abstraction, unused flag, duplicated logic, or scope creep? Is there a materially smaller change? |
+
+Require findings as severity (blocker, important, minor), file and line, problem, and a concrete fix. Require a binary vote: ACCEPT or REVISE. Load the impl-review skill for the full severity-group and dual-parent procedure when the run uses tracker severity tasks.
+
+### Wave Gate and Convergence
+
+A wave advances on three ACCEPT votes with zero open blockers. Fix blockers in the same branch, commit atomically, push, and re-run the wave. IMPORTANT and MINOR findings stay open past the wave gate; fix a minor if trivial, otherwise record it for convergence. A finding closes only per `C-finding-lifecycle`. Cap the loop at the gate declaration's `maxRounds` rounds per PR.
+
+If a blocker survives `maxRounds` rounds, mark the PR draft, write the exact blocker and attempted fixes, and move to independent work. Do not merge and do not report the work as done.
+
+After the final iteration, run one cross-stack convergence over all open PRs or the cumulative diff: conflicting assumptions, duplicated helpers, and merge-order breakage. That convergence must find no open finding before stopping.
+
+## Autonomous Decisions
+
+Use this precedence, highest first:
+
+1. The human's explicit request and the repository's documented invariants.
+2. Existing repository conventions: naming, error style, test patterns, and gates.
+3. The smallest, most reversible option.
+4. A prototype behind no public API.
+
+Record every non-obvious decision in the PR body: decision, why, alternatives, and reversal. If two options are plausible and reversible, pick the smaller one and keep moving.
+
+Reasonable autonomy includes naming, file placement, test shape, helper extraction, error wording, choosing between equivalent libraries already present, and splitting or merging iterations.
+
+### Hard Stops
+
+Stop the current line of work, leave a clear note, and continue only with independent iterations when one of these is true:
+
+- Credentials, permissions, a paid resource, or a secret is required.
+- The action is irreversible or destructive: rewriting shared history, deleting data or branches, installing or altering Git hooks, or force-pushing a shared branch.
+- It reaches production: deploy, release, publish, tag, or migrate live data.
+- Product intent is genuinely ambiguous and both options change user-facing behavior irreversibly.
+- The change is security-sensitive and there is no safe default.
+
+Not hard stops: failing tests, flaky tests, CI infrastructure outages, merge conflicts inside your own stack, missing documentation, an unavailable model (fall back and record it), or an unpleasant design tradeoff.
+
+## Verification and Evidence
+
+Discover the gates from the repository's agent instructions, Makefile, and CI. Run the narrow gate while iterating and the full gate before calling a PR ready. Docs-only changes still run docs, link, and frontmatter checks.
+
+If CI cannot run, say so explicitly and report local results instead. Keep the tree quiescent while verifying, and record the commit SHA the results apply to.
+
+## Tracking
+
+Create one tracker task per iteration and link it to the parent scope. Add labels and comments; never delete audit history. Comment the branch, commit SHA, PR URL, gate results, and each review round with its votes.
+
+Workers report evidence and never close their own tasks. Close only after convergence finds no open finding, and only for work you supervised and verified. If the tracker is unavailable, report the store path, the failed operation, and the repair needed, then continue with Git and PR evidence. A failed query is not proof of no work.
+
+## Morning Handoff
+
+Write the handoff to the repository's untracked agent-handoff directory, for example `.agents.local/afk-<YYYY-MM-DD>.md`, and repeat the essentials in the final message:
+
+1. State: why the run stopped, what is ready, and what is not.
+2. PR table: link, one-line summary, base, stack position, CI, review result, and recommended merge order.
+3. Decisions: choice and rationale for each non-obvious call.
+4. Risks: residual findings, unverified paths, and flaky or skipped gates.
+5. Scope boundary: what you deliberately did not do.
+6. First three checks: the fastest way for the human to validate the work.
+
+Never describe unmerged work as done or shipped. Say open, convergence complete, awaiting merge.
+
+## Exit Criteria
+
+Stop the session when all of these are true:
+
+- Every scoped iteration has an open PR, or is a draft with a hard-stop reason.
+- The final cross-stack convergence has no open finding: three ACCEPT and no open blocker, or the `maxRounds` budget is exhausted and residual findings are recorded.
+- The morning handoff is written and names the merge order.
+- No merge occurred, the default branch is untouched, and no unrelated work was modified.
+
+Then stop and report. Do not start new scope, do not make one more small fix, and do not wait or poll for the human.
+
+## Anti-Patterns
+
+- Merging because CI is green or the human seemed to want speed.
+- One giant PR that cannot be adopted progressively.
+- Silencing, skipping, or deleting a failing test to reach green.
+- Refactoring adjacent code because it was already open.
+- Asking a question mid-run and idling, or blocking forever on approval.
+- Claiming convergence without independent reviewers or without reading their findings.
+- Expanding the backlog instead of stopping at the approved scope.
+- Describing a red or draft PR as ready in the handoff.
+<!-- END GENERATED FROM pasture schema -->

@@ -131,7 +131,7 @@ func TestAggregateProducerRoundTripAndVerifiedCopies(t *testing.T) {
 	max, _ := artifact.ParseVersion("9.0.0")
 	pasture, _ := artifact.ParseRevision("1111111111111111111111111111111111111111")
 	aura, _ := artifact.ParseRevision("2222222222222222222222222222222222222222")
-	harnesses := []artifact.Harness{artifact.HarnessClaudeCode, artifact.HarnessOpenCode, artifact.HarnessCodex}
+	harnesses := []artifact.Harness{artifact.HarnessClaudeCode, artifact.HarnessOpenCode, artifact.HarnessCodex, artifact.HarnessAntigravityCLI}
 	extensions := []artifact.Extension{artifact.ExtensionSkills, artifact.ExtensionAgents, artifact.ExtensionHooks}
 	assets := memoryAssets{}
 	specs := []artifact.AggregateComponentSpec{}
@@ -161,7 +161,7 @@ func TestAggregateProducerRoundTripAndVerifiedCopies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Version() != version || parsed.Channel() != artifact.ReleaseFinal || parsed.InstallerMin() != min || parsed.InstallerMax() != max || parsed.PastureRevision() != pasture || parsed.AuraRevision() != aura || len(parsed.Components()) != 9 || parsed.Components()[0].RuntimeContractID().Harness() != parsed.Components()[0].Harness() {
+	if parsed.Version() != version || parsed.Channel() != artifact.ReleaseFinal || parsed.InstallerMin() != min || parsed.InstallerMax() != max || parsed.PastureRevision() != pasture || parsed.AuraRevision() != aura || len(parsed.Components()) != len(artifact.ComponentIDs()) || parsed.Components()[0].RuntimeContractID().Harness() != parsed.Components()[0].Harness() {
 		t.Fatal("typed component round trip failed")
 	}
 	expected := map[artifact.ComponentID]artifact.AggregateComponentSpec{}

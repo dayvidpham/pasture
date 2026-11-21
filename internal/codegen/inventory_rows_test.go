@@ -74,9 +74,14 @@ func TestInventoryNativeFunctionRowsAgreeWithPinnedDerivation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("codexNativeFunctions(): %v", err)
 	}
+	antigravityNative, err := antigravityCLINativeFunctions()
+	if err != nil {
+		t.Fatalf("antigravityCLINativeFunctions(): %v", err)
+	}
 	expected := map[ir.HarnessID][]string{
-		ir.HarnessCodex:    codexNative,
-		ir.HarnessOpenCode: openCodeNative,
+		ir.HarnessCodex:          codexNative,
+		ir.HarnessOpenCode:       openCodeNative,
+		ir.HarnessAntigravityCLI: antigravityNative,
 	}
 
 	table, err := inventory.Table()
